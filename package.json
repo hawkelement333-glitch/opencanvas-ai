@@ -1,0 +1,49 @@
+{
+  "name": "opencanvas-ai",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.15.1",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "setup": "pnpm install --frozen-lockfile && pnpm install:api",
+    "install:api": "python -m pip install -e \"apps/api[dev]\"",
+    "install:browsers": "pnpm --filter @opencanvas/web exec playwright install chromium",
+    "dev": "pnpm dev:web",
+    "dev:web": "pnpm --filter @opencanvas/web dev",
+    "dev:api": "cd apps/api && python -m uvicorn opencanvas_api.main:app --reload --host 127.0.0.1 --port 8000",
+    "demo": "python apps/api/scripts/demo.py start",
+    "demo:seed": "python apps/api/scripts/demo.py seed",
+    "demo:reset": "python apps/api/scripts/demo.py reset",
+    "demo:check": "python apps/api/scripts/demo.py check",
+    "demo:smoke": "python apps/api/scripts/demo.py smoke",
+    "db:migrate": "cd apps/api && python -m alembic upgrade head",
+    "build": "pnpm --filter @opencanvas/web build",
+    "format": "pnpm --filter @opencanvas/web exec prettier --write ../.. --ignore-path ../../.gitignore && python -m ruff format --config apps/api/pyproject.toml apps/api scripts",
+    "format:api": "python -m ruff format --config apps/api/pyproject.toml apps/api scripts",
+    "format:check": "pnpm --filter @opencanvas/web exec prettier --check ../.. --ignore-path ../../.gitignore && python -m ruff format --check --config apps/api/pyproject.toml apps/api scripts",
+    "format:check:api": "python -m ruff format --check --config apps/api/pyproject.toml apps/api scripts",
+    "lint": "pnpm --filter @opencanvas/web lint && python -m ruff check --config apps/api/pyproject.toml apps/api scripts",
+    "lint:api": "python -m ruff check --config apps/api/pyproject.toml apps/api scripts",
+    "typecheck": "pnpm --filter @opencanvas/web typecheck && pnpm typecheck:api",
+    "typecheck:api": "cd apps/api && python -m mypy opencanvas_api",
+    "test": "pnpm test:web && pnpm test:api",
+    "test:web": "pnpm --filter @opencanvas/web test",
+    "test:api": "python -m pytest apps/api/tests",
+    "test:integration": "python -m pytest apps/api/tests/test_canvas_api.py apps/api/tests/test_document_api.py apps/api/tests/test_grounded_ai.py apps/api/tests/test_canonical_api.py apps/api/tests/test_trace_api.py",
+    "test:security": "python -m pytest apps/api/tests -m security",
+    "test:e2e": "pnpm --filter @opencanvas/web test:e2e",
+    "validate:migrations": "python scripts/validate_migrations.py",
+    "validate:demo": "pnpm demo:reset && pnpm demo:check && pnpm demo:smoke",
+    "validate:hygiene": "python scripts/check_repository_hygiene.py",
+    "validate": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm test:security && pnpm test:e2e && pnpm build && pnpm validate:migrations && pnpm validate:demo && pnpm validate:hygiene",
+    "validate:clean-clone": "python scripts/clean_clone_check.py",
+    "check": "pnpm validate"
+  },
+  "pnpm": {
+    "overrides": {
+      "next>postcss": "8.5.14"
+    }
+  }
+}

@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "opencanvas-api"
+version = "0.1.0"
+description = "FastAPI application for the OpenCanvas AI spatial knowledge graph"
+requires-python = ">=3.12"
+dependencies = [
+  "aiofiles>=24.1,<26",
+  "alembic>=1.16,<2",
+  "asyncpg>=0.30,<1",
+  "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
+  "openai>=2,<3",
+  "orjson>=3.10,<4",
+  "pgvector>=0.4,<1",
+  "pydantic-settings>=2.10,<3",
+  "python-multipart>=0.0.20,<1",
+  "pypdf>=5.7,<7",
+  "python-docx>=1.2,<2",
+  "sqlalchemy[asyncio]>=2.0.40,<3",
+  "structlog>=25.4,<26",
+  "uvicorn[standard]>=0.35,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "aiosqlite>=0.21,<1",
+  "mypy>=1.17,<2",
+  "pytest>=8.4,<10",
+  "pytest-asyncio>=1.1,<2",
+  "ruff>=0.12,<1",
+  "testcontainers[postgres]>=4.13,<5",
+  "types-aiofiles>=24.1,<26",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["opencanvas_api"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-config --strict-markers"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+  "security: security-focused validation, storage, and prompt-boundary tests",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["opencanvas_api"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["pgvector.*"]
+ignore_missing_imports = true

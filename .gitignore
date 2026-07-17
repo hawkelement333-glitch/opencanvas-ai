@@ -1,0 +1,74 @@
+# JavaScript
+node_modules/
+.next/
+out/
+build/
+dist/
+.cache/
+.turbo/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+.secrets/
+credentials*.json
+service-account*.json
+*.key
+*.pem
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+
+# Runtime, upload, and local database data
+.runtime/
+data/
+uploads/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

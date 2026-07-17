@@ -1,0 +1,76 @@
+name: opencanvas-ai
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: opencanvas
+      POSTGRES_USER: opencanvas
+      POSTGRES_PASSWORD: opencanvas
+    ports:
+      - "5432:5432"
+    volumes:
+      - opencanvas-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opencanvas -d opencanvas"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api-migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    environment:
+      OPENCANVAS_DATABASE_URL: postgresql+asyncpg://opencanvas:opencanvas@db:5432/opencanvas
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    environment:
+      OPENCANVAS_DATABASE_URL: postgresql+asyncpg://opencanvas:opencanvas@db:5432/opencanvas
+      OPENCANVAS_DOCUMENT_STORAGE_ROOT: /app/data/documents
+    ports:
+      - "8000:8000"
+    volumes:
+      - opencanvas-files:/app/data/documents
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}"
+    environment:
+      NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}"
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  opencanvas-db:
+  opencanvas-files:

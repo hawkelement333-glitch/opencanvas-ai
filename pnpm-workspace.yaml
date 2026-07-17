@@ -1,0 +1,7 @@
+packages:
+  - "apps/*"
+overrides:
+  "next>postcss": "8.5.14"
+onlyBuiltDependencies:
+  - sharp
+  - unrs-resolver
