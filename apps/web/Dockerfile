@@ -22,7 +22,7 @@ RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
-COPY --from=builder --chown=nextjs:nodejs /app/COPYRIGHT /app/NOTICE /app/THIRD_PARTY_NOTICES.md ./
+COPY --from=builder --chown=nextjs:nodejs /app/LICENSE /app/COPYRIGHT /app/NOTICE /app/THIRD_PARTY_NOTICES.md ./
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000 HOSTNAME=0.0.0.0

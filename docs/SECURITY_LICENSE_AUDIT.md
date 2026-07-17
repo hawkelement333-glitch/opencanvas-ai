@@ -12,8 +12,9 @@ secret, vulnerability, or license obligation has been identified.
 
 ## Repository state and method
 
-- Git reported `No commits yet on master`; every project file was untracked at audit time.
-- Because `HEAD` does not exist, there was no Git history to scan or rewrite.
+- The initial audit began before the first commit, when Git reported `No commits yet on master`.
+- Before public release, the initial snapshot's personal author email was replaced with GitHub's
+  noreply identity, and the complete resulting history was included in the final secret scan.
 - The working tree, including relevant untracked files, was scanned by secret/token/private-key
   patterns and by sensitive filename/extension inventory.
 - Candidate credential assignments were reviewed in redacted form. Values were not copied into
@@ -146,12 +147,11 @@ those remain required before binary/container redistribution.
 
 ## Copyright and project-license status
 
-`COPYRIGHT` and `NOTICE` reserve the project owner's rights without claiming registration.
-No open-source `LICENSE` was created. `LICENSE_RECOMMENDATION.md` recommends All Rights Reserved
-for the private-submission path and presents MIT and Apache-2.0 alternatives. The verified rules
-allow a private repository shared with `testing@devpost.com` and
-`build-week-event@openai.com`; that path does not require an open-source license. A public release
-or Apache-2.0 selection still requires the owner's explicit approval.
+`LICENSE`, `COPYRIGHT`, and `NOTICE` reserve the project owner's rights without claiming
+registration. The owner selected a public proprietary All Rights Reserved evaluation license;
+public visibility is not represented as open source or as technical copy protection.
+`LICENSE_RECOMMENDATION.md` records the decision and retains MIT and Apache-2.0 as unselected future
+alternatives. The verified rules allow a public repository with relevant licensing.
 
 ## Commands and focused results
 
@@ -184,6 +184,7 @@ runtime files.
 1. Add reproducible Python dependency resolution and audit the exact set.
 2. Include full third-party license texts/notices in distributed images and bundles.
 3. Keep the current build isolated until authentication and authorization are implemented.
-4. Keep the repository private and share it with both required judging addresses unless Patrick
-   explicitly approves Apache-2.0 and a public release.
-5. Perform a final human secret/privacy review immediately before commit and publication.
+4. Preserve the owner-selected public proprietary `LICENSE`; do not describe the repository as
+   open source or assume public visibility prevents copying.
+5. Perform a final human privacy review of screenshots, video, Devpost fields, and browser tabs
+   immediately before submission.

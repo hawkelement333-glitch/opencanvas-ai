@@ -60,9 +60,12 @@ This register prevents the competition demo and public materials from implying c
 
 ## Competition/release
 
-- Git history is empty, so chronology cannot be proven with commits.
-- Repository URL/access, category, video, session ID, and final license are manual owner actions.
-- Screenshot and demo-video placeholders remain until approved assets exist.
+- The repository began with a single imported source snapshot, so Git cannot independently prove the
+  chronology of the earlier milestone work.
+- The public repository URL, Work and Productivity category, proprietary evaluation terms, and
+  synthetic screenshots are complete.
+- The public demo video, Codex `/feedback` session ID, and final Devpost form remain manual owner
+  actions.
 - The proposed `v0.3.0-buildweek-demo` tag has not been created or published.
 
 ## Recommended next milestone

@@ -102,12 +102,14 @@ Never paste credentials, internal storage paths, or private prompts into the rec
 - [ ] No secret, private URL, user data, terminal history, or notification is visible.
 - [ ] Video URL is added to `BUILD_WEEK_CHECKLIST.md` and release metadata.
 
-Before recording, run `pnpm demo:check` to validate the persisted grounded and insufficient-evidence replay invariants, then run `pnpm demo:smoke` to verify startup. Final runtime confirmation remains pending if local command execution is unavailable.
+Before recording, run `pnpm demo:check` to validate the persisted grounded and
+insufficient-evidence replay invariants, then run `pnpm demo:smoke` to verify startup. Both passed
+in the July 17 submission-candidate validation and must be repeated immediately before recording.
 
 ## Placeholders
 
 - Demo video URL: **TBD — manual action required**
-- Primary screenshot: **TBD — manual action required**
-- Citation screenshot: **TBD — manual action required**
-- Trace screenshot: **TBD — manual action required**
+- Primary screenshot: `docs/assets/opencanvas-evidence-canvas.jpg`
+- Citation screenshot: `docs/assets/opencanvas-citation-passage.jpg`
+- Trace screenshot: `docs/assets/opencanvas-trace-record.jpg`
 - Codex `/feedback` session ID: **TBD — manual action required**

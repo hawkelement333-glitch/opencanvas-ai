@@ -6,23 +6,24 @@ This document is an engineering and release-readiness recommendation, not legal 
 The project owner must make the final licensing decision after checking the current OpenAI
 Build Week and submission-platform rules.
 
-## Recommendation before release
+## Owner-selected release posture
 
-Keep the project **All Rights Reserved** while the product and commercialization strategy
-are unsettled. Do not add an open-source `LICENSE` silently. The repository currently has a
-`COPYRIGHT` and `NOTICE`, but no license grant.
+The owner selected a **public, proprietary, All Rights Reserved** repository for the competition
+submission. A root `LICENSE` now makes the limited judging permission and absence of a general
+public license explicit. This is not an open-source release, and public visibility does not prevent
+cloning or infringement; the license preserves the owner's legal position rather than providing a
+technical copy-protection mechanism.
 
 The verified Build Week FAQ/rules allow either a public repository with relevant licensing or a
 private repository shared with `testing@devpost.com` and `build-week-event@openai.com`. Before
-judges receive the repository, the owner should choose one of these paths:
+judges receive the repository, the owner could choose one of these paths:
 
-1. **Recommended while All Rights Reserved:** keep the repository private and share it with both
-   required judging addresses. This path does not require an open-source license.
+1. Keep the repository private and share it with both required judging addresses.
 2. If Patrick explicitly approves a public open-source release, add Apache License 2.0
    (recommended over MIT for this project) before making the repository public.
-3. If a public but proprietary/source-available strategy is desired, obtain an explicit legal
-   review of the proposed inspection and evaluation permission before publication. No such
-   permission is granted by the present files.
+3. **Selected:** publish the repository with a narrow proprietary evaluation license and retain
+   all other rights. Independent legal review remains advisable before relying on custom terms for
+   commercial enforcement.
 
 ## What copyright already does
 
@@ -93,8 +94,8 @@ repository with relevant licensing or a private repository shared with
 `testing@devpost.com` and `build-week-event@openai.com`. They do not require an open-source
 license for the private-sharing path.
 
-The recommended submission posture is therefore: retain All Rights Reserved, keep the repository
-private, and grant both judging addresses access. Making the repository public or adding
-Apache-2.0 still requires Patrick's explicit approval. Re-check the live rules immediately before
-submission because competition terms can change; repository access, Devpost submission, demo
-publication, and final legal approval remain manual actions.
+The selected submission posture is therefore: retain All Rights Reserved, publish the repository
+with the root proprietary `LICENSE`, and rely on the limited evaluation permission only for
+authorized competition judging. Re-check the live rules immediately before submission because
+competition terms can change; Devpost submission, demo publication, and any later open-source or
+commercial licensing decision remain separate owner actions.

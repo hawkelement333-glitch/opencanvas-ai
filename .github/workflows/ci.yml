@@ -40,7 +40,6 @@ jobs:
       OPENCANVAS_CORS_ORIGINS: '["http://127.0.0.1:3000","http://localhost:3000"]'
       OPENCANVAS_AI_PROVIDER: mock
       OPENCANVAS_EMBEDDING_PROVIDER: mock
-      OPENCANVAS_DOCUMENT_STORAGE_ROOT: ${{ runner.temp }}/opencanvas-documents
       NEXT_PUBLIC_API_URL: http://127.0.0.1:8000/api/v1
 
     steps:
@@ -76,7 +75,9 @@ jobs:
         run: corepack pnpm --filter @opencanvas/web exec playwright install --with-deps chromium
 
       - name: Prepare temporary storage
-        run: mkdir -p "$OPENCANVAS_DOCUMENT_STORAGE_ROOT"
+        run: |
+          echo "OPENCANVAS_DOCUMENT_STORAGE_ROOT=$RUNNER_TEMP/opencanvas-documents" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/opencanvas-documents"
 
       - name: Run canonical validation
         run: corepack pnpm validate

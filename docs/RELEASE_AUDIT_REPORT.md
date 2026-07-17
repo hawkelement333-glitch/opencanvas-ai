@@ -11,19 +11,21 @@ isolated deterministic demo, judge documentation, Trace/evidence fixtures, secur
 notices, dependency-license inventory, non-publishing CI, canonical validation scripts, container
 notice propagation, and repository-hygiene checks.
 
-The selected Git worktree began empty except for a new `.git` directory. It has no commit, `HEAD`,
-remote, or history, so the Milestone 3 snapshot was imported without machine-local/runtime data.
-That prevents commit-based chronology and historical secret review. Every source file remains
-untracked until the owner reviews and creates the first commit.
+The selected Git worktree began empty except for a new `.git` directory. The reviewed source was
+committed to `main` and connected to
+`https://github.com/hawkelement333-glitch/opencanvas-ai`. Before public release, the initial
+snapshot's personal author email was replaced with the account's GitHub noreply identity. The
+published history and candidate tree are included in the final secret/privacy review.
 
 The exact source candidate now passes the aggregate validation suite, source-only clean-clone
 reproduction, deterministic demo integrity/startup checks, production dependency audit, and final
 repository-hygiene scan. The transitive PostCSS advisory is remediated by a lockfile-backed nested
 override to `8.5.14`; the moderate production audit reports no known vulnerabilities.
 
-The repository is technically ready for owner review and competition packaging, but it is not
-committed, tagged, pushed, published, or deployed. License selection, repository access, category,
-video, screenshots, `/feedback` Session ID, Devpost fields, and publication approval remain manual.
+The owner approved public source access, proprietary All Rights Reserved evaluation terms, and the
+**Work and Productivity** category. No tag, GitHub release, hosted deployment, or Devpost submission
+has been created. The public YouTube video, final screenshots, primary-build `/feedback` Session ID,
+and Devpost form remain manual.
 
 ## 2. Files created
 
@@ -93,7 +95,8 @@ installation and the moderate production audit both pass; the lockfile was not h
 
 - No high-confidence key, access token, private key, certificate, private dataset, user record,
   private URL, local environment file, or local database was found in the source inventory.
-- Git history could not be scanned because no commits exist.
+- The complete publication history was scanned after replacing the initial snapshot's personal
+  author email with the account's GitHub noreply identity.
 - The product has no authentication or authorization and must remain a trusted local/demo
   deployment until that is implemented.
 - Live AI mode sends the exact selected context and instruction to OpenAI; local mock/demo mode does
@@ -132,10 +135,11 @@ before the first commit.
 The repository identifies `Copyright (c) 2026 Patrick Parke. All rights reserved.` and does not
 claim registration. No open-source license was silently applied.
 
-Recommended competition path: retain All Rights Reserved, keep the repository private, and share
-it with `testing@devpost.com` and `build-week-event@openai.com`. If the owner instead approves a
-public/open-source release, Apache License 2.0 is preferable to MIT for its express contributor
-patent grant and termination terms. The final choice remains a manual owner decision.
+Owner-selected competition path: publish the repository under the proprietary evaluation terms in
+the root `LICENSE`, retain all other rights, and use public visibility to satisfy judge-access
+requirements. Public visibility does not make the project open source or technically prevent
+cloning; the license preserves the owner's legal position. Any later open-source or commercial
+license remains a separate owner decision.
 
 ## 8. Demo mode behavior
 
@@ -197,31 +201,27 @@ on this host, so the two real PostgreSQL-stack Playwright cases remain intention
 
 ## 18. Competition compliance status
 
-Status: **PARTIAL**. The repository now contains judge setup, demo, Trace, security, architecture,
-Build Week, release, and limitation documentation plus deterministic sample data. Official rules
-were checked against [OpenAI Build Week](https://openai.com/build-week/) and the
-[Devpost FAQ](https://openai.devpost.com/details/faqs). Work and Productivity is the recommended
-track, but final category selection remains manual.
+Status: **READY WITH MANUAL ACTIONS** after the corrected GitHub Actions run is green. The public
+repository contains judge setup, demo, Trace, security, architecture, Build Week, release, and
+limitation documentation plus deterministic sample data. Official rules were rechecked against
+[OpenAI Build Week](https://openai.com/build-week/), the
+[Devpost FAQ](https://openai.devpost.com/details/faqs), and the
+[official rules](https://openai.devpost.com/rules). **Work and Productivity** is the selected track.
 
 See `BUILD_WEEK_CHECKLIST.md` for the evidence-by-evidence PASS/PARTIAL/MISSING/BLOCKED table.
 
 ## 19. Remaining manual actions
 
-- Choose the final license/repository-visibility path.
-- Create the first reviewed commit and configure the intended GitHub remote.
-- Share a private repository with both required judging addresses, or explicitly approve a public
-  release with relevant licensing.
-- Select the final competition category.
-- Capture and insert real screenshots.
+- Capture and insert the final primary, citation, and Trace screenshots.
 - Record and publicly upload an English YouTube demo of three minutes or less, with audio covering
   the product, Codex, and GPT-5.6.
 - Run `/feedback` in the primary Codex build task and insert the real Session ID.
-- Fill the Devpost form, repository URL, contact details, and final demo link.
+- Fill the Devpost form and final demo link, then verify every public URL.
 - Rehearse both a cited answer and an insufficient-evidence answer before recording.
 
 ## 20. Blocking issues
 
-No automated blocker remains for the isolated deterministic competition demo. The following known
+No automated blocker remains once the corrected workflow passes on GitHub. The following known
 limitations still constrain broader release claims:
 
 1. Python dependency resolution is bounded but not locked or vulnerability-scanned from a lockfile.
@@ -231,53 +231,45 @@ limitations still constrain broader release claims:
    internet-facing multi-user service.
 4. Owner-controlled competition and publication actions in section 19 remain incomplete.
 
-## 21. Proposed Git commands
+## 21. Final Git commands
 
-Do not run these until the owner has reviewed the complete working tree and explicitly approved
-the first commit and release preparation:
+The owner approved the public source update. Stage only reviewed paths; the four confirmed
+accidental pager-output files must never be included:
 
 ```powershell
 git status --short --branch
-git add .dockerignore .editorconfig .env.example .gitignore .github `
-  BUILD_WEEK_CHECKLIST.md CHANGELOG.md CODE_OF_CONDUCT.md CONTRIBUTING.md `
-  COPYRIGHT LICENSE_RECOMMENDATION.md NOTICE README.md RELEASE_CHECKLIST.md `
-  SECURITY.md THIRD_PARTY_NOTICES.md docker-compose.yml package.json `
-  pnpm-lock.yaml pnpm-workspace.yaml apps docs scripts
+git add -- .github/workflows/ci.yml BUILD_WEEK_CHECKLIST.md CHANGELOG.md LICENSE `
+  LICENSE_RECOMMENDATION.md NOTICE README.md RELEASE_CHECKLIST.md SECURITY.md docs
 git diff --cached --check
 git diff --cached --stat
 git diff --cached
-git commit -m "Prepare OpenCanvas AI Build Week demo release"
-git tag -a v0.3.0-buildweek-demo -m "OpenCanvas AI Build Week demo"
+git commit -m "Harden public Build Week submission"
+git push --force-with-lease origin main
 ```
 
-Because there is no remote, remote configuration cannot be made exact until the owner supplies the
-reviewed repository URL.
+The one-time force-with-lease is limited to replacing the private snapshot's personal author email
+with GitHub's noreply identity before public exposure. Do not rewrite the public history again.
 
 ## 22. Proposed GitHub publication sequence
 
-Only after explicit publication approval:
+Repository and branch:
 
 ```powershell
-git remote add origin <REVIEWED_GITHUB_REPOSITORY_URL>
-git push -u origin master
-git push origin v0.3.0-buildweek-demo
+git remote get-url origin
+git branch --show-current
 ```
 
-Then either keep the repository private and share it with both judging addresses, or carry out the
-separately approved public/license path. Create release notes from
-`docs/RELEASE_NOTES_v0.3.0-buildweek-demo.md`. Do not enable automated deployment/package
-publication as part of this sequence.
+The expected values are `https://github.com/hawkelement333-glitch/opencanvas-ai.git` and `main`.
+After the push, require green GitHub Actions, confirm public/incognito access, enable private
+vulnerability reporting, and verify the repository description/topics. Tag and GitHub release
+creation remain separate optional actions.
 
 ## 23. Rollback instructions
 
-- Before the first commit: do not delete the imported Milestone 3 snapshot. Copy the reviewed
-  worktree to a separate backup before staging if rollback is required.
-- After staging but before commit: inspect `git diff --cached`; use `git reset` to unstage while
-  preserving working files.
-- After a local commit but before push: delete only the local proposed tag with
-  `git tag -d v0.3.0-buildweek-demo`; use a new corrective commit rather than rewriting history.
-- After push: revert with a new commit and coordinate repository access/release changes. Do not
-  force-push or rewrite published history.
+- Before commit: inspect `git diff --cached` and unstage unintended paths without deleting working
+  files.
+- After the public push: revert with a new commit and coordinate access/release changes. Do not
+  force-push or rewrite public shared history again.
 - Demo data is isolated and ignored. `pnpm demo:reset` safely reconstructs it without touching the
   normal database.
 
@@ -313,5 +305,6 @@ git status --short --branch
 ```
 
 The final `validate` run passed all represented gates, and the final source-only clean clone passed
-the same suite before removing its temporary checkout. Do not stage, tag, push, share, or publish
-until the owner completes the manual review and approval actions in sections 19 and 21.
+the same suite before removing its temporary checkout. The public source update is owner-approved;
+tag/release publication, the video, `/feedback` Session ID, and Devpost submission remain governed
+by the manual actions in section 19.

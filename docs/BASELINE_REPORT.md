@@ -2,6 +2,10 @@
 
 Recorded: 2026-07-17 (America/Chicago)
 
+> Historical record: this document captures the state observed at the start of release hardening.
+> It is intentionally not a description of the current branch, remote, or validation status. See
+> `docs/RELEASE_AUDIT_REPORT.md` and `RELEASE_CHECKLIST.md` for the current candidate.
+
 ## Source-state note
 
 The selected Git worktree initially contained only a new `.git` directory: branch `master`, no

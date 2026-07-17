@@ -2,7 +2,12 @@
 
 ## Evidence status
 
-The current branch is `master`, but the repository has no commits and therefore has no commit hash or immutable Git timeline. All current project files are untracked. Local filesystem metadata shows project files beginning on July 16, 2026—for example, the initial migration was created that date—but timestamps can be copied or modified and are not equivalent to version-control evidence.
+The release repository is on `main` at
+<https://github.com/hawkelement333-glitch/opencanvas-ai>. The repository began as a single imported
+source snapshot, so Git documents the release state but does not independently prove the date on
+which each earlier milestone was built. Local filesystem metadata shows project files beginning on
+July 16, 2026—for example, the initial migration was created that date—but timestamps can be copied
+or modified and are not equivalent to version-control evidence.
 
 Project owner statement: OpenCanvas AI was conceived and development began on **July 16, 2026** during OpenAI Build Week. The stronger claim that no functional version existed before the competition period should be published only after the owner confirms it and preserves supporting session/export evidence.
 
@@ -48,9 +53,14 @@ The human-directed decisions reflected in the repository include:
 - isolate competition demo data and forbid live credentials in demo mode;
 - defer authentication, OCR, collaboration, and broad autonomous-agent scope.
 
-Final legal licensing, repository visibility, category selection, and publication remain owner decisions.
+The owner selected a public repository with proprietary evaluation terms and the **Work and
+Productivity** track. Creating a tag or GitHub release, uploading the demo video, and submitting the
+Devpost form remain separate owner actions.
 
-The current eligible tracks are Apps for Your Life, Work and Productivity, Developer Tools, and Education. **Work and Productivity** is the recommended fit, but category selection remains manual. Current rules require either a public repository with relevant licensing or a private repository shared with `testing@devpost.com` and `build-week-event@openai.com`.
+The current eligible tracks are Apps for Your Life, Work and Productivity, Developer Tools, and
+Education. **Work and Productivity** is the selected fit. Current rules require either a public
+repository with relevant licensing or a private repository shared with `testing@devpost.com` and
+`build-week-event@openai.com`.
 
 ## GPT-5.6 and runtime AI use
 
@@ -79,8 +89,8 @@ The application has no authentication, OCR, distributed document worker, object-
 
 - [ ] Owner attestation for the start/no-prior-version statement.
 - [ ] Codex `/feedback` session ID.
-- [ ] Approved screenshots without private content.
+- [x] Approved synthetic screenshots without private content.
 - [ ] Public demo video with audio and a sub-three-minute duration.
-- [ ] Final category, repository URL/access, and license decision.
+- [x] Final category, repository URL/access, and license decision.
 
 Current deadline: **July 21, 2026 at 5:00 PM PDT**. Verify the [Build Week page](https://openai.com/build-week/), [Devpost FAQ](https://openai.devpost.com/details/faqs), and [rules](https://openai.devpost.com/rules) before final submission.

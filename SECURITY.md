@@ -8,10 +8,11 @@ must be added explicitly when the first release is approved.
 
 ## Report a vulnerability privately
 
-Do not disclose suspected vulnerabilities, exposed credentials, private documents, or user
-data in a public issue. Contact the repository owner through the private contact channel listed
-in the competition submission. If the repository is later hosted on GitHub with private
-vulnerability reporting enabled, use a GitHub Security Advisory.
+Do not disclose suspected vulnerabilities, exposed credentials, private documents, or user data
+in a public issue. Use **Report a vulnerability** on this repository's GitHub Security page; private
+vulnerability reporting is the approved disclosure channel. If that control is temporarily
+unavailable, contact the repository owner through the GitHub profile without including sensitive
+details in a public message.
 
 Include a concise impact description, affected version or commit, reproduction steps, and a
 safe proof of concept. Do not access data that is not yours, disrupt a service, or retain copied
@@ -78,9 +79,8 @@ model prompt boundaries as a complete security boundary.
 
 ## Known release security findings
 
-The July 17, 2026 audit found no high-confidence committed secret; the repository has no commit
-history yet, so there was no historical content to scan. The JavaScript production lockfile
-reported one unresolved moderate transitive PostCSS advisory and no high or critical advisory.
-The application does not expose an untrusted-CSS processing feature, which constrains but does
-not eliminate practical exposure. See `docs/SECURITY_LICENSE_AUDIT.md` for the patched target,
-exact follow-up commands, scope, and caveats.
+The July 17, 2026 release audit and pre-publication history scan found no high-confidence committed
+secret, private key, database, upload, runtime artifact, or real environment file. The production
+PostCSS advisory was remediated by the lockfile-backed `8.5.14` override, and the final production
+dependency audit reported no known vulnerabilities at moderate severity or higher. See
+`docs/SECURITY_LICENSE_AUDIT.md` for scope and caveats.

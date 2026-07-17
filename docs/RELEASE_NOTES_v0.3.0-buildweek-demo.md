@@ -45,7 +45,9 @@ The release gate is:
 corepack pnpm validate
 ```
 
-Final command results and clean-clone evidence must be inserted into the release checklist before publishing. Historical Milestone 3 results are available in `docs/MILESTONE3_IMPLEMENTATION_REPORT.md`.
+Final local and GitHub Actions results are recorded in the release checklist for the exact
+submission candidate. Historical Milestone 3 results remain available in
+`docs/MILESTONE3_IMPLEMENTATION_REPORT.md`.
 
 ## Known limitations
 
@@ -63,4 +65,6 @@ Back up existing PostgreSQL and document volumes before any release migration. N
 
 ## Release governance
 
-The final license, repository access, tag, release publication, video, category, and Codex `/feedback` session ID require owner action. This preparation does not push or publish anything.
+The owner selected public source access, proprietary All Rights Reserved evaluation terms, and the
+**Work and Productivity** category. Tag/release publication, the public video, Devpost submission,
+and the primary-build Codex `/feedback` Session ID remain owner actions.

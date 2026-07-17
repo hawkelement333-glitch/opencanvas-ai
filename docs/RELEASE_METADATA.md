@@ -1,23 +1,28 @@
-# Proposed GitHub and Devpost metadata
+# GitHub, OpenAI Build Week, and Handshake metadata
 
-All values are drafts for owner review. No remote, tag, release, visibility change, or Devpost submission has been created.
+Current source repository: <https://github.com/hawkelement333-glitch/opencanvas-ai>. The owner
+approved public visibility under the proprietary All Rights Reserved evaluation terms in
+`LICENSE`. No tag, GitHub release, hosted deployment, YouTube video, or Devpost submission has
+been created.
 
 ## Release
 
 - Proposed tag: `v0.3.0-buildweek-demo`
 - Proposed release title: `OpenCanvas AI — Build Week Demo`
-- Proposed commit message: `Prepare OpenCanvas AI Build Week demo release`
 - Release notes: `docs/RELEASE_NOTES_v0.3.0-buildweek-demo.md`
-- Pre-release: recommended **yes** until judge setup and final legal choice are confirmed
-- Package manifests remain at `0.1.0`; the proposed tag names the competition milestone and does not silently change package publication versions.
+- Pre-release: recommended **yes** until the final video and Devpost submission are verified
+- Package manifests remain at `0.1.0`; the proposed tag names the competition milestone and does
+  not silently change package publication versions.
 
 ## Repository
 
-- Proposed name: `opencanvas-ai`
-- Proposed description: `Visual, source-grounded AI knowledge workspace with user-controlled context and claim-level Trace provenance.`
-- Proposed homepage/demo URL: **TBD**
-- Proposed repository URL: **TBD**
-- Proposed topics:
+- Name: `opencanvas-ai`
+- URL: <https://github.com/hawkelement333-glitch/opencanvas-ai>
+- Description: `Visual, source-grounded AI knowledge workspace with user-controlled context and durable provenance.`
+- Homepage/demo URL: **TBD — use the final public YouTube or Devpost project URL**
+- Visibility: **public**
+- License posture: **proprietary / All Rights Reserved; limited competition evaluation**
+- Topics:
   - `ai`
   - `codex`
   - `gpt-5-6`
@@ -29,58 +34,72 @@ All values are drafts for owner review. No remote, tag, release, visibility chan
   - `openai-build-week`
   - `productivity`
 
-## Product copy
+## OpenAI Build Week submission copy
 
+- Project name: `OpenCanvas AI`
 - Tagline: `See the context. Trust the evidence.`
+- Category: **Work and Productivity**
 - One sentence: `OpenCanvas AI is a spatial knowledge workspace that lets users select exact context, generate source-grounded answers, and inspect durable provenance.`
-- Devpost short summary: `OpenCanvas AI turns notes and documents into an interactive canvas where users choose exactly what AI may use. It retrieves only from selected sources, validates citations to exact passages, refuses unsupported questions, and preserves structured Trace evidence for each execution.`
-- Category: **TBD — Work and Productivity recommended; manual owner decision**
+- Short description: `OpenCanvas AI turns notes and documents into an interactive canvas where users choose exactly what AI may use. It retrieves only from selected sources, validates citations to exact passages, refuses unsupported questions, and preserves structured Trace evidence for each execution.`
+- Built with: `Codex`, `GPT-5.6`, `OpenAI Responses API`, `OpenAI Embeddings`, `Next.js`,
+  `React Flow`, `FastAPI`, `PostgreSQL`, `pgvector`
+- Repository URL: <https://github.com/hawkelement333-glitch/opencanvas-ai>
+- Testing path: follow `docs/JUDGE_SETUP.md`; no account or paid API credential is required
 
-## Required placeholders
+## Handshake AI Showcase copy
 
-- Public video URL: **TBD**
-- Screenshot URLs: **TBD**
-- Live demo URL: **TBD**
-- Codex `/feedback` Session ID: **TBD**
-- Public contact: **TBD**
-- Final license: **TBD**
-- Judge access method: **TBD — public with relevant licensing, or private sharing with `testing@devpost.com` and `build-week-event@openai.com`**
+- Project title: `OpenCanvas AI`
+- Project link: **use the final public YouTube or Devpost project URL; the GitHub URL is an
+  acceptable code link but is less effective as an employer-facing demo**
+- Description: `OpenCanvas AI helps knowledge workers reason across notes and documents without losing the boundary between evidence and generated analysis. Users arrange context on an infinite canvas, retrieve only from selected sources, open validated page- or section-level citations, and inspect durable execution provenance. I built the full-stack product with Codex and integrated GPT-5.6 through the server-side OpenAI Responses API, with deterministic judge-safe demo providers and a production-shaped PostgreSQL/pgvector architecture.`
+
+## Required owner-supplied fields
+
+- Public YouTube video URL: **TBD**
+- Primary screenshot: `docs/assets/opencanvas-evidence-canvas.jpg`
+- Citation screenshot: `docs/assets/opencanvas-citation-passage.jpg`
+- Trace screenshot: `docs/assets/opencanvas-trace-record.jpg`
+- Live demo URL: **optional; local deterministic judge path is documented**
+- Codex `/feedback` Session ID from the primary build task: **TBD**
+- Devpost account registration and final form acceptance: **manual action required**
 
 ## Accuracy guardrails
 
-- Do not call mock/demo responses live GPT-5.6 output.
+- Do not call deterministic replay or mock responses live GPT-5.6 output.
 - Do not claim automatic inference or source-conflict classification.
-- Do not claim a complete Trace UI.
-- Do not claim the Git history proves the Build Week start date; this repository has no commits.
-- Do not publish test counts unless rerun against the exact release candidate.
+- Do not claim a complete end-user Trace UI.
+- Dated commits prove publication snapshots, not the entire development chronology.
+- Do not publish test counts unless rerun against the exact candidate.
+- A public repository can be viewed and cloned; `LICENSE` reserves legal rights but cannot provide
+  technical copy protection.
 
-## Proposed review and publication sequence
+## Final technical sequence
 
-Run only after replacing placeholders, completing `RELEASE_CHECKLIST.md`, and receiving explicit owner approval:
-
-```sh
-git status --short
-git diff --check
-git diff
+```powershell
+git status --short --branch
 corepack pnpm validate
-git add .dockerignore .editorconfig .env.example .gitignore .github README.md BUILD_WEEK_CHECKLIST.md RELEASE_CHECKLIST.md CHANGELOG.md CONTRIBUTING.md CODE_OF_CONDUCT.md COPYRIGHT NOTICE THIRD_PARTY_NOTICES.md LICENSE_RECOMMENDATION.md SECURITY.md apps docs docker-compose.yml package.json pnpm-lock.yaml pnpm-workspace.yaml scripts
-git status --short
+corepack pnpm validate:clean-clone
+corepack pnpm demo:check
+corepack pnpm demo:smoke
+git diff --check
+git add -- <reviewed paths only>
 git diff --cached --check
 git diff --cached
-git commit -m "Prepare OpenCanvas AI Build Week demo release"
-git tag -a v0.3.0-buildweek-demo -m "OpenCanvas AI Build Week demo"
-git push origin master
-git push origin v0.3.0-buildweek-demo
+git commit -m "Harden public Build Week submission"
+git push --force-with-lease origin main  # one-time rewrite removes the private snapshot's personal email
 ```
 
-Before the push commands, verify that `origin` points to the owner-approved destination and that `master` is the intended publication branch. This repository currently has no remote and no commit, so those facts cannot be assumed.
-
-After pushing, configure approved repository access, create a GitHub pre-release from the reviewed notes, verify the clean-clone judge path, upload/verify the public YouTube video, and complete Devpost. Each is a separate manual action.
+After the push, require a green GitHub Actions run, verify public/incognito repository access,
+enable private vulnerability reporting, upload and verify the public YouTube video, add the
+primary-build `/feedback` Session ID, and submit through <https://openai.devpost.com/> before the
+deadline. Handshake AI Showcase is a separate optional portfolio action.
 
 ## Rollback outline
 
-- Before push: delete or correct a local proposed tag only with owner approval, amend the candidate, and rerun validation.
-- After push but before submission: prefer a new corrective commit or `git revert <published-commit>`; do not rewrite shared history.
-- If the GitHub release text is wrong, unpublish/edit the release through the reviewed owner account without deleting source history.
-- If a secret was exposed, make repository access private if possible, rotate/revoke the credential first, remove it from the working tree, and coordinate history remediation; a normal revert does not erase a secret from Git history.
-- If a migration causes a deployment issue, stop application writes, restore the pre-release database/file backup, and redeploy the previous reviewed artifact. Do not improvise an untested destructive downgrade.
+- Prefer a new corrective commit or `git revert <published-commit>` after the one-time privacy
+  rewrite; do not rewrite public shared history again.
+- If a secret is exposed, rotate or revoke it first. A normal revert does not erase it from Git
+  history; coordinate repository visibility and history remediation separately.
+- If a migration causes a deployment issue, stop application writes, restore the pre-release
+  database/file backup, and redeploy the previous reviewed artifact. Do not improvise an untested
+  destructive downgrade.

@@ -128,10 +128,11 @@ were verified from installed metadata and official PyPI metadata. The declared r
 
 ## Material bundled assets and sample data
 
-No fonts, icons outside the `lucide-react` dependency, images, videos, binary documents,
-third-party datasets, or vendored source trees were found in the audited repository. The two
-small text fixtures under `apps/api/tests/fixtures/` and the generated DOCX/PDF fixture content
-appear to be project-specific synthetic test data. Ownership was assessed from repository
+No fonts, icons outside the `lucide-react` dependency, videos, third-party binary documents,
+third-party datasets, or vendored source trees were found in the audited repository. The three
+JPEG screenshots under `docs/assets/`, the small text fixtures under `apps/api/tests/fixtures/`,
+and the generated DOCX/PDF fixture content are project-specific synthetic evidence or test data.
+Ownership was assessed from repository
 content only and was not independently proven.
 
 ## Release follow-up

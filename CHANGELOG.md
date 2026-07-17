@@ -1,6 +1,7 @@
 # Changelog
 
-This project follows a milestone-oriented pre-release history. Dates below are omitted unless independently supported; the current repository has no commits or tags.
+This project follows a milestone-oriented pre-release history. The repository has dated Build Week
+commits on `main`; no release tag has been created.
 
 ## [Unreleased] — proposed `v0.3.0-buildweek-demo`
 

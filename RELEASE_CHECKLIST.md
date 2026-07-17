@@ -1,7 +1,7 @@
 # Release checklist
 
 Proposed release: `v0.3.0-buildweek-demo`  
-State: draft; not committed, tagged, pushed, published, or deployed.
+State: source committed and published on `main`; not tagged, released, submitted, or deployed.
 
 ## Source and scope
 
@@ -14,9 +14,9 @@ State: draft; not committed, tagged, pushed, published, or deployed.
 ## Security and legal
 
 - [x] Final secret scan passes against the entire working tree.
-- [ ] Any discovered real credential has been removed and rotated by its owner.
+- [x] No real credential was discovered; no rotation is required.
 - [ ] Dependency license inventory and notices are reviewed.
-- [ ] Final license option is selected and consistent across README/legal files.
+- [x] Proprietary All Rights Reserved evaluation terms are selected and consistent across README/legal files.
 - [ ] Copyright owner and year are confirmed.
 - [x] Demo fixtures contain only owned/synthetic/non-sensitive material; screenshots remain pending.
 - [ ] `SECURITY.md` contains an approved private reporting route.
@@ -35,9 +35,9 @@ State: draft; not committed, tagged, pushed, published, or deployed.
 
 ## Quality gates
 
-Current handoff status: all required local automated gates pass on the exact release candidate,
-including source-only clean-clone reproduction and deterministic demo checks. GitHub Actions remains
-unverified until a repository is created and CI runs remotely.
+Current handoff status: all required local automated gates passed on the previous candidate,
+including source-only clean-clone reproduction and deterministic demo checks. The corrected
+submission candidate must repeat those gates and obtain a green GitHub Actions run.
 
 - [x] `corepack pnpm validate` passes on the exact release candidate.
 - [x] Formatting, linting, strict type checks, unit tests, integration tests, security tests, browser tests, build, migrations, demo checks, smoke tests, and hygiene are represented in that command.
@@ -50,18 +50,20 @@ unverified until a repository is created and CI runs remotely.
 - [x] README commands were copied and tested.
 - [x] Architecture reflects implementation, not aspirational features.
 - [x] Known limitations are accurate.
-- [ ] Screenshots and video placeholders are replaced.
+- [x] Primary, citation, and Trace screenshot placeholders are replaced with synthetic demo captures.
 - [ ] Video is public, under three minutes, and includes required audio.
 - [ ] `/feedback` session ID is added.
-- [ ] Repository URL/access and category are approved.
+- [x] Public repository URL/access and **Work and Productivity** category are approved.
 - [ ] Build Week checklist has no unexplained MISSING or BLOCKED item.
 - [ ] Release notes and metadata are reviewed.
 
 ## Publication guard
 
-- [ ] Patrick Parke has explicitly approved commit, tag, push, repository visibility, and release publication.
-- [ ] Remote name and destination branch are verified.
-- [ ] Proposed tag does not already exist locally or remotely.
+- [x] The owner explicitly approved committing, pushing, and public repository visibility.
+- [x] `origin` and destination branch `main` are verified.
+- [x] The proposed tag does not exist locally or remotely.
+- [ ] Tag creation and GitHub release publication receive separate final approval.
 - [ ] Rollback owner and procedure are agreed.
 
-Do not commit, tag, push, publish, deploy, or change repository visibility until every applicable item is complete or explicitly accepted by the owner.
+Do not create a tag or GitHub release, deploy, or submit to Devpost until every applicable item is
+complete or explicitly accepted by the owner.

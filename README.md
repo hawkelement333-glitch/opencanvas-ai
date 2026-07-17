@@ -4,11 +4,17 @@
 
 OpenCanvas AI turns notes and source documents into a spatial knowledge workspace. A user chooses the exact canvas objects supplied to AI, receives an editable response as a connected node, and can open every validated citation at the supporting page or section.
 
-Competition release candidate: `v0.3.0-buildweek-demo` (not yet tagged or published).
+Competition release candidate: `v0.3.0-buildweek-demo`. Source is published at
+[github.com/hawkelement333-glitch/opencanvas-ai](https://github.com/hawkelement333-glitch/opencanvas-ai);
+the optional release tag and GitHub release have not been created.
 
-> [Screenshot placeholder — canvas with selected sources and a cited AI response]
->
-> [Demo video placeholder — public video under three minutes]
+OpenAI Build Week track: **Work and Productivity**. The deterministic demo and recording script
+are documented in [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md).
+
+![OpenCanvas AI deterministic evidence canvas](docs/assets/opencanvas-evidence-canvas.jpg)
+
+Submission evidence: [validated citation passage](docs/assets/opencanvas-citation-passage.jpg) ·
+[persisted Trace record](docs/assets/opencanvas-trace-record.jpg)
 
 ## Why it exists
 
@@ -224,7 +230,11 @@ Competition fixtures are synthetic and non-sensitive. The seeded replay includes
 
 ## Build Week record
 
-The working tree has no Git commits yet, so Git cannot independently prove a start date or sequence. Local file metadata currently begins on July 16, 2026, including the initial migration, but filesystem timestamps are mutable and are only supporting evidence. The project owner reports that OpenCanvas AI was conceived and development began on July 16, 2026 during OpenAI Build Week; the stronger statement that no functional version existed before the competition period remains pending an owner attestation and preserved session evidence.
+The repository now has a dated Build Week publication history on `main`. That history establishes
+when reviewed snapshots were published, but a snapshot alone cannot prove the complete development
+start or sequence. The project owner reports that OpenCanvas AI was conceived and development began
+on July 16, 2026 during OpenAI Build Week; Codex task history and the dated repository commits are
+the supporting evidence for work completed during the submission period.
 
 Codex was used for repository inspection, implementation planning, incremental code changes, automated test construction, failure diagnosis, security review, and release preparation. Human decisions included the spatial interaction model, explicit-selection context boundary, citation semantics, additive canonical compatibility strategy, and the decision to keep demo mode isolated from live credentials. Private Codex conversation content is not included. The `/feedback` session ID remains a manual submission field.
 
@@ -238,10 +248,16 @@ Recommended next milestone: canonical ingestion adapters, then semantic memory, 
 
 ## Competition and release status
 
-Submission assets and owner actions are tracked in [BUILD_WEEK_CHECKLIST.md](BUILD_WEEK_CHECKLIST.md). Release review is tracked in [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). No tag, repository publication, GitHub release, Devpost submission, or deployment is performed by this preparation work.
+Submission assets and owner actions are tracked in [BUILD_WEEK_CHECKLIST.md](BUILD_WEEK_CHECKLIST.md).
+Release review is tracked in [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). The repository is public;
+no release tag, GitHub release, Devpost submission, or internet deployment has been created.
 
 ## License and ownership
 
-Copyright (c) 2026 Patrick Parke. The final release license is an owner decision and must be made before publication; see `LICENSE_RECOMMENDATION.md`, `COPYRIGHT`, `NOTICE`, and `THIRD_PARTY_NOTICES.md`. Do not infer open-source permission from repository visibility alone.
+Copyright (c) 2026 Patrick Parke. This is a proprietary **All Rights Reserved** release under the
+limited competition-evaluation terms in [LICENSE](LICENSE). It is not open source; public visibility
+does not grant permission to copy, modify, redistribute, commercialize, deploy, or create derivative
+works. See `LICENSE_RECOMMENDATION.md`, `COPYRIGHT`, `NOTICE`, and `THIRD_PARTY_NOTICES.md`.
 
-Project owner/contact: **Patrick Parke** — public contact link pending owner input.
+Project owner/contact: **Patrick Parke** via the
+[repository owner's GitHub profile](https://github.com/hawkelement333-glitch).

@@ -18,8 +18,8 @@ No globally installed Python package is assumed.
 PowerShell:
 
 ```powershell
-git clone <REPOSITORY_URL>
-Set-Location <REPOSITORY_DIRECTORY>
+git clone https://github.com/hawkelement333-glitch/opencanvas-ai.git
+Set-Location opencanvas-ai
 pnpm install --frozen-lockfile
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -30,8 +30,8 @@ pnpm demo
 macOS/Linux:
 
 ```sh
-git clone <REPOSITORY_URL>
-cd <REPOSITORY_DIRECTORY>
+git clone https://github.com/hawkelement333-glitch/opencanvas-ai.git
+cd opencanvas-ai
 pnpm install --frozen-lockfile
 python3 -m venv .venv
 source .venv/bin/activate
@@ -39,7 +39,9 @@ python -m pip install -e "apps/api[dev]"
 pnpm demo
 ```
 
-Open the URL printed by the demo command. The repository URL is intentionally a placeholder until the owner approves repository access.
+Open the URL printed by the demo command. The public repository requires no account or invitation
+to clone. Its proprietary license permits authorized competition inspection and evaluation but is
+not an open-source grant.
 
 Reset the demo:
 
@@ -125,4 +127,5 @@ pnpm demo:smoke
 - Single-user/local deployment only; no authentication.
 - No OCR, browsing, collaboration, automatic conflict classification, or Trace explorer UI.
 - Demo data and mock output are synthetic and visibly labeled.
-- Repository URL, final license, public YouTube video, and category remain owner-controlled submission items until filled in. The current alternative to a public repository is private access for `testing@devpost.com` and `build-week-event@openai.com`.
+- Repository URL, public access, proprietary license, and **Work and Productivity** category are
+  finalized. The public YouTube video and `/feedback` Session ID remain submission-owner actions.

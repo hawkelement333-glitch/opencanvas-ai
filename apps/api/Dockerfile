@@ -13,7 +13,7 @@ COPY --from=builder /wheels /wheels
 RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
 COPY apps/api/alembic.ini ./
 COPY apps/api/alembic ./alembic
-COPY COPYRIGHT NOTICE THIRD_PARTY_NOTICES.md ./
+COPY LICENSE COPYRIGHT NOTICE THIRD_PARTY_NOTICES.md ./
 RUN mkdir -p /app/data/documents && chown -R opencanvas:opencanvas /app/data
 USER opencanvas
 EXPOSE 8000
