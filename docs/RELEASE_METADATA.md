@@ -8,7 +8,7 @@ been created.
 ## Release
 
 - Proposed tag: `v0.3.0-buildweek-demo`
-- Proposed release title: `OpenCanvas AI — Build Week Demo`
+- Proposed release title: `SolarPlexus Mobius — Build Week Demo`
 - Release notes: `docs/RELEASE_NOTES_v0.3.0-buildweek-demo.md`
 - Pre-release: recommended **yes** until the final video and Devpost submission are verified
 - Package manifests remain at `0.1.0`; the proposed tag names the competition milestone and does
@@ -18,7 +18,7 @@ been created.
 
 - Name: `opencanvas-ai`
 - URL: <https://github.com/hawkelement333-glitch/opencanvas-ai>
-- Description: `Visual, source-grounded AI knowledge workspace with user-controlled context and durable provenance.`
+- Description: `SolarPlexus Mobius — a visual, source-grounded workspace for auditable AI knowledge work.`
 - Homepage/demo URL: **TBD — use the final public YouTube or Devpost project URL**
 - Visibility: **public**
 - License posture: **proprietary / All Rights Reserved; limited competition evaluation**
@@ -36,11 +36,11 @@ been created.
 
 ## OpenAI Build Week submission copy
 
-- Project name: `OpenCanvas AI`
-- Tagline: `See the context. Trust the evidence.`
+- Project name: `SolarPlexus Mobius`
+- Subtitle: `A visual, source-grounded workspace for auditable AI knowledge work`
 - Category: **Work and Productivity**
-- One sentence: `OpenCanvas AI is a spatial knowledge workspace that lets users select exact context, generate source-grounded answers, and inspect durable provenance.`
-- Short description: `OpenCanvas AI turns notes and documents into an interactive canvas where users choose exactly what AI may use. It retrieves only from selected sources, validates citations to exact passages, refuses unsupported questions, and preserves structured Trace evidence for each execution.`
+- One sentence: `SolarPlexus Mobius is a spatial knowledge workspace that lets users select exact context, generate source-grounded answers, and inspect durable provenance.`
+- Short description: `SolarPlexus Mobius turns notes and documents into an interactive canvas where users choose exactly what AI may use. It retrieves only from selected sources, validates citations to exact passages, refuses unsupported questions, and preserves structured Trace evidence for each execution.`
 - Built with: `Codex`, `GPT-5.6`, `OpenAI Responses API`, `OpenAI Embeddings`, `Next.js`,
   `React Flow`, `FastAPI`, `PostgreSQL`, `pgvector`
 - Repository URL: <https://github.com/hawkelement333-glitch/opencanvas-ai>
@@ -48,14 +48,15 @@ been created.
 
 ## Handshake AI Showcase copy
 
-- Project title: `OpenCanvas AI`
+- Project title: `SolarPlexus Mobius`
 - Project link: **use the final public YouTube or Devpost project URL; the GitHub URL is an
   acceptable code link but is less effective as an employer-facing demo**
-- Description: `OpenCanvas AI helps knowledge workers reason across notes and documents without losing the boundary between evidence and generated analysis. Users arrange context on an infinite canvas, retrieve only from selected sources, open validated page- or section-level citations, and inspect durable execution provenance. I built the full-stack product with Codex and integrated GPT-5.6 through the server-side OpenAI Responses API, with deterministic judge-safe demo providers and a production-shaped PostgreSQL/pgvector architecture.`
+- Description: `SolarPlexus Mobius helps knowledge workers reason across notes and documents without losing the boundary between evidence and generated analysis. Users arrange context on an infinite canvas, retrieve only from selected sources, open validated page- or section-level citations, and inspect durable execution provenance. I built the full-stack product with Codex and integrated GPT-5.6 through the server-side OpenAI Responses API, with deterministic judge-safe demo providers and a production-shaped PostgreSQL/pgvector architecture.`
 
 ## Required owner-supplied fields
 
 - Public YouTube video URL: **TBD**
+- Devpost thumbnail: `docs/assets/solarplexus-mobius-thumbnail.png`
 - Primary screenshot: `docs/assets/opencanvas-evidence-canvas.jpg`
 - Citation screenshot: `docs/assets/opencanvas-citation-passage.jpg`
 - Trace screenshot: `docs/assets/opencanvas-trace-record.jpg`

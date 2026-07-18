@@ -127,7 +127,7 @@ async function request<T>(
         code: "request_aborted",
       });
     }
-    throw new APIError("Could not reach the OpenCanvas server.", {
+    throw new APIError("Could not reach the SolarPlexus Mobius server.", {
       status: 0,
       code: "network_error",
     });
@@ -150,7 +150,7 @@ async function requestWithoutBody(path: string, init: RequestInit): Promise<void
     if (!response.ok) throw await parseError(response);
   } catch (error) {
     if (error instanceof APIError) throw error;
-    throw new APIError("Could not reach the OpenCanvas server.", {
+    throw new APIError("Could not reach the SolarPlexus Mobius server.", {
       status: 0,
       code: "network_error",
     });

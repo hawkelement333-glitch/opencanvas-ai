@@ -1,10 +1,10 @@
-# OpenCanvas AI `v0.3.0-buildweek-demo` — proposed release notes
+# SolarPlexus Mobius `v0.3.0-buildweek-demo` — proposed release notes
 
 Status: **draft; tag and release do not exist yet**.
 
 ## Highlights
 
-OpenCanvas AI is a visual knowledge workspace where users select the exact notes and documents supplied to an AI assistant. The proposed Build Week demo release combines:
+SolarPlexus Mobius is a visual knowledge workspace where users select the exact notes and documents supplied to an AI assistant. The proposed Build Week demo release combines:
 
 - a persistent infinite canvas with notes, directional edges, multi-selection, autosave, and editable AI responses;
 - secure PDF, TXT, Markdown, and DOCX ingestion;

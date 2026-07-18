@@ -1,8 +1,10 @@
-# OpenCanvas AI
+# SolarPlexus Mobius
 
-> Visual, source-grounded AI knowledge workspace with user-controlled context and durable provenance.
+> Formerly developed under the working name OpenCanvas AI.
 
-OpenCanvas AI turns notes and source documents into a spatial knowledge workspace. A user chooses the exact canvas objects supplied to AI, receives an editable response as a connected node, and can open every validated citation at the supporting page or section.
+> A visual, source-grounded workspace for auditable AI knowledge work
+
+SolarPlexus Mobius turns notes and source documents into a spatial knowledge workspace. A user chooses the exact canvas objects supplied to AI, receives an editable response as a connected node, and can open every validated citation at the supporting page or section.
 
 Competition release candidate: `v0.3.0-buildweek-demo`. Source is published at
 [github.com/hawkelement333-glitch/opencanvas-ai](https://github.com/hawkelement333-glitch/opencanvas-ai);
@@ -13,14 +15,14 @@ are documented in [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md).
 
 [![Contributor Guide](https://img.shields.io/badge/Contributor_Guide-Open-BAFF5A?style=for-the-badge&logo=github)](CONTRIBUTING.md)
 
-![OpenCanvas AI deterministic evidence canvas](docs/assets/opencanvas-slack-showcase.png)
+![SolarPlexus Mobius deterministic evidence canvas](docs/assets/opencanvas-slack-showcase.png)
 
 Submission evidence: [validated citation passage](docs/assets/opencanvas-citation-passage.jpg) ·
 [persisted Trace record](docs/assets/opencanvas-trace-record.jpg)
 
 ## Why it exists
 
-Knowledge workers often lose the boundary between evidence, interpretation, and generated text inside a chat transcript. OpenCanvas AI makes that boundary visible: sources remain on the canvas, context is explicitly selected, retrieval is limited to those sources, and generated answers carry source-level provenance.
+Knowledge workers often lose the boundary between evidence, interpretation, and generated text inside a chat transcript. SolarPlexus Mobius makes that boundary visible: sources remain on the canvas, context is explicitly selected, retrieval is limited to those sources, and generated answers carry source-level provenance.
 
 ## What it does
 
@@ -234,7 +236,7 @@ Competition fixtures are synthetic and non-sensitive. The seeded replay includes
 
 The repository now has a dated Build Week publication history on `main`. That history establishes
 when reviewed snapshots were published, but a snapshot alone cannot prove the complete development
-start or sequence. The project owner reports that OpenCanvas AI was conceived and development began
+start or sequence. The project owner reports that SolarPlexus Mobius was conceived and development began
 on July 16, 2026 during OpenAI Build Week; Codex task history and the dated repository commits are
 the supporting evidence for work completed during the submission period.
 

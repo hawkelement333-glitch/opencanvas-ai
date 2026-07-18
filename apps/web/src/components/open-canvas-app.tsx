@@ -209,7 +209,7 @@ function CanvasSidebar({
         <span className="brand-mark" aria-hidden="true">
           <Sparkles size={17} />
         </span>
-        {!collapsed && <strong>OpenCanvas</strong>}
+        {!collapsed && <strong>SolarPlexus Mobius</strong>}
         <button
           type="button"
           onClick={onCollapse}
@@ -362,7 +362,7 @@ export function OpenCanvasApp() {
 
       <section className="opencanvas-main" aria-label="Canvas workspace">
         {canvasesQuery.isPending ? (
-          <LoadingState label="Opening OpenCanvas…" />
+          <LoadingState label="Opening SolarPlexus Mobius…" />
         ) : canvasesQuery.isError ? (
           <ErrorState
             message={getErrorMessage(canvasesQuery.error)}
@@ -1262,7 +1262,7 @@ function CanvasWorkspace({ snapshot, onReload }: CanvasWorkspaceProps) {
             panOnDrag={[1, 2]}
             fitView={snapshot.nodes.length > 0}
             fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
-            aria-label="OpenCanvas spatial editor"
+            aria-label="SolarPlexus Mobius spatial editor"
             colorMode="dark"
           >
             <Background variant={BackgroundVariant.Dots} gap={22} size={1.1} color="#34373b" />

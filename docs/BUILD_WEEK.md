@@ -9,13 +9,13 @@ which each earlier milestone was built. Local filesystem metadata shows project 
 July 16, 2026—for example, the initial migration was created that date—but timestamps can be copied
 or modified and are not equivalent to version-control evidence.
 
-Project owner statement: OpenCanvas AI was conceived and development began on **July 16, 2026** during OpenAI Build Week. The stronger claim that no functional version existed before the competition period should be published only after the owner confirms it and preserves supporting session/export evidence.
+Project owner statement: SolarPlexus Mobius, formerly developed under the working name OpenCanvas AI, was conceived and development began on **July 16, 2026** during OpenAI Build Week. The stronger claim that no functional version existed before the competition period should be published only after the owner confirms it and preserves supporting session/export evidence.
 
 Codex `/feedback` session ID: **TBD — manual action required**
 
 ## Competition development summary
 
-OpenCanvas AI progressed from a persistent spatial canvas to document intelligence and then to durable provenance and a canonical knowledge foundation:
+SolarPlexus Mobius progressed from a persistent spatial canvas to document intelligence and then to durable provenance and a canonical knowledge foundation:
 
 | Milestone                          | Delivered capability                                                                                                                                                                                                      | Evidence                                                                                     |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |

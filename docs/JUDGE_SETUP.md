@@ -1,6 +1,6 @@
 # Judge setup
 
-OpenCanvas AI can run without an account and without paid API credentials. The deterministic demo path is recommended because it is isolated from normal application data and does not make OpenAI calls.
+SolarPlexus Mobius can run without an account and without paid API credentials. The deterministic demo path is recommended because it is isolated from normal application data and does not make OpenAI calls.
 
 ## Prerequisites
 

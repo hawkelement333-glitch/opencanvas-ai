@@ -7,8 +7,8 @@ import "@xyflow/react/dist/style.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "OpenCanvas AI",
-  description: "A spatial operating system for thinking with AI.",
+  title: "SolarPlexus Mobius",
+  description: "A visual, source-grounded workspace for auditable AI knowledge work",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
