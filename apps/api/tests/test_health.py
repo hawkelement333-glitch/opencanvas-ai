@@ -32,7 +32,7 @@ async def test_liveness_is_dependency_free(health_client: httpx.AsyncClient) -> 
         "status": "ok",
         "service": "opencanvas-api",
         "version": "0.1.0",
-        "environment": "development",
+        "environment": get_settings().environment,
         "ai_provider": None,
         "ai_configured": None,
     }
