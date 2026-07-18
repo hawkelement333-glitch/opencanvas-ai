@@ -13,7 +13,7 @@ are documented in [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md).
 
 [![Contributor Guide](https://img.shields.io/badge/Contributor_Guide-Open-BAFF5A?style=for-the-badge&logo=github)](CONTRIBUTING.md)
 
-![OpenCanvas AI deterministic evidence canvas](docs/assets/opencanvas-evidence-canvas.jpg)
+![OpenCanvas AI deterministic evidence canvas](docs/assets/opencanvas-slack-showcase.png)
 
 Submission evidence: [validated citation passage](docs/assets/opencanvas-citation-passage.jpg) ·
 [persisted Trace record](docs/assets/opencanvas-trace-record.jpg)
