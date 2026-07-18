@@ -24,8 +24,8 @@ override to `8.5.14`; the moderate production audit reports no known vulnerabili
 
 The owner approved public source access, proprietary All Rights Reserved evaluation terms, and the
 **Work and Productivity** category. No tag, GitHub release, hosted deployment, or Devpost submission
-has been created. The public YouTube video, final screenshots, primary-build `/feedback` Session ID,
-and Devpost form remain manual.
+has been created. The public YouTube video, primary-build `/feedback` Session ID, and Devpost form
+remain manual; the checked-in screenshots use only synthetic demo data.
 
 ## 2. Files created
 
@@ -112,10 +112,10 @@ installation and the moderate production audit both pass; the lockfile was not h
 
 ## 5. Secret scan status
 
-The final canonical hygiene scan passed across 159 source files after all code and configuration
-changes. No real secret was found and no rotation requirement was identified. Git history still
-cannot be scanned because the repository has no commit or `HEAD`; owner review remains required
-before the first commit.
+The final canonical hygiene scan passed across 163 source files after all code and configuration
+changes. No real secret was found and no rotation requirement was identified. The commit-eligible
+tree and reachable `main` history were reviewed after replacing the initial personal-email commit;
+the published branch uses the account's GitHub noreply identity.
 
 ## 6. Dependency-license findings
 
@@ -201,9 +201,10 @@ on this host, so the two real PostgreSQL-stack Playwright cases remain intention
 
 ## 18. Competition compliance status
 
-Status: **READY WITH MANUAL ACTIONS** after the corrected GitHub Actions run is green. The public
-repository contains judge setup, demo, Trace, security, architecture, Build Week, release, and
-limitation documentation plus deterministic sample data. Official rules were rechecked against
+Status: **READY WITH MANUAL ACTIONS**. PostgreSQL-backed canonical validation passed in
+[GitHub Actions run 29624339220](https://github.com/hawkelement333-glitch/opencanvas-ai/actions/runs/29624339220).
+The public repository contains judge setup, demo, Trace, security, architecture, Build Week,
+release, and limitation documentation plus deterministic sample data. Official rules were rechecked against
 [OpenAI Build Week](https://openai.com/build-week/), the
 [Devpost FAQ](https://openai.devpost.com/details/faqs), and the
 [official rules](https://openai.devpost.com/rules). **Work and Productivity** is the selected track.
@@ -260,9 +261,9 @@ git branch --show-current
 ```
 
 The expected values are `https://github.com/hawkelement333-glitch/opencanvas-ai.git` and `main`.
-After the push, require green GitHub Actions, confirm public/incognito access, enable private
-vulnerability reporting, and verify the repository description/topics. Tag and GitHub release
-creation remain separate optional actions.
+The push and green GitHub Actions run are complete. Confirm public/incognito access, enable private
+vulnerability reporting, and verify the repository description/topics before handoff. Tag and
+GitHub release creation remain separate optional actions.
 
 ## 23. Rollback instructions
 

@@ -8,18 +8,18 @@ State: source committed and published on `main`; not tagged, released, submitted
 - [ ] Owner has reviewed every working-tree change.
 - [x] `git status --short` contains only intended source, docs, configuration, and fixtures.
 - [x] No `.env`, database, upload, log, report, coverage, cache, credential, or private session export is included.
-- [ ] `git diff --check` passes after the initial commit exists or files are staged for review.
+- [x] `git diff --check` passes after the initial commit exists or files are staged for review.
 - [x] No generated/vendored files are accidentally added beyond the lockfile and intentional fixtures.
 
 ## Security and legal
 
 - [x] Final secret scan passes against the entire working tree.
 - [x] No real credential was discovered; no rotation is required.
-- [ ] Dependency license inventory and notices are reviewed.
+- [x] Dependency license inventory and notices are reviewed.
 - [x] Proprietary All Rights Reserved evaluation terms are selected and consistent across README/legal files.
 - [ ] Copyright owner and year are confirmed.
-- [x] Demo fixtures contain only owned/synthetic/non-sensitive material; screenshots remain pending.
-- [ ] `SECURITY.md` contains an approved private reporting route.
+- [x] Demo fixtures and checked-in screenshots contain only owned/synthetic/non-sensitive material.
+- [x] `SECURITY.md` contains the approved GitHub private-vulnerability-reporting route.
 
 ## Reproducibility
 
@@ -35,13 +35,13 @@ State: source committed and published on `main`; not tagged, released, submitted
 
 ## Quality gates
 
-Current handoff status: all required local automated gates passed on the previous candidate,
-including source-only clean-clone reproduction and deterministic demo checks. The corrected
-submission candidate must repeat those gates and obtain a green GitHub Actions run.
+Current handoff status: all required local automated gates, source-only clean-clone reproduction,
+deterministic demo checks, and the PostgreSQL-backed GitHub Actions run passed on the submission
+candidate.
 
 - [x] `corepack pnpm validate` passes on the exact release candidate.
 - [x] Formatting, linting, strict type checks, unit tests, integration tests, security tests, browser tests, build, migrations, demo checks, smoke tests, and hygiene are represented in that command.
-- [ ] GitHub Actions runs the same canonical command and is green.
+- [x] GitHub Actions runs the same canonical command and is green ([run 29624339220](https://github.com/hawkelement333-glitch/opencanvas-ai/actions/runs/29624339220)).
 - [x] No quality gate suppresses errors or converts failures to success.
 - [x] Actual final results and skips are recorded; no historical result is misrepresented as current.
 
@@ -55,7 +55,7 @@ submission candidate must repeat those gates and obtain a green GitHub Actions r
 - [ ] `/feedback` session ID is added.
 - [x] Public repository URL/access and **Work and Productivity** category are approved.
 - [ ] Build Week checklist has no unexplained MISSING or BLOCKED item.
-- [ ] Release notes and metadata are reviewed.
+- [x] Release notes and metadata are reviewed.
 
 ## Publication guard
 

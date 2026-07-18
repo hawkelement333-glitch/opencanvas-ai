@@ -89,10 +89,11 @@ git commit -m "Harden public Build Week submission"
 git push --force-with-lease origin main  # one-time rewrite removes the private snapshot's personal email
 ```
 
-After the push, require a green GitHub Actions run, verify public/incognito repository access,
-enable private vulnerability reporting, upload and verify the public YouTube video, add the
-primary-build `/feedback` Session ID, and submit through <https://openai.devpost.com/> before the
-deadline. Handshake AI Showcase is a separate optional portfolio action.
+The one-time privacy rewrite and green GitHub Actions validation are complete. Before submission,
+verify public/incognito repository access, enable private vulnerability reporting, upload and
+verify the public YouTube video, add the primary-build `/feedback` Session ID, and submit through
+<https://openai.devpost.com/> before the deadline. Handshake AI Showcase is a separate optional
+portfolio action.
 
 ## Rollback outline
 

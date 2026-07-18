@@ -28,7 +28,7 @@ Status vocabulary is intentionally strict: **PASS**, **PARTIAL**, **MISSING**, *
 | Secret/security audit                           | PASS                   | Security tests, production dependency audit, final source scan, and repository-hygiene validation passed; human pre-publication review remains required. |
 | Third-party license audit                       | PASS                   | Audited direct/transitive inventory and redistribution caveats are recorded in `THIRD_PARTY_NOTICES.md`; no exhaustive legal certainty is claimed.       |
 | Clean-clone reproduction                        | PASS                   | The exact source-only candidate completed frozen Node install, fresh Python install, canonical validation, and temporary cleanup.                        |
-| GitHub Actions                                  | BLOCKED                | The initial workflow was rejected before jobs started; the corrected workflow must be pushed and complete successfully.                                  |
+| GitHub Actions                                  | PASS                   | Canonical validation passed on `main`: [run 29624339220](https://github.com/hawkelement333-glitch/opencanvas-ai/actions/runs/29624339220).               |
 | Public source approval                          | PASS                   | The owner explicitly approved a public proprietary repository; tag, GitHub release, deployment, and Devpost submission remain separate actions.          |
 | Devpost form completion                         | MANUAL ACTION REQUIRED | Enter final category, description, URLs, session ID, and required disclosures.                                                                           |
 
