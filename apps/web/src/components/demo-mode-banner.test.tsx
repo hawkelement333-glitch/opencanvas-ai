@@ -5,6 +5,10 @@ import { DemoModeBanner } from "./open-canvas-app";
 
 describe("Build Week demo mode banner", () => {
   it("labels replay data and exposes Trace and evidence classifications", () => {
+    const apiBaseUrl = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1").replace(
+      /\/$/,
+      "",
+    );
     render(
       <DemoModeBanner
         runtime={{
@@ -25,7 +29,7 @@ describe("Build Week demo mode banner", () => {
     expect(screen.getByText("Unsupported")).toBeInTheDocument();
     expect(screen.getByTestId("inspect-demo-trace")).toHaveAttribute(
       "href",
-      "http://localhost:8000/api/v1/traces/d3000000-0000-4000-8000-000000000002",
+      `${apiBaseUrl}/traces/d3000000-0000-4000-8000-000000000002`,
     );
   });
 
