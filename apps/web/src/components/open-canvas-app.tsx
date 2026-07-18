@@ -127,10 +127,19 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
   );
 }
 
-export function DemoModeBanner({ runtime }: { runtime: RuntimeMode }) {
+export function DemoModeBanner({
+  runtime,
+  placement = "overlay",
+}: {
+  runtime: RuntimeMode;
+  placement?: "overlay" | "sidebar";
+}) {
   if (runtime.mode !== "deterministic_replay" || !runtime.demoTraceId) return null;
   return (
-    <aside className="demo-mode-banner" aria-label="Build Week deterministic demo mode">
+    <aside
+      className={`demo-mode-banner demo-mode-banner--${placement}`}
+      aria-label="Build Week deterministic demo mode"
+    >
       <div>
         <strong>DEMO · deterministic replay</strong>
         <span>No account, production data, credentials, or external AI calls</span>
@@ -158,6 +167,7 @@ interface SidebarProps {
   activeCanvasId: string | null;
   collapsed: boolean;
   creating: boolean;
+  runtime: RuntimeMode | null;
   onCollapse: () => void;
   onOpen: (canvasId: string) => void;
   onCreate: (name: string) => Promise<void>;
@@ -168,6 +178,7 @@ function CanvasSidebar({
   activeCanvasId,
   collapsed,
   creating,
+  runtime,
   onCollapse,
   onOpen,
   onCreate,
@@ -264,6 +275,10 @@ function CanvasSidebar({
               </button>
             ))}
           </nav>
+
+          {runtime?.mode === "deterministic_replay" && (
+            <DemoModeBanner runtime={runtime} placement="sidebar" />
+          )}
         </>
       )}
 
@@ -337,6 +352,7 @@ export function OpenCanvasApp() {
         activeCanvasId={activeCanvasId}
         collapsed={sidebarCollapsed}
         creating={createCanvas.isPending}
+        runtime={runtimeQuery.data ?? null}
         onCollapse={() => setSidebarCollapsed((current) => !current)}
         onOpen={openCanvas}
         onCreate={async (name) => {
@@ -345,9 +361,6 @@ export function OpenCanvasApp() {
       />
 
       <section className="opencanvas-main" aria-label="Canvas workspace">
-        {runtimeQuery.data?.mode === "deterministic_replay" && (
-          <DemoModeBanner runtime={runtimeQuery.data} />
-        )}
         {canvasesQuery.isPending ? (
           <LoadingState label="Opening OpenCanvas…" />
         ) : canvasesQuery.isError ? (

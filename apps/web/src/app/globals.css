@@ -278,11 +278,6 @@ textarea:focus-visible {
 }
 
 .demo-mode-banner {
-  position: absolute;
-  z-index: 40;
-  top: 74px;
-  left: 18px;
-  width: min(520px, calc(100% - 380px));
   display: flex;
   align-items: center;
   gap: 14px;
@@ -293,6 +288,25 @@ textarea:focus-visible {
   background: rgba(14, 17, 17, 0.94);
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
+}
+
+.demo-mode-banner--overlay {
+  position: absolute;
+  z-index: 40;
+  top: 74px;
+  left: 18px;
+  width: min(520px, calc(100% - 380px));
+}
+
+.demo-mode-banner--sidebar {
+  width: auto;
+  margin: 14px 10px 0;
+  display: grid;
+  align-items: start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  box-shadow: none;
 }
 
 .demo-mode-banner > div {
@@ -321,6 +335,11 @@ textarea:focus-visible {
   list-style: none;
 }
 
+.demo-mode-banner--sidebar ul {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
 .demo-mode-banner li {
   padding: 3px 6px;
   border: 1px solid var(--line);
@@ -339,6 +358,11 @@ textarea:focus-visible {
   font-size: 11px;
   font-weight: 700;
   text-decoration: none;
+}
+
+.demo-mode-banner--sidebar a {
+  margin-left: 0;
+  justify-content: space-between;
 }
 
 .route-state {
