@@ -1,15 +1,17 @@
-OpenCanvas AI
+SolarPlexus Mobius
 Copyright (c) 2026 Patrick Parke. All rights reserved.
 
-OpenCanvas AI is publicly visible under the proprietary All Rights Reserved terms in `LICENSE`.
-Repository visibility does not grant the public permission to copy, modify, redistribute,
-sublicense, commercially exploit, deploy, or create derivative works from the project.
+SolarPlexus Mobius, formerly developed under the working name OpenCanvas AI, is publicly visible
+under the proprietary All Rights Reserved terms in `LICENSE`. Repository visibility does not grant
+the public permission to copy, modify, redistribute, sublicense, commercially exploit, deploy, or
+create derivative works from the project.
+
 Authorized OpenAI Build Week judges receive only the limited inspection and evaluation permission
 stated in `LICENSE` and the applicable competition rules.
 
-OpenCanvas AI depends on third-party software distributed under its own licenses.
-Those components are not covered by the project's All Rights Reserved notice. See
-THIRD_PARTY_NOTICES.md for the audited dependency inventory and redistribution notes.
+SolarPlexus Mobius depends on third-party software distributed under its own licenses. Those
+components are not covered by the project's All Rights Reserved notice. See
+`THIRD_PARTY_NOTICES.md` for the audited dependency inventory and redistribution notes.
 
-OpenAI product names and other third-party names may be trademarks of their respective
-owners. Use of an API or SDK is also subject to the applicable service terms.
+OpenAI product names and other third-party names may be trademarks of their respective owners. Use
+of an API or SDK is also subject to the applicable service terms.
