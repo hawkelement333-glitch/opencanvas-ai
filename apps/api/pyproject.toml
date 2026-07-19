@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "opencanvas-api"
 version = "0.1.0"
-description = "FastAPI application for the OpenCanvas AI spatial knowledge graph"
+description = "FastAPI application for the SolarPlexus Mobius spatial knowledge graph"
 requires-python = ">=3.12"
 dependencies = [
   "aiofiles>=24.1,<26",

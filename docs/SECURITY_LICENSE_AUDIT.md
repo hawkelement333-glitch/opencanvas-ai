@@ -2,7 +2,7 @@
 
 Audit date: July 17, 2026
 
-Scope: OpenCanvas AI working tree in `Project Mobius Cartographer`
+Scope: SolarPlexus Mobius working tree
 
 Conclusion: no high-confidence secret, incompatible direct license, or known production JavaScript
 advisory found after remediation; manual legal and Python reproducibility follow-up remains

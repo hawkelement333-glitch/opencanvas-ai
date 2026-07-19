@@ -9,13 +9,18 @@ which each earlier milestone was built. Local filesystem metadata shows project 
 July 16, 2026—for example, the initial migration was created that date—but timestamps can be copied
 or modified and are not equivalent to version-control evidence.
 
-Project owner statement: OpenCanvas AI was conceived and development began on **July 16, 2026** during OpenAI Build Week. The stronger claim that no functional version existed before the competition period should be published only after the owner confirms it and preserves supporting session/export evidence.
+Project owner statement: SolarPlexus Mobius, formerly developed under the working name OpenCanvas
+AI, was conceived and development began on **July 16, 2026** during OpenAI Build Week. The stronger
+claim that no functional version existed before the competition period should be published only
+after the owner confirms it and preserves supporting session/export evidence.
 
-Codex `/feedback` session ID: **TBD — manual action required**
+Codex `/feedback` Session ID: enter the approved primary-build Session ID directly in Devpost. The
+ID and private Codex conversation content are intentionally not published in this repository.
 
 ## Competition development summary
 
-OpenCanvas AI progressed from a persistent spatial canvas to document intelligence and then to durable provenance and a canonical knowledge foundation:
+SolarPlexus Mobius progressed from a persistent spatial canvas to document intelligence and then to
+durable provenance and a canonical knowledge foundation:
 
 | Milestone                          | Delivered capability                                                                                                                                                                                                      | Evidence                                                                                     |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
@@ -37,7 +42,8 @@ Codex was used as an engineering collaborator for:
 - diagnosing failures and iterating until validation passed;
 - security, release, documentation, and competition-readiness audits.
 
-No private Codex transcript is published. The session ID and any permissible screenshots must be added manually after owner review.
+No private Codex transcript is published. The approved Session ID is submitted through Devpost;
+public evidence links may be added only after owner review.
 
 ## Human product and architecture decisions
 
@@ -64,11 +70,18 @@ repository with relevant licensing or a private repository shared with `testing@
 
 ## GPT-5.6 and runtime AI use
 
-The application integrates the OpenAI Responses API behind a server-side provider interface. The checked-in configuration defaults to `gpt-5.6-terra`, but model selection is environment-configurable. Live mode also uses server-side OpenAI embeddings by default when a key is present. Provider request IDs, model/configuration snapshots, output, and token usage when available are persisted for AI executions.
+The application integrates the OpenAI Responses API behind a server-side provider interface. The
+checked-in configuration defaults to `gpt-5.6-terra`, but model selection is environment-configurable.
+Live mode also uses server-side OpenAI embeddings by default when a key is present. Provider request
+IDs, model/configuration snapshots, output, and token usage when available are persisted for AI
+executions.
 
-When no key is present, deterministic mock answer and embedding providers are selected. Competition replay/demo mode deliberately uses those mock providers and must not be described as live GPT-5.6 output.
+When no key is present, deterministic mock answer and embedding providers are selected. Competition
+replay/demo mode deliberately uses those mock providers and must not be described as live GPT-5.6
+output.
 
-The exact model used by any historical Codex development session is not evidenced by Git and should not be asserted beyond the available Codex session metadata.
+The exact model used by any historical Codex development session is not evidenced by Git and should
+not be asserted beyond the available Codex session metadata.
 
 ## Validation and evidence locations
 
@@ -79,18 +92,23 @@ The exact model used by any historical Codex development session is not evidence
 - Architecture decisions: `docs/ARCHITECTURE.md` and milestone architecture documents.
 - Competition status: `BUILD_WEEK_CHECKLIST.md`.
 - Release status: `RELEASE_CHECKLIST.md`.
-- Codex session record: **TBD — `/feedback` session ID and approved evidence link**.
+- Codex session record: enter the approved `/feedback` Session ID in the official Devpost form.
 
 ## Known limitations at submission preparation
 
-The application has no authentication, OCR, distributed document worker, object-storage adapter, distributed rate limiter, automatic inference/conflict classification, or complete Trace UI. See `KNOWN_LIMITATIONS.md` for the maintained register.
+The application has no authentication, OCR, distributed document worker, object-storage adapter,
+distributed rate limiter, automatic inference/conflict classification, or complete Trace UI. See
+`KNOWN_LIMITATIONS.md` for the maintained register.
 
 ## Manual evidence still required
 
-- [ ] Owner attestation for the start/no-prior-version statement.
-- [ ] Codex `/feedback` session ID.
+- [ ] Owner attestation for the stronger no-prior-functional-version statement, if that claim is used.
+- [ ] Approved Codex `/feedback` Session ID entered in Devpost.
 - [x] Approved synthetic screenshots without private content.
-- [ ] Public demo video with audio and a sub-three-minute duration.
+- [ ] Public demo video with audio and a sub-three-minute duration entered in Devpost.
 - [x] Final category, repository URL/access, and license decision.
 
-Current deadline: **July 21, 2026 at 5:00 PM PDT**. Verify the [Build Week page](https://openai.com/build-week/), [Devpost FAQ](https://openai.devpost.com/details/faqs), and [rules](https://openai.devpost.com/rules) before final submission.
+Current deadline: **July 21, 2026 at 5:00 PM PDT**. Verify the
+[Build Week page](https://openai.com/build-week/),
+[Devpost FAQ](https://openai.devpost.com/details/faqs), and
+[rules](https://openai.devpost.com/rules) before final submission.

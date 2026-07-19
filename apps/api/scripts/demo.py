@@ -172,7 +172,7 @@ def build_web_command(corepack: str) -> list[str]:
 def _start(environment: Mapping[str, str]) -> int:
     _prepare(environment)
     api, web = _spawn_services(environment)
-    print("OpenCanvas Build Week demo: http://localhost:3000")
+    print("SolarPlexus Mobius Build Week demo: http://localhost:3000")
     print("Mode: deterministic replay fixture + local mock AI; no external AI calls")
     try:
         while api.poll() is None and web.poll() is None:
@@ -199,8 +199,10 @@ def _smoke(environment: Mapping[str, str]) -> int:
         if payload.get("externalAiEnabled") is not False:
             raise RuntimeError("Demo smoke test found external AI enabled.")
         page = _wait_for_url("http://127.0.0.1:3000")
-        if "OpenCanvas" not in page:
-            raise RuntimeError("Demo web page did not contain the OpenCanvas application shell.")
+        if "SolarPlexus Mobius" not in page:
+            raise RuntimeError(
+                "Demo web page did not contain the SolarPlexus Mobius application shell."
+            )
         print("Demo startup smoke test passed: API, replay runtime, and web page are ready.")
         return 0
     finally:
@@ -260,7 +262,7 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Safe OpenCanvas Build Week demo runner")
+    parser = argparse.ArgumentParser(description="Safe SolarPlexus Mobius Build Week demo runner")
     parser.add_argument("command", choices=("start", "seed", "reset", "check", "smoke"))
     args = parser.parse_args()
     environment = build_demo_environment()

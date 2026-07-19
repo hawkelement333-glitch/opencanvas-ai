@@ -36,7 +36,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     settings = get_settings()
     application = FastAPI(
-        title="OpenCanvas AI API",
+        title="SolarPlexus Mobius API",
         version=__version__,
         docs_url="/docs" if settings.environment != "production" else None,
         redoc_url=None,

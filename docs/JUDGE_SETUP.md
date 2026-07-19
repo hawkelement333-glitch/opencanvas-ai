@@ -1,6 +1,8 @@
-# Judge setup
+# SolarPlexus Mobius judge setup
 
-OpenCanvas AI can run without an account and without paid API credentials. The deterministic demo path is recommended because it is isolated from normal application data and does not make OpenAI calls.
+SolarPlexus Mobius can run without an account and without paid API credentials. The deterministic
+demo path is recommended because it is isolated from normal application data and does not make
+OpenAI calls.
 
 ## Prerequisites
 
@@ -39,9 +41,9 @@ python -m pip install -e "apps/api[dev]"
 pnpm demo
 ```
 
-Open the URL printed by the demo command. The public repository requires no account or invitation
-to clone. Its proprietary license permits authorized competition inspection and evaluation but is
-not an open-source grant.
+Open the URL printed by the demo command. The public repository requires no account or invitation to
+clone. Its proprietary license permits authorized competition inspection and evaluation but is not
+an open-source grant.
 
 Reset the demo:
 
@@ -49,7 +51,8 @@ Reset the demo:
 pnpm demo:reset
 ```
 
-Reset removes only the project-local demo runtime. It must not target PostgreSQL, a production database, or arbitrary upload directories.
+Reset removes only the project-local demo runtime. It must not target PostgreSQL, a production
+database, or arbitrary upload directories.
 
 ## Docker path
 
@@ -70,13 +73,18 @@ Stop without deleting data:
 docker compose down
 ```
 
-`docker compose down --volumes` permanently deletes the project database and uploaded documents. It is not part of routine judge setup.
+`docker compose down --volumes` permanently deletes the project database and uploaded documents. It
+is not part of routine judge setup.
 
 ## Live OpenAI mode (optional)
 
-Set a server-only `OPENAI_API_KEY` and choose `auto` or `openai` providers in normal mode. Never prefix the key with `NEXT_PUBLIC_`. Live mode is optional for the documented product workflow; deterministic demo mode intentionally rejects the key.
+Set a server-only `OPENAI_API_KEY` and choose `auto` or `openai` providers in normal mode. Never
+prefix the key with `NEXT_PUBLIC_`. Live mode is optional for the documented product workflow;
+deterministic demo mode intentionally rejects the key.
 
-The configured Responses model defaults to `gpt-5.6-terra`, and embeddings default to `text-embedding-3-small`. Availability, access, latency, and cost depend on the judge’s OpenAI project and are not guaranteed by this repository.
+The configured Responses model defaults to `gpt-5.6-terra`, and embeddings default to
+`text-embedding-3-small`. Availability, access, latency, and cost depend on the judge's OpenAI project
+and are not guaranteed by this repository.
 
 ## Verification walkthrough
 
@@ -87,8 +95,10 @@ The configured Responses model defaults to `gpt-5.6-terra`, and embeddings defau
 5. Open its extracted text.
 6. Shift-select the document and a note.
 7. Ask a supported question and open the citation at the exact passage.
-8. Open the separately persisted insufficient-evidence replay node and confirm it is ungrounded, has no citations, and preserves excluded retrieval candidates in its execution evidence.
-9. Query a known Trace ID through `/api/v1/traces/{traceId}` or inspect the demo’s prepared provenance step.
+8. Open the separately persisted insufficient-evidence replay node and confirm it is ungrounded, has
+   no citations, and preserves excluded retrieval candidates in its execution evidence.
+9. Query a known Trace ID through `/api/v1/traces/{traceId}` or inspect the demo's prepared provenance
+   step.
 
 ## Full validation
 
@@ -99,7 +109,8 @@ pnpm exec playwright install chromium
 pnpm validate
 ```
 
-The command should fail on any failed quality gate. CI runs the same canonical command against temporary services and must not publish or deploy.
+The command should fail on any failed quality gate. CI runs the same canonical command against
+temporary services and must not publish or deploy.
 
 The standalone demo checks are:
 
@@ -108,7 +119,10 @@ pnpm demo:check
 pnpm demo:smoke
 ```
 
-`demo:check` validates persisted replay invariants, including the separate grounded and insufficient-evidence executions. `demo:smoke` verifies that the isolated demo can start. These checks still require an actual final run against the release candidate; documentation alone is not validation evidence.
+`demo:check` validates persisted replay invariants, including the separate grounded and
+insufficient-evidence executions. `demo:smoke` verifies that the isolated demo can start. These checks
+still require an actual final run against the release candidate; documentation alone is not
+validation evidence.
 
 ## Troubleshooting
 
@@ -125,7 +139,12 @@ pnpm demo:smoke
 ## Judge-facing caveats
 
 - Single-user/local deployment only; no authentication.
-- No OCR, browsing, collaboration, automatic conflict classification, or Trace explorer UI.
+- No OCR, browsing, collaboration, automatic conflict classification, or complete Trace explorer UI.
 - Demo data and mock output are synthetic and visibly labeled.
-- Repository URL, public access, proprietary license, and **Work and Productivity** category are
-  finalized. The public YouTube video and `/feedback` Session ID remain submission-owner actions.
+- The promotional thumbnail is branding artwork, not implementation evidence.
+- Product behavior should be evaluated from the running localhost build and real captures from that
+  build, not generated UI concepts.
+- The repository URL, public access, proprietary license, and **Work and Productivity** category are
+  finalized.
+- The public YouTube URL and Codex `/feedback` Session ID are entered directly in Devpost by the
+  submission owner.
