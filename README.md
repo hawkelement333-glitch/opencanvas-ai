@@ -14,6 +14,7 @@ This repository contains the OpenAI Build Week competition release candidate
 - Source repository: <https://github.com/hawkelement333-glitch/opencanvas-ai>
 - Project website: <https://solarplexus-mobius.hawkelement333.chatgpt.site> — product overview only;
   no public demo or hosted application is currently available
+- Public demo video: <https://www.youtube.com/watch?v=gd0JWNcHhAA>
 - Judge setup: [docs/JUDGE_SETUP.md](docs/JUDGE_SETUP.md)
 - Recording guide: [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
 - Build Week record: [docs/BUILD_WEEK.md](docs/BUILD_WEEK.md)
@@ -292,9 +293,13 @@ security hardening, scalability, and a hosted public release.
 
 ## Competition status
 
-The repository is public and the documented judging path is the deterministic localhost demo. Final
-external fields—including the verified public YouTube URL and approved Codex `/feedback` Session
-ID—are entered directly in Devpost.
+The repository is public, the documented judging path is the deterministic localhost demo, and the
+public submission video is <https://www.youtube.com/watch?v=gd0JWNcHhAA>. The approved Codex
+`/feedback` Session ID must still be entered directly in Devpost.
+
+Before submission, open the repository and video in an incognito browser and confirm that the video is
+public, under three minutes, audible, and accurately distinguishes deterministic mock replay from live
+GPT-5.6 integration.
 
 Submission actions are tracked in [BUILD_WEEK_CHECKLIST.md](BUILD_WEEK_CHECKLIST.md), and release
 review is tracked in [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
