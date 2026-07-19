@@ -1,8 +1,13 @@
 # Contributing
 
-Thank you for your interest in OpenCanvas AI. This repository is in a competition release-candidate state and its final license has not yet been selected. Repository visibility does not itself grant permission to copy, redistribute, or create derivative works.
+Thank you for your interest in SolarPlexus Mobius, formerly developed under the working name
+OpenCanvas AI. This repository is a proprietary competition release candidate under the limited
+evaluation terms in `LICENSE`. Public visibility does not grant permission to copy, redistribute,
+modify, or create derivative works.
 
-Before making a substantial contribution, contact the project owner and confirm that contributions are being accepted under the current repository license and contribution terms. Do not submit code you do not have the right to contribute.
+Before making a substantial contribution, contact the project owner and confirm that contributions
+are being accepted under the current repository license and contribution terms. Do not submit code
+you do not have the right to contribute.
 
 ## Development setup
 
@@ -29,7 +34,9 @@ Start `pnpm dev:api` and `pnpm dev:web` in separate terminals.
 - Keep Trace evidence distinct from application logs and transient domain events.
 - Preserve existing canvas/document behavior unless the change explicitly migrates it.
 - Prefer small, typed, tested changes over broad rewrites.
-- Do not add real secrets, private data, copyrighted fixtures without permission, or generated output represented as human-authored evidence.
+- Do not add real secrets, private data, copyrighted fixtures without permission, or generated output
+  represented as human-authored or implemented-product evidence.
+- Keep internal `opencanvas` identifiers stable unless a reviewed compatibility migration is planned.
 
 ## Before proposing a change
 
@@ -43,7 +50,8 @@ Start `pnpm dev:api` and `pnpm dev:web` in separate terminals.
    corepack pnpm validate
    ```
 
-6. Update architecture, security, environment, migration, and limitations documentation when applicable.
+6. Update architecture, security, environment, migration, and limitations documentation when
+   applicable.
 
 ## Pull requests
 
@@ -54,10 +62,11 @@ A reviewable pull request should contain:
 - security/privacy considerations;
 - migration and rollback notes when relevant;
 - exact commands and results;
-- screenshots for visible changes;
-- no unrelated formatting or generated artifacts.
+- real screenshots from the reviewed build for visible product changes;
+- no unrelated formatting or generated artifacts presented as product evidence.
 
-Do not combine schema migrations with unrelated refactors. Never rewrite shared history or force-push a branch under review without coordinating with maintainers.
+Do not combine schema migrations with unrelated refactors. Never rewrite shared history or force-push
+a branch under review without coordinating with maintainers.
 
 ## Tests
 
@@ -67,7 +76,8 @@ Do not combine schema migrations with unrelated refactors. Never rewrite shared 
 - Formatting/lint/types: Prettier, ESLint, TypeScript, Ruff, mypy
 - Database: Alembic migration validation against disposable state
 
-Real-stack Playwright coverage may require the API and migrated PostgreSQL service. Deterministic tests must not call paid/live providers.
+Real-stack Playwright coverage may require the API and migrated PostgreSQL service. Deterministic
+tests must not call paid/live providers.
 
 ## Security reports
 
