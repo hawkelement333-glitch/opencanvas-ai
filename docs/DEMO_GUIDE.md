@@ -3,6 +3,9 @@
 This guide is for a deterministic, judge-safe walkthrough. It does not require an OpenAI key and
 must be described as **mock/demo mode**, not as a live GPT response.
 
+Public YouTube submission video:
+<https://www.youtube.com/watch?v=gd0JWNcHhAA>
+
 ## Start and reset
 
 From a clean checkout, install dependencies as described in `JUDGE_SETUP.md`, activate the Python
@@ -127,9 +130,14 @@ Invoke-RestMethod "http://localhost:8000/api/v1/trace-events?workspaceId=<WORKSP
 
 Never paste credentials, internal storage paths, or private prompts into the recording.
 
-## Recording checklist
+## Final-video review checklist
 
-- [ ] Public YouTube video is under three minutes.
+Review <https://www.youtube.com/watch?v=gd0JWNcHhAA> against every item below before final Devpost
+submission:
+
+- [ ] Video opens successfully in an incognito browser and is public, not unlisted or private if the
+      rules require public visibility.
+- [ ] Runtime is under three minutes.
 - [ ] Audio explains both Codex and GPT-5.6/runtime model use.
 - [ ] Deterministic demo mode is named on screen or in narration.
 - [ ] One supported answer and exact source passage are visible.
@@ -138,7 +146,8 @@ Never paste credentials, internal storage paths, or private prompts into the rec
 - [ ] Implemented features are shown with real product footage, not generated UI mockups.
 - [ ] Promotional artwork is clearly separated from product evidence.
 - [ ] No secret, private URL, user data, terminal history, or notification is visible.
-- [ ] The final public video URL is entered in Devpost.
+- [x] Public YouTube URL has been recorded in the repository documentation.
+- [ ] The same URL has been entered and saved in Devpost.
 
 Before recording, run `pnpm demo:check` to validate the persisted grounded and
 insufficient-evidence replay invariants, then run `pnpm demo:smoke` to verify startup. Both passed in
@@ -150,6 +159,6 @@ the July 17 submission-candidate validation and must be repeated immediately bef
 - Primary product screenshot: `docs/assets/opencanvas-evidence-canvas.jpg`
 - Citation screenshot: `docs/assets/opencanvas-citation-passage.jpg`
 - Trace screenshot: `docs/assets/opencanvas-trace-record.jpg`
-- Public video URL: enter the verified YouTube URL directly in Devpost after upload.
+- Public YouTube video: <https://www.youtube.com/watch?v=gd0JWNcHhAA>
 - Codex `/feedback` Session ID: enter the approved primary-build Session ID directly in Devpost; do
   not publish private Codex conversation content in this repository.
