@@ -4,15 +4,16 @@ Current source repository: <https://github.com/hawkelement333-glitch/opencanvas-
 public visibility under the proprietary All Rights Reserved evaluation terms in `LICENSE`.
 
 The official judging path is the documented deterministic localhost demonstration. A hosted
-application is not currently available. External submission values—especially the public YouTube URL
-and Codex `/feedback` Session ID—must be entered directly in Devpost after they are verified.
+application is not currently available. The public YouTube submission video is:
+<https://www.youtube.com/watch?v=gd0JWNcHhAA>. The Codex `/feedback` Session ID must still be entered
+directly in Devpost after it is verified.
 
 ## Release
 
 - Proposed tag: `v0.3.0-buildweek-demo`
 - Proposed release title: `SolarPlexus Mobius — Build Week Demo`
 - Release notes: `docs/RELEASE_NOTES_v0.3.0-buildweek-demo.md`
-- Pre-release: recommended **yes** until the final video and Devpost submission are verified
+- Pre-release: recommended **yes** until the final Devpost submission is verified
 - Package manifests remain at `0.1.0`; the proposed tag names the competition milestone and does not
   silently change package publication versions.
 
@@ -21,7 +22,8 @@ and Codex `/feedback` Session ID—must be entered directly in Devpost after the
 - Name: `opencanvas-ai`
 - URL: <https://github.com/hawkelement333-glitch/opencanvas-ai>
 - Recommended description: `SolarPlexus Mobius — a visual, source-grounded workspace for auditable AI knowledge work.`
-- Recommended homepage URL: use the final public YouTube or Devpost project URL after submission
+- Recommended homepage URL: <https://www.youtube.com/watch?v=gd0JWNcHhAA> until the final Devpost
+  project URL is available
 - Visibility: **public**
 - License posture: **proprietary / All Rights Reserved; limited competition evaluation**
 - Topics:
@@ -49,18 +51,19 @@ The repository, package, module, database, environment-variable, and storage ide
 - Built with: `Codex`, `GPT-5.6`, `OpenAI Responses API`, `OpenAI Embeddings`, `Next.js`,
   `React Flow`, `FastAPI`, `PostgreSQL`, `pgvector`
 - Repository URL: <https://github.com/hawkelement333-glitch/opencanvas-ai>
+- Public YouTube video: <https://www.youtube.com/watch?v=gd0JWNcHhAA>
 - Testing path: follow `docs/JUDGE_SETUP.md`; no account or paid API credential is required
 
 ## Handshake AI Showcase copy
 
 - Project title: `SolarPlexus Mobius`
-- Project link: use the final public YouTube or Devpost project URL; the GitHub URL is an acceptable
-  code link but is less effective as an employer-facing demo
+- Project link: <https://www.youtube.com/watch?v=gd0JWNcHhAA> until the final Devpost project URL is
+  available
 - Description: `SolarPlexus Mobius helps knowledge workers reason across notes and documents without losing the boundary between evidence and generated analysis. Users arrange context on an infinite canvas, retrieve only from selected sources, open validated page- or section-level citations, and inspect durable execution provenance. I built the full-stack product with Codex and integrated GPT-5.6 through the server-side OpenAI Responses API, with deterministic judge-safe demo providers and a production-shaped PostgreSQL/pgvector architecture.`
 
 ## Submission assets and owner-supplied fields
 
-- Public YouTube video URL: enter the verified URL directly in Devpost after upload
+- Public YouTube video: <https://www.youtube.com/watch?v=gd0JWNcHhAA>
 - Devpost thumbnail: `docs/assets/solarplexus-mobius-thumbnail.png`
 - Primary product screenshot: `docs/assets/opencanvas-evidence-canvas.jpg`
 - Citation screenshot: `docs/assets/opencanvas-citation-passage.jpg`
@@ -98,11 +101,12 @@ corepack pnpm demo:smoke
 git diff --check
 ```
 
-The one-time privacy rewrite and prior green GitHub Actions validation are complete. Before
-submission, rerun the final technical sequence against the exact candidate, verify public/incognito
-repository access, upload and verify the public YouTube video, enter the primary-build `/feedback`
-Session ID, and submit through <https://openai.devpost.com/> before the deadline. Handshake AI
-Showcase is a separate optional portfolio action.
+The one-time privacy rewrite and green GitHub Actions validation are complete. Before submission,
+rerun the final technical sequence against the exact candidate; open the repository and
+<https://www.youtube.com/watch?v=gd0JWNcHhAA> in an incognito browser; verify that the video is public,
+under three minutes, audible, and accurate; enter the primary-build `/feedback` Session ID; and submit
+through <https://openai.devpost.com/> before the deadline. Handshake AI Showcase is a separate
+optional portfolio action.
 
 ## Rollback outline
 
