@@ -1,0 +1,49 @@
+name: Export Devpost gallery assets
+
+on:
+  push:
+    branches:
+      - agent/devpost-gallery-export
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Package gallery assets
+        shell: bash
+        run: |
+          mkdir -p devpost-gallery-export
+          cp -R docs/assets/. devpost-gallery-export/
+          cat > devpost-gallery-export/CAPTIONS.txt <<'EOF'
+          01 Promotional hero
+          SolarPlexus Mobius — a visual, source-grounded workspace for auditable AI knowledge work.
+
+          02 Main evidence workspace
+          SolarPlexus Mobius evidence workspace with selected sources, connected notes, and a grounded response.
+
+          03 Source document preview
+          A selected source document with reviewable extracted text and preserved source-location metadata.
+
+          04 Exact citation navigation
+          A server-validated citation opens the exact supporting passage rather than only naming the source document.
+
+          05 Insufficient-evidence response
+          When selected sources do not support the question, SolarPlexus Mobius returns insufficient evidence without fabricated citations.
+
+          06 Trace or execution evidence
+          Persisted execution evidence records selected context, retrieved chunks, rankings, inclusion decisions, citations, status, and timestamps.
+          EOF
+
+      - name: Upload gallery package
+        uses: actions/upload-artifact@v4
+        with:
+          name: solarplexus-mobius-devpost-gallery-source
+          path: devpost-gallery-export
+          if-no-files-found: error
+          retention-days: 1
