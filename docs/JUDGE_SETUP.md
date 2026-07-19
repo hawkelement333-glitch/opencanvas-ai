@@ -129,10 +129,10 @@ validation evidence.
 | Symptom                                     | Check                                                                                                        |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `python` resolves to the Windows Store shim | Activate `.venv` and confirm `python --version`.                                                             |
-| Port 3000, 8000, or 5432 is occupied        | Stop the conflicting local process or adjust an explicitly documented local configuration.                  |
+| Port 3000, 8000, or 5432 is occupied        | Stop the conflicting local process or adjust an explicitly documented local configuration.                   |
 | API readiness fails                         | Check the database URL, migration container/log, and pgvector service health.                                |
 | Document remains failed                     | Open its error, confirm file format/size, then retry; OCR is unavailable.                                    |
-| AI shows `Mock AI`                          | Expected when no OpenAI key is configured.                                                                  |
+| AI shows `Mock AI`                          | Expected when no OpenAI key is configured.                                                                   |
 | No grounded citation                        | The selected sources did not produce a qualifying passage or the provider result failed citation validation. |
 | Demo isolation error                        | Remove live credentials and use only the exact demo command; do not override its paths.                      |
 
