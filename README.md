@@ -217,6 +217,19 @@ Trace from ordinary logs, and strict isolation of demo data from live credential
 The approved Codex `/feedback` Session ID is entered directly in Devpost. Private Codex conversation
 content is not published in this repository.
 
+## How GPT-5.6 was used
+
+The project owner used GPT-5.6 through ChatGPT during product development to:
+
+- refine the product scope, evidence semantics, and judge-facing explanations
+- review architecture, provenance, retrieval, and user-experience decisions
+- identify edge cases, risks, and release-readiness concerns
+- turn implementation results into clear documentation and demo narration
+
+This development use is separate from the recorded competition runtime. The deterministic demo uses
+mock answer and embedding providers so judges can reproduce the same workflow without API credentials
+or paid usage. The optional live provider remains separate and defaults to `gpt-5.6-terra` when enabled.
+
 ## Validation
 
 Install the dependency sets, install Playwright Chromium when needed, and run the canonical release
