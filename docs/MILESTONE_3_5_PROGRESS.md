@@ -5,9 +5,10 @@ Last updated: 2026-07-21 (America/Chicago)
 ## Protected repository state
 
 - Branch: `milestone-3.5-productization`
-- Latest local checkpoint: `16acba7` (`Establish Milestone 3.5 productization foundation`)
-- Latest remote checkpoint: `b45b776`; the recovery push is awaiting explicit destination-trust
-  confirmation after the execution guard disclosed the external-transfer risk.
+- Recovered foundation checkpoint: `16acba7` (`Establish Milestone 3.5 productization foundation`)
+- Verified recovery-ledger checkpoint: `f379b12` (`Record recovery push blocker`)
+- Remote `origin/milestone-3.5-productization` was verified at `f379b12` after a normal,
+  non-force push and contains both recovery commits.
 - Protected tag: `competition-demo-v1`
 - The protected tag was verified before implementation and has not been moved, recreated,
   force-updated, or otherwise modified.
@@ -132,10 +133,9 @@ Recovered implementation checks run on 2026-07-21:
 - No known recovery-foundation test failure remains. The full milestone validation gate has not
   yet been run.
 - The recovered foundation is committed locally as `16acba7`.
-- Two attempts to push only `milestone-3.5-productization` to the configured existing origin
-  `https://github.com/hawkelement333-glitch/opencanvas-ai.git` were blocked by the execution
-  guard because repository-code transfer requires fresh user confirmation that this destination
-  is trusted. No alternate transfer was attempted.
+- After the user explicitly confirmed the configured origin was trusted, recovery commits
+  `16acba7` and `f379b12` were pushed only to `origin/milestone-3.5-productization` and verified
+  on the remote. No force push, merge, default-branch push, tag change, or pull request occurred.
 - Original-context and current-context rerun endpoints still need implementation. The persistence
   columns exist, but immutable snapshot identifiers and rerun behavior are unfinished.
 - Dedicated authentication/session-expiration, two-user/multi-workspace isolation, file access,
@@ -150,11 +150,8 @@ Recovered implementation checks run on 2026-07-21:
 
 ## Exact next implementation step
 
-1. Obtain fresh user confirmation that the configured origin
-   `https://github.com/hawkelement333-glitch/opencanvas-ai.git` is trusted for this repository
-   code transfer.
-2. Push the local recovery commits only to `milestone-3.5-productization`, verify the remote
-   branch resolves to the local checkpoint, and record the pushed commit.
-3. Only after that recovery push succeeds, implement immutable original-context/current-context
-   reruns as the next checkpoint, including
+1. Implement immutable original-context/current-context reruns as the next checkpoint, including
    preserved node/document/chunk IDs and source versions plus focused tests.
+2. Run the focused rerun, Trace, authorization, lint, and type-check gates.
+3. Review, commit, push only to `milestone-3.5-productization`, and update this ledger with the
+   completed rerun phase and next unfinished action.
