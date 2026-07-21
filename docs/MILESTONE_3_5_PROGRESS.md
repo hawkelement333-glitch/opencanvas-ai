@@ -41,6 +41,11 @@ Last updated: 2026-07-21 (America/Chicago)
   workspace selection/creation, staging indicator, queued/retry/permanent-failure document UX,
   and credentialed CSRF-aware browser requests.
 - Removed invented document progress percentages; the UI now reports measurable stages only.
+- Added linked original-context and current-context rerun endpoints. Original-context reruns use
+  immutable note/chunk snapshots and exact document versions; current-context reruns resolve the
+  current selected nodes and current document version.
+- Added immutable node, document, chunk, and chunk-index snapshot identifiers in migration
+  `20260721_0006`, plus parent execution and parent Trace linkage for comparison.
 
 ## Files currently modified or added
 
@@ -128,6 +133,18 @@ Recovered implementation checks run on 2026-07-21:
 - Secret/artifact scan: only the documented development-only secret and explicit test
   placeholders were found; no live credentials or generated artifacts were found.
 
+Rerun checkpoint checks run on 2026-07-21:
+
+- Focused original/current note, document-version, Trace-lineage, authorization, and migration
+  tests: passed (`9` tests).
+- Full API suite: passed (`109` tests).
+- Strict API type check: passed (`45` source files).
+- Changed-file Ruff lint/format and whitespace checks: passed.
+- Web unit/component suite: passed (`24` tests across `7` files).
+- Web type check and lint: passed.
+- Migration validation: passed upgrade `20260721_0006` → downgrade `20260718_0005` →
+  re-upgrade `20260721_0006`.
+
 ## Known failures and incomplete scope
 
 - No known recovery-foundation test failure remains. The full milestone validation gate has not
@@ -136,8 +153,6 @@ Recovered implementation checks run on 2026-07-21:
 - After the user explicitly confirmed the configured origin was trusted, recovery commits
   `16acba7` and `f379b12` were pushed only to `origin/milestone-3.5-productization` and verified
   on the remote. No force push, merge, default-branch push, tag change, or pull request occurred.
-- Original-context and current-context rerun endpoints still need implementation. The persistence
-  columns exist, but immutable snapshot identifiers and rerun behavior are unfinished.
 - Dedicated authentication/session-expiration, two-user/multi-workspace isolation, file access,
   job retry/exhaustion, quota, and account-lifecycle tests still need to be added.
 - `.env.example`, deployment/container configuration, backup/restore/rollback runbooks, staging
@@ -150,8 +165,9 @@ Recovered implementation checks run on 2026-07-21:
 
 ## Exact next implementation step
 
-1. Implement immutable original-context/current-context reruns as the next checkpoint, including
-   preserved node/document/chunk IDs and source versions plus focused tests.
-2. Run the focused rerun, Trace, authorization, lint, and type-check gates.
+1. Add dedicated authentication, session expiration/rotation, two-user multi-workspace
+   isolation, manipulated identifier, and private-file authorization tests; fix any enforcement
+   gaps they expose.
+2. Run the focused security, full API, lint, type-check, and migration gates.
 3. Review, commit, push only to `milestone-3.5-productization`, and update this ledger with the
-   completed rerun phase and next unfinished action.
+   completed security/isolation phase and next unfinished action.

@@ -273,6 +273,15 @@ export const canvasApi = {
     );
   },
 
+  rerunAI(canvasId: string, requestId: string, context: "original" | "current") {
+    return request(
+      `/canvases/${encodeURIComponent(canvasId)}/ai/${encodeURIComponent(requestId)}/rerun-${context}`,
+      aiResultSchema,
+      { method: "POST" },
+      LONG_OPERATION_TIMEOUT_MS,
+    );
+  },
+
   uploadDocument(canvasId: string, file: File, position: { x: number; y: number }) {
     const form = new FormData();
     form.set("file", file, file.name);

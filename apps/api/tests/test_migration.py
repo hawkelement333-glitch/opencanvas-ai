@@ -123,7 +123,7 @@ def test_migration_uses_configured_database_url(
 
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("20260718_0005",)
+    assert revision == ("20260721_0006",)
 
 
 def test_phase_two_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) -> None:
@@ -155,7 +155,7 @@ def test_phase_two_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) ->
     command.upgrade(config, "head")
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("20260718_0005",)
+    assert revision == ("20260721_0006",)
 
 
 def test_trace_foundation_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) -> None:
@@ -180,7 +180,7 @@ def test_trace_foundation_migration_downgrades_and_reupgrades_sqlite(tmp_path: P
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
         indexes = {row[1] for row in connection.execute("PRAGMA index_list(trace_events)")}
-    assert revision == ("20260718_0005",)
+    assert revision == ("20260721_0006",)
     assert {
         "ix_trace_events_trace_time",
         "ix_trace_events_workspace_time",
@@ -221,7 +221,7 @@ def test_canonical_migration_backfills_canvases_and_reverses_sqlite(tmp_path: Pa
             "SELECT id, legacy_canvas_id FROM workspaces WHERE id = ?",
             (removed_canvas_id,),
         ).fetchone()
-    assert revision == ("20260718_0005",)
+    assert revision == ("20260721_0006",)
     assert workspaces == [
         (removed_canvas_id, "Removed canvas", 1, "active", "{}", removed_canvas_id),
         (retained_canvas_id, "Retained canvas", 1, "active", "{}", retained_canvas_id),
@@ -257,5 +257,5 @@ def test_canonical_migration_backfills_canvases_and_reverses_sqlite(tmp_path: Pa
         workspaces = connection.execute(
             "SELECT id, legacy_canvas_id, lifecycle_state FROM workspaces"
         ).fetchall()
-    assert revision == ("20260718_0005",)
+    assert revision == ("20260721_0006",)
     assert workspaces == [(retained_canvas_id, retained_canvas_id, "active")]

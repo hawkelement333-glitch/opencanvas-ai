@@ -4,7 +4,7 @@ import json
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, NoReturn, cast
+from typing import Annotated, Literal, NoReturn, cast
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import delete, func, select, update
@@ -74,7 +74,7 @@ from opencanvas_api.services.authorization import (
     require_owned_canvas,
     require_owned_workspace,
 )
-from opencanvas_api.services.context import build_context
+from opencanvas_api.services.context import ContextBundle, build_context
 from opencanvas_api.services.documents import (
     DocumentServiceError,
     RetrievedChunk,
@@ -627,6 +627,143 @@ async def ask_ai(
     provider: ProviderDep,
     settings: SettingsDep,
 ) -> AIQueryOut:
+    return await _execute_ai(
+        canvas_id=canvas_id,
+        payload=payload,
+        principal=principal,
+        session=session,
+        provider=provider,
+        settings=settings,
+    )
+
+
+@router.post(
+    "/{canvas_id}/ai/{request_id}/rerun-original",
+    response_model=AIQueryOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(enforce_ai_rate_limit)],
+)
+async def rerun_ai_with_original_context(
+    canvas_id: uuid.UUID,
+    request_id: uuid.UUID,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+    provider: ProviderDep,
+    settings: SettingsDep,
+) -> AIQueryOut:
+    parent = await _require_rerunnable_request(session, principal, canvas_id, request_id)
+    node_snapshots = list(
+        (
+            await session.scalars(
+                select(AIExecutionNode)
+                .where(AIExecutionNode.request_id == parent.id)
+                .order_by(AIExecutionNode.selected_order)
+            )
+        ).all()
+    )
+    chunk_snapshots = list(
+        (
+            await session.scalars(
+                select(AIExecutionChunk)
+                .where(AIExecutionChunk.request_id == parent.id)
+                .order_by(AIExecutionChunk.rank)
+            )
+        ).all()
+    )
+    if not node_snapshots or any(row.node_id_snapshot is None for row in node_snapshots):
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "original_context_unavailable",
+            "This execution predates immutable node snapshots and cannot be rerun exactly.",
+        )
+    if any(
+        row.chunk_id_snapshot is None or row.document_id_snapshot is None for row in chunk_snapshots
+    ):
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "original_context_unavailable",
+            "This execution predates immutable source snapshots and cannot be rerun exactly.",
+        )
+    return await _execute_ai(
+        canvas_id=canvas_id,
+        payload=AIQuery(
+            instruction=parent.instruction,
+            selected_node_ids=[cast(uuid.UUID, row.node_id_snapshot) for row in node_snapshots],
+        ),
+        principal=principal,
+        session=session,
+        provider=provider,
+        settings=settings,
+        parent_request=parent,
+        rerun_type="original_context",
+        original_nodes=node_snapshots,
+        original_chunks=chunk_snapshots,
+    )
+
+
+@router.post(
+    "/{canvas_id}/ai/{request_id}/rerun-current",
+    response_model=AIQueryOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(enforce_ai_rate_limit)],
+)
+async def rerun_ai_with_current_context(
+    canvas_id: uuid.UUID,
+    request_id: uuid.UUID,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+    provider: ProviderDep,
+    settings: SettingsDep,
+) -> AIQueryOut:
+    parent = await _require_rerunnable_request(session, principal, canvas_id, request_id)
+    return await _execute_ai(
+        canvas_id=canvas_id,
+        payload=AIQuery(
+            instruction=parent.instruction,
+            selected_node_ids=[uuid.UUID(node_id) for node_id in parent.selected_node_ids],
+        ),
+        principal=principal,
+        session=session,
+        provider=provider,
+        settings=settings,
+        parent_request=parent,
+        rerun_type="current_context",
+    )
+
+
+async def _require_rerunnable_request(
+    session: AsyncSession,
+    principal: Principal,
+    canvas_id: uuid.UUID,
+    request_id: uuid.UUID,
+) -> AIRequest:
+    await _require_canvas(session, canvas_id, principal)
+    request = await session.scalar(
+        select(AIRequest).where(
+            AIRequest.id == request_id,
+            AIRequest.canvas_id == canvas_id,
+            AIRequest.user_id == principal.user_id,
+            AIRequest.status == "completed",
+        )
+    )
+    if request is None:
+        raise ApiError(status.HTTP_404_NOT_FOUND, "execution_not_found", "Execution not found.")
+    return request
+
+
+async def _execute_ai(
+    *,
+    canvas_id: uuid.UUID,
+    payload: AIQuery,
+    principal: Principal,
+    session: AsyncSession,
+    provider: AIProvider,
+    settings: Settings,
+    parent_request: AIRequest | None = None,
+    rerun_type: Literal["original_context", "current_context"] | None = None,
+    original_nodes: list[AIExecutionNode] | None = None,
+    original_chunks: list[AIExecutionChunk] | None = None,
+) -> AIQueryOut:
     canvas = await _require_canvas(session, canvas_id, principal)
     month_start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     monthly_tokens = await session.scalar(
@@ -720,6 +857,26 @@ async def ask_ai(
         note_ids,
         character_limit=settings.ai_context_character_limit,
     )
+    if rerun_type == "original_context":
+        assert original_nodes is not None
+        note_snapshots = [
+            {
+                "nodeId": str(row.node_id_snapshot),
+                "title": row.title_snapshot,
+                "text": row.content_snapshot,
+            }
+            for row in original_nodes
+            if row.node_type != "document"
+        ]
+        rendered_parts = [
+            f"Node {index}\nTitle: {item['title']}\nContent:\n{item['text']}"
+            for index, item in enumerate(note_snapshots, start=1)
+        ]
+        context = ContextBundle(
+            node_ids=[uuid.UUID(item["nodeId"]) for item in note_snapshots],
+            snapshot=note_snapshots,
+            rendered="\n\n".join(rendered_parts)[: settings.ai_context_character_limit],
+        )
     grounded_request = bool(document_ids)
     embedding_provider = build_embedding_provider(settings)
     top_k = settings.document_retrieval_top_k
@@ -746,6 +903,7 @@ async def ask_ai(
     execution_started = datetime.now(UTC)
     execution_started_monotonic = time.perf_counter()
     trace_id = uuid.uuid4()
+    parent_trace_id = parent_request.trace_id if parent_request is not None else None
     request_record = AIRequest(
         trace_id=trace_id,
         user_id=principal.user_id,
@@ -763,7 +921,9 @@ async def ask_ai(
         provider_configuration_version=getattr(
             provider, "configuration_version", "unspecified-provider-contract-v1"
         ),
-        execution_mode="current_context",
+        execution_mode=rerun_type or "current_context",
+        parent_request_id=parent_request.id if parent_request is not None else None,
+        rerun_type=rerun_type,
         started_at=execution_started,
     )
     session.add(request_record)
@@ -772,6 +932,7 @@ async def ask_ai(
     await trace_service.start_trace(
         StartTraceInput(
             trace_id=trace_id,
+            parent_trace_id=parent_trace_id,
             event_type="ai.execution",
             actor_id=str(principal.user_id),
             actor_type="user",
@@ -794,15 +955,23 @@ async def ask_ai(
                 ),
                 "promptVersion": request_record.prompt_version,
                 "executionMode": request_record.execution_mode,
+                "parentRequestId": str(parent_request.id) if parent_request is not None else None,
+                "rerunType": rerun_type,
             },
         )
     )
     execution_nodes: list[AIExecutionNode] = []
+    original_node_by_id = {
+        row.node_id_snapshot: row for row in (original_nodes or []) if row.node_id_snapshot
+    }
     for selected_order, node in enumerate(ordered):
         reference = reference_by_node.get(node.id)
         document = document_by_id.get(reference.document_id) if reference is not None else None
-        content_snapshot = node.text
-        if document is not None:
+        original_node = original_node_by_id.get(node.id)
+        content_snapshot = (
+            original_node.content_snapshot if original_node is not None else node.text
+        )
+        if document is not None and original_node is None:
             content_snapshot = json.dumps(
                 {
                     "documentId": str(document.id),
@@ -822,12 +991,22 @@ async def ask_ai(
             AIExecutionNode(
                 request_id=request_record.id,
                 node_id=node.id,
+                node_id_snapshot=node.id,
                 selected_order=selected_order,
-                node_type=node.type,
-                node_revision=node.revision,
-                title_snapshot=node.title,
+                node_type=original_node.node_type if original_node is not None else node.type,
+                node_revision=(
+                    original_node.node_revision if original_node is not None else node.revision
+                ),
+                title_snapshot=(
+                    original_node.title_snapshot if original_node is not None else node.title
+                ),
                 content_snapshot=content_snapshot,
                 document_id=document.id if document is not None else None,
+                document_id_snapshot=(
+                    original_node.document_id_snapshot
+                    if original_node is not None
+                    else (document.id if document is not None else None)
+                ),
             )
         )
     session.add_all(execution_nodes)
@@ -836,53 +1015,80 @@ async def ask_ai(
 
     candidates: list[RetrievedChunk] = []
     if grounded_request:
-        try:
-            candidates = await search_documents(
-                session,
-                document_ids=document_ids,
-                query=payload.instruction,
-                provider=embedding_provider,
-                top_k=top_k,
-                threshold=threshold,
-            )
-        except DocumentServiceError as exc:
-            completed_at = datetime.now(UTC)
-            latency_ms = int((time.perf_counter() - execution_started_monotonic) * 1_000)
-            await session.execute(
-                update(AIRequest)
-                .where(AIRequest.id == request_record.id)
-                .values(
-                    status="failed",
-                    error=exc.safe_message,
-                    safe_error_category=exc.code,
-                    completed_at=completed_at,
-                    latency_ms=latency_ms,
-                    updated_at=func.now(),
+        if rerun_type == "original_context":
+            assert original_chunks is not None
+            candidates = [
+                RetrievedChunk(
+                    chunk_id=cast(uuid.UUID, row.chunk_id_snapshot),
+                    document_id=cast(uuid.UUID, row.document_id_snapshot),
+                    document_name=row.document_name_snapshot,
+                    file_type=document_by_id[cast(uuid.UUID, row.document_id_snapshot)].file_type,
+                    content=row.content_snapshot,
+                    page_number=row.page_number_snapshot,
+                    heading=row.heading_snapshot,
+                    chunk_index=row.chunk_index_snapshot,
+                    char_start=row.char_start_snapshot,
+                    char_end=row.char_end_snapshot,
+                    score=row.score,
+                    rank=row.rank,
+                    included_in_context=row.included_in_context,
+                    exclusion_reason=row.exclusion_reason,
+                    document_version=row.document_version_snapshot,
                 )
-            )
-            await trace_service.fail_trace(
-                FailTraceInput(
-                    trace_id=trace_id,
-                    event_type="ai.execution",
-                    actor_id=str(principal.user_id),
-                    actor_type="user",
-                    user_id=principal.user_id,
-                    workspace_id=canvas.workspace_id,
-                    object_id=request_record.id,
-                    object_type="ai_execution",
-                    operation="retrieve_context",
-                    metadata={"latencyMs": latency_ms},
-                    error=TraceErrorInfo(code=exc.code, message=exc.safe_message),
+                for row in original_chunks
+            ]
+        else:
+            try:
+                candidates = await search_documents(
+                    session,
+                    document_ids=document_ids,
+                    query=payload.instruction,
+                    provider=embedding_provider,
+                    top_k=top_k,
+                    threshold=threshold,
                 )
-            )
-            await session.commit()
-            raise ApiError(exc.status_code, exc.code, exc.safe_message) from exc
+            except DocumentServiceError as exc:
+                completed_at = datetime.now(UTC)
+                latency_ms = int((time.perf_counter() - execution_started_monotonic) * 1_000)
+                await session.execute(
+                    update(AIRequest)
+                    .where(AIRequest.id == request_record.id)
+                    .values(
+                        status="failed",
+                        error=exc.safe_message,
+                        safe_error_category=exc.code,
+                        completed_at=completed_at,
+                        latency_ms=latency_ms,
+                        updated_at=func.now(),
+                    )
+                )
+                await trace_service.fail_trace(
+                    FailTraceInput(
+                        trace_id=trace_id,
+                        parent_trace_id=parent_trace_id,
+                        event_type="ai.execution",
+                        actor_id=str(principal.user_id),
+                        actor_type="user",
+                        user_id=principal.user_id,
+                        workspace_id=canvas.workspace_id,
+                        object_id=request_record.id,
+                        object_type="ai_execution",
+                        operation="retrieve_context",
+                        metadata={"latencyMs": latency_ms},
+                        error=TraceErrorInfo(code=exc.code, message=exc.safe_message),
+                    )
+                )
+                await session.commit()
+                raise ApiError(exc.status_code, exc.code, exc.safe_message) from exc
         session.add_all(
             AIExecutionChunk(
                 request_id=request_record.id,
-                chunk_id=candidate.chunk_id,
+                chunk_id=(candidate.chunk_id if rerun_type != "original_context" else None),
+                chunk_id_snapshot=candidate.chunk_id,
                 document_id=candidate.document_id,
+                document_id_snapshot=candidate.document_id,
                 document_version_snapshot=candidate.document_version,
+                chunk_index_snapshot=candidate.chunk_index,
                 rank=candidate.rank,
                 score=candidate.score,
                 included_in_context=candidate.included_in_context,
@@ -1001,6 +1207,7 @@ async def ask_ai(
         await trace_service.fail_trace(
             FailTraceInput(
                 trace_id=trace_id,
+                parent_trace_id=parent_trace_id,
                 event_type="ai.execution",
                 actor_id=str(principal.user_id),
                 actor_type="user",
@@ -1067,7 +1274,7 @@ async def ask_ai(
     await session.flush()
 
     source_by_id = {source.source_id: source for source in grounded_sources}
-    session.add_all(
+    execution_citation_records = [
         AIExecutionCitation(
             request_id=request_record.id,
             ai_response_id_snapshot=response_record.id,
@@ -1085,7 +1292,8 @@ async def ask_ai(
             char_end_snapshot=source_by_id[result_citation.source_id].char_end,
         )
         for ordinal, result_citation in enumerate(result_citations, start=1)
-    )
+    ]
+    session.add_all(execution_citation_records)
     claims_by_source: dict[str, list[str]] = {}
     citation_order: list[str] = []
     for result_citation in result_citations:
@@ -1094,21 +1302,22 @@ async def ask_ai(
             citation_order.append(result_citation.source_id)
         claims_by_source[result_citation.source_id].append(result_citation.claim)
     citation_records: list[Citation] = []
-    for ordinal, source_id in enumerate(citation_order, start=1):
-        source = source_by_id[source_id]
-        citation = Citation(
-            ai_response_id=response_record.id,
-            document_id=source.document_id,
-            document_version=source.document_version,
-            chunk_id=source.chunk_id,
-            identifier=source.source_id,
-            claim="\n".join(dict.fromkeys(claims_by_source[source_id]))[:4_000],
-            quote=source.text[:1_200],
-            ordinal=ordinal,
-        )
-        session.add(citation)
-        citation_records.append(citation)
-    response_record.grounded = bool(citation_records) and not insufficient_evidence
+    if rerun_type != "original_context":
+        for ordinal, source_id in enumerate(citation_order, start=1):
+            source = source_by_id[source_id]
+            citation = Citation(
+                ai_response_id=response_record.id,
+                document_id=source.document_id,
+                document_version=source.document_version,
+                chunk_id=source.chunk_id,
+                identifier=source.source_id,
+                claim="\n".join(dict.fromkeys(claims_by_source[source_id]))[:4_000],
+                quote=source.text[:1_200],
+                ordinal=ordinal,
+            )
+            session.add(citation)
+            citation_records.append(citation)
+    response_record.grounded = bool(result_citations) and not insufficient_evidence
 
     document_node_by_document: dict[uuid.UUID, uuid.UUID] = {}
     for node_id in document_node_ids:
@@ -1235,6 +1444,7 @@ async def ask_ai(
     await trace_service.complete_trace(
         CompleteTraceInput(
             trace_id=trace_id,
+            parent_trace_id=parent_trace_id,
             event_type="ai.execution",
             actor_id=str(principal.user_id),
             actor_type="user",
@@ -1248,6 +1458,8 @@ async def ask_ai(
                 "responseId": str(response_record.id),
                 "responseNodeId": str(response_node.id),
                 "executionMode": request_record.execution_mode,
+                "parentRequestId": (str(parent_request.id) if parent_request is not None else None),
+                "rerunType": rerun_type,
                 "retrievedChunks": [
                     {
                         "sourceId": candidate.source_id,
@@ -1299,6 +1511,7 @@ async def ask_ai(
         await TraceService(session).fail_trace(
             FailTraceInput(
                 trace_id=trace_id,
+                parent_trace_id=parent_trace_id,
                 event_type="ai.execution",
                 actor_id=str(principal.user_id),
                 actor_type="user",
@@ -1322,28 +1535,50 @@ async def ask_ai(
         ) from exc
     await session.refresh(response_node)
     await session.refresh(response_record)
-    for citation in citation_records:
-        await session.refresh(citation)
+    for live_citation in citation_records:
+        await session.refresh(live_citation)
+    for execution_citation in execution_citation_records:
+        await session.refresh(execution_citation)
     for edge in edges:
         await session.refresh(edge)
-    citation_outputs = [
-        CitationOut(
-            id=citation.id,
-            source_id=citation.identifier,
-            document_id=citation.document_id,
-            document_title=document_by_id[citation.document_id].file_name,
-            chunk_id=citation.chunk_id,
-            page_number=source_by_id[citation.identifier].page_number,
-            heading=source_by_id[citation.identifier].heading,
-            chunk_index=source_by_id[citation.identifier].chunk_index,
-            start_offset=source_by_id[citation.identifier].char_start,
-            end_offset=source_by_id[citation.identifier].char_end,
-            excerpt=citation.quote,
-            claim=citation.claim,
-            ordinal=citation.ordinal,
-        )
-        for citation in citation_records
-    ]
+    if rerun_type == "original_context":
+        citation_outputs = [
+            CitationOut(
+                id=execution_citation.id,
+                source_id=execution_citation.source_id_snapshot,
+                document_id=execution_citation.document_id_snapshot,
+                document_title=execution_citation.document_name_snapshot,
+                chunk_id=execution_citation.chunk_id_snapshot,
+                page_number=execution_citation.page_number_snapshot,
+                heading=execution_citation.heading_snapshot,
+                chunk_index=source_by_id[execution_citation.source_id_snapshot].chunk_index,
+                start_offset=execution_citation.char_start_snapshot,
+                end_offset=execution_citation.char_end_snapshot,
+                excerpt=execution_citation.excerpt_snapshot,
+                claim=execution_citation.claim_snapshot,
+                ordinal=execution_citation.ordinal,
+            )
+            for execution_citation in execution_citation_records
+        ]
+    else:
+        citation_outputs = [
+            CitationOut(
+                id=live_citation.id,
+                source_id=live_citation.identifier,
+                document_id=live_citation.document_id,
+                document_title=document_by_id[live_citation.document_id].file_name,
+                chunk_id=live_citation.chunk_id,
+                page_number=source_by_id[live_citation.identifier].page_number,
+                heading=source_by_id[live_citation.identifier].heading,
+                chunk_index=source_by_id[live_citation.identifier].chunk_index,
+                start_offset=source_by_id[live_citation.identifier].char_start,
+                end_offset=source_by_id[live_citation.identifier].char_end,
+                excerpt=live_citation.quote,
+                claim=live_citation.claim,
+                ordinal=live_citation.ordinal,
+            )
+            for live_citation in citation_records
+        ]
     return AIQueryOut(
         request_id=request_record.id,
         response_id=response_record.id,
@@ -1354,4 +1589,9 @@ async def ask_ai(
         grounded=response_record.grounded,
         insufficient_evidence=response_record.insufficient_evidence,
         citations=citation_outputs,
+        parent_request_id=request_record.parent_request_id,
+        rerun_type=cast(
+            Literal["original_context", "current_context"] | None,
+            request_record.rerun_type,
+        ),
     )

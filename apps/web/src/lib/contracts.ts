@@ -186,6 +186,8 @@ export const aiResultSchema = z.object({
   grounded: z.boolean().default(false),
   insufficientEvidence: z.boolean().default(false),
   citations: z.array(citationSchema).max(100).default([]),
+  parentRequestId: z.string().uuid().nullable().default(null),
+  rerunType: z.enum(["original_context", "current_context"]).nullable().default(null),
 });
 
 export const documentUploadResultSchema = z.object({

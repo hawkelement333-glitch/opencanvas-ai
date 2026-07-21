@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from sqlalchemy import func, select
 
 from opencanvas_api.api.dependencies import get_ai_provider
-from opencanvas_api.db.models import AIRequest, AIResponse, CanvasNode, Edge
+from opencanvas_api.db.models import AIExecutionNode, AIRequest, AIResponse, CanvasNode, Edge
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.ai import AIProviderError
 from opencanvas_api.services.context import ContextBundle
@@ -139,3 +139,91 @@ async def test_openai_failure_persists_failed_request_without_partial_graph(
     assert response_count == 0
     assert node_count == 1
     assert edge_count == 0
+
+
+async def test_original_and_current_context_reruns_are_linked_and_distinct(
+    client: httpx.AsyncClient,
+    database: Database,
+    api_prefix: str,
+) -> None:
+    canvas = await _create_canvas(client, api_prefix, "Rerun comparison")
+    node = await _create_node(
+        client,
+        api_prefix,
+        canvas["id"],
+        title="Decision",
+        text="The original launch window is October.",
+    )
+    initial = await client.post(
+        f"{api_prefix}/canvases/{canvas['id']}/ai",
+        json={
+            "instruction": "Restate the selected launch window.",
+            "selectedNodeIds": [node["id"]],
+        },
+    )
+    assert initial.status_code == 201, initial.text
+    original_request_id = initial.json()["requestId"]
+
+    edited = await client.patch(
+        f"{api_prefix}/canvases/{canvas['id']}/nodes/{node['id']}",
+        json={
+            "revision": node["revision"],
+            "text": "The current launch window is December.",
+        },
+    )
+    assert edited.status_code == 200, edited.text
+
+    original_rerun = await client.post(
+        f"{api_prefix}/canvases/{canvas['id']}/ai/{original_request_id}/rerun-original"
+    )
+    current_rerun = await client.post(
+        f"{api_prefix}/canvases/{canvas['id']}/ai/{original_request_id}/rerun-current"
+    )
+    assert original_rerun.status_code == 201, original_rerun.text
+    assert current_rerun.status_code == 201, current_rerun.text
+    original_result = original_rerun.json()
+    current_result = current_rerun.json()
+    assert "original launch window is October" in original_result["node"]["text"]
+    assert "current launch window is December" not in original_result["node"]["text"]
+    assert "current launch window is December" in current_result["node"]["text"]
+    assert original_result["parentRequestId"] == original_request_id
+    assert original_result["rerunType"] == "original_context"
+    assert current_result["parentRequestId"] == original_request_id
+    assert current_result["rerunType"] == "current_context"
+    original_trace = await client.get(f"{api_prefix}/traces/{original_result['traceId']}")
+    assert original_trace.status_code == 200
+    assert {event["parentTraceId"] for event in original_trace.json()} == {
+        initial.json()["traceId"]
+    }
+    assert original_trace.json()[0]["metadata"]["rerunType"] == "original_context"
+
+    other_canvas = await _create_canvas(client, api_prefix, "Unrelated canvas")
+    denied = await client.post(
+        f"{api_prefix}/canvases/{other_canvas['id']}/ai/{original_request_id}/rerun-original"
+    )
+    assert denied.status_code == 404
+    assert denied.json()["code"] == "execution_not_found"
+
+    async with database.sessions() as session:
+        original_request = await session.get(AIRequest, uuid.UUID(original_result["requestId"]))
+        current_request = await session.get(AIRequest, uuid.UUID(current_result["requestId"]))
+        original_snapshot = await session.scalar(
+            select(AIExecutionNode).where(
+                AIExecutionNode.request_id == uuid.UUID(original_result["requestId"])
+            )
+        )
+        current_snapshot = await session.scalar(
+            select(AIExecutionNode).where(
+                AIExecutionNode.request_id == uuid.UUID(current_result["requestId"])
+            )
+        )
+    assert original_request is not None
+    assert original_request.parent_request_id == uuid.UUID(original_request_id)
+    assert original_request.execution_mode == "original_context"
+    assert current_request is not None
+    assert current_request.parent_request_id == uuid.UUID(original_request_id)
+    assert current_request.execution_mode == "current_context"
+    assert original_snapshot is not None
+    assert original_snapshot.content_snapshot == "The original launch window is October."
+    assert current_snapshot is not None
+    assert current_snapshot.content_snapshot == "The current launch window is December."

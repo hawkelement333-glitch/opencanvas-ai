@@ -451,6 +451,140 @@ class RepeatedCitationProvider:
         )
 
 
+class SnapshotCaptureProvider:
+    name = "mock"
+    model = "snapshot-capture-v1"
+    mock = True
+    configuration_version = "snapshot-capture-v1"
+
+    def __init__(self) -> None:
+        self.calls: list[list[GroundedSource]] = []
+
+    async def generate(self, instruction: str, context: ContextBundle) -> NoReturn:
+        raise AssertionError("The note-only path should not be used.")
+
+    async def generate_grounded(
+        self,
+        instruction: str,
+        notes_context: ContextBundle,
+        sources: list[GroundedSource],
+    ) -> GroundedAIResult:
+        del instruction, notes_context
+        self.calls.append(sources)
+        source = sources[0]
+        return GroundedAIResult(
+            text=f"Snapshot evidence: {source.text}",
+            insufficient_evidence=False,
+            citations=[GroundedCitation(source_id=source.source_id, claim=source.text)],
+            general_analysis=None,
+            provider_response_id=f"snapshot-{len(self.calls)}",
+        )
+
+
+async def test_reruns_preserve_original_document_version_and_resolve_current_version(
+    client: httpx.AsyncClient,
+    app: FastAPI,
+    api_prefix: str,
+    database: Database,
+) -> None:
+    provider = SnapshotCaptureProvider()
+    app.dependency_overrides[get_ai_provider] = lambda: provider
+    canvas = await _create_canvas(client, api_prefix, "Versioned reruns")
+    uploaded = await _upload(
+        client,
+        api_prefix,
+        canvas["id"],
+        filename="versioned.md",
+        content=b"# Launch code\n\nThe immutable launch code is ALPHA-101.",
+        media_type="text/markdown",
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    upload = uploaded.json()
+    initial = await client.post(
+        f"{api_prefix}/canvases/{canvas['id']}/ai",
+        json={
+            "instruction": "What is the immutable launch code?",
+            "selectedNodeIds": [upload["node"]["id"]],
+        },
+    )
+    assert initial.status_code == 201, initial.text
+    initial_result = initial.json()
+    assert provider.calls[0][0].document_version == 1
+    assert "ALPHA-101" in provider.calls[0][0].text
+
+    replaced = await client.post(
+        f"{api_prefix}/documents/{upload['document']['id']}/replace",
+        files={
+            "file": (
+                "versioned.md",
+                b"# Launch code\n\nThe current launch code is BETA-202.",
+                "text/markdown",
+            )
+        },
+    )
+    assert replaced.status_code == 200, replaced.text
+    ready = await client.get(f"{api_prefix}/documents/{upload['document']['id']}")
+    assert ready.status_code == 200
+    assert ready.json()["status"] == "ready"
+
+    original_rerun = await client.post(
+        f"{api_prefix}/canvases/{canvas['id']}/ai/{initial_result['requestId']}/rerun-original"
+    )
+    current_rerun = await client.post(
+        f"{api_prefix}/canvases/{canvas['id']}/ai/{initial_result['requestId']}/rerun-current"
+    )
+    assert original_rerun.status_code == 201, original_rerun.text
+    assert current_rerun.status_code == 201, current_rerun.text
+    assert provider.calls[1][0].document_version == 1
+    assert "ALPHA-101" in provider.calls[1][0].text
+    assert "BETA-202" not in provider.calls[1][0].text
+    assert provider.calls[2][0].document_version == 2
+    assert "BETA-202" in provider.calls[2][0].text
+    assert (
+        original_rerun.json()["citations"][0]["chunkId"]
+        == initial_result["citations"][0]["chunkId"]
+    )
+    assert original_rerun.json()["citations"][0]["documentId"] == upload["document"]["id"]
+
+    async with database.sessions() as session:
+        initial_chunks = list(
+            (
+                await session.scalars(
+                    select(AIExecutionChunk)
+                    .where(AIExecutionChunk.request_id == uuid.UUID(initial_result["requestId"]))
+                    .order_by(AIExecutionChunk.rank)
+                )
+            ).all()
+        )
+        original_chunks = list(
+            (
+                await session.scalars(
+                    select(AIExecutionChunk)
+                    .where(
+                        AIExecutionChunk.request_id == uuid.UUID(original_rerun.json()["requestId"])
+                    )
+                    .order_by(AIExecutionChunk.rank)
+                )
+            ).all()
+        )
+        current_chunks = list(
+            (
+                await session.scalars(
+                    select(AIExecutionChunk)
+                    .where(
+                        AIExecutionChunk.request_id == uuid.UUID(current_rerun.json()["requestId"])
+                    )
+                    .order_by(AIExecutionChunk.rank)
+                )
+            ).all()
+        )
+    assert [row.chunk_id_snapshot for row in original_chunks] == [
+        row.chunk_id_snapshot for row in initial_chunks
+    ]
+    assert {row.document_version_snapshot for row in original_chunks} == {1}
+    assert {row.document_version_snapshot for row in current_chunks} == {2}
+
+
 @pytest.mark.security
 async def test_invalid_model_citation_is_rejected_without_partial_response(
     client: httpx.AsyncClient,

@@ -270,6 +270,8 @@ class AIQueryOut(ApiModel):
     grounded: bool = False
     insufficient_evidence: bool = False
     citations: list[CitationOut] = Field(default_factory=list)
+    parent_request_id: uuid.UUID | None = None
+    rerun_type: Literal["original_context", "current_context"] | None = None
 
 
 class UploadDocumentOut(ApiModel):

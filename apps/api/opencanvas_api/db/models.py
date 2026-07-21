@@ -560,6 +560,7 @@ class AIExecutionNode(TimestampMixin, Base):
     node_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("nodes.id", ondelete="SET NULL"), index=True
     )
+    node_id_snapshot: Mapped[uuid.UUID | None] = mapped_column(index=True)
     selected_order: Mapped[int] = mapped_column(Integer, nullable=False)
     node_type: Mapped[str] = mapped_column(String(24), nullable=False)
     node_revision: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -568,6 +569,7 @@ class AIExecutionNode(TimestampMixin, Base):
     document_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("documents.id", ondelete="SET NULL"), index=True
     )
+    document_id_snapshot: Mapped[uuid.UUID | None] = mapped_column(index=True)
 
 
 class AIExecutionChunk(TimestampMixin, Base):
@@ -587,6 +589,10 @@ class AIExecutionChunk(TimestampMixin, Base):
             "char_end_snapshot > char_start_snapshot",
             name="ck_ai_execution_chunks_char_range",
         ),
+        CheckConstraint(
+            "chunk_index_snapshot >= 0",
+            name="ck_ai_execution_chunks_index_nonnegative",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -596,10 +602,13 @@ class AIExecutionChunk(TimestampMixin, Base):
     chunk_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("document_chunks.id", ondelete="SET NULL"), index=True
     )
+    chunk_id_snapshot: Mapped[uuid.UUID | None] = mapped_column(index=True)
     document_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("documents.id", ondelete="SET NULL"), index=True
     )
+    document_id_snapshot: Mapped[uuid.UUID | None] = mapped_column(index=True)
     document_version_snapshot: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    chunk_index_snapshot: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
     score: Mapped[float] = mapped_column(Float, nullable=False)
     included_in_context: Mapped[bool] = mapped_column(Boolean, nullable=False)
