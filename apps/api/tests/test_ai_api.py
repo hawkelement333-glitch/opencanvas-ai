@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 import uuid
+from typing import cast
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from sqlalchemy import func, select
 
 from opencanvas_api.api.dependencies import get_ai_provider
-from opencanvas_api.db.models import AIExecutionNode, AIRequest, AIResponse, CanvasNode, Edge
+from opencanvas_api.core.config import Settings, get_settings
+from opencanvas_api.db.models import (
+    SYSTEM_USER_ID,
+    AIExecutionNode,
+    AIRequest,
+    AIResponse,
+    CanvasNode,
+    Edge,
+    UsageRecord,
+)
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.ai import AIProviderError
 from opencanvas_api.services.context import ContextBundle
@@ -227,3 +238,44 @@ async def test_original_and_current_context_reruns_are_linked_and_distinct(
     assert original_snapshot.content_snapshot == "The original launch window is October."
     assert current_snapshot is not None
     assert current_snapshot.content_snapshot == "The current launch window is December."
+
+
+@pytest.mark.security
+async def test_workspace_monthly_token_budget_fails_before_provider_execution(
+    client: httpx.AsyncClient,
+    app: FastAPI,
+    database: Database,
+    api_prefix: str,
+) -> None:
+    current = cast(Settings, app.dependency_overrides[get_settings]())
+    app.dependency_overrides[get_settings] = lambda: current.model_copy(
+        update={"monthly_token_budget_per_workspace": 1_000}
+    )
+    canvas = await _create_canvas(client, api_prefix, "Budgeted workspace")
+    node = await _create_node(
+        client,
+        api_prefix,
+        canvas["id"],
+        title="Budget context",
+        text="No provider call should be made.",
+    )
+    async with database.sessions() as session:
+        session.add(
+            UsageRecord(
+                user_id=SYSTEM_USER_ID,
+                workspace_id=uuid.UUID(canvas["workspaceId"]),
+                operation="ai_execution",
+                input_tokens=700,
+                output_tokens=300,
+            )
+        )
+        await session.commit()
+    blocked = await client.post(
+        f"{api_prefix}/canvases/{canvas['id']}/ai",
+        json={"instruction": "Answer", "selectedNodeIds": [node["id"]]},
+    )
+    assert blocked.status_code == 429
+    assert blocked.json()["code"] == "workspace_token_budget_exhausted"
+    async with database.sessions() as session:
+        requests = list((await session.scalars(select(AIRequest))).all())
+    assert requests == []

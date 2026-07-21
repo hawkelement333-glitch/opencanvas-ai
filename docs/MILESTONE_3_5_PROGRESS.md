@@ -50,6 +50,9 @@ Last updated: 2026-07-21 (America/Chicago)
   multiple workspaces, covering CSRF, expiration, password reset, session revocation, generic
   credential failures, account settings/export/deletion, private files, Trace/rerun ownership,
   manipulated identifiers, and per-IP authentication rate limiting.
+- Added durable-job reliability coverage for idempotent enqueue, workspace concurrency,
+  exponential backoff, retry exhaustion, permanent failure, delayed deleted-document
+  cancellation, worker heartbeat freshness, and workspace monthly token budgets.
 
 ## Files currently modified or added
 
@@ -156,6 +159,13 @@ Authentication and isolation checkpoint checks run on 2026-07-21:
 - Full API suite: passed (`112` tests).
 - Strict API type check and focused Ruff lint/format check: passed.
 
+Job reliability and quota checkpoint checks run on 2026-07-21:
+
+- Focused job reliability and workspace token-budget tests: passed (`4` tests).
+- Complete security-marked API gate: passed (`25` tests).
+- Full API suite: passed (`116` tests).
+- Strict API type check and focused Ruff lint/format check: passed.
+
 ## Known failures and incomplete scope
 
 - No known recovery-foundation test failure remains. The full milestone validation gate has not
@@ -164,8 +174,6 @@ Authentication and isolation checkpoint checks run on 2026-07-21:
 - After the user explicitly confirmed the configured origin was trusted, recovery commits
   `16acba7` and `f379b12` were pushed only to `origin/milestone-3.5-productization` and verified
   on the remote. No force push, merge, default-branch push, tag change, or pull request occurred.
-- Dedicated job retry/exhaustion, delayed-job deletion, quota, and worker-health tests still need
-  to be added.
 - `.env.example`, deployment/container configuration, backup/restore/rollback runbooks, staging
   instructions, production instructions, and the final architecture/security documentation are
   unfinished.
@@ -176,8 +184,10 @@ Authentication and isolation checkpoint checks run on 2026-07-21:
 
 ## Exact next implementation step
 
-1. Add dedicated durable-job idempotency, retry/backoff/exhaustion, delayed-job deletion,
-   workspace concurrency, quota, and worker-health tests; fix any gaps they expose.
-2. Run the focused processing/security, full API, lint, type-check, and migration gates.
+1. Add `.env.example`, portable web/worker container and local production-shaped orchestration,
+   health checks, migration/startup commands, and backup/restore/rollback plus staging/production
+   runbooks without selecting a mandatory hosting vendor.
+2. Validate container configuration where local tooling permits, then run documentation/hygiene,
+   full API, web lint/type/build, and migration gates.
 3. Review, commit, push only to `milestone-3.5-productization`, and update this ledger with the
    completed security/isolation phase and next unfinished action.
