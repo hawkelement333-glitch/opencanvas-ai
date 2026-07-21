@@ -57,8 +57,8 @@ export function workspaceRole(workspace: Pick<Workspace, "name">): UniverseRole 
 export function canvasRole(canvas: Pick<Canvas, "name">): UniverseRole {
   return {
     level: "solar_system",
-    label: "Solar System · Project Cluster",
-    plainLabel: `Solar System · Project Cluster · ${canvas.name}`,
+    label: "Solar System",
+    plainLabel: `Solar System · ${canvas.name}`,
     description: "A focused project cluster built from real canvas objects and relationships.",
   };
 }
@@ -101,22 +101,31 @@ export function citationRole(citation: Pick<Citation, "ordinal" | "documentTitle
 
 export const edgeKindDetails: Record<
   CanvasEdgeKind,
-  { label: string; plainLabel: string; description: string; className: string }
+  {
+    label: string;
+    legendLabel: string;
+    plainLabel: string;
+    description: string;
+    className: string;
+  }
 > = {
   default: {
     label: "Pathway · Relationship",
+    legendLabel: "Relationship",
     plainLabel: "Pathway · User-created relationship",
     description: "A user-created relationship between two canvas objects.",
     className: "canvas-edge--relationship",
   },
   generated_from: {
     label: "Pathway · Context inclusion",
+    legendLabel: "Selected context",
     plainLabel: "Pathway · Generated from selected context",
     description: "A response was generated from this selected context item.",
     className: "canvas-edge--context",
   },
   cites: {
     label: "Pathway · Citation",
+    legendLabel: "Citation",
     plainLabel: "Pathway · Citation to exact source passage",
     description: "A validated citation links an answer to the exact source passage.",
     className: "canvas-edge--citation",

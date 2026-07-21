@@ -1373,7 +1373,7 @@ function CanvasWorkspace({ snapshot, workspace, onReload }: CanvasWorkspaceProps
             deleteKeyCode={null}
             panOnDrag={[1, 2]}
             fitView={snapshot.nodes.length > 0}
-            fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
+            fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
             aria-label="SolarPlexus Mobius spatial editor"
             colorMode="dark"
           >
@@ -1398,8 +1398,13 @@ function CanvasWorkspace({ snapshot, workspace, onReload }: CanvasWorkspaceProps
         <aside className="pathway-legend" aria-label="Pathway legend">
           <strong>Pathways</strong>
           {Object.entries(edgeKindDetails).map(([kind, details]) => (
-            <span key={kind} className={`pathway-legend__item ${details.className}`}>
-              {details.label}
+            <span
+              key={kind}
+              className={`pathway-legend__item ${details.className}`}
+              aria-label={details.plainLabel}
+              title={details.description}
+            >
+              {details.legendLabel}
             </span>
           ))}
         </aside>

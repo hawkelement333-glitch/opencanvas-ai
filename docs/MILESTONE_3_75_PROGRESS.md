@@ -8,8 +8,8 @@ Last updated: 2026-07-21 (America/Chicago)
 - Starting Milestone 3.5 remote commit: `3b576cae81d5622ca930eb2538e6527d861c759a`
 - Protected `competition-demo-v1` tag object: `acbde89b6e2cc3e41c372887794726d393836716`
 - Protected `competition-demo-v1` commit: `b45b7763b65861f9dfb3be7edf9b5eb271950917`
-- Current local HEAD: `522f4bd` (`Establish the living-universe design system`)
-- Current remote branch HEAD: not yet created for `origin/milestone-3.75-visual-redesign`
+- Current local HEAD: `cc1bc41` (`Record Milestone 3.75 push blocker`)
+- Current remote branch HEAD: `cc1bc41da2963e0705c410b77f3e33389dc63c7f` on `origin/milestone-3.75-visual-redesign`
 - Branch created from `origin/milestone-3.5-productization`.
 - Push target: `origin/milestone-3.75-visual-redesign` only.
 
@@ -37,34 +37,48 @@ Last updated: 2026-07-21 (America/Chicago)
 - Phase 2 semantic universe model: complete for the first checkpoint. Added a typed frontend mapping layer for universe, galaxy/workspace, solar-system/canvas, node roles, citation fragments, pathway types, processing labels, and resource summaries.
 - Initial design-system foundation: complete for the first checkpoint. Added restrained cosmic tokens, black-hole compact mark treatment, data-backed resource strip, pathway legend, semantic node labels, context-zone copy, and source/citation role labels.
 - Future-agent architecture documentation: complete for the first checkpoint. Documentation only; no active agent behavior added.
+- First live visual audit: complete. Deterministic demo mode reported `appMode=demo`, `mode=deterministic_replay`, and `externalAiEnabled=false`; the seeded canvas and source viewer were inspected in the browser.
+- Canvas legibility polish: complete for this checkpoint. Shortened solar-system navigation labels, compacted pathway legend text while preserving full accessible names, increased useful fit-to-view scale, and reduced minimap obstruction.
 
 ## Current phase
 
-- First checkpoint validation and commit.
+- Validate and commit the first live-audit polish checkpoint.
 
 ## Files changed in current checkpoint
 
-- `apps/web/src/lib/universe.ts`
-- `apps/web/src/lib/universe.test.ts`
-- `apps/web/src/lib/flow.ts`
-- `apps/web/src/components/canvas/canvas-node.tsx`
-- `apps/web/src/components/canvas/document-node.tsx`
-- `apps/web/src/components/assistant-panel.tsx`
-- `apps/web/src/components/open-canvas-app.tsx`
 - `apps/web/src/app/globals.css`
+- `apps/web/src/components/open-canvas-app.tsx`
+- `apps/web/src/lib/universe.test.ts`
+- `apps/web/src/lib/universe.ts`
 - `docs/MILESTONE_3_75_PROGRESS.md`
 - `docs/VISUAL_SYSTEM.md`
-- `docs/AGENT_UNIVERSE_ARCHITECTURE.md`
 
 ## Commits created
 
 - `522f4bd` (`Establish the living-universe design system`)
+- `cc1bc41` (`Record Milestone 3.75 push blocker`)
 
 ## Commits pushed
 
-- None yet for Milestone 3.75. A normal push to `origin/milestone-3.75-visual-redesign` was attempted after commit `522f4bd`, but the approval layer rejected the action and required explicit user approval for exporting the new branch to GitHub.
+- `522f4bd` (`Establish the living-universe design system`)
+- `cc1bc41` (`Record Milestone 3.75 push blocker`)
+- Successful normal push to `origin/milestone-3.75-visual-redesign`; remote HEAD verified as `cc1bc41da2963e0705c410b77f3e33389dc63c7f`.
+- The remote branch was verified to contain both commits. No force push, default-branch push, merge, pull request, or tag change occurred.
 
 ## Tests run after current edits
+
+- Deterministic demo runtime check: passed; replay mode loaded with no external AI.
+- Browser visual audit: passed for the seeded canvas and source viewer at the available `1280 × 720` viewport.
+- Changed-file Prettier write: passed; all six intended files were already formatted.
+- Focused web tests: passed, `18` tests across `5` files.
+- Web TypeScript check: passed.
+- Focused web lint on changed TypeScript files: passed.
+- `git diff --check`: passed.
+- Secret-pattern scan across all six changed files: no matches.
+- Prohibited-scope audit: passed. No worker, queue, scheduler, agent-runtime, external-call, embedding-provider, production-dependency, or Milestone 4 source additions; no dependency files changed.
+- Protected `competition-demo-v1` commit rechecked and unchanged at `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+
+Prior checkpoint validation:
 
 - Changed-file Prettier write: passed.
 - Focused web tests: passed, `15` tests across `4` files.
@@ -76,21 +90,16 @@ Last updated: 2026-07-21 (America/Chicago)
 ## Known failures
 
 - Pre-existing root pnpm dependency-status failure and Prettier backlog described above.
-- Pre-existing browser baseline did not progress past the app loading state in the in-app browser, even though API endpoints were healthy.
+- The in-app browser blocks direct navigation to the demo API port, so its documented two-port startup remains on the loading state in that browser tool. A temporary uncommitted same-origin test proxy allowed the real seeded UI to be audited; the proxy was fully removed before validation. This is a browser-tool constraint, not a change to the demo startup contract.
+- The available browser viewport remained `1280 × 720` despite narrow viewport overrides, so narrower responsive layouts still need a later visual recheck.
 
 ## Work in progress
 
-- Push the local checkpoint after explicit user approval, then continue with the next UI surface.
+- Create the coherent live-audit visual polish commit, then continue with the next visual-only surface.
 
 ## Next exact implementation step
 
-After user approval, run:
-
-```sh
-git push -u origin milestone-3.75-visual-redesign
-```
-
-Then verify the remote branch contains `522f4bd`, update this ledger with the pushed commit, and continue with the source viewer, Trace surface, upload/processing states, account flows, and responsive visual validation.
+After this checkpoint, continue with visual-only polish for the source viewer, upload/processing presentation states, restrained account surfaces, and responsive layouts. Do not add runtime behavior or begin Milestone 4.
 
 ## Resume commands
 

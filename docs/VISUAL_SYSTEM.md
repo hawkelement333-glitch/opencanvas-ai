@@ -29,7 +29,7 @@ Use the existing system font stack. Keep headings compact inside operational sur
 
 - Universe: application shell, account controls, runtime state, and system entry points.
 - Galaxy · Workspace: a user-owned workspace boundary.
-- Solar System · Project Cluster: a canvas inside a workspace.
+- Solar System: a canvas presented as a focused project cluster inside a workspace. Navigation uses the compact `Solar System · {canvas name}` form so real names remain legible.
 - Star · Answer Hub: generated answers and major response anchors.
 - Planet · Document: durable source documents.
 - Moon · Supporting Note: user-authored notes.
@@ -56,7 +56,7 @@ Nodes must always display real titles and real object types. Do not create decor
 - `Pathway · Generated from selected context`: generated answer linked to selected context.
 - `Pathway · Citation to exact source passage`: validated citation edge.
 
-Pathways require text labels or inspector explanations and must not rely on color alone.
+Pathways require text labels or inspector explanations and must not rely on color alone. The compact canvas legend uses `Relationship`, `Selected context`, and `Citation`, while accessible names retain the full semantic labels above.
 
 ## Evidence States
 

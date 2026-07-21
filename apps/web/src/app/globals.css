@@ -829,6 +829,11 @@ textarea:focus-visible {
   box-shadow: none;
 }
 
+.react-flow__minimap {
+  width: 148px;
+  height: 98px;
+}
+
 .react-flow__controls-button {
   color: var(--text-soft);
   border-bottom-color: var(--line);
@@ -1498,7 +1503,7 @@ textarea:focus-visible {
   bottom: 18px;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 9px;
   padding: 8px 9px;
   border: 1px solid rgba(183, 161, 255, 0.18);
   border-radius: 9px;
@@ -1518,6 +1523,7 @@ textarea:focus-visible {
 .pathway-legend__item {
   position: relative;
   padding-left: 11px;
+  white-space: nowrap;
 }
 
 .pathway-legend__item::before {

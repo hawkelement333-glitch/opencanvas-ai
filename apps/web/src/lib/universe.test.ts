@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import type { CanvasNode, DocumentMetadata } from "./contracts";
+import type { Canvas, CanvasNode, DocumentMetadata } from "./contracts";
 import {
+  canvasRole,
   citationRole,
   documentStageDetails,
   edgeKindDetails,
@@ -50,6 +51,16 @@ function node(partial: Partial<CanvasNode>): CanvasNode {
 }
 
 describe("semantic universe mapping", () => {
+  it("keeps solar-system navigation labels compact while preserving project meaning", () => {
+    const canvas = { name: "Aurora evidence lab" } as Canvas;
+
+    expect(canvasRole(canvas)).toMatchObject({
+      label: "Solar System",
+      plainLabel: "Solar System · Aurora evidence lab",
+    });
+    expect(canvasRole(canvas).description).toContain("project cluster");
+  });
+
   it("maps existing node types to plain-language hierarchy roles", () => {
     expect(nodeRole(node({ type: "note" })).label).toBe("Moon · Supporting Note");
     expect(nodeRole(node({ type: "ai_response" })).label).toBe("Star · Answer Hub");
@@ -73,6 +84,9 @@ describe("semantic universe mapping", () => {
   });
 
   it("distinguishes pathway types with accessible explanations", () => {
+    expect(edgeKindDetails.default.legendLabel).toBe("Relationship");
+    expect(edgeKindDetails.generated_from.legendLabel).toBe("Selected context");
+    expect(edgeKindDetails.cites.legendLabel).toBe("Citation");
     expect(edgeKindDetails.default.plainLabel).toContain("User-created relationship");
     expect(edgeKindDetails.generated_from.plainLabel).toContain("selected context");
     expect(edgeKindDetails.cites.plainLabel).toContain("exact source passage");
