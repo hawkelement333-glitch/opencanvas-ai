@@ -2,6 +2,85 @@
 
 Last updated: 2026-07-21 (America/Chicago)
 
+## Milestone 4.2 Sol checkpoint 1 — closed execution contracts
+
+### Starting state
+
+- Branch: `milestone-4-controlled-agents`.
+- Starting local and remote SHA: `3ab717199470da6b82b36da559c1ccc5a84e8c29`.
+- Protected tag object: `acbde89b6e2cc3e41c372887794726d393836716`.
+- Protected tag peeled commit: `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- Working tree at start: clean.
+
+### Sol safety-core scope and active unit
+
+Milestone 4.2 has started only as a bounded internal safety-core implementation. The first safe
+unit defines the closed action and immutable request/plan/idempotency contracts. It does not execute
+an agent, call a provider, expose a public route, or create a workspace effect.
+
+### Completed
+
+- Defined the only action as `generate_grounded_draft` in an immutable closed registry.
+- Bound the action to a fixed allowlist of read/draft capabilities, maximum `r1_draft` risk, and
+  explicit prohibitions on workspace mutation, external effects, and delegation.
+- Added a strict internal request contract containing server-resolved user scope, workspace,
+  canvas, context/plan references and expected digests, stored grant/approval references,
+  idempotency key, optional client request ID, and correlation ID.
+- Added a fixed six-stage plan: validate authority, load immutable context, retrieve selected
+  evidence, generate grounded draft, validate citations, and record/return.
+- Added a canonical idempotency fingerprint scoped to user, workspace, canvas, action, key,
+  immutable content, and stored authority. Transport correlation metadata does not change retry
+  identity.
+- Added focused tests proving the registry is closed, unknown actions and injected raw authority
+  are rejected, plan order and digest are stable, conflicting content changes retry identity, and
+  contracts are immutable.
+
+### Partial and deferred
+
+- Authority loading, policy orchestration, approval consumption, database idempotency, append-only
+  transition validation, immutable source resolution, cancellation, and late-result suppression
+  are not implemented in this first unit.
+- Provider generation, citation generation, Trace completion, public execution/cancel routes, and
+  UI are deferred to the Terra continuation and were not started.
+- PostgreSQL status: **NOT RUN**. No migration changed in this unit.
+
+### Files changed
+
+- `apps/api/opencanvas_api/services/agents/execution.py`
+- `apps/api/tests/test_agent_execution_contracts.py`
+- `docs/MILESTONE_4_PROGRESS.md`
+
+### Focused validation
+
+- Contract tests: `6 passed`.
+- Changed-file Ruff format: passed.
+- Changed-file Ruff lint: passed after correcting the test-only assertion style.
+- Focused mypy: passed for two source/test files.
+- `git diff --check`: passed.
+- Full backend, security, demo, PostgreSQL, frontend, and production suites: not run for this narrow
+  checkpoint.
+
+### Exact next unit
+
+Inspect the existing `ControlledAgentRepository.consume_approval` transaction and add the smallest
+trusted preflight authority boundary that loads the stored execution/context/plan/grant/approval,
+uses the pure deny-by-default evaluator, and reuses atomic one-time consumption. Design and test
+database idempotency separately if the current schema cannot enforce it. Do not add a provider call,
+public API, UI, tool/effect, worker, queue, scheduler, or delegation.
+
+### Exact resume commands
+
+```powershell
+cd C:\Users\hawke\Documents\Codex\2026-07-18\referenced-chatgpt-conversation-this-is-untrusted\work\opencanvas-ai
+git branch --show-current
+git status --short
+git fetch origin
+git rev-parse HEAD
+git rev-parse origin/milestone-4-controlled-agents
+git show-ref --tags -d competition-demo-v1
+Get-Content docs/MILESTONE_4_PROGRESS.md
+```
+
 ## Milestone 4.1B documentation completion checkpoint
 
 ### Git state at checkpoint preparation
