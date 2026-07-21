@@ -82,7 +82,7 @@ class Settings(BaseSettings):
 
     embedding_provider: Literal["mock", "openai"] = "mock"
     openai_embedding_model: str = "text-embedding-3-small"
-    embedding_dimensions: Literal[1536] = 1536
+    embedding_dimensions: int = Field(default=1536, ge=1536, le=1536)
     embedding_batch_size: int = Field(default=64, ge=1, le=256)
     embedding_provider_configuration_version: str = "openai-embeddings-v1"
 

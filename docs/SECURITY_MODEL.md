@@ -1,6 +1,9 @@
 # Security model
 
-This is an engineering threat model for the competition release candidate, not a certification or guarantee. The current application is intended for trusted single-user/local evaluation because authentication and multi-tenant authorization are not implemented.
+This is an engineering threat model for the competition artifact plus the Milestone 3.5
+productization bridge, not a certification or guarantee. Individual users authenticate, own
+multiple isolated workspaces, and are authorized server-side. Organizations, shared workspaces,
+roles, and collaboration are intentionally outside this milestone.
 
 ## Assets
 
@@ -9,8 +12,9 @@ This is an engineering threat model for the competition release candidate, not a
 - Document embeddings and retrieval metadata
 - AI instructions, responses, citations, and execution snapshots
 - Trace and canonical domain records
+- User credentials, sessions, password-reset tokens, and account export requests
 - OpenAI API credentials and provider metadata
-- Database and file-storage integrity
+- Database, job queue, worker, and private object-storage integrity
 
 ## Trust boundaries
 
@@ -19,12 +23,17 @@ flowchart LR
     Browser["Untrusted browser"] --> API["Validation and policy boundary"]
     Upload["Untrusted documents"] --> API
     API --> DB[("PostgreSQL")]
-    API --> Files["Private file root"]
+    API --> Files["Private local or S3-compatible storage"]
+    Worker["Document worker"] --> DB
+    Worker --> Files
     API --> Provider["External AI provider"]
     Provider --> API
 ```
 
-The browser, uploaded content, filenames, client MIME types, model output, and provider citation identifiers are untrusted. The API is responsible for authorization-ready scoping, validation, retrieval limits, prompt boundaries, and safe persistence.
+The browser, cookies and CSRF input, uploaded content, filenames, client MIME types, model output,
+and provider citation identifiers are untrusted. The API is responsible for authentication,
+authorization, workspace scoping, validation, retrieval limits, prompt boundaries, and safe
+persistence.
 
 ## Implemented controls
 
@@ -33,7 +42,8 @@ The browser, uploaded content, filenames, client MIME types, model output, and p
 - OpenAI keys are read only by the API process.
 - The frontend has no OpenAI SDK or credential path.
 - Only `NEXT_PUBLIC_*` configuration is browser-visible; secrets must never use that prefix.
-- Empty credentials select deterministic mock providers in `auto` mode.
+- Provider selection is explicit; missing live credentials fail configuration or the operation and
+  never select deterministic behavior silently.
 - Demo mode rejects OpenAI credentials and live providers.
 
 ### Uploads and files
@@ -64,16 +74,19 @@ Prompt injection defenses reduce risk but do not prove that model output is corr
 - SQLAlchemy parameterizes normal application queries.
 - Revision checks reject stale updates.
 - Canonical repositories require workspace scope; same-workspace relationship constraints provide database defense in depth.
+- Database-backed sessions expire and can be revoked; state-changing browser requests require a
+  matching CSRF token.
+- Every workspace/canvas, document/file, execution, citation, Trace, and rerun lookup derives or
+  verifies ownership server-side and returns a not-found boundary for foreign identifiers.
 - Document deletion removes live dependent source records and opaque file bytes; immutable execution evidence is retained deliberately.
 - Demo mode restricts database and file paths to `.runtime/demo` and refuses production environment mode.
 
-Workspace scoping is not access control until identity and authorization are added.
-
 ### Network and application surface
 
-- CORS uses configured explicit origins and `allow_credentials=false`.
+- CORS uses configured explicit origins with credential support; wildcard origins are rejected.
 - API strings, lists, context size, file size, and retrieval parameters are bounded.
-- Expensive-operation rate limiting is per-process.
+- Authentication, per-user, per-workspace, and expensive-operation limits are enforced; counters
+  remain process-local.
 - API errors expose safe codes/messages rather than internal storage paths.
 - Production mode disables interactive API docs.
 - Reference containers run application processes as non-root users.
@@ -88,19 +101,21 @@ In mock/demo mode, no OpenAI request is made. Judges should use mock/demo mode f
 
 Trace is durable provenance and can contain object associations, structured metadata, safe errors, and operation names. AI execution tables intentionally contain instructions, selected content snapshots, retrieved passages, and output. These records may be sensitive even though they are not ordinary application logs.
 
-Do not expose Trace, database inspection, or execution evidence to untrusted users before authentication, authorization, retention, export, and redaction policies exist.
+Trace and execution APIs enforce workspace ownership and redact secrets, authorization headers,
+hidden system instructions, internal paths, and unsafe diagnostics. Formal retention, export
+artifact generation, redaction workflows, and audit-administrator policy remain deployment work.
 
 ## Known gaps before internet deployment
 
-- Authentication, sessions, role/permission enforcement, and tenant isolation
-- TLS/reverse-proxy and managed-secret deployment guidance
-- Distributed rate limiting and abuse controls
+- Organizations, role-based sharing, invitations, and collaboration
+- Deployment-specific TLS/reverse-proxy, managed-secret, and key-rotation implementation
+- Distributed rate limiting and centralized abuse controls
 - Malware scanning and content disarm/reconstruction
-- Durable background jobs and transactional outbox
-- Object storage, encryption/key management policy, backups, and restore testing
+- Transactional outbox and broker-backed job administration for larger deployments
+- Managed encryption/key policy plus executed backup/restore disaster-recovery drills
 - Trace retention, privacy requests, redaction, and audit access policy
-- Dependency vulnerability scanning and signed supply-chain attestations
-- Security headers/CSP hardening and formal penetration testing
+- Signed supply-chain attestations
+- Formal penetration testing and compliance review
 
 ## Security testing
 

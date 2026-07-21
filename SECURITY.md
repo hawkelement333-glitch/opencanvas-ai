@@ -20,10 +20,12 @@ data. Receipt or response times are not guaranteed until a formal disclosure cha
 
 ## Current deployment boundary
 
-The current application has **no authentication or authorization**. It is suitable only for a
-trusted local, isolated demo environment. Do not expose the API, database, or document storage
-to the public internet or use it for multiple untrusted users. Authentication, workspace-level
-authorization, abuse controls, and tenant isolation are required before hosted production use.
+Milestone 3.5 provides individual accounts, database-backed sessions, CSRF protection, multiple
+owned workspaces, and server-side authorization for workspace data, private files, executions,
+citations, and Trace records. Staging and production fail closed unless PostgreSQL, SMTP password
+reset, explicit live AI/embedding providers, private S3-compatible storage, and the durable worker
+are configured. These controls have automated coverage but are not a certification or substitute
+for a deployment-specific threat assessment and penetration test.
 
 The checked-in PostgreSQL username and password are local-development placeholders. They must
 not be reused outside an isolated development environment.
@@ -46,12 +48,12 @@ content, user instructions, selected-node snapshots, retrieval rankings, AI resp
 citations, and Trace records. Treat the database, storage volume, backups, and exported logs as
 sensitive.
 
-With `OPENCANVAS_AI_PROVIDER=auto` and a configured OpenAI key, the selected context and user
-instruction are sent to the configured OpenAI service. With
-`OPENCANVAS_EMBEDDING_PROVIDER=auto` and a configured key, document chunks may be sent for
-embedding. Set both providers to `mock` when content must remain local. Review the provider's
-current data-use and retention terms before processing confidential, regulated, or personal
-information.
+With `OPENCANVAS_AI_PROVIDER=openai`, the selected context and user instruction are sent to the
+configured OpenAI service. With `OPENCANVAS_EMBEDDING_PROVIDER=openai`, document chunks are sent
+for embedding. Provider selection is explicit and failures never fall back to mock results. Set
+both providers to `mock` only in demo, test, or intentional local development. Review the
+provider's current data-use and retention terms before processing confidential, regulated, or
+personal information.
 
 Document deletion removes the active stored file and associated application records through
 the document API, but it cannot erase independent backups, provider-side data, external logs,
@@ -79,8 +81,8 @@ model prompt boundaries as a complete security boundary.
 
 ## Known release security findings
 
-The July 17, 2026 release audit and pre-publication history scan found no high-confidence committed
-secret, private key, database, upload, runtime artifact, or real environment file. The production
-PostCSS advisory was remediated by the lockfile-backed `8.5.14` override, and the final production
-dependency audit reported no known vulnerabilities at moderate severity or higher. See
+The July 21, 2026 Milestone 3.5 review found no committed live credential or generated runtime
+artifact. Fresh production JavaScript and third-party Python advisory audits reported no known
+vulnerabilities; the local editable application package is not a published PyPI distribution and
+was excluded from the Python registry lookup. See `docs/MILESTONE_3_5_COMPLETION_REPORT.md` and
 `docs/SECURITY_LICENSE_AUDIT.md` for scope and caveats.

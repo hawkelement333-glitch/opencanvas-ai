@@ -1,9 +1,19 @@
 import pytest
 from pydantic import ValidationError
 
-from opencanvas_api.core.config import Settings
+from opencanvas_api.core.config import PROJECT_ROOT, Settings
 
 pytestmark = pytest.mark.security
+
+
+def test_environment_template_parses_through_typed_settings() -> None:
+    settings = Settings(_env_file=PROJECT_ROOT / ".env.example")
+
+    assert settings.runtime_mode.value == "development"
+    assert settings.ai_provider == "mock"
+    assert settings.embedding_provider == "mock"
+    assert settings.embedding_dimensions == 1536
+    assert settings.job_provider == "database"
 
 
 def test_explicit_openai_provider_requires_server_key() -> None:
