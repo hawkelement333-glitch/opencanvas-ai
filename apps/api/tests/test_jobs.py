@@ -20,6 +20,7 @@ from opencanvas_api.db.models import (
 )
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.jobs import (
+    DocumentWorker,
     JobQueueError,
     claim_next_job,
     enqueue_document_job,
@@ -228,3 +229,16 @@ async def test_worker_health_requires_a_fresh_database_heartbeat(
     stale = await client.get(f"{api_prefix}/health/ready")
     assert stale.status_code == 503
     assert stale.json()["code"] == "worker_unavailable"
+
+
+async def test_idle_worker_commits_its_heartbeat(
+    app: FastAPI,
+    database: Database,
+) -> None:
+    settings = cast(Settings, app.dependency_overrides[get_settings]())
+    worker = DocumentWorker(settings=settings, sessions=database.sessions, worker_id="idle-worker")
+    assert await worker.run_once() is False
+    async with database.sessions() as session:
+        heartbeat = await session.get(WorkerHeartbeat, "idle-worker")
+    assert heartbeat is not None
+    assert heartbeat.status == "ready"

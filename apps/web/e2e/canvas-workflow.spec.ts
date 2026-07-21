@@ -2,12 +2,15 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 interface MockCanvas {
   id: string;
+  workspaceId: string;
   name: string;
   viewport: { x: number; y: number; zoom: number };
   revision: number;
   createdAt: string;
   updatedAt: string;
 }
+
+const workspaceId = "e2000000-0000-4000-8000-000000000001";
 
 interface MockNode {
   id: string;
@@ -44,7 +47,8 @@ async function json(route: Route, body: unknown, status = 200): Promise<void> {
     status,
     contentType: "application/json",
     headers: {
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": "http://127.0.0.1:3000",
+      "Access-Control-Allow-Credentials": "true",
       "Access-Control-Allow-Headers": "Content-Type",
       "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     },
@@ -68,11 +72,43 @@ async function installMockAPI(page: Page): Promise<void> {
       await route.fulfill({
         status: 204,
         headers: {
-          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Origin": "http://127.0.0.1:3000",
+          "Access-Control-Allow-Credentials": "true",
           "Access-Control-Allow-Headers": "Content-Type",
           "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
         },
       });
+      return;
+    }
+
+    if (path === "/health/runtime" && method === "GET") {
+      await json(route, {
+        mode: "live",
+        appMode: "test",
+        externalAiEnabled: false,
+        label: "Test",
+        demoCanvasId: null,
+        demoTraceId: null,
+      });
+      return;
+    }
+
+    if (path === "/workspaces" && method === "GET") {
+      const timestamp = iso();
+      await json(route, [
+        {
+          id: workspaceId,
+          name: "E2E workspace",
+          description: null,
+          ownerId: null,
+          version: 1,
+          lifecycleState: "active",
+          metadata: {},
+          legacyCanvasId: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      ]);
       return;
     }
 
@@ -86,6 +122,7 @@ async function installMockAPI(page: Page): Promise<void> {
       const timestamp = iso();
       canvas = {
         id: "canvas-e2e",
+        workspaceId,
         name: input.name,
         viewport: { x: 0, y: 0, zoom: 1 },
         revision: 0,
@@ -152,7 +189,13 @@ async function installMockAPI(page: Page): Promise<void> {
       const id = nodeMatch[1];
       nodes = nodes.filter((node) => node.id !== id);
       edges = edges.filter((edge) => edge.sourceNodeId !== id && edge.targetNodeId !== id);
-      await route.fulfill({ status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "http://127.0.0.1:3000",
+          "Access-Control-Allow-Credentials": "true",
+        },
+      });
       return;
     }
 
@@ -179,7 +222,13 @@ async function installMockAPI(page: Page): Promise<void> {
     const edgeMatch = path.match(/^\/canvases\/canvas-e2e\/edges\/([^/]+)$/);
     if (edgeMatch?.[1] && method === "DELETE") {
       edges = edges.filter((edge) => edge.id !== edgeMatch[1]);
-      await route.fulfill({ status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "http://127.0.0.1:3000",
+          "Access-Control-Allow-Credentials": "true",
+        },
+      });
       return;
     }
 
@@ -219,6 +268,7 @@ async function installMockAPI(page: Page): Promise<void> {
       await json(route, {
         requestId: "request-e2e",
         responseId: "response-e2e",
+        traceId: "e2000000-0000-4000-8000-000000000003",
         node: responseNode,
         edges: generatedEdges,
         mock: true,

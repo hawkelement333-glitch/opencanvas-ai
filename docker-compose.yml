@@ -1,5 +1,16 @@
 name: opencanvas-ai
 
+x-api-environment: &api-environment
+  APP_MODE: development
+  OPENCANVAS_APP_URL: http://localhost:3000
+  OPENCANVAS_DATABASE_URL: postgresql+asyncpg://opencanvas:opencanvas@db:5432/opencanvas
+  OPENCANVAS_AI_PROVIDER: mock
+  OPENCANVAS_EMBEDDING_PROVIDER: mock
+  OPENCANVAS_STORAGE_PROVIDER: local
+  OPENCANVAS_DOCUMENT_STORAGE_ROOT: /app/data/documents
+  OPENCANVAS_JOB_PROVIDER: database
+  OPENCANVAS_SESSION_SECRET: development-only-session-secret-change-before-deploying
+
 services:
   db:
     image: pgvector/pgvector:pg17
@@ -21,9 +32,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    env_file: .env
+    env_file: ${OPENCANVAS_ENV_FILE:-.env.example}
     environment:
-      OPENCANVAS_DATABASE_URL: postgresql+asyncpg://opencanvas:opencanvas@db:5432/opencanvas
+      <<: *api-environment
     command: ["alembic", "upgrade", "head"]
     depends_on:
       db:
@@ -34,10 +45,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    env_file: .env
+    env_file: ${OPENCANVAS_ENV_FILE:-.env.example}
     environment:
-      OPENCANVAS_DATABASE_URL: postgresql+asyncpg://opencanvas:opencanvas@db:5432/opencanvas
-      OPENCANVAS_DOCUMENT_STORAGE_ROOT: /app/data/documents
+      <<: *api-environment
     ports:
       - "8000:8000"
     volumes:
@@ -57,6 +67,26 @@ services:
       timeout: 5s
       retries: 10
 
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: ${OPENCANVAS_ENV_FILE:-.env.example}
+    environment:
+      <<: *api-environment
+    command: ["python", "-m", "scripts.worker"]
+    volumes:
+      - opencanvas-files:/app/data/documents
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-m", "scripts.worker", "--healthcheck"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
   web:
     build:
       context: .
@@ -69,6 +99,8 @@ services:
       - "3000:3000"
     depends_on:
       api:
+        condition: service_healthy
+      worker:
         condition: service_healthy
 
 volumes:

@@ -4,8 +4,8 @@ This register prevents the competition demo and public materials from implying c
 
 ## Product
 
-- No authentication, accounts, roles, ownership enforcement, or multi-tenant authorization.
-- Single-user/local trusted evaluation only.
+- Authentication supports individual accounts and multiple owned workspaces, but not
+  organizations, invitations, shared roles, or collaboration.
 - No real-time collaboration or conflict merging; stale revisions return conflicts.
 - No OCR; image-only PDFs fail with guidance.
 - Supported node UI is notes, documents, and AI responses—not general code, image-generation, audio, or video objects.
@@ -30,13 +30,15 @@ This register prevents the competition demo and public materials from implying c
 - Markdown heading preservation covers ATX headings; richer syntax is not a full Markdown AST.
 - DOCX extraction preserves supported paragraph headings and table text, not full visual layout.
 - No OCR, password decryption, macro execution, embedded-object execution, malware scan, or content-disarm pipeline.
-- Files are stored on the local API filesystem/volume rather than cloud object storage.
+- Staging/production support private S3-compatible object storage; the reference development
+  Compose stack intentionally uses a shared private local volume.
 - File unlink and relational commit cannot be one atomic transaction. A rare commit failure after unlink requires operational repair; staged trash/outbox cleanup is deferred.
 
 ## Reliability and scale
 
-- Document processing is an in-process background task, not a durable distributed worker queue.
-- Startup reconciliation makes interrupted work retryable but does not provide multi-replica leases.
+- Production-shaped processing uses persisted database jobs and an independently scalable worker.
+  The database queue is not a dedicated broker and does not yet provide long-running lease
+  renewal or dead-letter administration UI.
 - Rate limiting is process-local, not distributed.
 - Canonical domain events are process-local and published before the outer API transaction commits.
 - A transactional outbox is required before external side effects or multi-replica event delivery.
@@ -52,8 +54,10 @@ This register prevents the competition demo and public materials from implying c
 
 ## Security and privacy
 
-- No authorization boundary means all API/Trace endpoints must remain on a trusted network.
-- No formal data-retention, user deletion, redaction, backup, or disaster-recovery policy.
+- Account deletion and data-export request entry points exist, but export artifact generation,
+  formal retention schedules, and legal-hold workflows are not implemented.
+- Backup/restore/rollback procedures are documented but have not been validated against a managed
+  production deployment.
 - No completed security audit, penetration test, compliance certification, or vulnerability-free guarantee.
 - Uploaded content and execution snapshots may be sensitive; use synthetic demo data.
 - Demo isolation protects against accidental live provider/data use when its canonical command is used, but it is not a security sandbox for hostile local users.

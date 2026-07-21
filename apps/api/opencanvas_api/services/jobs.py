@@ -234,6 +234,7 @@ class DocumentWorker:
     async def run_once(self) -> bool:
         async with self.sessions() as session:
             await self._heartbeat(session, "ready")
+            await session.commit()
             job = await claim_next_job(session, worker_id=self.worker_id)
             if job is None:
                 return False

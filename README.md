@@ -137,7 +137,11 @@ docker compose up --build
 
 On macOS/Linux, use `cp .env.example .env`. Then open <http://localhost:3000>. Readiness is at <http://localhost:8000/api/v1/health/ready>; development API docs are at <http://localhost:8000/docs>.
 
-Compose runs PostgreSQL/pgvector, a one-shot Alembic migration service, FastAPI, and Next.js. Data persists in named `opencanvas-db` and `opencanvas-files` volumes. `docker compose down --volumes` deletes both volumes and should be used only when intentional.
+Compose runs PostgreSQL/pgvector, a one-shot Alembic migration service, FastAPI, an independent
+database-backed document worker, and Next.js. Data persists in named `opencanvas-db` and
+`opencanvas-files` volumes. `docker compose down --volumes` deletes both volumes and should be
+used only when intentional. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for staging, production,
+backup, restore, and rollback procedures.
 
 ## Local development
 
@@ -169,16 +173,16 @@ Open <http://localhost:3000>. Leave `OPENAI_API_KEY` empty for deterministic moc
 
 `.env.example` is the authoritative template. Important values are:
 
-| Variable                           | Required                           | Purpose                                                                                  |
-| ---------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------- |
-| `OPENCANVAS_DATABASE_URL`          | Yes outside isolated demo defaults | Async PostgreSQL URL for normal operation.                                               |
-| `NEXT_PUBLIC_API_URL`              | Yes for the web build              | Browser-visible API base URL; never place secrets in `NEXT_PUBLIC_*`.                    |
-| `OPENAI_API_KEY`                   | No                                 | Server-only key for live AI and embeddings. Empty selects mock providers in `auto` mode. |
-| `OPENCANVAS_AI_PROVIDER`           | No                                 | `auto`, `mock`, or `openai`.                                                             |
-| `OPENCANVAS_EMBEDDING_PROVIDER`    | No                                 | `auto`, `mock`, or `openai`.                                                             |
-| `OPENCANVAS_OPENAI_MODEL`          | No                                 | Responses model, currently defaulting to `gpt-5.6-terra`.                                |
-| `OPENCANVAS_DOCUMENT_STORAGE_ROOT` | Yes outside Docker defaults        | Non-public upload storage root.                                                          |
-| `OPENCANVAS_DEMO_MODE`             | Demo command only                  | Enables strict project-local demo isolation checks.                                      |
+| Variable                           | Required                           | Purpose                                                               |
+| ---------------------------------- | ---------------------------------- | --------------------------------------------------------------------- |
+| `OPENCANVAS_DATABASE_URL`          | Yes outside isolated demo defaults | Async PostgreSQL URL for normal operation.                            |
+| `NEXT_PUBLIC_API_URL`              | Yes for the web build              | Browser-visible API base URL; never place secrets in `NEXT_PUBLIC_*`. |
+| `OPENAI_API_KEY`                   | Live providers only                | Server-only key for live AI and embeddings.                           |
+| `OPENCANVAS_AI_PROVIDER`           | Yes                                | Explicitly `mock` or `openai`; failures never fall back to mock.      |
+| `OPENCANVAS_EMBEDDING_PROVIDER`    | Yes                                | Explicitly `mock` or `openai`; failures never fall back to mock.      |
+| `OPENCANVAS_OPENAI_MODEL`          | No                                 | Responses model, currently defaulting to `gpt-5.6-terra`.             |
+| `OPENCANVAS_DOCUMENT_STORAGE_ROOT` | Yes outside Docker defaults        | Non-public upload storage root.                                       |
+| `OPENCANVAS_DEMO_MODE`             | Demo command only                  | Enables strict project-local demo isolation checks.                   |
 
 Chunk size, overlap, file limits, retrieval top-k, relevance threshold, embedding model, dimensions, and CORS are also configurable in `.env.example`. Demo mode must not be combined with a production environment, OpenAI credentials, live providers, or non-demo storage/database paths.
 
@@ -224,7 +228,10 @@ pnpm validate
 - Files use opaque storage keys outside publicly served directories.
 - Model citations are checked against server-created source identifiers.
 - OpenAI and embedding calls remain server-side.
-- The application currently has no authentication or multi-tenant authorization and is suitable only for trusted single-user/local use.
+- Accounts use database-backed secure sessions and CSRF protection; every workspace/canvas,
+  document/file, execution, citation, and Trace read/write is authorized server-side.
+- Staging and production require PostgreSQL, SMTP reset delivery, explicit OpenAI providers,
+  private S3-compatible storage, and the durable database-backed worker.
 
 See [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md), [SECURITY.md](SECURITY.md), and [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md).
 
@@ -246,7 +253,10 @@ At runtime, live mode uses the server-side OpenAI Responses API with a configura
 
 ## Known limitations and roadmap
 
-Major limitations include no authentication, no OCR, no durable distributed ingestion worker, per-process rate limiting, local file storage, non-streaming AI responses, no automatic inference/conflict classification, and no end-user Trace explorer. See the complete [known-limitations register](docs/KNOWN_LIMITATIONS.md).
+Major limitations include no OCR or malware-scanning service, per-process rate limiting, a
+database-backed rather than broker-backed job queue, non-streaming AI responses, no automatic
+inference/conflict classification, and no complete end-user Trace explorer. See the complete
+[known-limitations register](docs/KNOWN_LIMITATIONS.md).
 
 Recommended next milestone: canonical ingestion adapters, then semantic memory, hybrid search, and workspace-wide knowledge discovery while preserving source identity and Trace provenance.
 

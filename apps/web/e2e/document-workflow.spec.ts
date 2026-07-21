@@ -1,8 +1,10 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 const timestamp = "2026-07-17T12:00:00Z";
+const workspaceId = "e2000000-0000-4000-8000-000000000002";
 const canvas = {
   id: "canvas-doc",
+  workspaceId,
   name: "Grounded research",
   viewport: { x: 0, y: 0, zoom: 1 },
   revision: 0,
@@ -74,7 +76,10 @@ async function json(route: Route, body: unknown, status = 200): Promise<void> {
   await route.fulfill({
     status,
     contentType: "application/json",
-    headers: { "Access-Control-Allow-Origin": "*" },
+    headers: {
+      "Access-Control-Allow-Origin": "http://127.0.0.1:3000",
+      "Access-Control-Allow-Credentials": "true",
+    },
     body: JSON.stringify(body),
   });
 }
@@ -106,7 +111,41 @@ async function installDocumentAPI(page: Page): Promise<void> {
     const path = new URL(request.url()).pathname.replace(/^\/api\/v1/, "");
 
     if (method === "OPTIONS") {
-      await route.fulfill({ status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "http://127.0.0.1:3000",
+          "Access-Control-Allow-Credentials": "true",
+        },
+      });
+      return;
+    }
+    if (path === "/health/runtime" && method === "GET") {
+      await json(route, {
+        mode: "live",
+        appMode: "test",
+        externalAiEnabled: false,
+        label: "Test",
+        demoCanvasId: null,
+        demoTraceId: null,
+      });
+      return;
+    }
+    if (path === "/workspaces" && method === "GET") {
+      await json(route, [
+        {
+          id: workspaceId,
+          name: "Document E2E workspace",
+          description: null,
+          ownerId: null,
+          version: 1,
+          lifecycleState: "active",
+          metadata: {},
+          legacyCanvasId: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      ]);
       return;
     }
     if (path === "/canvases" && method === "GET") {
@@ -290,6 +329,7 @@ async function installDocumentAPI(page: Page): Promise<void> {
       await json(route, {
         requestId: `request-${answerSequence}`,
         responseId: `response-${answerSequence}`,
+        traceId: "e2000000-0000-4000-8000-000000000004",
         node: responseNode,
         edges: generatedEdges,
         mock: true,
@@ -308,7 +348,13 @@ async function installDocumentAPI(page: Page): Promise<void> {
         (edge) => !removed.has(edge.sourceNodeId) && !removed.has(edge.targetNodeId),
       );
       document = null;
-      await route.fulfill({ status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "http://127.0.0.1:3000",
+          "Access-Control-Allow-Credentials": "true",
+        },
+      });
       return;
     }
 

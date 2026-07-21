@@ -1,6 +1,8 @@
 # OpenCanvas AI as-built architecture
 
-This document describes the competition release candidate as implemented. Milestone-specific decisions remain in `MVP_ARCHITECTURE.md`, `PHASE2_ARCHITECTURE.md`, and `MILESTONE3_ARCHITECTURE.md`.
+This document describes the competition architecture plus the Milestone 3.5 productization bridge.
+Milestone-specific decisions remain in `MVP_ARCHITECTURE.md`, `PHASE2_ARCHITECTURE.md`, and
+`MILESTONE3_ARCHITECTURE.md`; deployment operations are in `DEPLOYMENT.md`.
 
 ## System context
 
@@ -9,7 +11,9 @@ flowchart LR
     User["User"] --> Web["Next.js web app"]
     Web -->|"JSON and multipart HTTP"| API["FastAPI API"]
     API --> DB[("PostgreSQL 17 + pgvector")]
-    API --> Store["Non-public file store"]
+    API --> Store["Private local or S3-compatible store"]
+    Worker["Independent document worker"] --> DB
+    Worker --> Store
     API -->|"optional"| OpenAI["OpenAI Responses and Embeddings APIs"]
     API --> Mock["Deterministic mock providers"]
 ```
@@ -29,7 +33,8 @@ The browser is an untrusted client. It renders spatial state and sends validated
 
 ### API
 
-- FastAPI routers expose health, canvas, document, Trace, and canonical endpoints below `/api/v1`.
+- FastAPI routers expose authentication/account, health, workspace/canvas, document, Trace, and
+  canonical endpoints below `/api/v1`.
 - Pydantic models reject malformed inputs and bound strings, collections, and numeric settings.
 - Async SQLAlchemy sessions provide request-scoped persistence.
 - Provider protocols isolate live OpenAI calls from deterministic mock answer and embedding implementations.
@@ -40,7 +45,9 @@ The browser is an untrusted client. It renders spatial state and sends validated
 
 - PostgreSQL stores canvases, nodes, visual edges, document metadata, extracted chunks, embeddings, citations, AI executions, Trace events, and canonical records.
 - pgvector stores 1,536-dimensional document embeddings and provides HNSW cosine search in PostgreSQL.
-- Uploaded bytes live below a configured API-only root under opaque document/file keys; internal paths are never API output.
+- Uploaded bytes use a private storage-provider boundary: isolated demo assets, local test/development
+  storage, or S3-compatible object storage in staging/production. Internal paths and unrestricted
+  public URLs are never API output.
 - Docker Compose uses separate named volumes for database and uploaded files.
 
 ## Two compatible domain layers
@@ -96,7 +103,10 @@ flowchart LR
     Embed --> Ready["Ready document node"]
 ```
 
-Observable processing states are uploading, extracting, chunking, embedding, ready, and failed. In-process background processing uses a fresh database session; startup reconciliation makes interrupted work retryable. It is not a distributed job queue.
+Observable processing states include uploaded, queued, processing, extracting, chunking,
+embedding, indexing, ready, retryable failure/retrying, permanent failure, deleting, and deleted.
+Persisted idempotent jobs are claimed by an independent worker with backoff, retry exhaustion,
+deletion cancellation, and heartbeats. Demo mode keeps deterministic inline processing.
 
 ## Grounded answer flow
 
@@ -142,8 +152,8 @@ Relationships are directional, same-workspace objects. The current controlled vo
 - Extracted content is rendered as text and treated as untrusted prompt data.
 - Document retrieval is limited to selected documents on the active canvas.
 - Demo mode enforces isolated paths, mock providers, and absence of OpenAI credentials.
-
-There is no authentication or multi-user authorization. Workspace scoping is a domain invariant, not an access-control boundary.
+- Database-backed sessions, CSRF checks, server-side workspace ownership, authorized file proxying,
+  and not-found responses at ownership boundaries protect individual user workspaces.
 
 ## Deployment
 
@@ -151,10 +161,14 @@ The reference Compose topology is:
 
 - `db`: `pgvector/pgvector:pg17` with health check;
 - `api-migrate`: one-shot Alembic upgrade;
-- `api`: non-root FastAPI container with a private file volume;
+- `api`: non-root FastAPI container;
+- `worker`: non-root independent document worker with persisted heartbeat;
 - `web`: non-root Next.js standalone container.
 
-Production hardening still requires authentication, managed secrets, TLS/reverse proxy, malware scanning, object storage, centralized rate limiting, durable job/outbox infrastructure, backups, monitoring, and retention policy.
+Staging/production require managed secrets, TLS/reverse proxy, PostgreSQL/pgvector, SMTP password
+reset, explicit live providers, private S3-compatible storage, and the durable worker. Remaining
+hardening includes malware scanning, distributed rate limiting, a transactional outbox, managed
+backup/restore validation, centralized monitoring, and a formal retention policy.
 
 ## Architecture decisions
 
@@ -168,4 +182,6 @@ Production hardening still requires authentication, managed secrets, TLS/reverse
 
 ## Deferred architecture
 
-Authentication, real-time collaboration, OCR, distributed processing, object storage, automatic inference/conflict classification, Trace explorer/replay, canonical ingestion adapters, hybrid workspace search, and semantic memory remain deferred. See `KNOWN_LIMITATIONS.md`.
+Organizations/collaboration, OCR, malware scanning, broker-backed processing, automatic
+inference/conflict classification, a complete Trace explorer, canonical ingestion adapters,
+hybrid workspace search, and semantic memory remain deferred. See `KNOWN_LIMITATIONS.md`.
