@@ -51,6 +51,16 @@ def test_initial_migration_upgrades_sqlite(tmp_path: Path) -> None:
         "canonical_notes",
         "canonical_executions",
         "canonical_relationships",
+        "controlled_agent_executions",
+        "controlled_agent_execution_states",
+        "controlled_agent_context_snapshots",
+        "controlled_agent_plan_snapshots",
+        "controlled_agent_capability_grants",
+        "controlled_agent_grant_revocations",
+        "controlled_agent_approvals",
+        "controlled_agent_policy_decisions",
+        "controlled_agent_approval_consumptions",
+        "controlled_agent_audit_events",
     } <= tables
 
     with sqlite3.connect(database_path) as connection:
@@ -123,7 +133,7 @@ def test_migration_uses_configured_database_url(
 
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("20260721_0006",)
+    assert revision == ("20260721_0007",)
 
 
 def test_phase_two_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) -> None:
@@ -155,7 +165,7 @@ def test_phase_two_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) ->
     command.upgrade(config, "head")
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("20260721_0006",)
+    assert revision == ("20260721_0007",)
 
 
 def test_trace_foundation_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) -> None:
@@ -180,7 +190,7 @@ def test_trace_foundation_migration_downgrades_and_reupgrades_sqlite(tmp_path: P
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
         indexes = {row[1] for row in connection.execute("PRAGMA index_list(trace_events)")}
-    assert revision == ("20260721_0006",)
+    assert revision == ("20260721_0007",)
     assert {
         "ix_trace_events_trace_time",
         "ix_trace_events_workspace_time",
@@ -221,7 +231,7 @@ def test_canonical_migration_backfills_canvases_and_reverses_sqlite(tmp_path: Pa
             "SELECT id, legacy_canvas_id FROM workspaces WHERE id = ?",
             (removed_canvas_id,),
         ).fetchone()
-    assert revision == ("20260721_0006",)
+    assert revision == ("20260721_0007",)
     assert workspaces == [
         (removed_canvas_id, "Removed canvas", 1, "active", "{}", removed_canvas_id),
         (retained_canvas_id, "Retained canvas", 1, "active", "{}", retained_canvas_id),
@@ -257,5 +267,70 @@ def test_canonical_migration_backfills_canvases_and_reverses_sqlite(tmp_path: Pa
         workspaces = connection.execute(
             "SELECT id, legacy_canvas_id, lifecycle_state FROM workspaces"
         ).fetchall()
-    assert revision == ("20260721_0006",)
+    assert revision == ("20260721_0007",)
     assert workspaces == [(retained_canvas_id, retained_canvas_id, "active")]
+
+
+def test_controlled_agent_migration_is_append_only_and_reversible_sqlite(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "controlled-agent-migration-cycle.db"
+    api_directory = Path(__file__).resolve().parents[1]
+    config = Config(api_directory / "alembic.ini")
+    config.set_main_option("script_location", str(api_directory / "alembic"))
+    config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{database_path.as_posix()}")
+
+    command.upgrade(config, "head")
+    execution_id = uuid.uuid4().hex
+    context_id = uuid.uuid4().hex
+    plan_id = uuid.uuid4().hex
+    grant_id = uuid.uuid4().hex
+    with sqlite3.connect(database_path) as connection:
+        user_id = "00000000000040008000000000000001"
+        workspace_id = uuid.uuid4().hex
+        connection.execute(
+            "INSERT INTO workspaces (id, name, owner_id) VALUES (?, ?, ?)",
+            (workspace_id, "Controlled-agent audit", user_id),
+        )
+        connection.execute(
+            """INSERT INTO controlled_agent_executions
+               (id, user_id, workspace_id, schema_version, role, context_snapshot_id,
+                context_digest, plan_id, plan_digest, grant_id, created_at)
+               VALUES (?, ?, ?, 'controlled-agent-v1', 'evidence_verifier', ?, ?, ?, ?, ?, ?)""",
+            (
+                execution_id,
+                user_id,
+                workspace_id,
+                context_id,
+                "a" * 64,
+                plan_id,
+                "b" * 64,
+                grant_id,
+                "2026-07-21T18:00:00+00:00",
+            ),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            connection.execute(
+                "UPDATE controlled_agent_executions SET plan_digest = ? WHERE id = ?",
+                ("c" * 64, execution_id),
+            )
+
+    command.downgrade(config, "20260721_0006")
+    with sqlite3.connect(database_path) as connection:
+        revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+        tables = {
+            row[0]
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+    assert revision == ("20260721_0006",)
+    assert not any(table.startswith("controlled_agent_") for table in tables)
+
+    command.upgrade(config, "head")
+    with sqlite3.connect(database_path) as connection:
+        revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+        tables = {
+            row[0]
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+    assert revision == ("20260721_0007",)
+    assert "controlled_agent_approval_consumptions" in tables

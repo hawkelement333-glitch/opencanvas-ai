@@ -499,6 +499,43 @@ model. No API or tool registry is added for the same reason. These contracts are
 persistence boundary that the next 4.1 checkpoint may map to append-only tables and ownership-
 checked read repositories. They are not an execution runtime.
 
+#### Milestone 4.1B persistence boundary
+
+Milestone 4.1B maps the 4.1A contracts to ten append-only tables: execution identity, execution
+state, context snapshot, plan snapshot, capability grant, grant revocation, approval, policy
+decision, approval consumption, and audit event. Composite foreign keys bind every child record to
+the same execution, user, and workspace. Application mutation guards and database triggers reject
+UPDATE and DELETE against these security records; transitions, revocations, decisions, and
+consumption are always new rows.
+
+Approval consumption is a transaction boundary, not an execution feature. It reloads and validates
+the stored 4.1A contracts and canonical digests, reuses the pure policy evaluator, and inserts the
+allow decision plus single-use consumption inside one savepoint. A unique approval constraint
+prevents double use; replay, expiry, revocation, ownership mismatch, resource mismatch, and altered
+contract evidence fail closed. No route exposes this mutation operation in 4.1B.
+
+The only new API is an authenticated, ownership-scoped GET for one execution. It returns bounded
+history summaries and plan/context references, never raw stored contract payloads, session IDs,
+issuing-service details, credentials, or provider diagnostics. It cannot create, approve, consume,
+start, cancel, or otherwise operate an execution.
+
+Retention rules for this checkpoint are conservative:
+
+- execution identities, state transitions, snapshots, grants, revocations, approvals,
+  consumptions, policy decisions, and audit events remain append-only;
+- grant and approval expiry removes authority but does not delete evidence;
+- revocation adds a permanent invalidation record and does not rewrite the grant;
+- automatic cleanup, archival tiers, retention-duration configuration, and deletion workers are
+  not implemented;
+- future legal/security holds require an explicit hold model and policy review before cleanup can
+  exist;
+- account erasure, privacy redaction, cryptographic erasure, and retention-law reconciliation must
+  be designed before active controlled-agent data is enabled in production.
+
+Milestone 4.1A supplied the immutable contracts and pure policy function. Milestone 4.1B supplies
+only persistence, one-time approval accounting, and read-only inspection. Milestone 4.2 remains
+unstarted.
+
 ### Milestone 4.2 — User-initiated read-only agent
 
 - Add a synchronous, cancellable execution controller for one canvas and selected context.

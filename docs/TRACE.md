@@ -92,6 +92,23 @@ approval, execute a tool, or assert that an effect occurred. A later persistence
 commit the pre-effect policy decision and approval consumption atomically and must preserve the
 existing rule that incomplete or untraced effects cannot be reported as successful.
 
+Milestone 4.1B persists those contracts in a dedicated append-only audit boundary. Execution-state,
+revocation, policy-decision, approval-consumption, and audit histories are independent rows ordered
+by recorded time. Immutable context, plan, grant, and approval payloads retain their 4.1A canonical
+digest; inspection returns only their identifiers, safe status metadata, and hashes.
+
+The read-only endpoint is:
+
+```http
+GET /api/v1/workspaces/{workspaceId}/agent-executions/{executionId}?limit=50&offset=0
+```
+
+It requires the authenticated workspace owner and returns not found for a foreign workspace or
+execution. `limit` is bounded from 1 to 100 and the endpoint performs no approval, consumption,
+execution, provider, tool, or network action. Raw contract payloads stay server-side. Approval
+consumption has no public API in 4.1B; a future controller must use the atomic repository boundary
+and cannot infer authority from this inspection response.
+
 ## Current inspection workflow
 
 1. Obtain a `traceId` from a canonical mutation response or known execution association.

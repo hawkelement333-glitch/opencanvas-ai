@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -17,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -982,3 +984,380 @@ class CanonicalRelationship(Base):
     relationship_type: Mapped[str] = mapped_column(String(24), nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column()
     trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+
+
+class ControlledAgentExecution(Base):
+    """Immutable identity for a proposed controlled-agent execution."""
+
+    __tablename__ = "controlled_agent_executions"
+    __table_args__ = (
+        UniqueConstraint("id", "user_id", "workspace_id", name="uq_agent_execution_scope"),
+        CheckConstraint("schema_version = 'controlled-agent-v1'", name="ck_agent_execution_schema"),
+        CheckConstraint(
+            "role IN ('universe_coordinator', 'galaxy_analyst', "
+            "'solar_system_researcher', 'planet_specialist', 'evidence_verifier', "
+            "'drafting_assistant', 'controlled_action_executor')",
+            name="ck_agent_execution_role",
+        ),
+        Index("ix_agent_execution_owner_created", "user_id", "workspace_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    role: Mapped[str] = mapped_column(String(40), nullable=False)
+    context_snapshot_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    context_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    plan_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    grant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ControlledAgentExecutionState(Base):
+    __tablename__ = "controlled_agent_execution_states"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_executions.id",
+                "controlled_agent_executions.user_id",
+                "controlled_agent_executions.workspace_id",
+            ],
+            name="fk_agent_state_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("schema_version = 'controlled-agent-v1'", name="ck_agent_state_schema"),
+        CheckConstraint(
+            "status IN ('proposed', 'awaiting_approval', 'ready', 'running', 'succeeded', "
+            "'failed', 'cancelled', 'denied')",
+            name="ck_agent_state_status",
+        ),
+        Index("ix_agent_state_execution_time", "execution_id", "recorded_at", "state_id"),
+    )
+
+    state_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    safe_reason_code: Mapped[str | None] = mapped_column(String(64))
+
+
+class ControlledAgentContextSnapshot(Base):
+    __tablename__ = "controlled_agent_context_snapshots"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_executions.id",
+                "controlled_agent_executions.user_id",
+                "controlled_agent_executions.workspace_id",
+            ],
+            name="fk_agent_context_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("execution_id", name="uq_agent_context_execution"),
+        CheckConstraint("schema_version = 'controlled-agent-v1'", name="ck_agent_context_schema"),
+        Index("ix_agent_context_owner_execution", "user_id", "workspace_id", "execution_id"),
+    )
+
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ControlledAgentPlanSnapshot(Base):
+    __tablename__ = "controlled_agent_plan_snapshots"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_executions.id",
+                "controlled_agent_executions.user_id",
+                "controlled_agent_executions.workspace_id",
+            ],
+            name="fk_agent_plan_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("execution_id", name="uq_agent_plan_execution"),
+        CheckConstraint("schema_version = 'controlled-agent-v1'", name="ck_agent_plan_schema"),
+        Index("ix_agent_plan_owner_execution", "user_id", "workspace_id", "execution_id"),
+    )
+
+    plan_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ControlledAgentCapabilityGrant(Base):
+    __tablename__ = "controlled_agent_capability_grants"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_executions.id",
+                "controlled_agent_executions.user_id",
+                "controlled_agent_executions.workspace_id",
+            ],
+            name="fk_agent_grant_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("execution_id", name="uq_agent_grant_execution"),
+        UniqueConstraint(
+            "grant_id", "execution_id", "user_id", "workspace_id", name="uq_agent_grant_scope"
+        ),
+        CheckConstraint("schema_version = 'controlled-agent-v1'", name="ck_agent_grant_schema"),
+        CheckConstraint("expires_at > issued_at", name="ck_agent_grant_time_order"),
+        CheckConstraint(
+            "(approval_required = false AND approval_id IS NULL) OR "
+            "(approval_required = true AND approval_id IS NOT NULL)",
+            name="ck_agent_grant_approval_binding",
+        ),
+        Index("ix_agent_grant_owner_execution", "user_id", "workspace_id", "execution_id"),
+        Index("ix_agent_grant_expiry", "expires_at"),
+    )
+
+    grant_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    role: Mapped[str] = mapped_column(String(40), nullable=False)
+    context_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    approval_id: Mapped[uuid.UUID | None] = mapped_column()
+
+
+class ControlledAgentGrantRevocation(Base):
+    __tablename__ = "controlled_agent_grant_revocations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["grant_id", "execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_capability_grants.grant_id",
+                "controlled_agent_capability_grants.execution_id",
+                "controlled_agent_capability_grants.user_id",
+                "controlled_agent_capability_grants.workspace_id",
+            ],
+            name="fk_agent_revocation_grant_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("grant_id", name="uq_agent_revocation_grant"),
+        CheckConstraint(
+            "schema_version = 'controlled-agent-v1'", name="ck_agent_revocation_schema"
+        ),
+        Index("ix_agent_revocation_owner_execution", "user_id", "workspace_id", "execution_id"),
+    )
+
+    revocation_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    grant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    revoked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+
+
+class ControlledAgentApproval(Base):
+    __tablename__ = "controlled_agent_approvals"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["grant_id", "execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_capability_grants.grant_id",
+                "controlled_agent_capability_grants.execution_id",
+                "controlled_agent_capability_grants.user_id",
+                "controlled_agent_capability_grants.workspace_id",
+            ],
+            name="fk_agent_approval_grant_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "approval_id",
+            "execution_id",
+            "user_id",
+            "workspace_id",
+            name="uq_agent_approval_scope",
+        ),
+        CheckConstraint("schema_version = 'controlled-agent-v1'", name="ck_agent_approval_schema"),
+        CheckConstraint("decision IN ('approved', 'denied')", name="ck_agent_approval_decision"),
+        CheckConstraint("expires_at > decided_at", name="ck_agent_approval_time_order"),
+        Index("ix_agent_approval_owner_execution", "user_id", "workspace_id", "execution_id"),
+        Index("ix_agent_approval_expiry", "expires_at"),
+    )
+
+    approval_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    grant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    context_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ControlledAgentPolicyDecision(Base):
+    __tablename__ = "controlled_agent_policy_decisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_executions.id",
+                "controlled_agent_executions.user_id",
+                "controlled_agent_executions.workspace_id",
+            ],
+            name="fk_agent_policy_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "decision_id",
+            "execution_id",
+            "user_id",
+            "workspace_id",
+            name="uq_agent_policy_scope",
+        ),
+        CheckConstraint("schema_version = 'controlled-agent-v1'", name="ck_agent_policy_schema"),
+        CheckConstraint(
+            "outcome IN ('allow', 'deny', 'approval_required')", name="ck_agent_policy_outcome"
+        ),
+        Index("ix_agent_policy_execution_time", "execution_id", "evaluated_at", "decision_id"),
+    )
+
+    decision_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(24), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    grant_id: Mapped[uuid.UUID | None] = mapped_column()
+    approval_id: Mapped[uuid.UUID | None] = mapped_column()
+    context_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class ControlledAgentApprovalConsumption(Base):
+    __tablename__ = "controlled_agent_approval_consumptions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["approval_id", "execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_approvals.approval_id",
+                "controlled_agent_approvals.execution_id",
+                "controlled_agent_approvals.user_id",
+                "controlled_agent_approvals.workspace_id",
+            ],
+            name="fk_agent_consumption_approval_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["policy_decision_id", "execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_policy_decisions.decision_id",
+                "controlled_agent_policy_decisions.execution_id",
+                "controlled_agent_policy_decisions.user_id",
+                "controlled_agent_policy_decisions.workspace_id",
+            ],
+            name="fk_agent_consumption_policy_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("approval_id", name="uq_agent_consumption_approval"),
+        CheckConstraint(
+            "schema_version = 'controlled-agent-v1'", name="ck_agent_consumption_schema"
+        ),
+        Index("ix_agent_consumption_owner_execution", "user_id", "workspace_id", "execution_id"),
+    )
+
+    consumption_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    approval_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    policy_decision_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    consumed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ControlledAgentAuditEvent(Base):
+    __tablename__ = "controlled_agent_audit_events"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_executions.id",
+                "controlled_agent_executions.user_id",
+                "controlled_agent_executions.workspace_id",
+            ],
+            name="fk_agent_audit_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("schema_version = 'controlled-agent-v1'", name="ck_agent_audit_schema"),
+        Index("ix_agent_audit_execution_time", "execution_id", "recorded_at", "event_id"),
+    )
+
+    event_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    attributes: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
+
+
+CONTROLLED_AGENT_IMMUTABLE_MODELS = (
+    ControlledAgentExecution,
+    ControlledAgentExecutionState,
+    ControlledAgentContextSnapshot,
+    ControlledAgentPlanSnapshot,
+    ControlledAgentCapabilityGrant,
+    ControlledAgentGrantRevocation,
+    ControlledAgentApproval,
+    ControlledAgentPolicyDecision,
+    ControlledAgentApprovalConsumption,
+    ControlledAgentAuditEvent,
+)
+
+
+def _reject_controlled_agent_mutation(_mapper: Any, _connection: Any, target: object) -> None:
+    raise ValueError(f"{type(target).__name__} records are append-only")
+
+
+for _immutable_model in CONTROLLED_AGENT_IMMUTABLE_MODELS:
+    event.listen(_immutable_model, "before_update", _reject_controlled_agent_mutation)
+    event.listen(_immutable_model, "before_delete", _reject_controlled_agent_mutation)

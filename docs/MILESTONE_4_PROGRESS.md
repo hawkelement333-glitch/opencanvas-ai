@@ -46,18 +46,34 @@ Trace/audit requirements, deterministic demo constraints, failure rules, prohibi
 - Added a pure, side-effect-free, deny-by-default policy evaluator with exact ownership, scope,
   resource, hash, validity, revocation, approval, and replay checks.
 - Added deterministic unit coverage for contract immutability and policy denial boundaries.
+- Completed Milestone 4.1B persistence mapping for every 4.1A security contract.
+- Added append-only database and ORM enforcement, composite ownership constraints, and indexed
+  scoped reads.
+- Added atomic, unique approval consumption that revalidates stored canonical hashes and records
+  policy outcomes.
+- Added one bounded, authenticated, read-only execution-inspection endpoint that omits raw payloads
+  and secret-bearing fields.
+- Documented evidence retention, expiry-versus-deletion, future hold requirements, and the privacy
+  policy work required before active production use.
 
 ## Current phase
 
-- Milestone 4.1 first control-plane contract checkpoint validation and handoff.
+- Milestone 4.1B persistence-boundary validation and handoff. Milestone 4.2 is unstarted.
 
 ## Files changed in this checkpoint
 
-- `apps/api/opencanvas_api/services/agents/__init__.py`
-- `apps/api/opencanvas_api/services/agents/contracts.py`
-- `apps/api/opencanvas_api/services/agents/policy.py`
-- `apps/api/tests/test_agent_contracts.py`
-- `apps/api/tests/test_agent_policy.py`
+- `apps/api/alembic/versions/20260721_0007_controlled_agent_persistence.py`
+- `apps/api/opencanvas_api/db/models.py`
+- `apps/api/opencanvas_api/services/agents/persistence.py`
+- `apps/api/opencanvas_api/api/agent_schemas.py`
+- `apps/api/opencanvas_api/api/routes/agents.py`
+- `apps/api/opencanvas_api/api/router.py`
+- `apps/api/tests/agent_fixtures.py`
+- `apps/api/tests/test_agent_persistence.py`
+- `apps/api/tests/test_agent_persistence_schema.py`
+- `apps/api/tests/test_agent_api.py`
+- `apps/api/tests/test_migration.py`
+- `scripts/validate_migrations.py`
 - `docs/MILESTONE_4_CONTROLLED_AGENT_ARCHITECTURE.md`
 - `docs/MILESTONE_4_PROGRESS.md`
 - `docs/SECURITY_MODEL.md`
@@ -65,9 +81,9 @@ Trace/audit requirements, deterministic demo constraints, failure rules, prohibi
 
 ## Runtime boundary confirmation
 
-- No agent runtime, provider call, tool adapter, API route, database model, migration, or dependency
-  was added. A migration was intentionally deferred until table ownership, retention, transaction,
-  and read-repository designs are reviewed against these contracts.
+- No agent runtime, provider call, tool adapter, mutation API, dependency, or production service was
+  added. The new migration and models persist inert control-plane evidence only; the new API route
+  is GET-only inspection.
 - No document-worker, queue, heartbeat, retry, or scheduler implementation was changed.
 - No autonomous execution, recursive delegation, decision loop, or background behavior was added.
 - No external AI or embedding call was added.
@@ -76,22 +92,44 @@ Trace/audit requirements, deterministic demo constraints, failure rules, prohibi
 
 ## Validation status
 
-- Focused contract/policy tests: `17 passed`.
-- Complete backend tests, including relevant authentication, workspace-isolation, Trace, demo-mode,
-  canonical persistence, and provider regressions: `135 passed`.
+- Focused 4.1A/4.1B contract, policy, persistence, schema, API, and migration tests: `40 passed`.
+- Complete backend suite: `153 passed`.
+- Security-marked backend suite: `26 passed`, `127 deselected`.
+- Demo-mode regression suite: `10 passed`.
+- Deterministic demo reset, isolation/provenance check, and startup smoke: passed; API readiness,
+  replay runtime, and web page were ready without live providers.
+- Migration validator: passed upgrade to `20260721_0007`, downgrade to `20260721_0006`, and
+  re-upgrade to `20260721_0007`.
 - Full backend Ruff: passed.
-- Full backend strict mypy: passed for `48` source files.
-- Focused Prettier and Ruff formatting checks: passed.
-- Repository hygiene and secret-pattern scan: passed for `193` source files.
+- Full backend strict mypy: passed for `51` source files.
+- Focused Ruff formatting for all changed Python files: passed (`11` files already formatted).
+- Focused Prettier for the four changed Markdown files: passed.
+- Full backend Ruff formatting still reports the pre-existing untouched
+  `apps/api/scripts/demo.py` backlog; that unrelated file remains unchanged.
+- Repository hygiene and built-in secret scan: passed for `201` source files.
 - Final staged `git diff --check`: passed.
-- Prohibited-scope scan of the new Python package and tests found no provider, HTTP/network,
-  subprocess, task/loop, worker, queue, scheduler, delegation, or tool-call implementation.
-- Staged scope: exactly five contract/test source files and four controlled-agent documentation
-  files; no migration, dependency, configuration, demo, fixture, UI, route, worker, or provider
-  file.
+- Staged scope: exactly 16 Milestone 4.1B migration, model, repository, read-only API, test,
+  validation-script, and documentation files.
+- Prohibited-scope scan found no provider/embedding integration, HTTP/network client, subprocess,
+  task loop, background behavior, tool call, queue, scheduler, job, or delegation implementation in
+  the new production source.
 - Protected tag recheck: unchanged at tag object
   `acbde89b6e2cc3e41c372887794726d393836716`, resolving to
   `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+
+## Milestone 4.1B completion confirmation
+
+- Security-relevant tables reject UPDATE and DELETE; lifecycle, revocation, decision, and
+  consumption history is append-only.
+- Stored snapshot payloads retain the 4.1A canonical digest and consumption fails if the payload,
+  digest, or execution binding changes.
+- Approval consumption is transactionally paired with its allow decision and protected by a
+  unique approval constraint; repeated consumption produces an auditable denial.
+- Repository and API reads require the authenticated user, owned workspace, and execution scope.
+- The only endpoint added is GET-only, bounded, and omits raw payloads and secret-bearing fields.
+- No active agent execution, provider, tool, effect, worker, queue, scheduler, job, delegation,
+  external call, or autonomous behavior was added.
+- Demo fixtures and behavior remain unchanged, and Milestone 4.2 remains unstarted.
 
 ## Policy boundary confirmation
 
@@ -106,18 +144,22 @@ Trace/audit requirements, deterministic demo constraints, failure rules, prohibi
 ## Known pre-existing limitations
 
 - Full-repository Prettier has an existing untouched-file backlog recorded by Milestone 3.5/3.75.
-- Docker/PostgreSQL/live-provider deployment validation remains outside this documentation-only
-  checkpoint.
+- Docker/PostgreSQL/live-provider deployment validation remains outside this persistence-boundary
+  checkpoint. The migration implements PostgreSQL append-only triggers, but this local gate
+  exercised SQLite only.
 - Existing document processing has a persisted database job and independent worker. It is not a
   dedicated agent execution platform.
+- Restrictive audit-record deletion preserves evidence but requires a reviewed privacy-erasure,
+  legal-hold, retention-duration, and cryptographic-erasure policy before active production use.
 
 ## Next exact implementation step
 
-After this first Milestone 4.1 checkpoint is committed and pushed, review the frozen contracts as
-the persistence boundary. The next separately approved 4.1 checkpoint should design append-only
-tables, constraints, approval-consumption transactions, retention/deletion semantics, ownership-
-checked read repositories, and read-only inspection APIs. It must still add no provider calls,
-tools, effects, agent jobs, schedulers, or delegation. Milestone 4.2 must not start automatically.
+After this final Milestone 4.1B checkpoint is committed and pushed, stop. Milestone 4.2 requires a
+separate approval. Its exact proposed scope is one synchronous, explicitly user-initiated,
+cancellable, read-only execution over one owned canvas and selected immutable context, using the
+existing provider configuration and limits. It may retrieve selected sources, generate a grounded
+draft, and verify citations. It must add no durable workspace write, effect tool, agent job, queue,
+scheduler, or delegation.
 
 ## Recovery prompt
 

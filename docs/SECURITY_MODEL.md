@@ -124,6 +124,27 @@ and database mutation. They confer no authority merely by existing in client or 
 Server authentication, ownership checks, resource-version checks, and persistence constraints
 remain mandatory when the contracts are integrated in a later reviewed checkpoint.
 
+Milestone 4.1B implements that persistence boundary without activating agents. Security records are
+append-only through ORM mutation rejection and database UPDATE/DELETE triggers. Composite foreign
+keys preserve execution/user/workspace scope, and ownership-scoped repository queries join the
+current workspace owner before returning data. Unknown, foreign, deleted-workspace, or malformed
+identifiers share a not-found boundary.
+
+One-time approval use is enforced by a unique database constraint. The repository reloads the
+stored context, plan, grant, approval, revocations, and existing consumption IDs; verifies their
+original canonical digests; evaluates the pure policy contract; and writes an allow decision and
+consumption in one savepoint. Expired, revoked, replayed, altered, or scope-mismatched authority
+does not create a consumption. Denial decisions for an owned execution remain auditable.
+
+The inspection API is GET-only, bounded to 100 history rows per collection, and omits raw contract
+payloads, session IDs, issuing-service data, secrets, headers, and credentials. There is still no
+agent controller, provider boundary, tool, effect, worker, queue, scheduler, or delegation path.
+
+The new tables use restrictive deletion to preserve security evidence. Before active production
+use, privacy erasure, retention duration, legal/security holds, redaction, and cryptographic-erasure
+policy must be reconciled with account deletion. No cleanup worker or automatic deletion behavior
+is introduced here.
+
 ## Logging and Trace
 
 Trace is durable provenance and can contain object associations, structured metadata, safe errors, and operation names. AI execution tables intentionally contain instructions, selected content snapshots, retrieved passages, and output. These records may be sensitive even though they are not ordinary application logs.
