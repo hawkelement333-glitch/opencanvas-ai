@@ -2,6 +2,67 @@
 
 Last updated: 2026-07-21 (America/Chicago)
 
+## Milestone 4.1B documentation completion checkpoint
+
+### Git state at checkpoint preparation
+
+- Current branch: `milestone-4-controlled-agents`.
+- Starting local and remote SHA: `3770782e3d4f46306bdbdf5fd2cdb55309767b25`.
+- Protected `competition-demo-v1` peeled commit:
+  `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- Working tree at start: clean.
+- Milestone 4.2 work started: **No**.
+
+### Documentation completed
+
+- Added `docs/CONTROLLED_AGENT_DATA_POLICY.md` as an unapproved engineering policy proposal.
+- Classified all ten append-only controlled-agent record families and their common identifiers,
+  source references, hashes, timestamps, safe errors, and provider/model metadata.
+- Proposed cautious retention defaults: 12 months for completed/failed execution history, grants,
+  revocations, approvals, consumptions, and denied policy decisions; 90 days for context/plan
+  snapshots and export-request records; 24 months for security audit events; and 30–90 days for
+  operational logs. Every duration is explicitly subject to privacy, legal, security, and
+  operations approval.
+- Defined a future erasure model using access revocation, active-content deletion,
+  pseudonymization, redacted projections, disposition evidence, and cryptographic erasure without
+  rewriting immutable history or historical hashes.
+- Defined the required legal-hold contract. No legal-hold API or approved process exists.
+- Defined purpose-specific inspection, user, export, and security views. The current safe GET
+  projection is only a partial foundation; a production redaction workflow is not implemented.
+- Marked envelope encryption, per-user/workspace keys, and audited key destruction as required
+  before production acceptance of sensitive snapshot payloads. They are not implemented.
+- Completed the engineering enforcement gap table with current evidence, owners, target reviews,
+  and production blockers.
+- PostgreSQL trigger validation remains **NOT RUN** because PostgreSQL/Docker was unavailable. The
+  authoritative integration test exists but is not represented as passed.
+
+### Focused validation
+
+- Changed-document Prettier: passed for `docs/CONTROLLED_AGENT_DATA_POLICY.md` and this ledger.
+- `git diff --check`: passed.
+- Repository hygiene and built-in secret scan: passed for `206` source files.
+- Final scope audit: passed; exactly two Markdown files changed and no source, migration,
+  configuration, dependency, UI, runtime, worker, queue, scheduler, provider, tool, or effect file
+  changed.
+- Full backend, frontend, migration, demo, and PostgreSQL suites: not run because this checkpoint
+  changes documentation only.
+
+### Remaining production blockers
+
+- Policy approval by engineering, security, privacy, legal/compliance, and operations.
+- Authoritative PostgreSQL trigger execution in a PostgreSQL-capable environment.
+- Approved retention and deletion orchestration, pseudonymization, redacted/export/operator views,
+  legal holds, per-user/workspace envelope encryption and key destruction, backup erasure, and
+  controlled-agent incident-response operations.
+- Reconciliation of restrictive append-only evidence with account and workspace deletion.
+
+### Exact next step
+
+Commit and normally push this documentation-only checkpoint, then stop. Milestone 4.2 remains
+unstarted and requires separate explicit approval. Do not implement policy enforcement, retention
+jobs, holds, encryption, mutation APIs, agent runtime behavior, or later-milestone work in this
+checkpoint.
+
 ## Recovery checkpoint — PostgreSQL trigger test architecture
 
 ### Git state at checkpoint preparation
