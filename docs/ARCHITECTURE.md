@@ -182,6 +182,19 @@ backup/restore validation, centralized monitoring, and a formal retention policy
 
 ## Deferred architecture
 
+### Milestone 4 controlled-agent planning boundary
+
+Milestone 4.0 adds architecture documentation only. No active agent, tool adapter, agent API,
+database model, migration, queue, scheduler, provider call, or production service is present. The
+existing document-processing queue and `DocumentWorker` remain ingestion-specific infrastructure;
+they are not a general agent runtime.
+
+Future controlled-agent work must inherit the current authentication, workspace ownership,
+selected-context retrieval, provider fail-closed behavior, usage controls, optimistic revisions,
+and Trace atomicity. The normative plan is
+`MILESTONE_4_CONTROLLED_AGENT_ARCHITECTURE.md`; the visual-role bridge remains in
+`AGENT_UNIVERSE_ARCHITECTURE.md`.
+
 Organizations/collaboration, OCR, malware scanning, broker-backed processing, automatic
 inference/conflict classification, a complete Trace explorer, canonical ingestion adapters,
 hybrid workspace search, and semantic memory remain deferred. See `KNOWN_LIMITATIONS.md`.

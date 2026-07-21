@@ -34,7 +34,9 @@ GET /traces/{traceId}
 GET /trace-events?traceId=&parentTraceId=&workspaceId=&objectId=&eventType=&actorType=&status=&limit=
 ```
 
-Results are chronological by occurrence time and event ID. These endpoints are read-only. Because authentication is not implemented, they must not be exposed to an untrusted network.
+Results are chronological by occurrence time and event ID. These endpoints are read-only and use
+the current authenticated principal plus server-side workspace ownership checks. Demo mode uses its
+isolated synthetic principal and data boundary.
 
 ## AI execution evidence
 
@@ -64,6 +66,19 @@ Application logs support operations and diagnostics. Trace is product provenance
 ## Trace is not domain-event delivery
 
 Canonical domain events notify replaceable in-process subscribers. Subscribers are failure-isolated and do not provide durable delivery. Trace remains queryable persistence. External side effects eventually require a transactional outbox.
+
+## Planned controlled-agent evidence
+
+Milestone 4.0 adds no agent events or schemas. A future controlled-agent execution must extend
+Trace with the effective role and scope, plan/context/grant hashes, policy decisions, approval
+status, bounded tool intents and outcomes, provider/model configuration, usage/cost, cancellation,
+created or updated object versions, and rollback/compensation status. Detailed sensitive context
+belongs in authorized execution snapshots rather than duplicated event metadata.
+
+An effect cannot be reported as successful if its required approval, policy decision, tool result,
+or Trace write is missing. Future agent jobs, if accepted, require a dedicated audit path and cannot
+reuse document-worker heartbeat as evidence of agent health. See
+`MILESTONE_4_CONTROLLED_AGENT_ARCHITECTURE.md`.
 
 ## Current inspection workflow
 

@@ -97,6 +97,20 @@ In live mode, the API may send the user instruction, selected note content, retr
 
 In mock/demo mode, no OpenAI request is made. Judges should use mock/demo mode for non-sensitive deterministic evaluation.
 
+## Controlled-agent planning boundary
+
+Milestone 4.0 adds no active agent behavior. Future controlled agents are an additional untrusted
+decision source behind the API policy boundary; model output can propose but cannot authorize an
+action. Every future provider or tool attempt must pass a server-side policy enforcement point with
+an authenticated user, one owned workspace, an immutable context/plan hash, a narrow expiring
+capability grant, current resource-version checks, and explicit approval for durable effects.
+
+External, destructive, privilege-changing, cross-workspace, arbitrary-network, shell, code,
+filesystem, raw-database, and credential operations remain prohibited throughout Milestone 4.
+Recursive delegation, self-scheduling, ambient execution, and agent-created permissions are also
+prohibited. The detailed threat model and phase gates are in
+`MILESTONE_4_CONTROLLED_AGENT_ARCHITECTURE.md`.
+
 ## Logging and Trace
 
 Trace is durable provenance and can contain object associations, structured metadata, safe errors, and operation names. AI execution tables intentionally contain instructions, selected content snapshots, retrieved passages, and output. These records may be sensitive even though they are not ordinary application logs.

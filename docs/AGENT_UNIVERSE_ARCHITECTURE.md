@@ -1,16 +1,30 @@
-# Future Agent Universe Architecture
+# Agent Universe Architecture Bridge
 
-No agents, subagents, delegation, travel, or autonomous operation are active in Milestone 3.75.
+Milestone 4.0 is planning only. No agents, subagents, delegation, travel, tools, queues, schedules,
+or autonomous operation are active.
 
-This document records future extension points for the living knowledge universe. It is design and architecture preparation only. It does not add active agent execution, database tables, background autonomous work, provider consumption, or user-visible agent activity.
+This document connects the Milestone 3.75 living-universe presentation to future controlled-agent
+roles. Visual roles remain semantic labels and never grant execution authority. The normative
+Milestone 4 control-plane, permissions, approval, Trace, failure, and phase contract is
+`MILESTONE_4_CONTROLLED_AGENT_ARCHITECTURE.md`.
+
+This bridge does not add active execution, database tables, background work, provider consumption,
+or user-visible agent activity.
 
 ## Scope Levels
 
-- Universe orchestrator: future application-level coordinator across authorized galaxies.
-- Galaxy agent: future workspace-scoped helper limited to one user-owned workspace.
-- Solar-system subagent: future project-cluster helper limited to one canvas or project area.
-- Planet specialist: future object-scoped helper limited to one document, note, answer, or durable knowledge object.
-- Lower-level worker: future task helper limited to citations, chunks, claims, passages, or sections.
+- Universe coordinator: future metadata-only router; it has no implicit content or cross-workspace
+  authority.
+- Galaxy analyst: future read-only helper limited to one user-owned workspace.
+- Solar-system researcher: future selected-context helper limited to one canvas or project area.
+- Planet specialist: future object-scoped helper limited to one document, note, answer, or durable
+  knowledge object.
+- Evidence verifier: future read-only helper limited to exact citations, chunks, claims, passages,
+  or sections.
+- Controlled action executor: future effectful role limited to an exact approved action plan.
+
+These roles are descriptions, not permissions. A future server-minted capability grant determines
+the effective scope and allowed tools for one execution.
 
 ## Ownership and Isolation
 
@@ -29,7 +43,7 @@ Permissions should narrow as scope becomes smaller:
 - Galaxy scope is bound to one workspace.
 - Solar-system scope is bound to one canvas or project cluster.
 - Planet scope is bound to one object and its authorized child records.
-- Lower-level scope is bound to specific evidence fragments or processing records.
+- Evidence-fragment scope is bound to specific citations, chunks, claims, passages, or sections.
 
 Future records should store the effective permission scope used for each action.
 
@@ -66,7 +80,9 @@ No API keys, authorization headers, hidden system instructions, private provider
 
 ## Delegation Records
 
-If delegation is added in a future milestone, records should capture:
+Delegation is disabled in Milestone 4.0–4.3. If bounded child work is explicitly accepted in 4.4,
+it must be nonrecursive, limited to one child level, and strictly narrower than the parent grant.
+Records should capture:
 
 - Parent execution
 - Child execution
@@ -125,13 +141,13 @@ Future agents require explicit human approval before:
 Failures must remain scoped:
 
 - A failed planet specialist must not corrupt the whole galaxy.
-- A delayed lower-level worker must not resurrect deleted documents.
+- Delayed future agent work must not resurrect deleted documents or objects.
 - Failed or partial processing must not appear searchable.
 - Retry exhaustion must produce diagnosable permanent-failure state.
 
 ## Future Migration Needs
 
-Future implementation may require migrations for:
+Milestone 4.1 may propose reviewed migrations for:
 
 - Agent scope records
 - Delegation records
@@ -140,4 +156,5 @@ Future implementation may require migrations for:
 - Agent-specific usage accounting
 - Agent Trace relationships
 
-Those migrations are intentionally not added in Milestone 3.75 because no active agent feature is being implemented.
+Those migrations are intentionally not added in Milestone 4.0 because this checkpoint is planning
+only.
