@@ -52,6 +52,7 @@ _STOPWORDS = {
 class EmbeddingProvider(Protocol):
     name: str
     model: str
+    configuration_version: str
     dimensions: int
     mock: bool
 
@@ -61,6 +62,7 @@ class EmbeddingProvider(Protocol):
 class MockEmbeddingProvider:
     name = "mock"
     model = "mock-term-hash-v1"
+    configuration_version = "deterministic-mock-v1"
     dimensions = 1536
     mock = True
 
@@ -80,8 +82,10 @@ class OpenAIEmbeddingProvider:
         dimensions: int = 1536,
         batch_size: int = 64,
         timeout_seconds: float = 45.0,
+        configuration_version: str = "openai-embeddings-v1",
     ) -> None:
         self.model = model
+        self.configuration_version = configuration_version
         self.dimensions = dimensions
         self._api_key = api_key
         self._batch_size = batch_size
@@ -119,14 +123,17 @@ class OpenAIEmbeddingProvider:
 
 
 def build_embedding_provider(settings: Settings) -> EmbeddingProvider:
-    if settings.effective_embedding_provider == "mock" or settings.openai_api_key is None:
+    if settings.embedding_provider == "mock":
         return MockEmbeddingProvider()
+    if settings.openai_api_key is None:
+        raise EmbeddingProviderError("The configured embedding provider is unavailable.")
     return OpenAIEmbeddingProvider(
         api_key=settings.openai_api_key,
         model=settings.openai_embedding_model,
         dimensions=settings.embedding_dimensions,
         batch_size=settings.embedding_batch_size,
         timeout_seconds=settings.openai_timeout_seconds,
+        configuration_version=settings.embedding_provider_configuration_version,
     )
 
 

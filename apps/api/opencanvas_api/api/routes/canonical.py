@@ -36,10 +36,16 @@ from opencanvas_api.api.canonical_schemas import (
     WorkspaceOut,
     WorkspaceUpdate,
 )
-from opencanvas_api.api.dependencies import get_canonical_service, get_session
+from opencanvas_api.api.dependencies import (
+    PrincipalDep,
+    get_canonical_service,
+    get_session,
+    require_path_workspace_principal,
+)
 from opencanvas_api.api.errors import ApiError
 from opencanvas_api.api.serialization import utc
 from opencanvas_api.db.models import (
+    SYSTEM_WORKSPACE_ID,
     CanonicalChunk,
     CanonicalDocument,
     CanonicalExecution,
@@ -74,7 +80,7 @@ from opencanvas_api.services.canonical.service import (
     WorkspaceQueryFilters,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_path_workspace_principal)])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CanonicalServiceDep = Annotated[CanonicalService, Depends(get_canonical_service)]
 
@@ -96,11 +102,15 @@ class _ObjectFields(TypedDict):
 )
 async def create_workspace(
     payload: WorkspaceCreate,
+    principal: PrincipalDep,
     service: CanonicalServiceDep,
     session: SessionDep,
 ) -> WorkspaceOut:
+    values = payload.model_dump()
+    values["owner_id"] = principal.user_id
+    values["actor_id"] = str(principal.user_id)
     workspace = await _mutate(
-        service.create_workspace(CreateWorkspaceInput.model_validate(payload.model_dump())),
+        service.create_workspace(CreateWorkspaceInput.model_validate(values)),
         session,
     )
     return _workspace_out(workspace)
@@ -109,6 +119,7 @@ async def create_workspace(
 @router.get("/workspaces", response_model=list[WorkspaceOut])
 async def list_workspaces(
     service: CanonicalServiceDep,
+    principal: PrincipalDep,
     owner_id: Annotated[uuid.UUID | None, Query(alias="ownerId")] = None,
     lifecycle_state: Annotated[LifecycleState | None, Query(alias="lifecycleState")] = None,
     include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
@@ -118,7 +129,7 @@ async def list_workspaces(
     workspaces = await _read(
         service.list_workspaces(
             WorkspaceQueryFilters(
-                owner_id=owner_id,
+                owner_id=principal.user_id,
                 lifecycle_state=_service_state(lifecycle_state),
                 include_deleted=include_deleted,
                 limit=limit,
@@ -126,7 +137,9 @@ async def list_workspaces(
             )
         )
     )
-    return [_workspace_out(workspace) for workspace in workspaces]
+    return [
+        _workspace_out(workspace) for workspace in workspaces if workspace.id != SYSTEM_WORKSPACE_ID
+    ]
 
 
 @router.get("/workspaces/{workspace_id}", response_model=WorkspaceOut)
@@ -144,11 +157,14 @@ async def get_workspace(
 async def update_workspace(
     workspace_id: uuid.UUID,
     payload: WorkspaceUpdate,
+    principal: PrincipalDep,
     service: CanonicalServiceDep,
     session: SessionDep,
 ) -> WorkspaceOut:
     values = payload.model_dump(exclude_unset=True)
     values["workspace_id"] = workspace_id
+    values["owner_id"] = principal.user_id
+    values["actor_id"] = str(principal.user_id)
     workspace = await _mutate(
         service.update_workspace(UpdateWorkspaceInput.model_validate(values)),
         session,

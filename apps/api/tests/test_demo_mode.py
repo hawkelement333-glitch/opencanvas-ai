@@ -185,6 +185,7 @@ async def test_runtime_endpoint_distinguishes_replay_from_live_mode(client, app)
     assert response.status_code == 200
     assert response.json() == {
         "mode": "deterministic_replay",
+        "appMode": "demo",
         "externalAiEnabled": False,
         "label": "Build Week demo · deterministic replay · no external AI calls",
         "demoCanvasId": str(DEMO_CANVAS_ID),

@@ -28,6 +28,7 @@ class RetrievedChunk:
     rank: int = 0
     included_in_context: bool = True
     exclusion_reason: str | None = None
+    document_version: int = 1
 
     @property
     def source_id(self) -> str:
@@ -159,6 +160,7 @@ def _retrieved(
         char_start=chunk.char_start,
         char_end=chunk.char_end,
         score=max(-1.0, min(1.0, score)),
+        document_version=chunk.document_version,
     )
 
 

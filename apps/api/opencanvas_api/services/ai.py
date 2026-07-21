@@ -58,6 +58,7 @@ class GroundedSource:
     char_start: int
     char_end: int
     score: float
+    document_version: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +102,7 @@ class AIProviderError(RuntimeError):
 class AIProvider(Protocol):
     name: str
     model: str
+    configuration_version: str
     mock: bool
 
     async def generate(self, instruction: str, context: ContextBundle) -> AIResult: ...
@@ -116,6 +118,7 @@ class AIProvider(Protocol):
 class MockAIProvider:
     name = "mock"
     model = "mock-context-v1"
+    configuration_version = "deterministic-mock-v1"
     mock = True
 
     async def generate(self, instruction: str, context: ContextBundle) -> AIResult:
@@ -165,10 +168,20 @@ class OpenAIResponsesProvider:
     name = "openai"
     mock = False
 
-    def __init__(self, *, api_key: str, model: str, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        timeout_seconds: float,
+        max_output_tokens: int = MAX_OUTPUT_TOKENS,
+        configuration_version: str = "openai-responses-v1",
+    ) -> None:
         self.model = model
+        self.configuration_version = configuration_version
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
+        self._max_output_tokens = max_output_tokens
 
     async def generate(self, instruction: str, context: ContextBundle) -> AIResult:
         prompt = (
@@ -182,7 +195,7 @@ class OpenAIResponsesProvider:
                 model=self.model,
                 instructions=SYSTEM_INSTRUCTIONS,
                 input=prompt,
-                max_output_tokens=MAX_OUTPUT_TOKENS,
+                max_output_tokens=self._max_output_tokens,
             )
         except Exception as exc:
             raise AIProviderError("The OpenAI request failed.") from exc
@@ -238,7 +251,7 @@ class OpenAIResponsesProvider:
                 instructions=GROUNDED_SYSTEM_INSTRUCTIONS,
                 input=prompt,
                 text_format=_StructuredGroundedAnswer,
-                max_output_tokens=MAX_OUTPUT_TOKENS,
+                max_output_tokens=self._max_output_tokens,
             )
         except Exception as exc:
             raise AIProviderError("The OpenAI grounded request failed.") from exc
@@ -282,15 +295,18 @@ def validate_grounded_result(
 
 
 def model_configuration(provider: AIProvider, *, grounded: bool) -> dict[str, object]:
+    prompt_version = GROUNDED_PROMPT_VERSION if grounded else NOTE_PROMPT_VERSION
     return {
         "provider": provider.name,
         "model": provider.model,
-        "systemInstructions": (GROUNDED_SYSTEM_INSTRUCTIONS if grounded else SYSTEM_INSTRUCTIONS),
-        "maxOutputTokens": MAX_OUTPUT_TOKENS,
+        "providerConfigurationVersion": getattr(
+            provider, "configuration_version", "unspecified-provider-contract-v1"
+        ),
+        "promptVersion": prompt_version,
+        "maxOutputTokens": getattr(provider, "_max_output_tokens", MAX_OUTPUT_TOKENS),
         "timeoutSeconds": getattr(provider, "_timeout_seconds", None),
         "structuredOutput": (
             {
-                "schema": _StructuredGroundedAnswer.model_json_schema(),
                 "version": STRUCTURED_GROUNDED_OUTPUT_VERSION,
             }
             if grounded
@@ -300,12 +316,14 @@ def model_configuration(provider: AIProvider, *, grounded: bool) -> dict[str, ob
 
 
 def build_ai_provider(settings: Settings) -> AIProvider:
-    if settings.effective_ai_provider == "mock":
+    if settings.ai_provider == "mock":
         return MockAIProvider()
     if settings.openai_api_key is None:
-        return MockAIProvider()
+        raise AIProviderError("The configured AI provider is unavailable.")
     return OpenAIResponsesProvider(
         api_key=settings.openai_api_key,
         model=settings.openai_model,
         timeout_seconds=settings.openai_timeout_seconds,
+        max_output_tokens=settings.ai_max_output_tokens,
+        configuration_version=settings.ai_provider_configuration_version,
     )

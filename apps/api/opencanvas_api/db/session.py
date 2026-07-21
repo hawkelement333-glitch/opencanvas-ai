@@ -4,7 +4,6 @@ from typing import Any
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -12,8 +11,17 @@ from sqlalchemy.ext.asyncio import (
 
 
 class Database:
-    def __init__(self, database_url: str) -> None:
-        self.engine: AsyncEngine = create_async_engine(database_url, pool_pre_ping=True)
+    def __init__(
+        self,
+        database_url: str,
+        *,
+        pool_size: int = 10,
+        pool_timeout_seconds: float = 15.0,
+    ) -> None:
+        options: dict[str, object] = {"pool_pre_ping": True}
+        if database_url.startswith("postgresql"):
+            options.update(pool_size=pool_size, pool_timeout=pool_timeout_seconds)
+        self.engine = create_async_engine(database_url, **options)
         if database_url.startswith("sqlite"):
             event.listen(self.engine.sync_engine, "connect", _enable_sqlite_foreign_keys)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)

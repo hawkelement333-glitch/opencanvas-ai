@@ -1684,3 +1684,132 @@ textarea:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+.account-shell {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 32px 18px;
+  color: var(--text);
+  background: radial-gradient(circle at 50% 20%, #16232b 0, #0b1014 48%, #070a0d 100%);
+}
+
+.account-card {
+  width: min(440px, 100%);
+  padding: 30px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(15, 22, 27, 0.94);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+}
+
+.account-card--wide {
+  width: min(620px, 100%);
+}
+.account-card__eyebrow {
+  color: #7fd5df;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.account-card h1 {
+  margin: 10px 0 8px;
+  font-size: 27px;
+}
+.account-card p {
+  color: var(--text-soft);
+  line-height: 1.55;
+}
+.account-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+}
+.account-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+.account-form input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--text);
+  background: #0a0f13;
+}
+.account-form button,
+.account-actions button {
+  padding: 11px 14px;
+  border: 1px solid rgba(97, 196, 214, 0.35);
+  border-radius: 9px;
+  color: #e9fcff;
+  background: rgba(73, 160, 176, 0.2);
+  cursor: pointer;
+}
+.account-form button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.account-links,
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 18px;
+}
+.account-links button {
+  padding: 0;
+  border: 0;
+  color: #77cad7;
+  background: transparent;
+  cursor: pointer;
+}
+.account-actions a,
+.account-card a {
+  align-self: center;
+  color: #77cad7;
+}
+.account-message {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(97, 196, 214, 0.24);
+  border-radius: 8px;
+  color: #bce7ed;
+  background: rgba(97, 196, 214, 0.08);
+  overflow-wrap: anywhere;
+}
+.environment-indicator {
+  margin-top: 12px;
+  padding: 8px;
+  border: 1px solid rgba(226, 175, 75, 0.35);
+  border-radius: 7px;
+  color: #e5c57d;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+.workspace-select,
+.workspace-empty {
+  width: calc(100% - 20px);
+  margin: 0 10px 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text-soft);
+  background: #0b1115;
+  font-size: 10px;
+}
+.workspace-empty {
+  cursor: pointer;
+}
+.canvas-sidebar__footer a {
+  color: inherit;
+  text-decoration: none;
+}
+.route-state > a {
+  color: #77cad7;
+  font-size: 12px;
+}

@@ -33,6 +33,7 @@ class Viewport(Point):
 
 class CanvasCreate(ApiModel):
     name: str = Field(min_length=1, max_length=120)
+    workspace_id: uuid.UUID | None = None
 
     @field_validator("name")
     @classmethod
@@ -67,6 +68,7 @@ class CanvasPatch(ApiModel):
 
 class CanvasOut(ApiModel):
     id: uuid.UUID
+    workspace_id: uuid.UUID
     name: str
     viewport: Viewport
     revision: int
@@ -75,13 +77,30 @@ class CanvasOut(ApiModel):
 
 
 DocumentFileType = Literal["pdf", "txt", "markdown", "docx"]
-DocumentStatus = Literal["processing", "ready", "failed"]
+DocumentStatus = Literal[
+    "uploaded",
+    "queued",
+    "processing",
+    "ready",
+    "retryable_failure",
+    "retrying",
+    "permanent_failure",
+    "deleting",
+    "deleted",
+    "failed",
+]
 DocumentProcessingStage = Literal[
     "uploading",
+    "queued",
+    "validating",
     "extracting",
     "chunking",
     "embedding",
+    "indexing",
     "ready",
+    "retrying",
+    "deleting",
+    "deleted",
     "failed",
 ]
 NodeType = Literal["note", "ai_response", "document"]
@@ -244,6 +263,7 @@ class AIQuery(ApiModel):
 class AIQueryOut(ApiModel):
     request_id: uuid.UUID
     response_id: uuid.UUID
+    trace_id: uuid.UUID
     node: NodeOut
     edges: list[EdgeOut]
     mock: bool

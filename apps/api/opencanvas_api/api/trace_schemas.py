@@ -23,6 +23,7 @@ class TraceEventOut(ApiModel):
     event_type: str
     actor_id: str | None = None
     actor_type: ActorType
+    user_id: uuid.UUID | None = None
     workspace_id: uuid.UUID | None = None
     object_id: uuid.UUID | None = None
     object_type: str | None = None

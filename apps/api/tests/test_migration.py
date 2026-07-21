@@ -67,7 +67,16 @@ def test_initial_migration_upgrades_sqlite(tmp_path: Path) -> None:
         node_id = uuid.uuid4().hex
         request_id = uuid.uuid4().hex
         response_id = uuid.uuid4().hex
-        connection.execute("INSERT INTO canvases (id, name) VALUES (?, ?)", (canvas_id, "Audit"))
+        workspace_id = uuid.uuid4().hex
+        system_user_id = "00000000000040008000000000000001"
+        connection.execute(
+            "INSERT INTO workspaces (id, name, owner_id) VALUES (?, ?, ?)",
+            (workspace_id, "Audit workspace", system_user_id),
+        )
+        connection.execute(
+            "INSERT INTO canvases (id, workspace_id, name) VALUES (?, ?, ?)",
+            (canvas_id, workspace_id, "Audit"),
+        )
         connection.execute(
             """INSERT INTO nodes
                (id, canvas_id, type, title, text, position_x, position_y)
@@ -76,10 +85,12 @@ def test_initial_migration_upgrades_sqlite(tmp_path: Path) -> None:
         )
         connection.execute(
             """INSERT INTO ai_requests
-               (id, canvas_id, instruction, selected_node_ids, context_snapshot,
-                provider, model, status)
-               VALUES (?, ?, 'Question', '[]', '[]', 'mock', 'mock', 'completed')""",
-            (request_id, canvas_id),
+               (id, trace_id, user_id, workspace_id, canvas_id, instruction,
+                selected_node_ids, context_snapshot, provider, model,
+                provider_configuration_version, execution_mode, status)
+               VALUES (?, ?, ?, ?, ?, 'Question', '[]', '[]', 'mock', 'mock',
+                       'test-v1', 'current_context', 'completed')""",
+            (request_id, request_id, system_user_id, workspace_id, canvas_id),
         )
         connection.execute(
             """INSERT INTO ai_responses (id, request_id, node_id, content)
@@ -112,7 +123,7 @@ def test_migration_uses_configured_database_url(
 
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("20260717_0004",)
+    assert revision == ("20260718_0005",)
 
 
 def test_phase_two_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) -> None:
@@ -144,7 +155,7 @@ def test_phase_two_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) ->
     command.upgrade(config, "head")
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("20260717_0004",)
+    assert revision == ("20260718_0005",)
 
 
 def test_trace_foundation_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) -> None:
@@ -169,7 +180,7 @@ def test_trace_foundation_migration_downgrades_and_reupgrades_sqlite(tmp_path: P
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
         indexes = {row[1] for row in connection.execute("PRAGMA index_list(trace_events)")}
-    assert revision == ("20260717_0004",)
+    assert revision == ("20260718_0005",)
     assert {
         "ix_trace_events_trace_time",
         "ix_trace_events_workspace_time",
@@ -210,7 +221,7 @@ def test_canonical_migration_backfills_canvases_and_reverses_sqlite(tmp_path: Pa
             "SELECT id, legacy_canvas_id FROM workspaces WHERE id = ?",
             (removed_canvas_id,),
         ).fetchone()
-    assert revision == ("20260717_0004",)
+    assert revision == ("20260718_0005",)
     assert workspaces == [
         (removed_canvas_id, "Removed canvas", 1, "active", "{}", removed_canvas_id),
         (retained_canvas_id, "Retained canvas", 1, "active", "{}", retained_canvas_id),
@@ -246,5 +257,5 @@ def test_canonical_migration_backfills_canvases_and_reverses_sqlite(tmp_path: Pa
         workspaces = connection.execute(
             "SELECT id, legacy_canvas_id, lifecycle_state FROM workspaces"
         ).fetchall()
-    assert revision == ("20260717_0004",)
+    assert revision == ("20260718_0005",)
     assert workspaces == [(retained_canvas_id, retained_canvas_id, "active")]

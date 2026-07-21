@@ -32,11 +32,15 @@ def build_demo_environment(source: Mapping[str, str] | None = None) -> dict[str,
     environment = dict(source or os.environ)
     environment.update(
         {
+            "APP_MODE": "demo",
+            "OPENCANVAS_APP_MODE": "demo",
             "OPENCANVAS_ENVIRONMENT": "development",
             "OPENCANVAS_DEMO_MODE": "true",
             "OPENCANVAS_DATABASE_URL": DEMO_DATABASE_URL,
             "OPENCANVAS_AI_PROVIDER": "mock",
             "OPENCANVAS_EMBEDDING_PROVIDER": "mock",
+            "OPENCANVAS_STORAGE_PROVIDER": "demo",
+            "OPENCANVAS_JOB_PROVIDER": "inline",
             "OPENCANVAS_DOCUMENT_STORAGE_ROOT": str(DEMO_DOCUMENT_STORAGE_ROOT),
             "NEXT_PUBLIC_API_URL": "http://localhost:8000/api/v1",
             "OPENAI_API_KEY": "",
@@ -49,11 +53,15 @@ def build_demo_environment(source: Mapping[str, str] | None = None) -> dict[str,
 def validate_demo_environment(environment: Mapping[str, str]) -> Settings:
     expected = build_demo_environment({})
     protected_keys = (
+        "APP_MODE",
+        "OPENCANVAS_APP_MODE",
         "OPENCANVAS_ENVIRONMENT",
         "OPENCANVAS_DEMO_MODE",
         "OPENCANVAS_DATABASE_URL",
         "OPENCANVAS_AI_PROVIDER",
         "OPENCANVAS_EMBEDDING_PROVIDER",
+        "OPENCANVAS_STORAGE_PROVIDER",
+        "OPENCANVAS_JOB_PROVIDER",
         "OPENCANVAS_DOCUMENT_STORAGE_ROOT",
     )
     if any(environment.get(key) != expected[key] for key in protected_keys):
@@ -61,11 +69,14 @@ def validate_demo_environment(environment: Mapping[str, str]) -> Settings:
     if environment.get("OPENAI_API_KEY") or environment.get("OPENCANVAS_OPENAI_API_KEY"):
         raise RuntimeError("The demo environment must not contain OpenAI credentials.")
     settings = Settings(
+        app_mode="demo",
         environment="development",
         demo_mode=True,
         database_url=DEMO_DATABASE_URL,
         ai_provider="mock",
         embedding_provider="mock",
+        storage_provider="demo",
+        job_provider="inline",
         document_storage_root=DEMO_DOCUMENT_STORAGE_ROOT,
         openai_api_key=None,
     )

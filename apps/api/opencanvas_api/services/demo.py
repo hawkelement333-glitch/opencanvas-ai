@@ -35,6 +35,7 @@ from opencanvas_api.db.models import (
     DocumentProcessingJob,
     Edge,
     TraceEvent,
+    User,
     Workspace,
 )
 from opencanvas_api.services.documents.embeddings import MockEmbeddingProvider
@@ -48,6 +49,7 @@ DEMO_INSUFFICIENT_REQUEST_ID = uuid.UUID("d3000000-0000-4000-8000-000000000006")
 DEMO_INSUFFICIENT_RESPONSE_ID = uuid.UUID("d3000000-0000-4000-8000-000000000007")
 DEMO_INSUFFICIENT_NODE_ID = uuid.UUID("d3000000-0000-4000-8000-000000000008")
 DEMO_INSUFFICIENT_TRACE_ID = uuid.UUID("d3000000-0000-4000-8000-000000000009")
+DEMO_USER_ID = uuid.UUID("d3000000-0000-4000-8000-000000000010")
 DEMO_TIMESTAMP = datetime(2026, 7, 17, 15, 0, tzinfo=UTC)
 
 DOCUMENT_ONE_ID = uuid.UUID("d3000000-0000-4000-8000-000000000101")
@@ -127,8 +129,34 @@ async def seed_demo(session: AsyncSession, storage_root: Path) -> DemoSeedResult
     if await session.get(Canvas, DEMO_CANVAS_ID) is not None:
         return DemoSeedResult(DEMO_CANVAS_ID, DEMO_TRACE_ID, created=False)
 
+    user = User(
+        id=DEMO_USER_ID,
+        email="demo@mobius.invalid",
+        email_normalized="demo@mobius.invalid",
+        password_hash="demo-login-disabled",
+        display_name="Competition demo",
+        email_verified=True,
+        settings_payload={"demo": True},
+        **_timestamps(),
+    )
+    workspace = Workspace(
+        id=DEMO_CANVAS_ID,
+        owner_id=DEMO_USER_ID,
+        name="Build Week Evidence Lab — DEMO DATA",
+        description="Non-sensitive deterministic replay workspace for competition evaluation.",
+        version=1,
+        lifecycle_state="active",
+        metadata_payload={"demo": True, "mode": "deterministic_replay"},
+        legacy_canvas_id=None,
+        **_timestamps(),
+    )
+    session.add(user)
+    await session.flush()
+    session.add(workspace)
+    await session.flush()
     canvas = Canvas(
         id=DEMO_CANVAS_ID,
+        workspace_id=DEMO_CANVAS_ID,
         name="Build Week Evidence Lab — DEMO DATA",
         viewport_x=15,
         viewport_y=20,
@@ -136,19 +164,9 @@ async def seed_demo(session: AsyncSession, storage_root: Path) -> DemoSeedResult
         revision=1,
         **_timestamps(),
     )
-    workspace = Workspace(
-        id=DEMO_CANVAS_ID,
-        name="Build Week Evidence Lab — DEMO DATA",
-        description="Non-sensitive deterministic replay workspace for competition evaluation.",
-        version=1,
-        lifecycle_state="active",
-        metadata_payload={"demo": True, "mode": "deterministic_replay"},
-        legacy_canvas_id=DEMO_CANVAS_ID,
-        **_timestamps(),
-    )
     session.add(canvas)
     await session.flush()
-    session.add(workspace)
+    workspace.legacy_canvas_id = DEMO_CANVAS_ID
     await session.flush()
 
     nodes = _canvas_nodes()
@@ -377,6 +395,8 @@ def _document_records() -> list[object]:
                 ),
                 DocumentProcessingJob(
                     id=_id(160 + offset),
+                    user_id=DEMO_USER_ID,
+                    workspace_id=DEMO_CANVAS_ID,
                     document_id=document_id,
                     attempt=1,
                     status="ready",
@@ -393,6 +413,9 @@ def _document_records() -> list[object]:
 def _ai_records() -> list[object]:
     request = AIRequest(
         id=DEMO_REQUEST_ID,
+        trace_id=DEMO_TRACE_ID,
+        user_id=DEMO_USER_ID,
+        workspace_id=DEMO_CANVAS_ID,
         canvas_id=DEMO_CANVAS_ID,
         instruction=(
             "Reconcile the approved launch facts, onboarding inference, contingency-date conflict, "
@@ -436,6 +459,11 @@ def _ai_records() -> list[object]:
             "selectedDocumentIds": [str(DOCUMENT_ONE_ID), str(DOCUMENT_TWO_ID)],
         },
         prompt_version="buildweek-demo-replay-v1",
+        provider_configuration_version="deterministic-demo-replay-v1",
+        execution_mode="demo_replay",
+        started_at=DEMO_TIMESTAMP,
+        completed_at=DEMO_TIMESTAMP,
+        latency_ms=0,
         **_timestamps(),
     )
     response = AIResponse(
@@ -453,6 +481,9 @@ def _ai_records() -> list[object]:
     )
     insufficient_request = AIRequest(
         id=DEMO_INSUFFICIENT_REQUEST_ID,
+        trace_id=DEMO_INSUFFICIENT_TRACE_ID,
+        user_id=DEMO_USER_ID,
+        workspace_id=DEMO_CANVAS_ID,
         canvas_id=DEMO_CANVAS_ID,
         instruction="What is the project CEO's favorite color?",
         selected_node_ids=[str(DOCUMENT_ONE_NODE_ID), str(DOCUMENT_TWO_NODE_ID)],
@@ -468,6 +499,11 @@ def _ai_records() -> list[object]:
             "selectedDocumentIds": [str(DOCUMENT_ONE_ID), str(DOCUMENT_TWO_ID)],
         },
         prompt_version="buildweek-demo-replay-v1",
+        provider_configuration_version="deterministic-demo-replay-v1",
+        execution_mode="demo_replay",
+        started_at=DEMO_TIMESTAMP,
+        completed_at=DEMO_TIMESTAMP,
+        latency_ms=0,
         **_timestamps(),
     )
     insufficient_response = AIResponse(
@@ -761,6 +797,7 @@ def _trace_events() -> list[TraceEvent]:
         event_type="demo.grounded_replay",
         actor_id="buildweek-demo",
         actor_type="system",
+        user_id=DEMO_USER_ID,
         workspace_id=DEMO_CANVAS_ID,
         object_id=DEMO_REQUEST_ID,
         object_type="ai_execution",
@@ -774,6 +811,7 @@ def _trace_events() -> list[TraceEvent]:
         event_type="demo.insufficient_evidence_replay",
         actor_id="buildweek-demo",
         actor_type="system",
+        user_id=DEMO_USER_ID,
         workspace_id=DEMO_CANVAS_ID,
         object_id=DEMO_INSUFFICIENT_REQUEST_ID,
         object_type="ai_execution",

@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from opencanvas_api.db.models import (
+    SYSTEM_USER_ID,
     CanonicalChunk,
     CanonicalDocument,
     CanonicalExecution,
@@ -59,7 +60,7 @@ class CanonicalRepository:
             id=workspace_id,
             name=name,
             description=description,
-            owner_id=owner_id,
+            owner_id=owner_id or SYSTEM_USER_ID,
             version=1,
             lifecycle_state=lifecycle_state.value,
             metadata_payload=metadata_payload,

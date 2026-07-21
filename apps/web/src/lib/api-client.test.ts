@@ -4,6 +4,7 @@ import { APIError, canvasApi } from "./api-client";
 
 const validCanvas = {
   id: "canvas-1",
+  workspaceId: "00000000-0000-4000-8000-000000000002",
   name: "Launch plan",
   viewport: { x: 0, y: 0, zoom: 1 },
   revision: 0,

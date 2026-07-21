@@ -4,6 +4,7 @@ import uuid
 
 import httpx
 
+from opencanvas_api.db.models import SYSTEM_WORKSPACE_ID
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.trace import (
     FailTraceInput,
@@ -18,7 +19,7 @@ async def test_trace_read_api_serializes_and_filters_events(
     database: Database,
     api_prefix: str,
 ) -> None:
-    workspace_id = uuid.uuid4()
+    workspace_id = SYSTEM_WORKSPACE_ID
     object_id = uuid.uuid4()
     async with database.sessions() as session:
         service = TraceService(session)

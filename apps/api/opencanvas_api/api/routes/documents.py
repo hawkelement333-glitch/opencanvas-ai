@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import uuid
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from opencanvas_api.api.dependencies import (
+    MutatingPrincipalDep,
+    PrincipalDep,
     enforce_document_rate_limit,
     get_database,
     get_session,
@@ -36,8 +39,16 @@ from opencanvas_api.db.models import (
     Document,
     DocumentChunk,
     DocumentFile,
+    DocumentVersion,
+    UsageRecord,
 )
 from opencanvas_api.db.session import Database
+from opencanvas_api.services.auth import Principal
+from opencanvas_api.services.authorization import (
+    AuthorizationError,
+    require_owned_canvas,
+    require_owned_document,
+)
 from opencanvas_api.services.documents import (
     DocumentProcessor,
     DocumentServiceError,
@@ -45,9 +56,11 @@ from opencanvas_api.services.documents import (
     build_document_storage,
     build_embedding_provider,
     delete_document,
+    replace_document_upload,
     search_documents,
     validate_and_store_upload,
 )
+from opencanvas_api.services.jobs import JobQueueError, build_job_provider
 
 router = APIRouter()
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -60,18 +73,24 @@ def _service_error(error: DocumentServiceError) -> ApiError:
     return ApiError(error.status_code, error.code, error.safe_message)
 
 
-async def _require_canvas(session: AsyncSession, canvas_id: uuid.UUID) -> Canvas:
-    canvas = await session.get(Canvas, canvas_id)
-    if canvas is None:
-        raise ApiError(status.HTTP_404_NOT_FOUND, "canvas_not_found", "Canvas not found.")
-    return canvas
+async def _require_canvas(
+    session: AsyncSession, canvas_id: uuid.UUID, principal: Principal
+) -> Canvas:
+    try:
+        return await require_owned_canvas(session, principal, canvas_id)
+    except AuthorizationError as exc:
+        raise ApiError(status.HTTP_404_NOT_FOUND, "canvas_not_found", "Canvas not found.") from exc
 
 
-async def _require_document(session: AsyncSession, document_id: uuid.UUID) -> Document:
-    document = await session.get(Document, document_id)
-    if document is None:
-        raise ApiError(status.HTTP_404_NOT_FOUND, "document_not_found", "Document not found.")
-    return document
+async def _require_document(
+    session: AsyncSession, document_id: uuid.UUID, principal: Principal
+) -> Document:
+    try:
+        return await require_owned_document(session, principal, document_id)
+    except AuthorizationError as exc:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND, "document_not_found", "Document not found."
+        ) from exc
 
 
 async def _bump_canvas(session: AsyncSession, canvas: Canvas) -> None:
@@ -138,6 +157,7 @@ async def _process_document_background(
 )
 async def upload_document(
     canvas_id: uuid.UUID,
+    principal: MutatingPrincipalDep,
     session: SessionDep,
     settings: SettingsDep,
     database: DatabaseDep,
@@ -146,8 +166,9 @@ async def upload_document(
     x: CanvasCoordinate = 80.0,
     y: CanvasCoordinate = 80.0,
 ) -> UploadDocumentOut:
-    canvas = await _require_canvas(session, canvas_id)
+    canvas = await _require_canvas(session, canvas_id, principal)
     storage = build_document_storage(settings)
+    job_provider = build_job_provider(settings)
     try:
         document = await validate_and_store_upload(
             session,
@@ -183,6 +204,24 @@ async def upload_document(
                 document_id=document.id,
             )
         )
+        await job_provider.enqueue(
+            session,
+            user_id=principal.user_id,
+            workspace_id=canvas.workspace_id,
+            document=document,
+        )
+        session.add(
+            UsageRecord(
+                user_id=principal.user_id,
+                workspace_id=canvas.workspace_id,
+                operation="document_upload",
+                storage_bytes=document.file_size_bytes,
+                metadata_payload={
+                    "documentId": str(document.id),
+                    "contentSha256": document.content_sha256,
+                },
+            )
+        )
         await _bump_canvas(session, canvas)
         await session.commit()
     except Exception as exc:
@@ -192,17 +231,24 @@ async def upload_document(
                 await storage.delete(storage_key)
             except DocumentServiceError as cleanup_error:
                 raise _service_error(cleanup_error) from exc
+        if isinstance(exc, JobQueueError):
+            raise ApiError(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                "processing_limit_reached",
+                str(exc),
+            ) from exc
         raise
     await session.refresh(document)
     await session.refresh(node)
     metadata = document_metadata_out(document)
-    background_tasks.add_task(
-        _process_document_background,
-        database,
-        settings,
-        document.id,
-        force=False,
-    )
+    if job_provider.runs_inline:
+        background_tasks.add_task(
+            _process_document_background,
+            database,
+            settings,
+            document.id,
+            force=False,
+        )
     return UploadDocumentOut(
         document=metadata,
         node=node_out(node, document=metadata),
@@ -210,13 +256,99 @@ async def upload_document(
 
 
 @router.get("/documents/{document_id}", response_model=DocumentMetadata)
-async def get_document(document_id: uuid.UUID, session: SessionDep) -> DocumentMetadata:
-    return document_metadata_out(await _require_document(session, document_id))
+async def get_document(
+    document_id: uuid.UUID, principal: PrincipalDep, session: SessionDep
+) -> DocumentMetadata:
+    return document_metadata_out(await _require_document(session, document_id, principal))
+
+
+@router.get("/documents/{document_id}/file")
+async def get_document_file(
+    document_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+    settings: SettingsDep,
+) -> Response:
+    document = await _require_document(session, document_id, principal)
+    stored_file = await session.scalar(
+        select(DocumentFile).where(DocumentFile.document_id == document.id)
+    )
+    if stored_file is None:
+        raise ApiError(status.HTTP_404_NOT_FOUND, "file_not_found", "Document file not found.")
+    try:
+        content = await build_document_storage(settings).read(stored_file.storage_key)
+    except DocumentServiceError as exc:
+        raise _service_error(exc) from exc
+    return Response(
+        content=content,
+        media_type=document.media_type,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(document.file_name)}",
+            "Content-Length": str(len(content)),
+        },
+    )
+
+
+@router.post(
+    "/documents/{document_id}/replace",
+    response_model=DocumentMetadata,
+    dependencies=[Depends(enforce_document_rate_limit)],
+)
+async def replace_document(
+    document_id: uuid.UUID,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+    settings: SettingsDep,
+    database: DatabaseDep,
+    background_tasks: BackgroundTasks,
+    file: Annotated[UploadFile, File(description="Replacement document")],
+) -> DocumentMetadata:
+    document = await _require_document(session, document_id, principal)
+    canvas = await _require_canvas(session, document.canvas_id, principal)
+    storage = build_document_storage(settings)
+    try:
+        document, _ = await replace_document_upload(
+            session,
+            document=document,
+            upload=file,
+            settings=settings,
+            storage=storage,
+        )
+        job_provider = build_job_provider(settings)
+        await job_provider.enqueue(
+            session,
+            user_id=principal.user_id,
+            workspace_id=canvas.workspace_id,
+            document=document,
+            force=True,
+        )
+        await _bump_canvas(session, canvas)
+        await session.commit()
+    except DocumentServiceError as exc:
+        await session.rollback()
+        raise _service_error(exc) from exc
+    except JobQueueError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_429_TOO_MANY_REQUESTS, "processing_limit_reached", str(exc)
+        ) from exc
+    if job_provider.runs_inline:
+        background_tasks.add_task(
+            _process_document_background,
+            database,
+            settings,
+            document.id,
+            force=True,
+        )
+    await session.refresh(document)
+    return document_metadata_out(document)
 
 
 @router.get("/documents/{document_id}/text", response_model=DocumentTextOut)
-async def get_document_text(document_id: uuid.UUID, session: SessionDep) -> DocumentTextOut:
-    document = await _require_document(session, document_id)
+async def get_document_text(
+    document_id: uuid.UUID, principal: PrincipalDep, session: SessionDep
+) -> DocumentTextOut:
+    document = await _require_document(session, document_id, principal)
     if document.extracted_text is None:
         raise ApiError(
             status.HTTP_409_CONFLICT,
@@ -254,9 +386,10 @@ async def get_document_text(document_id: uuid.UUID, session: SessionDep) -> Docu
 async def get_source_passage(
     document_id: uuid.UUID,
     chunk_id: uuid.UUID,
+    principal: PrincipalDep,
     session: SessionDep,
 ) -> SourcePassageOut:
-    document = await _require_document(session, document_id)
+    document = await _require_document(session, document_id, principal)
     chunk = await session.scalar(
         select(DocumentChunk).where(
             DocumentChunk.id == chunk_id,
@@ -275,49 +408,125 @@ async def get_source_passage(
 )
 async def retry_document_processing(
     document_id: uuid.UUID,
+    principal: MutatingPrincipalDep,
     session: SessionDep,
     settings: SettingsDep,
     database: DatabaseDep,
     background_tasks: BackgroundTasks,
 ) -> DocumentMetadata:
-    document = await _require_document(session, document_id)
-    canvas = await _require_canvas(session, document.canvas_id)
-    if document.status != "failed":
+    document = await _require_document(session, document_id, principal)
+    canvas = await _require_canvas(session, document.canvas_id, principal)
+    if document.status not in {"failed", "retryable_failure", "permanent_failure"}:
         raise ApiError(
             status.HTTP_409_CONFLICT,
             "document_retry_not_allowed",
             "Only failed documents can be retried.",
         )
-    document.status = "processing"
-    document.processing_stage = "uploading"
-    document.error_message = None
+    job_provider = build_job_provider(settings)
+    try:
+        await job_provider.enqueue(
+            session,
+            user_id=principal.user_id,
+            workspace_id=canvas.workspace_id,
+            document=document,
+            force=True,
+        )
+    except JobQueueError as exc:
+        raise ApiError(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "processing_limit_reached",
+            str(exc),
+        ) from exc
     await _bump_canvas(session, canvas)
     await session.commit()
     await session.refresh(document)
     metadata = document_metadata_out(document)
-    background_tasks.add_task(
-        _process_document_background,
-        database,
-        settings,
-        document.id,
-        force=True,
-    )
+    if job_provider.runs_inline:
+        background_tasks.add_task(
+            _process_document_background,
+            database,
+            settings,
+            document.id,
+            force=True,
+        )
     return metadata
+
+
+@router.post(
+    "/documents/{document_id}/reprocess",
+    response_model=DocumentMetadata,
+    dependencies=[Depends(enforce_document_rate_limit)],
+)
+async def reprocess_document(
+    document_id: uuid.UUID,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+    settings: SettingsDep,
+    database: DatabaseDep,
+    background_tasks: BackgroundTasks,
+) -> DocumentMetadata:
+    document = await _require_document(session, document_id, principal)
+    canvas = await _require_canvas(session, document.canvas_id, principal)
+    if document.status != "ready":
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "document_reprocess_not_allowed",
+            "Only ready documents can be reprocessed.",
+        )
+    job_provider = build_job_provider(settings)
+    try:
+        await job_provider.enqueue(
+            session,
+            user_id=principal.user_id,
+            workspace_id=canvas.workspace_id,
+            document=document,
+            force=True,
+        )
+    except JobQueueError as exc:
+        raise ApiError(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "processing_limit_reached",
+            str(exc),
+        ) from exc
+    await _bump_canvas(session, canvas)
+    await session.commit()
+    if job_provider.runs_inline:
+        background_tasks.add_task(
+            _process_document_background,
+            database,
+            settings,
+            document.id,
+            force=True,
+        )
+    await session.refresh(document)
+    return document_metadata_out(document)
 
 
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_document(
     document_id: uuid.UUID,
+    principal: MutatingPrincipalDep,
     session: SessionDep,
     settings: SettingsDep,
 ) -> Response:
-    document = await _require_document(session, document_id)
-    canvas = await _require_canvas(session, document.canvas_id)
+    document = await _require_document(session, document_id, principal)
+    canvas = await _require_canvas(session, document.canvas_id, principal)
     storage = build_document_storage(settings)
+    version_storage_keys = set(
+        (
+            await session.scalars(
+                select(DocumentVersion.storage_key).where(
+                    DocumentVersion.document_id == document_id
+                )
+            )
+        ).all()
+    )
     try:
         storage_key = await delete_document(session, document_id=document_id)
         if storage_key is not None:
-            await storage.delete(storage_key)
+            version_storage_keys.add(storage_key)
+        for version_storage_key in sorted(version_storage_keys):
+            await storage.delete(version_storage_key)
     except DocumentServiceError as exc:
         await session.rollback()
         raise _service_error(exc) from exc
@@ -334,10 +543,11 @@ async def remove_document(
 async def search_selected_documents(
     canvas_id: uuid.UUID,
     payload: DocumentSearchRequest,
+    principal: MutatingPrincipalDep,
     session: SessionDep,
     settings: SettingsDep,
 ) -> DocumentSearchOut:
-    await _require_canvas(session, canvas_id)
+    await _require_canvas(session, canvas_id, principal)
     documents = (
         await session.scalars(
             select(Document).where(

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated, NoReturn, cast
 
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -9,7 +11,13 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from opencanvas_api.api.dependencies import enforce_ai_rate_limit, get_ai_provider, get_session
+from opencanvas_api.api.dependencies import (
+    MutatingPrincipalDep,
+    PrincipalDep,
+    enforce_ai_rate_limit,
+    get_ai_provider,
+    get_session,
+)
 from opencanvas_api.api.errors import ApiError
 from opencanvas_api.api.schemas import (
     AIQuery,
@@ -32,6 +40,7 @@ from opencanvas_api.api.schemas import (
 from opencanvas_api.api.serialization import document_metadata_out, enrich_nodes, node_out, utc
 from opencanvas_api.core.config import Settings, get_settings
 from opencanvas_api.db.models import (
+    AIClaim,
     AIExecutionChunk,
     AIExecutionCitation,
     AIExecutionNode,
@@ -46,6 +55,8 @@ from opencanvas_api.db.models import (
     Document,
     DocumentFile,
     Edge,
+    UsageRecord,
+    Workspace,
 )
 from opencanvas_api.services.ai import (
     GROUNDED_PROMPT_VERSION,
@@ -57,6 +68,12 @@ from opencanvas_api.services.ai import (
     model_configuration,
     validate_grounded_result,
 )
+from opencanvas_api.services.auth import Principal
+from opencanvas_api.services.authorization import (
+    AuthorizationError,
+    require_owned_canvas,
+    require_owned_workspace,
+)
 from opencanvas_api.services.context import build_context
 from opencanvas_api.services.documents import (
     DocumentServiceError,
@@ -64,6 +81,13 @@ from opencanvas_api.services.documents import (
     build_document_storage,
     build_embedding_provider,
     search_documents,
+)
+from opencanvas_api.services.trace import (
+    CompleteTraceInput,
+    FailTraceInput,
+    StartTraceInput,
+    TraceErrorInfo,
+    TraceService,
 )
 
 router = APIRouter(prefix="/canvases")
@@ -76,6 +100,7 @@ RevisionQuery = Annotated[int, Query(ge=0)]
 def _canvas_out(canvas: Canvas) -> CanvasOut:
     return CanvasOut(
         id=canvas.id,
+        workspace_id=canvas.workspace_id,
         name=canvas.name,
         viewport=Viewport(x=canvas.viewport_x, y=canvas.viewport_y, zoom=canvas.viewport_zoom),
         revision=canvas.revision,
@@ -98,11 +123,13 @@ def _edge_out(edge: Edge) -> EdgeOut:
     )
 
 
-async def _require_canvas(session: AsyncSession, canvas_id: uuid.UUID) -> Canvas:
-    canvas = await session.get(Canvas, canvas_id)
-    if canvas is None:
-        raise ApiError(status.HTTP_404_NOT_FOUND, "canvas_not_found", "Canvas not found.")
-    return canvas
+async def _require_canvas(
+    session: AsyncSession, canvas_id: uuid.UUID, principal: Principal
+) -> Canvas:
+    try:
+        return await require_owned_canvas(session, principal, canvas_id)
+    except AuthorizationError as exc:
+        raise ApiError(status.HTTP_404_NOT_FOUND, "canvas_not_found", "Canvas not found.") from exc
 
 
 async def _raise_node_missing_or_stale(
@@ -129,16 +156,63 @@ async def _bump_canvas(session: AsyncSession, canvas_id: uuid.UUID) -> None:
 
 
 @router.get("", response_model=list[CanvasOut])
-async def list_canvases(session: SessionDep) -> list[CanvasOut]:
+async def list_canvases(
+    principal: PrincipalDep,
+    session: SessionDep,
+    workspace_id: Annotated[uuid.UUID | None, Query(alias="workspaceId")] = None,
+) -> list[CanvasOut]:
+    if workspace_id is not None:
+        try:
+            await require_owned_workspace(session, principal, workspace_id)
+        except AuthorizationError as exc:
+            raise ApiError(
+                status.HTTP_404_NOT_FOUND, "workspace_not_found", "Workspace not found."
+            ) from exc
+    filters = [Workspace.owner_id == principal.user_id, Workspace.deleted_at.is_(None)]
+    if workspace_id is not None:
+        filters.append(Canvas.workspace_id == workspace_id)
     canvases = (
-        await session.scalars(select(Canvas).order_by(Canvas.updated_at.desc(), Canvas.id))
+        await session.scalars(
+            select(Canvas)
+            .join(Workspace, Workspace.id == Canvas.workspace_id)
+            .where(*filters)
+            .order_by(Canvas.updated_at.desc(), Canvas.id)
+        )
     ).all()
     return [_canvas_out(canvas) for canvas in canvases]
 
 
 @router.post("", response_model=CanvasOut, status_code=status.HTTP_201_CREATED)
-async def create_canvas(payload: CanvasCreate, session: SessionDep) -> CanvasOut:
-    canvas = Canvas(name=payload.name)
+async def create_canvas(
+    payload: CanvasCreate, principal: MutatingPrincipalDep, session: SessionDep
+) -> CanvasOut:
+    workspace = None
+    if payload.workspace_id is not None:
+        try:
+            workspace = await require_owned_workspace(session, principal, payload.workspace_id)
+        except AuthorizationError as exc:
+            raise ApiError(
+                status.HTTP_404_NOT_FOUND, "workspace_not_found", "Workspace not found."
+            ) from exc
+    else:
+        workspace = await session.scalar(
+            select(Workspace)
+            .where(
+                Workspace.owner_id == principal.user_id,
+                Workspace.deleted_at.is_(None),
+                Workspace.lifecycle_state != "deleted",
+            )
+            .order_by(Workspace.created_at, Workspace.id)
+        )
+    if workspace is None:
+        workspace = Workspace(
+            owner_id=principal.user_id,
+            name=f"{principal.display_name}'s workspace",
+            lifecycle_state="active",
+        )
+        session.add(workspace)
+        await session.flush()
+    canvas = Canvas(name=payload.name, workspace_id=workspace.id)
     session.add(canvas)
     await session.commit()
     await session.refresh(canvas)
@@ -146,16 +220,20 @@ async def create_canvas(payload: CanvasCreate, session: SessionDep) -> CanvasOut
 
 
 @router.get("/{canvas_id}", response_model=CanvasOut)
-async def get_canvas(canvas_id: uuid.UUID, session: SessionDep) -> CanvasOut:
-    return _canvas_out(await _require_canvas(session, canvas_id))
+async def get_canvas(
+    canvas_id: uuid.UUID, principal: PrincipalDep, session: SessionDep
+) -> CanvasOut:
+    return _canvas_out(await _require_canvas(session, canvas_id, principal))
 
 
 @router.patch("/{canvas_id}", response_model=CanvasOut)
 async def patch_canvas(
     canvas_id: uuid.UUID,
     payload: CanvasPatch,
+    principal: MutatingPrincipalDep,
     session: SessionDep,
 ) -> CanvasOut:
+    await _require_canvas(session, canvas_id, principal)
     values: dict[str, object] = {
         "revision": Canvas.revision + 1,
         "updated_at": func.now(),
@@ -193,9 +271,11 @@ async def patch_canvas(
 async def delete_canvas(
     canvas_id: uuid.UUID,
     revision: RevisionQuery,
+    principal: MutatingPrincipalDep,
     session: SessionDep,
     settings: SettingsDep,
 ) -> Response:
+    await _require_canvas(session, canvas_id, principal)
     storage_keys = list(
         (
             await session.scalars(
@@ -226,10 +306,12 @@ async def delete_canvas(
 
 
 @router.get("/{canvas_id}/snapshot", response_model=SnapshotOut)
-async def get_snapshot(canvas_id: uuid.UUID, session: SessionDep) -> SnapshotOut:
+async def get_snapshot(
+    canvas_id: uuid.UUID, principal: PrincipalDep, session: SessionDep
+) -> SnapshotOut:
     if session.get_bind().dialect.name == "postgresql":
         await session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
-    canvas = await _require_canvas(session, canvas_id)
+    canvas = await _require_canvas(session, canvas_id, principal)
     nodes = (
         await session.scalars(
             select(CanvasNode)
@@ -261,9 +343,10 @@ async def get_snapshot(canvas_id: uuid.UUID, session: SessionDep) -> SnapshotOut
 async def create_node(
     canvas_id: uuid.UUID,
     payload: NodeCreate,
+    principal: MutatingPrincipalDep,
     session: SessionDep,
 ) -> NodeOut:
-    await _require_canvas(session, canvas_id)
+    await _require_canvas(session, canvas_id, principal)
     if payload.type == "document":
         raise ApiError(
             status.HTTP_400_BAD_REQUEST,
@@ -292,8 +375,10 @@ async def patch_node(
     canvas_id: uuid.UUID,
     node_id: uuid.UUID,
     payload: NodePatch,
+    principal: MutatingPrincipalDep,
     session: SessionDep,
 ) -> NodeOut:
+    await _require_canvas(session, canvas_id, principal)
     persisted_node = await session.scalar(
         select(CanvasNode).where(
             CanvasNode.id == node_id,
@@ -369,8 +454,10 @@ async def duplicate_node(
     canvas_id: uuid.UUID,
     node_id: uuid.UUID,
     payload: NodeDuplicate,
+    principal: MutatingPrincipalDep,
     session: SessionDep,
 ) -> NodeOut:
+    await _require_canvas(session, canvas_id, principal)
     source = await session.scalar(
         select(CanvasNode).where(CanvasNode.id == node_id, CanvasNode.canvas_id == canvas_id)
     )
@@ -427,8 +514,10 @@ async def delete_node(
     canvas_id: uuid.UUID,
     node_id: uuid.UUID,
     revision: RevisionQuery,
+    principal: MutatingPrincipalDep,
     session: SessionDep,
 ) -> Response:
+    await _require_canvas(session, canvas_id, principal)
     node = await session.scalar(
         select(CanvasNode).where(CanvasNode.id == node_id, CanvasNode.canvas_id == canvas_id)
     )
@@ -458,9 +547,10 @@ async def delete_node(
 async def create_edge(
     canvas_id: uuid.UUID,
     payload: EdgeCreate,
+    principal: MutatingPrincipalDep,
     session: SessionDep,
 ) -> EdgeOut:
-    await _require_canvas(session, canvas_id)
+    await _require_canvas(session, canvas_id, principal)
     node_ids = {payload.source_node_id, payload.target_node_id}
     found_ids = set(
         (
@@ -502,8 +592,10 @@ async def delete_edge(
     canvas_id: uuid.UUID,
     edge_id: uuid.UUID,
     revision: RevisionQuery,
+    principal: MutatingPrincipalDep,
     session: SessionDep,
 ) -> Response:
+    await _require_canvas(session, canvas_id, principal)
     deleted = await session.scalar(
         delete(Edge)
         .where(Edge.id == edge_id, Edge.canvas_id == canvas_id, Edge.revision == revision)
@@ -530,11 +622,30 @@ async def delete_edge(
 async def ask_ai(
     canvas_id: uuid.UUID,
     payload: AIQuery,
+    principal: MutatingPrincipalDep,
     session: SessionDep,
     provider: ProviderDep,
     settings: SettingsDep,
 ) -> AIQueryOut:
-    await _require_canvas(session, canvas_id)
+    canvas = await _require_canvas(session, canvas_id, principal)
+    month_start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    monthly_tokens = await session.scalar(
+        select(
+            func.coalesce(
+                func.sum(UsageRecord.input_tokens + UsageRecord.output_tokens),
+                0,
+            )
+        ).where(
+            UsageRecord.workspace_id == canvas.workspace_id,
+            UsageRecord.created_at >= month_start,
+        )
+    )
+    if int(monthly_tokens or 0) >= settings.monthly_token_budget_per_workspace:
+        raise ApiError(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "workspace_token_budget_exhausted",
+            "This workspace has reached its monthly AI token budget.",
+        )
     selected = (
         await session.scalars(
             select(CanvasNode).where(
@@ -622,8 +733,23 @@ async def ask_ai(
         "embeddingProvider": embedding_provider.name if grounded_request else None,
         "embeddingModel": embedding_provider.model if grounded_request else None,
         "embeddingDimensions": embedding_provider.dimensions if grounded_request else None,
+        "embeddingConfigurationVersion": (
+            getattr(
+                embedding_provider,
+                "configuration_version",
+                "unspecified-provider-contract-v1",
+            )
+            if grounded_request
+            else None
+        ),
     }
+    execution_started = datetime.now(UTC)
+    execution_started_monotonic = time.perf_counter()
+    trace_id = uuid.uuid4()
     request_record = AIRequest(
+        trace_id=trace_id,
+        user_id=principal.user_id,
+        workspace_id=canvas.workspace_id,
         canvas_id=canvas_id,
         instruction=payload.instruction,
         selected_node_ids=[str(node_id) for node_id in payload.selected_node_ids],
@@ -634,9 +760,43 @@ async def ask_ai(
         model_configuration=model_configuration(provider, grounded=grounded_request),
         retrieval_configuration=retrieval_configuration,
         prompt_version=(GROUNDED_PROMPT_VERSION if grounded_request else NOTE_PROMPT_VERSION),
+        provider_configuration_version=getattr(
+            provider, "configuration_version", "unspecified-provider-contract-v1"
+        ),
+        execution_mode="current_context",
+        started_at=execution_started,
     )
     session.add(request_record)
     await session.flush()
+    trace_service = TraceService(session)
+    await trace_service.start_trace(
+        StartTraceInput(
+            trace_id=trace_id,
+            event_type="ai.execution",
+            actor_id=str(principal.user_id),
+            actor_type="user",
+            user_id=principal.user_id,
+            workspace_id=canvas.workspace_id,
+            object_id=request_record.id,
+            object_type="ai_execution",
+            operation="generate_grounded_answer" if grounded_request else "generate_answer",
+            metadata={
+                "canvasId": str(canvas_id),
+                "question": payload.instruction,
+                "selectedNodeIds": [str(node_id) for node_id in payload.selected_node_ids],
+                "selectedDocumentIds": [str(document_id) for document_id in document_ids],
+                "provider": provider.name,
+                "model": provider.model,
+                "providerConfigurationVersion": getattr(
+                    provider,
+                    "configuration_version",
+                    "unspecified-provider-contract-v1",
+                ),
+                "promptVersion": request_record.prompt_version,
+                "executionMode": request_record.execution_mode,
+            },
+        )
+    )
     execution_nodes: list[AIExecutionNode] = []
     for selected_order, node in enumerate(ordered):
         reference = reference_by_node.get(node.id)
@@ -686,10 +846,34 @@ async def ask_ai(
                 threshold=threshold,
             )
         except DocumentServiceError as exc:
+            completed_at = datetime.now(UTC)
+            latency_ms = int((time.perf_counter() - execution_started_monotonic) * 1_000)
             await session.execute(
                 update(AIRequest)
                 .where(AIRequest.id == request_record.id)
-                .values(status="failed", error=exc.safe_message, updated_at=func.now())
+                .values(
+                    status="failed",
+                    error=exc.safe_message,
+                    safe_error_category=exc.code,
+                    completed_at=completed_at,
+                    latency_ms=latency_ms,
+                    updated_at=func.now(),
+                )
+            )
+            await trace_service.fail_trace(
+                FailTraceInput(
+                    trace_id=trace_id,
+                    event_type="ai.execution",
+                    actor_id=str(principal.user_id),
+                    actor_type="user",
+                    user_id=principal.user_id,
+                    workspace_id=canvas.workspace_id,
+                    object_id=request_record.id,
+                    object_type="ai_execution",
+                    operation="retrieve_context",
+                    metadata={"latencyMs": latency_ms},
+                    error=TraceErrorInfo(code=exc.code, message=exc.safe_message),
+                )
             )
             await session.commit()
             raise ApiError(exc.status_code, exc.code, exc.safe_message) from exc
@@ -698,6 +882,7 @@ async def ask_ai(
                 request_id=request_record.id,
                 chunk_id=candidate.chunk_id,
                 document_id=candidate.document_id,
+                document_version_snapshot=candidate.document_version,
                 rank=candidate.rank,
                 score=candidate.score,
                 included_in_context=candidate.included_in_context,
@@ -738,6 +923,7 @@ async def ask_ai(
             char_start=candidate.char_start,
             char_end=candidate.char_end,
             score=candidate.score,
+            document_version=candidate.document_version,
         )
         for candidate in candidates
         if candidate.included_in_context
@@ -784,10 +970,55 @@ async def ask_ai(
             output_tokens = result.output_tokens
             total_tokens = result.total_tokens
     except AIProviderError as exc:
+        completed_at = datetime.now(UTC)
+        latency_ms = int((time.perf_counter() - execution_started_monotonic) * 1_000)
+        validation_messages = {
+            "The AI response cited a source that was not retrieved.",
+            "The AI response claimed grounding without a valid citation.",
+            "An insufficient-evidence response cannot contain citations.",
+            "The AI response did not contain text.",
+        }
+        safe_provider_message = (
+            str(exc)
+            if str(exc) in validation_messages
+            else "The configured AI provider could not complete the request."
+        )
+        safe_error_category = (
+            "citation_validation_failure" if str(exc) in validation_messages else "provider_failure"
+        )
         await session.execute(
             update(AIRequest)
             .where(AIRequest.id == request_record.id)
-            .values(status="failed", error=str(exc), updated_at=func.now())
+            .values(
+                status="failed",
+                error=safe_provider_message,
+                safe_error_category=safe_error_category,
+                completed_at=completed_at,
+                latency_ms=latency_ms,
+                updated_at=func.now(),
+            )
+        )
+        await trace_service.fail_trace(
+            FailTraceInput(
+                trace_id=trace_id,
+                event_type="ai.execution",
+                actor_id=str(principal.user_id),
+                actor_type="user",
+                user_id=principal.user_id,
+                workspace_id=canvas.workspace_id,
+                object_id=request_record.id,
+                object_type="ai_execution",
+                operation="call_provider",
+                metadata={
+                    "provider": provider.name,
+                    "model": provider.model,
+                    "latencyMs": latency_ms,
+                },
+                error=TraceErrorInfo(
+                    code=safe_error_category,
+                    message=safe_provider_message,
+                ),
+            )
         )
         await session.commit()
         raise ApiError(
@@ -845,6 +1076,7 @@ async def ask_ai(
             claim_snapshot=result_citation.claim,
             excerpt_snapshot=source_by_id[result_citation.source_id].text[:1_200],
             document_id_snapshot=source_by_id[result_citation.source_id].document_id,
+            document_version_snapshot=source_by_id[result_citation.source_id].document_version,
             chunk_id_snapshot=source_by_id[result_citation.source_id].chunk_id,
             document_name_snapshot=source_by_id[result_citation.source_id].document_title,
             page_number_snapshot=source_by_id[result_citation.source_id].page_number,
@@ -867,6 +1099,7 @@ async def ask_ai(
         citation = Citation(
             ai_response_id=response_record.id,
             document_id=source.document_id,
+            document_version=source.document_version,
             chunk_id=source.chunk_id,
             identifier=source.source_id,
             claim="\n".join(dict.fromkeys(claims_by_source[source_id]))[:4_000],
@@ -923,23 +1156,162 @@ async def ask_ai(
                 )
             )
     edges = [*generated_edges, *cite_edges]
+    completed_at = datetime.now(UTC)
+    latency_ms = int((time.perf_counter() - execution_started_monotonic) * 1_000)
+    input_token_count = input_tokens or 0
+    output_token_count = output_tokens or 0
+    estimated_cost = (
+        input_token_count * settings.estimated_input_cost_per_million_tokens
+        + output_token_count * settings.estimated_output_cost_per_million_tokens
+    ) / 1_000_000
+    if insufficient_evidence:
+        session.add(
+            AIClaim(
+                request_id=request_record.id,
+                ai_response_id=response_record.id,
+                ordinal=1,
+                claim=response_text[:4_000],
+                evidence_status="insufficient_evidence",
+                evidence_snapshot=[],
+            )
+        )
+    elif result_citations:
+        session.add_all(
+            AIClaim(
+                request_id=request_record.id,
+                ai_response_id=response_record.id,
+                ordinal=ordinal,
+                claim=result_citation.claim,
+                evidence_status="supported",
+                evidence_snapshot=[
+                    {
+                        "sourceId": result_citation.source_id,
+                        "documentId": str(source_by_id[result_citation.source_id].document_id),
+                        "documentVersion": source_by_id[result_citation.source_id].document_version,
+                        "chunkId": str(source_by_id[result_citation.source_id].chunk_id),
+                    }
+                ],
+            )
+            for ordinal, result_citation in enumerate(result_citations, start=1)
+        )
+    else:
+        session.add(
+            AIClaim(
+                request_id=request_record.id,
+                ai_response_id=response_record.id,
+                ordinal=1,
+                claim=response_text[:4_000],
+                evidence_status="inference",
+                evidence_snapshot=[],
+            )
+        )
+    session.add(
+        UsageRecord(
+            user_id=principal.user_id,
+            workspace_id=canvas.workspace_id,
+            operation="ai_execution",
+            input_tokens=input_token_count,
+            output_tokens=output_token_count,
+            estimated_cost_usd=estimated_cost,
+            metadata_payload={
+                "provider": provider.name,
+                "model": provider.model,
+                "requestId": str(request_record.id),
+            },
+        )
+    )
     await session.execute(
         update(AIRequest)
         .where(AIRequest.id == request_record.id)
-        .values(status="completed", error=None, updated_at=func.now())
+        .values(
+            status="completed",
+            error=None,
+            completed_at=completed_at,
+            latency_ms=latency_ms,
+            estimated_cost_usd=estimated_cost,
+            updated_at=func.now(),
+        )
+    )
+    await trace_service.complete_trace(
+        CompleteTraceInput(
+            trace_id=trace_id,
+            event_type="ai.execution",
+            actor_id=str(principal.user_id),
+            actor_type="user",
+            user_id=principal.user_id,
+            workspace_id=canvas.workspace_id,
+            object_id=request_record.id,
+            object_type="ai_execution",
+            operation="complete_execution",
+            metadata={
+                "requestId": str(request_record.id),
+                "responseId": str(response_record.id),
+                "responseNodeId": str(response_node.id),
+                "executionMode": request_record.execution_mode,
+                "retrievedChunks": [
+                    {
+                        "sourceId": candidate.source_id,
+                        "documentId": str(candidate.document_id),
+                        "documentVersion": candidate.document_version,
+                        "chunkId": str(candidate.chunk_id),
+                        "rank": candidate.rank,
+                        "score": candidate.score,
+                        "included": candidate.included_in_context,
+                        "exclusionReason": candidate.exclusion_reason,
+                    }
+                    for candidate in candidates
+                ],
+                "citations": [
+                    {
+                        "sourceId": citation.source_id,
+                        "claim": citation.claim,
+                    }
+                    for citation in result_citations
+                ],
+                "citationValidation": "passed",
+                "insufficientEvidence": insufficient_evidence,
+                "inputTokens": input_tokens,
+                "outputTokens": output_tokens,
+                "totalTokens": total_tokens,
+                "latencyMs": latency_ms,
+                "estimatedCostUsd": estimated_cost,
+            },
+        )
     )
     await _bump_canvas(session, canvas_id)
     try:
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
+        failed_at = datetime.now(UTC)
         await session.execute(
             update(AIRequest)
             .where(AIRequest.id == request_record.id)
             .values(
                 status="failed",
                 error="Could not persist the AI response.",
+                safe_error_category="persistence_conflict",
+                completed_at=failed_at,
+                latency_ms=latency_ms,
                 updated_at=func.now(),
+            )
+        )
+        await TraceService(session).fail_trace(
+            FailTraceInput(
+                trace_id=trace_id,
+                event_type="ai.execution",
+                actor_id=str(principal.user_id),
+                actor_type="user",
+                user_id=principal.user_id,
+                workspace_id=canvas.workspace_id,
+                object_id=request_record.id,
+                object_type="ai_execution",
+                operation="persist_execution",
+                metadata={"latencyMs": latency_ms},
+                error=TraceErrorInfo(
+                    code="persistence_conflict",
+                    message="The execution could not be persisted because its canvas changed.",
+                ),
             )
         )
         await session.commit()
@@ -975,6 +1347,7 @@ async def ask_ai(
     return AIQueryOut(
         request_id=request_record.id,
         response_id=response_record.id,
+        trace_id=trace_id,
         node=node_out(response_node, citations=citation_outputs),
         edges=[_edge_out(edge) for edge in edges],
         mock=provider.mock,

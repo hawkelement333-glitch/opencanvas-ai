@@ -134,7 +134,8 @@ async def test_openai_failure_persists_failed_request_without_partial_graph(
         edge_count = await session.scalar(select(func.count()).select_from(Edge))
     assert len(requests) == 1
     assert requests[0].status == "failed"
-    assert requests[0].error == "Provider unavailable."
+    assert requests[0].error == "The configured AI provider could not complete the request."
+    assert requests[0].safe_error_category == "provider_failure"
     assert response_count == 0
     assert node_count == 1
     assert edge_count == 0

@@ -13,6 +13,8 @@
     "dev": "pnpm dev:web",
     "dev:web": "pnpm --filter @opencanvas/web dev",
     "dev:api": "cd apps/api && python -m uvicorn opencanvas_api.main:app --reload --host 127.0.0.1 --port 8000",
+    "worker": "cd apps/api && python -m scripts.worker",
+    "worker:once": "cd apps/api && python -m scripts.worker --once",
     "demo": "python apps/api/scripts/demo.py start",
     "demo:seed": "python apps/api/scripts/demo.py seed",
     "demo:reset": "python apps/api/scripts/demo.py reset",

@@ -56,10 +56,11 @@ def test_workspace_schema_and_legacy_canvas_link() -> None:
     assert table.name == "workspaces"
     assert Workspace.metadata_payload.property.columns[0].name == "metadata"
     assert _foreign_key_contract(Workspace) == {
-        (("legacy_canvas_id",), ("canvases.id",), "SET NULL")
+        (("legacy_canvas_id",), ("canvases.id",), "SET NULL"),
+        (("owner_id",), ("users.id",), "CASCADE"),
     }
     assert ("legacy_canvas_id",) in _unique_contract(Workspace)
-    assert table.c.owner_id.nullable is True
+    assert table.c.owner_id.nullable is False
     assert table.c.legacy_canvas_id.nullable is True
     checks = _checks(Workspace)
     assert "version >= 1" in checks

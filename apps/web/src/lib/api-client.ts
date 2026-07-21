@@ -17,6 +17,10 @@ import {
   documentUploadResultSchema,
   problemDetailsSchema,
   runtimeModeSchema,
+  authSessionSchema,
+  passwordResetRequestSchema,
+  userSchema,
+  workspaceSchema,
   sourcePassageSchema,
   updateNodeInputSchema,
   viewportSchema,
@@ -35,6 +39,18 @@ import {
 const DEFAULT_API_URL = "http://localhost:8000/api/v1";
 const API_TIMEOUT_MS = 20_000;
 const LONG_OPERATION_TIMEOUT_MS = 180_000;
+const CSRF_COOKIE_NAME = process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME ?? "mobius_session_csrf";
+
+function csrfHeaders(method: string | undefined): Record<string, string> {
+  if (!method || ["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return {};
+  const prefix = `${encodeURIComponent(CSRF_COOKIE_NAME)}=`;
+  const token = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix))
+    ?.slice(prefix.length);
+  return token ? { "X-CSRF-Token": decodeURIComponent(token) } : {};
+}
 
 function getApiBaseUrl(): string {
   return (process.env.NEXT_PUBLIC_API_URL ?? DEFAULT_API_URL).replace(/\/$/, "");
@@ -100,9 +116,11 @@ async function request<T>(
     const response = await fetch(`${getApiBaseUrl()}${path}`, {
       ...init,
       signal: controller.signal,
+      credentials: "include",
       headers: {
         Accept: "application/json",
         ...(init.body && !hasFormDataBody ? { "Content-Type": "application/json" } : {}),
+        ...csrfHeaders(init.method),
         ...init.headers,
       },
     });
@@ -145,7 +163,8 @@ async function requestWithoutBody(path: string, init: RequestInit): Promise<void
     const response = await fetch(`${getApiBaseUrl()}${path}`, {
       ...init,
       signal: controller.signal,
-      headers: { Accept: "application/json", ...init.headers },
+      credentials: "include",
+      headers: { Accept: "application/json", ...csrfHeaders(init.method), ...init.headers },
     });
     if (!response.ok) throw await parseError(response);
   } catch (error) {
@@ -163,12 +182,13 @@ export const canvasApi = {
   getRuntimeMode(signal?: AbortSignal): Promise<RuntimeMode> {
     return request("/health/runtime", runtimeModeSchema, { signal });
   },
-  listCanvases(signal?: AbortSignal): Promise<Canvas[]> {
-    return request("/canvases", z.array(canvasSchema), { signal });
+  listCanvases(workspaceId?: string, signal?: AbortSignal): Promise<Canvas[]> {
+    const query = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : "";
+    return request(`/canvases${query}`, z.array(canvasSchema), { signal });
   },
 
-  createCanvas(name: string): Promise<Canvas> {
-    const input = createCanvasInputSchema.parse({ name });
+  createCanvas(name: string, workspaceId?: string): Promise<Canvas> {
+    const input = createCanvasInputSchema.parse({ name, workspaceId });
     return request("/canvases", canvasSchema, { method: "POST", body: JSON.stringify(input) });
   },
 
@@ -305,6 +325,69 @@ export const canvasApi = {
       documentSearchResultSchema,
       { method: "POST", body: JSON.stringify(input) },
     );
+  },
+};
+
+export const workspaceApi = {
+  list(signal?: AbortSignal) {
+    return request("/workspaces", z.array(workspaceSchema), { signal });
+  },
+  create(name: string) {
+    return request("/workspaces", workspaceSchema, {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  },
+};
+
+export const accountApi = {
+  signUp(input: { email: string; password: string; displayName: string }) {
+    return request("/auth/signup", authSessionSchema, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  signIn(input: { email: string; password: string }) {
+    return request("/auth/signin", authSessionSchema, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  me(signal?: AbortSignal) {
+    return request("/auth/me", userSchema, { signal });
+  },
+  signOut() {
+    return requestWithoutBody("/auth/signout", { method: "POST" });
+  },
+  update(input: { displayName: string }) {
+    return request("/account", userSchema, { method: "PATCH", body: JSON.stringify(input) });
+  },
+  requestReset(email: string) {
+    return request("/auth/password-reset/request", passwordResetRequestSchema, {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  },
+  confirmReset(token: string, password: string) {
+    return requestWithoutBody("/auth/password-reset/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, password }),
+    });
+  },
+  requestExport() {
+    return request(
+      "/account/export",
+      z.object({ id: z.string().uuid(), status: z.string(), createdAt: z.string() }),
+      { method: "POST" },
+    );
+  },
+  delete(password: string) {
+    return requestWithoutBody("/account", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password, confirmation: "DELETE MY ACCOUNT" }),
+    });
   },
 };
 

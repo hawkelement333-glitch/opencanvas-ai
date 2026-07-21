@@ -12,7 +12,8 @@ describe("Build Week demo mode banner", () => {
     render(
       <DemoModeBanner
         runtime={{
-          mode: "deterministic_replay",
+        mode: "deterministic_replay",
+        appMode: "demo",
           externalAiEnabled: false,
           label: "Build Week demo · deterministic replay · no external AI calls",
           demoCanvasId: "d3000000-0000-4000-8000-000000000001",
@@ -37,7 +38,8 @@ describe("Build Week demo mode banner", () => {
     const { container } = render(
       <DemoModeBanner
         runtime={{
-          mode: "live",
+        mode: "live",
+        appMode: "production",
           externalAiEnabled: true,
           label: "Live model mode",
           demoCanvasId: null,

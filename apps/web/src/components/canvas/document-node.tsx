@@ -17,13 +17,19 @@ import { useCanvasNodeActions } from "@/components/canvas/canvas-node";
 import type { DocumentProcessingStage } from "@/lib/contracts";
 import type { CanvasFlowNode } from "@/lib/flow";
 
-const stageDetails: Record<DocumentProcessingStage, { label: string; progress: number }> = {
-  uploading: { label: "Uploading", progress: 12 },
-  extracting: { label: "Extracting text", progress: 35 },
-  chunking: { label: "Building passages", progress: 60 },
-  embedding: { label: "Indexing meaning", progress: 82 },
-  ready: { label: "Ready", progress: 100 },
-  failed: { label: "Processing failed", progress: 100 },
+const stageDetails: Record<DocumentProcessingStage, { label: string }> = {
+  uploading: { label: "Uploading" },
+  queued: { label: "Queued for processing" },
+  validating: { label: "Validating file" },
+  extracting: { label: "Extracting text" },
+  chunking: { label: "Building passages" },
+  embedding: { label: "Creating embeddings" },
+  indexing: { label: "Updating retrieval index" },
+  ready: { label: "Ready" },
+  retrying: { label: "Retry queued" },
+  deleting: { label: "Deleting" },
+  deleted: { label: "Deleted" },
+  failed: { label: "Processing failed" },
 };
 
 function formatBytes(bytes: number): string {
@@ -47,7 +53,8 @@ export const DocumentNodeCard = memo(function DocumentNodeCard({
   const stage = document?.processingStage ?? "failed";
   const details = stageDetails[stage];
   const ready = document?.status === "ready";
-  const failed = document?.status === "failed" || !document;
+  const failed =
+    !document || ["failed", "retryable_failure", "permanent_failure"].includes(document.status);
 
   return (
     <article
@@ -163,19 +170,11 @@ export const DocumentNodeCard = memo(function DocumentNodeCard({
             )}
             {details.label}
           </span>
-          {!failed && (
-            <div
-              className="document-node__progress"
-              role="progressbar"
-              aria-label={`${document?.fileName ?? node.title} processing progress`}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={details.progress}
-            >
-              <span style={{ width: `${details.progress}%` }} />
-            </div>
-          )}
+          {!failed && !ready && <small>Stage-based status · completion time varies</small>}
           {failed && document?.errorMessage && <p>{document.errorMessage}</p>}
+          {document?.status === "permanent_failure" && (
+            <p>Automatic retries are exhausted. Review the file or retry manually.</p>
+          )}
         </div>
 
         <div className="document-node__footer">

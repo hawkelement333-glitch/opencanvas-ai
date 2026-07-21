@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 
 from opencanvas_api.db.models import (
+    SYSTEM_WORKSPACE_ID,
     CanonicalExecution,
     CanonicalRelationship,
     Canvas,
@@ -240,7 +241,9 @@ async def test_trace_completion_failure_rolls_back_domain_mutation_before_failur
         await session.commit()
 
     async with database.sessions() as session:
-        workspace_count = await session.scalar(select(func.count()).select_from(Workspace))
+        workspace_count = await session.scalar(
+            select(func.count()).select_from(Workspace).where(Workspace.id != SYSTEM_WORKSPACE_ID)
+        )
         trace_events = (
             await session.scalars(
                 select(TraceEvent)

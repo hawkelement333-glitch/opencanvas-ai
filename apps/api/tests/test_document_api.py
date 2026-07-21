@@ -83,8 +83,8 @@ async def test_complete_upload_process_select_query_cite_trace_and_delete_workfl
     )
     assert pdf_response.status_code == 201, pdf_response.text
     pdf_upload = cast(JsonObject, pdf_response.json())
-    assert pdf_upload["document"]["status"] == "processing"
-    assert pdf_upload["document"]["processingStage"] == "uploading"
+    assert pdf_upload["document"]["status"] == "queued"
+    assert pdf_upload["document"]["processingStage"] == "queued"
     assert pdf_upload["document"]["pageCount"] is None
     assert pdf_upload["node"]["type"] == "document"
     assert pdf_upload["node"]["document"]["id"] == pdf_upload["document"]["id"]
@@ -221,7 +221,8 @@ async def test_complete_upload_process_select_query_cite_trace_and_delete_workfl
     assert request is not None
     assert request.instruction == instruction
     assert request.prompt_version == "grounded-block-citations-v1"
-    assert request.model_configuration["systemInstructions"]
+    assert "systemInstructions" not in request.model_configuration
+    assert request.model_configuration["providerConfigurationVersion"]
     assert request.model_configuration["maxOutputTokens"] == 1_600
     assert request.retrieval_configuration["selectedDocumentIds"] == [
         pdf_upload["document"]["id"],
@@ -379,8 +380,8 @@ async def test_upload_sanitizes_filename_and_failed_processing_can_retry(
     )
     assert image_only.status_code == 201
     queued = image_only.json()["document"]
-    assert queued["status"] == "processing"
-    assert queued["processingStage"] == "uploading"
+    assert queued["status"] == "queued"
+    assert queued["processingStage"] == "queued"
     failed_response = await client.get(f"{api_prefix}/documents/{queued['id']}")
     failed = failed_response.json()
     assert failed["status"] == "failed"
@@ -389,8 +390,8 @@ async def test_upload_sanitizes_filename_and_failed_processing_can_retry(
 
     retried = await client.post(f"{api_prefix}/documents/{failed['id']}/retry")
     assert retried.status_code == 200
-    assert retried.json()["status"] == "processing"
-    assert retried.json()["processingStage"] == "uploading"
+    assert retried.json()["status"] == "queued"
+    assert retried.json()["processingStage"] == "retrying"
     retried_status = await client.get(f"{api_prefix}/documents/{failed['id']}")
     assert retried_status.json()["status"] == "failed"
     assert "OCR" in retried_status.json()["errorMessage"]

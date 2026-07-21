@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from opencanvas_api.core.config import Settings
 from opencanvas_api.db.models import (
+    Canvas,
     CanvasDocumentNode,
     CanvasNode,
     Document,
@@ -17,6 +18,8 @@ from opencanvas_api.db.models import (
     DocumentEmbedding,
     DocumentFile,
     DocumentProcessingJob,
+    DocumentVersion,
+    Workspace,
 )
 from opencanvas_api.services.documents.chunking import chunk_document
 from opencanvas_api.services.documents.embeddings import EmbeddingProvider
@@ -25,7 +28,7 @@ from opencanvas_api.services.documents.errors import (
     DocumentServiceError,
 )
 from opencanvas_api.services.documents.extraction import extract_document
-from opencanvas_api.services.documents.storage import LocalDocumentStorage
+from opencanvas_api.services.documents.storage import DocumentStorage
 from opencanvas_api.services.documents.validation import (
     read_upload_limited,
     validate_document_bytes,
@@ -38,7 +41,7 @@ async def validate_and_store_upload(
     canvas_id: uuid.UUID,
     upload: UploadFile,
     settings: Settings,
-    storage: LocalDocumentStorage,
+    storage: DocumentStorage,
 ) -> Document:
     content = await read_upload_limited(upload, settings.document_max_file_size_bytes)
     validated = await asyncio.to_thread(
@@ -48,6 +51,20 @@ async def validate_and_store_upload(
         declared_media_type=upload.content_type,
         settings=settings,
     )
+    duplicate = await session.scalar(
+        select(Document.id).where(
+            Document.canvas_id == canvas_id,
+            Document.content_sha256 == validated.sha256,
+            Document.deleted_at.is_(None),
+            Document.status != "deleted",
+        )
+    )
+    if duplicate is not None:
+        raise DocumentProcessingError(
+            "This exact file already exists in the workspace.",
+            code="duplicate_upload",
+            status_code=409,
+        )
     document = Document(
         canvas_id=canvas_id,
         file_name=validated.file_name,
@@ -71,12 +88,91 @@ async def validate_and_store_upload(
             media_type=validated.media_type,
         )
     )
+    session.add(
+        DocumentVersion(
+            document_id=document.id,
+            version=1,
+            file_name=validated.file_name,
+            file_type=validated.file_type,
+            media_type=validated.media_type,
+            file_size_bytes=validated.size_bytes,
+            content_sha256=validated.sha256,
+            storage_key=stored.storage_key,
+            status="uploaded",
+        )
+    )
     try:
         await session.flush()
     except Exception:
         await storage.delete(stored.storage_key)
         raise
     return document
+
+
+async def replace_document_upload(
+    session: AsyncSession,
+    *,
+    document: Document,
+    upload: UploadFile,
+    settings: Settings,
+    storage: DocumentStorage,
+) -> tuple[Document, str]:
+    content = await read_upload_limited(upload, settings.document_max_file_size_bytes)
+    validated = await asyncio.to_thread(
+        validate_document_bytes,
+        filename=upload.filename,
+        content=content,
+        declared_media_type=upload.content_type,
+        settings=settings,
+    )
+    if validated.sha256 == document.content_sha256:
+        raise DocumentProcessingError(
+            "The replacement is identical to the current document version.",
+            code="duplicate_upload",
+            status_code=409,
+        )
+    next_version = document.version_count + 1
+    stored = await storage.store(document.id, validated.extension, validated.content)
+    current_file = await session.scalar(
+        select(DocumentFile).where(DocumentFile.document_id == document.id)
+    )
+    if current_file is None:
+        await storage.delete(stored.storage_key)
+        raise DocumentProcessingError("The current document file is missing.")
+    previous_key = current_file.storage_key
+    current_file.storage_key = stored.storage_key
+    current_file.byte_size = stored.byte_size
+    current_file.sha256 = validated.sha256
+    current_file.media_type = validated.media_type
+    session.add(
+        DocumentVersion(
+            document_id=document.id,
+            version=next_version,
+            file_name=validated.file_name,
+            file_type=validated.file_type,
+            media_type=validated.media_type,
+            file_size_bytes=validated.size_bytes,
+            content_sha256=validated.sha256,
+            storage_key=stored.storage_key,
+            status="uploaded",
+        )
+    )
+    document.file_name = validated.file_name
+    document.file_type = validated.file_type
+    document.media_type = validated.media_type
+    document.file_size_bytes = validated.size_bytes
+    document.content_sha256 = validated.sha256
+    document.status = "uploaded"
+    document.processing_stage = "uploading"
+    document.page_count = None
+    document.chunk_count = 0
+    document.extracted_text = None
+    document.error_message = None
+    document.safe_error_category = None
+    document.version_count = next_version
+    document.current_version = next_version
+    await session.flush()
+    return document, previous_key
 
 
 INTERRUPTED_PROCESSING_MESSAGE = (
@@ -116,7 +212,7 @@ class DocumentProcessor:
         self,
         *,
         settings: Settings,
-        storage: LocalDocumentStorage,
+        storage: DocumentStorage,
         provider: EmbeddingProvider,
     ) -> None:
         self.settings = settings
@@ -166,7 +262,12 @@ class DocumentProcessor:
             if document.chunk_count > 0 and embedding_count == document.chunk_count:
                 return document
             force = True
-        if document.status == "processing" and document.processing_stage != "uploading":
+        if document.status == "processing" and document.processing_stage not in {
+            "uploading",
+            "queued",
+            "processing",
+            "retrying",
+        }:
             raise DocumentProcessingError(
                 "The document is already being processed.",
                 code="document_processing",
@@ -178,25 +279,58 @@ class DocumentProcessor:
         )
         if document_file is None:
             raise DocumentProcessingError("The stored document file is missing.")
-        attempt = (
-            await session.scalar(
-                select(func.coalesce(func.max(DocumentProcessingJob.attempt), 0)).where(
-                    DocumentProcessingJob.document_id == document_id
-                )
-            )
-            or 0
-        ) + 1
-        job = DocumentProcessingJob(
-            document_id=document_id,
-            attempt=attempt,
-            status="extracting",
-            started_at=datetime.now(UTC),
+        canvas = await session.get(Canvas, document.canvas_id)
+        workspace = (
+            await session.get(Workspace, canvas.workspace_id) if canvas is not None else None
         )
-        session.add(job)
+        if canvas is None or workspace is None:
+            raise DocumentProcessingError("The document workspace is unavailable.")
+        job = await session.scalar(
+            select(DocumentProcessingJob)
+            .where(
+                DocumentProcessingJob.document_id == document_id,
+                DocumentProcessingJob.status.in_(("queued", "retrying", "processing")),
+                DocumentProcessingJob.completed_at.is_(None),
+            )
+            .order_by(DocumentProcessingJob.attempt.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        if job is None:
+            attempt = (
+                await session.scalar(
+                    select(func.coalesce(func.max(DocumentProcessingJob.attempt), 0)).where(
+                        DocumentProcessingJob.document_id == document_id
+                    )
+                )
+                or 0
+            ) + 1
+            job = DocumentProcessingJob(
+                user_id=workspace.owner_id,
+                workspace_id=workspace.id,
+                document_id=document_id,
+                attempt=attempt,
+                status="extracting",
+                idempotency_key=(
+                    f"document:{document_id}:version:{document.current_version}:attempt:{attempt}"
+                ),
+                started_at=datetime.now(UTC),
+            )
+            session.add(job)
+        else:
+            attempt = job.attempt
+            job.status = "extracting"
+            job.started_at = job.started_at or datetime.now(UTC)
         document.status = "processing"
         document.processing_stage = "extracting"
         document.error_message = None
         await self._persist(session, commit=commit_stages)
+        version = await session.scalar(
+            select(DocumentVersion).where(
+                DocumentVersion.document_id == document_id,
+                DocumentVersion.version == document.current_version,
+            )
+        )
 
         try:
             content = await self.storage.read(document_file.storage_key)
@@ -208,6 +342,9 @@ class DocumentProcessor:
             )
             document.extracted_text = extracted.text
             document.page_count = extracted.page_count
+            if version is not None:
+                version.extracted_text = extracted.text
+                version.status = "processing"
             document.processing_stage = "chunking"
             job.status = "chunking"
             await self._persist(session, commit=commit_stages)
@@ -227,6 +364,7 @@ class DocumentProcessor:
             chunk_records = [
                 DocumentChunk(
                     document_id=document_id,
+                    document_version=document.current_version,
                     chunk_index=chunk.chunk_index,
                     content=chunk.content,
                     page_number=chunk.page_number,
@@ -266,6 +404,8 @@ class DocumentProcessor:
             document.error_message = None
             job.status = "ready"
             job.completed_at = datetime.now(UTC)
+            if version is not None:
+                version.status = "ready"
             await self._persist(session, commit=commit_stages)
             return document
         except Exception as exc:
@@ -277,8 +417,16 @@ class DocumentProcessor:
             document.status = "failed"
             document.processing_stage = "failed"
             document.error_message = safe_message[:2_000]
+            document.safe_error_category = (
+                exc.code if isinstance(exc, DocumentServiceError) else "processing_failed"
+            )
+            document.retry_count = max(0, attempt - 1)
             job.status = "failed"
             job.error_message = safe_message[:2_000]
+            job.safe_error_category = document.safe_error_category
+            job.retryable = attempt <= self.settings.processing_retry_limit
+            if version is not None:
+                version.status = "failed"
             job.completed_at = datetime.now(UTC)
             await self._persist(session, commit=commit_stages)
             if isinstance(exc, DocumentProcessingError):

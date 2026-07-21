@@ -840,6 +840,8 @@ class CanonicalService:
         parent_trace_id: uuid.UUID | None,
         mutation: Mutation[MutationT],
     ) -> MutationT:
+        trace_workspace_id = workspace_id
+        trace_user_id = _actor_user_id(actor_id)
         try:
             context = await self.trace_service.start_trace(
                 StartTraceInput(
@@ -847,7 +849,8 @@ class CanonicalService:
                     event_type=f"{operation}.started",
                     actor_id=actor_id,
                     actor_type="user" if actor_id is not None else "system",
-                    workspace_id=workspace_id,
+                    user_id=trace_user_id,
+                    workspace_id=trace_workspace_id,
                     object_id=object_id,
                     object_type=object_type,
                     operation=operation,
@@ -872,6 +875,7 @@ class CanonicalService:
                         event_type=f"{operation}.succeeded",
                         actor_id=actor_id,
                         actor_type="user" if actor_id is not None else "system",
+                        user_id=trace_user_id,
                         workspace_id=workspace_id,
                         object_id=object_id,
                         object_type=success_object_type,
@@ -882,7 +886,7 @@ class CanonicalService:
         except CanonicalDomainError as exc:
             await self._record_failure(
                 context=context,
-                workspace_id=workspace_id,
+                workspace_id=trace_workspace_id,
                 object_id=object_id,
                 object_type=object_type,
                 operation=operation,
@@ -894,7 +898,7 @@ class CanonicalService:
             error = CanonicalStorageError("Canonical trace completion failed.")
             await self._record_failure(
                 context=context,
-                workspace_id=workspace_id,
+                workspace_id=trace_workspace_id,
                 object_id=object_id,
                 object_type=object_type,
                 operation=operation,
@@ -906,7 +910,7 @@ class CanonicalService:
             error = CanonicalStorageError("Canonical mutation failed.")
             await self._record_failure(
                 context=context,
-                workspace_id=workspace_id,
+                workspace_id=trace_workspace_id,
                 object_id=object_id,
                 object_type=object_type,
                 operation=operation,
@@ -924,7 +928,7 @@ class CanonicalService:
         self,
         *,
         context: TraceContext,
-        workspace_id: uuid.UUID,
+        workspace_id: uuid.UUID | None,
         object_id: uuid.UUID,
         object_type: str,
         operation: str,
@@ -939,6 +943,7 @@ class CanonicalService:
                     event_type=f"{operation}.failed",
                     actor_id=actor_id,
                     actor_type="user" if actor_id is not None else "system",
+                    user_id=_actor_user_id(actor_id),
                     workspace_id=workspace_id,
                     object_id=object_id,
                     object_type=object_type,
@@ -963,6 +968,15 @@ class CanonicalService:
                 trace_event_id=trace_event.event_id,
             )
         )
+
+
+def _actor_user_id(actor_id: str | None) -> uuid.UUID | None:
+    if actor_id is None:
+        return None
+    try:
+        return uuid.UUID(actor_id)
+    except ValueError:
+        return None
 
 
 def _parse_create_payload(object_type: str, payload: JsonObject) -> PayloadModel:

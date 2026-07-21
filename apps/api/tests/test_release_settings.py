@@ -26,13 +26,42 @@ def test_production_requires_postgresql() -> None:
         Settings(environment="production", database_url="sqlite+aiosqlite:///unsafe.db")
 
 
-def test_production_accepts_async_postgresql_without_live_ai() -> None:
+def test_production_refuses_mock_provider_fallback() -> None:
+    with pytest.raises(ValidationError, match="refuses mock AI"):
+        Settings(
+            environment="production",
+            app_url="https://mobius.example",
+            cors_origins=["https://mobius.example"],
+            database_url="postgresql+asyncpg://user:placeholder@db/opencanvas",
+            session_secret="production-placeholder-secret-with-thirty-two-bytes",
+            password_reset_provider="smtp",
+            smtp_host="smtp.example",
+            smtp_from_address="noreply@mobius.example",
+            ai_provider="mock",
+            embedding_provider="mock",
+        )
+
+
+def test_production_accepts_complete_explicit_configuration() -> None:
     settings = Settings(
-        environment="production",
+        app_mode="production",
+        app_url="https://mobius.example",
+        cors_origins=["https://mobius.example"],
         database_url="postgresql+asyncpg://user:placeholder@db/opencanvas",
-        ai_provider="mock",
-        embedding_provider="mock",
+        session_secret="production-placeholder-secret-with-thirty-two-bytes",
+        password_reset_provider="smtp",
+        smtp_host="smtp.example",
+        smtp_from_address="noreply@mobius.example",
+        ai_provider="openai",
+        embedding_provider="openai",
+        openai_api_key="placeholder-not-live",
+        storage_provider="s3",
+        object_storage_bucket="mobius-production",
+        object_storage_access_key_id="placeholder",
+        object_storage_secret_access_key="placeholder",
+        job_provider="database",
     )
 
-    assert settings.environment == "production"
-    assert settings.effective_ai_provider == "mock"
+    assert settings.runtime_mode.value == "production"
+    assert settings.effective_ai_provider == "openai"
+    assert settings.secure_cookies is True

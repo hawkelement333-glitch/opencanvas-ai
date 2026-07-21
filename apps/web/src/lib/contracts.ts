@@ -15,13 +15,30 @@ export const viewportSchema = pointSchema.extend({
 const timestampSchema = z.string().datetime({ offset: true });
 
 export const documentFileTypeSchema = z.enum(["pdf", "txt", "markdown", "docx"]);
-export const documentStatusSchema = z.enum(["processing", "ready", "failed"]);
+export const documentStatusSchema = z.enum([
+  "uploaded",
+  "queued",
+  "processing",
+  "ready",
+  "retryable_failure",
+  "retrying",
+  "permanent_failure",
+  "deleting",
+  "deleted",
+  "failed",
+]);
 export const documentProcessingStageSchema = z.enum([
   "uploading",
+  "queued",
+  "validating",
   "extracting",
   "chunking",
   "embedding",
+  "indexing",
   "ready",
+  "retrying",
+  "deleting",
+  "deleted",
   "failed",
 ]);
 
@@ -64,6 +81,7 @@ export const citationSchema = z
 
 export const canvasSchema = z.object({
   id: z.string().min(1),
+  workspaceId: z.string().uuid(),
   name: z.string().min(1).max(120),
   viewport: viewportSchema.default({ x: 0, y: 0, zoom: 1 }),
   revision: z.number().int().nonnegative(),
@@ -106,7 +124,10 @@ export const canvasSnapshotSchema = z.object({
 });
 
 export const createCanvasInputSchema = z
-  .object({ name: z.string().trim().min(1, "Name is required").max(120) })
+  .object({
+    name: z.string().trim().min(1, "Name is required").max(120),
+    workspaceId: z.string().uuid().optional(),
+  })
   .strict();
 
 export const createNodeInputSchema = z
@@ -158,6 +179,7 @@ export const askAIInputSchema = z
 export const aiResultSchema = z.object({
   requestId: z.string().min(1),
   responseId: z.string().min(1),
+  traceId: z.string().uuid(),
   node: canvasNodeSchema,
   edges: z.array(canvasEdgeSchema),
   mock: z.boolean(),
@@ -234,10 +256,42 @@ export const problemDetailsSchema = z
 
 export const runtimeModeSchema = z.object({
   mode: z.enum(["live", "deterministic_replay"]),
+  appMode: z.enum(["demo", "development", "test", "staging", "production"]),
   externalAiEnabled: z.boolean(),
   label: z.string().min(1),
   demoCanvasId: z.string().uuid().nullable(),
   demoTraceId: z.string().uuid().nullable(),
+});
+
+export const userSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email(),
+  displayName: z.string().min(1),
+  emailVerified: z.boolean(),
+});
+
+export const workspaceSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(160),
+  description: z.string().nullable(),
+  ownerId: z.string().uuid().nullable(),
+  version: z.number().int().positive(),
+  lifecycleState: z.string(),
+  metadata: z.record(z.string(), z.unknown()),
+  legacyCanvasId: z.string().uuid().nullable(),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+});
+
+export const authSessionSchema = z.object({
+  user: userSchema,
+  csrfToken: z.string().min(1),
+  expiresAt: timestampSchema,
+});
+
+export const passwordResetRequestSchema = z.object({
+  accepted: z.boolean(),
+  developmentToken: z.string().nullable(),
 });
 
 export type Canvas = z.infer<typeof canvasSchema>;
@@ -261,6 +315,8 @@ export type SourcePassage = z.infer<typeof sourcePassageSchema>;
 export type DocumentSearchInput = z.infer<typeof documentSearchInputSchema>;
 export type DocumentSearchResult = z.infer<typeof documentSearchResultSchema>;
 export type RuntimeMode = z.infer<typeof runtimeModeSchema>;
+export type User = z.infer<typeof userSchema>;
+export type Workspace = z.infer<typeof workspaceSchema>;
 
 export const DEFAULT_NODE_SIZE = { width: 320, height: 240 } as const;
 

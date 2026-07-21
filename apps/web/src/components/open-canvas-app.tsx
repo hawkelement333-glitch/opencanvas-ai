@@ -49,7 +49,7 @@ import { AssistantPanel } from "@/components/assistant-panel";
 import { CanvasNodeActionsProvider, CanvasNodeCard } from "@/components/canvas/canvas-node";
 import { DocumentNodeCard } from "@/components/canvas/document-node";
 import { DocumentPreviewPanel } from "@/components/document-preview-panel";
-import { canvasApi, getErrorMessage, getTraceUrl } from "@/lib/api-client";
+import { canvasApi, getErrorMessage, getTraceUrl, workspaceApi } from "@/lib/api-client";
 import { AutosaveQueue, type SaveState } from "@/lib/autosave-queue";
 import {
   buildAIRequest,
@@ -60,6 +60,7 @@ import {
   type DocumentFileType,
   type DocumentMetadata,
   type RuntimeMode,
+  type Workspace,
 } from "@/lib/contracts";
 import {
   removeDocumentCitations,
@@ -123,6 +124,7 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
       <button type="button" onClick={onRetry}>
         <RefreshCw size={15} aria-hidden="true" /> Try again
       </button>
+      <a href="/sign-in">Sign in or restore your session</a>
     </div>
   );
 }
@@ -163,23 +165,31 @@ export function DemoModeBanner({
 }
 
 interface SidebarProps {
+  workspaces: readonly Workspace[];
+  activeWorkspaceId: string | null;
   canvases: readonly Canvas[];
   activeCanvasId: string | null;
   collapsed: boolean;
   creating: boolean;
   runtime: RuntimeMode | null;
   onCollapse: () => void;
+  onWorkspaceOpen: (workspaceId: string) => void;
+  onWorkspaceCreate: () => void;
   onOpen: (canvasId: string) => void;
   onCreate: (name: string) => Promise<void>;
 }
 
 function CanvasSidebar({
+  workspaces,
+  activeWorkspaceId,
   canvases,
   activeCanvasId,
   collapsed,
   creating,
   runtime,
   onCollapse,
+  onWorkspaceOpen,
+  onWorkspaceCreate,
   onOpen,
   onCreate,
 }: SidebarProps) {
@@ -222,6 +232,30 @@ function CanvasSidebar({
 
       {!collapsed && (
         <>
+          <div className="canvas-sidebar__section-title">
+            <span>Workspace</span>
+            <button type="button" onClick={onWorkspaceCreate} aria-label="Create workspace">
+              <Plus size={15} aria-hidden="true" />
+            </button>
+          </div>
+          {workspaces.length > 0 ? (
+            <select
+              className="workspace-select"
+              value={activeWorkspaceId ?? ""}
+              onChange={(event) => onWorkspaceOpen(event.target.value)}
+              aria-label="Active workspace"
+            >
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <button type="button" className="workspace-empty" onClick={onWorkspaceCreate}>
+              Create your first workspace
+            </button>
+          )}
           <div className="canvas-sidebar__section-title">
             <span>Your canvases</span>
             <button
@@ -279,12 +313,17 @@ function CanvasSidebar({
           {runtime?.mode === "deterministic_replay" && (
             <DemoModeBanner runtime={runtime} placement="sidebar" />
           )}
+          {runtime?.appMode === "staging" && (
+            <div className="environment-indicator" role="status">
+              STAGING · production-shaped data
+            </div>
+          )}
         </>
       )}
 
       <div className="canvas-sidebar__footer" title="Local-first editing with server persistence">
         <Cloud size={15} aria-hidden="true" />
-        {!collapsed && <span>Server-synced</span>}
+        {!collapsed && <a href="/account">Account · server-synced</a>}
       </div>
     </aside>
   );
@@ -292,6 +331,7 @@ function CanvasSidebar({
 
 export function OpenCanvasApp() {
   const queryClient = useQueryClient();
+  const [chosenWorkspaceId, setChosenWorkspaceId] = useState<string | null>(null);
   const [chosenCanvasId, setChosenCanvasId] = useState<string | null>(null);
   const [storedCanvasId] = useState<string | null>(() =>
     typeof window === "undefined" ? null : window.localStorage.getItem(LAST_CANVAS_KEY),
@@ -305,9 +345,16 @@ export function OpenCanvasApp() {
     staleTime: Number.POSITIVE_INFINITY,
   });
 
+  const workspacesQuery = useQuery({
+    queryKey: ["workspaces"],
+    queryFn: ({ signal }) => workspaceApi.list(signal),
+  });
+
+  const activeWorkspaceId = chosenWorkspaceId ?? workspacesQuery.data?.[0]?.id ?? null;
+
   const canvasesQuery = useQuery({
-    queryKey: ["canvases"],
-    queryFn: ({ signal }) => canvasApi.listCanvases(signal),
+    queryKey: ["canvases", activeWorkspaceId],
+    queryFn: ({ signal }) => canvasApi.listCanvases(activeWorkspaceId ?? undefined, signal),
   });
 
   const activeCanvasId =
@@ -328,11 +375,28 @@ export function OpenCanvasApp() {
   });
 
   const createCanvas = useMutation({
-    mutationFn: (name: string) => canvasApi.createCanvas(name),
+    mutationFn: (name: string) => canvasApi.createCanvas(name, activeWorkspaceId ?? undefined),
     onSuccess: (canvas) => {
-      queryClient.setQueryData<Canvas[]>(["canvases"], (current = []) => [...current, canvas]);
+      setChosenWorkspaceId(canvas.workspaceId);
+      queryClient.setQueryData<Canvas[]>(["canvases", canvas.workspaceId], (current = []) => [
+        ...current,
+        canvas,
+      ]);
+      void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
       setChosenCanvasId(canvas.id);
       window.localStorage.setItem(LAST_CANVAS_KEY, canvas.id);
+    },
+  });
+
+  const createWorkspace = useMutation({
+    mutationFn: (name: string) => workspaceApi.create(name),
+    onSuccess: (workspace) => {
+      queryClient.setQueryData<Workspace[]>(["workspaces"], (current = []) => [
+        ...current,
+        workspace,
+      ]);
+      setChosenWorkspaceId(workspace.id);
+      setChosenCanvasId(null);
     },
   });
 
@@ -348,12 +412,22 @@ export function OpenCanvasApp() {
   return (
     <main className="opencanvas-app">
       <CanvasSidebar
+        workspaces={workspacesQuery.data ?? []}
+        activeWorkspaceId={activeWorkspaceId}
         canvases={canvases}
         activeCanvasId={activeCanvasId}
         collapsed={sidebarCollapsed}
         creating={createCanvas.isPending}
         runtime={runtimeQuery.data ?? null}
         onCollapse={() => setSidebarCollapsed((current) => !current)}
+        onWorkspaceOpen={(workspaceId) => {
+          setChosenWorkspaceId(workspaceId);
+          setChosenCanvasId(null);
+        }}
+        onWorkspaceCreate={() => {
+          const name = window.prompt("Workspace name", "My workspace")?.trim();
+          if (name) createWorkspace.mutate(name);
+        }}
         onOpen={openCanvas}
         onCreate={async (name) => {
           await createCanvas.mutateAsync(name);
@@ -485,7 +559,11 @@ function CanvasWorkspace({ snapshot, onReload }: CanvasWorkspaceProps) {
         new Set(
           nodes
             .map((node) => node.data.node.document)
-            .filter((document) => document?.status === "processing")
+            .filter((document) =>
+              document
+                ? ["uploaded", "queued", "processing", "retrying"].includes(document.status)
+                : false,
+            )
             .map((document) => document?.id)
             .filter((id): id is string => Boolean(id)),
         ),

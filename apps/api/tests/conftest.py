@@ -10,7 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from opencanvas_api.api.dependencies import get_database, get_session
 from opencanvas_api.core.config import Settings, get_settings
-from opencanvas_api.db.models import Base
+from opencanvas_api.db.models import (
+    SYSTEM_USER_ID,
+    SYSTEM_WORKSPACE_ID,
+    Base,
+    User,
+    Workspace,
+)
 from opencanvas_api.db.session import Database
 from opencanvas_api.main import create_app
 
@@ -20,6 +26,25 @@ async def database() -> AsyncIterator[Database]:
     database = Database("sqlite+aiosqlite:///:memory:")
     async with database.engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+    async with database.sessions() as session:
+        session.add(
+            User(
+                id=SYSTEM_USER_ID,
+                email="test-system@mobius.invalid",
+                email_normalized="test-system@mobius.invalid",
+                password_hash="test-only",
+                display_name="Test system user",
+                email_verified=True,
+            )
+        )
+        session.add(
+            Workspace(
+                id=SYSTEM_WORKSPACE_ID,
+                owner_id=SYSTEM_USER_ID,
+                name="Test workspace",
+            )
+        )
+        await session.commit()
     try:
         yield database
     finally:
@@ -36,6 +61,7 @@ def app(database: Database, tmp_path: Path) -> FastAPI:
         ai_context_character_limit=10_000,
         document_storage_root=tmp_path / "documents",
         embedding_provider="mock",
+        auth_test_bypass=True,
     )
 
     async def session_override() -> AsyncIterator[AsyncSession]:

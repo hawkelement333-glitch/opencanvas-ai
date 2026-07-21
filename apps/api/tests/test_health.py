@@ -35,6 +35,9 @@ async def test_liveness_is_dependency_free(health_client: httpx.AsyncClient) -> 
         "environment": get_settings().environment,
         "ai_provider": None,
         "ai_configured": None,
+        "app_mode": "development",
+        "storage_provider": None,
+        "job_provider": None,
     }
 
 

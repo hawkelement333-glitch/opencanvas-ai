@@ -41,6 +41,7 @@ class TraceEventBaseInput(TraceInputModel):
     event_type: str = Field(min_length=1, max_length=120)
     actor_id: str | None = Field(default=None, min_length=1, max_length=255)
     actor_type: ActorType = "system"
+    user_id: uuid.UUID | None = None
     workspace_id: uuid.UUID | None = None
     object_id: uuid.UUID | None = None
     object_type: str | None = Field(default=None, min_length=1, max_length=64)
@@ -105,6 +106,7 @@ class TraceQueryFilters(TraceInputModel):
     trace_id: uuid.UUID | None = None
     parent_trace_id: uuid.UUID | None = None
     workspace_id: uuid.UUID | None = None
+    workspace_ids: list[uuid.UUID] | None = None
     object_id: uuid.UUID | None = None
     event_type: str | None = Field(default=None, min_length=1, max_length=120)
     actor_type: ActorType | None = None
@@ -155,6 +157,7 @@ class TraceService:
                 event_type=input_data.event_type,
                 actor_id=input_data.actor_id,
                 actor_type=input_data.actor_type,
+                user_id=input_data.user_id,
                 workspace_id=input_data.workspace_id,
                 object_id=input_data.object_id,
                 object_type=input_data.object_type,
@@ -182,6 +185,7 @@ class TraceService:
             event_type=input_data.event_type,
             actor_id=input_data.actor_id,
             actor_type=input_data.actor_type,
+            user_id=input_data.user_id,
             workspace_id=input_data.workspace_id,
             object_id=input_data.object_id,
             object_type=input_data.object_type,
@@ -229,6 +233,8 @@ class TraceService:
             statement = statement.where(TraceEvent.parent_trace_id == filters.parent_trace_id)
         if filters.workspace_id is not None:
             statement = statement.where(TraceEvent.workspace_id == filters.workspace_id)
+        if filters.workspace_ids is not None:
+            statement = statement.where(TraceEvent.workspace_id.in_(filters.workspace_ids))
         if filters.object_id is not None:
             statement = statement.where(TraceEvent.object_id == filters.object_id)
         if filters.event_type is not None:
