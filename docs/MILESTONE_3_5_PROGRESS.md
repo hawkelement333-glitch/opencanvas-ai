@@ -20,8 +20,11 @@ foundation`)
 - All milestone pushes were normal non-force pushes.
 - Protected annotated tag: `competition-demo-v1` (tag object `acbde89b6e2cc3e41c372887794726d393836716`),
   unchanged and still resolving to commit `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
-- Local and remote default-branch references both remained at `f04ace592e253c48172d129331ed8cd9bc4d4f4f`.
-  No default-branch merge or push, history rewrite, pull request, or later-milestone work occurred.
+- Before the required final fetch, local `main` and the cached `origin/main` tracking ref were both
+  `f04ace592e253c48172d129331ed8cd9bc4d4f4f`. The post-push fetch showed that the actual remote
+  default branch had independently advanced to `fc2e90fcc517755eaa8262bfa5125c540ff3669f`;
+  local `main` remained unchanged. This work pushed only the milestone branch. No default-branch
+  merge or push, history rewrite, pull request, or later-milestone work occurred in this task.
 
 ## Recovered productization foundation checkpointed locally
 
