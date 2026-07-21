@@ -13,6 +13,7 @@ import { useState, type FormEvent } from "react";
 
 import { askAIInputSchema, type CanvasNode } from "@/lib/contracts";
 import { getErrorMessage } from "@/lib/api-client";
+import { nodeRole, summarizeResources } from "@/lib/universe";
 
 interface AssistantPanelProps {
   selectedNodes: readonly CanvasNode[];
@@ -32,6 +33,7 @@ export function AssistantPanel({ selectedNodes, onAsk, onClearSelection }: Assis
     | { type: "success"; mock: boolean; grounded: boolean; insufficientEvidence: boolean }
     | { type: "error"; message: string }
   >({ type: "idle" });
+  const selectedResources = summarizeResources(selectedNodes, selectedNodes);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -55,21 +57,21 @@ export function AssistantPanel({ selectedNodes, onAsk, onClearSelection }: Assis
   };
 
   return (
-    <aside className="assistant-panel" aria-label="AI assistant">
+    <aside className="assistant-panel" aria-label="Controlled evidence query">
       <div className="assistant-panel__heading">
         <span className="assistant-panel__icon" aria-hidden="true">
           <Bot size={18} />
         </span>
         <div>
-          <p>Canvas assistant</p>
-          <span>Reasons only across your selection</span>
+          <p>Ask from selected evidence</p>
+          <span>Controlled context only · no unselected sources</span>
         </div>
       </div>
 
       <section className="context-tray" aria-labelledby="context-title">
         <div className="context-tray__header">
           <div>
-            <span id="context-title">Context</span>
+            <span id="context-title">Context Zone</span>
             <strong>{selectedNodes.length}</strong>
           </div>
           {selectedNodes.length > 0 && (
@@ -91,17 +93,32 @@ export function AssistantPanel({ selectedNodes, onAsk, onClearSelection }: Assis
               <li key={node.id}>
                 <span>{index + 1}</span>
                 <p>{node.title}</p>
-                <small>
-                  {node.type === "ai_response"
-                    ? "AI"
-                    : node.type === "document"
-                      ? "Source"
-                      : "Note"}
-                </small>
+                <small>{nodeRole(node).label}</small>
               </li>
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="resource-panel" aria-label="Selected context resources">
+        <div>
+          <span>Resources</span>
+          <strong>{selectedResources.readyDocuments} ready sources</strong>
+        </div>
+        <dl>
+          <div>
+            <dt>Selected</dt>
+            <dd>{selectedResources.selectedItems}</dd>
+          </div>
+          <div>
+            <dt>Documents</dt>
+            <dd>{selectedResources.documents}</dd>
+          </div>
+          <div>
+            <dt>Citations</dt>
+            <dd>{selectedResources.citations}</dd>
+          </div>
+        </dl>
       </section>
 
       <div className="assistant-panel__spacer" />
@@ -140,7 +157,7 @@ export function AssistantPanel({ selectedNodes, onAsk, onClearSelection }: Assis
       </div>
 
       <form className="assistant-composer" onSubmit={submit}>
-        <label htmlFor="assistant-instruction">Ask about selected canvas items</label>
+        <label htmlFor="assistant-instruction">Evidence query</label>
         <textarea
           id="assistant-instruction"
           value={instruction}
@@ -154,14 +171,14 @@ export function AssistantPanel({ selectedNodes, onAsk, onClearSelection }: Assis
               event.currentTarget.form?.requestSubmit();
             }
           }}
-          placeholder="What do these sources say about the launch date?"
+          placeholder="Ask a question that can be answered from the selected evidence."
           rows={4}
           maxLength={8_000}
           disabled={status.type === "asking"}
           data-testid="assistant-input"
         />
         <div className="assistant-composer__footer">
-          <span>Enter to ask · Shift+Enter for a new line</span>
+          <span>{selectedNodes.length} selected · Enter to ask</span>
           <button
             type="submit"
             disabled={status.type === "asking" || selectedNodes.length === 0 || !instruction.trim()}

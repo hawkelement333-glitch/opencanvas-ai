@@ -14,23 +14,8 @@ import {
 import { memo, type MouseEvent } from "react";
 
 import { useCanvasNodeActions } from "@/components/canvas/canvas-node";
-import type { DocumentProcessingStage } from "@/lib/contracts";
 import type { CanvasFlowNode } from "@/lib/flow";
-
-const stageDetails: Record<DocumentProcessingStage, { label: string }> = {
-  uploading: { label: "Uploading" },
-  queued: { label: "Queued for processing" },
-  validating: { label: "Validating file" },
-  extracting: { label: "Extracting text" },
-  chunking: { label: "Building passages" },
-  embedding: { label: "Creating embeddings" },
-  indexing: { label: "Updating retrieval index" },
-  ready: { label: "Ready" },
-  retrying: { label: "Retry queued" },
-  deleting: { label: "Deleting" },
-  deleted: { label: "Deleted" },
-  failed: { label: "Processing failed" },
-};
+import { documentStageDetails, nodeRole } from "@/lib/universe";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1_024) return `${bytes} B`;
@@ -51,7 +36,8 @@ export const DocumentNodeCard = memo(function DocumentNodeCard({
   const { node, pending } = data;
   const document = node.document;
   const stage = document?.processingStage ?? "failed";
-  const details = stageDetails[stage];
+  const details = documentStageDetails[stage];
+  const role = nodeRole(node);
   const ready = document?.status === "ready";
   const failed =
     !document || ["failed", "retryable_failure", "permanent_failure"].includes(document.status);
@@ -60,7 +46,7 @@ export const DocumentNodeCard = memo(function DocumentNodeCard({
     <article
       className={`canvas-node document-node ${failed ? "document-node--failed" : ""} ${pending ? "canvas-node--pending" : ""}`}
       data-testid={`canvas-node-${id}`}
-      aria-label={`Document: ${document?.fileName ?? node.title}`}
+      aria-label={`${role.label}: ${document?.fileName ?? node.title}`}
     >
       <NodeResizer
         color="#61c4d6"
@@ -92,7 +78,7 @@ export const DocumentNodeCard = memo(function DocumentNodeCard({
 
       <header className="canvas-node__header">
         <span className="canvas-node__kind document-node__kind">
-          <FileText size={14} aria-hidden="true" /> Document
+          <FileText size={14} aria-hidden="true" /> {role.label}
         </span>
         <div className="canvas-node__actions nodrag" onMouseDown={stopPropagation}>
           <button
@@ -137,6 +123,7 @@ export const DocumentNodeCard = memo(function DocumentNodeCard({
               {document?.fileType.toUpperCase() ?? "FILE"} ·{" "}
               {document ? formatBytes(document.fileSize) : "Metadata unavailable"}
             </small>
+            <small>{role.description}</small>
           </div>
         </div>
 
@@ -170,7 +157,7 @@ export const DocumentNodeCard = memo(function DocumentNodeCard({
             )}
             {details.label}
           </span>
-          {!failed && !ready && <small>Stage-based status · completion time varies</small>}
+          {!failed && !ready && <small>{details.userAction}</small>}
           {failed && document?.errorMessage && <p>{document.errorMessage}</p>}
           {document?.status === "permanent_failure" && (
             <p>Automatic retries are exhausted. Review the file or retry manually.</p>

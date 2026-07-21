@@ -13,6 +13,7 @@ import {
 
 import type { Citation } from "@/lib/contracts";
 import type { CanvasFlowNode, NodeHandlers } from "@/lib/flow";
+import { citationRole, nodeRole } from "@/lib/universe";
 
 const CanvasNodeActionsContext = createContext<NodeHandlers | null>(null);
 
@@ -76,6 +77,7 @@ export function ResponseCitations({
                   <strong>[{citation.ordinal}]</strong>
                   <span>{citation.documentTitle}</span>
                   <small>{citationLocation(citation)}</small>
+                  <em>{citationRole(citation).label}</em>
                 </button>
               </li>
             ))}
@@ -97,6 +99,7 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({
   const { node, pending } = data;
   const isAI = node.type === "ai_response";
   const citations = node.citations ?? [];
+  const role = nodeRole(node);
 
   const changeTitle = (event: ChangeEvent<HTMLInputElement>) => {
     actions.onTitleChange(id, event.target.value);
@@ -110,7 +113,7 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({
     <article
       className={`canvas-node ${isAI ? "canvas-node--ai" : ""} ${pending ? "canvas-node--pending" : ""}`}
       data-testid={`canvas-node-${id}`}
-      aria-label={`${isAI ? "AI response" : "Note"}: ${node.title}`}
+      aria-label={`${role.label}: ${node.title}`}
     >
       <NodeResizer
         color={isAI ? "#b39aff" : "#d8ff8d"}
@@ -147,7 +150,7 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({
           ) : (
             <StickyNote size={14} aria-hidden="true" />
           )}
-          {isAI ? "AI response" : "Note"}
+          {role.label}
         </span>
         <div className="canvas-node__actions nodrag" onMouseDown={stopPropagation}>
           <button
@@ -194,6 +197,10 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({
         maxLength={160}
         data-testid={`node-title-${id}`}
       />
+      <div className="canvas-node__role" title={role.description}>
+        <span>{role.level.replace("_", " ")}</span>
+        <span>{isAI ? `${citations.length} citations` : "Selectable context"}</span>
+      </div>
       <textarea
         className="canvas-node__editor nodrag nopan nowheel"
         aria-label={`${node.title} content`}

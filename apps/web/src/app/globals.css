@@ -1,6 +1,7 @@
 :root {
   color-scheme: dark;
   --bg: #090a0c;
+  --bg-deep: #05040a;
   --surface: #101215;
   --surface-raised: #17191d;
   --surface-soft: #1d2025;
@@ -12,6 +13,9 @@
   --lime: #d5ff8a;
   --lime-ink: #18200c;
   --violet: #b7a1ff;
+  --violet-deep: #6c44d9;
+  --solar: #f3c15f;
+  --cyan: #67d6e6;
   --danger: #ff8f8f;
   --success: #9ee69a;
   --shadow: 0 20px 55px rgba(0, 0, 0, 0.32);
@@ -65,7 +69,10 @@ textarea:focus-visible {
   grid-template-columns: auto minmax(0, 1fr);
   width: 100vw;
   height: 100dvh;
-  background: var(--bg);
+  background:
+    radial-gradient(circle at 18% 22%, rgba(108, 68, 217, 0.22), transparent 34%),
+    radial-gradient(circle at 78% 16%, rgba(243, 193, 95, 0.1), transparent 28%),
+    linear-gradient(135deg, var(--bg-deep), var(--bg));
 }
 
 .canvas-sidebar {
@@ -76,7 +83,7 @@ textarea:focus-visible {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--line);
-  background: #0d0f11;
+  background: linear-gradient(180deg, rgba(19, 14, 37, 0.88), rgba(8, 9, 13, 0.97)), #0d0f11;
   transition: width 180ms ease;
 }
 
@@ -124,9 +131,13 @@ textarea:focus-visible {
   height: 34px;
   display: grid;
   place-items: center;
-  border-radius: 10px;
-  color: var(--lime-ink);
-  background: var(--lime);
+  border: 1px solid rgba(243, 193, 95, 0.7);
+  border-radius: 50%;
+  color: var(--solar);
+  background:
+    radial-gradient(circle at 50% 50%, #05040a 0 34%, transparent 36%),
+    conic-gradient(from 245deg, var(--solar), rgba(243, 193, 95, 0.1), var(--violet), var(--solar));
+  box-shadow: 0 0 22px rgba(243, 193, 95, 0.2);
 }
 
 .canvas-sidebar__section-title {
@@ -256,8 +267,8 @@ textarea:focus-visible {
 
 .canvas-list button.is-active {
   color: var(--text);
-  border-color: var(--line);
-  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(243, 193, 95, 0.34);
+  background: rgba(243, 193, 95, 0.08);
 }
 
 .canvas-sidebar__footer {
@@ -276,7 +287,8 @@ textarea:focus-visible {
   position: relative;
   min-width: 0;
   min-height: 0;
-  background: var(--bg);
+  background:
+    radial-gradient(circle at 50% 50%, rgba(103, 214, 230, 0.055), transparent 30%), var(--bg);
 }
 
 .demo-mode-banner {
@@ -472,13 +484,14 @@ textarea:focus-visible {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #0a0b0d;
+  background: var(--bg-deep);
 }
 
 .canvas-stage .react-flow {
   background:
-    radial-gradient(circle at 25% 30%, rgba(213, 255, 138, 0.035), transparent 25%),
-    radial-gradient(circle at 75% 70%, rgba(183, 161, 255, 0.045), transparent 28%), #0a0b0d;
+    radial-gradient(circle at 22% 30%, rgba(243, 193, 95, 0.055), transparent 24%),
+    radial-gradient(circle at 75% 70%, rgba(103, 214, 230, 0.06), transparent 25%),
+    radial-gradient(circle at 50% 48%, rgba(108, 68, 217, 0.18), transparent 42%), #05040a;
 }
 
 .canvas-toolbar {
@@ -492,18 +505,17 @@ textarea:focus-visible {
   align-items: center;
   gap: 10px;
   padding: 7px 8px 7px 14px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: rgba(19, 21, 24, 0.88);
+  border: 1px solid rgba(183, 161, 255, 0.2);
+  border-radius: 10px;
+  background: rgba(10, 9, 18, 0.9);
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.22);
   backdrop-filter: blur(14px);
 }
 
 .canvas-toolbar__title {
   min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
+  display: grid;
+  gap: 2px;
 }
 
 .canvas-toolbar__title span {
@@ -515,9 +527,42 @@ textarea:focus-visible {
 }
 
 .canvas-toolbar__title small {
-  color: var(--text-faint);
+  color: var(--solar);
   font-size: 10px;
   white-space: nowrap;
+}
+
+.canvas-resource-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.canvas-resource-strip div {
+  min-width: 58px;
+  padding: 5px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.canvas-resource-strip dt,
+.canvas-resource-strip dd {
+  margin: 0;
+}
+
+.canvas-resource-strip dt {
+  color: var(--text-faint);
+  font-size: 7px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.canvas-resource-strip dd {
+  color: var(--text);
+  font-size: 11px;
 }
 
 .save-indicator {
@@ -576,9 +621,9 @@ textarea:focus-visible {
 }
 
 .react-flow__node-canvasCard.selected .canvas-node {
-  border-color: rgba(213, 255, 138, 0.85);
+  border-color: rgba(243, 193, 95, 0.86);
   box-shadow:
-    0 0 0 1px rgba(213, 255, 138, 0.35),
+    0 0 0 1px rgba(243, 193, 95, 0.35),
     0 18px 45px rgba(0, 0, 0, 0.38);
 }
 
@@ -596,8 +641,10 @@ textarea:focus-visible {
   flex-direction: column;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 14px;
-  background: linear-gradient(145deg, #1b1e21, #15171a);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(243, 193, 95, 0.08), transparent 34%),
+    linear-gradient(145deg, #1b1e21, #15171a);
   box-shadow: 0 12px 35px rgba(0, 0, 0, 0.25);
   overflow: hidden;
   transition:
@@ -611,6 +658,20 @@ textarea:focus-visible {
   background:
     linear-gradient(145deg, rgba(183, 161, 255, 0.08), transparent 45%),
     linear-gradient(145deg, #1c1b23, #16161b);
+}
+
+.canvas-node__role {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 2px 0;
+  color: var(--text-faint);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.canvas-node__role span:first-child {
+  color: var(--solar);
 }
 
 .canvas-node--pending {
@@ -740,7 +801,7 @@ textarea:focus-visible {
 }
 
 .react-flow__edge-path {
-  stroke: #747b78;
+  stroke: #86829a;
   stroke-width: 1.5;
 }
 
@@ -855,7 +916,7 @@ textarea:focus-visible {
   flex-direction: column;
   padding: 16px;
   border-left: 1px solid var(--line);
-  background: #101215;
+  background: linear-gradient(180deg, rgba(18, 15, 32, 0.94), rgba(10, 12, 16, 0.98)), #101215;
   overflow: hidden;
 }
 
@@ -873,7 +934,7 @@ textarea:focus-visible {
   display: grid;
   place-items: center;
   border: 1px solid rgba(183, 161, 255, 0.24);
-  border-radius: 10px;
+  border-radius: 8px;
   color: var(--violet);
   background: rgba(183, 161, 255, 0.08);
 }
@@ -1006,6 +1067,60 @@ textarea:focus-visible {
   flex: 1;
 }
 
+.resource-panel {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+  padding: 11px;
+  border: 1px solid rgba(243, 193, 95, 0.17);
+  border-radius: 9px;
+  background: rgba(243, 193, 95, 0.045);
+}
+
+.resource-panel > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
+.resource-panel > div span {
+  color: var(--solar);
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.resource-panel dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.resource-panel dl div {
+  padding: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+}
+
+.resource-panel dt,
+.resource-panel dd {
+  margin: 0;
+}
+
+.resource-panel dt {
+  color: var(--text-faint);
+  font-size: 7px;
+  text-transform: uppercase;
+}
+
+.resource-panel dd {
+  color: var(--text);
+  font-size: 12px;
+}
+
 .assistant-state {
   min-height: 29px;
   display: flex;
@@ -1107,7 +1222,7 @@ textarea:focus-visible {
 .document-node {
   border-color: rgba(97, 196, 214, 0.34);
   background:
-    linear-gradient(145deg, rgba(97, 196, 214, 0.09), transparent 48%),
+    linear-gradient(145deg, rgba(97, 196, 214, 0.11), transparent 48%),
     linear-gradient(145deg, #182126, #14191c);
 }
 
@@ -1316,7 +1431,7 @@ textarea:focus-visible {
 .canvas-node__citations button {
   width: 100%;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 5px;
   padding: 5px 6px;
@@ -1351,6 +1466,12 @@ textarea:focus-visible {
   font-size: 7px;
 }
 
+.canvas-node__citations button em {
+  color: var(--cyan);
+  font-size: 7px;
+  font-style: normal;
+}
+
 .canvas-node__ungrounded {
   color: var(--text-faint);
   font-size: 8px;
@@ -1359,6 +1480,55 @@ textarea:focus-visible {
 .canvas-edge--citation .react-flow__edge-path {
   stroke: #61c4d6;
   stroke-dasharray: 5 5;
+}
+
+.canvas-edge--context .react-flow__edge-path {
+  stroke: var(--violet);
+  stroke-width: 1.8;
+}
+
+.canvas-edge--relationship .react-flow__edge-path {
+  stroke: #8d9291;
+}
+
+.pathway-legend {
+  position: absolute;
+  z-index: 12;
+  left: 14px;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 9px;
+  border: 1px solid rgba(183, 161, 255, 0.18);
+  border-radius: 9px;
+  color: var(--text-soft);
+  background: rgba(10, 9, 18, 0.88);
+}
+
+.pathway-legend strong,
+.pathway-legend__item {
+  font-size: 9px;
+}
+
+.pathway-legend strong {
+  color: var(--solar);
+}
+
+.pathway-legend__item {
+  position: relative;
+  padding-left: 11px;
+}
+
+.pathway-legend__item::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 7px;
+  height: 2px;
+  content: "";
+  background: currentColor;
+  transform: translateY(-50%);
 }
 
 .document-dropzone {
@@ -1625,7 +1795,8 @@ textarea:focus-visible {
   }
 
   .canvas-toolbar__title small,
-  .save-indicator {
+  .save-indicator,
+  .canvas-resource-strip {
     display: none;
   }
 
@@ -1671,6 +1842,10 @@ textarea:focus-visible {
     padding: 0;
     justify-content: center;
     font-size: 0;
+  }
+
+  .pathway-legend {
+    display: none;
   }
 }
 

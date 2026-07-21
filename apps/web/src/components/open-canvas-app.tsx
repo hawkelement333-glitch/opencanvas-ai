@@ -73,6 +73,7 @@ import {
   type CanvasFlowNode,
   type NodeHandlers,
 } from "@/lib/flow";
+import { canvasRole, edgeKindDetails, summarizeResources, workspaceRole } from "@/lib/universe";
 
 const LAST_CANVAS_KEY = "opencanvas:last-canvas";
 const nodeTypes = { canvasCard: CanvasNodeCard, documentCard: DocumentNodeCard };
@@ -233,7 +234,7 @@ function CanvasSidebar({
       {!collapsed && (
         <>
           <div className="canvas-sidebar__section-title">
-            <span>Workspace</span>
+            <span>Galaxy · Workspace</span>
             <button type="button" onClick={onWorkspaceCreate} aria-label="Create workspace">
               <Plus size={15} aria-hidden="true" />
             </button>
@@ -257,7 +258,7 @@ function CanvasSidebar({
             </button>
           )}
           <div className="canvas-sidebar__section-title">
-            <span>Your canvases</span>
+            <span>Solar systems</span>
             <button
               type="button"
               onClick={() => setShowForm((current) => !current)}
@@ -305,7 +306,7 @@ function CanvasSidebar({
                 data-testid={`open-canvas-${canvas.id}`}
               >
                 <FolderOpen size={15} aria-hidden="true" />
-                <span>{canvas.name}</span>
+                <span>{canvasRole(canvas).plainLabel}</span>
               </button>
             ))}
           </nav>
@@ -351,6 +352,8 @@ export function OpenCanvasApp() {
   });
 
   const activeWorkspaceId = chosenWorkspaceId ?? workspacesQuery.data?.[0]?.id ?? null;
+  const activeWorkspace =
+    workspacesQuery.data?.find((workspace) => workspace.id === activeWorkspaceId) ?? null;
 
   const canvasesQuery = useQuery({
     queryKey: ["canvases", activeWorkspaceId],
@@ -448,9 +451,9 @@ export function OpenCanvasApp() {
               <Sparkles size={28} />
             </span>
             <p className="eyebrow">A spatial place for connected thinking</p>
-            <h1>Create your first canvas</h1>
+            <h1>Create your first solar system</h1>
             <p>
-              Add notes, draw relationships, and ask AI to reason across exactly what you select.
+              Add notes and sources to a workspace galaxy, then ask from exactly what you select.
             </p>
             <button
               type="button"
@@ -481,6 +484,7 @@ export function OpenCanvasApp() {
             <CanvasWorkspace
               key={snapshotQuery.data.canvas.id}
               snapshot={snapshotQuery.data}
+              workspace={activeWorkspace}
               onReload={() => void snapshotQuery.refetch()}
             />
           </ReactFlowProvider>
@@ -492,10 +496,11 @@ export function OpenCanvasApp() {
 
 interface CanvasWorkspaceProps {
   snapshot: Awaited<ReturnType<typeof canvasApi.getSnapshot>>;
+  workspace: Workspace | null;
   onReload: () => void;
 }
 
-function CanvasWorkspace({ snapshot, onReload }: CanvasWorkspaceProps) {
+function CanvasWorkspace({ snapshot, workspace, onReload }: CanvasWorkspaceProps) {
   const flow = useReactFlow<CanvasFlowNode, CanvasFlowEdge>();
   const stageRef = useRef<HTMLDivElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -1179,6 +1184,16 @@ function CanvasWorkspace({ snapshot, onReload }: CanvasWorkspaceProps) {
   }, [deleteSelection, flush]);
 
   const selected = useMemo(() => selectedCanvasNodes(nodes), [nodes]);
+  const resources = useMemo(
+    () =>
+      summarizeResources(
+        nodes.map((node) => node.data.node),
+        selected,
+      ),
+    [nodes, selected],
+  );
+  const activeGalaxy = workspaceRole({ name: workspace?.name ?? "Current workspace" });
+  const activeSolarSystem = canvasRole(snapshot.canvas);
 
   const clearSelection = useCallback(() => {
     replaceNodes(nodesRef.current.map((node) => ({ ...node, selected: false })));
@@ -1250,11 +1265,30 @@ function CanvasWorkspace({ snapshot, onReload }: CanvasWorkspaceProps) {
       >
         <header className="canvas-toolbar" aria-label="Canvas toolbar">
           <div className="canvas-toolbar__title">
-            <span>{snapshot.canvas.name}</span>
+            <small>{activeGalaxy.label}</small>
+            <span>{activeSolarSystem.plainLabel}</span>
             <small>
               {nodes.length} {nodes.length === 1 ? "node" : "nodes"}
             </small>
           </div>
+          <dl className="canvas-resource-strip" aria-label="Solar system resources">
+            <div>
+              <dt>Docs</dt>
+              <dd>{resources.documents}</dd>
+            </div>
+            <div>
+              <dt>Ready</dt>
+              <dd>{resources.readyDocuments}</dd>
+            </div>
+            <div>
+              <dt>Processing</dt>
+              <dd>{resources.processingDocuments}</dd>
+            </div>
+            <div>
+              <dt>Context</dt>
+              <dd>{resources.selectedItems}</dd>
+            </div>
+          </dl>
           <span className={`save-indicator save-indicator--${saveState.status}`} aria-live="polite">
             {saveState.status === "saving" && <LoaderCircle size={13} className="spin" />}
             {saveState.status === "saved" && <Check size={13} />}
@@ -1343,7 +1377,7 @@ function CanvasWorkspace({ snapshot, onReload }: CanvasWorkspaceProps) {
             aria-label="SolarPlexus Mobius spatial editor"
             colorMode="dark"
           >
-            <Background variant={BackgroundVariant.Dots} gap={22} size={1.1} color="#34373b" />
+            <Background variant={BackgroundVariant.Lines} gap={46} size={0.8} color="#2f2a4d" />
             <Controls showInteractive={false} position="bottom-left" />
             <MiniMap
               position="bottom-right"
@@ -1360,6 +1394,15 @@ function CanvasWorkspace({ snapshot, onReload }: CanvasWorkspaceProps) {
             />
           </ReactFlow>
         </CanvasNodeActionsProvider>
+
+        <aside className="pathway-legend" aria-label="Pathway legend">
+          <strong>Pathways</strong>
+          {Object.entries(edgeKindDetails).map(([kind, details]) => (
+            <span key={kind} className={`pathway-legend__item ${details.className}`}>
+              {details.label}
+            </span>
+          ))}
+        </aside>
 
         {dropActive && (
           <div className="document-dropzone" role="status" aria-live="polite">
@@ -1384,7 +1427,7 @@ function CanvasWorkspace({ snapshot, onReload }: CanvasWorkspaceProps) {
               <StickyNote size={24} />
             </span>
             <h2>Start with a thought</h2>
-            <p>Add a note or upload a source, then ask AI to reason across your selection.</p>
+            <p>Add a supporting note or upload a source planet, then ask from selected evidence.</p>
             <button type="button" onClick={() => void createNote()}>
               <Plus size={15} aria-hidden="true" /> Add a note
             </button>

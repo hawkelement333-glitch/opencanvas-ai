@@ -1,6 +1,7 @@
 import { MarkerType, type Edge, type Node } from "@xyflow/react";
 
 import type { CanvasEdge, CanvasNode, Citation } from "./contracts";
+import { edgeKindDetails } from "./universe";
 
 export type CanvasNodeData = Record<string, unknown> & {
   node: CanvasNode;
@@ -41,15 +42,16 @@ export function toFlowNode(
 
 export function toFlowEdge(edge: CanvasEdge): CanvasFlowEdge {
   const isCitation = edge.kind === "cites";
+  const details = edgeKindDetails[edge.kind];
   return {
     id: edge.id,
     source: edge.sourceNodeId,
     target: edge.targetNodeId,
-    label: edge.label,
+    label: edge.label ?? details.label,
     type: "smoothstep",
     animated: edge.kind === "generated_from",
     markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
-    className: isCitation ? "canvas-edge--citation" : undefined,
+    className: details.className,
     style: isCitation ? { stroke: "#61c4d6", strokeDasharray: "5 5", strokeWidth: 1.6 } : undefined,
     data: { edge },
   };
