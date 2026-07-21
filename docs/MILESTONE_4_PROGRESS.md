@@ -36,24 +36,38 @@ Trace/audit requirements, deterministic demo constraints, failure rules, prohibi
   evidence, failure/rollback rules, and demo isolation.
 - Defined queue/scheduler safety requirements without implementing either.
 - Defined allowed/prohibited behavior and Milestone 4.1–4.4 gates.
+- Pushed the Milestone 4.0 planning checkpoint to
+  `origin/milestone-4-controlled-agents` and configured that branch as upstream.
+- Added frozen, versioned control-plane contracts for executions, append-only execution states,
+  immutable context and plan snapshots, capability grants, approvals, revocations, audit events,
+  and policy decisions.
+- Added canonical serialization and domain-separated SHA-256 hashing for plans, contexts, grants,
+  and approvals.
+- Added a pure, side-effect-free, deny-by-default policy evaluator with exact ownership, scope,
+  resource, hash, validity, revocation, approval, and replay checks.
+- Added deterministic unit coverage for contract immutability and policy denial boundaries.
 
 ## Current phase
 
-- Milestone 4.0 documentation validation and checkpoint commit.
+- Milestone 4.1 first control-plane contract checkpoint validation and handoff.
 
 ## Files changed in this checkpoint
 
+- `apps/api/opencanvas_api/services/agents/__init__.py`
+- `apps/api/opencanvas_api/services/agents/contracts.py`
+- `apps/api/opencanvas_api/services/agents/policy.py`
+- `apps/api/tests/test_agent_contracts.py`
+- `apps/api/tests/test_agent_policy.py`
 - `docs/MILESTONE_4_CONTROLLED_AGENT_ARCHITECTURE.md`
 - `docs/MILESTONE_4_PROGRESS.md`
-- `docs/AGENT_UNIVERSE_ARCHITECTURE.md`
-- `docs/ARCHITECTURE.md`
 - `docs/SECURITY_MODEL.md`
 - `docs/TRACE.md`
 
 ## Runtime boundary confirmation
 
 - No agent runtime, provider call, tool adapter, API route, database model, migration, or dependency
-  was added.
+  was added. A migration was intentionally deferred until table ownership, retention, transaction,
+  and read-repository designs are reviewed against these contracts.
 - No document-worker, queue, heartbeat, retry, or scheduler implementation was changed.
 - No autonomous execution, recursive delegation, decision loop, or background behavior was added.
 - No external AI or embedding call was added.
@@ -62,21 +76,32 @@ Trace/audit requirements, deterministic demo constraints, failure rules, prohibi
 
 ## Validation status
 
-- Focused Prettier write/check for all six changed Markdown files: passed.
-- Documentation reference and fenced-block balance check: passed; six documents checked with no
-  missing references or unbalanced fences.
-- Repository hygiene: passed for `188` source files.
-- `git diff --check`: passed before staging; final staged check required immediately before commit.
-- Secret-pattern scan: no matches.
-- Prohibited-scope audit: passed. All six changes are under `docs/`; no source, migration,
-  dependency, configuration, worker, queue, scheduler, provider, service, demo, or fixture file is
-  changed. No executable code fence was added.
+- Focused contract/policy tests: `17 passed`.
+- Complete backend tests, including relevant authentication, workspace-isolation, Trace, demo-mode,
+  canonical persistence, and provider regressions: `135 passed`.
+- Full backend Ruff: passed.
+- Full backend strict mypy: passed for `48` source files.
+- Focused Prettier and Ruff formatting checks: passed.
+- Repository hygiene and secret-pattern scan: passed for `193` source files.
+- Final staged `git diff --check`: passed.
+- Prohibited-scope scan of the new Python package and tests found no provider, HTTP/network,
+  subprocess, task/loop, worker, queue, scheduler, delegation, or tool-call implementation.
+- Staged scope: exactly five contract/test source files and four controlled-agent documentation
+  files; no migration, dependency, configuration, demo, fixture, UI, route, worker, or provider
+  file.
 - Protected tag recheck: unchanged at tag object
   `acbde89b6e2cc3e41c372887794726d393836716`, resolving to
   `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
 
-TypeScript, frontend lint, backend lint/types, unit tests, and builds are not required for a
-documentation-only checkpoint unless validation reveals a non-document change.
+## Policy boundary confirmation
+
+- Unspecified and malformed capabilities are rejected by the closed contract; absent authority is
+  denied by default.
+- Policy evaluation is deterministic and has no I/O or state mutation.
+- Approvals bind to exact plan/context digests, capability/resource scope, user, workspace,
+  execution, grant, policy version, and validity window; consumed approvals are denied as replayed.
+- Security records are frozen value objects. Changes require a distinct record/digest, while
+  revocation and execution-state changes use explicit append-only records.
 
 ## Known pre-existing limitations
 
@@ -88,10 +113,11 @@ documentation-only checkpoint unless validation reveals a non-document change.
 
 ## Next exact implementation step
 
-Begin Milestone 4.1 only after approval: turn the planning document into reviewed persistence and
-policy contracts, starting with a deny-by-default capability matrix and migrations for immutable
-execution, plan, context, grant, approval, and tool-audit records. Do not add provider calls, tools,
-effects, agent jobs, schedulers, or delegation in the first 4.1 checkpoint.
+After this first Milestone 4.1 checkpoint is committed and pushed, review the frozen contracts as
+the persistence boundary. The next separately approved 4.1 checkpoint should design append-only
+tables, constraints, approval-consumption transactions, retention/deletion semantics, ownership-
+checked read repositories, and read-only inspection APIs. It must still add no provider calls,
+tools, effects, agent jobs, schedulers, or delegation. Milestone 4.2 must not start automatically.
 
 ## Recovery prompt
 

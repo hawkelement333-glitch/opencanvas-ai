@@ -472,6 +472,33 @@ respecting future retention and privacy policy.
 - Exit gate: cross-user/workspace denial, stale-plan invalidation, secret redaction, and migration
   tests pass.
 
+#### Milestone 4.1 first checkpoint implementation
+
+The first 4.1 checkpoint implements the control-plane semantics as frozen, versioned Pydantic
+value objects in `opencanvas_api.services.agents`. Execution identity, append-only execution state,
+context and plan snapshots, capability grants, approvals, revocations, policy decisions, and safe
+audit events all carry explicit user, workspace, and execution ownership. Closed enums define the
+roles, capabilities, resources, risks, states, decisions, and outcomes; an unknown capability is
+invalid rather than implicitly permitted.
+
+Plan, context, grant, and approval contracts use canonical, domain-separated SHA-256 digests.
+Canonical serialization normalizes Unicode, UUIDs, enumerations, UTC timestamps, field order, and
+unordered grant/approval scopes. Plan action and selected-context order remain meaningful. Changing
+any bound snapshot creates a different digest and invalidates the grant or approval.
+
+The initial policy decision point is a pure function: the caller supplies the evaluation timestamp,
+decision ID, immutable snapshots, optional grant/approval, revocations, and already-consumed
+approval IDs. It performs no I/O and mutates no state. Missing, expired, revoked, replayed,
+cross-owner, cross-workspace, cross-execution, wrong-resource, unknown-capability, or hash-mismatched
+authority is denied. Durable approval consumption must eventually be committed atomically by the
+persistence layer; this function only evaluates the supplied consumption snapshot.
+
+No migration is justified in this checkpoint. Creating tables before repository, retention,
+transaction, and read-authorization designs are reviewed would prematurely freeze the storage
+model. No API or tool registry is added for the same reason. These contracts are the reviewed
+persistence boundary that the next 4.1 checkpoint may map to append-only tables and ownership-
+checked read repositories. They are not an execution runtime.
+
 ### Milestone 4.2 — User-initiated read-only agent
 
 - Add a synchronous, cancellable execution controller for one canvas and selected context.

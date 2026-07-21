@@ -80,6 +80,18 @@ or Trace write is missing. Future agent jobs, if accepted, require a dedicated a
 reuse document-worker heartbeat as evidence of agent health. See
 `MILESTONE_4_CONTROLLED_AGENT_ARCHITECTURE.md`.
 
+Milestone 4.1 defines frozen `AuditEvent`, `PolicyDecision`, `ExecutionRecord`, and append-only
+`ExecutionStateRecord` contracts. They correlate every record to an execution, user, and workspace;
+policy evidence additionally records the policy version, outcome, safe reason code, evaluation
+time, plan/context digests, and applicable grant/approval IDs. Audit attributes are bounded scalar
+key/value pairs so documents, prompts, secrets, headers, provider diagnostics, and arbitrary nested
+payloads are not casually copied into Trace.
+
+These are schema contracts only. They do not write current Trace tables, add read APIs, consume an
+approval, execute a tool, or assert that an effect occurred. A later persistence integration must
+commit the pre-effect policy decision and approval consumption atomically and must preserve the
+existing rule that incomplete or untraced effects cannot be reported as successful.
+
 ## Current inspection workflow
 
 1. Obtain a `traceId` from a canonical mutation response or known execution association.

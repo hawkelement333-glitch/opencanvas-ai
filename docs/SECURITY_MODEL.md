@@ -111,6 +111,19 @@ Recursive delegation, self-scheduling, ambient execution, and agent-created perm
 prohibited. The detailed threat model and phase gates are in
 `MILESTONE_4_CONTROLLED_AGENT_ARCHITECTURE.md`.
 
+Milestone 4.1 now defines a side-effect-free, deny-by-default policy contract. Authority must bind
+the authenticated user, workspace, execution, closed capability, exact versioned resource, policy
+version, immutable plan digest, immutable context digest, and validity window. Revocation records
+are append-only. Required approvals additionally bind the grant and exact capability/resource set;
+expired, revoked, altered, mismatched, or already-consumed approvals are denied. The evaluator does
+not consume approvals itself: a future persistence boundary must record policy decision and
+single-use approval consumption atomically before an effect is introduced.
+
+These contracts are deliberately disconnected from routes, providers, tools, workers, schedulers,
+and database mutation. They confer no authority merely by existing in client or process memory.
+Server authentication, ownership checks, resource-version checks, and persistence constraints
+remain mandatory when the contracts are integrated in a later reviewed checkpoint.
+
 ## Logging and Trace
 
 Trace is durable provenance and can contain object associations, structured metadata, safe errors, and operation names. AI execution tables intentionally contain instructions, selected content snapshots, retrieved passages, and output. These records may be sensitive even though they are not ordinary application logs.
