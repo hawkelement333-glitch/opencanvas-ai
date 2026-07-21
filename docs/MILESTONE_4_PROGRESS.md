@@ -43,6 +43,8 @@ an agent, call a provider, expose a public route, or create a workspace effect.
 - Provider generation, citation generation, Trace completion, public execution/cancel routes, and
   UI are deferred to the Terra continuation and were not started.
 - PostgreSQL status: **NOT RUN**. No migration changed in this unit.
+- Low-usage recovery trigger activated after checkpoint 1. No second implementation unit was
+  started; only the existing approval transaction and canvas fixture were inspected.
 
 ### Files changed
 
@@ -59,6 +61,15 @@ an agent, call a provider, expose a public route, or create a workspace effect.
 - `git diff --check`: passed.
 - Full backend, security, demo, PostgreSQL, frontend, and production suites: not run for this narrow
   checkpoint.
+
+### Checkpoint result
+
+- Commit created: `daaa5106582929fd05d7f884eb11f9f31b801327` —
+  `Define the controlled execution safety boundary`.
+- Commit pushed normally only to `origin/milestone-4-controlled-agents`.
+- Local and remote SHA after fetch: `daaa5106582929fd05d7f884eb11f9f31b801327`.
+- Working tree after the implementation push: clean.
+- Sol safety-core completion status: **partial**. Do not begin Terra provider integration.
 
 ### Exact next unit
 
