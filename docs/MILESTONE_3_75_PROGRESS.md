@@ -8,7 +8,7 @@ Last updated: 2026-07-21 (America/Chicago)
 - Starting Milestone 3.5 remote commit: `3b576cae81d5622ca930eb2538e6527d861c759a`
 - Protected `competition-demo-v1` tag object: `acbde89b6e2cc3e41c372887794726d393836716`
 - Protected `competition-demo-v1` commit: `b45b7763b65861f9dfb3be7edf9b5eb271950917`
-- Current local HEAD at branch creation: `3b576cae81d5622ca930eb2538e6527d861c759a`
+- Current local HEAD: `522f4bd` (`Establish the living-universe design system`)
 - Current remote branch HEAD: not yet created for `origin/milestone-3.75-visual-redesign`
 - Branch created from `origin/milestone-3.5-productization`.
 - Push target: `origin/milestone-3.75-visual-redesign` only.
@@ -58,11 +58,11 @@ Last updated: 2026-07-21 (America/Chicago)
 
 ## Commits created
 
-- None yet for Milestone 3.75.
+- `522f4bd` (`Establish the living-universe design system`)
 
 ## Commits pushed
 
-- None yet for Milestone 3.75.
+- None yet for Milestone 3.75. A normal push to `origin/milestone-3.75-visual-redesign` was attempted after commit `522f4bd`, but the approval layer rejected the action and required explicit user approval for exporting the new branch to GitHub.
 
 ## Tests run after current edits
 
@@ -80,11 +80,17 @@ Last updated: 2026-07-21 (America/Chicago)
 
 ## Work in progress
 
-- Inspect final diff, commit the first checkpoint, push to `origin/milestone-3.75-visual-redesign`, then continue with the next UI surface.
+- Push the local checkpoint after explicit user approval, then continue with the next UI surface.
 
 ## Next exact implementation step
 
-Commit and push the first checkpoint. Then continue with the source viewer, Trace surface, upload/processing states, account flows, and responsive visual validation.
+After user approval, run:
+
+```sh
+git push -u origin milestone-3.75-visual-redesign
+```
+
+Then verify the remote branch contains `522f4bd`, update this ledger with the pushed commit, and continue with the source viewer, Trace surface, upload/processing states, account flows, and responsive visual validation.
 
 ## Resume commands
 
