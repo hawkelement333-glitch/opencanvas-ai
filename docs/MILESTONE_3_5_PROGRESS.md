@@ -46,6 +46,10 @@ Last updated: 2026-07-21 (America/Chicago)
   current selected nodes and current document version.
 - Added immutable node, document, chunk, and chunk-index snapshot identifiers in migration
   `20260721_0006`, plus parent execution and parent Trace linkage for comparison.
+- Added real-session authentication and authorization tests with two independent users and
+  multiple workspaces, covering CSRF, expiration, password reset, session revocation, generic
+  credential failures, account settings/export/deletion, private files, Trace/rerun ownership,
+  manipulated identifiers, and per-IP authentication rate limiting.
 
 ## Files currently modified or added
 
@@ -145,6 +149,13 @@ Rerun checkpoint checks run on 2026-07-21:
 - Migration validation: passed upgrade `20260721_0006` → downgrade `20260718_0005` →
   re-upgrade `20260721_0006`.
 
+Authentication and isolation checkpoint checks run on 2026-07-21:
+
+- Focused real-session authentication/account/isolation tests: passed (`3` tests).
+- Complete security-marked API gate: passed (`21` tests).
+- Full API suite: passed (`112` tests).
+- Strict API type check and focused Ruff lint/format check: passed.
+
 ## Known failures and incomplete scope
 
 - No known recovery-foundation test failure remains. The full milestone validation gate has not
@@ -153,8 +164,8 @@ Rerun checkpoint checks run on 2026-07-21:
 - After the user explicitly confirmed the configured origin was trusted, recovery commits
   `16acba7` and `f379b12` were pushed only to `origin/milestone-3.5-productization` and verified
   on the remote. No force push, merge, default-branch push, tag change, or pull request occurred.
-- Dedicated authentication/session-expiration, two-user/multi-workspace isolation, file access,
-  job retry/exhaustion, quota, and account-lifecycle tests still need to be added.
+- Dedicated job retry/exhaustion, delayed-job deletion, quota, and worker-health tests still need
+  to be added.
 - `.env.example`, deployment/container configuration, backup/restore/rollback runbooks, staging
   instructions, production instructions, and the final architecture/security documentation are
   unfinished.
@@ -165,9 +176,8 @@ Rerun checkpoint checks run on 2026-07-21:
 
 ## Exact next implementation step
 
-1. Add dedicated authentication, session expiration/rotation, two-user multi-workspace
-   isolation, manipulated identifier, and private-file authorization tests; fix any enforcement
-   gaps they expose.
-2. Run the focused security, full API, lint, type-check, and migration gates.
+1. Add dedicated durable-job idempotency, retry/backoff/exhaustion, delayed-job deletion,
+   workspace concurrency, quota, and worker-health tests; fix any gaps they expose.
+2. Run the focused processing/security, full API, lint, type-check, and migration gates.
 3. Review, commit, push only to `milestone-3.5-productization`, and update this ledger with the
    completed security/isolation phase and next unfinished action.
