@@ -9,7 +9,8 @@ Last updated: 2026-07-21 (America/Chicago)
 - Verified recovery-ledger checkpoint: `f379b12` (`Record recovery push blocker`)
 - Deployment/worker operations checkpoint: `484d2b3` (`Add deployment and worker operations
 foundation`)
-- Remote `origin/milestone-3.5-productization` was verified at `484d2b3` after normal,
+- Release-audit checkpoint: `5aeaa7c` (`Complete Milestone 3.5 release audit`)
+- Remote `origin/milestone-3.5-productization` was verified at `5aeaa7c` after normal,
   non-force pushes and contains every recorded checkpoint.
 - Protected tag: `competition-demo-v1`
 - The protected tag was verified before implementation and has not been moved, recreated,
@@ -61,10 +62,14 @@ foundation`)
 - Fixed idle workers to commit their persisted heartbeat and added regression coverage.
 - Updated the mock competition browser workflows for credentialed CORS, workspace ownership,
   runtime metadata, and required Trace identifiers.
+- Corrected environment-file parsing for the fixed embedding dimension and added a regression
+  that loads the authoritative `.env.example` through typed settings.
+- Reconciled the public security policy/threat model with the implemented ownership boundary and
+  added `docs/MILESTONE_3_5_COMPLETION_REPORT.md`.
 
 ## Files currently modified or added
 
-After checkpoint `484d2b3` was pushed, only this progress ledger is modified. No source,
+After checkpoint `5aeaa7c` was pushed, only this progress ledger is modified. No source,
 configuration, secret, generated dependency directory, temporary file, or test database is
 uncommitted.
 
@@ -140,6 +145,21 @@ Deployment and operations checkpoint checks run on 2026-07-21:
 - Docker Compose CLI/image validation was not run because Docker is not installed in this
   environment; no container-build success is claimed.
 
+Final release audit checks run on 2026-07-21:
+
+- Release-settings, demo-isolation, and health matrix: passed (`19` tests).
+- Authoritative environment-template regression: passed; focused release settings passed (`7`
+  tests).
+- Final full API suite after the environment fix: passed (`118` tests).
+- Final strict API type check: passed (`45` source files); affected Ruff lint/format passed.
+- Production JavaScript advisory audit: no known vulnerabilities.
+- Third-party Python advisory audit: no known vulnerabilities after updating the local audit
+  environment's `pip`; the editable local project was excluded from PyPI lookup.
+- Secret-pattern, branch, remote, protected-tag, completion-report, and security-document review:
+  passed.
+- Full-repository Prettier still reports the recorded pre-existing backlog in `37` untouched
+  files; every Milestone 3.5 changed file passes formatting.
+
 ## Known failures and incomplete scope
 
 - No known source test, lint, type, migration, build, demo, or runnable E2E failure remains.
@@ -148,15 +168,15 @@ Deployment and operations checkpoint checks run on 2026-07-21:
   on the remote. No force push, merge, default-branch push, tag change, or pull request occurred.
 - The container topology could not be built or launched because Docker is unavailable locally.
 - The two real-service browser tests remain intentionally skipped without PostgreSQL.
-- A final dependency review, release-settings matrix confirmation, and completion audit remain.
 - Live OpenAI, SMTP, S3-compatible storage, PostgreSQL, and deployed worker calls have not been
   performed; no live-provider success is claimed.
+- No Milestone 3.5 implementation action remains in this environment. External service/container
+  validation gaps are recorded in the completion report and must not be represented as passed.
 
 ## Exact next implementation step
 
-1. Run the final release-settings matrix and targeted production fail-closed checks, including
-   refusal of deterministic providers and separation from demo data.
-2. Complete the available dependency/security review and reconcile the requested completion
-   report against code, migrations, docs, and every actually run validation result.
-3. Fix any audit findings, run affected tests, then create and push the final Milestone 3.5
-   checkpoint plus an exact final ledger record. Do not begin Milestone 3.75 or Milestone 4.
+1. In a Docker/PostgreSQL-capable environment, run Compose config/build/start and the two
+   real-service E2E workflows.
+2. With dedicated non-production credentials, validate live OpenAI, SMTP, private object storage,
+   backup, restore, and rollback before accepting real user data.
+3. Stop. Do not begin Milestone 3.75 or Milestone 4 without a new explicit request.
