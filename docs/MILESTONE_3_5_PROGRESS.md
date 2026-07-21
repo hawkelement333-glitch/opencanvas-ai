@@ -7,8 +7,10 @@ Last updated: 2026-07-21 (America/Chicago)
 - Branch: `milestone-3.5-productization`
 - Recovered foundation checkpoint: `16acba7` (`Establish Milestone 3.5 productization foundation`)
 - Verified recovery-ledger checkpoint: `f379b12` (`Record recovery push blocker`)
-- Remote `origin/milestone-3.5-productization` was verified at `f379b12` after a normal,
-  non-force push and contains both recovery commits.
+- Deployment/worker operations checkpoint: `484d2b3` (`Add deployment and worker operations
+foundation`)
+- Remote `origin/milestone-3.5-productization` was verified at `484d2b3` after normal,
+  non-force pushes and contains every recorded checkpoint.
 - Protected tag: `competition-demo-v1`
 - The protected tag was verified before implementation and has not been moved, recreated,
   force-updated, or otherwise modified.
@@ -53,66 +55,18 @@ Last updated: 2026-07-21 (America/Chicago)
 - Added durable-job reliability coverage for idempotent enqueue, workspace concurrency,
   exponential backoff, retry exhaustion, permanent failure, delayed deleted-document
   cancellation, worker heartbeat freshness, and workspace monthly token budgets.
+- Added a portable web/API/worker/PostgreSQL Compose topology, independent worker healthcheck,
+  startup migration task, complete environment template, deployment/backup/restore/rollback
+  runbook, and updated as-built/limitations documentation.
+- Fixed idle workers to commit their persisted heartbeat and added regression coverage.
+- Updated the mock competition browser workflows for credentialed CORS, workspace ownership,
+  runtime metadata, and required Trace identifiers.
 
 ## Files currently modified or added
 
-The complete productization foundation working set below was reviewed and committed in local
-checkpoint `16acba7`. Only this progress ledger is modified after that checkpoint:
-
-- `package.json`
-- `apps/api/alembic/versions/20260718_0005_productization_bridge.py`
-- `apps/api/opencanvas_api/core/config.py`
-- `apps/api/opencanvas_api/db/models.py`
-- `apps/api/opencanvas_api/db/session.py`
-- `apps/api/opencanvas_api/main.py`
-- `apps/api/opencanvas_api/api/dependencies.py`
-- `apps/api/opencanvas_api/api/router.py`
-- `apps/api/opencanvas_api/api/schemas.py`
-- `apps/api/opencanvas_api/api/trace_schemas.py`
-- `apps/api/opencanvas_api/api/routes/auth.py`
-- `apps/api/opencanvas_api/api/routes/canonical.py`
-- `apps/api/opencanvas_api/api/routes/canvases.py`
-- `apps/api/opencanvas_api/api/routes/documents.py`
-- `apps/api/opencanvas_api/api/routes/health.py`
-- `apps/api/opencanvas_api/api/routes/traces.py`
-- `apps/api/opencanvas_api/services/ai.py`
-- `apps/api/opencanvas_api/services/auth.py`
-- `apps/api/opencanvas_api/services/authorization.py`
-- `apps/api/opencanvas_api/services/email.py`
-- `apps/api/opencanvas_api/services/demo.py`
-- `apps/api/opencanvas_api/services/trace.py`
-- `apps/api/opencanvas_api/services/jobs.py`
-- `apps/api/opencanvas_api/services/canonical/repository.py`
-- `apps/api/opencanvas_api/services/canonical/service.py`
-- `apps/api/opencanvas_api/services/documents/__init__.py`
-- `apps/api/opencanvas_api/services/documents/embeddings.py`
-- `apps/api/opencanvas_api/services/documents/processing.py`
-- `apps/api/opencanvas_api/services/documents/retrieval.py`
-- `apps/api/opencanvas_api/services/documents/storage.py`
-- `apps/api/scripts/demo.py`
-- `apps/api/scripts/worker.py`
-- `apps/api/tests/conftest.py`
-- `apps/api/tests/test_ai_api.py`
-- `apps/api/tests/test_canonical_schema.py`
-- `apps/api/tests/test_canonical_service.py`
-- `apps/api/tests/test_demo_mode.py`
-- `apps/api/tests/test_document_api.py`
-- `apps/api/tests/test_health.py`
-- `apps/api/tests/test_migration.py`
-- `apps/api/tests/test_release_settings.py`
-- `apps/api/tests/test_trace_api.py`
-- `apps/web/src/app/account/page.tsx`
-- `apps/web/src/app/reset-password/page.tsx`
-- `apps/web/src/app/sign-in/page.tsx`
-- `apps/web/src/app/globals.css`
-- `apps/web/src/components/canvas/document-node.tsx`
-- `apps/web/src/components/demo-mode-banner.test.tsx`
-- `apps/web/src/components/open-canvas-app.tsx`
-- `apps/web/src/lib/api-client.ts`
-- `apps/web/src/lib/api-client.test.ts`
-- `apps/web/src/lib/contracts.ts`
-- `scripts/validate_migrations.py`
-- `docs/MILESTONE_3_5_PROGRESS.md`
+After checkpoint `484d2b3` was pushed, only this progress ledger is modified. No source,
+configuration, secret, generated dependency directory, temporary file, or test database is
+uncommitted.
 
 ## Validation already run
 
@@ -166,28 +120,43 @@ Job reliability and quota checkpoint checks run on 2026-07-21:
 - Full API suite: passed (`116` tests).
 - Strict API type check and focused Ruff lint/format check: passed.
 
+Deployment and operations checkpoint checks run on 2026-07-21:
+
+- Full API suite: passed (`117` tests).
+- Explicit integration gate: passed (`21` tests).
+- Complete security-marked API gate: passed (`25` tests; `92` deselected).
+- API Ruff lint/format and strict type check: passed (`85` formatted files, `45` source files).
+- Web lint and type check: passed.
+- Web unit/component suite: passed (`24` tests across `7` files).
+- Production web build: passed.
+- Migration validation: passed upgrade `20260721_0006` → downgrade `20260718_0005` →
+  re-upgrade `20260721_0006`.
+- Repository hygiene and changed-file formatting/whitespace checks: passed.
+- Deterministic demo reset, isolation/provenance check, and API/web startup smoke: passed with no
+  paid provider or production credential.
+- Focused mock browser workflows: passed (`2` tests); full E2E gate passed those same `2` tests
+  and skipped the `2` tests that require a real PostgreSQL service by their existing conditions.
+- Compose YAML and required service/dependency/worker-health wiring: passed structural validation.
+- Docker Compose CLI/image validation was not run because Docker is not installed in this
+  environment; no container-build success is claimed.
+
 ## Known failures and incomplete scope
 
-- No known recovery-foundation test failure remains. The full milestone validation gate has not
-  yet been run.
-- The recovered foundation is committed locally as `16acba7`.
+- No known source test, lint, type, migration, build, demo, or runnable E2E failure remains.
 - After the user explicitly confirmed the configured origin was trusted, recovery commits
   `16acba7` and `f379b12` were pushed only to `origin/milestone-3.5-productization` and verified
   on the remote. No force push, merge, default-branch push, tag change, or pull request occurred.
-- `.env.example`, deployment/container configuration, backup/restore/rollback runbooks, staging
-  instructions, production instructions, and the final architecture/security documentation are
-  unfinished.
-- The post-change web unit/E2E/build gates, demo workflow, closest local production-shaped
-  validation, migration gate, dependency review, and complete validation gate remain to run.
+- The container topology could not be built or launched because Docker is unavailable locally.
+- The two real-service browser tests remain intentionally skipped without PostgreSQL.
+- A final dependency review, release-settings matrix confirmation, and completion audit remain.
 - Live OpenAI, SMTP, S3-compatible storage, PostgreSQL, and deployed worker calls have not been
   performed; no live-provider success is claimed.
 
 ## Exact next implementation step
 
-1. Add `.env.example`, portable web/worker container and local production-shaped orchestration,
-   health checks, migration/startup commands, and backup/restore/rollback plus staging/production
-   runbooks without selecting a mandatory hosting vendor.
-2. Validate container configuration where local tooling permits, then run documentation/hygiene,
-   full API, web lint/type/build, and migration gates.
-3. Review, commit, push only to `milestone-3.5-productization`, and update this ledger with the
-   completed security/isolation phase and next unfinished action.
+1. Run the final release-settings matrix and targeted production fail-closed checks, including
+   refusal of deterministic providers and separation from demo data.
+2. Complete the available dependency/security review and reconcile the requested completion
+   report against code, migrations, docs, and every actually run validation result.
+3. Fix any audit findings, run affected tests, then create and push the final Milestone 3.5
+   checkpoint plus an exact final ledger record. Do not begin Milestone 3.75 or Milestone 4.
