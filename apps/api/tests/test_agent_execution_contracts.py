@@ -25,6 +25,7 @@ def make_request(**updates: object) -> ControlledExecutionRequest:
         "user_id": uuid.UUID("10000000-0000-0000-0000-000000000001"),
         "workspace_id": uuid.UUID("20000000-0000-0000-0000-000000000002"),
         "canvas_id": uuid.UUID("30000000-0000-0000-0000-000000000003"),
+        "execution_id": uuid.UUID("80000000-0000-0000-0000-000000000008"),
         "context_snapshot_id": uuid.UUID("40000000-0000-0000-0000-000000000004"),
         "expected_context_digest": "a" * 64,
         "plan_id": uuid.UUID("50000000-0000-0000-0000-000000000005"),
@@ -44,7 +45,7 @@ def make_plan(**updates: object) -> ControlledExecutionPlan:
     request = make_request()
     values: dict[str, object] = {
         "plan_id": request.plan_id,
-        "execution_id": uuid.UUID("80000000-0000-0000-0000-000000000008"),
+        "execution_id": request.execution_id,
         "user_id": request.user_id,
         "workspace_id": request.workspace_id,
         "canvas_id": request.canvas_id,

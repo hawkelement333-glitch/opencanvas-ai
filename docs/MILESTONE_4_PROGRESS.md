@@ -2,6 +2,37 @@
 
 Last updated: 2026-07-21 (America/Chicago)
 
+## Milestone 4.2 Sol checkpoint 2 — trusted authority preflight
+
+- Starting local and remote SHA: `4792c3c620e784752b7a194adfa42d25d25ed880` on
+  `milestone-4-controlled-agents`; working tree was clean and the protected tag remained at
+  `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- Added an internal `ExecutionAuthorityPreflight` for the closed `generate_grounded_draft` action.
+  It compares the authenticated server principal to the request, verifies the active owned
+  workspace/canvas, loads the owned stored execution and all stored authority records, verifies
+  context/plan/grant/approval references and digests, enforces the canvas draft capability and R0/R1
+  risk boundary, and delegates the final decision to the existing pure policy and atomic
+  consumption repository.
+- The approval is consumed only inside the existing nested transaction after stored contract
+  parsing, canonical digest recomputation, ownership/resource/capability checks, expiry/revocation
+  checks, and an `allow` policy result. The unique approval constraint converts races/replays into
+  an append-only `approval_replayed` denial; no second consumption is written.
+- The result contains only safe IDs, verified digests, action, correlation ID, decision ID, and
+  consumption ID. It returns no raw authority payload, session/service data, or content.
+- Files changed: `execution.py`, `agent_fixtures.py`, the existing contract tests, new authority
+  preflight tests, and the two Milestone 4 handoff documents. No migration changed.
+- Focused contract/preflight/policy/persistence suite: `38 passed`. The authority file alone:
+  `9 passed`, including independent-connection parallel consumption. Ruff format/lint and focused
+  mypy passed for four files. PostgreSQL: **NOT RUN**.
+- Full backend, security, demo, frontend, production build, live-provider, deployment, and
+  PostgreSQL suites were not run.
+- Known limitation: reference failures before policy evaluation deny safely without creating a
+  policy row; the request idempotency and transition checkpoint must decide whether a separate
+  bounded preflight-denial audit record is required. No authorized execution state is created here.
+- Exact next Sol unit: **Database-backed request idempotency and append-only execution-state
+  validation.** Do not begin immutable-context resolution, cancellation, provider work, API, or UI
+  in that checkpoint.
+
 ## Milestone 4.2 Sol checkpoint 1 — closed execution contracts
 
 ### Starting state

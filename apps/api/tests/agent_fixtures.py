@@ -40,12 +40,12 @@ def make_agent_bundle(
     user_id: uuid.UUID = SYSTEM_USER_ID,
     workspace_id: uuid.UUID = SYSTEM_WORKSPACE_ID,
     approval_expires_at: datetime | None = None,
+    resource: ResourceScope | None = None,
+    capability: Capability = Capability.DOCUMENT_VERSION_READ,
 ) -> AgentBundle:
     execution_id = uuid.uuid4()
-    resource = ResourceScope(
-        kind=ResourceKind.DOCUMENT_VERSION,
-        resource_id=uuid.uuid4(),
-        version=3,
+    resource = resource or ResourceScope(
+        kind=ResourceKind.DOCUMENT_VERSION, resource_id=uuid.uuid4(), version=3
     )
     context = ContextSnapshot(
         snapshot_id=uuid.uuid4(),
@@ -66,7 +66,7 @@ def make_agent_bundle(
             PlanAction(
                 action_id=uuid.uuid4(),
                 ordinal=0,
-                capability=Capability.DOCUMENT_VERSION_READ,
+                capability=capability,
                 resource=resource,
                 risk_class=RiskClass.R0_OBSERVATION,
             ),
@@ -81,7 +81,7 @@ def make_agent_bundle(
         workspace_id=workspace_id,
         execution_id=execution_id,
         role=AgentRole.EVIDENCE_VERIFIER,
-        capabilities=(Capability.DOCUMENT_VERSION_READ,),
+        capabilities=(capability,),
         resources=(resource,),
         context_digest=contract_digest(context),
         plan_digest=contract_digest(plan),

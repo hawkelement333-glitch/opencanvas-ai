@@ -1,6 +1,6 @@
 # Milestone 4.2 Sol safety-core handoff
 
-Status: **partial recovery handoff after checkpoint 1**. The Sol safety core is not complete and the
+Status: **partial recovery handoff after checkpoint 2**. The Sol safety core is not complete and the
 Terra continuation must not begin yet.
 
 ## Repository state
@@ -8,6 +8,7 @@ Terra continuation must not begin yet.
 - Starting branch: `milestone-4-controlled-agents`.
 - Starting local and remote SHA: `3ab717199470da6b82b36da559c1ccc5a84e8c29`.
 - Implemented checkpoint: `daaa5106582929fd05d7f884eb11f9f31b801327`.
+- Authority checkpoint starting SHA: `4792c3c620e784752b7a194adfa42d25d25ed880`.
 - Protected tag object: `acbde89b6e2cc3e41c372887794726d393836716`.
 - Protected tag peeled commit: `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
 
@@ -34,6 +35,22 @@ and atomically records an allow decision with one approval consumption in a nest
 Ownership reads require the execution user, active owned workspace, and execution ID. This must be
 reused rather than replaced.
 
+## Trusted authority preflight
+
+The internal preflight now accepts the strict request plus a separately supplied authenticated
+server principal. It verifies the principal, active owned workspace/canvas, execution, stored
+context and plan references/digests, stored grant, stored approval, closed action, canvas resource,
+draft capability, and R0/R1 risk. Raw authority is never accepted from the caller.
+
+The repository reloads grant, revocations, approval, prior consumptions, context, and plan and
+recomputes canonical hashes. Only an allow result enters the existing nested transaction that
+inserts the policy decision and one approval consumption. The unique approval constraint makes
+parallel use fail closed; replay produces a safe append-only denial and never a second consumption.
+The outer caller controls commit/rollback so the decision and consumption share its transaction.
+
+The returned value contains safe references only. No authorized execution state is created by this
+checkpoint, and no content retrieval or provider operation occurs.
+
 ## Focused validation
 
 - Contract tests: `6 passed`.
@@ -42,6 +59,8 @@ reused rather than replaced.
 - Focused mypy: passed for two files.
 - `git diff --check`: passed.
 - Repository hygiene and built-in secret scan: passed for `208` source files.
+- Authority/preflight/policy/persistence suite: `38 passed`; authority tests: `9 passed`, including
+  an independent-connection parallel approval race.
 - PostgreSQL: **NOT RUN**. No migration changed.
 
 Full backend, security, demo, PostgreSQL, frontend, production build, provider, and deployment
@@ -49,7 +68,6 @@ checks were not run for this narrow checkpoint.
 
 ## Incomplete Sol work
 
-- Trusted preflight orchestration and closed-action-to-capability enforcement
 - Database-enforced idempotency and parallel-request behavior
 - Append-only transition validation and terminal-state rules
 - Immutable selected-node/document-version/chunk context resolution
@@ -62,14 +80,12 @@ workspace effect, tool, worker, queue, scheduler, delegation, or child execution
 
 ## Exact next Sol continuation order
 
-1. Add a trusted internal preflight service that verifies the request references against stored
-   execution/context/plan/grant/approval records and reuses `consume_approval`.
-2. Add the smallest database-enforced idempotency design, in a separate migration checkpoint if
+1. Add the smallest database-enforced idempotency design, in a separate migration checkpoint if
    required, with identical-retry and conflicting/parallel-reuse tests.
-3. Add append-only transition validation without adding a succeeded state to the provider-free path.
-4. Resolve the exact selected immutable context without current-version substitution or broad search.
-5. Add cancellation and late-result suppression guards.
-6. Run the complete focused Sol security gate and update this document from partial to complete.
+2. Add append-only transition validation without adding a succeeded state to the provider-free path.
+3. Resolve the exact selected immutable context without current-version substitution or broad search.
+4. Add cancellation and late-result suppression guards.
+5. Run the complete focused Sol security gate and update this document from partial to complete.
 
 Only after all six Sol steps pass may Terra proceed in this order:
 
