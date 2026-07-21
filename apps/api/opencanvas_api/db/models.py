@@ -1340,6 +1340,48 @@ class ControlledAgentAuditEvent(Base):
     attributes: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
 
 
+class ControlledAgentRequestIdentity(Base):
+    """Append-only database identity for one scoped logical execution request."""
+
+    __tablename__ = "controlled_agent_request_identities"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_executions.id",
+                "controlled_agent_executions.user_id",
+                "controlled_agent_executions.workspace_id",
+            ],
+            name="fk_agent_request_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "action",
+            "idempotency_key",
+            name="uq_agent_request_idempotency_scope",
+        ),
+        CheckConstraint(
+            "action = 'generate_grounded_draft'", name="ck_agent_request_closed_action"
+        ),
+        Index("ix_agent_request_execution", "execution_id"),
+    )
+
+    request_identity_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("canvases.id", ondelete="RESTRICT"), nullable=False
+    )
+    action: Mapped[str] = mapped_column(String(40), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 CONTROLLED_AGENT_IMMUTABLE_MODELS = (
     ControlledAgentExecution,
     ControlledAgentExecutionState,
@@ -1351,6 +1393,7 @@ CONTROLLED_AGENT_IMMUTABLE_MODELS = (
     ControlledAgentPolicyDecision,
     ControlledAgentApprovalConsumption,
     ControlledAgentAuditEvent,
+    ControlledAgentRequestIdentity,
 )
 
 

@@ -2,6 +2,33 @@
 
 Last updated: 2026-07-21 (America/Chicago)
 
+## Milestone 4.2 Sol checkpoint 3A — database request idempotency
+
+- Starting local and remote SHA: `8c4db0f023f00a6605c635cf85fbf70a08bd7f1e`; branch and
+  protected tag were verified, and the working tree was clean.
+- Added migration `20260721_0008` and an append-only request-identity model. Database uniqueness is
+  scoped to authenticated user, workspace, canvas, closed action, and idempotency key. The stored
+  canonical digest binds execution, context/plan IDs and hashes, grant, and approval while excluding
+  transport-only metadata.
+- Identical retries return the original request identity and logical execution without consuming an
+  approval. Conflicting reuse appends a safe `execution.idempotency_conflict` audit event, does not
+  reveal or mutate the original fingerprint, and consumes no approval.
+- Uniqueness and nested-transaction handling are database-backed; no in-memory lock is used. The
+  new identity is protected by ORM and SQLite/PostgreSQL append-only triggers.
+- Migration validation passed: upgrade `0008`, downgrade `0007`, re-upgrade `0008`. Focused
+  migration/idempotency tests: `12 passed`; idempotency tests alone: `6 passed`. The earlier focused
+  idempotency/authority/persistence/policy run passed `38` tests. Changed-file mypy passed; Ruff
+  format/lint passed after one exception-chaining correction.
+- PostgreSQL: **NOT RUN**. The migration contains the PostgreSQL trigger, but authoritative
+  PostgreSQL execution and concurrent PostgreSQL behavior were not run.
+- Partial work: execution-state validation was not started because the low-usage trigger activated.
+  Therefore the combined idempotency/state checkpoint is not complete.
+- Exact next unit: implement closed append-only execution-state validation and terminal-state
+  protection, then rerun the combined focused gate. Do not begin immutable-context resolution,
+  cancellation, provider generation, API, or UI.
+- Resume with the commands already recorded below, then inspect migration `0008`,
+  `ExecutionRequestRegistry`, and `test_agent_request_idempotency.py` before editing.
+
 ## Milestone 4.2 Sol checkpoint 2 — trusted authority preflight
 
 - Starting local and remote SHA: `4792c3c620e784752b7a194adfa42d25d25ed880` on

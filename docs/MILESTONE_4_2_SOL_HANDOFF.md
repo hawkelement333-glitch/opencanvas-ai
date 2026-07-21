@@ -1,6 +1,6 @@
 # Milestone 4.2 Sol safety-core handoff
 
-Status: **partial recovery handoff after checkpoint 2**. The Sol safety core is not complete and the
+Status: **partial recovery handoff after checkpoint 3A**. The Sol safety core is not complete and the
 Terra continuation must not begin yet.
 
 ## Repository state
@@ -51,6 +51,21 @@ The outer caller controls commit/rollback so the decision and consumption share 
 The returned value contains safe references only. No authorized execution state is created by this
 checkpoint, and no content retrieval or provider operation occurs.
 
+## Database-backed request idempotency
+
+Migration `20260721_0008` adds an append-only request identity with a unique boundary of user,
+workspace, canvas, action, and idempotency key. Its canonical fingerprint also binds the execution,
+context and plan references/digests, grant, and approval. Correlation/client request metadata is
+excluded.
+
+`ExecutionRequestRegistry` reserves the identity inside a nested transaction. An identical retry
+returns the original request/execution reference. A different fingerprint under the same scoped key
+fails closed, preserves the original row, appends a minimal conflict audit event, and consumes no
+approval. No in-memory lock or provider work is involved.
+
+The migration cycle passed upgrade `0008`, downgrade `0007`, and re-upgrade `0008`. SQLite focused
+migration/idempotency tests passed. PostgreSQL is **NOT RUN**.
+
 ## Focused validation
 
 - Contract tests: `6 passed`.
@@ -68,7 +83,6 @@ checks were not run for this narrow checkpoint.
 
 ## Incomplete Sol work
 
-- Database-enforced idempotency and parallel-request behavior
 - Append-only transition validation and terminal-state rules
 - Immutable selected-node/document-version/chunk context resolution
 - Prompt-injection isolation tests for the resolved context package
@@ -80,12 +94,10 @@ workspace effect, tool, worker, queue, scheduler, delegation, or child execution
 
 ## Exact next Sol continuation order
 
-1. Add the smallest database-enforced idempotency design, in a separate migration checkpoint if
-   required, with identical-retry and conflicting/parallel-reuse tests.
-2. Add append-only transition validation without adding a succeeded state to the provider-free path.
-3. Resolve the exact selected immutable context without current-version substitution or broad search.
-4. Add cancellation and late-result suppression guards.
-5. Run the complete focused Sol security gate and update this document from partial to complete.
+1. Add append-only transition validation without adding a succeeded state to the provider-free path.
+2. Resolve the exact selected immutable context without current-version substitution or broad search.
+3. Add cancellation and late-result suppression guards.
+4. Run the complete focused Sol security gate and update this document from partial to complete.
 
 Only after all six Sol steps pass may Terra proceed in this order:
 

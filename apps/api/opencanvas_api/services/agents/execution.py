@@ -9,11 +9,14 @@ from typing import Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from opencanvas_api.db.models import Canvas, Workspace
+from opencanvas_api.db.models import Canvas, ControlledAgentRequestIdentity, Workspace
 from opencanvas_api.services.agents.contracts import (
     SCHEMA_VERSION,
+    AuditAttribute,
+    AuditEvent,
     Capability,
     ContractModel,
     Digest,
@@ -169,6 +172,91 @@ class AuthorityPreflightDenied(RuntimeError):
         self.reason_code = reason_code
 
 
+class IdempotencyConflict(RuntimeError):
+    pass
+
+
+class IdempotencyPersistenceConflict(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class RequestReservation:
+    request_identity_id: uuid.UUID
+    execution_id: uuid.UUID
+    request_digest: Digest
+    created: bool
+
+
+class ExecutionRequestRegistry:
+    """Reserve one append-only logical request identity using database uniqueness."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+        self.repository = ControlledAgentRepository(session)
+
+    async def reserve(
+        self,
+        *,
+        authenticated_user_id: uuid.UUID,
+        request: ControlledExecutionRequest,
+        created_at: datetime,
+    ) -> RequestReservation:
+        if authenticated_user_id != request.user_id:
+            raise AuthorityPreflightDenied("user_scope_mismatch")
+        digest = idempotency_digest(request)
+        identity_id = uuid.uuid4()
+        try:
+            async with self.session.begin_nested():
+                self.session.add(
+                    ControlledAgentRequestIdentity(
+                        request_identity_id=identity_id,
+                        execution_id=request.execution_id,
+                        user_id=authenticated_user_id,
+                        workspace_id=request.workspace_id,
+                        canvas_id=request.canvas_id,
+                        action=request.action.value,
+                        idempotency_key=request.idempotency_key,
+                        request_digest=digest,
+                        created_at=created_at,
+                    )
+                )
+                await self.session.flush()
+            return RequestReservation(identity_id, request.execution_id, digest, True)
+        except IntegrityError:
+            existing = await self.session.scalar(
+                select(ControlledAgentRequestIdentity).where(
+                    ControlledAgentRequestIdentity.user_id == authenticated_user_id,
+                    ControlledAgentRequestIdentity.workspace_id == request.workspace_id,
+                    ControlledAgentRequestIdentity.canvas_id == request.canvas_id,
+                    ControlledAgentRequestIdentity.action == request.action.value,
+                    ControlledAgentRequestIdentity.idempotency_key == request.idempotency_key,
+                )
+            )
+            if existing is None:
+                raise IdempotencyPersistenceConflict("request_identity_unavailable") from None
+            if existing.request_digest != digest:
+                await self.repository.append_audit_event(
+                    AuditEvent(
+                        event_id=uuid.uuid4(),
+                        trace_id=uuid.uuid4(),
+                        execution_id=existing.execution_id,
+                        user_id=existing.user_id,
+                        workspace_id=existing.workspace_id,
+                        event_type="execution.idempotency_conflict",
+                        recorded_at=created_at,
+                        attributes=(AuditAttribute(key="category", value="request_conflict"),),
+                    )
+                )
+                raise IdempotencyConflict("idempotency_conflict") from None
+            return RequestReservation(
+                existing.request_identity_id,
+                existing.execution_id,
+                existing.request_digest,
+                False,
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class AuthorizedPreflight:
     execution_id: uuid.UUID
@@ -311,7 +399,11 @@ __all__ = [
     "ControlledExecutionPlan",
     "ControlledExecutionRequest",
     "ExecutionAuthorityPreflight",
+    "ExecutionRequestRegistry",
     "ExecutionStage",
+    "IdempotencyConflict",
     "IdempotencyFingerprint",
+    "IdempotencyPersistenceConflict",
+    "RequestReservation",
     "idempotency_digest",
 ]
