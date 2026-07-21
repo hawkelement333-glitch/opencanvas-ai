@@ -2,6 +2,103 @@
 
 Last updated: 2026-07-21 (America/Chicago)
 
+## Recovery checkpoint — PostgreSQL trigger test architecture
+
+### Git state at checkpoint preparation
+
+- Current branch: `milestone-4-controlled-agents`.
+- Starting SHA: `567f1a82b90044488924ee5f31b3fa3a1a541137`.
+- Current local SHA before the recovery commit:
+  `567f1a82b90044488924ee5f31b3fa3a1a541137`.
+- Current remote SHA before the recovery push:
+  `567f1a82b90044488924ee5f31b3fa3a1a541137`.
+- Protected tag object: `acbde89b6e2cc3e41c372887794726d393836716`.
+- Protected tag peeled commit: `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- Milestone 4.2 work started: **No**.
+
+### Completed in this recovery unit
+
+- Added an explicit `postgres` pytest marker and `pnpm test:postgres` command.
+- Added fail-closed validation for `OPENCANVAS_POSTGRES_TEST_URL`. Local tests require a loopback
+  PostgreSQL URL whose database name has a distinct test/CI segment and no development, staging, or
+  production terminology.
+- Added a fixture that creates a random disposable PostgreSQL database, upgrades it through Alembic,
+  and drops it after the session.
+- Added direct-SQL PostgreSQL coverage for all ten controlled-agent tables: trigger presence,
+  rejected UPDATE/DELETE, composite execution/user/workspace scope, unique approval consumption,
+  readable retained history, and unchanged hashes.
+- Added an in-memory PostgreSQL 17 Compose test profile and CI wiring.
+- Added exact local and CI run instructions in `docs/CONTROLLED_AGENT_POSTGRES_TESTING.md`.
+
+### Partial or not started
+
+- PostgreSQL execution result: **NOT RUN**. Docker is not installed, no listener exists on ports
+  5432/55432, and `OPENCANVAS_POSTGRES_TEST_URL` is unset. The marked integration test reported one
+  explicit skip; it is not recorded as passed.
+- `docs/CONTROLLED_AGENT_DATA_POLICY.md`: not started.
+- Retention/erasure/legal-hold/redaction/cryptographic-erasure policy: not started.
+- Engineering enforcement gap table: not started.
+- Full backend, security, migration-cycle, and demo smoke gates: not run for this recovery unit. The
+  previous 4.1B results below remain historical evidence only.
+
+### Files changed in this recovery unit
+
+- `.github/workflows/ci.yml`
+- `apps/api/pyproject.toml`
+- `apps/api/tests/postgres_support.py`
+- `apps/api/tests/test_agent_postgres.py`
+- `apps/api/tests/test_postgres_support.py`
+- `docker-compose.yml`
+- `package.json`
+- `docs/CONTROLLED_AGENT_POSTGRES_TESTING.md`
+- `docs/MILESTONE_4_PROGRESS.md`
+
+### Focused checks run
+
+- Ruff format for the three PostgreSQL test files: passed.
+- Ruff lint for the three PostgreSQL test files: passed.
+- Focused mypy for the three PostgreSQL test files: passed; the initial missing `asyncpg` type-stub
+  error was corrected with the existing project override mechanism.
+- Safe PostgreSQL URL tests: `5 passed`.
+- PostgreSQL integration marker without configured service: `1 skipped` — **NOT RUN**.
+- Prettier for the changed YAML, JSON, and Markdown files: passed.
+- Repository hygiene and built-in secret scan: passed for `205` source files.
+- Prohibited-scope audit: passed. No agent runtime, execution stage, effect tool, queue, scheduler,
+  delegation, durable workspace mutation, external AI/embedding call, production dependency, new
+  UI, or later-milestone implementation was added.
+- Known current failures: none in the focused runnable checks.
+
+### Exact next implementation step
+
+Resume the remaining Milestone 4.1B feedback with documentation only: create
+`docs/CONTROLLED_AGENT_DATA_POLICY.md` covering data classification, proposed retention periods,
+privacy erasure without history rewrites, legal holds, redacted projections, future envelope
+encryption/key destruction, backups/replicas/logs/exports/test copies, required approvals, and the
+engineering enforcement gap table. Do not begin Milestone 4.2 or implement retention workers,
+deletion jobs, legal-hold APIs, encryption systems, mutation endpoints, or agent behavior.
+
+### Exact resume commands
+
+```powershell
+cd C:\Users\hawke\Documents\Codex\2026-07-18\referenced-chatgpt-conversation-this-is-untrusted\work\opencanvas-ai
+git branch --show-current
+git status --short
+git fetch origin
+git rev-parse HEAD
+git rev-parse origin/milestone-4-controlled-agents
+git show-ref --tags -d competition-demo-v1
+Get-Content docs/MILESTONE_4_PROGRESS.md
+```
+
+When Docker is available, run the authoritative PostgreSQL check separately:
+
+```powershell
+docker compose --profile test up -d postgres-test
+$env:OPENCANVAS_POSTGRES_TEST_URL = "postgresql+asyncpg://opencanvas_test:local-test-only@127.0.0.1:55432/opencanvas_test_admin"
+pnpm test:postgres
+docker compose --profile test down
+```
+
 ## Repository state
 
 - Current branch: `milestone-4-controlled-agents`

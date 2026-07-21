@@ -37,6 +37,7 @@ jobs:
       CI: "true"
       OPENCANVAS_ENVIRONMENT: test
       OPENCANVAS_DATABASE_URL: postgresql+asyncpg://opencanvas:opencanvas-ci-only@127.0.0.1:5432/opencanvas_ci
+      OPENCANVAS_POSTGRES_TEST_URL: postgresql+asyncpg://opencanvas:opencanvas-ci-only@127.0.0.1:5432/opencanvas_ci
       OPENCANVAS_CORS_ORIGINS: '["http://127.0.0.1:3000","http://localhost:3000"]'
       OPENCANVAS_AI_PROVIDER: mock
       OPENCANVAS_EMBEDDING_PROVIDER: mock
@@ -81,3 +82,6 @@ jobs:
 
       - name: Run canonical validation
         run: corepack pnpm validate
+
+      - name: Run PostgreSQL append-only integration tests
+        run: corepack pnpm test:postgres

@@ -12,6 +12,24 @@ x-api-environment: &api-environment
   OPENCANVAS_SESSION_SECRET: development-only-session-secret-change-before-deploying
 
 services:
+  postgres-test:
+    profiles: ["test"]
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: opencanvas_test_admin
+      POSTGRES_USER: opencanvas_test
+      POSTGRES_PASSWORD: local-test-only
+    ports:
+      - "55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U opencanvas_test -d opencanvas_test_admin"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
   db:
     image: pgvector/pgvector:pg17
     environment:

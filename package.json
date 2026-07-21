@@ -35,6 +35,7 @@
     "test:api": "python -m pytest apps/api/tests",
     "test:integration": "python -m pytest apps/api/tests/test_canvas_api.py apps/api/tests/test_document_api.py apps/api/tests/test_grounded_ai.py apps/api/tests/test_canonical_api.py apps/api/tests/test_trace_api.py",
     "test:security": "python -m pytest apps/api/tests -m security",
+    "test:postgres": "python -m pytest apps/api/tests -m postgres",
     "test:e2e": "pnpm --filter @opencanvas/web test:e2e",
     "validate:migrations": "python scripts/validate_migrations.py",
     "validate:demo": "pnpm demo:reset && pnpm demo:check && pnpm demo:smoke",

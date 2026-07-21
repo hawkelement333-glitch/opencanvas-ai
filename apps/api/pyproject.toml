@@ -45,6 +45,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
   "security: security-focused validation, storage, and prompt-boundary tests",
+  "postgres: direct PostgreSQL migration, trigger, and constraint integration tests",
 ]
 
 [tool.ruff]
@@ -64,5 +65,5 @@ plugins = ["pydantic.mypy"]
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["pgvector.*"]
+module = ["asyncpg.*", "pgvector.*"]
 ignore_missing_imports = true
