@@ -2,9 +2,24 @@
 
 Date: 2026-07-21
 
-Branch: `milestone-3.5-productization`
+## Verified repository state
 
-Protected checkpoint: `competition-demo-v1` → `b45b7763b65861f9dfb3be7edf9b5eb271950917`
+- Branch: `milestone-3.5-productization`
+- Final Milestone 3.5 handoff local HEAD before this documentation correction:
+  `bd488e57293f6996e5c9a505cb912d888235f199`
+- Final Milestone 3.5 handoff remote `origin/milestone-3.5-productization` HEAD before this
+  documentation correction: `bd488e57293f6996e5c9a505cb912d888235f199`
+- Protected annotated tag: `competition-demo-v1` (tag object
+  `acbde89b6e2cc3e41c372887794726d393836716`), unchanged and resolving to commit
+  `b45b7763b65861f9dfb3be7edf9b5eb271950917`
+- Working tree at handoff verification: clean
+- Push method: normal push; no force-push or force-with-lease
+- No merge, default-branch push, pull request, history rewrite, or Milestone 3.75/Milestone 4 work
+  occurred
+
+The documentation-correction commit necessarily follows `bd488e5`; its exact local/remote hash and
+clean post-push state are reported after that commit is created and pushed because a commit cannot
+contain its own hash.
 
 ## Outcome
 

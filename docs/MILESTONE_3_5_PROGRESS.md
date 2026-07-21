@@ -10,12 +10,18 @@ Last updated: 2026-07-21 (America/Chicago)
 - Deployment/worker operations checkpoint: `484d2b3` (`Add deployment and worker operations
 foundation`)
 - Release-audit checkpoint: `5aeaa7c` (`Complete Milestone 3.5 release audit`)
-- Remote `origin/milestone-3.5-productization` was verified at `5aeaa7c` after normal,
-  non-force pushes and contains every recorded checkpoint.
-- Protected tag: `competition-demo-v1`
-- The protected tag was verified before implementation and has not been moved, recreated,
-  force-updated, or otherwise modified.
-- No default-branch merge or pull request has been created.
+- Final handoff-ledger checkpoint: `bd488e5` (`Close Milestone 3.5 progress ledger`)
+- Verified local HEAD before this documentation correction:
+  `bd488e57293f6996e5c9a505cb912d888235f199`.
+- Verified remote `origin/milestone-3.5-productization` HEAD before this documentation correction:
+  `bd488e57293f6996e5c9a505cb912d888235f199`.
+- Every checkpoint listed above, plus `b6329e1`, `3d90e2f`, `d463992`, `edfefe6`, and `e71d6f8`,
+  was verified reachable from that remote HEAD.
+- All milestone pushes were normal non-force pushes.
+- Protected annotated tag: `competition-demo-v1` (tag object `acbde89b6e2cc3e41c372887794726d393836716`),
+  unchanged and still resolving to commit `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- Local and remote default-branch references both remained at `f04ace592e253c48172d129331ed8cd9bc4d4f4f`.
+  No default-branch merge or push, history rewrite, pull request, or later-milestone work occurred.
 
 ## Recovered productization foundation checkpointed locally
 
@@ -69,9 +75,11 @@ foundation`)
 
 ## Files currently modified or added
 
-After checkpoint `5aeaa7c` was pushed, only this progress ledger is modified. No source,
-configuration, secret, generated dependency directory, temporary file, or test database is
-uncommitted.
+The working tree was verified clean at handoff checkpoint `bd488e5` before this documentation-only
+correction. This correction changes only the progress ledger, completion report, and deployment
+guide; it does not change application source, configuration, secrets, generated dependencies,
+temporary files, or test databases. The post-push working-tree state is verified and reported
+after the correction commit because a commit cannot record its own hash.
 
 ## Validation already run
 

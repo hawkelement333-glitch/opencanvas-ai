@@ -50,6 +50,12 @@ Open <http://localhost:3000>. Inspect:
 The development-only database password and session secret in Compose are placeholders. Never use
 them on a shared host. `docker compose down --volumes` destroys the local database and file volume.
 
+This Compose definition is production-shaped development, not production. Docker/Compose image
+builds and startup, real PostgreSQL browser tests, and live OpenAI, SMTP, and S3-compatible service
+calls were not run during the final Milestone 3.5 validation and remain unverified. Do not accept
+production user data until those external validations, plus the documented backup/restore and
+rollback exercises, pass with dedicated non-production resources.
+
 ## Staging and production configuration
 
 Start from `.env.example`, inject secrets through the deployment platform, and set:
@@ -146,4 +152,5 @@ pnpm demo
 
 The demo command forces deterministic providers, a project-local demo database and storage root,
 and no OpenAI credential. It does not start the production worker or write to deployed services.
-Resetting demo state affects only the isolated demo paths.
+Resetting demo state affects only the isolated demo paths and does not alter development, staging,
+or production data.
