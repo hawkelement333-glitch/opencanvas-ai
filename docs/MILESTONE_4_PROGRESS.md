@@ -12,6 +12,12 @@ Last updated: 2026-07-21 (America/Chicago)
   `567f1a82b90044488924ee5f31b3fa3a1a541137`.
 - Current remote SHA before the recovery push:
   `567f1a82b90044488924ee5f31b3fa3a1a541137`.
+- Completed recovery implementation SHA:
+  `f0a744b9d496f7046c4bacb9242e176aaf770db0`.
+- Current local and remote implementation SHA after the successful normal push:
+  `f0a744b9d496f7046c4bacb9242e176aaf770db0`.
+- The progress-ledger handoff commit follows that implementation commit; use the exact resume
+  commands below to resolve its local and remote SHA without relying on a self-referential hash.
 - Protected tag object: `acbde89b6e2cc3e41c372887794726d393836716`.
 - Protected tag peeled commit: `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
 - Milestone 4.2 work started: **No**.
