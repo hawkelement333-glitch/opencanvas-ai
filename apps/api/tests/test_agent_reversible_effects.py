@@ -9,7 +9,7 @@ from typing import Any, cast
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, text, update
 
 from opencanvas_api.db.models import (
     SYSTEM_USER_ID,
@@ -29,8 +29,10 @@ from opencanvas_api.services.agents.contracts import (
     CapabilityGrant,
     ResourceKind,
     ResourceScope,
+    RevocationRecord,
     contract_digest,
 )
+from opencanvas_api.services.agents.persistence import ControlledAgentRepository
 from opencanvas_api.services.agents.reversible_write_effects import ReversibleWriteEffectService
 from opencanvas_api.services.agents.reversible_write_rollback_approvals import (
     ReversibleWriteRollbackApprovalService,
@@ -352,6 +354,65 @@ async def _install_rollback_grant(
             )
         )
         await session.commit()
+
+
+async def _prepared_rollback_effect(
+    client: httpx.AsyncClient,
+    database: Database,
+    api_prefix: str,
+    *,
+    action: str = "note.create",
+    capability: Capability | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], str, httpx.Response, uuid.UUID]:
+    canvas = await _create_canvas(client, api_prefix, f"Rollback {action} validation")
+    node = None
+    if action == "note.update":
+        node = await _create_node(
+            client, api_prefix, canvas["id"], title="Before", text="Before text"
+        )
+    _, proposal, route = await _approved_proposal(
+        client, api_prefix, action=action, node=node, canvas=canvas
+    )
+    applied = await _effect(client, route, proposal)
+    assert applied.status_code == 200, applied.text
+    effect_id = uuid.UUID(applied.json()["effectId"])
+    if capability is not None:
+        await _install_rollback_grant(
+            database, effect_id=effect_id, capability=capability
+        )
+    return canvas, proposal, route, applied, effect_id
+
+
+async def _rollback_issue_error(
+    database: Database,
+    *,
+    canvas: dict[str, Any],
+    effect_id: uuid.UUID,
+    expected_approvals: int = 0,
+    expected_results: int = 0,
+) -> RollbackApprovalError:
+    async with database.sessions() as session:
+        with pytest.raises(RollbackApprovalError) as caught:
+            await ReversibleWriteRollbackApprovalService(session).issue(
+                authenticated_user_id=SYSTEM_USER_ID,
+                workspace_id=uuid.UUID(canvas["workspaceId"]),
+                canvas_id=uuid.UUID(canvas["id"]),
+                effect_id=effect_id,
+                idempotency_key=f"rollback-denied-{uuid.uuid4().hex}",
+            )
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackApproval)
+            )
+            == expected_approvals
+        )
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackResult)
+            )
+            == expected_results
+        )
+    return caught.value
 
 
 @pytest.mark.parametrize(
@@ -982,6 +1043,301 @@ async def test_rollback_approval_api_enforces_authentication_csrf_and_scope(
             assert "traceback" not in serialized
             assert "sql" not in serialized
             assert "database" not in serialized
+
+
+@pytest.mark.parametrize("changed_field", ["revision", "title", "text", "state_digest"])
+async def test_rollback_approval_revalidates_current_note_state(
+    client: httpx.AsyncClient,
+    database: Database,
+    api_prefix: str,
+    changed_field: str,
+) -> None:
+    canvas, _, _, applied, effect_id = await _prepared_rollback_effect(
+        client,
+        database,
+        api_prefix,
+        capability=Capability.CANVAS_NOTE_CREATE_ROLLBACK,
+    )
+    note_id = uuid.UUID(applied.json()["noteId"])
+    if changed_field == "state_digest":
+        async with database.sessions() as session:
+            await session.execute(
+                update(CanvasNode)
+                .where(CanvasNode.id == note_id)
+                .values(text="Digest-only test mutation")
+            )
+            await session.commit()
+        expected_code = "state_conflict"
+    else:
+        payload: dict[str, object] = {"revision": applied.json()["revision"]}
+        if changed_field == "revision":
+            payload["text"] = "Revision changed"
+        elif changed_field == "title":
+            payload["title"] = "Title changed"
+        else:
+            payload["text"] = "Text changed"
+        changed = await client.patch(
+            f"{api_prefix}/canvases/{canvas['id']}/nodes/{note_id}",
+            json=payload,
+        )
+        assert changed.status_code == 200, changed.text
+        expected_code = "revision_conflict"
+
+    error = await _rollback_issue_error(database, canvas=canvas, effect_id=effect_id)
+    assert error.code == expected_code
+    assert error.message == "Rollback is not eligible."
+
+
+@pytest.mark.parametrize(
+    ("evidence_change", "expected_code"),
+    [
+        ("missing", "rollback_evidence_missing"),
+        ("before_state", "rollback_evidence_invalid"),
+        ("before_digest", "rollback_evidence_invalid"),
+        ("after_digest", "rollback_evidence_invalid"),
+    ],
+)
+async def test_rollback_approval_rejects_invalid_update_evidence(
+    client: httpx.AsyncClient,
+    database: Database,
+    api_prefix: str,
+    evidence_change: str,
+    expected_code: str,
+) -> None:
+    canvas, _, _, _, effect_id = await _prepared_rollback_effect(
+        client,
+        database,
+        api_prefix,
+        action="note.update",
+        capability=Capability.CANVAS_NOTE_UPDATE_ROLLBACK,
+    )
+    async with database.sessions() as session:
+        if evidence_change == "missing":
+            await session.execute(
+                delete(ControlledAgentReversibleWriteRollbackEvidence).where(
+                    ControlledAgentReversibleWriteRollbackEvidence.effect_id == effect_id
+                )
+            )
+        else:
+            values: dict[str, object]
+            if evidence_change == "before_state":
+                values = {"before_state": {"title": "Incomplete"}}
+            elif evidence_change == "before_digest":
+                values = {"before_digest": "f" * 64}
+            else:
+                values = {"after_digest": "f" * 64}
+            await session.execute(
+                update(ControlledAgentReversibleWriteRollbackEvidence)
+                .where(ControlledAgentReversibleWriteRollbackEvidence.effect_id == effect_id)
+                .values(**values)
+            )
+        await session.commit()
+
+    error = await _rollback_issue_error(database, canvas=canvas, effect_id=effect_id)
+    assert error.code == expected_code
+    assert error.message == "Rollback is not eligible."
+
+
+@pytest.mark.parametrize(
+    ("action", "capability"),
+    [
+        ("note.create", Capability.CANVAS_NOTE_CREATE),
+        ("note.create", Capability.CANVAS_NOTE_UPDATE_ROLLBACK),
+        ("note.update", Capability.CANVAS_NOTE_UPDATE),
+        ("note.update", Capability.CANVAS_NOTE_CREATE_ROLLBACK),
+    ],
+)
+async def test_rollback_approval_rejects_wrong_capability(
+    client: httpx.AsyncClient,
+    database: Database,
+    api_prefix: str,
+    action: str,
+    capability: Capability,
+) -> None:
+    canvas, _, _, _, effect_id = await _prepared_rollback_effect(
+        client, database, api_prefix, action=action, capability=capability
+    )
+    error = await _rollback_issue_error(database, canvas=canvas, effect_id=effect_id)
+    assert error.code == "capability_missing"
+
+
+@pytest.mark.parametrize("grant_state", ["expired", "revoked"])
+async def test_rollback_approval_rejects_inactive_grant(
+    client: httpx.AsyncClient,
+    database: Database,
+    api_prefix: str,
+    grant_state: str,
+) -> None:
+    canvas, _, _, _, effect_id = await _prepared_rollback_effect(
+        client,
+        database,
+        api_prefix,
+        capability=Capability.CANVAS_NOTE_CREATE_ROLLBACK,
+    )
+    async with database.sessions() as session:
+        effect = await session.get(ControlledAgentReversibleWriteEffect, effect_id)
+        assert effect is not None
+        grant = await session.scalar(
+            select(ControlledAgentCapabilityGrant).where(
+                ControlledAgentCapabilityGrant.execution_id == effect.execution_id
+            )
+        )
+        assert grant is not None
+        if grant_state == "expired":
+            expired_at = datetime.now(UTC) - timedelta(minutes=1)
+            issued_at = expired_at - timedelta(hours=1)
+            await session.execute(
+                update(ControlledAgentCapabilityGrant)
+                .where(ControlledAgentCapabilityGrant.grant_id == grant.grant_id)
+                .values(issued_at=issued_at, expires_at=expired_at)
+            )
+        else:
+            await ControlledAgentRepository(session).append_revocation(
+                RevocationRecord(
+                    revocation_id=uuid.uuid4(),
+                    subject_kind="grant",
+                    subject_id=grant.grant_id,
+                    user_id=grant.user_id,
+                    workspace_id=grant.workspace_id,
+                    execution_id=grant.execution_id,
+                    revoked_at=datetime.now(UTC),
+                    reason_code="rollback_test_revoked",
+                )
+            )
+        await session.commit()
+
+    error = await _rollback_issue_error(database, canvas=canvas, effect_id=effect_id)
+    assert error.code == f"grant_{grant_state}"
+
+
+async def test_rollback_approval_rejects_missing_note(
+    client: httpx.AsyncClient, database: Database, api_prefix: str
+) -> None:
+    canvas, _, _, applied, effect_id = await _prepared_rollback_effect(
+        client,
+        database,
+        api_prefix,
+        capability=Capability.CANVAS_NOTE_CREATE_ROLLBACK,
+    )
+    async with database.engine.connect() as connection:
+        await connection.execute(text("PRAGMA foreign_keys=OFF"))
+        await connection.commit()
+        await connection.execute(
+            delete(CanvasNode).where(CanvasNode.id == uuid.UUID(applied.json()["noteId"]))
+        )
+        await connection.commit()
+        await connection.execute(text("PRAGMA foreign_keys=ON"))
+        await connection.commit()
+
+    error = await _rollback_issue_error(database, canvas=canvas, effect_id=effect_id)
+    assert error.code == "note_missing"
+
+
+async def test_rollback_approval_rejects_existing_successful_result(
+    client: httpx.AsyncClient, database: Database, api_prefix: str
+) -> None:
+    canvas, _, _, _, effect_id = await _prepared_rollback_effect(
+        client,
+        database,
+        api_prefix,
+        capability=Capability.CANVAS_NOTE_CREATE_ROLLBACK,
+    )
+    async with database.sessions() as session:
+        issued = await ReversibleWriteRollbackApprovalService(session).issue(
+            authenticated_user_id=SYSTEM_USER_ID,
+            workspace_id=uuid.UUID(canvas["workspaceId"]),
+            canvas_id=uuid.UUID(canvas["id"]),
+            effect_id=effect_id,
+            idempotency_key=f"rollback-before-result-{uuid.uuid4().hex}",
+        )
+        approval = issued.approval
+        result = ControlledAgentReversibleWriteRollbackResult(
+            rollback_result_id=uuid.uuid4(),
+            rollback_approval_id=approval.rollback_approval_id,
+            execution_id=approval.execution_id,
+            user_id=approval.user_id,
+            workspace_id=approval.workspace_id,
+            canvas_id=approval.canvas_id,
+            note_id=approval.note_id,
+            proposal_id=approval.proposal_id,
+            effect_id=approval.effect_id,
+            forward_action=approval.forward_action,
+            rollback_action=approval.rollback_action,
+            rollback_target_kind=approval.rollback_target_kind,
+            rollback_approval_digest=approval.approval_digest,
+            scoped_idempotency_key=f"rollback-result-{uuid.uuid4().hex}",
+            expected_pre_rollback_revision=approval.expected_current_revision,
+            resulting_revision=None,
+            pre_rollback_state_digest=approval.effect_after_state_digest,
+            post_rollback_target_digest=approval.rollback_target_digest,
+            trace_id=uuid.uuid4(),
+            created_at=datetime.now(UTC),
+        )
+        session.add(result)
+        await session.commit()
+
+    error = await _rollback_issue_error(
+        database,
+        canvas=canvas,
+        effect_id=effect_id,
+        expected_approvals=1,
+        expected_results=1,
+    )
+    assert error.code == "already_rolled_back"
+    async with database.sessions() as session:
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackApproval)
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackResult)
+            )
+            == 1
+        )
+
+
+@pytest.mark.parametrize(
+    ("effect_change", "expected_code"),
+    [("unsupported", "unsupported_action"), ("unsuccessful", "effect_not_successful")],
+)
+async def test_rollback_approval_fails_closed_for_invalid_effect_state(
+    client: httpx.AsyncClient,
+    database: Database,
+    api_prefix: str,
+    effect_change: str,
+    expected_code: str,
+) -> None:
+    canvas, _, _, _, effect_id = await _prepared_rollback_effect(
+        client,
+        database,
+        api_prefix,
+        capability=Capability.CANVAS_NOTE_CREATE_ROLLBACK,
+    )
+    async with database.engine.connect() as connection:
+        await connection.execute(text("PRAGMA foreign_keys=OFF"))
+        await connection.execute(text("PRAGMA ignore_check_constraints=ON"))
+        await connection.commit()
+        values = (
+            {"action": "unsupported"}
+            if effect_change == "unsupported"
+            else {"outcome": "failed"}
+        )
+        await connection.execute(
+            update(ControlledAgentReversibleWriteEffect)
+            .where(ControlledAgentReversibleWriteEffect.effect_id == effect_id)
+            .values(**values)
+        )
+        await connection.commit()
+        await connection.execute(text("PRAGMA ignore_check_constraints=OFF"))
+        await connection.execute(text("PRAGMA foreign_keys=ON"))
+        await connection.commit()
+
+    error = await _rollback_issue_error(database, canvas=canvas, effect_id=effect_id)
+    assert error.code == expected_code
+    assert error.message == "Rollback is not eligible."
 
 
 def _state_digest(state: dict[str, object]) -> str:
