@@ -2,6 +2,18 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 rollback-specific capability contract — local only
+
+- Starting SHA: `8c0fc5b02ca3953065ecacde830c52122ed89734`; implementation SHA:
+  `2cbc34f4e088a0fdd186db9a0e3b2759d5aaa039`.
+- Added `canvas.note.create.rollback` and `canvas.note.update.rollback`, mapped only to their exact
+  inverse actions. Forward and cross-rollback substitution remains denied by closed vocabulary.
+- No `0015` migration: capabilities persist as canonical contract payload values with no closed
+  database capability constraint. Tests: focused contract `10 passed`; Ruff, mypy, and diff passed.
+- PostgreSQL, frontend, rollback review/execution, unrelated suites, and network tools not run.
+- Exact continuation: server-authoritative rollback eligibility review and rollback-approval issuance
+  only; no rollback execution, frontend, or Milestone 4.4.
+
 ## Milestone 4.3 rollback-authority SQLite validation — local only
 
 - Starting SHA: `f202e530385bc74781142d330f6a2849aa726502`.

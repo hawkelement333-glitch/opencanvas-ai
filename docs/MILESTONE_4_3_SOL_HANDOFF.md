@@ -1,5 +1,14 @@
 # Milestone 4.3 Sol Handoff
 
+## Rollback-specific authority contract
+
+Local checkpoint `2cbc34f4e088a0fdd186db9a0e3b2759d5aaa039` adds two closed capabilities:
+`canvas.note.create.rollback` only for removing the exact note produced by a successful
+`note.create` effect, and `canvas.note.update.rollback` only for restoring the exact immutable
+evidence state from a successful `note.update` effect. They are distinct from forward capabilities.
+No database migration was required: grant capabilities are canonical validated payload values, not a
+database enum or check-constrained capability column.
+
 ## MILESTONE 4.3 SOL ARCHITECTURE COMPLETE LOCALLY — READY FOR TERRA
 
 ## Baseline and local safety

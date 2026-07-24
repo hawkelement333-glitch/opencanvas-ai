@@ -1,5 +1,21 @@
 # Milestone 4.3 Terra Handoff
 
+## Rollback-specific capability contract complete locally
+
+- Starting SHA: `8c0fc5b02ca3953065ecacde830c52122ed89734`.
+- Capability checkpoint: `2cbc34f4e088a0fdd186db9a0e3b2759d5aaa039`.
+- Added closed values: `canvas.note.create.rollback` and `canvas.note.update.rollback`.
+
+The pure mapping permits each value only for its matching inverse note action; it rejects forward
+create/update substitution, cross-rollback substitution, and unknown values. No migration is
+required because capability strings remain canonical payload data. Focused contract checks: `10 passed`;
+Ruff, strict mypy, and diff checks passed. PostgreSQL and network tools were not run.
+
+### Exact next checkpoint
+
+Implement only server-authoritative rollback eligibility review and rollback-approval issuance using
+these narrow capabilities. Do not execute a rollback.
+
 ## Rollback-authority SQLite validation complete locally
 
 - Starting SHA: `f202e530385bc74781142d330f6a2849aa726502`.
