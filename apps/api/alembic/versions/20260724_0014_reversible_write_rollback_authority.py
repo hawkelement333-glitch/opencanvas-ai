@@ -88,6 +88,14 @@ def upgrade() -> None:
         sa.Column("approval_digest", sa.String(length=64), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.UniqueConstraint(
+            "execution_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "scoped_idempotency_key",
+            name="uq_agent_rollback_approval_execution_scope_idempotency",
+        ),
         sa.CheckConstraint(
             "forward_action IN ('note.create', 'note.update')",
             name="ck_agent_rollback_approval_forward_action",

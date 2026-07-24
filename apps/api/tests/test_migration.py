@@ -738,6 +738,7 @@ def test_rollback_authority_migration_upgrades_downgrades_and_reupgrades_sqlite(
         f"trg_{result_table}_delete_blocked",
     }
     assert approval_sql is not None and result_sql is not None
+    assert "uq_agent_rollback_approval_execution_scope_idempotency" in approval_sql[0]
     assert "ck_agent_rollback_approval_action_shape" in approval_sql[0]
     assert "fk_agent_rollback_approval_effect_scope" in approval_sql[0]
     assert "ck_agent_rollback_result_action_shape" in result_sql[0]

@@ -648,6 +648,18 @@ async def test_rollback_approval_rejects_invalid_evidence_shape_and_scope(
         await _persist_authority(database, _rollback_approval(updated, grant_id=uuid.uuid4()))
 
 
+async def test_rollback_approval_enforces_scoped_idempotency_uniqueness(
+    database: Database,
+) -> None:
+    authority = await _seed_rollback_authority_context(database, action="note.create")
+    key = "rollback-approval-scope-key"
+    await _persist_authority(database, _rollback_approval(authority, scoped_idempotency_key=key))
+    with pytest.raises(IntegrityError):
+        await _persist_authority(
+            database, _rollback_approval(authority, scoped_idempotency_key=key)
+        )
+
+
 @pytest.mark.parametrize("action", ["note.create", "note.update"])
 async def test_rollback_result_persists_the_two_closed_success_forms(
     database: Database, action: str

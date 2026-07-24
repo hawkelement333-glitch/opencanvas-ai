@@ -1757,6 +1757,14 @@ class ControlledAgentReversibleWriteRollbackApproval(Base):
             name="fk_agent_rollback_approval_grant_scope",
             ondelete="RESTRICT",
         ),
+        UniqueConstraint(
+            "execution_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "scoped_idempotency_key",
+            name="uq_agent_rollback_approval_execution_scope_idempotency",
+        ),
         CheckConstraint(
             "forward_action IN ('note.create', 'note.update')",
             name="ck_agent_rollback_approval_forward_action",
