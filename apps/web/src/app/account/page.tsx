@@ -28,14 +28,14 @@ export default function AccountPage() {
   if (account.isPending)
     return (
       <main className="account-shell">
-        <p>Loading account…</p>
+        <p role="status">Loading account…</p>
       </main>
     );
   if (account.isError)
     return (
       <main className="account-shell">
-        <section className="account-card">
-          <h1>Session expired</h1>
+        <section className="account-card" aria-labelledby="account-session-title">
+          <h1 id="account-session-title">Session expired</h1>
           <p>{getErrorMessage(account.error)}</p>
           <a href="/sign-in">Sign in again</a>
         </section>
@@ -44,10 +44,10 @@ export default function AccountPage() {
 
   return (
     <main className="account-shell">
-      <section className="account-card account-card--wide">
+      <section className="account-card account-card--wide" aria-labelledby="account-title">
         <div className="account-card__eyebrow">Account settings</div>
-        <h1>{account.data.displayName}</h1>
-        <p>{account.data.email}</p>
+        <h1 id="account-title">{account.data.displayName}</h1>
+        <p className="account-card__identity">{account.data.email}</p>
         <form onSubmit={update} className="account-form">
           <label>
             Display name
