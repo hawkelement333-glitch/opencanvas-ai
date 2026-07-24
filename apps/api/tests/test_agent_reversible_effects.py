@@ -3,22 +3,31 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from opencanvas_api.db.models import (
     SYSTEM_USER_ID,
     CanvasNode,
     ControlledAgentApprovalConsumption,
     ControlledAgentAuditEvent,
+    ControlledAgentCapabilityGrant,
     ControlledAgentReversibleWriteEffect,
     ControlledAgentReversibleWriteRollbackEvidence,
     TraceEvent,
 )
 from opencanvas_api.db.session import Database
+from opencanvas_api.services.agents.contracts import (
+    Capability,
+    CapabilityGrant,
+    ResourceKind,
+    ResourceScope,
+    contract_digest,
+)
 from opencanvas_api.services.agents.reversible_write_effects import ReversibleWriteEffectService
 from tests.test_canvas_api import _create_canvas, _create_node
 
@@ -278,6 +287,119 @@ async def test_stale_update_conflict_leaves_approval_and_note_unchanged(
             )
             == 0
         )
+
+
+async def _install_rollback_grant(
+    database: Database, *, effect_id: uuid.UUID, capability: Capability
+) -> None:
+    """Install a test-only rollback grant without changing the forward-effect contract."""
+
+    async with database.sessions() as session:
+        effect = await session.get(ControlledAgentReversibleWriteEffect, effect_id)
+        assert effect is not None
+        row = await session.scalar(
+            select(ControlledAgentCapabilityGrant).where(
+                ControlledAgentCapabilityGrant.execution_id == effect.execution_id
+            )
+        )
+        assert row is not None
+        grant = CapabilityGrant.model_validate(row.payload).model_copy(
+            update={
+                "capabilities": (capability,),
+                "resources": (
+                    ResourceScope(
+                        kind=ResourceKind.NODE,
+                        resource_id=effect.resulting_resource_id,
+                        version=effect.resulting_revision,
+                    ),
+                ),
+                "issued_at": datetime.now(UTC),
+                "expires_at": datetime.now(UTC) + timedelta(hours=1),
+            }
+        )
+        await session.execute(
+            update(ControlledAgentCapabilityGrant)
+            .where(ControlledAgentCapabilityGrant.grant_id == row.grant_id)
+            .values(
+                payload=grant.model_dump(mode="json"),
+                payload_digest=contract_digest(grant),
+                issued_at=grant.issued_at,
+                expires_at=grant.expires_at,
+            )
+        )
+        await session.commit()
+
+
+@pytest.mark.parametrize(
+    ("action", "capability", "target_kind"),
+    [
+        ("note.create", Capability.CANVAS_NOTE_CREATE_ROLLBACK, "authoritative_absence"),
+        ("note.update", Capability.CANVAS_NOTE_UPDATE_ROLLBACK, "exact_prior_state"),
+    ],
+)
+async def test_rollback_review_derives_eligible_authority_from_persisted_effect(
+    client: httpx.AsyncClient,
+    database: Database,
+    api_prefix: str,
+    action: str,
+    capability: Capability,
+    target_kind: str,
+) -> None:
+    canvas = await _create_canvas(client, api_prefix, "Rollback review canvas")
+    node = None
+    if action == "note.update":
+        node = await _create_node(
+            client, api_prefix, canvas["id"], title="Before", text="Before text"
+        )
+    _, proposal, route = await _approved_proposal(
+        client, api_prefix, action=action, node=node, canvas=canvas
+    )
+    applied = await _effect(client, route, proposal)
+    assert applied.status_code == 200, applied.text
+    effect_id = uuid.UUID(applied.json()["effectId"])
+    await _install_rollback_grant(database, effect_id=effect_id, capability=capability)
+
+    review = await client.get(
+        f"{route}/canvases/{canvas['id']}/reversible-effects/{effect_id}/rollback-review"
+    )
+    assert review.status_code == 200, review.text
+    body = review.json()
+    assert body == {
+        "effectId": str(effect_id),
+        "forwardAction": action,
+        "noteId": applied.json()["noteId"],
+        "effectRevision": applied.json()["revision"],
+        "currentRevision": applied.json()["revision"],
+        "rollbackAction": f"{action}.rollback",
+        "rollbackTargetKind": target_kind,
+        "requiredCapability": capability.value,
+        "eligible": True,
+        "approvalRequired": True,
+        "denialReason": None,
+        "conflict": False,
+    }
+    assert "beforeState" not in body and "grant" not in body and "digest" not in body
+
+
+async def test_rollback_review_rejects_forward_capability_without_mutation(
+    client: httpx.AsyncClient, database: Database, api_prefix: str
+) -> None:
+    canvas, proposal, route = await _approved_proposal(client, api_prefix)
+    applied = await _effect(client, route, proposal)
+    assert applied.status_code == 200, applied.text
+    effect_id = uuid.UUID(applied.json()["effectId"])
+    before = applied.json().copy()
+
+    review = await client.get(
+        f"{route}/canvases/{canvas['id']}/reversible-effects/{effect_id}/rollback-review"
+    )
+    assert review.status_code == 200, review.text
+    assert review.json()["eligible"] is False
+    assert review.json()["denialReason"] == "capability_missing"
+    async with database.sessions() as session:
+        effect = await session.get(ControlledAgentReversibleWriteEffect, effect_id)
+        node = await session.get(CanvasNode, uuid.UUID(before["noteId"]))
+    assert effect is not None and node is not None and node.revision == before["revision"]
 
 
 def _state_digest(state: dict[str, object]) -> str:

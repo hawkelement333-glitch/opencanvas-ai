@@ -32,6 +32,7 @@ from opencanvas_api.api.agent_schemas import (
     ReversibleWriteEffectStart,
     ReversibleWriteProposalOut,
     ReversibleWriteProposalStart,
+    ReversibleWriteRollbackReviewOut,
 )
 from opencanvas_api.api.dependencies import (
     MutatingPrincipalDep,
@@ -65,6 +66,9 @@ from opencanvas_api.services.agents.reversible_write_effects import (
 from opencanvas_api.services.agents.reversible_write_proposals import (
     ReversibleProposalError,
     ReversibleWriteProposalService,
+)
+from opencanvas_api.services.agents.reversible_write_rollback_review import (
+    ReversibleWriteRollbackReviewService,
 )
 from opencanvas_api.services.agents.reversible_writes import ReversibleWriteAction
 from opencanvas_api.services.ai import AIProvider
@@ -181,6 +185,41 @@ async def apply_reversible_write_effect(
         note_id=effect.resulting_resource_id,
         revision=effect.resulting_revision,
         duplicate=applied.duplicate,
+    )
+
+
+@router.get(
+    "/canvases/{canvas_id}/reversible-effects/{effect_id}/rollback-review",
+    response_model=ReversibleWriteRollbackReviewOut,
+)
+async def review_reversible_write_rollback(
+    workspace_id: uuid.UUID,
+    canvas_id: uuid.UUID,
+    effect_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+) -> ReversibleWriteRollbackReviewOut:
+    """Read authority from server records; this endpoint never issues or executes rollback."""
+
+    review = await ReversibleWriteRollbackReviewService(session).review(
+        authenticated_user_id=principal.user_id,
+        workspace_id=workspace_id,
+        canvas_id=canvas_id,
+        effect_id=effect_id,
+    )
+    return ReversibleWriteRollbackReviewOut(
+        effect_id=review.effect_id,
+        forward_action=review.forward_action,
+        note_id=review.note_id,
+        effect_revision=review.effect_revision,
+        current_revision=review.current_revision,
+        rollback_action=review.rollback_action,
+        rollback_target_kind=review.rollback_target_kind,
+        required_capability=review.required_capability,
+        eligible=review.eligible,
+        approval_required=review.approval_required,
+        denial_reason=review.denial_reason,
+        conflict=review.conflict,
     )
 
 

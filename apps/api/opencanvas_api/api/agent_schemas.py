@@ -226,3 +226,18 @@ class ReversibleWriteEffectOut(ApiModel):
     note_id: uuid.UUID
     revision: int
     duplicate: bool = False
+
+
+class ReversibleWriteRollbackReviewOut(ApiModel):
+    effect_id: uuid.UUID
+    forward_action: str | None = None
+    note_id: uuid.UUID | None = None
+    effect_revision: int | None = None
+    current_revision: int | None = None
+    rollback_action: str | None = None
+    rollback_target_kind: str | None = None
+    required_capability: str | None = None
+    eligible: bool
+    approval_required: bool
+    denial_reason: str | None = None
+    conflict: bool
