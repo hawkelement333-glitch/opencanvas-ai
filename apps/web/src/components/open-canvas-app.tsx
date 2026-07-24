@@ -46,10 +46,11 @@ import {
 } from "react";
 
 import { AssistantPanel } from "@/components/assistant-panel";
+import { ControlledDraftPanel } from "@/components/controlled-draft-panel";
 import { CanvasNodeActionsProvider, CanvasNodeCard } from "@/components/canvas/canvas-node";
 import { DocumentNodeCard } from "@/components/canvas/document-node";
 import { DocumentPreviewPanel } from "@/components/document-preview-panel";
-import { canvasApi, getErrorMessage, getTraceUrl, workspaceApi } from "@/lib/api-client";
+import { agentApi, canvasApi, getErrorMessage, getTraceUrl, workspaceApi } from "@/lib/api-client";
 import { AutosaveQueue, type SaveState } from "@/lib/autosave-queue";
 import {
   buildAIRequest,
@@ -57,6 +58,7 @@ import {
   type Canvas,
   type CanvasNode,
   type Citation,
+  type ControlledDraftCitation,
   type DocumentFileType,
   type DocumentMetadata,
   type RuntimeMode,
@@ -485,6 +487,7 @@ export function OpenCanvasApp() {
               key={snapshotQuery.data.canvas.id}
               snapshot={snapshotQuery.data}
               workspace={activeWorkspace}
+              runtime={runtimeQuery.data ?? null}
               onReload={() => void snapshotQuery.refetch()}
             />
           </ReactFlowProvider>
@@ -497,10 +500,11 @@ export function OpenCanvasApp() {
 interface CanvasWorkspaceProps {
   snapshot: Awaited<ReturnType<typeof canvasApi.getSnapshot>>;
   workspace: Workspace | null;
+  runtime: RuntimeMode | null;
   onReload: () => void;
 }
 
-function CanvasWorkspace({ snapshot, workspace, onReload }: CanvasWorkspaceProps) {
+function CanvasWorkspace({ snapshot, workspace, runtime, onReload }: CanvasWorkspaceProps) {
   const flow = useReactFlow<CanvasFlowNode, CanvasFlowEdge>();
   const stageRef = useRef<HTMLDivElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -771,6 +775,39 @@ function CanvasWorkspace({ snapshot, workspace, onReload }: CanvasWorkspaceProps
       setSurfaceError(getErrorMessage(error));
     }
   }, []);
+
+  const openControlledCitation = useCallback(
+    async (citation: ControlledDraftCitation, ordinal: number) => {
+      const local = nodesRef.current
+        .map((node) => node.data.node.document)
+        .find((document) => document?.id === citation.documentId);
+      try {
+        const document = local ?? (await canvasApi.getDocument(citation.documentId));
+        setPreview({
+          document,
+          citation: {
+            id: `controlled-${citation.chunkId}`,
+            sourceId: citation.sourceId,
+            documentId: citation.documentId,
+            documentTitle: document.fileName,
+            chunkId: citation.chunkId,
+            pageNumber: null,
+            heading: null,
+            chunkIndex: ordinal - 1,
+            startOffset: 0,
+            endOffset: citation.quote.length,
+            excerpt: citation.quote,
+            claim: citation.claim,
+            ordinal,
+          },
+        });
+        setSurfaceError(null);
+      } catch (error) {
+        setSurfaceError(getErrorMessage(error));
+      }
+    },
+    [],
+  );
 
   const retryDocument = useCallback(
     async (nodeId: string) => {
@@ -1461,7 +1498,18 @@ function CanvasWorkspace({ snapshot, workspace, onReload }: CanvasWorkspaceProps
         />
       )}
 
-      <AssistantPanel selectedNodes={selected} onAsk={askAI} onClearSelection={clearSelection} />
+      {runtime?.mode !== "deterministic_replay" && workspace ? (
+        <ControlledDraftPanel
+          canvasId={snapshot.canvas.id}
+          selectedNodes={selected}
+          onStart={(input) => agentApi.startGroundedDraft(workspace.id, input)}
+          onOpenCitation={openControlledCitation}
+          onClearSelection={clearSelection}
+          getTraceUrl={getTraceUrl}
+        />
+      ) : (
+        <AssistantPanel selectedNodes={selected} onAsk={askAI} onClearSelection={clearSelection} />
+      )}
     </div>
   );
 }

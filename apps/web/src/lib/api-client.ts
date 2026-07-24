@@ -7,6 +7,9 @@ import {
   canvasNodeSchema,
   canvasSchema,
   canvasSnapshotSchema,
+  controlledDraftCancellationSchema,
+  controlledDraftSchema,
+  controlledDraftStartInputSchema,
   createCanvasInputSchema,
   createEdgeInputSchema,
   createNodeInputSchema,
@@ -29,6 +32,9 @@ import {
   type Canvas,
   type CanvasEdge,
   type CanvasSnapshot,
+  type ControlledDraft,
+  type ControlledDraftCancellation,
+  type ControlledDraftStartInput,
   type CreateEdgeInput,
   type CreateNodeInput,
   type DocumentSearchInput,
@@ -333,6 +339,33 @@ export const canvasApi = {
       `/canvases/${encodeURIComponent(canvasId)}/documents/search`,
       documentSearchResultSchema,
       { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+};
+
+export const agentApi = {
+  startGroundedDraft(
+    workspaceId: string,
+    rawInput: ControlledDraftStartInput,
+  ): Promise<ControlledDraft> {
+    const input = controlledDraftStartInputSchema.parse(rawInput);
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/agent-executions/drafts`,
+      controlledDraftSchema,
+      { method: "POST", body: JSON.stringify(input) },
+      LONG_OPERATION_TIMEOUT_MS,
+    );
+  },
+
+  cancelExecution(
+    workspaceId: string,
+    executionId: string,
+    idempotencyKey: string,
+  ): Promise<ControlledDraftCancellation> {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/agent-executions/${encodeURIComponent(executionId)}/cancel`,
+      controlledDraftCancellationSchema,
+      { method: "POST", body: JSON.stringify({ idempotencyKey }) },
     );
   },
 };

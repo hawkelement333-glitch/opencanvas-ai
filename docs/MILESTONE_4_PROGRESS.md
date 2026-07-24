@@ -2,6 +2,32 @@
 
 Last updated: 2026-07-23 (America/Chicago)
 
+## Milestone 4.2 Terra checkpoint 3 — read-only controlled grounded-draft interface
+
+- Starting local and remote SHA: `8dfd290d9b541fa5fedfb4ab49fe6a22a273ad3d`.
+- Added the smallest production-shaped controlled-draft panel and typed browser contract. It is used
+  only outside deterministic replay; demo mode retains the existing deterministic assistant exactly.
+  The panel makes one explicit authenticated start request, prevents duplicate starts while the
+  request is active, renders only the server-confirmed read-only terminal result, exposes validated
+  citations through the existing authorized document-preview path, and links to the existing Trace.
+- No browser code creates or validates authority, approvals, lifecycle state, immutable context,
+  citations, results, or workspace changes. Safe failures use a generic user-facing message rather
+  than provider detail. No save, apply, create-note, update-note, retry timer, or automatic start
+  control was introduced.
+- The current start endpoint is synchronous and returns an execution identifier only after a
+  terminal result. Consequently this UI does not present a misleading cancellation button: it
+  cannot authoritatively target an in-progress execution. The existing server cancellation endpoint
+  is typed in the API client for a future server contract that exposes an active execution ID.
+- Focused frontend validation: `npm run test -- controlled-draft-panel.test.tsx api-client.test.ts`
+  — `2 files passed`, `7 tests passed`; `npm run typecheck` passed; `npm run lint` passed; changed
+  files were formatted with direct Prettier; `git diff --check` passed.
+- `npm run format:check` remains **not clean** on the pre-existing repository baseline: it reports
+  16 files, including untouched configuration, E2E, account, and canvas files. No broad formatting
+  rewrite was retained.
+- Exact next Terra step: audit the scoped UI diff, commit and normally push this checkpoint, then
+  run the remaining complete Terra validation gate and write the Terra-to-Luna handoff. Luna has not
+  started.
+
 ## Milestone 4.2 Terra checkpoint 2 — server-owned start and authoritative cancel API
 
 - Starting local and remote SHA: `7dd816a15a7a3f995b41c54ea0f0900f4ad15764`.

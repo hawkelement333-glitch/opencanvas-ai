@@ -190,6 +190,59 @@ export const aiResultSchema = z.object({
   rerunType: z.enum(["original_context", "current_context"]).nullable().default(null),
 });
 
+export const controlledDraftStartInputSchema = z
+  .object({
+    canvasId: z.string().uuid(),
+    instruction: z.string().trim().min(1, "Enter a question or instruction").max(8_000),
+    selectedNodeIds: z.array(z.string().uuid()).min(1, "Select at least one node").max(50),
+    idempotencyKey: z
+      .string()
+      .min(8)
+      .max(128)
+      .regex(/^[A-Za-z0-9._:-]+$/),
+    clientRequestId: z.string().min(1).max(128).optional(),
+  })
+  .refine((value) => new Set(value.selectedNodeIds).size === value.selectedNodeIds.length, {
+    message: "Selected context must not contain duplicates",
+    path: ["selectedNodeIds"],
+  });
+
+export const controlledDraftCitationSchema = z.object({
+  sourceId: z.string().min(1),
+  documentId: z.string().uuid(),
+  documentVersion: z.number().int().nonnegative(),
+  chunkId: z.string().uuid(),
+  claim: z.string(),
+  quote: z.string(),
+});
+
+export const controlledDraftSchema = z.object({
+  executionId: z.string().uuid(),
+  traceId: z.string().uuid(),
+  responseId: z.string().uuid(),
+  text: z.string(),
+  insufficientEvidence: z.boolean(),
+  citations: z.array(controlledDraftCitationSchema).default([]),
+  duplicate: z.boolean().default(false),
+});
+
+export const controlledDraftCancellationSchema = z.object({
+  executionId: z.string().uuid(),
+  cancelled: z.boolean(),
+  duplicate: z.boolean(),
+  status: z.enum([
+    "proposed",
+    "awaiting_approval",
+    "ready",
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "denied",
+  ]),
+  reasonCode: z.string().min(1),
+});
+
 export const documentUploadResultSchema = z.object({
   document: documentMetadataSchema,
   node: canvasNodeSchema,
@@ -307,6 +360,10 @@ export type UpdateNodeInput = z.infer<typeof updateNodeInputSchema>;
 export type CreateEdgeInput = z.infer<typeof createEdgeInputSchema>;
 export type AskAIInput = z.infer<typeof askAIInputSchema>;
 export type AIResult = z.infer<typeof aiResultSchema>;
+export type ControlledDraftStartInput = z.infer<typeof controlledDraftStartInputSchema>;
+export type ControlledDraft = z.infer<typeof controlledDraftSchema>;
+export type ControlledDraftCitation = z.infer<typeof controlledDraftCitationSchema>;
+export type ControlledDraftCancellation = z.infer<typeof controlledDraftCancellationSchema>;
 export type Point = z.infer<typeof pointSchema>;
 export type Citation = z.infer<typeof citationSchema>;
 export type DocumentFileType = z.infer<typeof documentFileTypeSchema>;
