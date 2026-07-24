@@ -114,6 +114,8 @@ class ReversibleWriteRollbackApprovalService:
             expires_at = (
                 existing.expires_at if existing is not None else self.now + ROLLBACK_APPROVAL_TTL
             )
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
             digest_input = RollbackApprovalDigestInput(
                 execution_id=effect.execution_id,
                 user_id=authenticated_user_id,
