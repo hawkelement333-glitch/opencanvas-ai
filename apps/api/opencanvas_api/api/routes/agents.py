@@ -32,6 +32,8 @@ from opencanvas_api.api.agent_schemas import (
     ReversibleWriteEffectStart,
     ReversibleWriteProposalOut,
     ReversibleWriteProposalStart,
+    ReversibleWriteRollbackApprovalOut,
+    ReversibleWriteRollbackApprovalStart,
     ReversibleWriteRollbackReviewOut,
 )
 from opencanvas_api.api.dependencies import (
@@ -66,6 +68,10 @@ from opencanvas_api.services.agents.reversible_write_effects import (
 from opencanvas_api.services.agents.reversible_write_proposals import (
     ReversibleProposalError,
     ReversibleWriteProposalService,
+)
+from opencanvas_api.services.agents.reversible_write_rollback_approvals import (
+    ReversibleWriteRollbackApprovalService,
+    RollbackApprovalError,
 )
 from opencanvas_api.services.agents.reversible_write_rollback_review import (
     ReversibleWriteRollbackReviewService,
@@ -220,6 +226,44 @@ async def review_reversible_write_rollback(
         approval_required=review.approval_required,
         denial_reason=review.denial_reason,
         conflict=review.conflict,
+    )
+
+
+@router.post(
+    "/canvases/{canvas_id}/reversible-effects/{effect_id}/rollback-approval",
+    response_model=ReversibleWriteRollbackApprovalOut,
+)
+async def issue_reversible_write_rollback_approval(
+    workspace_id: uuid.UUID,
+    canvas_id: uuid.UUID,
+    effect_id: uuid.UUID,
+    payload: ReversibleWriteRollbackApprovalStart,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> ReversibleWriteRollbackApprovalOut:
+    try:
+        issued = await ReversibleWriteRollbackApprovalService(session).issue(
+            authenticated_user_id=principal.user_id,
+            workspace_id=workspace_id,
+            canvas_id=canvas_id,
+            effect_id=effect_id,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except RollbackApprovalError as exc:
+        await session.rollback()
+        raise ApiError(exc.status_code, exc.code, exc.message) from exc
+    approval = issued.approval
+    return ReversibleWriteRollbackApprovalOut(
+        rollback_approval_id=approval.rollback_approval_id,
+        effect_id=approval.effect_id,
+        note_id=approval.note_id,
+        forward_action=approval.forward_action,
+        rollback_action=approval.rollback_action,
+        expected_current_revision=approval.expected_current_revision,
+        rollback_target_kind=approval.rollback_target_kind,
+        expires_at=approval.expires_at,
+        duplicate=issued.duplicate,
     )
 
 

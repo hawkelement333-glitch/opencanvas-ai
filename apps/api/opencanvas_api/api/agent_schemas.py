@@ -241,3 +241,19 @@ class ReversibleWriteRollbackReviewOut(ApiModel):
     approval_required: bool
     denial_reason: str | None = None
     conflict: bool
+
+
+class ReversibleWriteRollbackApprovalStart(ApiModel):
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class ReversibleWriteRollbackApprovalOut(ApiModel):
+    rollback_approval_id: uuid.UUID
+    effect_id: uuid.UUID
+    note_id: uuid.UUID
+    forward_action: Literal["note.create", "note.update"]
+    rollback_action: Literal["note.create.rollback", "note.update.rollback"]
+    expected_current_revision: int
+    rollback_target_kind: Literal["authoritative_absence", "exact_prior_state"]
+    expires_at: datetime
+    duplicate: bool = False
