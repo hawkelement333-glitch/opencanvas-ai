@@ -1577,6 +1577,18 @@ class ControlledAgentReversibleWriteEffect(Base):
         ),
         Index("ix_agent_reversible_effect_proposal", "proposal_id"),
         Index(
+            "ux_agent_reversible_effect_rollback_scope",
+            "effect_id",
+            "execution_id",
+            "proposal_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "action",
+            "resulting_resource_id",
+            unique=True,
+        ),
+        Index(
             "ix_agent_reversible_effect_scope", "user_id", "workspace_id", "canvas_id", "created_at"
         ),
     )
@@ -1603,6 +1615,74 @@ class ControlledAgentReversibleWriteEffect(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ControlledAgentReversibleWriteRollbackEvidence(Base):
+    """Immutable exact pre-update note state bound to one authoritative effect result."""
+
+    __tablename__ = "controlled_agent_reversible_write_rollback_evidence"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            [
+                "effect_id",
+                "execution_id",
+                "proposal_id",
+                "user_id",
+                "workspace_id",
+                "canvas_id",
+                "action",
+                "note_id",
+            ],
+            [
+                "controlled_agent_reversible_write_effects.effect_id",
+                "controlled_agent_reversible_write_effects.execution_id",
+                "controlled_agent_reversible_write_effects.proposal_id",
+                "controlled_agent_reversible_write_effects.user_id",
+                "controlled_agent_reversible_write_effects.workspace_id",
+                "controlled_agent_reversible_write_effects.canvas_id",
+                "controlled_agent_reversible_write_effects.action",
+                "controlled_agent_reversible_write_effects.resulting_resource_id",
+            ],
+            name="fk_agent_rollback_evidence_effect_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["note_id", "canvas_id"],
+            ["nodes.id", "nodes.canvas_id"],
+            name="fk_agent_rollback_evidence_note_canvas",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("effect_id", name="uq_agent_rollback_evidence_effect"),
+        CheckConstraint("action = 'note.update'", name="ck_agent_rollback_evidence_action"),
+        CheckConstraint(
+            "post_effect_revision = pre_effect_revision + 1",
+            name="ck_agent_rollback_evidence_revision_order",
+        ),
+        Index("ix_agent_rollback_evidence_note", "note_id", "post_effect_revision"),
+        Index(
+            "ix_agent_rollback_evidence_scope",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "created_at",
+        ),
+    )
+
+    evidence_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    effect_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    proposal_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    note_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    pre_effect_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    post_effect_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    before_state: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    before_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    after_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 CONTROLLED_AGENT_IMMUTABLE_MODELS = (
     ControlledAgentExecution,
     ControlledAgentExecutionState,
@@ -1618,6 +1698,7 @@ CONTROLLED_AGENT_IMMUTABLE_MODELS = (
     ControlledAgentRequestIdentity,
     ControlledAgentReversibleWriteProposal,
     ControlledAgentReversibleWriteEffect,
+    ControlledAgentReversibleWriteRollbackEvidence,
 )
 
 
