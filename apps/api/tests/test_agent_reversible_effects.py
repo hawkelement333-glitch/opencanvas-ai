@@ -508,6 +508,44 @@ async def test_successful_rollback_approval_issuance(
     assert approval.approval_digest == digest
 
 
+async def test_rollback_approval_exact_duplicate_returns_one_row(
+    client: httpx.AsyncClient, database: Database, api_prefix: str
+) -> None:
+    canvas, proposal, route = await _approved_proposal(client, api_prefix)
+    applied = await _effect(client, route, proposal)
+    effect_id = uuid.UUID(applied.json()["effectId"])
+    await _install_rollback_grant(
+        database, effect_id=effect_id, capability=Capability.CANVAS_NOTE_CREATE_ROLLBACK
+    )
+    key = f"rollback-duplicate-{uuid.uuid4().hex}"
+    async with database.sessions() as session:
+        service = ReversibleWriteRollbackApprovalService(session)
+        first = await service.issue(
+            authenticated_user_id=SYSTEM_USER_ID,
+            workspace_id=uuid.UUID(canvas["workspaceId"]),
+            canvas_id=uuid.UUID(canvas["id"]),
+            effect_id=effect_id,
+            idempotency_key=key,
+        )
+        await session.commit()
+    async with database.sessions() as session:
+        duplicate = await ReversibleWriteRollbackApprovalService(session).issue(
+            authenticated_user_id=SYSTEM_USER_ID,
+            workspace_id=uuid.UUID(canvas["workspaceId"]),
+            canvas_id=uuid.UUID(canvas["id"]),
+            effect_id=effect_id,
+            idempotency_key=key,
+        )
+        assert duplicate.duplicate is True
+        assert duplicate.approval.rollback_approval_id == first.approval.rollback_approval_id
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackApproval)
+            )
+            == 1
+        )
+
+
 def _state_digest(state: dict[str, object]) -> str:
     return hashlib.sha256(
         json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
