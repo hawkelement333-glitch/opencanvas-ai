@@ -1051,6 +1051,64 @@ class ControlledAgentExecutionState(Base):
     safe_reason_code: Mapped[str | None] = mapped_column(String(64))
 
 
+class ControlledAgentStateTransition(Base):
+    """Append-only compare-and-set evidence for one validated lifecycle transition."""
+
+    __tablename__ = "controlled_agent_state_transitions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_executions.id",
+                "controlled_agent_executions.user_id",
+                "controlled_agent_executions.workspace_id",
+            ],
+            name="fk_agent_transition_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id"],
+            ["controlled_agent_execution_states.state_id"],
+            name="fk_agent_transition_state",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["previous_state_id"],
+            ["controlled_agent_execution_states.state_id"],
+            name="fk_agent_transition_previous_state",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("state_id", name="uq_agent_transition_state"),
+        UniqueConstraint(
+            "execution_id",
+            "sequence",
+            name="uq_agent_transition_execution_sequence",
+        ),
+        UniqueConstraint(
+            "execution_id",
+            "predecessor_token",
+            name="uq_agent_transition_execution_predecessor",
+        ),
+        CheckConstraint(
+            "schema_version = 'controlled-agent-v1'",
+            name="ck_agent_transition_schema",
+        ),
+        CheckConstraint("sequence >= 0", name="ck_agent_transition_sequence"),
+        Index("ix_agent_transition_execution_sequence", "execution_id", "sequence"),
+    )
+
+    transition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    state_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    previous_state_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    predecessor_token: Mapped[str] = mapped_column(String(36), nullable=False)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ControlledAgentContextSnapshot(Base):
     __tablename__ = "controlled_agent_context_snapshots"
     __table_args__ = (
@@ -1385,6 +1443,7 @@ class ControlledAgentRequestIdentity(Base):
 CONTROLLED_AGENT_IMMUTABLE_MODELS = (
     ControlledAgentExecution,
     ControlledAgentExecutionState,
+    ControlledAgentStateTransition,
     ControlledAgentContextSnapshot,
     ControlledAgentPlanSnapshot,
     ControlledAgentCapabilityGrant,

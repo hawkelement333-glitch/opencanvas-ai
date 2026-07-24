@@ -1,6 +1,37 @@
 # Milestone 4 Controlled Agents Progress Ledger
 
-Last updated: 2026-07-21 (America/Chicago)
+Last updated: 2026-07-23 (America/Chicago)
+
+## Milestone 4.2 Sol checkpoint 3B — lifecycle transition safety
+
+- Starting local and remote SHA:
+  `9bb70e41269465daff314d7a27c43ec6ca1bb0ed`.
+- Reconstructed the unavailable prior-task state from the branch, commits, tests, Sol handoff, and
+  this ledger. The repository confirms checkpoint 3A was the latest completed unit; Terra and Luna
+  implementation were not present and were not restarted.
+- Added migration `20260723_0009` with an append-only lifecycle transition guard. Unique
+  `(execution_id, sequence)` and `(execution_id, predecessor_token)` constraints provide a
+  database-backed compare-and-set boundary so two successors cannot authoritatively follow the
+  same prior state.
+- Replaced unrestricted state appends with ownership-scoped, closed transition validation.
+  Executions must begin in `proposed`; only declared successors are accepted; timestamps cannot
+  regress; and `succeeded`, `failed`, `cancelled`, and `denied` are terminal.
+- Added current-state reads ordered by validated transition sequence rather than caller timestamps.
+- Added focused lifecycle and schema tests covering valid transitions, invalid initial/terminal
+  transitions, terminal reopening, timestamp regression, ownership mismatch, current-state
+  ordering, and database compare-and-set constraints.
+- Focused lifecycle/persistence/schema/API/migration tests: `28 passed`.
+- Migration validation: passed upgrade `0009`, downgrade `0008`, re-upgrade `0009`.
+- Ruff lint: passed. Focused mypy for the persistence/model files: passed.
+- `git diff --check`: passed.
+- PostgreSQL execution: **NOT RUN**. The migration contains PostgreSQL-compatible constraints and
+  append-only trigger wiring, but no configured PostgreSQL service is available in this checkpoint.
+- No provider call, immutable-context resolver, cancellation controller, result publication, API,
+  UI, worker, queue, scheduler, delegation, workspace effect, Milestone 3.75 integration, Terra
+  work, or Luna work was added.
+- Exact next unit: resolve the stored selected context to exact owned canvas/node/document-version/
+  chunk identities and content digests without current-version substitution or broad search, then
+  add focused tamper, deletion, ownership, and later-workspace-change tests.
 
 ## Milestone 4.2 Sol checkpoint 3A — database request idempotency
 

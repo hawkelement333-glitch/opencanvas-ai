@@ -12,8 +12,8 @@ from alembic.config import Config
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 API_ROOT = REPOSITORY_ROOT / "apps" / "api"
-EXPECTED_HEAD = "20260721_0008"
-PREVIOUS_REVISION = "20260721_0007"
+EXPECTED_HEAD = "20260723_0009"
+PREVIOUS_REVISION = "20260721_0008"
 
 
 def revision(database_path: Path) -> str:
@@ -40,9 +40,7 @@ def main() -> int:
 
         command.downgrade(config, PREVIOUS_REVISION)
         if revision(database_path) != PREVIOUS_REVISION:
-            raise RuntimeError(
-                f"Migration downgrade did not reach {PREVIOUS_REVISION}."
-            )
+            raise RuntimeError(f"Migration downgrade did not reach {PREVIOUS_REVISION}.")
 
         command.upgrade(config, "head")
         if revision(database_path) != EXPECTED_HEAD:

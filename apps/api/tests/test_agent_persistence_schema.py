@@ -13,11 +13,13 @@ from opencanvas_api.db.models import (
     ControlledAgentGrantRevocation,
     ControlledAgentPlanSnapshot,
     ControlledAgentPolicyDecision,
+    ControlledAgentStateTransition,
 )
 
 AGENT_MODELS = (
     ControlledAgentExecution,
     ControlledAgentExecutionState,
+    ControlledAgentStateTransition,
     ControlledAgentContextSnapshot,
     ControlledAgentPlanSnapshot,
     ControlledAgentCapabilityGrant,
@@ -62,6 +64,9 @@ def test_execution_children_use_composite_owner_scope_foreign_keys() -> None:
         constraint.name for constraint in inspect(ControlledAgentExecution).local_table.constraints
     }
     assert "fk_agent_state_execution_scope" in _foreign_key_names(ControlledAgentExecutionState)
+    assert "fk_agent_transition_execution_scope" in _foreign_key_names(
+        ControlledAgentStateTransition
+    )
     assert "fk_agent_context_execution_scope" in _foreign_key_names(ControlledAgentContextSnapshot)
     assert "fk_agent_plan_execution_scope" in _foreign_key_names(ControlledAgentPlanSnapshot)
     assert "fk_agent_grant_execution_scope" in _foreign_key_names(ControlledAgentCapabilityGrant)
@@ -74,3 +79,11 @@ def test_revocation_and_consumption_are_separate_one_time_records() -> None:
         "fk_agent_consumption_approval_scope",
         "fk_agent_consumption_policy_scope",
     } <= _foreign_key_names(ControlledAgentApprovalConsumption)
+
+
+def test_state_transitions_have_database_compare_and_set_boundaries() -> None:
+    assert {
+        ("state_id",),
+        ("execution_id", "sequence"),
+        ("execution_id", "predecessor_token"),
+    } <= _unique_columns(ControlledAgentStateTransition)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from pydantic import ValidationError
@@ -21,6 +21,7 @@ from opencanvas_api.db.models import (
     ControlledAgentGrantRevocation,
     ControlledAgentPlanSnapshot,
     ControlledAgentPolicyDecision,
+    ControlledAgentStateTransition,
     Workspace,
 )
 from opencanvas_api.services.agents.contracts import (
@@ -31,6 +32,7 @@ from opencanvas_api.services.agents.contracts import (
     ContextSnapshot,
     ExecutionRecord,
     ExecutionStateRecord,
+    ExecutionStatus,
     PlanSnapshot,
     PolicyDecision,
     PolicyOutcome,
@@ -51,6 +53,56 @@ class AgentPersistenceNotFound(AgentPersistenceError):
 
 class AgentContractIntegrityError(AgentPersistenceError):
     pass
+
+
+class AgentStateTransitionError(AgentPersistenceError):
+    pass
+
+
+class AgentStateConflict(AgentStateTransitionError):
+    pass
+
+
+TERMINAL_EXECUTION_STATUSES = frozenset(
+    {
+        ExecutionStatus.SUCCEEDED,
+        ExecutionStatus.FAILED,
+        ExecutionStatus.CANCELLED,
+        ExecutionStatus.DENIED,
+    }
+)
+
+ALLOWED_EXECUTION_TRANSITIONS = {
+    ExecutionStatus.PROPOSED: frozenset(
+        {
+            ExecutionStatus.AWAITING_APPROVAL,
+            ExecutionStatus.READY,
+            ExecutionStatus.DENIED,
+            ExecutionStatus.CANCELLED,
+        }
+    ),
+    ExecutionStatus.AWAITING_APPROVAL: frozenset(
+        {
+            ExecutionStatus.READY,
+            ExecutionStatus.DENIED,
+            ExecutionStatus.CANCELLED,
+        }
+    ),
+    ExecutionStatus.READY: frozenset(
+        {
+            ExecutionStatus.RUNNING,
+            ExecutionStatus.DENIED,
+            ExecutionStatus.CANCELLED,
+        }
+    ),
+    ExecutionStatus.RUNNING: frozenset(
+        {
+            ExecutionStatus.SUCCEEDED,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.CANCELLED,
+        }
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,19 +233,108 @@ class ControlledAgentRepository:
         await self.session.flush()
 
     async def append_state(self, state: ExecutionStateRecord) -> None:
-        self.session.add(
-            ControlledAgentExecutionState(
-                state_id=state.state_id,
-                execution_id=state.execution_id,
-                user_id=state.user_id,
-                workspace_id=state.workspace_id,
-                schema_version=state.schema_version,
-                status=state.status.value,
-                recorded_at=state.recorded_at,
-                safe_reason_code=state.safe_reason_code,
+        """Append one validated transition with database-backed successor exclusivity."""
+
+        await self._owned_execution(state.user_id, state.workspace_id, state.execution_id)
+        latest = (
+            await self.session.execute(
+                select(ControlledAgentStateTransition, ControlledAgentExecutionState)
+                .join(
+                    ControlledAgentExecutionState,
+                    ControlledAgentExecutionState.state_id
+                    == ControlledAgentStateTransition.state_id,
+                )
+                .where(
+                    ControlledAgentStateTransition.execution_id == state.execution_id,
+                    ControlledAgentStateTransition.user_id == state.user_id,
+                    ControlledAgentStateTransition.workspace_id == state.workspace_id,
+                )
+                .order_by(ControlledAgentStateTransition.sequence.desc())
+                .limit(1)
             )
+        ).first()
+        previous_transition = latest[0] if latest is not None else None
+        previous_state = latest[1] if latest is not None else None
+        if previous_state is None:
+            if state.status is not ExecutionStatus.PROPOSED:
+                raise AgentStateTransitionError("execution_must_begin_proposed")
+            sequence = 0
+            predecessor_token = "root"
+        else:
+            if previous_transition is None:
+                raise AgentStateConflict("execution_transition_missing")
+            previous_status = ExecutionStatus(previous_state.status)
+            if previous_status in TERMINAL_EXECUTION_STATUSES:
+                raise AgentStateTransitionError("execution_already_terminal")
+            if state.status not in ALLOWED_EXECUTION_TRANSITIONS.get(previous_status, frozenset()):
+                raise AgentStateTransitionError(
+                    f"invalid_execution_transition:{previous_status.value}:{state.status.value}"
+                )
+            previous_recorded_at = previous_state.recorded_at
+            if previous_recorded_at.tzinfo is None:
+                previous_recorded_at = previous_recorded_at.replace(tzinfo=UTC)
+            if state.recorded_at < previous_recorded_at:
+                raise AgentStateTransitionError("execution_state_time_regressed")
+            sequence = previous_transition.sequence + 1
+            predecessor_token = str(previous_state.state_id)
+
+        state_row = ControlledAgentExecutionState(
+            state_id=state.state_id,
+            execution_id=state.execution_id,
+            user_id=state.user_id,
+            workspace_id=state.workspace_id,
+            schema_version=state.schema_version,
+            status=state.status.value,
+            recorded_at=state.recorded_at,
+            safe_reason_code=state.safe_reason_code,
         )
-        await self.session.flush()
+        transition_row = ControlledAgentStateTransition(
+            transition_id=uuid.uuid4(),
+            state_id=state.state_id,
+            previous_state_id=previous_state.state_id if previous_state is not None else None,
+            predecessor_token=predecessor_token,
+            execution_id=state.execution_id,
+            user_id=state.user_id,
+            workspace_id=state.workspace_id,
+            schema_version=state.schema_version,
+            sequence=sequence,
+            recorded_at=state.recorded_at,
+        )
+        try:
+            async with self.session.begin_nested():
+                self.session.add(state_row)
+                await self.session.flush()
+                self.session.add(transition_row)
+                await self.session.flush()
+        except IntegrityError:
+            raise AgentStateConflict("execution_state_changed") from None
+
+    async def current_state(
+        self,
+        *,
+        user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        execution_id: uuid.UUID,
+    ) -> ControlledAgentExecutionState | None:
+        await self._owned_execution(user_id, workspace_id, execution_id)
+        return cast(
+            ControlledAgentExecutionState | None,
+            await self.session.scalar(
+                select(ControlledAgentExecutionState)
+                .join(
+                    ControlledAgentStateTransition,
+                    ControlledAgentStateTransition.state_id
+                    == ControlledAgentExecutionState.state_id,
+                )
+                .where(
+                    ControlledAgentStateTransition.execution_id == execution_id,
+                    ControlledAgentStateTransition.user_id == user_id,
+                    ControlledAgentStateTransition.workspace_id == workspace_id,
+                )
+                .order_by(ControlledAgentStateTransition.sequence.desc())
+                .limit(1)
+            ),
+        )
 
     async def append_revocation(self, revocation: RevocationRecord) -> None:
         if revocation.subject_kind != "grant":
@@ -559,10 +700,14 @@ class ControlledAgentRepository:
 
 
 __all__ = [
+    "ALLOWED_EXECUTION_TRANSITIONS",
+    "TERMINAL_EXECUTION_STATUSES",
     "AgentContractIntegrityError",
     "AgentInspection",
     "AgentPersistenceError",
     "AgentPersistenceNotFound",
+    "AgentStateConflict",
+    "AgentStateTransitionError",
     "ApprovalConsumptionAttempt",
     "ControlledAgentRepository",
 ]

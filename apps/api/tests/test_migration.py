@@ -5,9 +5,9 @@ import uuid
 from pathlib import Path
 
 import pytest
+from alembic import command
 from alembic.config import Config
 
-from alembic import command
 from opencanvas_api.core.config import get_settings
 
 
@@ -53,6 +53,7 @@ def test_initial_migration_upgrades_sqlite(tmp_path: Path) -> None:
         "canonical_relationships",
         "controlled_agent_executions",
         "controlled_agent_execution_states",
+        "controlled_agent_state_transitions",
         "controlled_agent_context_snapshots",
         "controlled_agent_plan_snapshots",
         "controlled_agent_capability_grants",
@@ -134,7 +135,7 @@ def test_migration_uses_configured_database_url(
 
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("20260721_0008",)
+    assert revision == ("20260723_0009",)
 
 
 def test_phase_two_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) -> None:
@@ -166,7 +167,7 @@ def test_phase_two_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) ->
     command.upgrade(config, "head")
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("20260721_0008",)
+    assert revision == ("20260723_0009",)
 
 
 def test_trace_foundation_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) -> None:
@@ -191,7 +192,7 @@ def test_trace_foundation_migration_downgrades_and_reupgrades_sqlite(tmp_path: P
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
         indexes = {row[1] for row in connection.execute("PRAGMA index_list(trace_events)")}
-    assert revision == ("20260721_0008",)
+    assert revision == ("20260723_0009",)
     assert {
         "ix_trace_events_trace_time",
         "ix_trace_events_workspace_time",
@@ -232,7 +233,7 @@ def test_canonical_migration_backfills_canvases_and_reverses_sqlite(tmp_path: Pa
             "SELECT id, legacy_canvas_id FROM workspaces WHERE id = ?",
             (removed_canvas_id,),
         ).fetchone()
-    assert revision == ("20260721_0008",)
+    assert revision == ("20260723_0009",)
     assert workspaces == [
         (removed_canvas_id, "Removed canvas", 1, "active", "{}", removed_canvas_id),
         (retained_canvas_id, "Retained canvas", 1, "active", "{}", retained_canvas_id),
@@ -268,7 +269,7 @@ def test_canonical_migration_backfills_canvases_and_reverses_sqlite(tmp_path: Pa
         workspaces = connection.execute(
             "SELECT id, legacy_canvas_id, lifecycle_state FROM workspaces"
         ).fetchall()
-    assert revision == ("20260721_0008",)
+    assert revision == ("20260723_0009",)
     assert workspaces == [(retained_canvas_id, retained_canvas_id, "active")]
 
 
@@ -333,5 +334,5 @@ def test_controlled_agent_migration_is_append_only_and_reversible_sqlite(
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
-    assert revision == ("20260721_0008",)
+    assert revision == ("20260723_0009",)
     assert "controlled_agent_approval_consumptions" in tables
