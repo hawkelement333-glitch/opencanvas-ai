@@ -34,7 +34,9 @@ from opencanvas_api.api.agent_schemas import (
     ReversibleWriteProposalStart,
     ReversibleWriteRollbackApprovalOut,
     ReversibleWriteRollbackApprovalStart,
+    ReversibleWriteRollbackOut,
     ReversibleWriteRollbackReviewOut,
+    ReversibleWriteRollbackStart,
 )
 from opencanvas_api.api.dependencies import (
     MutatingPrincipalDep,
@@ -75,6 +77,10 @@ from opencanvas_api.services.agents.reversible_write_rollback_approvals import (
 )
 from opencanvas_api.services.agents.reversible_write_rollback_review import (
     ReversibleWriteRollbackReviewService,
+)
+from opencanvas_api.services.agents.reversible_write_rollbacks import (
+    ReversibleWriteRollbackService,
+    RollbackExecutionError,
 )
 from opencanvas_api.services.agents.reversible_writes import ReversibleWriteAction
 from opencanvas_api.services.ai import AIProvider
@@ -264,6 +270,47 @@ async def issue_reversible_write_rollback_approval(
         rollback_target_kind=approval.rollback_target_kind,
         expires_at=approval.expires_at,
         duplicate=issued.duplicate,
+    )
+
+
+@router.post(
+    "/canvases/{canvas_id}/reversible-effects/{effect_id}/"
+    "rollback-approvals/{rollback_approval_id}/execute",
+    response_model=ReversibleWriteRollbackOut,
+)
+async def execute_reversible_write_rollback(
+    workspace_id: uuid.UUID,
+    canvas_id: uuid.UUID,
+    effect_id: uuid.UUID,
+    rollback_approval_id: uuid.UUID,
+    payload: ReversibleWriteRollbackStart,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> ReversibleWriteRollbackOut:
+    try:
+        applied = await ReversibleWriteRollbackService(session).apply(
+            authenticated_user_id=principal.user_id,
+            workspace_id=workspace_id,
+            canvas_id=canvas_id,
+            effect_id=effect_id,
+            rollback_approval_id=rollback_approval_id,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except RollbackExecutionError as exc:
+        await session.rollback()
+        raise ApiError(exc.status_code, exc.code, exc.message) from exc
+    result = applied.result
+    return ReversibleWriteRollbackOut(
+        rollback_result_id=result.rollback_result_id,
+        rollback_approval_id=result.rollback_approval_id,
+        effect_id=result.effect_id,
+        note_id=result.note_id,
+        rollback_action=result.rollback_action,
+        rollback_target_kind=result.rollback_target_kind,
+        resulting_revision=result.resulting_revision,
+        created_at=utc(result.created_at),
+        duplicate=applied.duplicate,
     )
 
 

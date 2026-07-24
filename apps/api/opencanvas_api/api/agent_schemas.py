@@ -257,3 +257,19 @@ class ReversibleWriteRollbackApprovalOut(ApiModel):
     rollback_target_kind: Literal["authoritative_absence", "exact_prior_state"]
     expires_at: datetime
     duplicate: bool = False
+
+
+class ReversibleWriteRollbackStart(ApiModel):
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class ReversibleWriteRollbackOut(ApiModel):
+    rollback_result_id: uuid.UUID
+    rollback_approval_id: uuid.UUID
+    effect_id: uuid.UUID
+    note_id: uuid.UUID
+    rollback_action: Literal["note.create.rollback", "note.update.rollback"]
+    rollback_target_kind: Literal["authoritative_absence", "exact_prior_state"]
+    resulting_revision: int | None
+    created_at: datetime
+    duplicate: bool = False
