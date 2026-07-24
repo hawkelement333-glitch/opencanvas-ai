@@ -1,6 +1,21 @@
 # Milestone 4 Controlled Agents Progress Ledger
 
-Last updated: 2026-07-23 (America/Chicago)
+Last updated: 2026-07-24 (America/Chicago)
+
+## Milestone 4.2 Luna final audit
+
+- Audited from `9d78b723db7878739332c2d5398c5dd9e11a781e`; branch and remote matched and the
+  working tree was clean before documentation correction.
+- Confirmed deny-by-default authority, immutable context, closed lifecycle/CAS transitions,
+  server-owned prepared/run identity, authoritative cancellation, late-result suppression,
+  idempotency, citation validation, Trace/usage integration, frontend terminal states, and
+  cross-scope authorization through the existing focused suites.
+- Confirmed migration `20260724_0010_agent_prepared_execution.py` is the only Luna-era persistence
+  change and is limited to server-owned request reconstruction. No prohibited scope was found:
+  no workers, queues, schedulers, delegation, autonomy, workspace writes, new providers, visual
+  integration, Milestone 4.3, or Milestone 4.4.
+- Corrected stale Terra handoff language and recorded the final checks. Final audit status:
+  **MILESTONE 4.2 COMPLETE**. No further Milestone 4.2 work remains; stop before Milestone 4.3.
 
 ## Milestone 4.2 Terra completion — server-owned active-execution cancellation
 
