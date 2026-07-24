@@ -2,6 +2,26 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4 visual integration checkpoint — local only
+
+- Verified Milestone 4.2 source: `milestone-4-controlled-agents` at
+  `868abe19dfc46ccb2f2c09ff1ee94bac5c9ec79c`.
+- Verified Milestone 3.75 source: `milestone-3.75-visual-redesign` at
+  `52c7d307baba66ce1d539cfc66f3478eeb12d60b`.
+- Merge base: `ff34f22b6264f9a0e12b8fa5d8e66dcd2e7074a4`.
+- Local branch: `milestone-4-visual-integration-local`; no upstream and no remote integration ref.
+- Normal non-squash local merge created `8a86864`; a formatting-only local checkpoint is `85a3721`.
+  The merge was conflict-free. Visual changes remain limited to account state presentation,
+  document-card stage presentation, source-preview accessibility/responsiveness, CSS, and visual
+  documentation; the controlled-agent runtime and server safety paths were preserved.
+- Complete local gate: backend/migration tests `44 passed`; frontend `10 files`, `33 tests passed`;
+  frontend TypeScript, lint, production build, focused formatting, and `git diff --check` passed.
+- Secret scan and prohibited-scope audit passed. No workers, queues, schedulers, delegation,
+  autonomous execution, new providers, workspace writes, Milestone 4.3/4.4, or protected-demo
+  changes were found.
+- Browser smoke, dependency audit, PostgreSQL execution, and deterministic-demo E2E were not run
+  in this local integration checkpoint and are recorded as unavailable/not run in the handoff.
+
 ## Milestone 4.2 Luna final audit
 
 - Audited from `9d78b723db7878739332c2d5398c5dd9e11a781e`; branch and remote matched and the
