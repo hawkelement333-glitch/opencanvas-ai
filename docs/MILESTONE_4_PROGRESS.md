@@ -126,7 +126,7 @@ This implementation-only status is superseded by the validated checkpoint above.
   targets require that digest; updates retain immutable evidence `before_digest`.
 - Database-backed scoped idempotency is now enforced by
   `uq_agent_rollback_approval_execution_scope_idempotency` on `(execution_id, user_id,
-  workspace_id, canvas_id, scoped_idempotency_key)` in both model and unpublished migration `0014`.
+workspace_id, canvas_id, scoped_idempotency_key)` in both model and unpublished migration `0014`.
 - Validation: focused contract, persistence, and SQLite migration-cycle group `92 passed`; Ruff,
   strict mypy, compilation, sole Alembic head, diff/whitespace, secret-like-material, and prohibited
   scope scans passed. PostgreSQL runtime was not run.
@@ -249,7 +249,7 @@ This implementation-only status is superseded by the validated checkpoint above.
 
 - Starting SHA: `5281d85ab60c4036d1ed8200bd738a8530ae839e`.
 - Implementation checkpoint: `8dde7573e3dbdffe78be2ecb19339b47d10c6fa3` (`Bind note updates to
-  rollback evidence`).
+rollback evidence`).
 - Completed: the existing nested note-update transaction captures exact NFC-normalized mutable
   `{title, text}` state before CAS, hashes canonical sorted compact JSON with SHA-256, applies the
   update, hashes the post-update state, flushes the immutable effect, then persists one immutable
@@ -311,7 +311,7 @@ This implementation-only status is superseded by the validated checkpoint above.
 - Authorized base and starting SHA: `21aee1f86b47424ee774f3245c0d0d3599215846`.
 - Current local branch: `milestone-4.3-reversible-writes-local`; no upstream.
 - Architecture checkpoint: `e7f18d5299b365a98caeb46413f6efed007130a5` (`Define reversible-write
-  safety architecture`).
+safety architecture`).
 - Completed: closed reversible note action/capability vocabulary; frozen server-owned proposal,
   preview, destination/resource/revision, expiry, and idempotency contract; canonical-digest proof;
   architecture for approval/replay/revocation/CSRF, transaction/CAS, rollback, audit/Trace,
@@ -361,7 +361,7 @@ This implementation-only status is superseded by the validated checkpoint above.
   `6a48ee44bc2eeffad722ce082e94d80c2e2f466e` before this documentation commit.
 - Focused combined UI/accessibility/safety checks: `5 files`, `12 passed`; frontend TypeScript and
   lint passed. Full local gate: backend/migration `44 passed`; frontend `10 files`, `33 tests
-  passed`; production build passed. Deterministic-demo regression: `10 passed`.
+passed`; production build passed. Deterministic-demo regression: `10 passed`.
 - Security review found no client authority path, client-generated execution identity, false
   cancellation, workspace write, provider change, citation/Trace semantic change, or protected-demo
   change. The visual surfaces remain presentation-only. Secret and prohibited-scope scans passed.
@@ -399,13 +399,13 @@ This implementation-only status is superseded by the validated checkpoint above.
   client-generated ID, aborted-fetch cancellation, polling, worker, queue, scheduler, autonomous
   execution, provider, Milestone 3.75, Luna, or Milestone 4.3 work was added.
 - Focused API cancellation lifecycle result: `13 passed`. Focused frontend result: `2 files`, `6
-  tests passed`; frontend lint and production build passed. Final broader validation is recorded in
+tests passed`; frontend lint and production build passed. Final broader validation is recorded in
   the completion handoff commit.
 
 ## Milestone 4.2 Terra validation and recovery handoff
 
 - UI checkpoint `aacfdf28a4a3771fecd3ac0b36e453662c5f512a` (`Add controlled grounded-draft
-  interface`) was committed and normally pushed. Local and remote heads matched immediately after
+interface`) was committed and normally pushed. Local and remote heads matched immediately after
   the push; protected tag object `acbde89b6e2cc3e41c372887794726d393836716` and peeled demo
   commit `b45b7763b65861f9dfb3be7edf9b5eb271950917` were unchanged.
 - Complete available gate after that checkpoint: controlled-agent backend suite `37 passed`;
@@ -937,7 +937,7 @@ docker compose --profile test down
   digest, approval, grant, capability, revocation, idempotency, and revision checks; compare-and-set
   updates; immutable effect/audit/Trace records; rollback-on-failure transaction boundary.
 - Tests: atomic-effect coverage `5 passed`; affected agent/persistence/migration regression set `59
-  passed`; strict mypy, focused Ruff format/lint, `git diff --check`, and hygiene/secret scan passed.
+passed`; strict mypy, focused Ruff format/lint, `git diff --check`, and hygiene/secret scan passed.
 - Not run: PostgreSQL integration, network tools, frontend checks, and unrelated backend suites.
 - Protected tag unchanged: `competition-demo-v1` is
   `b45b7763b65861f9dfb3be7edf9b5eb271950917`; main unchanged; no remote write occurred.

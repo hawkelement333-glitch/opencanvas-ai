@@ -413,7 +413,7 @@ Focused coverage at `3a959d9`:
 - Affected proposal, persistence, schema, API, effect-persistence, and migration regressions:
   `59 passed`.
 - Strict mypy for the service, endpoint, schemas, and tests; focused Ruff format/lint; `git diff
-  --check`; and repository hygiene/secret scan: passed.
+--check`; and repository hygiene/secret scan: passed.
 - PostgreSQL integration, network tools, frontend checks, and unrelated backend suites: not run.
 
 No rollback feature, frontend work, worker, queue, scheduler, provider, Milestone 4.4, or Milestone
