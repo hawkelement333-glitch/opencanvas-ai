@@ -147,7 +147,7 @@ export const DocumentNodeCard = memo(function DocumentNodeCard({
           role="status"
           aria-live="polite"
         >
-          <span>
+          <span className="document-node__status-label">
             {ready ? (
               <CheckCircle2 size={13} aria-hidden="true" />
             ) : failed ? (

@@ -1343,6 +1343,21 @@ textarea:focus-visible {
   margin: 0;
 }
 
+.document-node__status-label {
+  width: fit-content;
+  padding: 4px 7px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: rgba(97, 196, 214, 0.045);
+}
+
+.document-node__status > small {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-faint);
+  line-height: 1.4;
+}
+
 .document-node__status--ready {
   color: var(--success);
 }
@@ -1590,7 +1605,8 @@ textarea:focus-visible {
   display: flex;
   flex-direction: column;
   border-left: 1px solid rgba(97, 196, 214, 0.24);
-  background: rgba(15, 18, 21, 0.98);
+  background:
+    linear-gradient(180deg, rgba(19, 25, 31, 0.99), rgba(10, 14, 18, 0.99)), rgba(15, 18, 21, 0.98);
   box-shadow: -18px 0 45px rgba(0, 0, 0, 0.36);
 }
 
@@ -1622,6 +1638,10 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+.document-preview__heading {
+  min-width: 0;
+}
+
 .document-preview__header small {
   margin-bottom: 2px;
   color: #83d8e5;
@@ -1632,8 +1652,14 @@ textarea:focus-visible {
 }
 
 .document-preview__header h2 {
+  display: -webkit-box;
   color: var(--text);
   font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .document-preview__header button {
@@ -1652,6 +1678,12 @@ textarea:focus-visible {
   background: rgba(255, 255, 255, 0.06);
 }
 
+.document-preview__header button:focus-visible,
+.document-preview__state button:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
 .document-preview__meta,
 .document-preview__sections {
   display: flex;
@@ -1663,12 +1695,12 @@ textarea:focus-visible {
 
 .document-preview__meta span,
 .document-preview__sections span {
-  padding: 3px 6px;
-  border: 1px solid var(--line);
+  padding: 4px 7px;
+  border: 1px solid rgba(97, 196, 214, 0.18);
   border-radius: 999px;
-  color: var(--text-faint);
+  color: var(--text-soft);
   font-size: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(97, 196, 214, 0.035);
 }
 
 .document-preview__citation {
@@ -1693,6 +1725,7 @@ textarea:focus-visible {
   color: var(--text-soft);
   font-size: 9px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .document-preview__citation blockquote {
@@ -1705,6 +1738,8 @@ textarea:focus-visible {
   flex: 1;
   padding: 12px 16px 16px;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .document-preview__state {
@@ -1742,6 +1777,7 @@ textarea:focus-visible {
   border-radius: 10px;
   color: var(--text-soft);
   background: rgba(97, 196, 214, 0.045);
+  box-shadow: inset 3px 0 0 rgba(97, 196, 214, 0.34);
 }
 
 .document-preview__passage:focus {
@@ -1765,6 +1801,7 @@ textarea:focus-visible {
   margin: 0;
   font-size: 10px;
   line-height: 1.58;
+  overflow-wrap: anywhere;
 }
 
 .document-preview__sections {
@@ -1779,6 +1816,11 @@ textarea:focus-visible {
   line-height: 1.65;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.document-preview__text:focus-visible {
+  outline: 2px solid rgba(97, 196, 214, 0.55);
+  outline-offset: 3px;
 }
 
 .assistant-state--warning {
@@ -1812,6 +1854,16 @@ textarea:focus-visible {
   }
 }
 
+@media (max-width: 820px) {
+  .document-preview {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    border-left: 0;
+  }
+}
+
 @media (max-width: 760px) {
   .canvas-sidebar:not(.canvas-sidebar--collapsed) {
     width: 188px;
@@ -1832,6 +1884,22 @@ textarea:focus-visible {
     right: 0;
     bottom: 0;
     width: 100%;
+  }
+
+  .document-preview__header {
+    padding: 13px 14px 10px;
+  }
+
+  .document-preview__meta {
+    padding-inline: 14px;
+  }
+
+  .document-preview__citation {
+    margin-inline: 14px;
+  }
+
+  .document-preview__content {
+    padding-inline: 14px;
   }
 
   .assistant-panel__heading,
@@ -1898,6 +1966,11 @@ textarea:focus-visible {
   margin: 10px 0 8px;
   font-size: 27px;
 }
+
+.account-card__identity {
+  margin-top: 0;
+  overflow-wrap: anywhere;
+}
 .account-card p {
   color: var(--text-soft);
   line-height: 1.55;
@@ -1961,6 +2034,23 @@ textarea:focus-visible {
   color: #bce7ed;
   background: rgba(97, 196, 214, 0.08);
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .account-shell {
+    place-items: start stretch;
+    padding: 18px 12px;
+  }
+
+  .account-card,
+  .account-card--wide {
+    width: 100%;
+    padding: 22px 18px;
+  }
+
+  .account-actions > * {
+    width: 100%;
+  }
 }
 .environment-indicator {
   margin-top: 12px;

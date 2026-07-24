@@ -66,16 +66,18 @@ export function DocumentPreviewPanel({ document, citation, onClose }: DocumentPr
         <span aria-hidden="true">
           <FileText size={18} />
         </span>
-        <div>
+        <div className="document-preview__heading">
           <small>Source document</small>
-          <h2 id="document-preview-title">{document.fileName}</h2>
+          <h2 id="document-preview-title" title={document.fileName}>
+            {document.fileName}
+          </h2>
         </div>
         <button type="button" onClick={onClose} aria-label="Close document preview">
           <X size={16} aria-hidden="true" />
         </button>
       </header>
 
-      <div className="document-preview__meta">
+      <div className="document-preview__meta" aria-label="Document metadata">
         <span>{document.fileType.toUpperCase()}</span>
         {document.pageCount && <span>{document.pageCount} pages</span>}
         <span>{document.chunkCount} passages</span>
@@ -120,10 +122,10 @@ export function DocumentPreviewPanel({ document, citation, onClose }: DocumentPr
                 className="document-preview__passage"
                 ref={passageRef}
                 tabIndex={-1}
-                aria-label="Cited source passage"
+                aria-labelledby="cited-passage-title"
                 data-testid="source-passage"
               >
-                <strong>Cited passage</strong>
+                <strong id="cited-passage-title">Cited passage</strong>
                 {passageQuery.isPending ? (
                   <span role="status">
                     <LoaderCircle size={13} className="spin" aria-hidden="true" /> Resolving source…
@@ -159,7 +161,11 @@ export function DocumentPreviewPanel({ document, citation, onClose }: DocumentPr
               </nav>
             )}
 
-            <pre className="document-preview__text" tabIndex={0}>
+            <pre
+              className="document-preview__text"
+              tabIndex={0}
+              aria-label="Extracted document text"
+            >
               {textQuery.data.text}
             </pre>
           </>
