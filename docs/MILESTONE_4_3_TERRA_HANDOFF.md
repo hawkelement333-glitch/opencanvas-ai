@@ -1,5 +1,50 @@
 # Milestone 4.3 Terra Handoff
 
+## Effect-result persistence validated locally
+
+- Starting SHA: `9d2bb55bf3523e46691eb92e4adeda55f8ca2525`.
+- Persistence-test checkpoint: `9cb3781c08b09b162579ea6f43e3e0a2cc4db5ed`.
+- Branch: `milestone-4.3-reversible-writes-local`; upstream: none.
+- Database environment: SQLite only. PostgreSQL was not configured or run.
+
+The focused tests exposed and corrected two concrete database-integrity gaps before the effect
+record could be accepted: proposal and approval IDs are now bound to the same execution, user,
+workspace, canvas, and action scope as the effect. The migration also enforces the closed
+create/update resource shape: creates cannot carry update-only resource/revision/before-state
+fields, while updates require the bound resource, expected revision, matching result resource, and
+before-state digest.
+
+The SQLite persistence coverage verifies valid create and update result records; required fields;
+proposal, approval, user, workspace, and canvas scope; cross-scope rejection; closed actions and
+outcomes; plan-digest presence; scoped idempotency; distinct identities; result uniqueness;
+create/update nullable-field combinations; and direct migrated-trigger UPDATE/DELETE rejection.
+Migration coverage upgrades `20260724_0011` to `20260724_0012`, confirms the sole head, table,
+indexes, constraints, and immutable triggers, downgrades to `20260724_0011` and confirms removal,
+then re-upgrades and reruns persistence tests.
+
+Validation at `9cb3781`:
+
+- Focused effect persistence, migration, and reversible-proposal chain: `34 passed` (SQLite).
+- Strict mypy for changed tests: passed (2 source files).
+- Focused Ruff format and lint: passed.
+- Static migration validator: passed upgrade to `20260724_0012`, downgrade to
+  `20260724_0011`, and re-upgrade to `20260724_0012`.
+- `git diff --check`, repository hygiene/secret scan, and diff-scoped prohibited-scope scan:
+  passed.
+- Skipped: PostgreSQL integration, unrelated backend/frontend suites, and all network tools.
+
+No remote write, fetch, pull, sync, upstream change, or tag operation occurred. `main` is
+unchanged; `competition-demo-v1` remains protected at
+`b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+
+### Exact next checkpoint
+
+Implement only the atomic server-authoritative note create/update transaction: reload and verify
+the owned proposal/approval/grant/context/plan inside one transaction, consume approval once,
+apply the note compare-and-set, persist this immutable effect result with safe audit/Trace evidence,
+and roll back every write on denial, conflict, or persistence failure. Do not add a route, rollback
+feature, frontend work, worker, queue, scheduler, provider, or Milestone 4.4 work in that checkpoint.
+
 ## Phase 1 complete locally: proposal and approval foundation
 
 - Starting Sol handoff: `718ca72e7af6141feb4e6bffc8be9edf74e27995`.

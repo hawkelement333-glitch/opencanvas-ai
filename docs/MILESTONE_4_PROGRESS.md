@@ -636,6 +636,48 @@ pnpm test:postgres
 docker compose --profile test down
 ```
 
+## Milestone 4.3 effect-result persistence checkpoint
+
+- Starting SHA: `9d2bb55bf3523e46691eb92e4adeda55f8ca2525`.
+- Local persistence-test SHA: `9cb3781c08b09b162579ea6f43e3e0a2cc4db5ed`.
+- Branch: `milestone-4.3-reversible-writes-local`; working tree was clean after the test commit;
+  upstream: none.
+- Updated: effect-result ORM/migration scope bindings, migration-head validation, focused SQLite
+  persistence tests, migration-cycle tests, and `docs/MILESTONE_4_3_TERRA_HANDOFF.md`.
+- Complete: authoritative proposal/approval scope foreign keys; closed create/update resource
+  shapes; SQLite persistence validation; upgrade/downgrade/re-upgrade validation; append-only
+  trigger validation.
+- Partial: no atomic note transaction exists yet; no route, rollback, UI, PostgreSQL integration,
+  or later milestone work was started.
+- Tests: `34 passed` for focused effect persistence, migration, and reversible-proposal chain on
+  SQLite; strict mypy (2 changed test files), focused Ruff format/lint, migration validator,
+  whitespace, hygiene/secret scan, and diff-scoped prohibited-scope scan passed.
+- Not run: PostgreSQL integration (no configured service), unrelated backend/frontend suites, and
+  network-dependent tools.
+- Known failures: none in the focused local gate. The earlier fixture-only trigger test was moved to
+  the migration cycle because `Base.metadata.create_all` does not install Alembic triggers.
+- Protected tag: `competition-demo-v1` remains
+  `b45b7763b65861f9dfb3be7edf9b5eb271950917`; `main` unchanged; no remote write occurred.
+
+### Exact next implementation step
+
+Implement only the atomic server-authoritative note create/update transaction with reload-time
+authority checks, one-time approval consumption, note compare-and-set, immutable effect persistence,
+safe audit/Trace evidence, and full transactional rollback on every failure. Do not add a route,
+rollback feature, frontend, worker, queue, scheduler, provider, or Milestone 4.4 work.
+
+### Exact resume commands
+
+```powershell
+cd C:\Users\hawke\Documents\Codex\2026-07-18\referenced-chatgpt-conversation-this-is-untrusted\work\opencanvas-ai
+git branch --show-current
+git status --short
+git rev-parse HEAD
+git rev-parse --abbrev-ref '@{upstream}'
+git rev-parse competition-demo-v1^{}
+Get-Content docs/MILESTONE_4_3_TERRA_HANDOFF.md
+```
+
 ## Repository state
 
 - Current branch: `milestone-4-controlled-agents`
