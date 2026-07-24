@@ -2,6 +2,20 @@
 
 Last updated: 2026-07-23 (America/Chicago)
 
+## Milestone 4.2 Terra completion — server-owned active-execution cancellation
+
+- Started from approved local/remote SHA `531499976596b9fe847e753ec596467e181337fa`.
+- Added migration `20260724_0010`: the append-only request identity now retains the existing
+  authorized instruction/client request ID, allowing the server to reconstruct the exact request.
+- Preparation returns a server-issued execution ID in `ready`; explicit run reloads the request
+  server-side and transitions it to `running`. The UI cancels only that real ID and only presents
+  cancelled after the existing authoritative lifecycle endpoint confirms it. No browser authority,
+  client-generated ID, aborted-fetch cancellation, polling, worker, queue, scheduler, autonomous
+  execution, provider, Milestone 3.75, Luna, or Milestone 4.3 work was added.
+- Focused API cancellation lifecycle result: `13 passed`. Focused frontend result: `2 files`, `6
+  tests passed`; frontend lint and production build passed. Final broader validation is recorded in
+  the completion handoff commit.
+
 ## Milestone 4.2 Terra validation and recovery handoff
 
 - UI checkpoint `aacfdf28a4a3771fecd3ac0b36e453662c5f512a` (`Add controlled grounded-draft

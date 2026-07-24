@@ -17,19 +17,23 @@ import {
   type CanvasNode,
   type ControlledDraft,
   type ControlledDraftCitation,
+  type ControlledDraftCancellation,
+  type ControlledDraftPrepared,
 } from "@/lib/contracts";
 import { nodeRole, summarizeResources } from "@/lib/universe";
 
 interface ControlledDraftPanelProps {
   canvasId: string;
   selectedNodes: readonly CanvasNode[];
-  onStart: (input: {
+  onPrepare: (input: {
     canvasId: string;
     instruction: string;
     selectedNodeIds: string[];
     idempotencyKey: string;
     clientRequestId?: string;
-  }) => Promise<ControlledDraft>;
+  }) => Promise<ControlledDraftPrepared>;
+  onRun: (executionId: string) => Promise<ControlledDraft>;
+  onCancel: (executionId: string, idempotencyKey: string) => Promise<ControlledDraftCancellation>;
   onOpenCitation: (citation: ControlledDraftCitation, ordinal: number) => void;
   onClearSelection: () => void;
   getTraceUrl: (traceId: string) => string;
@@ -42,7 +46,9 @@ function requestKey(): string {
 export function ControlledDraftPanel({
   canvasId,
   selectedNodes,
-  onStart,
+  onPrepare,
+  onRun,
+  onCancel,
   onOpenCitation,
   onClearSelection,
   getTraceUrl,
@@ -51,11 +57,15 @@ export function ControlledDraftPanel({
   const [status, setStatus] = useState<
     | { type: "idle" }
     | { type: "starting" }
+    | { type: "running"; executionId: string }
+    | { type: "cancelling"; executionId: string }
+    | { type: "cancelled" }
     | { type: "succeeded"; result: ControlledDraft }
     | { type: "failed"; message: string }
   >({ type: "idle" });
   const selectedResources = summarizeResources(selectedNodes, selectedNodes);
-  const active = status.type === "starting";
+  const active =
+    status.type === "starting" || status.type === "running" || status.type === "cancelling";
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -76,7 +86,9 @@ export function ControlledDraftPanel({
 
     setStatus({ type: "starting" });
     try {
-      const result = await onStart(parsed.data);
+      const prepared = await onPrepare(parsed.data);
+      setStatus({ type: "running", executionId: prepared.executionId });
+      const result = await onRun(prepared.executionId);
       setInstruction("");
       setStatus({ type: "succeeded", result });
     } catch {
@@ -84,6 +96,19 @@ export function ControlledDraftPanel({
         type: "failed",
         message: "The controlled draft could not be completed. Review the Trace or try again.",
       });
+    }
+  };
+
+  const cancel = async () => {
+    if (status.type !== "running") return;
+    const executionId = status.executionId;
+    setStatus({ type: "cancelling", executionId });
+    try {
+      const outcome = await onCancel(executionId, requestKey());
+      if (outcome.cancelled && outcome.status === "cancelled") setStatus({ type: "cancelled" });
+      else setStatus({ type: "failed", message: "The controlled draft could not be cancelled." });
+    } catch {
+      setStatus({ type: "failed", message: "The controlled draft could not be cancelled." });
     }
   };
 
@@ -157,6 +182,30 @@ export function ControlledDraftPanel({
           <span className="assistant-state--loading">
             <LoaderCircle size={14} className="spin" aria-hidden="true" /> Starting controlled
             draft…
+          </span>
+        )}
+        {status.type === "running" && (
+          <span className="assistant-state--loading">
+            <LoaderCircle size={14} className="spin" aria-hidden="true" /> Controlled draft is
+            running.{" "}
+            <button
+              type="button"
+              onClick={() => void cancel()}
+              aria-label="Cancel controlled draft"
+            >
+              Cancel
+            </button>
+          </span>
+        )}
+        {status.type === "cancelling" && (
+          <span className="assistant-state--loading">
+            <LoaderCircle size={14} className="spin" aria-hidden="true" /> Cancelling controlled
+            draft…
+          </span>
+        )}
+        {status.type === "cancelled" && (
+          <span className="assistant-state--warning">
+            <CircleAlert size={14} aria-hidden="true" /> Controlled draft cancelled.
           </span>
         )}
         {status.type === "failed" && (
@@ -240,8 +289,8 @@ export function ControlledDraftPanel({
         </div>
       </form>
       <p className="controlled-draft-note">
-        Cancellation is available only after the server exposes an active execution identifier; this
-        synchronous controlled route confirms a terminal result before returning it.
+        Cancellation is available only while the server confirms this controlled execution is
+        active.
       </p>
     </aside>
   );

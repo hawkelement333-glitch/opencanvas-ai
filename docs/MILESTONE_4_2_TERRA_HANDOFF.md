@@ -2,12 +2,12 @@
 
 Last updated: 2026-07-23 (America/Chicago)
 
-## TERRA IMPLEMENTATION INCOMPLETE
+## TERRA IMPLEMENTATION COMPLETE — READY FOR LUNA
 
-Terra now has a bounded, server-authoritative controlled grounded-draft path. Its remaining blocker
-is intentional: the synchronous start route only returns an execution identifier after the
-provider-backed operation is terminal. The browser therefore has no authoritative target for an
-in-progress cancellation request, and does not display a misleading cancellation control.
+Terra now has a bounded server-authoritative controlled grounded-draft path with truthful active
+execution cancellation: preparation returns a real server-issued ID in `ready`, and explicit run
+reconstructs the persisted request server-side. The browser cannot generate an execution ID or
+authority payload and only shows cancellation after the lifecycle endpoint confirms it.
 
 ## Verified state
 

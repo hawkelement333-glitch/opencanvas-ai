@@ -1436,6 +1436,8 @@ class ControlledAgentRequestIdentity(Base):
     )
     action: Mapped[str] = mapped_column(String(40), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    instruction: Mapped[str] = mapped_column(Text, nullable=False)
+    client_request_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

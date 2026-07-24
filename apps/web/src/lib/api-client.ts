@@ -9,6 +9,7 @@ import {
   canvasSnapshotSchema,
   controlledDraftCancellationSchema,
   controlledDraftSchema,
+  controlledDraftPreparedSchema,
   controlledDraftStartInputSchema,
   createCanvasInputSchema,
   createEdgeInputSchema,
@@ -33,6 +34,7 @@ import {
   type CanvasEdge,
   type CanvasSnapshot,
   type ControlledDraft,
+  type ControlledDraftPrepared,
   type ControlledDraftCancellation,
   type ControlledDraftStartInput,
   type CreateEdgeInput,
@@ -344,6 +346,27 @@ export const canvasApi = {
 };
 
 export const agentApi = {
+  prepareGroundedDraft(
+    workspaceId: string,
+    rawInput: ControlledDraftStartInput,
+  ): Promise<ControlledDraftPrepared> {
+    const input = controlledDraftStartInputSchema.parse(rawInput);
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/agent-executions/drafts/prepare`,
+      controlledDraftPreparedSchema,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+
+  runGroundedDraft(workspaceId: string, executionId: string): Promise<ControlledDraft> {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/agent-executions/${encodeURIComponent(executionId)}/run`,
+      controlledDraftSchema,
+      { method: "POST" },
+      LONG_OPERATION_TIMEOUT_MS,
+    );
+  },
+
   startGroundedDraft(
     workspaceId: string,
     rawInput: ControlledDraftStartInput,

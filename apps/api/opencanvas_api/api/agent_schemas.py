@@ -140,6 +140,12 @@ class AgentDraftCitationOut(ApiModel):
     quote: str
 
 
+class AgentDraftPreparedOut(ApiModel):
+    execution_id: uuid.UUID
+    status: Literal["ready"]
+    duplicate: bool = False
+
+
 class AgentDraftOut(ApiModel):
     execution_id: uuid.UUID
     trace_id: uuid.UUID

@@ -16,6 +16,7 @@ from opencanvas_api.api.agent_schemas import (
     AgentContextReferenceOut,
     AgentDraftCitationOut,
     AgentDraftOut,
+    AgentDraftPreparedOut,
     AgentDraftStart,
     AgentExecutionCancel,
     AgentExecutionCancelOut,
@@ -86,6 +87,45 @@ async def start_grounded_draft(
             authenticated_user_id=principal.user_id,
             request=prepared.request,
         )
+    except ControlledDraftError as exc:
+        raise ApiError(exc.status_code, exc.code, exc.message) from exc
+    return _draft_out(result)
+
+
+@router.post("/drafts/prepare", response_model=AgentDraftPreparedOut, status_code=status.HTTP_201_CREATED)
+async def prepare_grounded_draft(
+    workspace_id: uuid.UUID, payload: AgentDraftStart, request: Request, principal: MutatingPrincipalDep,
+    session: SessionDep, settings: SettingsDep,
+) -> AgentDraftPreparedOut:
+    service = ControlledGroundedDraftService(session, provider=get_ai_provider(settings), settings=settings)
+    correlation_id = str(getattr(request.state, "correlation_id", uuid.uuid4().hex))
+    try:
+        prepared = await service.prepare(
+            authenticated_user_id=principal.user_id, workspace_id=workspace_id, canvas_id=payload.canvas_id,
+            selected_node_ids=payload.selected_node_ids, instruction=payload.instruction,
+            idempotency_key=payload.idempotency_key, correlation_id=correlation_id,
+            client_request_id=payload.client_request_id,
+        )
+        await session.commit()
+    except ControlledDraftError as exc:
+        raise ApiError(exc.status_code, exc.code, exc.message) from exc
+    return AgentDraftPreparedOut(execution_id=prepared.request.execution_id, status="ready", duplicate=not prepared.created)
+
+
+@router.post("/{execution_id}/run", response_model=AgentDraftOut)
+async def run_grounded_draft(
+    workspace_id: uuid.UUID, execution_id: uuid.UUID, request: Request, principal: MutatingPrincipalDep,
+    session: SessionDep, provider: ProviderDep, settings: SettingsDep,
+    _: Annotated[None, Depends(enforce_ai_rate_limit)],
+) -> AgentDraftOut:
+    service = ControlledGroundedDraftService(session, provider=provider, settings=settings)
+    correlation_id = str(getattr(request.state, "correlation_id", uuid.uuid4().hex))
+    try:
+        prepared = await service.load_prepared_request(
+            authenticated_user_id=principal.user_id, workspace_id=workspace_id,
+            execution_id=execution_id, correlation_id=correlation_id,
+        )
+        result = await service.execute(authenticated_user_id=principal.user_id, request=prepared)
     except ControlledDraftError as exc:
         raise ApiError(exc.status_code, exc.code, exc.message) from exc
     return _draft_out(result)

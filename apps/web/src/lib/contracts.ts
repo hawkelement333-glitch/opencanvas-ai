@@ -226,6 +226,12 @@ export const controlledDraftSchema = z.object({
   duplicate: z.boolean().default(false),
 });
 
+export const controlledDraftPreparedSchema = z.object({
+  executionId: z.string().uuid(),
+  status: z.literal("ready"),
+  duplicate: z.boolean().default(false),
+});
+
 export const controlledDraftCancellationSchema = z.object({
   executionId: z.string().uuid(),
   cancelled: z.boolean(),
@@ -362,6 +368,7 @@ export type AskAIInput = z.infer<typeof askAIInputSchema>;
 export type AIResult = z.infer<typeof aiResultSchema>;
 export type ControlledDraftStartInput = z.infer<typeof controlledDraftStartInputSchema>;
 export type ControlledDraft = z.infer<typeof controlledDraftSchema>;
+export type ControlledDraftPrepared = z.infer<typeof controlledDraftPreparedSchema>;
 export type ControlledDraftCitation = z.infer<typeof controlledDraftCitationSchema>;
 export type ControlledDraftCancellation = z.infer<typeof controlledDraftCancellationSchema>;
 export type Point = z.infer<typeof pointSchema>;

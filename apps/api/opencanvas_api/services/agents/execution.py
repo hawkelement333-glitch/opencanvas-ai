@@ -303,6 +303,8 @@ class ExecutionRequestRegistry:
                         canvas_id=request.canvas_id,
                         action=request.action.value,
                         idempotency_key=request.idempotency_key,
+                        instruction=request.instruction,
+                        client_request_id=request.client_request_id,
                         request_digest=digest,
                         created_at=created_at,
                     )

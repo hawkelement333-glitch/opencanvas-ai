@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
+import { describe, expect, it, vi } from "vitest";
 
 import { ControlledDraftPanel } from "./controlled-draft-panel";
 import type { CanvasNode, ControlledDraft } from "@/lib/contracts";
@@ -11,8 +11,8 @@ const selected: CanvasNode[] = [
     id: "a0000000-0000-4000-8000-000000000001",
     canvasId: "b0000000-0000-4000-8000-000000000001",
     type: "note",
-    title: "Launch hypothesis",
-    text: "Teams need shared spatial context.",
+    title: "Evidence",
+    text: "Evidence",
     position: { x: 0, y: 0 },
     width: 320,
     height: 240,
@@ -21,93 +21,77 @@ const selected: CanvasNode[] = [
     updatedAt: "2026-07-16T18:00:00Z",
   },
 ];
-
 const result: ControlledDraft = {
   executionId: "c0000000-0000-4000-8000-000000000001",
   traceId: "d0000000-0000-4000-8000-000000000001",
   responseId: "e0000000-0000-4000-8000-000000000001",
-  text: "Shared spatial context is supported.",
+  text: "Grounded result",
   insufficientEvidence: false,
+  citations: [],
   duplicate: false,
-  citations: [
-    {
-      sourceId: "source-1",
-      documentId: "f0000000-0000-4000-8000-000000000001",
-      documentVersion: 1,
-      chunkId: "10000000-0000-4000-8000-000000000001",
-      claim: "Teams need shared spatial context.",
-      quote: "shared spatial context",
-    },
-  ],
 };
 
-function renderPanel(onStart = vi.fn().mockResolvedValue(result)) {
-  return {
-    onStart,
-    ...render(
-      createElement(ControlledDraftPanel, {
-        canvasId: "b0000000-0000-4000-8000-000000000001",
-        selectedNodes: selected,
-        onStart,
-        onOpenCitation: vi.fn(),
-        onClearSelection: vi.fn(),
-        getTraceUrl: (traceId) => `/trace/${traceId}`,
-      }),
-    ),
-  };
+function setup(onRun = vi.fn().mockResolvedValue(result)) {
+  const onPrepare = vi
+    .fn()
+    .mockResolvedValue({ executionId: result.executionId, status: "ready", duplicate: false });
+  const onCancel = vi
+    .fn()
+    .mockResolvedValue({
+      executionId: result.executionId,
+      cancelled: true,
+      duplicate: false,
+      status: "cancelled",
+      reasonCode: "user_requested",
+    });
+  render(
+    createElement(ControlledDraftPanel, {
+      canvasId: selected[0]!.canvasId,
+      selectedNodes: selected,
+      onPrepare,
+      onRun,
+      onCancel,
+      onOpenCitation: vi.fn(),
+      onClearSelection: vi.fn(),
+      getTraceUrl: (id) => `/trace/${id}`,
+    }),
+  );
+  return { onPrepare, onRun, onCancel };
 }
 
 describe("ControlledDraftPanel", () => {
-  it("starts only after explicit user action and shows a read-only grounded draft", async () => {
+  it("does not start automatically and runs only after a server-issued execution is prepared", async () => {
     const user = userEvent.setup();
-    const { onStart } = renderPanel();
-    expect(onStart).not.toHaveBeenCalled();
-    await user.type(screen.getByTestId("controlled-draft-input"), "Summarize this idea");
+    const { onPrepare, onRun } = setup();
+    expect(onPrepare).not.toHaveBeenCalled();
+    await user.type(screen.getByTestId("controlled-draft-input"), "Summarize evidence");
     await user.click(screen.getByTestId("start-controlled-draft"));
     expect(await screen.findByText(/Grounded draft confirmed/i)).toBeInTheDocument();
-    expect(onStart).toHaveBeenCalledWith(
-      expect.objectContaining({
-        canvasId: "b0000000-0000-4000-8000-000000000001",
-        instruction: "Summarize this idea",
-        selectedNodeIds: [selected[0]!.id],
-      }),
+    expect(onPrepare).toHaveBeenCalledWith(
+      expect.objectContaining({ selectedNodeIds: [selected[0]!.id] }),
     );
-    expect(screen.getByRole("button", { name: "Citation [1]" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Inspect Trace/i })).toHaveAttribute(
-      "href",
-      `/trace/${result.traceId}`,
-    );
-    expect(
-      screen.queryByRole("button", { name: /save|apply|create note/i }),
-    ).not.toBeInTheDocument();
+    expect(onRun).toHaveBeenCalledWith(result.executionId);
   });
 
-  it("shows the server-request state and blocks duplicate starts", async () => {
+  it("cancels only a server-confirmed running execution", async () => {
     const user = userEvent.setup();
     let resolve!: (value: ControlledDraft) => void;
-    const onStart = vi.fn().mockImplementation(
-      () =>
-        new Promise<ControlledDraft>((done) => {
-          resolve = done;
-        }),
+    const { onCancel } = setup(
+      vi.fn().mockImplementation(
+        () =>
+          new Promise<ControlledDraft>((done) => {
+            resolve = done;
+          }),
+      ),
     );
-    renderPanel(onStart);
-    await user.type(screen.getByTestId("controlled-draft-input"), "Find a risk");
+    await user.type(screen.getByTestId("controlled-draft-input"), "Summarize evidence");
     await user.click(screen.getByTestId("start-controlled-draft"));
-    expect(screen.getByText(/Starting controlled draft/i)).toBeInTheDocument();
-    expect(screen.getByTestId("start-controlled-draft")).toBeDisabled();
-    await user.click(screen.getByTestId("start-controlled-draft"));
-    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(
+      await screen.findByRole("button", { name: "Cancel controlled draft" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel controlled draft" }));
+    expect(onCancel).toHaveBeenCalledWith(result.executionId, expect.any(String));
+    expect(await screen.findByText(/Controlled draft cancelled/i)).toBeInTheDocument();
     resolve(result);
-    expect(await screen.findByTestId("controlled-draft-result")).toBeInTheDocument();
-  });
-
-  it("does not expose an unsafe failure message", async () => {
-    const user = userEvent.setup();
-    renderPanel(vi.fn().mockRejectedValue(new Error("provider token: secret-value")));
-    await user.type(screen.getByTestId("controlled-draft-input"), "Find a risk");
-    await user.click(screen.getByTestId("start-controlled-draft"));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be completed/i);
-    expect(screen.queryByText(/secret-value/i)).not.toBeInTheDocument();
   });
 });

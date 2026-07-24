@@ -1502,7 +1502,11 @@ function CanvasWorkspace({ snapshot, workspace, runtime, onReload }: CanvasWorks
         <ControlledDraftPanel
           canvasId={snapshot.canvas.id}
           selectedNodes={selected}
-          onStart={(input) => agentApi.startGroundedDraft(workspace.id, input)}
+          onPrepare={(input) => agentApi.prepareGroundedDraft(workspace.id, input)}
+          onRun={(executionId) => agentApi.runGroundedDraft(workspace.id, executionId)}
+          onCancel={(executionId, idempotencyKey) =>
+            agentApi.cancelExecution(workspace.id, executionId, idempotencyKey)
+          }
           onOpenCitation={openControlledCitation}
           onClearSelection={clearSelection}
           getTraceUrl={getTraceUrl}

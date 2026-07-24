@@ -164,3 +164,31 @@ async def test_authenticated_grounded_draft_start_is_idempotent_and_conflict_saf
     )
     assert conflict.status_code == 409
     assert conflict.json()["code"] == "idempotency_conflict"
+
+
+async def test_prepared_draft_exposes_server_id_for_authoritative_cancellation(
+    client: httpx.AsyncClient, api_prefix: str
+) -> None:
+    canvas = await _create_canvas(client, api_prefix, "Prepared controlled draft")
+    node = await _create_node(client, api_prefix, canvas["id"], title="Evidence", text="Evidence.")
+    route = f"{api_prefix}/workspaces/{canvas['workspaceId']}/agent-executions"
+    prepared = await client.post(
+        f"{route}/drafts/prepare",
+        json={
+            "canvasId": canvas["id"], "instruction": "What is supported?",
+            "selectedNodeIds": [node["id"]], "idempotencyKey": "terra-prepared-cancel-001",
+        },
+    )
+    assert prepared.status_code == 201, prepared.text
+    body = prepared.json()
+    assert body["status"] == "ready"
+    execution_id = body["executionId"]
+    cancelled = await client.post(
+        f"{route}/{execution_id}/cancel", json={"idempotencyKey": "terra-cancel-confirm-001"}
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["cancelled"] is True
+    assert cancelled.json()["status"] == "cancelled"
+    refused = await client.post(f"{route}/{execution_id}/run")
+    assert refused.status_code == 409
+    assert refused.json()["code"] == "execution_not_runnable"

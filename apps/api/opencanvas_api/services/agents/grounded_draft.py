@@ -23,6 +23,7 @@ from opencanvas_api.db.models import (
     Canvas,
     CanvasDocumentNode,
     CanvasNode,
+    ControlledAgentRequestIdentity,
     Citation,
     Document,
     DocumentChunk,
@@ -175,55 +176,27 @@ class ControlledGroundedDraftService:
         except AgentPersistenceNotFound:
             inspection = None
         if inspection is not None:
-            stored_context = self.repository._load_contract(
-                ContextSnapshot,
-                inspection.context.payload,
-                inspection.context.payload_digest,
+            request = await self._request_from_inspection(
+                authenticated_user_id=authenticated_user_id,
+                workspace_id=workspace_id,
+                canvas_id=canvas_id,
+                execution_id=execution_id,
+                correlation_id=correlation_id,
+                inspection=inspection,
             )
-            stored_node_ids = tuple(
+            if request.instruction != instruction or tuple(
                 resource.scope.resource_id
-                for resource in stored_context.resources
+                for resource in self.repository._load_contract(
+                    ContextSnapshot, inspection.context.payload, inspection.context.payload_digest
+                ).resources
                 if resource.scope.kind is ResourceKind.NODE
-            )
-            if stored_node_ids != tuple(selected_node_ids):
+            ) != tuple(selected_node_ids):
                 raise ControlledDraftError(
                     "idempotency_conflict",
                     "The idempotency key was already used for a different request.",
                 )
-            stored_grant = next(
-                (row for row in inspection.grants if row.grant_id == inspection.execution.grant_id),
-                None,
-            )
-            stored_approval = next(
-                (
-                    row
-                    for row in inspection.approvals
-                    if row.grant_id == inspection.execution.grant_id
-                ),
-                None,
-            )
-            if stored_grant is None or stored_approval is None:
-                raise ControlledDraftError(
-                    "agent_authorization_denied", "The controlled execution is not available."
-                )
             return PreparedControlledDraft(
-                request=ControlledExecutionRequest(
-                    user_id=authenticated_user_id,
-                    workspace_id=workspace_id,
-                    canvas_id=canvas_id,
-                    execution_id=execution_id,
-                    context_snapshot_id=inspection.context.snapshot_id,
-                    expected_context_digest=inspection.context.payload_digest,
-                    plan_id=inspection.plan.plan_id,
-                    expected_plan_digest=inspection.plan.payload_digest,
-                    action=ControlledAction.GENERATE_GROUNDED_DRAFT,
-                    grant_id=stored_grant.grant_id,
-                    approval_id=stored_approval.approval_id,
-                    idempotency_key=idempotency_key,
-                    instruction=instruction,
-                    client_request_id=client_request_id,
-                    correlation_id=correlation_id,
-                ),
+                request=request,
                 created=False,
             )
 
@@ -468,6 +441,28 @@ class ControlledGroundedDraftService:
                 correlation_id=correlation_id,
                 client_request_id=client_request_id,
             )
+        await ExecutionRequestRegistry(self.session).reserve(
+            authenticated_user_id=authenticated_user_id,
+            request=ControlledExecutionRequest(
+                user_id=authenticated_user_id, workspace_id=workspace_id, canvas_id=canvas_id,
+                execution_id=execution_id, context_snapshot_id=context.snapshot_id,
+                expected_context_digest=context_digest, plan_id=plan.plan_id,
+                expected_plan_digest=plan_digest, action=ControlledAction.GENERATE_GROUNDED_DRAFT,
+                grant_id=grant.grant_id, approval_id=approval_id, idempotency_key=idempotency_key,
+                instruction=instruction, client_request_id=client_request_id, correlation_id=correlation_id,
+            ),
+            created_at=now,
+        )
+        await self._append_prepared_states(
+            ControlledExecutionRequest(
+                user_id=authenticated_user_id, workspace_id=workspace_id, canvas_id=canvas_id,
+                execution_id=execution_id, context_snapshot_id=context.snapshot_id,
+                expected_context_digest=context_digest, plan_id=plan.plan_id,
+                expected_plan_digest=plan_digest, action=ControlledAction.GENERATE_GROUNDED_DRAFT,
+                grant_id=grant.grant_id, approval_id=approval_id, idempotency_key=idempotency_key,
+                instruction=instruction, client_request_id=client_request_id, correlation_id=correlation_id,
+            ), now,
+        )
         return PreparedControlledDraft(
             request=ControlledExecutionRequest(
                 user_id=authenticated_user_id,
@@ -506,7 +501,19 @@ class ControlledGroundedDraftService:
             created_at=started_at,
         )
         if not reservation.created:
-            return await self._existing_result(request.execution_id)
+            current = await self.repository.current_state(
+                user_id=request.user_id,
+                workspace_id=request.workspace_id,
+                execution_id=request.execution_id,
+            )
+            if current is not None and current.status == ExecutionStatus.SUCCEEDED.value:
+                return await self._existing_result(request.execution_id)
+            if current is not None and current.status in {
+                ExecutionStatus.CANCELLED.value,
+                ExecutionStatus.FAILED.value,
+                ExecutionStatus.DENIED.value,
+            }:
+                raise ControlledDraftError("execution_not_runnable", "The controlled execution is not runnable.")
 
         await self._enforce_workspace_budget(request.workspace_id)
         try:
@@ -529,6 +536,11 @@ class ControlledGroundedDraftService:
                 "The selected evidence changed or is no longer available.",
             ) from exc
 
+        current = await self.repository.current_state(
+            user_id=request.user_id, workspace_id=request.workspace_id, execution_id=request.execution_id
+        )
+        if current is not None and current.status == ExecutionStatus.CANCELLED.value:
+            raise ControlledDraftError("execution_cancelled", "The controlled execution was cancelled.")
         await self._append_running_states(request, started_at)
         trace_id = uuid.uuid4()
         request_record = AIRequest(
@@ -829,10 +841,71 @@ class ControlledGroundedDraftService:
                 status_code=429,
             )
 
+    async def load_prepared_request(
+        self,
+        *,
+        authenticated_user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        execution_id: uuid.UUID,
+        correlation_id: str,
+    ) -> ControlledExecutionRequest:
+        try:
+            inspection = await self.repository.inspect_execution(
+                user_id=authenticated_user_id, workspace_id=workspace_id,
+                execution_id=execution_id, limit=100, offset=0,
+            )
+        except AgentPersistenceNotFound as exc:
+            raise ControlledDraftError("agent_execution_not_found", "Controlled execution not found.", status_code=404) from exc
+        return await self._request_from_inspection(
+            authenticated_user_id=authenticated_user_id, workspace_id=workspace_id,
+            canvas_id=uuid.UUID(int=0), execution_id=execution_id,
+            correlation_id=correlation_id, inspection=inspection,
+        )
+
+    async def _request_from_inspection(
+        self, *, authenticated_user_id: uuid.UUID, workspace_id: uuid.UUID, canvas_id: uuid.UUID,
+        execution_id: uuid.UUID, correlation_id: str, inspection: object,
+    ) -> ControlledExecutionRequest:
+        identity = await self.session.scalar(
+            select(ControlledAgentRequestIdentity).where(
+                ControlledAgentRequestIdentity.execution_id == execution_id,
+                ControlledAgentRequestIdentity.user_id == authenticated_user_id,
+                ControlledAgentRequestIdentity.workspace_id == workspace_id,
+            )
+        )
+        stored_grant = next((row for row in inspection.grants if row.grant_id == inspection.execution.grant_id), None)  # type: ignore[attr-defined]
+        stored_approval = next((row for row in inspection.approvals if row.grant_id == inspection.execution.grant_id), None)  # type: ignore[attr-defined]
+        if identity is None or stored_grant is None or stored_approval is None:
+            raise ControlledDraftError("agent_authorization_denied", "The controlled execution is not available.")
+        return ControlledExecutionRequest(
+            user_id=authenticated_user_id, workspace_id=workspace_id, canvas_id=identity.canvas_id,
+            execution_id=execution_id, context_snapshot_id=inspection.context.snapshot_id,  # type: ignore[attr-defined]
+            expected_context_digest=inspection.context.payload_digest, plan_id=inspection.plan.plan_id,  # type: ignore[attr-defined]
+            expected_plan_digest=inspection.plan.payload_digest, action=ControlledAction.GENERATE_GROUNDED_DRAFT,  # type: ignore[attr-defined]
+            grant_id=stored_grant.grant_id, approval_id=stored_approval.approval_id,
+            idempotency_key=identity.idempotency_key, instruction=identity.instruction,
+            client_request_id=identity.client_request_id, correlation_id=correlation_id,
+        )
+
+    async def _append_prepared_states(
+        self, request: ControlledExecutionRequest, recorded_at: datetime
+    ) -> None:
+        for status in (ExecutionStatus.PROPOSED, ExecutionStatus.AWAITING_APPROVAL, ExecutionStatus.READY):
+            await self.repository.append_state(ExecutionStateRecord(
+                state_id=uuid.uuid4(), execution_id=request.execution_id, user_id=request.user_id,
+                workspace_id=request.workspace_id, status=status, recorded_at=recorded_at,
+            ))
+
     async def _append_running_states(
         self, request: ControlledExecutionRequest, recorded_at: datetime
     ) -> None:
-        for status in (ExecutionStatus.PROPOSED, ExecutionStatus.READY, ExecutionStatus.RUNNING):
+        current = await self.repository.current_state(
+            user_id=request.user_id, workspace_id=request.workspace_id, execution_id=request.execution_id
+        )
+        statuses = (ExecutionStatus.PROPOSED, ExecutionStatus.READY, ExecutionStatus.RUNNING) if current is None else (ExecutionStatus.RUNNING,)
+        if current is not None and current.status != ExecutionStatus.READY.value:
+            raise ControlledDraftError("execution_not_runnable", "The controlled execution is not ready.")
+        for status in statuses:
             await self.repository.append_state(
                 ExecutionStateRecord(
                     state_id=uuid.uuid4(),
