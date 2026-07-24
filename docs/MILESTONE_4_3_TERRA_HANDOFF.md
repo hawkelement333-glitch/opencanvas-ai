@@ -12,7 +12,8 @@
 user, workspace, canvas, server-owned execution, action, idempotency key, canonical payload digest,
 and Trace ID. The service creates only `note.create` or `note.update` proposals, reloads ownership
 server-side, binds exact canvas/note revisions, creates existing immutable execution/context/plan/
-grant records, and records proposed/awaiting-approval states plus audit evidence.
+grant records, and records proposed/awaiting-approval states plus audit evidence. Approval also
+fails closed when the grant has already been revoked.
 
 CSRF-protected endpoints create a proposal and explicitly approve its presented proposal digest. An
 approval is persisted once and transitions to `ready`; it is not consumed here and no canvas node is
@@ -21,7 +22,7 @@ single-use-consumption controls remain authoritative for an effect phase.
 
 ## Phase 1 validation
 
-- Proposal/approval, contract, persistence, and API set: `24 passed`.
+- Proposal/approval, contract, persistence, and API set: `25 passed`.
 - New service/route strict mypy: passed.
 - New-file Ruff format/lint: passed.
 - Migration cycle: upgrade `20260724_0011`, downgrade `20260724_0010`, re-upgrade: passed.

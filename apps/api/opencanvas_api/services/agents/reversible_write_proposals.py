@@ -20,6 +20,7 @@ from opencanvas_api.db.models import (
     CanvasNode,
     ControlledAgentApproval,
     ControlledAgentCapabilityGrant,
+    ControlledAgentGrantRevocation,
     ControlledAgentReversibleWriteProposal,
     Workspace,
 )
@@ -328,6 +329,17 @@ class ReversibleWriteProposalService:
         )
         if self.now >= grant.expires_at or grant.approval_id is None:
             raise ReversibleProposalError("grant_inactive", "Proposal authority is inactive.")
+        revoked = await self.session.scalar(
+            select(ControlledAgentGrantRevocation.revocation_id).where(
+                ControlledAgentGrantRevocation.grant_id == grant.grant_id,
+                ControlledAgentGrantRevocation.user_id == authenticated_user_id,
+                ControlledAgentGrantRevocation.workspace_id == workspace_id,
+                ControlledAgentGrantRevocation.execution_id == execution_id,
+                ControlledAgentGrantRevocation.revoked_at <= self.now,
+            )
+        )
+        if revoked is not None:
+            raise ReversibleProposalError("grant_revoked", "Proposal authority was revoked.")
         existing = await self.session.scalar(
             select(ControlledAgentApproval).where(
                 ControlledAgentApproval.approval_id == grant.approval_id

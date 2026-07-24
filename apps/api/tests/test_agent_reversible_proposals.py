@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+import uuid
+from datetime import UTC
+
 import httpx
 from sqlalchemy import func, select
 
-from opencanvas_api.db.models import CanvasNode, ControlledAgentApproval, ControlledAgentAuditEvent
+from opencanvas_api.db.models import (
+    CanvasNode,
+    ControlledAgentApproval,
+    ControlledAgentAuditEvent,
+    ControlledAgentCapabilityGrant,
+    ControlledAgentGrantRevocation,
+)
+from opencanvas_api.services.agents.contracts import RevocationRecord
+from opencanvas_api.services.agents.persistence import ControlledAgentRepository
 from tests.test_canvas_api import _create_canvas, _create_node
 
 
@@ -93,6 +104,51 @@ async def test_reversible_proposal_rejects_digest_and_stale_note_revision(
     )
     assert mismatch.status_code == 409
     assert mismatch.json()["code"] == "proposal_digest_mismatch"
+
+
+async def test_reversible_proposal_approval_rejects_revoked_grant(
+    client: httpx.AsyncClient, database, api_prefix: str
+) -> None:
+    canvas = await _create_canvas(client, api_prefix, "Revoked proposal canvas")
+    route = f"{api_prefix}/workspaces/{canvas['workspaceId']}/agent-executions"
+    created = await client.post(
+        f"{route}/reversible-proposals",
+        json={
+            "canvasId": canvas["id"],
+            "action": "note.create",
+            "title": "Draft",
+            "text": "Draft",
+            "idempotencyKey": "reversible-revoked-001",
+        },
+    )
+    assert created.status_code == 201, created.text
+    execution_id = uuid.UUID(created.json()["executionId"])
+    async with database.sessions() as session:
+        grant = await session.scalar(
+            select(ControlledAgentCapabilityGrant).where(
+                ControlledAgentCapabilityGrant.execution_id == execution_id
+            )
+        )
+        assert grant is not None
+        await ControlledAgentRepository(session).append_revocation(
+            RevocationRecord(
+                revocation_id=uuid.uuid4(),
+                subject_kind="grant",
+                subject_id=grant.grant_id,
+                user_id=grant.user_id,
+                workspace_id=grant.workspace_id,
+                execution_id=grant.execution_id,
+                revoked_at=grant.issued_at.replace(tzinfo=UTC),
+                reason_code="test_revoked",
+            )
+        )
+        await session.commit()
+    denied = await client.post(
+        f"{route}/{execution_id}/reversible-proposal/approve",
+        json={"planDigest": created.json()["planDigest"]},
+    )
+    assert denied.status_code == 409
+    assert denied.json()["code"] == "grant_revoked"
 
 
 async def _node_count(database) -> int:
