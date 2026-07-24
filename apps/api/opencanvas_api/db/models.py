@@ -1500,6 +1500,74 @@ class ControlledAgentReversibleWriteProposal(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ControlledAgentReversibleWriteEffect(Base):
+    """Immutable authoritative result for one accepted reversible note effect."""
+
+    __tablename__ = "controlled_agent_reversible_write_effects"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_executions.id",
+                "controlled_agent_executions.user_id",
+                "controlled_agent_executions.workspace_id",
+            ],
+            name="fk_agent_reversible_effect_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["proposal_id"],
+            ["controlled_agent_reversible_write_proposals.proposal_id"],
+            name="fk_agent_reversible_effect_proposal",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["canvas_id"],
+            ["canvases.id"],
+            name="fk_agent_reversible_effect_canvas",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("execution_id", name="uq_agent_reversible_effect_execution"),
+        UniqueConstraint("proposal_id", name="uq_agent_reversible_effect_proposal"),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "idempotency_key",
+            name="uq_agent_reversible_effect_idempotency",
+        ),
+        CheckConstraint(
+            "action IN ('note.create', 'note.update')", name="ck_agent_reversible_effect_action"
+        ),
+        CheckConstraint("outcome = 'succeeded'", name="ck_agent_reversible_effect_outcome"),
+        Index("ix_agent_reversible_effect_proposal", "proposal_id"),
+        Index(
+            "ix_agent_reversible_effect_scope", "user_id", "workspace_id", "canvas_id", "created_at"
+        ),
+    )
+
+    effect_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    proposal_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    approval_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    destination_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resource_id: Mapped[uuid.UUID | None] = mapped_column()
+    expected_revision: Mapped[int | None] = mapped_column(Integer)
+    resulting_resource_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resulting_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    before_digest: Mapped[str | None] = mapped_column(String(64))
+    after_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 CONTROLLED_AGENT_IMMUTABLE_MODELS = (
     ControlledAgentExecution,
     ControlledAgentExecutionState,
@@ -1514,6 +1582,7 @@ CONTROLLED_AGENT_IMMUTABLE_MODELS = (
     ControlledAgentAuditEvent,
     ControlledAgentRequestIdentity,
     ControlledAgentReversibleWriteProposal,
+    ControlledAgentReversibleWriteEffect,
 )
 
 
