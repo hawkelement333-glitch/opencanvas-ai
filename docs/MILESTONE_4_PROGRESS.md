@@ -636,6 +636,26 @@ pnpm test:postgres
 docker compose --profile test down
 ```
 
+## Milestone 4.3 atomic note-effect checkpoint
+
+- Starting SHA: `177376f76b6c77a89229d5c4ddee69bcf43e3d6b`.
+- Atomic-effect implementation SHA: `3a959d9d70c45348c7fc4e1553e0afca32fe9647`.
+- Branch: `milestone-4.3-reversible-writes-local`; clean after implementation commit; upstream: none.
+- Complete: CSRF-protected, server-authoritative atomic create/update service and endpoint; scope,
+  digest, approval, grant, capability, revocation, idempotency, and revision checks; compare-and-set
+  updates; immutable effect/audit/Trace records; rollback-on-failure transaction boundary.
+- Tests: atomic-effect coverage `5 passed`; affected agent/persistence/migration regression set `59
+  passed`; strict mypy, focused Ruff format/lint, `git diff --check`, and hygiene/secret scan passed.
+- Not run: PostgreSQL integration, network tools, frontend checks, and unrelated backend suites.
+- Protected tag unchanged: `competition-demo-v1` is
+  `b45b7763b65861f9dfb3be7edf9b5eb271950917`; main unchanged; no remote write occurred.
+
+### Exact next implementation step
+
+Review this atomic-effect boundary. Any rollback implementation requires separate authorization and
+must use a new approved proposal/idempotency key, after-state compare-and-set, linked immutable
+compensating records, and refusal to overwrite subsequent unrelated changes.
+
 ## Milestone 4.3 effect-result persistence checkpoint
 
 - Starting SHA: `9d2bb55bf3523e46691eb92e4adeda55f8ca2525`.

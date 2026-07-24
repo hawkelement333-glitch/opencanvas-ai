@@ -1,5 +1,47 @@
 # Milestone 4.3 Terra Handoff
 
+## Atomic reversible note effect complete locally
+
+- Starting SHA: `177376f76b6c77a89229d5c4ddee69bcf43e3d6b`.
+- Atomic-effect implementation commit: `3a959d9d70c45348c7fc4e1553e0afca32fe9647`.
+- Branch: `milestone-4.3-reversible-writes-local`; upstream: none; no remote write occurred.
+
+`ReversibleWriteEffectService` is the sole synchronous, server-authoritative effect path. The
+CSRF-protected endpoint accepts only an execution ID and idempotency key. It reconstructs the
+persisted proposal, exact preview content, canvas/destination, resource/revision, execution, plan,
+grant, and approval server-side; it does not accept client authority, action, content, digest, or
+success state.
+
+Within one nested database boundary it checks owned user/workspace/canvas scope, proposal digest and
+plan binding, approval decision/expiry, grant expiry/capability/revocation through the authoritative
+approval-consumption policy, exact proposal idempotency, and current canvas/revision. Exact duplicate
+delivery returns the immutable prior effect. Conflicting keys fail closed. Creation writes one note at
+the approved canvas; update uses an exact node-revision compare-and-set. The transaction records
+before/after digests, resulting resource/revision, immutable effect result, audit evidence, and
+started/succeeded scoped Trace evidence. Any exception rolls back the note, consumption, effect,
+audit, and Trace success records.
+
+Focused coverage at `3a959d9`:
+
+- Atomic create, update, exact duplicate, conflicting key, missing execution, stale update, before/
+  after evidence, audit/Trace evidence, single consumption, and injected post-mutation rollback:
+  `5 passed`.
+- Affected proposal, persistence, schema, API, effect-persistence, and migration regressions:
+  `59 passed`.
+- Strict mypy for the service, endpoint, schemas, and tests; focused Ruff format/lint; `git diff
+  --check`; and repository hygiene/secret scan: passed.
+- PostgreSQL integration, network tools, frontend checks, and unrelated backend suites: not run.
+
+No rollback feature, frontend work, worker, queue, scheduler, provider, Milestone 4.4, or Milestone
+5 work was added. `main` remains unchanged and `competition-demo-v1` remains
+`b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+
+### Exact next checkpoint
+
+Review the atomic effect boundary, then implement separately authorized rollback only: a new approved
+proposal/key, after-state compare-and-set, linked immutable compensating effect/audit/Trace evidence,
+and refusal to overwrite later unrelated changes. Do not start it automatically.
+
 ## Effect-result persistence validated locally
 
 - Starting SHA: `9d2bb55bf3523e46691eb92e4adeda55f8ca2525`.
