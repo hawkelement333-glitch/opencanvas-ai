@@ -2,6 +2,18 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 Terra Phase 1 — local only
+
+- Corrected Sol handoff checkpoint: `90a4e320b373e46ee2bf48ac183a19ba1e6c7fc7`.
+- Completed: immutable reversible-note proposal persistence, server-owned proposal/digest/scope
+  construction, explicit CSRF-protected approval, append-only state/audit evidence, and exact
+  idempotent proposal/approval redelivery. No workspace effect is exposed or applied.
+- Migration: `20260724_0011_reversible_write_proposals`.
+- Focused tests: `24 passed`; strict mypy, new-file format/lint, and SQLite migration cycle passed.
+- Exact next unit: Phase 2 minimal note effect transaction only; consume approval atomically with
+  compare-and-set, idempotency, and safe audit/Trace evidence.
+- Remote freeze remains in force: branch has no upstream and no remote write occurred.
+
 ## Milestone 4.3 Sol safety architecture — local only
 
 - Authorized base and starting SHA: `21aee1f86b47424ee774f3245c0d0d3599215846`.

@@ -354,6 +354,16 @@ class ControlledAgentRepository:
         )
         await self.session.flush()
 
+    async def append_approval(self, approval: ApprovalRecord, grant: CapabilityGrant) -> None:
+        """Append one explicit approval after rechecking its immutable grant binding."""
+
+        self._validate_approval_binding(approval, grant)
+        self.session.add(self._approval_row(approval))
+        try:
+            await self.session.flush()
+        except IntegrityError:
+            raise AgentStateConflict("approval_already_decided") from None
+
     async def append_audit_event(self, event: AuditEvent) -> None:
         self.session.add(
             ControlledAgentAuditEvent(

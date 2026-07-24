@@ -175,3 +175,41 @@ class AgentExecutionCancelOut(ApiModel):
         "denied",
     ]
     reason_code: str
+
+
+class ReversibleWriteProposalStart(ApiModel):
+    canvas_id: uuid.UUID
+    action: Literal["note.create", "note.update"]
+    title: str = Field(min_length=1, max_length=160)
+    text: str = Field(max_length=20_000)
+    note_id: uuid.UUID | None = None
+    expected_revision: int | None = Field(default=None, ge=0)
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class ReversibleWriteProposalOut(ApiModel):
+    execution_id: uuid.UUID
+    proposal_id: uuid.UUID
+    trace_id: uuid.UUID
+    action: Literal["note.create", "note.update"]
+    plan_digest: str
+    canvas_id: uuid.UUID
+    canvas_revision: int
+    note_id: uuid.UUID | None = None
+    expected_revision: int | None = None
+    title: str
+    text: str
+    expires_at: datetime
+    duplicate: bool = False
+
+
+class ReversibleWriteApprovalStart(ApiModel):
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ReversibleWriteApprovalOut(ApiModel):
+    execution_id: uuid.UUID
+    approval_id: uuid.UUID
+    plan_digest: str
+    status: Literal["ready"]
+    duplicate: bool = False

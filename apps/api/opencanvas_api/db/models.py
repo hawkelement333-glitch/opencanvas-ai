@@ -1442,6 +1442,64 @@ class ControlledAgentRequestIdentity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ControlledAgentReversibleWriteProposal(Base):
+    """Immutable review-only proposal; this table does not represent an applied effect."""
+
+    __tablename__ = "controlled_agent_reversible_write_proposals"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_executions.id",
+                "controlled_agent_executions.user_id",
+                "controlled_agent_executions.workspace_id",
+            ],
+            name="fk_agent_reversible_proposal_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["canvas_id"],
+            ["canvases.id"],
+            name="fk_agent_reversible_proposal_canvas",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("execution_id", name="uq_agent_reversible_proposal_execution"),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "action",
+            "idempotency_key",
+            name="uq_agent_reversible_proposal_idempotency",
+        ),
+        CheckConstraint(
+            "action IN ('note.create', 'note.update')",
+            name="ck_agent_reversible_proposal_action",
+        ),
+        CheckConstraint("expires_at > created_at", name="ck_agent_reversible_proposal_time_order"),
+        Index(
+            "ix_agent_reversible_proposal_scope",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "created_at",
+        ),
+    )
+
+    proposal_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 CONTROLLED_AGENT_IMMUTABLE_MODELS = (
     ControlledAgentExecution,
     ControlledAgentExecutionState,
@@ -1455,6 +1513,7 @@ CONTROLLED_AGENT_IMMUTABLE_MODELS = (
     ControlledAgentApprovalConsumption,
     ControlledAgentAuditEvent,
     ControlledAgentRequestIdentity,
+    ControlledAgentReversibleWriteProposal,
 )
 
 

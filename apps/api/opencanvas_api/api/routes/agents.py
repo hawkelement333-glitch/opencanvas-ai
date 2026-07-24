@@ -26,6 +26,10 @@ from opencanvas_api.api.agent_schemas import (
     AgentPolicyDecisionOut,
     AgentRevocationOut,
     AgentStateOut,
+    ReversibleWriteApprovalOut,
+    ReversibleWriteApprovalStart,
+    ReversibleWriteProposalOut,
+    ReversibleWriteProposalStart,
 )
 from opencanvas_api.api.dependencies import (
     MutatingPrincipalDep,
@@ -51,12 +55,91 @@ from opencanvas_api.services.agents.persistence import (
     AgentPersistenceNotFound,
     ControlledAgentRepository,
 )
+from opencanvas_api.services.agents.contracts import contract_digest
+from opencanvas_api.services.agents.reversible_write_proposals import (
+    ReversibleProposalError,
+    ReversibleWriteProposalService,
+)
+from opencanvas_api.services.agents.reversible_writes import ReversibleWriteAction
 from opencanvas_api.services.ai import AIProvider
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/agent-executions")
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 ProviderDep = Annotated[AIProvider, Depends(get_ai_provider)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+
+
+@router.post("/reversible-proposals", response_model=ReversibleWriteProposalOut, status_code=status.HTTP_201_CREATED)
+async def prepare_reversible_write_proposal(
+    workspace_id: uuid.UUID,
+    payload: ReversibleWriteProposalStart,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> ReversibleWriteProposalOut:
+    service = ReversibleWriteProposalService(session)
+    try:
+        prepared = await service.prepare(
+            authenticated_user_id=principal.user_id,
+            workspace_id=workspace_id,
+            canvas_id=payload.canvas_id,
+            action=ReversibleWriteAction(payload.action),
+            title=payload.title,
+            text=payload.text,
+            note_id=payload.note_id,
+            expected_revision=payload.expected_revision,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except ReversibleProposalError as exc:
+        raise ApiError(exc.status_code, exc.code, exc.message) from exc
+    proposal = prepared.proposal
+    return ReversibleWriteProposalOut(
+        execution_id=proposal.execution_id,
+        proposal_id=proposal.proposal_id,
+        trace_id=prepared.trace_id,
+        action=proposal.action.value,
+        plan_digest=contract_digest(proposal),
+        canvas_id=proposal.canvas.resource_id,
+        canvas_revision=proposal.canvas.version or 0,
+        note_id=proposal.resource.resource_id if proposal.resource is not None else None,
+        expected_revision=proposal.resource.version if proposal.resource is not None else None,
+        title=proposal.preview.title,
+        text=proposal.preview.text,
+        expires_at=proposal.expires_at,
+        duplicate=prepared.duplicate,
+    )
+
+
+@router.post("/{execution_id}/reversible-proposal/approve", response_model=ReversibleWriteApprovalOut)
+async def approve_reversible_write_proposal(
+    workspace_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    payload: ReversibleWriteApprovalStart,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> ReversibleWriteApprovalOut:
+    session_id = principal.session_id or uuid.uuid5(
+        uuid.NAMESPACE_URL, f"opencanvas:test-approval-session:{principal.user_id}"
+    )
+    service = ReversibleWriteProposalService(session)
+    try:
+        prepared, duplicate = await service.approve(
+            authenticated_user_id=principal.user_id,
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+            presented_plan_digest=payload.plan_digest,
+            session_id=session_id,
+        )
+        await session.commit()
+    except ReversibleProposalError as exc:
+        raise ApiError(exc.status_code, exc.code, exc.message) from exc
+    return ReversibleWriteApprovalOut(
+        execution_id=execution_id,
+        approval_id=prepared.approval_id,
+        plan_digest=contract_digest(prepared.proposal),
+        status="ready",
+        duplicate=duplicate,
+    )
 
 
 @router.post("/drafts", response_model=AgentDraftOut, status_code=status.HTTP_201_CREATED)
