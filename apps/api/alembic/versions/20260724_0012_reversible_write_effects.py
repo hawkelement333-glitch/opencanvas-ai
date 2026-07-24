@@ -18,6 +18,12 @@ TABLE = "controlled_agent_reversible_write_effects"
 
 
 def upgrade() -> None:
+    op.create_index(
+        "ux_agent_reversible_proposal_effect_scope",
+        "controlled_agent_reversible_write_proposals",
+        ["proposal_id", "execution_id", "user_id", "workspace_id", "canvas_id", "action"],
+        unique=True,
+    )
     op.create_table(
         TABLE,
         sa.Column("effect_id", sa.Uuid(), nullable=False),
@@ -44,6 +50,13 @@ def upgrade() -> None:
             "action IN ('note.create', 'note.update')", name="ck_agent_reversible_effect_action"
         ),
         sa.CheckConstraint("outcome = 'succeeded'", name="ck_agent_reversible_effect_outcome"),
+        sa.CheckConstraint(
+            "(action = 'note.create' AND resource_id IS NULL AND expected_revision IS NULL "
+            "AND before_digest IS NULL) OR "
+            "(action = 'note.update' AND resource_id IS NOT NULL AND expected_revision IS NOT NULL "
+            "AND resulting_resource_id = resource_id AND before_digest IS NOT NULL)",
+            name="ck_agent_reversible_effect_resource_shape",
+        ),
         sa.ForeignKeyConstraint(
             ["canvas_id"],
             ["canvases.id"],
@@ -51,9 +64,27 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["proposal_id"],
-            ["controlled_agent_reversible_write_proposals.proposal_id"],
+            ["proposal_id", "execution_id", "user_id", "workspace_id", "canvas_id", "action"],
+            [
+                "controlled_agent_reversible_write_proposals.proposal_id",
+                "controlled_agent_reversible_write_proposals.execution_id",
+                "controlled_agent_reversible_write_proposals.user_id",
+                "controlled_agent_reversible_write_proposals.workspace_id",
+                "controlled_agent_reversible_write_proposals.canvas_id",
+                "controlled_agent_reversible_write_proposals.action",
+            ],
             name="fk_agent_reversible_effect_proposal",
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["approval_id", "execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_approvals.approval_id",
+                "controlled_agent_approvals.execution_id",
+                "controlled_agent_approvals.user_id",
+                "controlled_agent_approvals.workspace_id",
+            ],
+            name="fk_agent_reversible_effect_approval_scope",
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
@@ -103,3 +134,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table(TABLE)
+    op.drop_index(
+        "ux_agent_reversible_proposal_effect_scope",
+        table_name="controlled_agent_reversible_write_proposals",
+    )

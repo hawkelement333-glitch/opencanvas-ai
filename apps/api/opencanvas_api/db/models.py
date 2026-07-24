@@ -1484,6 +1484,16 @@ class ControlledAgentReversibleWriteProposal(Base):
             "canvas_id",
             "created_at",
         ),
+        Index(
+            "ux_agent_reversible_proposal_effect_scope",
+            "proposal_id",
+            "execution_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "action",
+            unique=True,
+        ),
     )
 
     proposal_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
@@ -1516,9 +1526,27 @@ class ControlledAgentReversibleWriteEffect(Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["proposal_id"],
-            ["controlled_agent_reversible_write_proposals.proposal_id"],
+            ["proposal_id", "execution_id", "user_id", "workspace_id", "canvas_id", "action"],
+            [
+                "controlled_agent_reversible_write_proposals.proposal_id",
+                "controlled_agent_reversible_write_proposals.execution_id",
+                "controlled_agent_reversible_write_proposals.user_id",
+                "controlled_agent_reversible_write_proposals.workspace_id",
+                "controlled_agent_reversible_write_proposals.canvas_id",
+                "controlled_agent_reversible_write_proposals.action",
+            ],
             name="fk_agent_reversible_effect_proposal",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["approval_id", "execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_approvals.approval_id",
+                "controlled_agent_approvals.execution_id",
+                "controlled_agent_approvals.user_id",
+                "controlled_agent_approvals.workspace_id",
+            ],
+            name="fk_agent_reversible_effect_approval_scope",
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
@@ -1540,6 +1568,13 @@ class ControlledAgentReversibleWriteEffect(Base):
             "action IN ('note.create', 'note.update')", name="ck_agent_reversible_effect_action"
         ),
         CheckConstraint("outcome = 'succeeded'", name="ck_agent_reversible_effect_outcome"),
+        CheckConstraint(
+            "(action = 'note.create' AND resource_id IS NULL AND expected_revision IS NULL "
+            "AND before_digest IS NULL) OR "
+            "(action = 'note.update' AND resource_id IS NOT NULL AND expected_revision IS NOT NULL "
+            "AND resulting_resource_id = resource_id AND before_digest IS NOT NULL)",
+            name="ck_agent_reversible_effect_resource_shape",
+        ),
         Index("ix_agent_reversible_effect_proposal", "proposal_id"),
         Index(
             "ix_agent_reversible_effect_scope", "user_id", "workspace_id", "canvas_id", "created_at"
