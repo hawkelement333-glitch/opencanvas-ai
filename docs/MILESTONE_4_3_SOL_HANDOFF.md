@@ -6,7 +6,9 @@
 
 - Authorized starting SHA: `21aee1f86b47424ee774f3245c0d0d3599215846`.
 - Local branch: `milestone-4.3-reversible-writes-local`; upstream: none.
-- Architecture checkpoint: `e7f18d5299b365a98caeb46413f6efed007130a5`.
+- Sol architecture commit: `e7f18d5299b365a98caeb46413f6efed007130a5`.
+- Final Sol handoff commit and authorized Terra starting point:
+  `718ca72e7af6141feb4e6bffc8be9edf74e27995`.
 - Remote freeze: no push, remote branch, tag, pull request, release, upload, or GitHub write occurred.
 - Protected tag object: `acbde89b6e2cc3e41c372887794726d393836716`.
 - Protected peeled demo commit: `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
