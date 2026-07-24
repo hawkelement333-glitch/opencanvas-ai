@@ -1961,7 +1961,7 @@ class ControlledAgentReversibleWriteRollbackResult(Base):
             "(forward_action = 'note.update' "
             "AND rollback_action = 'note.update.rollback' "
             "AND rollback_target_kind = 'exact_prior_state' "
-            "AND resulting_revision > 0)",
+            "AND resulting_revision IS NOT NULL AND resulting_revision > 0)",
             name="ck_agent_rollback_result_action_shape",
         ),
         CheckConstraint(

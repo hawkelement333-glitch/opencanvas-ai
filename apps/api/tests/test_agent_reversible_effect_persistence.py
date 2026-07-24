@@ -13,7 +13,9 @@ from opencanvas_api.db.models import (
     CanvasNode,
     ControlledAgentReversibleWriteEffect,
     ControlledAgentReversibleWriteProposal,
+    ControlledAgentReversibleWriteRollbackApproval,
     ControlledAgentReversibleWriteRollbackEvidence,
+    ControlledAgentReversibleWriteRollbackResult,
 )
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.agents.persistence import ControlledAgentRepository
@@ -403,6 +405,306 @@ async def test_rollback_evidence_is_one_per_effect_and_append_only(database: Dat
         await session.rollback()
     async with database.sessions() as session:
         persisted = await session.get(ControlledAgentReversibleWriteRollbackEvidence, evidence_id)
+        assert persisted is not None
+        await session.delete(persisted)
+        with pytest.raises(ValueError, match="append-only"):
+            await session.commit()
+
+
+@dataclass(frozen=True, slots=True)
+class RollbackAuthorityContext:
+    context: EffectContext
+    effect: ControlledAgentReversibleWriteEffect
+    note_id: uuid.UUID
+    evidence: ControlledAgentReversibleWriteRollbackEvidence | None
+
+
+async def _seed_rollback_authority_context(
+    database: Database,
+    *,
+    action: str,
+    bundle: AgentBundle | None = None,
+    canvas_id: uuid.UUID | None = None,
+) -> RollbackAuthorityContext:
+    context = await _seed_effect_context(
+        database,
+        bundle=bundle,
+        canvas_id=canvas_id,
+        action=action,
+    )
+    note_id = uuid.uuid4()
+    async with database.sessions() as session:
+        session.add(
+            CanvasNode(
+                id=note_id,
+                canvas_id=context.canvas_id,
+                type="note",
+                title="Before title" if action == "note.update" else "Created title",
+                text="Before text" if action == "note.update" else "Created text",
+                position_x=0.0,
+                position_y=0.0,
+                revision=5 if action == "note.update" else 1,
+            )
+        )
+        await session.commit()
+    effect = _effect(
+        context,
+        action=action,
+        resource_id=note_id if action == "note.update" else None,
+        expected_revision=4 if action == "note.update" else None,
+        resulting_resource_id=note_id,
+        resulting_revision=5 if action == "note.update" else 1,
+        before_digest="a" * 64 if action == "note.update" else None,
+    )
+    await _persist(database, effect)
+    evidence = _evidence(context, effect, note_id) if action == "note.update" else None
+    if evidence:
+        await _persist_evidence(database, evidence)
+    return RollbackAuthorityContext(context, effect, note_id, evidence)
+
+
+def _rollback_approval(
+    authority: RollbackAuthorityContext, **updates: object
+) -> ControlledAgentReversibleWriteRollbackApproval:
+    effect = authority.effect
+    is_update = effect.action == "note.update"
+    values: dict[str, object] = {
+        "rollback_approval_id": uuid.uuid4(),
+        "execution_id": effect.execution_id,
+        "user_id": effect.user_id,
+        "workspace_id": effect.workspace_id,
+        "canvas_id": effect.canvas_id,
+        "note_id": authority.note_id,
+        "proposal_id": effect.proposal_id,
+        "effect_id": effect.effect_id,
+        "forward_action": effect.action,
+        "rollback_action": "note.update.rollback" if is_update else "note.create.rollback",
+        "rollback_evidence_id": authority.evidence.evidence_id if authority.evidence else None,
+        "original_plan_digest": effect.plan_digest,
+        "expected_current_revision": effect.resulting_revision,
+        "effect_after_state_digest": effect.after_digest,
+        "rollback_target_kind": "exact_prior_state" if is_update else "authoritative_absence",
+        "rollback_target_digest": "a" * 64 if is_update else "c" * 64,
+        "grant_id": authority.context.bundle.grant.grant_id,
+        "scoped_idempotency_key": f"rollback-approval-{uuid.uuid4()}",
+        "approval_digest": "d" * 64,
+        "expires_at": NOW + timedelta(minutes=5),
+        "created_at": NOW,
+    }
+    values.update(updates)
+    return ControlledAgentReversibleWriteRollbackApproval(**values)
+
+
+def _rollback_result(
+    authority: RollbackAuthorityContext,
+    approval: ControlledAgentReversibleWriteRollbackApproval,
+    **updates: object,
+) -> ControlledAgentReversibleWriteRollbackResult:
+    effect = authority.effect
+    is_update = effect.action == "note.update"
+    values: dict[str, object] = {
+        "rollback_result_id": uuid.uuid4(),
+        "rollback_approval_id": approval.rollback_approval_id,
+        "execution_id": effect.execution_id,
+        "user_id": effect.user_id,
+        "workspace_id": effect.workspace_id,
+        "canvas_id": effect.canvas_id,
+        "note_id": authority.note_id,
+        "proposal_id": effect.proposal_id,
+        "effect_id": effect.effect_id,
+        "forward_action": effect.action,
+        "rollback_action": approval.rollback_action,
+        "rollback_target_kind": approval.rollback_target_kind,
+        "rollback_approval_digest": approval.approval_digest,
+        "scoped_idempotency_key": f"rollback-result-{uuid.uuid4()}",
+        "expected_pre_rollback_revision": effect.resulting_revision,
+        "resulting_revision": effect.resulting_revision + 1 if is_update else None,
+        "pre_rollback_state_digest": effect.after_digest,
+        "post_rollback_target_digest": approval.rollback_target_digest,
+        "trace_id": uuid.uuid4(),
+        "created_at": NOW,
+    }
+    values.update(updates)
+    return ControlledAgentReversibleWriteRollbackResult(**values)
+
+
+async def _persist_authority(database: Database, record: object) -> None:
+    async with database.sessions() as session:
+        session.add(record)
+        await session.commit()
+
+
+@pytest.mark.parametrize("action", ["note.create", "note.update"])
+async def test_rollback_approval_persists_the_two_closed_authority_forms(
+    database: Database, action: str
+) -> None:
+    authority = await _seed_rollback_authority_context(database, action=action)
+    approval = _rollback_approval(authority)
+
+    await _persist_authority(database, approval)
+
+    assert approval.forward_action == action
+    assert approval.rollback_evidence_id == (
+        authority.evidence.evidence_id if authority.evidence else None
+    )
+    assert approval.expected_current_revision > 0
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"forward_action": "note.delete"},
+        {"rollback_action": "note.delete.rollback"},
+        {"rollback_target_kind": "arbitrary_state"},
+        {"rollback_action": "note.update.rollback"},
+        {"expected_current_revision": 0},
+        {"expected_current_revision": -1},
+        {"original_plan_digest": "bad"},
+        {"effect_after_state_digest": "B" * 64},
+        {"rollback_target_digest": "short"},
+        {"scoped_idempotency_key": ""},
+        {"approval_digest": ""},
+        {"expires_at": NOW},
+    ],
+)
+async def test_rollback_approval_rejects_invalid_closed_contract(
+    database: Database, updates: dict[str, object]
+) -> None:
+    authority = await _seed_rollback_authority_context(database, action="note.create")
+    with pytest.raises(IntegrityError):
+        await _persist_authority(database, _rollback_approval(authority, **updates))
+
+
+async def test_rollback_approval_rejects_invalid_evidence_shape_and_scope(
+    database: Database,
+) -> None:
+    created = await _seed_rollback_authority_context(database, action="note.create")
+    updated = await _seed_rollback_authority_context(database, action="note.update")
+    assert updated.evidence is not None
+
+    with pytest.raises(IntegrityError):
+        await _persist_authority(
+            database,
+            _rollback_approval(created, rollback_evidence_id=updated.evidence.evidence_id),
+        )
+    with pytest.raises(IntegrityError):
+        await _persist_authority(
+            database,
+            _rollback_approval(updated, rollback_evidence_id=None),
+        )
+    with pytest.raises(IntegrityError):
+        await _persist_authority(
+            database,
+            _rollback_approval(updated, proposal_id=created.effect.proposal_id),
+        )
+    with pytest.raises(IntegrityError):
+        await _persist_authority(database, _rollback_approval(updated, note_id=uuid.uuid4()))
+    with pytest.raises(IntegrityError):
+        await _persist_authority(database, _rollback_approval(updated, grant_id=uuid.uuid4()))
+
+
+@pytest.mark.parametrize("action", ["note.create", "note.update"])
+async def test_rollback_result_persists_the_two_closed_success_forms(
+    database: Database, action: str
+) -> None:
+    authority = await _seed_rollback_authority_context(database, action=action)
+    approval = _rollback_approval(authority)
+    await _persist_authority(database, approval)
+    result = _rollback_result(authority, approval)
+
+    await _persist_authority(database, result)
+
+    assert result.rollback_approval_id == approval.rollback_approval_id
+    if action == "note.create":
+        assert result.resulting_revision is None
+    else:
+        assert result.resulting_revision is not None and result.resulting_revision > 0
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"forward_action": "note.delete"},
+        {"rollback_action": "note.update.rollback"},
+        {"rollback_target_kind": "arbitrary_state"},
+        {"expected_pre_rollback_revision": 0},
+        {"resulting_revision": 1},
+        {"pre_rollback_state_digest": "bad"},
+        {"post_rollback_target_digest": "BAD" * 22},
+        {"scoped_idempotency_key": ""},
+    ],
+)
+async def test_create_rollback_result_rejects_invalid_closed_contract(
+    database: Database, updates: dict[str, object]
+) -> None:
+    authority = await _seed_rollback_authority_context(database, action="note.create")
+    approval = _rollback_approval(authority)
+    await _persist_authority(database, approval)
+    with pytest.raises(IntegrityError):
+        await _persist_authority(database, _rollback_result(authority, approval, **updates))
+
+
+async def test_update_rollback_result_rejects_missing_resulting_revision(
+    database: Database,
+) -> None:
+    authority = await _seed_rollback_authority_context(database, action="note.update")
+    approval = _rollback_approval(authority)
+    await _persist_authority(database, approval)
+    with pytest.raises(IntegrityError):
+        await _persist_authority(
+            database, _rollback_result(authority, approval, resulting_revision=None)
+        )
+
+
+async def test_rollback_result_enforces_success_identity_uniqueness_and_append_only(
+    database: Database,
+) -> None:
+    authority = await _seed_rollback_authority_context(database, action="note.update")
+    approval = _rollback_approval(authority)
+    await _persist_authority(database, approval)
+    result = _rollback_result(authority, approval, scoped_idempotency_key="same-result-key")
+    await _persist_authority(database, result)
+
+    with pytest.raises(IntegrityError):
+        await _persist_authority(database, _rollback_result(authority, approval))
+    second_approval = _rollback_approval(authority)
+    await _persist_authority(database, second_approval)
+    with pytest.raises(IntegrityError):
+        await _persist_authority(database, _rollback_result(authority, second_approval))
+    other_authority = await _seed_rollback_authority_context(
+        database,
+        action="note.update",
+        bundle=make_agent_bundle(
+            user_id=authority.effect.user_id,
+            workspace_id=authority.effect.workspace_id,
+        ),
+        canvas_id=authority.effect.canvas_id,
+    )
+    other_approval = _rollback_approval(other_authority)
+    await _persist_authority(database, other_approval)
+    with pytest.raises(IntegrityError):
+        await _persist_authority(
+            database,
+            _rollback_result(
+                other_authority,
+                other_approval,
+                scoped_idempotency_key="same-result-key",
+            ),
+        )
+
+    async with database.sessions() as session:
+        persisted = await session.get(
+            ControlledAgentReversibleWriteRollbackResult, result.rollback_result_id
+        )
+        assert persisted is not None
+        persisted.rollback_approval_digest = "e" * 64
+        with pytest.raises(ValueError, match="append-only"):
+            await session.commit()
+        await session.rollback()
+    async with database.sessions() as session:
+        persisted = await session.get(
+            ControlledAgentReversibleWriteRollbackResult, result.rollback_result_id
+        )
         assert persisted is not None
         await session.delete(persisted)
         with pytest.raises(ValueError, match="append-only"):
