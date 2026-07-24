@@ -54,3 +54,17 @@ gating remain intact. No visual label or control grants authority or changes lif
 The local combined branch has not had browser smoke, dependency audit, PostgreSQL execution, or a
 fresh deterministic-demo E2E run. These are recorded limitations, not claimed successes. No further
 visual redesign or Milestone 4.3 work is included.
+
+## Luna final audit update — local only
+
+The final Luna audit reran the focused combined checks (`5 files`, `12 passed`), the full backend/
+migration gate (`44 passed`), full frontend suite (`10 files`, `33 tests passed`), TypeScript, lint,
+production build, secret scan, prohibited-scope audit, and deterministic-demo regression (`10
+passed`). No confirmed visual-integration defect was found.
+
+Browser smoke remains not run because no local web/API server was active and this audit did not add
+runtime setup. Dependency audit remains not run because it would transmit dependency metadata during
+the explicit remote freeze. Docker and a PostgreSQL test URL remain unavailable. These limitations
+are not passed checks.
+
+See `docs/MILESTONE_4_VISUAL_INTEGRATION_LUNA_HANDOFF.md` for the final local audit record.

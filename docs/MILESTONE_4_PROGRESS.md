@@ -22,6 +22,24 @@ Last updated: 2026-07-24 (America/Chicago)
 - Browser smoke, dependency audit, PostgreSQL execution, and deterministic-demo E2E were not run
   in this local integration checkpoint and are recorded as unavailable/not run in the handoff.
 
+## Milestone 4 visual integration Luna audit — local only
+
+- Audited branch: `milestone-4-visual-integration-local` at
+  `6a48ee44bc2eeffad722ce082e94d80c2e2f466e` before this documentation commit.
+- Focused combined UI/accessibility/safety checks: `5 files`, `12 passed`; frontend TypeScript and
+  lint passed. Full local gate: backend/migration `44 passed`; frontend `10 files`, `33 tests
+  passed`; production build passed. Deterministic-demo regression: `10 passed`.
+- Security review found no client authority path, client-generated execution identity, false
+  cancellation, workspace write, provider change, citation/Trace semantic change, or protected-demo
+  change. The visual surfaces remain presentation-only. Secret and prohibited-scope scans passed.
+- Accessibility review confirmed the focused source-preview/citation, dialog, and controlled-panel
+  regression coverage; no integration defect was found.
+- Browser smoke: not run because no local web/API server was running and the audit did not introduce
+  service setup. Dependency audit: not run because `npm audit` would transmit dependency metadata,
+  prohibited by the remote-freeze/local-only boundary. Docker and PostgreSQL URL: unavailable;
+  PostgreSQL execution not run. No remote write, upstream, remote integration branch, tag change,
+  source-branch change, default-branch change, or Milestone 4.3 work occurred.
+
 ## Milestone 4.2 Luna final audit
 
 - Audited from `9d78b723db7878739332c2d5398c5dd9e11a781e`; branch and remote matched and the
