@@ -2,6 +2,30 @@
 
 Last updated: 2026-07-23 (America/Chicago)
 
+## Milestone 4.2 Sol final security gate
+
+- Recovery started clean with local and remote SHA
+  `9bb70e41269465daff314d7a27c43ec6ca1bb0ed`.
+- Completed and normally pushed three bounded checkpoints:
+  - `18b995e` — lifecycle transition validation and database compare-and-set guards.
+  - `6cde6f6` — immutable selected-context resolution.
+  - `87dd85a` — authoritative cancellation and late-result suppression.
+- Complete focused Sol gate: `74 passed`.
+- Migration cycle: upgrade `0009`, downgrade `0008`, re-upgrade `0009` passed.
+- Ruff format: `19 files already formatted`; Ruff lint passed.
+- Mypy passed for all controlled-agent service modules and the database model target.
+- Repository hygiene and built-in secret scan passed for `216` source files.
+- High-confidence secret scan found no matches; `git diff --check` passed.
+- No dependency, provider, API, UI, worker, queue, scheduler, delegation, workspace-effect,
+  Milestone 3.75, Terra, Luna, or later-milestone file was added.
+- PostgreSQL: **NOT RUN**. Docker is unavailable and no PostgreSQL test URL is configured; the
+  marked test reported one skip.
+- Sol completion decision: **SOL SAFETY CORE COMPLETE — MILESTONE 4.2 NOT COMPLETE**.
+- Exact next authorized action: a separately authorized Terra task may implement only the provider,
+  grounded generation/citation/Trace, narrow API/UI, and remaining Milestone 4.2 tests listed in
+  `docs/MILESTONE_4_2_SOL_HANDOFF.md`. This Sol task must stop after its final documentation commit
+  and normal push.
+
 ## Milestone 4.2 Sol checkpoint 3D — cancellation and late-result suppression
 
 - Starting local and remote SHA:
