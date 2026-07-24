@@ -93,7 +93,9 @@ def _require_aware_utc(value: datetime) -> datetime:
 class ResourceScope(ContractModel):
     kind: ResourceKind
     resource_id: uuid.UUID
-    version: int | None = Field(default=None, ge=1)
+    # Canvas and node revisions begin at zero; document versions remain validated by their
+    # authoritative resolver query and therefore cannot be substituted across resource kinds.
+    version: int | None = Field(default=None, ge=0)
 
 
 class ContextResource(ContractModel):

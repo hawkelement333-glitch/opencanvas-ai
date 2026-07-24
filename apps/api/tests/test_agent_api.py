@@ -13,6 +13,7 @@ from opencanvas_api.services.agents.contracts import ExecutionStateRecord, Execu
 from opencanvas_api.services.agents.persistence import ControlledAgentRepository
 from opencanvas_api.services.auth import Principal
 from tests.agent_fixtures import NOW, make_agent_bundle
+from tests.test_canvas_api import _create_canvas, _create_node
 
 
 async def _seed_inspection(database: Database):
@@ -118,3 +119,48 @@ async def test_inspection_endpoint_hides_cross_user_and_missing_records(
     for response in (await client.get(owner_path), await client.get(missing_path)):
         assert response.status_code == 404
         assert response.json()["code"] == "agent_execution_not_found"
+
+
+async def test_authenticated_grounded_draft_start_is_idempotent_and_conflict_safe(
+    client: httpx.AsyncClient, api_prefix: str
+) -> None:
+    canvas = await _create_canvas(client, api_prefix, "Controlled draft")
+    first = await _create_node(
+        client,
+        api_prefix,
+        canvas["id"],
+        title="Selected note",
+        text="Untrusted evidence only.",
+    )
+    second = await _create_node(
+        client,
+        api_prefix,
+        canvas["id"],
+        title="Different note",
+        text="Different untrusted evidence.",
+    )
+    payload = {
+        "canvasId": canvas["id"],
+        "instruction": "What evidence is available?",
+        "selectedNodeIds": [first["id"]],
+        "idempotencyKey": "terra-api-draft-001",
+    }
+    route = f"{api_prefix}/workspaces/{canvas['workspaceId']}/agent-executions/drafts"
+    started = await client.post(route, json=payload)
+    assert started.status_code == 201, started.text
+    first_result = started.json()
+    assert first_result["insufficientEvidence"] is True
+    assert first_result["citations"] == []
+    assert first_result["duplicate"] is False
+
+    duplicate = await client.post(route, json=payload)
+    assert duplicate.status_code == 201, duplicate.text
+    assert duplicate.json()["executionId"] == first_result["executionId"]
+    assert duplicate.json()["duplicate"] is True
+
+    conflict = await client.post(
+        route,
+        json={**payload, "selectedNodeIds": [second["id"]]},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["code"] == "idempotency_conflict"

@@ -2,6 +2,31 @@
 
 Last updated: 2026-07-23 (America/Chicago)
 
+## Milestone 4.2 Terra checkpoint 2 — server-owned start and authoritative cancel API
+
+- Starting local and remote SHA: `7dd816a15a7a3f995b41c54ea0f0900f4ad15764`.
+- Added one narrow authenticated start route at
+  `/workspaces/{workspace_id}/agent-executions/drafts` and one narrow authenticated cancellation
+  route at `/workspaces/{workspace_id}/agent-executions/{execution_id}/cancel`.
+- The start path derives user/workspace scope from server authentication, validates one owned canvas
+  and its selected nodes, captures a bounded exact context package, creates the one R1 draft grant
+  and user-start approval, and invokes the checkpoint-1 bridge. Client input cannot provide a grant,
+  approval, lifecycle state, context digest, or policy decision.
+- Start idempotency is scoped to the user/workspace/canvas/key. Exact redelivery returns the stored
+  result; a different instruction is rejected by the existing request fingerprint and a different
+  node selection is rejected before execution. Cancellation derives an idempotent server event ID
+  and calls only the existing authoritative Sol lifecycle controller.
+- Corrected a confirmed repository integration mismatch: new canvas/node records begin at revision
+  `0`, so immutable scopes now allow that exact revision. The resolver still validates each resource
+  kind and exact version; document versions cannot be substituted.
+- Focused validation: `apps/api/tests/test_agent_api.py` — `3 passed`; format, lint, and focused
+  mypy passed for the preparation service and API modules.
+- Not started: read-only UI, broad final validation, Terra handoff, or Luna. No worker, queue,
+  scheduler, delegation, new provider, external AI/embedding call, durable workspace mutation, or
+  Milestone 3.75 integration was added.
+- Exact next Terra unit: add the smallest read-only execution panel using the inspection/start
+  endpoints and focused frontend coverage, then run the full Terra gate and hand off to Luna.
+
 ## Milestone 4.2 Terra checkpoint 1 — immutable grounded-draft application bridge
 
 - Terra started from the clean, normally pushed Sol safety-core SHA

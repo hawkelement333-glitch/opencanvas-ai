@@ -6,9 +6,10 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from opencanvas_api.core.config import Settings
@@ -19,26 +20,50 @@ from opencanvas_api.db.models import (
     AIExecutionNode,
     AIRequest,
     AIResponse,
+    Canvas,
+    CanvasDocumentNode,
+    CanvasNode,
     Citation,
+    Document,
+    DocumentChunk,
+    DocumentVersion,
     UsageRecord,
+    Workspace,
 )
 from opencanvas_api.services.agents.contracts import (
+    AgentRole,
+    ApprovalDecision,
+    ApprovalRecord,
+    Capability,
+    CapabilityGrant,
+    ContextResource,
+    ContextSnapshot,
+    ExecutionRecord,
     ExecutionStateRecord,
     ExecutionStatus,
+    PlanAction,
+    PlanSnapshot,
     ResourceKind,
+    ResourceScope,
+    RiskClass,
+    contract_digest,
 )
 from opencanvas_api.services.agents.execution import (
     AuthorityPreflightDenied,
+    ControlledAction,
     ControlledExecutionLifecycle,
     ControlledExecutionRequest,
     ExecutionAuthorityPreflight,
     ExecutionRequestRegistry,
     ImmutableContextDenied,
     ImmutableSelectedContextResolver,
+    ResolvedContextResource,
     ResolvedSelectedContext,
     ResultAcceptanceRequest,
+    resolved_resource_digest,
 )
 from opencanvas_api.services.agents.persistence import (
+    AgentPersistenceNotFound,
     AgentStateTransitionError,
     ControlledAgentRepository,
 )
@@ -92,6 +117,12 @@ class ControlledDraftResult:
     duplicate: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedControlledDraft:
+    request: ControlledExecutionRequest
+    created: bool
+
+
 class ControlledGroundedDraftService:
     """Synchronous Terra bridge for one already-authorized controlled draft.
 
@@ -113,6 +144,350 @@ class ControlledGroundedDraftService:
         self.settings = settings
         self.repository = ControlledAgentRepository(session)
         self._now = now or (lambda: datetime.now(UTC))
+
+    async def prepare(
+        self,
+        *,
+        authenticated_user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        canvas_id: uuid.UUID,
+        selected_node_ids: list[uuid.UUID],
+        instruction: str,
+        idempotency_key: str,
+        correlation_id: str,
+        client_request_id: str | None = None,
+    ) -> PreparedControlledDraft:
+        """Create or reload the one server-owned authority package for a user request."""
+
+        execution_id = uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"opencanvas:controlled-draft:{authenticated_user_id}:{workspace_id}:"
+            f"{canvas_id}:{idempotency_key}",
+        )
+        try:
+            inspection = await self.repository.inspect_execution(
+                user_id=authenticated_user_id,
+                workspace_id=workspace_id,
+                execution_id=execution_id,
+                limit=100,
+                offset=0,
+            )
+        except AgentPersistenceNotFound:
+            inspection = None
+        if inspection is not None:
+            stored_context = self.repository._load_contract(
+                ContextSnapshot,
+                inspection.context.payload,
+                inspection.context.payload_digest,
+            )
+            stored_node_ids = tuple(
+                resource.scope.resource_id
+                for resource in stored_context.resources
+                if resource.scope.kind is ResourceKind.NODE
+            )
+            if stored_node_ids != tuple(selected_node_ids):
+                raise ControlledDraftError(
+                    "idempotency_conflict",
+                    "The idempotency key was already used for a different request.",
+                )
+            stored_grant = next(
+                (row for row in inspection.grants if row.grant_id == inspection.execution.grant_id),
+                None,
+            )
+            stored_approval = next(
+                (
+                    row
+                    for row in inspection.approvals
+                    if row.grant_id == inspection.execution.grant_id
+                ),
+                None,
+            )
+            if stored_grant is None or stored_approval is None:
+                raise ControlledDraftError(
+                    "agent_authorization_denied", "The controlled execution is not available."
+                )
+            return PreparedControlledDraft(
+                request=ControlledExecutionRequest(
+                    user_id=authenticated_user_id,
+                    workspace_id=workspace_id,
+                    canvas_id=canvas_id,
+                    execution_id=execution_id,
+                    context_snapshot_id=inspection.context.snapshot_id,
+                    expected_context_digest=inspection.context.payload_digest,
+                    plan_id=inspection.plan.plan_id,
+                    expected_plan_digest=inspection.plan.payload_digest,
+                    action=ControlledAction.GENERATE_GROUNDED_DRAFT,
+                    grant_id=stored_grant.grant_id,
+                    approval_id=stored_approval.approval_id,
+                    idempotency_key=idempotency_key,
+                    instruction=instruction,
+                    client_request_id=client_request_id,
+                    correlation_id=correlation_id,
+                ),
+                created=False,
+            )
+
+        now = self._now()
+        canvas = await self.session.scalar(
+            select(Canvas)
+            .join(Workspace, Workspace.id == Canvas.workspace_id)
+            .where(
+                Canvas.id == canvas_id,
+                Canvas.workspace_id == workspace_id,
+                Workspace.owner_id == authenticated_user_id,
+                Workspace.deleted_at.is_(None),
+                Workspace.lifecycle_state != "deleted",
+            )
+        )
+        if canvas is None:
+            raise ControlledDraftError("canvas_not_found", "Canvas not found.", status_code=404)
+        nodes = tuple(
+            (
+                await self.session.scalars(
+                    select(CanvasNode).where(
+                        CanvasNode.canvas_id == canvas_id,
+                        CanvasNode.id.in_(selected_node_ids),
+                    )
+                )
+            ).all()
+        )
+        by_id = {node.id: node for node in nodes}
+        if len(by_id) != len(selected_node_ids):
+            raise ControlledDraftError(
+                "invalid_selected_nodes",
+                "Every selected node must belong to this canvas.",
+                status_code=400,
+            )
+        ordered_nodes = [by_id[node_id] for node_id in selected_node_ids]
+        resources = [
+            ResolvedContextResource(
+                scope=ResourceScope(
+                    kind=ResourceKind.CANVAS, resource_id=canvas.id, version=canvas.revision
+                ),
+                canvas_id=canvas.id,
+                title=canvas.name,
+                content=f"Canvas revision {canvas.revision}",
+            )
+        ]
+        for node in ordered_nodes:
+            resources.append(
+                ResolvedContextResource(
+                    scope=ResourceScope(
+                        kind=ResourceKind.NODE, resource_id=node.id, version=node.revision
+                    ),
+                    canvas_id=canvas.id,
+                    title=node.title,
+                    content=node.text,
+                )
+            )
+        document_node_ids = [node.id for node in ordered_nodes if node.type == "document"]
+        references = (
+            tuple(
+                (
+                    await self.session.scalars(
+                        select(CanvasDocumentNode).where(
+                            CanvasDocumentNode.canvas_id == canvas_id,
+                            CanvasDocumentNode.node_id.in_(document_node_ids),
+                        )
+                    )
+                ).all()
+            )
+            if document_node_ids
+            else ()
+        )
+        if len(references) != len(document_node_ids):
+            raise ControlledDraftError(
+                "document_reference_missing",
+                "A selected document is missing its stored-document reference.",
+            )
+        remaining_chunks = self.settings.document_retrieval_top_k
+        for reference in references:
+            document = await self.session.scalar(
+                select(Document).where(
+                    Document.id == reference.document_id,
+                    Document.canvas_id == canvas_id,
+                    Document.status == "ready",
+                    Document.deleted_at.is_(None),
+                )
+            )
+            if document is None:
+                raise ControlledDraftError(
+                    "documents_not_ready",
+                    "Selected documents must finish processing successfully before querying.",
+                )
+            version = await self.session.scalar(
+                select(DocumentVersion).where(
+                    DocumentVersion.document_id == document.id,
+                    DocumentVersion.version == document.current_version,
+                    DocumentVersion.status == "ready",
+                    DocumentVersion.deleted_at.is_(None),
+                )
+            )
+            if version is None or not version.extracted_text:
+                raise ControlledDraftError(
+                    "immutable_context_unavailable", "The selected evidence is unavailable."
+                )
+            resources.append(
+                ResolvedContextResource(
+                    scope=ResourceScope(
+                        kind=ResourceKind.DOCUMENT_VERSION,
+                        resource_id=version.id,
+                        version=version.version,
+                    ),
+                    canvas_id=canvas.id,
+                    title=version.file_name,
+                    content=version.extracted_text,
+                    document_id=document.id,
+                    document_version=version.version,
+                )
+            )
+            if remaining_chunks:
+                chunks = tuple(
+                    (
+                        await self.session.scalars(
+                            select(DocumentChunk)
+                            .where(
+                                DocumentChunk.document_id == document.id,
+                                DocumentChunk.document_version == version.version,
+                            )
+                            .order_by(DocumentChunk.chunk_index)
+                            .limit(remaining_chunks)
+                        )
+                    ).all()
+                )
+                remaining_chunks -= len(chunks)
+                resources.extend(
+                    ResolvedContextResource(
+                        scope=ResourceScope(
+                            kind=ResourceKind.CHUNK,
+                            resource_id=chunk.id,
+                            version=chunk.document_version,
+                        ),
+                        canvas_id=canvas.id,
+                        title=chunk.heading or f"Chunk {chunk.chunk_index + 1}",
+                        content=chunk.content,
+                        document_id=document.id,
+                        document_version=chunk.document_version,
+                    )
+                    for chunk in chunks
+                )
+        context = ContextSnapshot(
+            snapshot_id=uuid.uuid4(),
+            user_id=authenticated_user_id,
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+            captured_at=now,
+            resources=tuple(
+                ContextResource(scope=item.scope, content_digest=resolved_resource_digest(item))
+                for item in resources
+            ),
+        )
+        action_scope = ResourceScope(kind=ResourceKind.CANVAS, resource_id=canvas_id)
+        plan = PlanSnapshot(
+            plan_id=uuid.uuid4(),
+            user_id=authenticated_user_id,
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+            role=AgentRole.DRAFTING_ASSISTANT,
+            created_at=now,
+            actions=(
+                PlanAction(
+                    action_id=uuid.uuid4(),
+                    ordinal=0,
+                    capability=Capability.DRAFT_ANSWER_CREATE,
+                    resource=action_scope,
+                    risk_class=RiskClass.R1_DRAFT,
+                ),
+            ),
+        )
+        context_digest = contract_digest(context)
+        plan_digest = contract_digest(plan)
+        approval_id = uuid.uuid4()
+        grant = CapabilityGrant(
+            grant_id=uuid.uuid4(),
+            policy_version="controlled-agent-policy-v1",
+            issuing_service="controlled-grounded-draft-service",
+            user_id=authenticated_user_id,
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+            role=AgentRole.DRAFTING_ASSISTANT,
+            capabilities=(Capability.DRAFT_ANSWER_CREATE,),
+            resources=(action_scope,),
+            context_digest=context_digest,
+            plan_digest=plan_digest,
+            issued_at=now,
+            expires_at=now + timedelta(minutes=5),
+            approval_required=True,
+            approval_id=approval_id,
+        )
+        approval = ApprovalRecord(
+            approval_id=approval_id,
+            session_id=uuid.uuid4(),
+            policy_version=grant.policy_version,
+            user_id=authenticated_user_id,
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+            grant_id=grant.grant_id,
+            decision=ApprovalDecision.APPROVED,
+            capabilities=grant.capabilities,
+            resources=grant.resources,
+            context_digest=context_digest,
+            plan_digest=plan_digest,
+            decided_at=now,
+            expires_at=grant.expires_at,
+        )
+        execution = ExecutionRecord(
+            execution_id=execution_id,
+            user_id=authenticated_user_id,
+            workspace_id=workspace_id,
+            role=AgentRole.DRAFTING_ASSISTANT,
+            context_snapshot_id=context.snapshot_id,
+            context_digest=context_digest,
+            plan_id=plan.plan_id,
+            plan_digest=plan_digest,
+            grant_id=grant.grant_id,
+            created_at=now,
+        )
+        try:
+            await self.repository.append_bundle(
+                execution=execution,
+                context=context,
+                plan=plan,
+                grant=grant,
+                approval=approval,
+            )
+        except IntegrityError:
+            await self.session.rollback()
+            return await self.prepare(
+                authenticated_user_id=authenticated_user_id,
+                workspace_id=workspace_id,
+                canvas_id=canvas_id,
+                selected_node_ids=selected_node_ids,
+                instruction=instruction,
+                idempotency_key=idempotency_key,
+                correlation_id=correlation_id,
+                client_request_id=client_request_id,
+            )
+        return PreparedControlledDraft(
+            request=ControlledExecutionRequest(
+                user_id=authenticated_user_id,
+                workspace_id=workspace_id,
+                canvas_id=canvas_id,
+                execution_id=execution_id,
+                context_snapshot_id=context.snapshot_id,
+                expected_context_digest=context_digest,
+                plan_id=plan.plan_id,
+                expected_plan_digest=plan_digest,
+                action=ControlledAction.GENERATE_GROUNDED_DRAFT,
+                grant_id=grant.grant_id,
+                approval_id=approval_id,
+                idempotency_key=idempotency_key,
+                instruction=instruction,
+                client_request_id=client_request_id,
+                correlation_id=correlation_id,
+            ),
+            created=True,
+        )
 
     async def execute(
         self,
