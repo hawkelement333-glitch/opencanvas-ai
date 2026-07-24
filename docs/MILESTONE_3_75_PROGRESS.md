@@ -1,6 +1,6 @@
 # Milestone 3.75 Visual Redesign Progress Ledger
 
-Last updated: 2026-07-21 (America/Chicago)
+Last updated: 2026-07-23 (America/Chicago)
 
 ## Repository state
 
@@ -57,10 +57,9 @@ Last updated: 2026-07-21 (America/Chicago)
 
 ## Current phase
 
-- `READY FOR LUNA FINALIZATION`
-- Commit and push this recovered Terra checkpoint, then limit Luna to final copy/documentation,
-  full-suite/build confirmation when practical, and closing the remaining browser-capture evidence
-  limitation. Do not begin new implementation surfaces.
+- `LUNA FINALIZATION COMPLETE — DOCUMENTED VALIDATION LIMITATION`
+- The responsive evidence-surface checkpoint is pushed and validated. No additional implementation
+  surface is permitted in this milestone; stop before Milestone 4.
 
 ## Files changed in current checkpoint
 
@@ -87,9 +86,8 @@ Last updated: 2026-07-21 (America/Chicago)
 - Prior checkpoints were pushed normally to `origin/milestone-3.75-visual-redesign`; the recovery
   session started with local and remote HEAD matching at
   `ff34f22b6264f9a0e12b8fa5d8e66dcd2e7074a4`.
-- The recovered Terra checkpoint is to be pushed normally immediately after this ledger is
-  committed. The completion report records the exact final local and remote SHA because a commit
-  cannot contain its own hash.
+- The recovered Terra checkpoint `8b6fd9d8e4bd52ee16de50ca08fd90686e46e32a` is pushed normally and
+  was the local and remote branch tip before this Luna documentation checkpoint.
 
 ## Tests run after current edits
 
@@ -180,16 +178,37 @@ Recovered Terra checkpoint validation (2026-07-23):
 
 ## Work in progress
 
-- No partial source or account implementation remains in the Terra checkpoint.
-- Create and push the bounded recovery commit, verify local/remote equality and the protected tag,
-  then stop.
+- No partial source or account implementation remains.
+- Only the final Luna ledger and completion report are being committed; no further UI or runtime
+  work is planned in Milestone 3.75.
 
 ## Next exact implementation step
 
-Luna should run the full frontend test suite and production build if the environment permits, perform
-final copy and documentation cleanup only, optionally recapture the 390-pixel source viewer to close
-the in-app capture limitation, and prepare the Milestone 3.75 completion report. Do not add another
-UI surface, runtime behavior, or Milestone 4 code.
+After this documentation checkpoint, verify local/remote SHA equality and the protected tag, then
+stop. Any future work belongs to a separately authorized milestone; do not add another UI surface,
+runtime behavior, or Milestone 4 code here.
+
+## Luna finalization validation (2026-07-23)
+
+- Repository state: passed. Branch is `milestone-3.75-visual-redesign`; local and remote HEAD were
+  `8b6fd9d8e4bd52ee16de50ca08fd90686e46e32a` before this documentation checkpoint; the protected
+  tag still peels to `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- Full frontend suite through the repository wrapper: blocked before test execution by the existing
+  pnpm ignored-build-script policy for `sharp@0.34.5` and `unrs-resolver@1.12.2`.
+- Full frontend suite through the installed web runner: passed, `9` test files and `31` tests.
+- Production build through the repository wrapper: blocked by the same unchanged pnpm policy.
+- Production build through installed Next.js: passed; Next.js `16.2.10` compiled, typechecked,
+  generated all `6` static pages, and completed route optimization.
+- Full web ESLint: passed with `--max-warnings=0`.
+- Strict web TypeScript: passed with `tsc --noEmit`.
+- Repository hygiene: passed for `187` source files.
+- `git diff --check`: passed.
+- Secret-pattern scan and prohibited-scope audit: passed; no secrets or runtime/agent/provider/
+  worker/queue/scheduler/production changes were introduced.
+- The browser capture limitation remains documented above: at narrow explicit viewport overrides,
+  the in-app browser can crop the outer surface even when DOM geometry, overflow, reachability,
+  accepted captures, and focused tests pass. No code change was made to work around that tool
+  limitation.
 
 ## Resume commands
 
