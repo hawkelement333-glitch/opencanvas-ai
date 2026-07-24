@@ -1871,6 +1871,175 @@ class ControlledAgentReversibleWriteRollbackApproval(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ControlledAgentReversibleWriteRollbackResult(Base):
+    """Immutable authoritative result for one successfully applied note rollback."""
+
+    __tablename__ = "controlled_agent_reversible_write_rollback_results"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["rollback_approval_id"],
+            ["controlled_agent_reversible_write_rollback_approvals.rollback_approval_id"],
+            name="fk_agent_rollback_result_approval",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            [
+                "proposal_id",
+                "execution_id",
+                "user_id",
+                "workspace_id",
+                "canvas_id",
+                "forward_action",
+            ],
+            [
+                "controlled_agent_reversible_write_proposals.proposal_id",
+                "controlled_agent_reversible_write_proposals.execution_id",
+                "controlled_agent_reversible_write_proposals.user_id",
+                "controlled_agent_reversible_write_proposals.workspace_id",
+                "controlled_agent_reversible_write_proposals.canvas_id",
+                "controlled_agent_reversible_write_proposals.action",
+            ],
+            name="fk_agent_rollback_result_proposal_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            [
+                "effect_id",
+                "execution_id",
+                "proposal_id",
+                "user_id",
+                "workspace_id",
+                "canvas_id",
+                "forward_action",
+                "note_id",
+            ],
+            [
+                "controlled_agent_reversible_write_effects.effect_id",
+                "controlled_agent_reversible_write_effects.execution_id",
+                "controlled_agent_reversible_write_effects.proposal_id",
+                "controlled_agent_reversible_write_effects.user_id",
+                "controlled_agent_reversible_write_effects.workspace_id",
+                "controlled_agent_reversible_write_effects.canvas_id",
+                "controlled_agent_reversible_write_effects.action",
+                "controlled_agent_reversible_write_effects.resulting_resource_id",
+            ],
+            name="fk_agent_rollback_result_effect_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["note_id", "canvas_id"],
+            ["nodes.id", "nodes.canvas_id"],
+            name="fk_agent_rollback_result_note_canvas",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("rollback_approval_id", name="uq_agent_rollback_result_approval"),
+        UniqueConstraint("effect_id", name="uq_agent_rollback_result_effect"),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "scoped_idempotency_key",
+            name="uq_agent_rollback_result_idempotency",
+        ),
+        CheckConstraint(
+            "forward_action IN ('note.create', 'note.update')",
+            name="ck_agent_rollback_result_forward_action",
+        ),
+        CheckConstraint(
+            "rollback_action IN ('note.create.rollback', 'note.update.rollback')",
+            name="ck_agent_rollback_result_action",
+        ),
+        CheckConstraint(
+            "rollback_target_kind IN ('authoritative_absence', 'exact_prior_state')",
+            name="ck_agent_rollback_result_target_kind",
+        ),
+        CheckConstraint(
+            "(forward_action = 'note.create' "
+            "AND rollback_action = 'note.create.rollback' "
+            "AND rollback_target_kind = 'authoritative_absence' "
+            "AND resulting_revision IS NULL) OR "
+            "(forward_action = 'note.update' "
+            "AND rollback_action = 'note.update.rollback' "
+            "AND rollback_target_kind = 'exact_prior_state' "
+            "AND resulting_revision > 0)",
+            name="ck_agent_rollback_result_action_shape",
+        ),
+        CheckConstraint(
+            "expected_pre_rollback_revision > 0",
+            name="ck_agent_rollback_result_expected_revision_positive",
+        ),
+        CheckConstraint(
+            "length(scoped_idempotency_key) > 0",
+            name="ck_agent_rollback_result_idempotency_nonempty",
+        ),
+        CheckConstraint(
+            "length(rollback_approval_digest) = 64 "
+            "AND rollback_approval_digest NOT GLOB '*[^0-9a-f]*'",
+            name="ck_agent_rollback_result_approval_digest",
+        ).ddl_if(dialect="sqlite"),
+        CheckConstraint(
+            "rollback_approval_digest ~ '^[0-9a-f]{64}$'",
+            name="ck_agent_rollback_result_approval_digest",
+        ).ddl_if(dialect="postgresql"),
+        CheckConstraint(
+            "length(pre_rollback_state_digest) = 64 "
+            "AND pre_rollback_state_digest NOT GLOB '*[^0-9a-f]*'",
+            name="ck_agent_rollback_result_pre_rollback_digest",
+        ).ddl_if(dialect="sqlite"),
+        CheckConstraint(
+            "pre_rollback_state_digest ~ '^[0-9a-f]{64}$'",
+            name="ck_agent_rollback_result_pre_rollback_digest",
+        ).ddl_if(dialect="postgresql"),
+        CheckConstraint(
+            "length(post_rollback_target_digest) = 64 "
+            "AND post_rollback_target_digest NOT GLOB '*[^0-9a-f]*'",
+            name="ck_agent_rollback_result_post_rollback_digest",
+        ).ddl_if(dialect="sqlite"),
+        CheckConstraint(
+            "post_rollback_target_digest ~ '^[0-9a-f]{64}$'",
+            name="ck_agent_rollback_result_post_rollback_digest",
+        ).ddl_if(dialect="postgresql"),
+        Index("ix_agent_rollback_result_approval", "rollback_approval_id"),
+        Index("ix_agent_rollback_result_effect", "effect_id"),
+        Index(
+            "ix_agent_rollback_result_idempotency",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "scoped_idempotency_key",
+        ),
+        Index(
+            "ix_agent_rollback_result_scope",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "created_at",
+        ),
+        Index("ix_agent_rollback_result_note", "note_id"),
+    )
+
+    rollback_result_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    rollback_approval_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    note_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    proposal_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    effect_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    forward_action: Mapped[str] = mapped_column(String(32), nullable=False)
+    rollback_action: Mapped[str] = mapped_column(String(32), nullable=False)
+    rollback_target_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    rollback_approval_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    scoped_idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    expected_pre_rollback_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    resulting_revision: Mapped[int | None] = mapped_column(Integer)
+    pre_rollback_state_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    post_rollback_target_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 CONTROLLED_AGENT_IMMUTABLE_MODELS = (
     ControlledAgentExecution,
     ControlledAgentExecutionState,
@@ -1888,6 +2057,7 @@ CONTROLLED_AGENT_IMMUTABLE_MODELS = (
     ControlledAgentReversibleWriteEffect,
     ControlledAgentReversibleWriteRollbackEvidence,
     ControlledAgentReversibleWriteRollbackApproval,
+    ControlledAgentReversibleWriteRollbackResult,
 )
 
 
