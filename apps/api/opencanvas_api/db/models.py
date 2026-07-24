@@ -1656,6 +1656,14 @@ class ControlledAgentReversibleWriteRollbackEvidence(Base):
             "post_effect_revision = pre_effect_revision + 1",
             name="ck_agent_rollback_evidence_revision_order",
         ),
+        CheckConstraint(
+            "json_type(before_state) = 'object'",
+            name="ck_agent_rollback_evidence_before_state_object",
+        ).ddl_if(dialect="sqlite"),
+        CheckConstraint(
+            "json_typeof(before_state) = 'object'",
+            name="ck_agent_rollback_evidence_before_state_object",
+        ).ddl_if(dialect="postgresql"),
         Index("ix_agent_rollback_evidence_note", "note_id", "post_effect_revision"),
         Index(
             "ix_agent_rollback_evidence_scope",

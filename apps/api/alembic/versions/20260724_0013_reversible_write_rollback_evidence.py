@@ -7,6 +7,7 @@ Revises: 20260724_0012
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "20260724_0013"
@@ -20,6 +21,11 @@ POSTGRES_FUNCTION = "reject_agent_rollback_evidence_mutation"
 
 
 def upgrade() -> None:
+    before_state_object_check = (
+        "json_type(before_state) = 'object'"
+        if op.get_bind().dialect.name == "sqlite"
+        else "json_typeof(before_state) = 'object'"
+    )
     op.create_index(
         "ux_agent_reversible_effect_rollback_scope",
         EFFECT_TABLE,
@@ -56,6 +62,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "post_effect_revision = pre_effect_revision + 1",
             name="ck_agent_rollback_evidence_revision_order",
+        ),
+        sa.CheckConstraint(
+            before_state_object_check,
+            name="ck_agent_rollback_evidence_before_state_object",
         ),
         sa.ForeignKeyConstraint(
             [
