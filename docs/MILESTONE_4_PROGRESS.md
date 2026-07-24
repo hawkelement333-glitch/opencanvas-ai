@@ -2,6 +2,34 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 rollback-authority migration — local only
+
+- Starting SHA: `783a55a6f66346d2e12d6d5444c8257f834da93d`.
+- Migration implementation SHA: `4c8f5c4b30d0e7b87bd5cb57b34fa4d19323f398`.
+- Branch: `milestone-4.3-reversible-writes-local`; upstream: none.
+- Completed: migration `20260724_0014_reversible_write_rollback_authority` with down revision
+  `20260724_0013`. It creates the immutable rollback-approval table before the immutable
+  rollback-result table, matching the completed ORM columns, types, nullability, composite/single
+  foreign keys, named checks, unique constraints, and lookup indexes.
+- Immutability: SQLite UPDATE/DELETE rejection triggers and migration-specific PostgreSQL trigger
+  functions plus combined mutation-blocking triggers are created for both tables. Downgrade removes
+  result protections/table, then approval protections/table, without touching `0013` or earlier
+  objects.
+- Validation: Python compilation and import, revision/down-revision inspection, Alembic sole-head
+  validation (`20260724_0014`), static column/constraint/index comparison against both ORM models,
+  SQLite/PostgreSQL trigger-definition inspection, focused Ruff format/lint, strict mypy, diff and
+  whitespace checks passed.
+- Not run: migration execution cycle, persistence tests, PostgreSQL runtime, frontend and unrelated
+  backend suites, and network tools.
+- Scope confirmation: no service, route, review/execution behavior, frontend, worker, queue,
+  scheduler, provider, Milestone 4.4, or Milestone 5 work was added.
+- Remote-freeze proof: no upstream, push, pull, fetch, sync, remote branch/tag change, publication,
+  deployment, or GitHub write occurred. `main` is unchanged and `competition-demo-v1` remains
+  `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- Exact continuation: rollback-authority SQLite persistence and migration-cycle tests only—upgrade
+  `0013` to `0014`, inspect schema and immutable triggers, downgrade/re-upgrade, and verify valid
+  and rejected approval/result rows. Do not implement rollback review or execution.
+
 ## Milestone 4.3 rollback-evidence transaction integration — local only
 
 - Starting SHA: `5281d85ab60c4036d1ed8200bd738a8530ae839e`.

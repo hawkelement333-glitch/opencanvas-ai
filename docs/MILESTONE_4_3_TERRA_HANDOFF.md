@@ -1,5 +1,48 @@
 # Milestone 4.3 Terra Handoff
 
+## Rollback-authority migration complete locally
+
+- Starting SHA: `783a55a6f66346d2e12d6d5444c8257f834da93d`.
+- Migration commit: `4c8f5c4b30d0e7b87bd5cb57b34fa4d19323f398`
+  (`Add rollback authority migration`).
+- Branch: `milestone-4.3-reversible-writes-local`; upstream: none; no remote write occurred.
+- Migration: `20260724_0014_reversible_write_rollback_authority`, revising `20260724_0013`.
+
+The migration creates `controlled_agent_reversible_write_rollback_approvals` first, followed by
+`controlled_agent_reversible_write_rollback_results`. It mirrors the completed ORM contracts:
+scope-bound proposal/effect/note/grant relationships for approvals; approval/proposal/effect/note
+relationships for results; closed note-create removal and note-update restoration actions; digest,
+revision, idempotency, time, and successful-result uniqueness constraints; and all declared lookup
+indexes, including Trace correlation on results.
+
+Both tables are append-only. SQLite receives named `BEFORE UPDATE` and `BEFORE DELETE` rejection
+triggers. PostgreSQL receives migration-specific rejection functions and combined UPDATE/DELETE
+triggers. Downgrade removes result protections/table first, then approval protections/table, leaving
+`20260724_0013` and earlier objects untouched.
+
+Static validation at the migration checkpoint:
+
+- Python compilation, module import, down-revision inspection, and Alembic sole-head validation:
+  passed (`20260724_0014`).
+- Static model-to-migration comparison of both table column lists, named constraints, and indexes:
+  passed.
+- SQLite and PostgreSQL trigger-definition inspection: passed.
+- Focused Ruff format/lint and strict mypy: passed.
+- `git diff --check`, whitespace, secret-like-material, and prohibited-scope checks: passed.
+- PostgreSQL runtime, Alembic upgrade/downgrade/re-upgrade cycle, persistence tests, frontend tests,
+  unrelated backend tests, and network tools: not run.
+
+`main` remains unchanged and `competition-demo-v1` remains
+`b45b7763b65861f9dfb3be7edf9b5eb271950917`. No push, pull, fetch, upstream change, tag operation,
+publication, deployment, or GitHub write occurred.
+
+### Exact next checkpoint
+
+Run only rollback-authority SQLite persistence and migration-cycle tests: upgrade from `0013` to
+`0014`, inspect both tables/constraints/indexes/triggers, downgrade to `0013`, re-upgrade, then test
+valid and rejected approval/result persistence plus append-only behavior. Do not implement rollback
+review or execution, routes, frontend work, Milestone 4.4, or Milestone 5.
+
 ## Rollback evidence bound to atomic note updates locally
 
 - Starting SHA: `5281d85ab60c4036d1ed8200bd738a8530ae839e`.
