@@ -2,6 +2,16 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 note-create digest compatibility — local only
+
+- Starting SHA: `12faee145c03d1b776fd0941e7d1ad4caa2ff1ea`; implementation SHA:
+  `f4fe90ac0b73d46f4c6d089ee2d5a06d4671f6ef`.
+- Create effects verify only legacy `_note_digest` (ID/revision/title/text); update effects verify
+  only immutable rollback evidence canonical state. No fallback or backfill is permitted.
+- No migration: the sole create-effect writer already uses the legacy helper consistently.
+- Focused persistence: `63 passed`; Ruff, mypy, and diff checks passed. PostgreSQL/network not run.
+- Next: server-authoritative rollback eligibility review only; no approval issuance or execution.
+
 ## Milestone 4.3 rollback-specific capability contract — local only
 
 - Starting SHA: `8c0fc5b02ca3953065ecacde830c52122ed89734`; implementation SHA:

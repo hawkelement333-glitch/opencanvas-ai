@@ -1,5 +1,11 @@
 # Milestone 4.3 Sol Handoff
 
+## Create-effect digest compatibility
+
+Create effects use the legacy `_note_digest(note)` contract (note identity, revision, title, text).
+Update rollback eligibility instead uses exact immutable evidence `{title,text}` digests. These
+representations are intentionally not interchangeable and verification must dispatch by forward action.
+
 ## Rollback-specific authority contract
 
 Local checkpoint `2cbc34f4e088a0fdd186db9a0e3b2759d5aaa039` adds two closed capabilities:

@@ -1,5 +1,21 @@
 # Milestone 4.3 Terra Handoff
 
+## Note-create effect digest contract complete locally
+
+- Starting SHA: `12faee145c03d1b776fd0941e7d1ad4caa2ff1ea`.
+- Compatibility commit: `f4fe90ac0b73d46f4c6d089ee2d5a06d4671f6ef`.
+
+`verify_completed_effect_state` is a fail-closed internal helper. `note.create` recomputes the
+existing `_note_digest` from exact persisted note ID, revision, title, and text. `note.update`
+requires exact rollback evidence and validates only canonical evidence state/digests; neither path
+falls back to the other. No migration or historical backfill was needed: all create-effect writers
+use the same existing helper. Focused persistence tests: `63 passed`; Ruff and strict mypy passed.
+
+### Exact next checkpoint
+
+Implement server-authoritative rollback eligibility review only, using this verifier. Do not issue
+approval or execute rollback.
+
 ## Rollback-specific capability contract complete locally
 
 - Starting SHA: `8c0fc5b02ca3953065ecacde830c52122ed89734`.
