@@ -2,7 +2,39 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
-## Milestone 4.3 backend rollback — issuance checkpoint in progress
+## Milestone 4.3 rollback approval issuance validated — local only
+
+- Starting SHA: `70be72c0b6216aed0245bc6fcea37678c430ef14`.
+- Local validation checkpoints:
+  - `290a75c` — scope, grant-scope, authentication, ownership, and CSRF boundaries;
+  - `42aebec` — fresh note/evidence/effect revalidation and capability/grant denial;
+  - `e9d680a` — source-authority non-mutation, safe response allowlist, and request-authority
+    rejection.
+- The issuer permits only one fresh, server-derived approval. Cross-user/workspace/canvas requests,
+  wrong grant bindings, forward or cross-rollback capabilities, expired/revoked grants, changed or
+  missing notes/evidence, invalid completed-effect state, and an existing rollback result all fail
+  closed without creating another approval or rollback result.
+- Authentication and CSRF coverage uses the existing real-session fixtures. The POST route rejects
+  missing/invalid CSRF, unauthenticated access, inaccessible workspace/canvas scope, and unknown
+  authority-bearing request fields. Its successful response is an explicit allowlist and omits
+  prior state, grant material/digests, policy internals, stack traces, SQL, and database details.
+- Issuance does not mutate the note, proposal, effect, rollback evidence, or grant; does not consume
+  the forward approval; and does not emit false rollback-completion audit or Trace evidence.
+- Validation: the affected reversible-write, persistence, policy, agent API, ownership, and CSRF
+  group reported `161 passed` on SQLite. Focused Ruff, strict mypy, compilation/imports, mapper
+  validation, and sole Alembic head `20260724_0014` passed.
+- No production defect was found by these remaining validation groups. The earlier expired-replay
+  defect remains fixed at `70be72c`: an expired approval cannot replay as an exact duplicate.
+- Not run: rollback execution, frontend, PostgreSQL runtime, unrelated full suites, or network tools.
+  No rollback operation was implemented or invoked by application code.
+- Exact next checkpoint: implement the separately authorized atomic rollback transaction. It must
+  revalidate the approval/effect/evidence/current note state, compare-and-set the exact inverse
+  mutation, and persist one immutable rollback result plus truthful audit/Trace evidence. Do not
+  begin frontend, Milestone 4.4, or Milestone 5.
+
+## Milestone 4.3 backend rollback — issuance implementation checkpoint (historical)
+
+This implementation-only status is superseded by the validated checkpoint above.
 
 - Starting SHA: `d2e8eea947fcd6b25cd224979d5732dd1412c154`; local issuance SHA:
   `7bfccd69e6a4e61178b5a1154f8283c9704313e3`.

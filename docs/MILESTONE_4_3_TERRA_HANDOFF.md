@@ -1,6 +1,38 @@
 # Milestone 4.3 Terra Handoff
 
-## Backend rollback issuance checkpoint in progress
+## Rollback approval issuance validated locally
+
+- Starting SHA: `70be72c0b6216aed0245bc6fcea37678c430ef14`.
+- Local checkpoints: `290a75c` (scope/authentication/CSRF), `42aebec`
+  (revalidation/capability/grant denial), and `e9d680a` (non-mutation/response/request authority).
+
+The server-authoritative issuer is now validated across successful create/update issuance, exact
+duplicate replay, authoritative-state replay conflict, expired replay, cross-user/workspace/canvas
+scope denial, mismatched grant authority, real-session authentication and CSRF, fresh note/evidence
+verification, closed rollback capabilities, expired/revoked grants, invalid effect state, and a
+pre-existing successful rollback result.
+
+Request authority remains limited to the path-owned workspace/canvas/effect and one scoped
+idempotency key. Unknown fields cannot override revision, action, target, evidence, capability,
+grant, proposal, execution, ownership, digest, or expiry. Successful responses expose only the
+declared response schema. Failed or successful issuance does not mutate source authority, consume
+forward approval state, create a rollback result, or emit rollback-completion audit/Trace evidence.
+
+The affected SQLite regression group reported `161 passed`. Focused Ruff, strict mypy, compilation
+and imports, SQLAlchemy mapper validation, and sole Alembic head `20260724_0014` passed. PostgreSQL
+runtime, frontend, rollback execution, unrelated full suites, and network tools were not run. No
+remaining issuance defect is known.
+
+### Exact next checkpoint
+
+Implement only the separately authorized atomic rollback transaction: revalidate the immutable
+approval/effect/evidence and live note inside one transaction, apply the exact compare-and-set
+inverse, and persist one immutable rollback result plus truthful audit/Trace evidence. Do not begin
+frontend, Milestone 4.4, or Milestone 5.
+
+## Backend rollback issuance implementation checkpoint (historical)
+
+This implementation-only status is superseded by the validated checkpoint above.
 
 `7bfccd69e6a4e61178b5a1154f8283c9704313e3` adds only approval issuance: a CSRF-protected endpoint,
 safe schemas, and an issuer that re-runs the existing authoritative review inside its nested write
