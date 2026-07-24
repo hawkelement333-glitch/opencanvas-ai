@@ -2,6 +2,27 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 rollback-authority SQLite validation — local only
+
+- Starting SHA: `f202e530385bc74781142d330f6a2849aa726502`.
+- Test/correction SHA: `a707c88d0d0c64fb9d2b7840745bbf124d616f79`.
+- Branch: `milestone-4.3-reversible-writes-local`; upstream: none; SQLite only.
+- Completed: focused approval/result persistence and `0013` → `0014` upgrade, schema/index/check/
+  foreign-key/trigger inspection, downgrade cleanup, and re-upgrade to sole `0014` head. Result:
+  `71 passed`.
+- Defect corrected: update rollback results now require non-null positive `resulting_revision`; the
+  ORM and unpublished local `0014` migration were corrected together.
+- Passed: focused Ruff format/lint, strict mypy, Python compilation, model/migration imports, mapper
+  configuration, SQLite metadata, Alembic head, whitespace/diff, secret-like-material, and
+  prohibited-scope scans.
+- Not run: PostgreSQL, frontend, unrelated backend/API/service suites, and network tools.
+- Remote-freeze proof: no upstream, remote operation, publication, deployment, or GitHub write.
+  `main` is unchanged and `competition-demo-v1` remains
+  `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- Exact continuation: separately authorize server-authoritative rollback review/execution only;
+  revalidate approval/effect/evidence/current state in one compensating transaction and record
+  immutable result/audit/Trace evidence. Do not begin frontend or Milestone 4.4.
+
 ## Milestone 4.3 rollback-authority migration — local only
 
 - Starting SHA: `783a55a6f66346d2e12d6d5444c8257f834da93d`.

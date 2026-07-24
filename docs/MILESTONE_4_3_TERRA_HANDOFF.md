@@ -1,5 +1,39 @@
 # Milestone 4.3 Terra Handoff
 
+## Rollback-authority SQLite validation complete locally
+
+- Starting SHA: `f202e530385bc74781142d330f6a2849aa726502`.
+- Validation commit: `a707c88d0d0c64fb9d2b7840745bbf124d616f79`.
+- Branch: `milestone-4.3-reversible-writes-local`; upstream: none; no remote write occurred.
+- Database: SQLite only. PostgreSQL runtime was not configured or run.
+
+Focused persistence coverage validates both closed rollback-approval forms and both successful
+rollback-result forms; digest, action, target, revision, evidence, grant, scope, uniqueness, and
+append-only rejections; plus scoped idempotency and result identity behavior. The focused SQLite
+persistence/migration-chain set reported `71 passed`.
+
+The migration cycle upgrades `0013` to `0014`, verifies both tables, named checks, indexes,
+foreign-key declarations, and four SQLite mutation-blocking triggers, downgrades to `0013`, confirms
+cleanup while rollback evidence remains, then re-upgrades to sole head `0014`.
+
+One defect was corrected: the update rollback-result check now requires non-null, positive
+`resulting_revision`; SQLite permits `NULL` through a bare `> 0` expression. No other model or
+migration defect was found.
+
+Focused Ruff format/lint, strict mypy, Python compilation, model/migration imports, mapper and
+SQLite metadata construction, Alembic head inspection, whitespace/diff, secret-like-material, and
+prohibited-scope checks passed. Frontend, unrelated backend/API/service, PostgreSQL, and network
+checks were not run.
+
+`main` remains unchanged and `competition-demo-v1` remains
+`b45b7763b65861f9dfb3be7edf9b5eb271950917`; no remote operation occurred.
+
+### Exact next checkpoint
+
+Implement separately authorized server-authoritative rollback review and execution only: revalidate
+new approval, effect, evidence, and current state inside one compensating transaction; refuse later
+unrelated changes; persist immutable result/audit/Trace evidence. Do not add frontend or Milestone 4.4.
+
 ## Rollback-authority migration complete locally
 
 - Starting SHA: `783a55a6f66346d2e12d6d5444c8257f834da93d`.
