@@ -18,6 +18,7 @@ from opencanvas_api.db.models import (
     ControlledAgentAuditEvent,
     ControlledAgentCapabilityGrant,
     ControlledAgentReversibleWriteEffect,
+    ControlledAgentReversibleWriteProposal,
     ControlledAgentReversibleWriteRollbackApproval,
     ControlledAgentReversibleWriteRollbackEvidence,
     ControlledAgentReversibleWriteRollbackResult,
@@ -1006,7 +1007,29 @@ async def test_rollback_approval_api_enforces_authentication_csrf_and_scope(
             headers=headers,
         )
         assert valid.status_code == 200, valid.text
-        assert valid.json()["effectId"] == str(effect_id)
+        valid_body = valid.json()
+        assert valid_body["effectId"] == str(effect_id)
+        assert set(valid_body) == {
+            "rollbackApprovalId",
+            "effectId",
+            "noteId",
+            "forwardAction",
+            "rollbackAction",
+            "expectedCurrentRevision",
+            "rollbackTargetKind",
+            "expiresAt",
+            "duplicate",
+        }
+        serialized_valid = valid.text.lower()
+        for private_term in (
+            "beforestate",
+            "grantdigest",
+            "grant_id",
+            "policy",
+            "traceback",
+            "database",
+        ):
+            assert private_term not in serialized_valid
 
         inaccessible_canvas = await owner.post(
             endpoint.replace(str(canvas["id"]), str(uuid.uuid4())),
@@ -1338,6 +1361,205 @@ async def test_rollback_approval_fails_closed_for_invalid_effect_state(
     error = await _rollback_issue_error(database, canvas=canvas, effect_id=effect_id)
     assert error.code == expected_code
     assert error.message == "Rollback is not eligible."
+
+
+async def test_rollback_approval_issuance_preserves_all_source_authority(
+    client: httpx.AsyncClient, database: Database, api_prefix: str
+) -> None:
+    canvas, proposal_body, _, applied, effect_id = await _prepared_rollback_effect(
+        client,
+        database,
+        api_prefix,
+        action="note.update",
+        capability=Capability.CANVAS_NOTE_UPDATE_ROLLBACK,
+    )
+    note_id = uuid.UUID(applied.json()["noteId"])
+    async with database.sessions() as session:
+        effect = await session.get(ControlledAgentReversibleWriteEffect, effect_id)
+        assert effect is not None
+        proposal = await session.get(
+            ControlledAgentReversibleWriteProposal, uuid.UUID(proposal_body["proposalId"])
+        )
+        evidence = await session.scalar(
+            select(ControlledAgentReversibleWriteRollbackEvidence).where(
+                ControlledAgentReversibleWriteRollbackEvidence.effect_id == effect_id
+            )
+        )
+        note = await session.get(CanvasNode, note_id)
+        grant = await session.scalar(
+            select(ControlledAgentCapabilityGrant).where(
+                ControlledAgentCapabilityGrant.execution_id == effect.execution_id
+            )
+        )
+        assert proposal is not None and evidence is not None
+        assert note is not None and grant is not None
+        source_state = {
+            "note": (note.revision, note.title, note.text),
+            "proposal": (proposal.proposal_id, proposal.payload_digest),
+            "effect": (
+                effect.effect_id,
+                effect.before_digest,
+                effect.after_digest,
+                effect.resulting_revision,
+            ),
+            "evidence": (
+                evidence.evidence_id,
+                evidence.before_state,
+                evidence.before_digest,
+                evidence.after_digest,
+            ),
+            "grant": (grant.grant_id, grant.payload_digest, grant.expires_at),
+        }
+        counts_before = {
+            "consumptions": int(
+                await session.scalar(
+                    select(func.count()).select_from(ControlledAgentApprovalConsumption)
+                )
+                or 0
+            ),
+            "audit": int(
+                await session.scalar(
+                    select(func.count()).select_from(ControlledAgentAuditEvent)
+                )
+                or 0
+            ),
+            "trace": int(
+                await session.scalar(select(func.count()).select_from(TraceEvent)) or 0
+            ),
+        }
+
+    async with database.sessions() as session:
+        await ReversibleWriteRollbackApprovalService(session).issue(
+            authenticated_user_id=SYSTEM_USER_ID,
+            workspace_id=uuid.UUID(canvas["workspaceId"]),
+            canvas_id=uuid.UUID(canvas["id"]),
+            effect_id=effect_id,
+            idempotency_key=f"rollback-nonmutation-{uuid.uuid4().hex}",
+        )
+        await session.commit()
+
+    async with database.sessions() as session:
+        effect = await session.get(ControlledAgentReversibleWriteEffect, effect_id)
+        proposal = await session.get(
+            ControlledAgentReversibleWriteProposal, uuid.UUID(proposal_body["proposalId"])
+        )
+        evidence = await session.scalar(
+            select(ControlledAgentReversibleWriteRollbackEvidence).where(
+                ControlledAgentReversibleWriteRollbackEvidence.effect_id == effect_id
+            )
+        )
+        note = await session.get(CanvasNode, note_id)
+        assert effect is not None
+        grant = await session.scalar(
+            select(ControlledAgentCapabilityGrant).where(
+                ControlledAgentCapabilityGrant.execution_id == effect.execution_id
+            )
+        )
+        assert proposal is not None and evidence is not None
+        assert note is not None and grant is not None
+        assert (note.revision, note.title, note.text) == source_state["note"]
+        assert (proposal.proposal_id, proposal.payload_digest) == source_state["proposal"]
+        assert (
+            effect.effect_id,
+            effect.before_digest,
+            effect.after_digest,
+            effect.resulting_revision,
+        ) == source_state["effect"]
+        assert (
+            evidence.evidence_id,
+            evidence.before_state,
+            evidence.before_digest,
+            evidence.after_digest,
+        ) == source_state["evidence"]
+        assert (grant.grant_id, grant.payload_digest, grant.expires_at) == source_state["grant"]
+        assert (
+            int(
+                await session.scalar(
+                    select(func.count()).select_from(ControlledAgentApprovalConsumption)
+                )
+                or 0
+            )
+            == counts_before["consumptions"]
+        )
+        assert (
+            int(
+                await session.scalar(
+                    select(func.count()).select_from(ControlledAgentAuditEvent)
+                )
+                or 0
+            )
+            == counts_before["audit"]
+        )
+        assert (
+            int(await session.scalar(select(func.count()).select_from(TraceEvent)) or 0)
+            == counts_before["trace"]
+        )
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackApproval)
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackResult)
+            )
+            == 0
+        )
+
+
+async def test_rollback_approval_request_cannot_override_authority(
+    client: httpx.AsyncClient, database: Database, api_prefix: str
+) -> None:
+    canvas, _, route, _, effect_id = await _prepared_rollback_effect(
+        client,
+        database,
+        api_prefix,
+        capability=Capability.CANVAS_NOTE_CREATE_ROLLBACK,
+    )
+    endpoint = (
+        f"{route}/canvases/{canvas['id']}/reversible-effects/"
+        f"{effect_id}/rollback-approval"
+    )
+    override = await client.post(
+        endpoint,
+        json={
+            "idempotencyKey": "authority-override-key",
+            "expectedCurrentRevision": 999,
+            "forwardAction": "note.update",
+            "rollbackAction": "note.update.rollback",
+            "rollbackTargetKind": "exact_prior_state",
+            "rollbackTargetDigest": "f" * 64,
+            "rollbackEvidenceId": str(uuid.uuid4()),
+            "capability": "canvas.note.update.rollback",
+            "grantId": str(uuid.uuid4()),
+            "proposalId": str(uuid.uuid4()),
+            "executionId": str(uuid.uuid4()),
+            "userId": str(uuid.uuid4()),
+            "workspaceId": str(uuid.uuid4()),
+            "canvasId": str(uuid.uuid4()),
+            "approvalDigest": "f" * 64,
+            "expiresAt": datetime.now(UTC).isoformat(),
+        },
+    )
+    assert override.status_code == 422
+    serialized = override.text.lower()
+    assert "traceback" not in serialized
+    assert "sql" not in serialized
+    assert "database" not in serialized
+    async with database.sessions() as session:
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackApproval)
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackResult)
+            )
+            == 0
+        )
 
 
 def _state_digest(state: dict[str, object]) -> str:
