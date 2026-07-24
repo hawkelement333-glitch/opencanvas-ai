@@ -1,5 +1,14 @@
 # Milestone 4.3 Terra Handoff
 
+## Backend rollback issuance checkpoint in progress
+
+`7bfccd69e6a4e61178b5a1154f8283c9704313e3` adds only approval issuance: a CSRF-protected endpoint,
+safe schemas, and an issuer that re-runs the existing authoritative review inside its nested write
+boundary. It creates the immutable approval with server-derived scope, canonical target/approval
+digests, 15-minute expiry, and database-backed idempotency; it does not modify a note or create a
+rollback result. Static validation passed; focused API/service tests and all execution work remain
+unfinished. Resume with issuer tests, then the separate compensating transaction.
+
 ## Rollback approval authority contracts complete locally
 
 - Starting SHA: `3b7d7dc04d9628a5709b83cab2aaf7f372ed7c17`.

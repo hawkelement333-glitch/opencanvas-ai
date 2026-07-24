@@ -2,6 +2,21 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 backend rollback — issuance checkpoint in progress
+
+- Starting SHA: `d2e8eea947fcd6b25cd224979d5732dd1412c154`; local issuance SHA:
+  `7bfccd69e6a4e61178b5a1154f8283c9704313e3`.
+- Complete: authenticated, CSRF-protected rollback-approval request/response schemas, POST endpoint,
+  and server-authoritative issuer. The issuer reruns rollback review inside a nested transaction,
+  derives every persisted binding, uses canonical target/approval digest contracts and 15-minute TTL,
+  and enforces scoped duplicate/conflict behavior without note/result/grant mutation.
+- Validation run: focused formatter, Ruff, strict mypy, compilation, diff check, and code-only
+  secret-like-material scan passed. Focused API/service tests have **not yet run**.
+- Partial: atomic rollback execution, immutable result/audit/Trace creation, issuance API tests, and
+  execution tests are not started. No rollback was executed and no runtime rollback result was created.
+- Exact next step: add focused issuer tests using the existing real SQLite fixtures, then implement
+  the separate atomic create/update compensating transaction and result path. Do not begin frontend.
+
 ## Milestone 4.3 rollback approval authority contracts — local only
 
 - Starting SHA: `3b7d7dc04d9628a5709b83cab2aaf7f372ed7c17`; contract SHA:
