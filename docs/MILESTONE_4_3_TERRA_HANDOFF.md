@@ -1,5 +1,46 @@
 # Milestone 4.3 Terra Handoff
 
+## Rollback evidence bound to atomic note updates locally
+
+- Starting SHA: `5281d85ab60c4036d1ed8200bd738a8530ae839e`.
+- Transaction-integration commit: `8dde7573e3dbdffe78be2ecb19339b47d10c6fa3`
+  (`Bind note updates to rollback evidence`).
+- Branch: `milestone-4.3-reversible-writes-local`; upstream: none; no remote write occurred.
+- Database validation: SQLite only. PostgreSQL was not configured or run.
+
+For an approved `note.update`, the existing nested server-authoritative transaction now captures the
+exact mutable state changed by that action—NFC-normalized `title` and `text`—before the compare-and-
+set update. It serializes that JSON object with sorted keys, UTF-8, and compact separators, then
+stores its SHA-256 digest. It calculates the post-update digest with the same canonical state rule.
+The service flushes the immutable effect result and inserts exactly one immutable rollback-evidence
+row bound to that effect, proposal, user, workspace, canvas, note, pre-update revision, post-update
+revision, before state, and both digests before audit/Trace success records complete.
+
+Creates still produce no rollback-evidence row. Exact duplicate update delivery returns the original
+effect and creates neither a second note update, approval consumption, nor evidence row. Older effects
+are not backfilled and therefore remain rollback-ineligible without exact authoritative evidence.
+Any failure inside the nested transaction rolls back the note update, approval consumption, effect,
+rollback evidence, audit success, and Trace success together.
+
+Validation at the integration checkpoint:
+
+- Focused transaction-integration tests: `6 passed`.
+- Affected backend group (effects, effect persistence, proposals/approvals, agent API, migrations):
+  `56 passed`.
+- Focused Ruff format/lint and strict mypy for changed service/tests: passed.
+- `git diff --check`, local secret-like-material scan, and prohibited-scope scan: passed.
+- Skipped: PostgreSQL, frontend suites, unrelated backend suites, and all network tools.
+
+No rollback execution, rollback review endpoint, frontend work, worker, queue, scheduler, delegation,
+provider, or Milestone 4.4/5 behavior was added. `main` remains unchanged and
+`competition-demo-v1` remains `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+
+### Exact next checkpoint
+
+Implement separately authorized server-authoritative rollback review and execution: require a new
+approved proposal/key, compare the current note against the evidence after state, create a linked
+immutable compensating effect/audit/Trace record, and refuse to overwrite later unrelated changes.
+
 ## Rollback-evidence migration cycle validated locally
 
 - Starting SHA: `2c76d113b7477dd5df3df37e2c0aa409785bec59`.

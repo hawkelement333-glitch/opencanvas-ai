@@ -2,6 +2,33 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 rollback-evidence transaction integration — local only
+
+- Starting SHA: `5281d85ab60c4036d1ed8200bd738a8530ae839e`.
+- Implementation checkpoint: `8dde7573e3dbdffe78be2ecb19339b47d10c6fa3` (`Bind note updates to
+  rollback evidence`).
+- Completed: the existing nested note-update transaction captures exact NFC-normalized mutable
+  `{title, text}` state before CAS, hashes canonical sorted compact JSON with SHA-256, applies the
+  update, hashes the post-update state, flushes the immutable effect, then persists one immutable
+  rollback-evidence row in the same transaction before audit/Trace success completion.
+- Idempotency: exact duplicate update delivery returns the existing effect without another update,
+  approval consumption, or evidence row; conflicting reuse remains denied. Note creation and older
+  effects create no rollback evidence and are not made rollback eligible.
+- Failure atomicity: injected post-mutation failure, stale revision, and existing authority failures
+  leave no evidence; nested transaction rollback also removes update, approval consumption, effect,
+  audit success, and Trace success.
+- Validation: focused integration `6 passed`; bounded affected backend group `56 passed`; focused
+  Ruff format/lint, strict mypy, `git diff --check`, secret-like-material scan, and prohibited-scope
+  scan passed. SQLite only; PostgreSQL, frontend, unrelated backend, and network checks were not run.
+- Scope confirmation: no rollback execution/review endpoint, worker, queue, scheduler, delegation,
+  provider, frontend, Milestone 4.4, or Milestone 5 behavior was added.
+- Remote-freeze proof: no upstream, push, pull, fetch, sync, remote branch/tag change, publication,
+  deployment, or GitHub write occurred. `main` and `competition-demo-v1` remain unchanged; the tag
+  resolves to `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- Exact continuation: separately authorize server-authoritative rollback review and execution with a
+  new approved proposal/key, after-state CAS, linked immutable compensating evidence, and refusal to
+  overwrite unrelated later changes.
+
 ## Milestone 4.3 rollback-evidence migration cycle — local only
 
 - Starting SHA: `2c76d113b7477dd5df3df37e2c0aa409785bec59`.
