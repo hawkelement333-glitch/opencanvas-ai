@@ -596,3 +596,83 @@ This planning checkpoint is complete when:
 - the diff passes formatting, whitespace, secret, link/reference, and prohibited-scope review;
 - no runtime, migration, provider, dependency, worker, queue, scheduler, or service is added;
 - the checkpoint is committed with `Start Milestone 4 controlled-agent planning`.
+
+## 21. Milestone 4.3 Sol safety architecture: reversible note writes
+
+This is an architecture and contract boundary only. It adds no route, mutation, persistence record,
+UI control, worker, scheduler, provider, or active effect. Terra may implement only section 21.8
+after separately reviewing its transaction boundary.
+
+### 21.1 Closed scope and threat model
+
+The first effect family is exactly one owned workspace, one owned canvas, and either `note.create`
+on that canvas or `note.update` on exactly one existing note node at its exact revision. The closed
+capabilities are `canvas.note.create` and `canvas.note.update`; the closed actions are `note.create`
+and `note.update`. Deletion, document replacement, arbitrary node changes, arbitrary tools,
+cross-workspace operations, external effects, delegation, schedules, and autonomous invocation are
+denied regardless of approval.
+
+Fail closed for forged action/capability values, a client-selected execution ID, altered
+destination/resource/revision/preview, replay, expiry, revocation, CSRF, cross-scope IDs, stale
+state, concurrent writes, conflicting duplicate requests, untraced outcomes, or unsafe rollback.
+
+### 21.2 Proposal, approval, and authority
+
+`ReversibleWriteProposal` is frozen and strict. It binds server-owned proposal/execution/user/
+workspace/canvas IDs, action, capability, destination, optional existing note, bounded preview,
+creation/expiry, and idempotency key. Its canonical digest is the approval plan digest. Create has
+no existing note; update has one `node` with an exact revision. Destination is exactly the bound
+canvas. The server rebuilds it from authorized records; the browser receives only a safe projection.
+
+The existing immutable grant, approval, revocation, and policy evaluator remain authoritative. A
+durable-write grant requires approved, unexpired, unrevoked, unconsumed approval matching user,
+workspace, execution, capability/resource scope, policy/context/proposal digest, and session/CSRF.
+Client request IDs are idempotency hints only; server-owned execution/proposal IDs are authoritative.
+
+### 21.3 Transaction, review, and rollback model
+
+Terra must load ownership, current revisions, grant, approval, revocations, and stored canonical
+proposal in one transaction. It re-evaluates policy before effect, atomically consumes approval,
+uses compare-and-set, and writes safe before/after evidence plus audit and Trace events. Stale,
+cancelled/revoked, conflicting, concurrent, or untraced outcomes roll back. Exact duplicate requests
+return their prior terminal result; same key with another canonical proposal is denied.
+
+Frontend states are preview/review only: loading, denied, expired, revoked, stale,
+approval-required, approved/consumed, conflict, and safe-success. Preview never implies an effect.
+Rollback is not implemented. When separately authorized, it is a new plan and approval with a new
+idempotency key and compare-and-set against exact after-state; it refuses later unrelated changes.
+
+### 21.4 Audit, Trace, migration, API, and demo plan
+
+Future append-only records retain proposal digest, action/capability, scope, approval decision and
+consumption, policy decision, idempotency outcome, before/after revisions and safe content digests,
+reason, actor, timestamps, Trace ID, and rollback linkage. They exclude note bodies where a digest
+suffices, secrets, cookies, CSRF tokens, authorization headers, hidden prompts, and internal paths.
+
+Sol adds no migration. Terra may add one only if current persistence cannot atomically retain
+proposal, consumption, idempotency, and evidence; it needs workspace-scoped constraints/indexes and
+upgrade/downgrade coverage. Its first API is authenticated and CSRF-protected proposal/approval
+only, reconstructing scope server-side. `APP_MODE=demo` gains no hidden write capability, provider,
+worker, queue, scheduler, or automatic effect and keeps its fixtures and Trace unchanged.
+
+### 21.5 Required validation matrix
+
+Test stable digests; altered action/destination/resource/revision/digest; unknown action; expired,
+revoked, replayed approval; cross-user/workspace use; stale proposal/resource; exact versus
+conflicting duplicate idempotency; concurrent revision conflict; atomic audit/Trace; and rollback
+refusal after later unrelated work. Do not claim an unimplemented effect or rollback works.
+
+### 21.6 Sol contract proof
+
+`services/agents/reversible_writes.py` is pure. Its tests prove canonical digest stability and that
+the digest binds the closed action, destination, resource, and revision; they reject unknown actions
+and invalid create/update bindings. Existing policy tests cover expiry, revocation, replay, scope,
+hash binding, and deny-by-default behavior.
+
+### 21.7 Exact bounded Terra sequence
+
+1. Persist immutable proposal records only if necessary, with constrained migration coverage.
+2. Add only authenticated, CSRF-protected server-owned proposal and approval APIs.
+3. Add focused persistence/authorization tests for bindings, consumption, revocation, replay, stale
+   state, and idempotency; do not add an effect unless it is essential to prove this transaction.
+4. Stop, validate, document, and request separate authorization before a note mutation or rollback.
