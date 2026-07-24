@@ -1,5 +1,35 @@
 # Milestone 4.3 Terra Handoff
 
+## Rollback approval authority contracts complete locally
+
+- Starting SHA: `3b7d7dc04d9628a5709b83cab2aaf7f372ed7c17`.
+- Contract commit: `96b1119e71a118a9c98ac1c5c287a6bc6eae4f9b`.
+
+`authoritative_absence_digest()` now hashes exactly the canonical payload
+`{"resource":"canvas.note","state":"authoritative_absence"}` under
+`controlled-agent.rollback-target.v1`. It is the sole permitted create-rollback target digest;
+update restoration continues to use immutable evidence `before_digest` without rehashing.
+
+`rollback_approval_digest()` hashes only the typed, server-owned approval bindings under
+`controlled-agent.rollback-approval.v1`, including schema version, authority scope, effect/proposal,
+closed actions, verified revisions/digests, optional evidence ID, grant, key, and canonical expiry.
+`ROLLBACK_APPROVAL_TTL` is exactly 15 minutes. The later issuer must never replace an expired approval
+under the same scoped key.
+
+The ORM and unpublished `20260724_0014` migration now share
+`uq_agent_rollback_approval_execution_scope_idempotency` across `(execution_id, user_id,
+workspace_id, canvas_id, scoped_idempotency_key)`, providing database-backed duplicate protection.
+
+Focused contract, persistence, and SQLite migration-cycle validation: `92 passed`. Ruff, strict mypy,
+compilation, Alembic sole-head inspection, diff/whitespace, secret-like-material, and prohibited-scope
+checks passed. PostgreSQL runtime, issuance/execution, frontend, unrelated suites, and network tools
+were not run. No remote operation occurred.
+
+### Exact next checkpoint
+
+Implement the server-authoritative rollback approval issuer only, using these contracts and fresh
+in-transaction review revalidation. Do not execute rollback.
+
 ## Rollback revision contract corrected locally
 
 - Starting SHA: `04119652d54c5c907fad9140ebcf8ae337ca5986`.

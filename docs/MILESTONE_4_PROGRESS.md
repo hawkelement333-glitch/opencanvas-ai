@@ -2,6 +2,26 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 rollback approval authority contracts — local only
+
+- Starting SHA: `3b7d7dc04d9628a5709b83cab2aaf7f372ed7c17`; contract SHA:
+  `96b1119e71a118a9c98ac1c5c287a6bc6eae4f9b`.
+- Complete: canonical `authoritative_absence_digest()` with domain
+  `controlled-agent.rollback-target.v1`; canonical typed `rollback_approval_digest()` with domain
+  `controlled-agent.rollback-approval.v1`; fixed `ROLLBACK_APPROVAL_TTL = 15 minutes`.
+- The absence payload is exactly `{resource: canvas.note, state: authoritative_absence}`. Create
+  targets require that digest; updates retain immutable evidence `before_digest`.
+- Database-backed scoped idempotency is now enforced by
+  `uq_agent_rollback_approval_execution_scope_idempotency` on `(execution_id, user_id,
+  workspace_id, canvas_id, scoped_idempotency_key)` in both model and unpublished migration `0014`.
+- Validation: focused contract, persistence, and SQLite migration-cycle group `92 passed`; Ruff,
+  strict mypy, compilation, sole Alembic head, diff/whitespace, secret-like-material, and prohibited
+  scope scans passed. PostgreSQL runtime was not run.
+- Branch: `milestone-4.3-reversible-writes-local`; upstream: none; protected tag remains
+  `b45b7763b65861f9dfb3be7edf9b5eb271950917`; no remote operation occurred.
+- Exact continuation: server-authoritative rollback approval issuance using fresh in-transaction
+  review revalidation, canonical digest/TTL contracts, and database uniqueness. Do not execute rollback.
+
 ## Milestone 4.3 rollback revision contract correction — local only
 
 - Starting SHA: `04119652d54c5c907fad9140ebcf8ae337ca5986`; correction SHA:
