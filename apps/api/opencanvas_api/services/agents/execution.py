@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Literal, Self
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from opencanvas_api.db.models import (
     Canvas,
     CanvasNode,
+    ControlledAgentAuditEvent,
     ControlledAgentRequestIdentity,
     Document,
     DocumentChunk,
@@ -23,12 +25,16 @@ from opencanvas_api.db.models import (
 )
 from opencanvas_api.services.agents.contracts import (
     SCHEMA_VERSION,
+    ApprovalRecord,
     AuditAttribute,
     AuditEvent,
     Capability,
+    CapabilityGrant,
     ContextSnapshot,
     ContractModel,
     Digest,
+    ExecutionStateRecord,
+    ExecutionStatus,
     PlanSnapshot,
     ResourceKind,
     ResourceScope,
@@ -38,6 +44,8 @@ from opencanvas_api.services.agents.contracts import (
 )
 from opencanvas_api.services.agents.persistence import (
     AgentPersistenceNotFound,
+    AgentStateConflict,
+    AgentStateTransitionError,
     ApprovalConsumptionAttempt,
     ControlledAgentRepository,
 )
@@ -641,13 +649,557 @@ class ImmutableSelectedContextResolver:
         return resource
 
 
+class CancellationRequest(ContractModel):
+    cancellation_id: uuid.UUID
+    execution_id: uuid.UUID
+    user_id: uuid.UUID
+    workspace_id: uuid.UUID
+    requested_at: datetime
+    reason_code: str = Field(default="user_cancelled", min_length=1, max_length=64)
+    replacement_execution_id: uuid.UUID | None = None
+
+    _requested_at_is_utc = field_validator("requested_at")(_require_aware_utc)
+
+
+@dataclass(frozen=True, slots=True)
+class CancellationOutcome:
+    cancelled: bool
+    duplicate: bool
+    status: ExecutionStatus
+    reason_code: str
+
+
+class ResultAcceptanceRequest(ContractModel):
+    delivery_id: uuid.UUID
+    execution_id: uuid.UUID
+    user_id: uuid.UUID
+    workspace_id: uuid.UUID
+    running_state_id: uuid.UUID
+    context_snapshot_id: uuid.UUID
+    context_digest: Digest = Field(pattern=r"^[0-9a-f]{64}$")
+    resolution_digest: Digest = Field(pattern=r"^[0-9a-f]{64}$")
+    result_digest: Digest = Field(pattern=r"^[0-9a-f]{64}$")
+    produced_at: datetime
+
+    _produced_at_is_utc = field_validator("produced_at")(_require_aware_utc)
+
+
+@dataclass(frozen=True, slots=True)
+class ResultAcceptanceOutcome:
+    accepted: bool
+    duplicate: bool
+    status: ExecutionStatus
+    reason_code: str
+
+
+def _database_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+class ControlledExecutionLifecycle:
+    """Authoritative cancellation and result-publication boundary for synchronous execution."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+        self.repository = ControlledAgentRepository(session)
+
+    async def cancel(
+        self,
+        *,
+        authenticated_user_id: uuid.UUID,
+        request: CancellationRequest,
+        trace_id: uuid.UUID,
+    ) -> CancellationOutcome:
+        if authenticated_user_id != request.user_id:
+            raise AuthorityPreflightDenied("user_scope_mismatch")
+        existing = await self.session.get(ControlledAgentAuditEvent, request.cancellation_id)
+        if existing is not None:
+            if (
+                existing.execution_id != request.execution_id
+                or existing.user_id != request.user_id
+                or existing.workspace_id != request.workspace_id
+                or existing.event_type
+                not in {
+                    "execution.cancelled",
+                    "execution.cancellation_rejected",
+                }
+            ):
+                raise AuthorityPreflightDenied("cancellation_identity_conflict")
+            status = await self._required_current_status(request)
+            return CancellationOutcome(
+                cancelled=existing.event_type == "execution.cancelled",
+                duplicate=True,
+                status=status,
+                reason_code=self._attribute(existing, "reason") or request.reason_code,
+            )
+
+        current = await self.repository.current_state(
+            user_id=request.user_id,
+            workspace_id=request.workspace_id,
+            execution_id=request.execution_id,
+        )
+        if current is None:
+            await self.repository.append_state(
+                ExecutionStateRecord(
+                    state_id=uuid.uuid4(),
+                    execution_id=request.execution_id,
+                    user_id=request.user_id,
+                    workspace_id=request.workspace_id,
+                    status=ExecutionStatus.PROPOSED,
+                    recorded_at=request.requested_at,
+                    safe_reason_code="cancelled_before_start",
+                )
+            )
+            current = await self.repository.current_state(
+                user_id=request.user_id,
+                workspace_id=request.workspace_id,
+                execution_id=request.execution_id,
+            )
+        if current is None:
+            raise AgentStateConflict("execution_state_unavailable")
+        current_status = ExecutionStatus(current.status)
+        if current_status in {
+            ExecutionStatus.SUCCEEDED,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.DENIED,
+        }:
+            await self._append_lifecycle_event(
+                event_id=request.cancellation_id,
+                trace_id=trace_id,
+                execution_id=request.execution_id,
+                user_id=request.user_id,
+                workspace_id=request.workspace_id,
+                event_type="execution.cancellation_rejected",
+                recorded_at=request.requested_at,
+                attributes=(
+                    AuditAttribute(key="reason", value="execution_already_terminal"),
+                    AuditAttribute(key="status", value=current_status.value),
+                ),
+            )
+            return CancellationOutcome(
+                cancelled=False,
+                duplicate=False,
+                status=current_status,
+                reason_code="execution_already_terminal",
+            )
+        if current_status is ExecutionStatus.CANCELLED:
+            await self._append_lifecycle_event(
+                event_id=request.cancellation_id,
+                trace_id=trace_id,
+                execution_id=request.execution_id,
+                user_id=request.user_id,
+                workspace_id=request.workspace_id,
+                event_type="execution.cancelled",
+                recorded_at=request.requested_at,
+                attributes=(
+                    AuditAttribute(key="reason", value=request.reason_code),
+                    AuditAttribute(key="status", value=ExecutionStatus.CANCELLED.value),
+                ),
+            )
+            return CancellationOutcome(
+                cancelled=True,
+                duplicate=False,
+                status=ExecutionStatus.CANCELLED,
+                reason_code=request.reason_code,
+            )
+
+        try:
+            await self.repository.append_state(
+                ExecutionStateRecord(
+                    state_id=uuid.uuid4(),
+                    execution_id=request.execution_id,
+                    user_id=request.user_id,
+                    workspace_id=request.workspace_id,
+                    status=ExecutionStatus.CANCELLED,
+                    recorded_at=request.requested_at,
+                    safe_reason_code=request.reason_code,
+                )
+            )
+        except AgentStateConflict:
+            current_status = await self._required_current_status(request)
+            if current_status is not ExecutionStatus.CANCELLED:
+                return await self._record_cancel_race_rejection(
+                    request=request,
+                    trace_id=trace_id,
+                    status=current_status,
+                )
+
+        attributes = [
+            AuditAttribute(key="reason", value=request.reason_code),
+            AuditAttribute(key="status", value=ExecutionStatus.CANCELLED.value),
+        ]
+        if request.replacement_execution_id is not None:
+            attributes.append(
+                AuditAttribute(
+                    key="replacementExecutionId",
+                    value=str(request.replacement_execution_id),
+                )
+            )
+        await self._append_lifecycle_event(
+            event_id=request.cancellation_id,
+            trace_id=trace_id,
+            execution_id=request.execution_id,
+            user_id=request.user_id,
+            workspace_id=request.workspace_id,
+            event_type="execution.cancelled",
+            recorded_at=request.requested_at,
+            attributes=tuple(attributes),
+        )
+        return CancellationOutcome(
+            cancelled=True,
+            duplicate=False,
+            status=ExecutionStatus.CANCELLED,
+            reason_code=request.reason_code,
+        )
+
+    async def accept_result(
+        self,
+        *,
+        authenticated_user_id: uuid.UUID,
+        authorized: AuthorizedPreflight,
+        resolved: ResolvedSelectedContext,
+        request: ResultAcceptanceRequest,
+        accepted_at: datetime,
+        trace_id: uuid.UUID,
+    ) -> ResultAcceptanceOutcome:
+        _require_aware_utc(accepted_at)
+        self._validate_result_identity(
+            authenticated_user_id=authenticated_user_id,
+            authorized=authorized,
+            resolved=resolved,
+            request=request,
+        )
+        existing = await self.session.get(ControlledAgentAuditEvent, request.delivery_id)
+        if existing is not None:
+            return self._existing_result_outcome(existing, request)
+
+        current = await self.repository.current_state(
+            user_id=request.user_id,
+            workspace_id=request.workspace_id,
+            execution_id=request.execution_id,
+        )
+        if current is None:
+            return await self._reject_result(
+                request=request,
+                trace_id=trace_id,
+                accepted_at=accepted_at,
+                status=ExecutionStatus.PROPOSED,
+                reason_code="execution_not_running",
+            )
+        current_status = ExecutionStatus(current.status)
+        if current.state_id != request.running_state_id:
+            return await self._reject_result(
+                request=request,
+                trace_id=trace_id,
+                accepted_at=accepted_at,
+                status=current_status,
+                reason_code="stale_execution_state",
+            )
+        if current_status is not ExecutionStatus.RUNNING:
+            return await self._reject_result(
+                request=request,
+                trace_id=trace_id,
+                accepted_at=accepted_at,
+                status=current_status,
+                reason_code=f"execution_{current_status.value}",
+            )
+
+        authority_failure = await self._authority_failure(
+            authorized=authorized,
+            evaluated_at=accepted_at,
+        )
+        if authority_failure is not None:
+            with suppress(AgentStateConflict):
+                await self.repository.append_state(
+                    ExecutionStateRecord(
+                        state_id=uuid.uuid4(),
+                        execution_id=request.execution_id,
+                        user_id=request.user_id,
+                        workspace_id=request.workspace_id,
+                        status=ExecutionStatus.CANCELLED,
+                        recorded_at=accepted_at,
+                        safe_reason_code=authority_failure,
+                    )
+                )
+            current_status = await self._required_current_status(request)
+            return await self._reject_result(
+                request=request,
+                trace_id=trace_id,
+                accepted_at=accepted_at,
+                status=current_status,
+                reason_code=authority_failure,
+            )
+
+        try:
+            await self.repository.append_state(
+                ExecutionStateRecord(
+                    state_id=uuid.uuid4(),
+                    execution_id=request.execution_id,
+                    user_id=request.user_id,
+                    workspace_id=request.workspace_id,
+                    status=ExecutionStatus.SUCCEEDED,
+                    recorded_at=accepted_at,
+                )
+            )
+        except (AgentStateConflict, AgentStateTransitionError):
+            current_status = await self._required_current_status(request)
+            return await self._reject_result(
+                request=request,
+                trace_id=trace_id,
+                accepted_at=accepted_at,
+                status=current_status,
+                reason_code=f"execution_{current_status.value}",
+            )
+
+        await self._append_lifecycle_event(
+            event_id=request.delivery_id,
+            trace_id=trace_id,
+            execution_id=request.execution_id,
+            user_id=request.user_id,
+            workspace_id=request.workspace_id,
+            event_type="execution.result_accepted",
+            recorded_at=accepted_at,
+            attributes=(
+                AuditAttribute(key="resultDigest", value=request.result_digest),
+                AuditAttribute(key="resolutionDigest", value=request.resolution_digest),
+                AuditAttribute(key="status", value=ExecutionStatus.SUCCEEDED.value),
+            ),
+        )
+        return ResultAcceptanceOutcome(
+            accepted=True,
+            duplicate=False,
+            status=ExecutionStatus.SUCCEEDED,
+            reason_code="result_accepted",
+        )
+
+    async def _authority_failure(
+        self,
+        *,
+        authorized: AuthorizedPreflight,
+        evaluated_at: datetime,
+    ) -> str | None:
+        inspection = await self.repository.inspect_execution(
+            user_id=authorized.user_id,
+            workspace_id=authorized.workspace_id,
+            execution_id=authorized.execution_id,
+            limit=100,
+            offset=0,
+        )
+        grant_row = next(
+            (row for row in inspection.grants if row.grant_id == authorized.grant_id),
+            None,
+        )
+        approval_row = next(
+            (row for row in inspection.approvals if row.approval_id == authorized.approval_id),
+            None,
+        )
+        if grant_row is None or approval_row is None:
+            return "authority_not_found"
+        consumption = next(
+            (
+                row
+                for row in inspection.consumptions
+                if row.consumption_id == authorized.approval_consumption_id
+            ),
+            None,
+        )
+        decision = next(
+            (
+                row
+                for row in inspection.policy_decisions
+                if row.decision_id == authorized.policy_decision_id
+            ),
+            None,
+        )
+        if consumption is None or decision is None:
+            return "authority_not_consumed"
+        if (
+            consumption.approval_id != authorized.approval_id
+            or consumption.policy_decision_id != authorized.policy_decision_id
+            or decision.outcome != "allow"
+            or decision.approval_id != authorized.approval_id
+            or decision.grant_id != authorized.grant_id
+        ):
+            return "authority_binding_mismatch"
+        grant = self.repository._load_contract(
+            CapabilityGrant,
+            grant_row.payload,
+            grant_row.payload_digest,
+        )
+        approval = self.repository._load_contract(
+            ApprovalRecord,
+            approval_row.payload,
+            approval_row.payload_digest,
+        )
+        if evaluated_at < grant.issued_at or evaluated_at >= grant.expires_at:
+            return "grant_inactive"
+        if evaluated_at < approval.decided_at or evaluated_at >= approval.expires_at:
+            return "approval_inactive"
+        if any(
+            row.grant_id == authorized.grant_id and _database_utc(row.revoked_at) <= evaluated_at
+            for row in inspection.revocations
+        ):
+            return "grant_revoked"
+        return None
+
+    @staticmethod
+    def _validate_result_identity(
+        *,
+        authenticated_user_id: uuid.UUID,
+        authorized: AuthorizedPreflight,
+        resolved: ResolvedSelectedContext,
+        request: ResultAcceptanceRequest,
+    ) -> None:
+        if authenticated_user_id != request.user_id or authenticated_user_id != authorized.user_id:
+            raise AuthorityPreflightDenied("user_scope_mismatch")
+        if (
+            request.execution_id != authorized.execution_id
+            or request.workspace_id != authorized.workspace_id
+            or request.context_snapshot_id != authorized.context_snapshot_id
+            or request.context_digest != authorized.context_digest
+            or request.context_snapshot_id != resolved.snapshot_id
+            or request.context_digest != resolved.context_digest
+            or request.resolution_digest != resolved.resolution_digest
+        ):
+            raise AuthorityPreflightDenied("result_identity_mismatch")
+
+    @staticmethod
+    def _attribute(event: ControlledAgentAuditEvent, key: str) -> str | None:
+        value = next(
+            (item.get("value") for item in event.attributes if item.get("key") == key),
+            None,
+        )
+        return value if isinstance(value, str) else None
+
+    def _existing_result_outcome(
+        self,
+        event: ControlledAgentAuditEvent,
+        request: ResultAcceptanceRequest,
+    ) -> ResultAcceptanceOutcome:
+        if (
+            event.execution_id != request.execution_id
+            or event.user_id != request.user_id
+            or event.workspace_id != request.workspace_id
+            or self._attribute(event, "resultDigest") != request.result_digest
+            or self._attribute(event, "resolutionDigest") != request.resolution_digest
+        ):
+            raise AuthorityPreflightDenied("result_delivery_conflict")
+        status_value = self._attribute(event, "status") or ExecutionStatus.FAILED.value
+        status = ExecutionStatus(status_value)
+        return ResultAcceptanceOutcome(
+            accepted=event.event_type == "execution.result_accepted",
+            duplicate=True,
+            status=status,
+            reason_code=self._attribute(event, "reason") or event.event_type.rsplit(".", 1)[-1],
+        )
+
+    async def _reject_result(
+        self,
+        *,
+        request: ResultAcceptanceRequest,
+        trace_id: uuid.UUID,
+        accepted_at: datetime,
+        status: ExecutionStatus,
+        reason_code: str,
+    ) -> ResultAcceptanceOutcome:
+        await self._append_lifecycle_event(
+            event_id=request.delivery_id,
+            trace_id=trace_id,
+            execution_id=request.execution_id,
+            user_id=request.user_id,
+            workspace_id=request.workspace_id,
+            event_type="execution.result_rejected",
+            recorded_at=accepted_at,
+            attributes=(
+                AuditAttribute(key="reason", value=reason_code),
+                AuditAttribute(key="resultDigest", value=request.result_digest),
+                AuditAttribute(key="resolutionDigest", value=request.resolution_digest),
+                AuditAttribute(key="status", value=status.value),
+            ),
+        )
+        return ResultAcceptanceOutcome(
+            accepted=False,
+            duplicate=False,
+            status=status,
+            reason_code=reason_code,
+        )
+
+    async def _required_current_status(
+        self,
+        request: CancellationRequest | ResultAcceptanceRequest,
+    ) -> ExecutionStatus:
+        current = await self.repository.current_state(
+            user_id=request.user_id,
+            workspace_id=request.workspace_id,
+            execution_id=request.execution_id,
+        )
+        if current is None:
+            raise AgentStateConflict("execution_state_unavailable")
+        return ExecutionStatus(current.status)
+
+    async def _record_cancel_race_rejection(
+        self,
+        *,
+        request: CancellationRequest,
+        trace_id: uuid.UUID,
+        status: ExecutionStatus,
+    ) -> CancellationOutcome:
+        await self._append_lifecycle_event(
+            event_id=request.cancellation_id,
+            trace_id=trace_id,
+            execution_id=request.execution_id,
+            user_id=request.user_id,
+            workspace_id=request.workspace_id,
+            event_type="execution.cancellation_rejected",
+            recorded_at=request.requested_at,
+            attributes=(
+                AuditAttribute(key="reason", value="execution_state_changed"),
+                AuditAttribute(key="status", value=status.value),
+            ),
+        )
+        return CancellationOutcome(
+            cancelled=False,
+            duplicate=False,
+            status=status,
+            reason_code="execution_state_changed",
+        )
+
+    async def _append_lifecycle_event(
+        self,
+        *,
+        event_id: uuid.UUID,
+        trace_id: uuid.UUID,
+        execution_id: uuid.UUID,
+        user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        event_type: str,
+        recorded_at: datetime,
+        attributes: tuple[AuditAttribute, ...],
+    ) -> None:
+        await self.repository.append_audit_event(
+            AuditEvent(
+                event_id=event_id,
+                trace_id=trace_id,
+                execution_id=execution_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                event_type=event_type,
+                recorded_at=recorded_at,
+                attributes=attributes,
+            )
+        )
+
+
 __all__ = [
     "ACTION_REGISTRY",
     "GROUND_DRAFT_STAGES",
     "ActionBoundary",
     "AuthorityPreflightDenied",
     "AuthorizedPreflight",
+    "CancellationOutcome",
+    "CancellationRequest",
     "ControlledAction",
+    "ControlledExecutionLifecycle",
     "ControlledExecutionPlan",
     "ControlledExecutionRequest",
     "ExecutionAuthorityPreflight",
@@ -661,6 +1213,8 @@ __all__ = [
     "RequestReservation",
     "ResolvedContextResource",
     "ResolvedSelectedContext",
+    "ResultAcceptanceOutcome",
+    "ResultAcceptanceRequest",
     "idempotency_digest",
     "resolved_context_digest",
     "resolved_resource_digest",

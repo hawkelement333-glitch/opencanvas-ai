@@ -14,6 +14,7 @@ from opencanvas_api.db.models import (
 )
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.agents.contracts import (
+    Capability,
     ContextResource,
     ContextSnapshot,
     ResourceKind,
@@ -38,8 +39,14 @@ async def _seed_selected_context(
     node_text: str = "Selected note evidence",
     wrong_digest: bool = False,
 ) -> tuple[AgentBundle, AuthorizedPreflight, CanvasNode, DocumentVersion, DocumentChunk]:
-    base = make_agent_bundle()
-    canvas = Canvas(id=uuid.uuid4(), workspace_id=base.execution.workspace_id, name="Selected")
+    owner = make_agent_bundle()
+    canvas = Canvas(id=uuid.uuid4(), workspace_id=owner.execution.workspace_id, name="Selected")
+    base = make_agent_bundle(
+        user_id=owner.execution.user_id,
+        workspace_id=owner.execution.workspace_id,
+        resource=ResourceScope(kind=ResourceKind.CANVAS, resource_id=canvas.id),
+        capability=Capability.DRAFT_ANSWER_CREATE,
+    )
     node = CanvasNode(
         id=uuid.uuid4(),
         canvas_id=canvas.id,

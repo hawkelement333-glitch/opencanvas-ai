@@ -2,6 +2,38 @@
 
 Last updated: 2026-07-23 (America/Chicago)
 
+## Milestone 4.2 Sol checkpoint 3D — cancellation and late-result suppression
+
+- Starting local and remote SHA:
+  `6cde6f6` (`Resolve immutable controlled-agent context`).
+- Added an internal synchronous lifecycle boundary for authoritative, idempotent cancellation and
+  result publication. Cancellation before start appends `proposed -> cancelled`; cancellation
+  during execution creates one terminal successor; repeated cancellation cannot reopen or duplicate
+  the transition; and cancellation after success is recorded as rejected without changing success.
+- Result acceptance binds the authenticated user, execution, workspace, running-state identity,
+  stored context snapshot/digest, immutable resolution digest, and result digest. A delivery UUID
+  is the append-only audit identity, so exact redelivery is idempotent and conflicting reuse fails
+  closed.
+- Publication rechecks the consumed approval/policy binding, grant and approval expiry, and grant
+  revocation at acceptance time. Missing consumption, altered authority, expired/revoked authority,
+  cancelled/terminal state, stale running state, supersession, and lifecycle races reject the
+  result without making it authoritative.
+- Cancellation/result races use the checkpoint 3B database compare-and-set transition guard.
+  Whichever terminal successor commits first remains authoritative; the loser reloads current state,
+  suppresses its late outcome, and appends safe rejection evidence.
+- Tests cover `cancel before start`, `start -> cancel -> result`, `start -> result -> cancel`,
+  grant revocation before result, approval expiry before result, superseded execution, stale running
+  state, exact duplicate result delivery, conflicting delivery reuse, repeated cancellation, and
+  terminal-state preservation.
+- Focused cancellation/lifecycle/context tests: `14 passed`.
+- Ruff format/lint: passed. Focused mypy for `execution.py`: passed.
+- No migration was required for this unit. No provider call, result body persistence, public API,
+  UI, workspace effect, worker, queue, scheduler, delegation, Terra, Luna, or Milestone 3.75 work
+  was added.
+- Exact next unit: run the complete Sol contract/policy/persistence/authority/idempotency/lifecycle/
+  immutable-context/cancellation/result gate, migration cycle, repository/security audits, update
+  the Sol handoff to an evidence-backed completion decision, commit, push, and stop before Terra.
+
 ## Milestone 4.2 Sol checkpoint 3C — immutable selected context
 
 - Starting local and remote SHA:
