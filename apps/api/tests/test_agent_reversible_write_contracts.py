@@ -16,6 +16,8 @@ from opencanvas_api.services.agents.reversible_writes import (
     NotePreview,
     ReversibleWriteAction,
     ReversibleWriteProposal,
+    ReversibleWriteRollbackAction,
+    rollback_capability_for,
 )
 
 NOW = datetime(2026, 7, 24, 12, tzinfo=UTC)
@@ -105,3 +107,42 @@ def test_unknown_action_fails_closed() -> None:
 
     with pytest.raises(ValidationError):
         ReversibleWriteProposal.model_validate(data)
+
+
+@pytest.mark.parametrize(
+    ("action", "capability"),
+    [
+        (
+            ReversibleWriteRollbackAction.NOTE_CREATE_ROLLBACK,
+            Capability.CANVAS_NOTE_CREATE_ROLLBACK,
+        ),
+        (
+            ReversibleWriteRollbackAction.NOTE_UPDATE_ROLLBACK,
+            Capability.CANVAS_NOTE_UPDATE_ROLLBACK,
+        ),
+    ],
+)
+def test_rollback_capabilities_are_closed_and_action_specific(
+    action: ReversibleWriteRollbackAction, capability: Capability
+) -> None:
+    assert rollback_capability_for(action) is capability
+    assert capability.value in {item.value for item in Capability}
+
+
+def test_forward_and_cross_rollback_capabilities_cannot_substitute() -> None:
+    assert (
+        rollback_capability_for(ReversibleWriteRollbackAction.NOTE_CREATE_ROLLBACK)
+        is not Capability.CANVAS_NOTE_CREATE
+    )
+    assert (
+        rollback_capability_for(ReversibleWriteRollbackAction.NOTE_UPDATE_ROLLBACK)
+        is not Capability.CANVAS_NOTE_UPDATE
+    )
+    assert rollback_capability_for(
+        ReversibleWriteRollbackAction.NOTE_CREATE_ROLLBACK
+    ) is not rollback_capability_for(ReversibleWriteRollbackAction.NOTE_UPDATE_ROLLBACK)
+
+
+def test_unknown_rollback_capability_fails_closed() -> None:
+    with pytest.raises(ValueError):
+        Capability("canvas.note.rollback")

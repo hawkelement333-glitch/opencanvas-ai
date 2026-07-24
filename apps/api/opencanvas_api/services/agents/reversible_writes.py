@@ -29,6 +29,25 @@ class ReversibleWriteAction(StrEnum):
     NOTE_UPDATE = "note.update"
 
 
+class ReversibleWriteRollbackAction(StrEnum):
+    """The closed inverse action vocabulary; it grants no generic undo authority."""
+
+    NOTE_CREATE_ROLLBACK = "note.create.rollback"
+    NOTE_UPDATE_ROLLBACK = "note.update.rollback"
+
+
+ROLLBACK_CAPABILITY_BY_ACTION = {
+    ReversibleWriteRollbackAction.NOTE_CREATE_ROLLBACK: Capability.CANVAS_NOTE_CREATE_ROLLBACK,
+    ReversibleWriteRollbackAction.NOTE_UPDATE_ROLLBACK: Capability.CANVAS_NOTE_UPDATE_ROLLBACK,
+}
+
+
+def rollback_capability_for(action: ReversibleWriteRollbackAction) -> Capability:
+    """Return the sole least-privilege capability for one closed rollback action."""
+
+    return ROLLBACK_CAPABILITY_BY_ACTION[action]
+
+
 class NotePreview(ContractModel):
     """Bounded, display-safe proposal content; it is not a persisted note."""
 
@@ -85,4 +104,10 @@ class ReversibleWriteProposal(ContractModel):
         return self
 
 
-__all__ = ["NotePreview", "ReversibleWriteAction", "ReversibleWriteProposal"]
+__all__ = [
+    "NotePreview",
+    "ReversibleWriteAction",
+    "ReversibleWriteProposal",
+    "ReversibleWriteRollbackAction",
+    "rollback_capability_for",
+]

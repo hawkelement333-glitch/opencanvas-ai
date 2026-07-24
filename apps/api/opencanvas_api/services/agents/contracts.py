@@ -36,6 +36,8 @@ class Capability(StrEnum):
     DRAFT_ANSWER_CREATE = "draft.answer.create"
     CANVAS_NOTE_CREATE = "canvas.note.create"
     CANVAS_NOTE_UPDATE = "canvas.note.update"
+    CANVAS_NOTE_CREATE_ROLLBACK = "canvas.note.create.rollback"
+    CANVAS_NOTE_UPDATE_ROLLBACK = "canvas.note.update.rollback"
     EXECUTION_CANCEL = "execution.cancel"
 
 
