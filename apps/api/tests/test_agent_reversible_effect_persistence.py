@@ -19,6 +19,10 @@ from opencanvas_api.db.models import (
 )
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.agents.persistence import ControlledAgentRepository
+from opencanvas_api.services.agents.reversible_write_effects import (
+    _note_digest,
+    verify_completed_effect_state,
+)
 from tests.agent_fixtures import NOW, AgentBundle, make_agent_bundle
 
 
@@ -194,6 +198,36 @@ async def test_effect_persists_with_bound_proposal_approval_and_create_shape(
     assert persisted.approval_id == context.bundle.approval.approval_id
     assert persisted.resource_id is None
     assert persisted.expected_revision is None
+
+
+async def test_create_effect_state_verification_uses_only_legacy_note_digest(
+    database: Database,
+) -> None:
+    context = await _seed_effect_context(database)
+    note = CanvasNode(
+        id=uuid.uuid4(),
+        canvas_id=context.canvas_id,
+        type="note",
+        title="Created title",
+        text="Created text",
+        position_x=0.0,
+        position_y=0.0,
+        revision=1,
+    )
+    effect = _effect(
+        context,
+        resulting_resource_id=note.id,
+        resulting_revision=note.revision,
+        after_digest=_note_digest(note),
+    )
+
+    assert verify_completed_effect_state(effect, note)
+    note.title = "Changed"
+    assert not verify_completed_effect_state(effect, note)
+    note.title = "Created title"
+    note.revision = 2
+    assert not verify_completed_effect_state(effect, note)
+    assert not verify_completed_effect_state(_effect(context, resulting_resource_id=note.id), note)
 
 
 async def test_effect_persists_with_update_resource_revision_and_evidence(

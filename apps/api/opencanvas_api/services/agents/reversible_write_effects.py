@@ -448,4 +448,54 @@ def _note_state_digest(state: dict[str, str]) -> str:
     ).hexdigest()
 
 
-__all__ = ["AppliedReversibleEffect", "ReversibleEffectError", "ReversibleWriteEffectService"]
+def verify_completed_effect_state(
+    effect: ControlledAgentReversibleWriteEffect,
+    note: CanvasNode | None,
+    evidence: ControlledAgentReversibleWriteRollbackEvidence | None = None,
+) -> bool:
+    """Fail-closed state verification using the one digest contract for each forward action."""
+
+    if (
+        effect.outcome != "succeeded"
+        or note is None
+        or note.id != effect.resulting_resource_id
+        or note.revision != effect.resulting_revision
+    ):
+        return False
+    if effect.action == ReversibleWriteAction.NOTE_CREATE.value:
+        return _note_digest(note) == effect.after_digest
+    if effect.action != ReversibleWriteAction.NOTE_UPDATE.value or evidence is None:
+        return False
+    if (
+        evidence.effect_id != effect.effect_id
+        or evidence.proposal_id != effect.proposal_id
+        or evidence.user_id != effect.user_id
+        or evidence.workspace_id != effect.workspace_id
+        or evidence.canvas_id != effect.canvas_id
+        or evidence.note_id != note.id
+        or evidence.post_effect_revision != effect.resulting_revision
+        or evidence.after_digest != effect.after_digest
+        or not isinstance(evidence.before_state, dict)
+    ):
+        return False
+    before_state = evidence.before_state
+    title = before_state.get("title")
+    text = before_state.get("text")
+    if (
+        set(before_state) != {"title", "text"}
+        or not isinstance(title, str)
+        or not isinstance(text, str)
+    ):
+        return False
+    canonical_before_state = {"title": title, "text": text}
+    if _note_state_digest(canonical_before_state) != evidence.before_digest:
+        return False
+    return _note_state_digest(_note_state(note)) == evidence.after_digest
+
+
+__all__ = [
+    "AppliedReversibleEffect",
+    "ReversibleEffectError",
+    "ReversibleWriteEffectService",
+    "verify_completed_effect_state",
+]
