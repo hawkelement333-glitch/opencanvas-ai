@@ -87,13 +87,16 @@ def upgrade() -> None:
         for operation in ("UPDATE", "DELETE"):
             op.execute(
                 sa.text(
-                    f"CREATE TRIGGER trg_{TABLE}_{operation.lower()}_blocked BEFORE {operation} ON {TABLE} BEGIN SELECT RAISE(ABORT, 'controlled-agent records are append-only'); END"
+                    f"CREATE TRIGGER trg_{TABLE}_{operation.lower()}_blocked "
+                    f"BEFORE {operation} ON {TABLE} BEGIN SELECT RAISE(ABORT, "
+                    "'controlled-agent records are append-only'); END"
                 )
             )
     else:
         op.execute(
             sa.text(
-                f"CREATE TRIGGER trg_{TABLE}_mutation_blocked BEFORE UPDATE OR DELETE ON {TABLE} FOR EACH ROW EXECUTE FUNCTION reject_controlled_agent_mutation()"
+                f"CREATE TRIGGER trg_{TABLE}_mutation_blocked BEFORE UPDATE OR DELETE ON {TABLE} "
+                "FOR EACH ROW EXECUTE FUNCTION reject_controlled_agent_mutation()"
             )
         )
 
