@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from typing import Any
 
@@ -13,6 +15,7 @@ from opencanvas_api.db.models import (
     ControlledAgentApprovalConsumption,
     ControlledAgentAuditEvent,
     ControlledAgentReversibleWriteEffect,
+    ControlledAgentReversibleWriteRollbackEvidence,
     TraceEvent,
 )
 from opencanvas_api.db.session import Database
@@ -119,6 +122,7 @@ async def test_approved_update_uses_exact_revision_and_preserves_before_after_ev
     assert applied.status_code == 200, applied.text
     async with database.sessions() as session:
         effect = await session.scalar(select(ControlledAgentReversibleWriteEffect))
+        evidence = await session.scalar(select(ControlledAgentReversibleWriteRollbackEvidence))
         updated = await session.get(CanvasNode, uuid.UUID(applied.json()["noteId"]))
     assert (
         effect is not None
@@ -126,6 +130,49 @@ async def test_approved_update_uses_exact_revision_and_preserves_before_after_ev
         and effect.after_digest != effect.before_digest
     )
     assert updated is not None and (updated.title, updated.text, updated.revision) == (
+        "Applied title",
+        "Applied text",
+        1,
+    )
+    assert evidence is not None
+    assert evidence.effect_id == effect.effect_id
+    assert (evidence.user_id, evidence.workspace_id, evidence.canvas_id, evidence.note_id) == (
+        effect.user_id,
+        effect.workspace_id,
+        effect.canvas_id,
+        updated.id,
+    )
+    assert evidence.before_state == {"text": "Before text", "title": "Before"}
+    assert (evidence.pre_effect_revision, evidence.post_effect_revision) == (0, 1)
+    assert evidence.before_digest == _state_digest(evidence.before_state)
+    assert evidence.after_digest == _state_digest(
+        {"text": "Applied text", "title": "Applied title"}
+    )
+    assert effect.before_digest == evidence.before_digest
+    assert effect.after_digest == evidence.after_digest
+
+
+async def test_exact_duplicate_update_returns_one_effect_and_one_rollback_evidence(
+    client: httpx.AsyncClient, database: Database, api_prefix: str
+) -> None:
+    canvas = await _create_canvas(client, api_prefix, "Rollback duplicate canvas")
+    node = await _create_node(client, api_prefix, canvas["id"], title="Before", text="Before text")
+    _, proposal, route = await _approved_proposal(
+        client, api_prefix, action="note.update", node=node, canvas=canvas
+    )
+    applied = await _effect(client, route, proposal)
+    duplicate = await _effect(client, route, proposal)
+    assert applied.status_code == duplicate.status_code == 200
+    assert duplicate.json()["duplicate"] is True
+    async with database.sessions() as session:
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackEvidence)
+            )
+            == 1
+        )
+        persisted = await session.get(CanvasNode, uuid.UUID(node["id"]))
+    assert persisted is not None and (persisted.title, persisted.text, persisted.revision) == (
         "Applied title",
         "Applied text",
         1,
@@ -155,7 +202,11 @@ async def test_effect_rejects_conflicting_key_and_missing_execution_without_muta
 async def test_failure_after_mutation_rolls_back_every_success_record(
     client: httpx.AsyncClient, database: Database, api_prefix: str
 ) -> None:
-    canvas, proposal, _ = await _approved_proposal(client, api_prefix)
+    canvas = await _create_canvas(client, api_prefix, "Rollback failure canvas")
+    node = await _create_node(client, api_prefix, canvas["id"], title="Before", text="Before text")
+    _, proposal, _ = await _approved_proposal(
+        client, api_prefix, action="note.update", node=node, canvas=canvas
+    )
 
     async def fail_after_mutation() -> None:
         raise RuntimeError("injected effect failure")
@@ -170,7 +221,12 @@ async def test_failure_after_mutation_rolls_back_every_success_record(
             )
         await session.rollback()
     async with database.sessions() as session:
-        assert await session.scalar(select(func.count()).select_from(CanvasNode)) == 0
+        persisted = await session.get(CanvasNode, uuid.UUID(node["id"]))
+        assert persisted is not None and (persisted.title, persisted.text, persisted.revision) == (
+            "Before",
+            "Before text",
+            0,
+        )
         assert (
             await session.scalar(
                 select(func.count()).select_from(ControlledAgentApprovalConsumption)
@@ -180,6 +236,12 @@ async def test_failure_after_mutation_rolls_back_every_success_record(
         assert (
             await session.scalar(
                 select(func.count()).select_from(ControlledAgentReversibleWriteEffect)
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackEvidence)
             )
             == 0
         )
@@ -210,3 +272,15 @@ async def test_stale_update_conflict_leaves_approval_and_note_unchanged(
             )
             == 0
         )
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackEvidence)
+            )
+            == 0
+        )
+
+
+def _state_digest(state: dict[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()

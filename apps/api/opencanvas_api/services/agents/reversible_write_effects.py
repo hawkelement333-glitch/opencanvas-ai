@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import unicodedata
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -20,6 +22,7 @@ from opencanvas_api.db.models import (
     ControlledAgentPlanSnapshot,
     ControlledAgentReversibleWriteEffect,
     ControlledAgentReversibleWriteProposal,
+    ControlledAgentReversibleWriteRollbackEvidence,
     Workspace,
 )
 from opencanvas_api.services.agents.contracts import (
@@ -124,10 +127,14 @@ class ReversibleWriteEffectService:
             )
             if decision.outcome.value != "allow":
                 raise ReversibleEffectError(decision.reason_code, "Effect authority is inactive.")
-            node, before_digest = await self._apply_note(proposal, canvas)
+            node, before_state, before_digest = await self._apply_note(proposal, canvas)
             if self.after_mutation is not None:
                 await self.after_mutation()
-            after_digest = _note_digest(node)
+            after_digest = (
+                _note_state_digest(_note_state(node))
+                if before_state is not None
+                else _note_digest(node)
+            )
             trace_id = uuid.uuid4()
             trace = TraceService(self.session)
             await trace.start_trace(
@@ -175,6 +182,27 @@ class ReversibleWriteEffectService:
                 created_at=self.now,
             )
             self.session.add(effect)
+            await self.session.flush()
+            if before_state is not None:
+                self.session.add(
+                    ControlledAgentReversibleWriteRollbackEvidence(
+                        evidence_id=uuid.uuid4(),
+                        effect_id=effect.effect_id,
+                        execution_id=execution_id,
+                        proposal_id=proposal.proposal_id,
+                        user_id=authenticated_user_id,
+                        workspace_id=workspace_id,
+                        canvas_id=canvas.id,
+                        action=proposal.action.value,
+                        note_id=node.id,
+                        pre_effect_revision=node.revision - 1,
+                        post_effect_revision=node.revision,
+                        before_state=before_state,
+                        before_digest=before_digest,
+                        after_digest=after_digest,
+                        created_at=self.now,
+                    )
+                )
             await self.repository.append_audit_event(
                 AuditEvent(
                     event_id=uuid.uuid4(),
@@ -343,7 +371,7 @@ class ReversibleWriteEffectService:
 
     async def _apply_note(
         self, proposal: ReversibleWriteProposal, canvas: Canvas
-    ) -> tuple[CanvasNode, str | None]:
+    ) -> tuple[CanvasNode, dict[str, str] | None, str | None]:
         if proposal.action is ReversibleWriteAction.NOTE_CREATE:
             node = CanvasNode(
                 canvas_id=canvas.id,
@@ -356,7 +384,7 @@ class ReversibleWriteEffectService:
             self.session.add(node)
             await self.session.flush()
             await self._bump_canvas(canvas.id)
-            return node, None
+            return node, None, None
         if proposal.resource is None or proposal.resource.kind is not ResourceKind.NODE:
             raise ReversibleEffectError("invalid_note_target", "Effect proposal is invalid.")
         current = await self.session.scalar(
@@ -368,7 +396,8 @@ class ReversibleWriteEffectService:
         )
         if current is None:
             raise ReversibleEffectError("note_not_found", "Note not found.", status_code=404)
-        before_digest = _note_digest(current)
+        before_state = _note_state(current)
+        before_digest = _note_state_digest(before_state)
         updated_node = (
             await self.session.execute(
                 update(CanvasNode)
@@ -388,7 +417,7 @@ class ReversibleWriteEffectService:
         if updated_node is None:
             raise ReversibleEffectError("stale_revision", "Note revision changed.")
         await self._bump_canvas(canvas.id)
-        return updated_node, before_digest
+        return updated_node, before_state, before_digest
 
     async def _bump_canvas(self, canvas_id: uuid.UUID) -> None:
         await self.session.execute(
@@ -399,6 +428,23 @@ class ReversibleWriteEffectService:
 def _note_digest(node: CanvasNode) -> str:
     return hashlib.sha256(
         f"{node.id}:{node.revision}:{node.title}:{node.text}".encode()
+    ).hexdigest()
+
+
+def _note_state(node: CanvasNode) -> dict[str, str]:
+    """Return the complete mutable state changed by the approved note-update action."""
+
+    return {
+        "text": unicodedata.normalize("NFC", node.text),
+        "title": unicodedata.normalize("NFC", node.title),
+    }
+
+
+def _note_state_digest(state: dict[str, str]) -> str:
+    """Hash the repository's stable JSON representation of restorable note state."""
+
+    return hashlib.sha256(
+        json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
 
 
