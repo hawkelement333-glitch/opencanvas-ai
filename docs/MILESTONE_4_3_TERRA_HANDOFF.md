@@ -1,5 +1,27 @@
 # Milestone 4.3 Terra Handoff
 
+## Rollback revision contract corrected locally
+
+- Starting SHA: `04119652d54c5c907fad9140ebcf8ae337ca5986`.
+- Correction commit: `9f3ec4ff87bcf0de8f22a0744581006b74764a67`.
+
+The authoritative create-effect contract produces revision `0`; update effects produce a positive
+revision. The unpublished `20260724_0014` migration and matching ORM now enforce that exact closed
+rule through `ck_agent_rollback_approval_expected_revision_action` and
+`ck_agent_rollback_result_expected_revision_action`. Create approvals/results require expected
+revision `0`; update approvals/results require a positive expected revision. Existing action/target
+checks continue to require create-result absence and positive non-null update-result revisions.
+
+SQLite persistence and migration-cycle coverage: `79 passed`; focused Ruff, strict mypy, compilation,
+Alembic sole-head inspection, diff/whitespace, secret-like-material, and prohibited-scope checks
+passed. PostgreSQL runtime, approval issuance/execution, frontend, unrelated suites, and network tools
+were not run. No remote operation occurred; main and `competition-demo-v1` remain unchanged.
+
+### Exact next checkpoint
+
+Implement server-authoritative rollback approval issuance only, revalidating the current rollback
+review state in the issuing transaction. Do not execute rollback.
+
 ## Rollback eligibility review complete locally
 
 - Starting SHA: `2fd3b09d28e83e7aaae9ef7d70483bb04f20d9c1`.

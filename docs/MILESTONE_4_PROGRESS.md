@@ -2,6 +2,23 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 rollback revision contract correction — local only
+
+- Starting SHA: `04119652d54c5c907fad9140ebcf8ae337ca5986`; correction SHA:
+  `9f3ec4ff87bcf0de8f22a0744581006b74764a67`.
+- Complete: corrected unpublished migration `20260724_0014`, matching ORM constraints, and focused
+  SQLite tests for the real create revision `0` / update positive revision contract.
+- Named checks: `ck_agent_rollback_approval_expected_revision_action` and
+  `ck_agent_rollback_result_expected_revision_action`. They reject positive/negative create expected
+  revisions and zero/negative update expected revisions while preserving result target semantics.
+- Validation: focused persistence plus migration cycle `79 passed`; Ruff, strict mypy, compilation,
+  sole Alembic head `20260724_0014`, diff/whitespace, secret-like-material, and prohibited-scope scans
+  passed. PostgreSQL runtime was not run.
+- Branch: `milestone-4.3-reversible-writes-local`; upstream: none; main and
+  `competition-demo-v1` (`b45b7763b65861f9dfb3be7edf9b5eb271950917`) unchanged; no remote operation.
+- Exact continuation: server-authoritative rollback approval issuance with fresh in-transaction review
+  revalidation. Do not execute rollback.
+
 ## Milestone 4.3 rollback eligibility review — local only
 
 - Starting SHA: `2fd3b09d28e83e7aaae9ef7d70483bb04f20d9c1`; implementation SHA:
