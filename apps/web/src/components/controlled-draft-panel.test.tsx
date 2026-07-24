@@ -35,15 +35,13 @@ function setup(onRun = vi.fn().mockResolvedValue(result)) {
   const onPrepare = vi
     .fn()
     .mockResolvedValue({ executionId: result.executionId, status: "ready", duplicate: false });
-  const onCancel = vi
-    .fn()
-    .mockResolvedValue({
-      executionId: result.executionId,
-      cancelled: true,
-      duplicate: false,
-      status: "cancelled",
-      reasonCode: "user_requested",
-    });
+  const onCancel = vi.fn().mockResolvedValue({
+    executionId: result.executionId,
+    cancelled: true,
+    duplicate: false,
+    status: "cancelled",
+    reasonCode: "user_requested",
+  });
   render(
     createElement(ControlledDraftPanel, {
       canvasId: selected[0]!.canvasId,
