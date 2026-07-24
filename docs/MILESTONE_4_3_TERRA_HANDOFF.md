@@ -1,5 +1,42 @@
 # Milestone 4.3 Terra Handoff
 
+## Rollback-evidence migration cycle validated locally
+
+- Starting SHA: `2c76d113b7477dd5df3df37e2c0aa409785bec59`.
+- Branch: `milestone-4.3-reversible-writes-local`; upstream: none; no remote write occurred.
+- Database environment: SQLite only through the repository Alembic/pytest harness. PostgreSQL was
+  not configured or run.
+
+Migration `20260724_0013_reversible_write_rollback_evidence` upgraded from `20260724_0012`, created
+the rollback-evidence table, named scope/note indexes, composite foreign keys, action/revision checks,
+the `ck_agent_rollback_evidence_before_state_object` JSON-object check, and append-only UPDATE/DELETE
+triggers. A direct SQLite check proved JSON `null` is rejected and direct UPDATE/DELETE are rejected.
+Downgrade to `20260724_0012` removed the evidence table, its triggers, and its parent-effect scope
+index while preserving the `20260724_0012` effect table and immutable triggers. Re-upgrade restored
+`20260724_0013` as the sole migration head.
+
+The cycle exposed no migration defect. It did expose six stale current-head assertions and one stale
+script-directory head assertion in the existing SQLite migration harness; they now expect `0013` when
+testing an upgrade to `head`. Explicit `0012` target/downgrade assertions remain unchanged.
+
+Validation:
+
+- SQLite migration-chain suite: `8 passed`.
+- Focused rollback-evidence persistence suite: `35 passed`.
+- Focused migration-cycle test: `1 passed` before the broader migration-chain run.
+- Strict mypy, Ruff format/lint, Python compilation, Alembic import/head validation, and whitespace
+  checks: passed.
+- Skipped: PostgreSQL execution, unrelated backend/frontend suites, and all network tools.
+
+`main` remains unchanged and `competition-demo-v1` remains
+`b45b7763b65861f9dfb3be7edf9b5eb271950917`. No remote operation, upstream change, or tag operation
+occurred.
+
+### Exact next checkpoint
+
+Bind the already-validated rollback evidence into the atomic server-authoritative note-update
+transaction. Do not begin rollback execution, frontend work, Milestone 4.4, or Milestone 5.
+
 ## Atomic reversible note effect complete locally
 
 - Starting SHA: `177376f76b6c77a89229d5c4ddee69bcf43e3d6b`.

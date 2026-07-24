@@ -2,6 +2,28 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 rollback-evidence migration cycle — local only
+
+- Starting SHA: `2c76d113b7477dd5df3df37e2c0aa409785bec59`.
+- Database: SQLite only via the repository Alembic/pytest harness; PostgreSQL was not configured or
+  run.
+- Completed: `20260724_0012` → `20260724_0013` upgrade, schema/index/composite-FK/check/trigger
+  inspection, direct JSON-null and immutable-trigger enforcement, downgrade to `0012`, cleanup
+  inspection, and re-upgrade to the sole `0013` head.
+- Tests: migration chain `8 passed`; focused rollback-evidence persistence `35 passed`; focused new
+  cycle test `1 passed` before the full migration-chain run. Focused Ruff format/lint, strict mypy,
+  Python compilation, Alembic head validation, `git diff --check`, and whitespace checks passed.
+- Defect corrected: seven stale migration-harness assertions that described `0012` as the current
+  repository head now expect `0013` only for `head`/script-head checks. Migration `0013` itself did
+  not require a schema or downgrade correction.
+- Not run: PostgreSQL, unrelated backend/frontend suites, and all network tools.
+- Remote freeze proof: no upstream, remote operation, remote branch/tag change, push, pull, fetch,
+  sync, publication, or deployment occurred. `main` and `competition-demo-v1` remain unchanged; the
+  protected tag resolves to `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- Exact continuation: bind immutable rollback evidence into the atomic server-authoritative
+  note-update transaction; do not implement rollback execution, frontend work, Milestone 4.4, or
+  Milestone 5.
+
 ## Milestone 4.3 Terra Phase 1 — local only
 
 - Corrected Sol handoff checkpoint: `90a4e320b373e46ee2bf48ac183a19ba1e6c7fc7`.
