@@ -4,10 +4,11 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
+from fastapi import FastAPI
 from sqlalchemy import func, select, update
 
 from opencanvas_api.db.models import (
@@ -41,6 +42,7 @@ from opencanvas_api.services.agents.reversible_writes import (
     authoritative_absence_digest,
     rollback_approval_digest,
 )
+from tests.test_auth_authorization import _csrf, _enable_real_auth, _sign_up
 from tests.test_canvas_api import _create_canvas, _create_node
 
 
@@ -51,6 +53,7 @@ async def _approved_proposal(
     action: str = "note.create",
     node: dict[str, Any] | None = None,
     canvas: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], str]:
     canvas = canvas or await _create_canvas(client, api_prefix, "Atomic effect canvas")
     route = f"{api_prefix}/workspaces/{canvas['workspaceId']}/agent-executions"
@@ -63,24 +66,33 @@ async def _approved_proposal(
     }
     if node is not None:
         payload.update(noteId=node["id"], expectedRevision=node["revision"])
-    prepared = await client.post(f"{route}/reversible-proposals", json=payload)
+    prepared = await client.post(
+        f"{route}/reversible-proposals", json=payload, headers=headers
+    )
     assert prepared.status_code == 201, prepared.text
     proposal = prepared.json()
     proposal["_idempotencyKey"] = payload["idempotencyKey"]
     approved = await client.post(
         f"{route}/{proposal['executionId']}/reversible-proposal/approve",
         json={"planDigest": proposal["planDigest"]},
+        headers=headers,
     )
     assert approved.status_code == 200, approved.text
     return canvas, proposal, route
 
 
 async def _effect(
-    client: httpx.AsyncClient, route: str, proposal: dict[str, Any], *, key: str | None = None
+    client: httpx.AsyncClient,
+    route: str,
+    proposal: dict[str, Any],
+    *,
+    key: str | None = None,
+    headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     return await client.post(
         f"{route}/{proposal['executionId']}/reversible-effect",
         json={"idempotencyKey": key or proposal["_idempotencyKey"]},
+        headers=headers,
     )
 
 
@@ -771,6 +783,205 @@ async def test_rollback_approval_expired_replay_fails_closed_without_replacement
             )
             == 0
         )
+
+
+@pytest.mark.parametrize("scope_field", ["user", "workspace", "canvas"])
+async def test_rollback_approval_rejects_cross_scope_issuance(
+    client: httpx.AsyncClient,
+    database: Database,
+    api_prefix: str,
+    scope_field: str,
+) -> None:
+    canvas, proposal, route = await _approved_proposal(client, api_prefix)
+    applied = await _effect(client, route, proposal)
+    assert applied.status_code == 200, applied.text
+    effect_id = uuid.UUID(applied.json()["effectId"])
+    await _install_rollback_grant(
+        database, effect_id=effect_id, capability=Capability.CANVAS_NOTE_CREATE_ROLLBACK
+    )
+    request_scope = {
+        "authenticated_user_id": SYSTEM_USER_ID,
+        "workspace_id": uuid.UUID(canvas["workspaceId"]),
+        "canvas_id": uuid.UUID(canvas["id"]),
+    }
+    request_scope[
+        {
+            "user": "authenticated_user_id",
+            "workspace": "workspace_id",
+            "canvas": "canvas_id",
+        }[scope_field]
+    ] = uuid.uuid4()
+
+    async with database.sessions() as session:
+        with pytest.raises(RollbackApprovalError) as caught:
+            await ReversibleWriteRollbackApprovalService(session).issue(
+                **request_scope,
+                effect_id=effect_id,
+                idempotency_key=f"rollback-cross-scope-{uuid.uuid4().hex}",
+            )
+        assert caught.value.code == "scope_mismatch"
+        assert caught.value.message == "Rollback is not eligible."
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackApproval)
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackResult)
+            )
+            == 0
+        )
+
+
+@pytest.mark.parametrize("grant_scope_field", ["execution_id", "user_id", "workspace_id"])
+async def test_rollback_approval_rejects_wrong_grant_scope(
+    client: httpx.AsyncClient,
+    database: Database,
+    api_prefix: str,
+    grant_scope_field: str,
+) -> None:
+    canvas, proposal, route = await _approved_proposal(client, api_prefix)
+    applied = await _effect(client, route, proposal)
+    assert applied.status_code == 200, applied.text
+    effect_id = uuid.UUID(applied.json()["effectId"])
+    await _install_rollback_grant(
+        database, effect_id=effect_id, capability=Capability.CANVAS_NOTE_CREATE_ROLLBACK
+    )
+    async with database.sessions() as session:
+        effect = await session.get(ControlledAgentReversibleWriteEffect, effect_id)
+        assert effect is not None
+        row = await session.scalar(
+            select(ControlledAgentCapabilityGrant).where(
+                ControlledAgentCapabilityGrant.execution_id == effect.execution_id
+            )
+        )
+        assert row is not None
+        grant = CapabilityGrant.model_validate(row.payload).model_copy(
+            update={grant_scope_field: uuid.uuid4()}
+        )
+        await session.execute(
+            update(ControlledAgentCapabilityGrant)
+            .where(ControlledAgentCapabilityGrant.grant_id == row.grant_id)
+            .values(
+                payload=grant.model_dump(mode="json"),
+                payload_digest=contract_digest(grant),
+            )
+        )
+        await session.commit()
+
+    async with database.sessions() as session:
+        with pytest.raises(RollbackApprovalError) as caught:
+            await ReversibleWriteRollbackApprovalService(session).issue(
+                authenticated_user_id=SYSTEM_USER_ID,
+                workspace_id=uuid.UUID(canvas["workspaceId"]),
+                canvas_id=uuid.UUID(canvas["id"]),
+                effect_id=effect_id,
+                idempotency_key=f"rollback-wrong-grant-{uuid.uuid4().hex}",
+            )
+        assert caught.value.code == "grant_scope_mismatch"
+        assert caught.value.message == "Rollback is not eligible."
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(ControlledAgentReversibleWriteRollbackApproval)
+            )
+            == 0
+        )
+
+
+@pytest.mark.security
+async def test_rollback_approval_api_enforces_authentication_csrf_and_scope(
+    app: FastAPI, database: Database, api_prefix: str
+) -> None:
+    _enable_real_auth(app)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as owner:
+        owner_session = await _sign_up(
+            owner,
+            api_prefix,
+            email="rollback-owner@example.test",
+            display_name="Rollback Owner",
+        )
+        headers = _csrf(owner_session)
+        workspace = cast(
+            dict[str, Any], (await owner.get(f"{api_prefix}/workspaces")).json()[0]
+        )
+        canvas_response = await owner.post(
+            f"{api_prefix}/canvases",
+            json={"name": "Rollback API canvas", "workspaceId": workspace["id"]},
+            headers=headers,
+        )
+        assert canvas_response.status_code == 201, canvas_response.text
+        canvas = cast(dict[str, Any], canvas_response.json())
+        _, proposal, route = await _approved_proposal(
+            owner, api_prefix, canvas=canvas, headers=headers
+        )
+        applied = await _effect(owner, route, proposal, headers=headers)
+        assert applied.status_code == 200, applied.text
+        effect_id = uuid.UUID(applied.json()["effectId"])
+        await _install_rollback_grant(
+            database,
+            effect_id=effect_id,
+            capability=Capability.CANVAS_NOTE_CREATE_ROLLBACK,
+        )
+        endpoint = (
+            f"{route}/canvases/{canvas['id']}/reversible-effects/"
+            f"{effect_id}/rollback-approval"
+        )
+
+        missing = await owner.post(endpoint, json={"idempotencyKey": "missing-csrf-key"})
+        invalid = await owner.post(
+            endpoint,
+            json={"idempotencyKey": "invalid-csrf-key"},
+            headers={"X-CSRF-Token": "invalid"},
+        )
+        assert missing.status_code == invalid.status_code == 403
+        assert missing.json()["code"] == invalid.json()["code"] == "csrf_validation_failed"
+
+        valid = await owner.post(
+            endpoint,
+            json={"idempotencyKey": "valid-csrf-key"},
+            headers=headers,
+        )
+        assert valid.status_code == 200, valid.text
+        assert valid.json()["effectId"] == str(effect_id)
+
+        inaccessible_canvas = await owner.post(
+            endpoint.replace(str(canvas["id"]), str(uuid.uuid4())),
+            json={"idempotencyKey": "wrong-canvas-key"},
+            headers=headers,
+        )
+        inaccessible_workspace = await owner.post(
+            endpoint.replace(str(workspace["id"]), str(uuid.uuid4())),
+            json={"idempotencyKey": "wrong-workspace-key"},
+            headers=headers,
+        )
+        for inaccessible in (inaccessible_canvas, inaccessible_workspace):
+            assert inaccessible.status_code == 409
+            assert inaccessible.json() == {
+                "code": "scope_mismatch",
+                "detail": "Rollback is not eligible.",
+            }
+
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as anonymous:
+            unauthenticated = await anonymous.post(
+                endpoint,
+                json={"idempotencyKey": "unauthenticated-key"},
+                headers=headers,
+            )
+        assert unauthenticated.status_code == 401
+        for response in (
+            missing,
+            invalid,
+            inaccessible_canvas,
+            inaccessible_workspace,
+            unauthenticated,
+        ):
+            serialized = response.text.lower()
+            assert "traceback" not in serialized
+            assert "sql" not in serialized
+            assert "database" not in serialized
 
 
 def _state_digest(state: dict[str, object]) -> str:
