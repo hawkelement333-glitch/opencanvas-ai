@@ -2,6 +2,24 @@
 
 Last updated: 2026-07-23 (America/Chicago)
 
+## Milestone 4.2 Terra validation and recovery handoff
+
+- UI checkpoint `aacfdf28a4a3771fecd3ac0b36e453662c5f512a` (`Add controlled grounded-draft
+  interface`) was committed and normally pushed. Local and remote heads matched immediately after
+  the push; protected tag object `acbde89b6e2cc3e41c372887794726d393836716` and peeled demo
+  commit `b45b7763b65861f9dfb3be7edf9b5eb271950917` were unchanged.
+- Complete available gate after that checkpoint: controlled-agent backend suite `37 passed`;
+  frontend suite `9 files passed`, `33 tests passed`; frontend TypeScript, lint, and production
+  build passed. `npm run format:check` remains not clean on the existing baseline (16 files); no
+  broad formatting rewrite was retained.
+- The synchronous start route returns an execution identifier only after a terminal result. The UI
+  correctly does not show a false cancellation control. Terra is therefore **INCOMPLETE** until a
+  future server-owned contract exposes a real active execution identifier that the existing
+  authoritative cancellation endpoint can target. Do not use client IDs, aborted fetches, polling,
+  background work, workers, queues, schedulers, or autonomous execution to bridge this gap.
+- `docs/MILESTONE_4_2_TERRA_HANDOFF.md` contains the exact continuation scope. Luna and Milestone
+  4.3 have not started.
+
 ## Milestone 4.2 Terra checkpoint 3 — read-only controlled grounded-draft interface
 
 - Starting local and remote SHA: `8dfd290d9b541fa5fedfb4ab49fe6a22a273ad3d`.
