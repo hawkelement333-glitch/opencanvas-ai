@@ -1,5 +1,39 @@
 # Milestone 4.3 Terra Handoff
 
+## Frontend rollback flow complete locally
+
+- Starting SHA: `9b1b04b35625446e17537584ab10d88335447052`.
+- Frontend implementation: `f6362db65e85cc7cc7f3019d14e564962668634d`.
+
+The current Milestone 3.75 canvas now presents the completed review, approval, and execution chain
+for a known completed effect supplied as `rollbackEffectId`. The control is disabled in
+deterministic replay mode, loads only the authenticated server review, and presents the action only
+when that review is eligible. Create effects explain that the unchanged created note will be
+removed; update effects explain that the server-captured prior title/text will be restored.
+
+An accessible confirmation is required before approval issuance. Approval and execution use
+separate idempotency keys and pending states, prevent repeat submission, and accept no
+authority-bearing client fields. Successful execution refreshes the canvas snapshot and reports
+note removal, prior-state restoration, or exact-duplicate completion without exposing internal
+result evidence.
+
+Closed UI messages distinguish expired approval, stale note conflict, unavailable or revoked
+authority, authentication/CSRF failure, already-completed rollback, ineligibility, and a safe
+generic failure. The client schemas and component never render prior state, evidence, grants or
+grant digests, policy internals, SQL/database detail, stack traces, or raw exception text.
+
+Validation: focused component/API-client coverage reported `19 passed`; the complete frontend
+unit/component suite reported `48 passed` across 11 files. TypeScript, ESLint, Prettier,
+`git diff --check`, repository hygiene, and the production Next.js frontend build passed. A
+browser-driven visual audit, backend regressions, PostgreSQL runtime, external services, and network
+tools were not run. No backend code changed and no remote operation occurred.
+
+### Exact next checkpoint
+
+Perform only the final Milestone 4.3 audit of the completed proposal, approval, effect, rollback
+review, rollback approval, atomic rollback execution, audit/Trace, and frontend flow. Do not begin
+Milestone 4.4 or Milestone 5 automatically.
+
 ## Atomic rollback execution complete locally
 
 - Starting SHA: `75a83551275222465a30cb1fb670a90ade3e8c7f`.

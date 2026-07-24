@@ -2,6 +2,36 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 frontend rollback flow complete — local only
+
+- Starting SHA: `9b1b04b35625446e17537584ab10d88335447052`.
+- Frontend implementation: `f6362db` (`Add rollback controls to reversible effects`).
+- A completed effect can be handed to the canvas through the `rollbackEffectId` query parameter.
+  The browser loads the owned server review and shows a rollback control only when the current
+  non-demo workspace and canvas are available. Demo behavior is unchanged.
+- The control covers server-derived create-note removal and update-note restoration, explicit
+  accessible confirmation, separate approval and execution states, pending-request suppression,
+  exact-duplicate completion, and a canvas refresh after success.
+- Browser authority is restricted to path identifiers and newly generated approval/execution
+  idempotency keys. The client does not send action, capability, expected revision, target kind or
+  digest, evidence, grant, approval digest, expiry, or effect-result fields.
+- Safe closed UI states cover loading, ineligibility, expired approval, expired/revoked/mis-scoped
+  authority, stale note conflicts, authentication/CSRF failures, already-completed rollback, and
+  generic server failures. Responses render no prior state, rollback evidence, grant material,
+  policy internals, SQL details, stack traces, or raw exceptions.
+- Validation:
+  - focused rollback component and API-client tests: `19 passed`;
+  - complete frontend unit/component suite: `48 passed` across 11 files;
+  - frontend TypeScript and ESLint: passed;
+  - production Next.js frontend build: passed;
+  - Prettier, `git diff --check`, and repository hygiene over 245 source files: passed.
+- Not run: browser-driven visual audit, backend regression suites, PostgreSQL runtime, external
+  services, or network tools. No backend architecture changed.
+- Remote freeze preserved: no push, pull, fetch, sync, upstream, PR, deployment, upload, remote
+  branch, or tag operation occurred.
+- Exact next checkpoint: perform only the final Milestone 4.3 audit across the completed backend and
+  frontend chain. Do not begin Milestone 4.4 or Milestone 5 automatically.
+
 ## Milestone 4.3 atomic rollback execution complete — local only
 
 - Starting SHA: `75a83551275222465a30cb1fb670a90ade3e8c7f`.
