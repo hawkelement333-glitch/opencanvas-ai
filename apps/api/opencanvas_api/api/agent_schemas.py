@@ -213,3 +213,16 @@ class ReversibleWriteApprovalOut(ApiModel):
     plan_digest: str
     status: Literal["ready"]
     duplicate: bool = False
+
+
+class ReversibleWriteEffectStart(ApiModel):
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class ReversibleWriteEffectOut(ApiModel):
+    effect_id: uuid.UUID
+    trace_id: uuid.UUID
+    action: Literal["note.create", "note.update"]
+    note_id: uuid.UUID
+    revision: int
+    duplicate: bool = False

@@ -28,6 +28,8 @@ from opencanvas_api.api.agent_schemas import (
     AgentStateOut,
     ReversibleWriteApprovalOut,
     ReversibleWriteApprovalStart,
+    ReversibleWriteEffectOut,
+    ReversibleWriteEffectStart,
     ReversibleWriteProposalOut,
     ReversibleWriteProposalStart,
 )
@@ -41,6 +43,7 @@ from opencanvas_api.api.dependencies import (
 from opencanvas_api.api.errors import ApiError
 from opencanvas_api.api.serialization import utc
 from opencanvas_api.core.config import Settings, get_settings
+from opencanvas_api.services.agents.contracts import contract_digest
 from opencanvas_api.services.agents.execution import (
     CancellationRequest,
     ControlledExecutionLifecycle,
@@ -55,7 +58,10 @@ from opencanvas_api.services.agents.persistence import (
     AgentPersistenceNotFound,
     ControlledAgentRepository,
 )
-from opencanvas_api.services.agents.contracts import contract_digest
+from opencanvas_api.services.agents.reversible_write_effects import (
+    ReversibleEffectError,
+    ReversibleWriteEffectService,
+)
 from opencanvas_api.services.agents.reversible_write_proposals import (
     ReversibleProposalError,
     ReversibleWriteProposalService,
@@ -69,7 +75,11 @@ ProviderDep = Annotated[AIProvider, Depends(get_ai_provider)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
-@router.post("/reversible-proposals", response_model=ReversibleWriteProposalOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/reversible-proposals",
+    response_model=ReversibleWriteProposalOut,
+    status_code=status.HTTP_201_CREATED,
+)
 async def prepare_reversible_write_proposal(
     workspace_id: uuid.UUID,
     payload: ReversibleWriteProposalStart,
@@ -110,7 +120,9 @@ async def prepare_reversible_write_proposal(
     )
 
 
-@router.post("/{execution_id}/reversible-proposal/approve", response_model=ReversibleWriteApprovalOut)
+@router.post(
+    "/{execution_id}/reversible-proposal/approve", response_model=ReversibleWriteApprovalOut
+)
 async def approve_reversible_write_proposal(
     workspace_id: uuid.UUID,
     execution_id: uuid.UUID,
@@ -139,6 +151,36 @@ async def approve_reversible_write_proposal(
         plan_digest=contract_digest(prepared.proposal),
         status="ready",
         duplicate=duplicate,
+    )
+
+
+@router.post("/{execution_id}/reversible-effect", response_model=ReversibleWriteEffectOut)
+async def apply_reversible_write_effect(
+    workspace_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    payload: ReversibleWriteEffectStart,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> ReversibleWriteEffectOut:
+    try:
+        applied = await ReversibleWriteEffectService(session).apply(
+            authenticated_user_id=principal.user_id,
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except ReversibleEffectError as exc:
+        await session.rollback()
+        raise ApiError(exc.status_code, exc.code, exc.message) from exc
+    effect = applied.effect
+    return ReversibleWriteEffectOut(
+        effect_id=effect.effect_id,
+        trace_id=effect.trace_id,
+        action=effect.action,
+        note_id=effect.resulting_resource_id,
+        revision=effect.resulting_revision,
+        duplicate=applied.duplicate,
     )
 
 
@@ -175,38 +217,59 @@ async def start_grounded_draft(
     return _draft_out(result)
 
 
-@router.post("/drafts/prepare", response_model=AgentDraftPreparedOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/drafts/prepare", response_model=AgentDraftPreparedOut, status_code=status.HTTP_201_CREATED
+)
 async def prepare_grounded_draft(
-    workspace_id: uuid.UUID, payload: AgentDraftStart, request: Request, principal: MutatingPrincipalDep,
-    session: SessionDep, settings: SettingsDep,
+    workspace_id: uuid.UUID,
+    payload: AgentDraftStart,
+    request: Request,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+    settings: SettingsDep,
 ) -> AgentDraftPreparedOut:
-    service = ControlledGroundedDraftService(session, provider=get_ai_provider(settings), settings=settings)
+    service = ControlledGroundedDraftService(
+        session, provider=get_ai_provider(settings), settings=settings
+    )
     correlation_id = str(getattr(request.state, "correlation_id", uuid.uuid4().hex))
     try:
         prepared = await service.prepare(
-            authenticated_user_id=principal.user_id, workspace_id=workspace_id, canvas_id=payload.canvas_id,
-            selected_node_ids=payload.selected_node_ids, instruction=payload.instruction,
-            idempotency_key=payload.idempotency_key, correlation_id=correlation_id,
+            authenticated_user_id=principal.user_id,
+            workspace_id=workspace_id,
+            canvas_id=payload.canvas_id,
+            selected_node_ids=payload.selected_node_ids,
+            instruction=payload.instruction,
+            idempotency_key=payload.idempotency_key,
+            correlation_id=correlation_id,
             client_request_id=payload.client_request_id,
         )
         await session.commit()
     except ControlledDraftError as exc:
         raise ApiError(exc.status_code, exc.code, exc.message) from exc
-    return AgentDraftPreparedOut(execution_id=prepared.request.execution_id, status="ready", duplicate=not prepared.created)
+    return AgentDraftPreparedOut(
+        execution_id=prepared.request.execution_id, status="ready", duplicate=not prepared.created
+    )
 
 
 @router.post("/{execution_id}/run", response_model=AgentDraftOut)
 async def run_grounded_draft(
-    workspace_id: uuid.UUID, execution_id: uuid.UUID, request: Request, principal: MutatingPrincipalDep,
-    session: SessionDep, provider: ProviderDep, settings: SettingsDep,
+    workspace_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    request: Request,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+    provider: ProviderDep,
+    settings: SettingsDep,
     _: Annotated[None, Depends(enforce_ai_rate_limit)],
 ) -> AgentDraftOut:
     service = ControlledGroundedDraftService(session, provider=provider, settings=settings)
     correlation_id = str(getattr(request.state, "correlation_id", uuid.uuid4().hex))
     try:
         prepared = await service.load_prepared_request(
-            authenticated_user_id=principal.user_id, workspace_id=workspace_id,
-            execution_id=execution_id, correlation_id=correlation_id,
+            authenticated_user_id=principal.user_id,
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+            correlation_id=correlation_id,
         )
         result = await service.execute(authenticated_user_id=principal.user_id, request=prepared)
     except ControlledDraftError as exc:
