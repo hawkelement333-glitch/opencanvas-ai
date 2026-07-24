@@ -477,7 +477,7 @@ async def _seed_rollback_authority_context(
                 text="Before text" if action == "note.update" else "Created text",
                 position_x=0.0,
                 position_y=0.0,
-                revision=5 if action == "note.update" else 1,
+                revision=5 if action == "note.update" else 0,
             )
         )
         await session.commit()
@@ -487,7 +487,7 @@ async def _seed_rollback_authority_context(
         resource_id=note_id if action == "note.update" else None,
         expected_revision=4 if action == "note.update" else None,
         resulting_resource_id=note_id,
-        resulting_revision=5 if action == "note.update" else 1,
+        resulting_revision=5 if action == "note.update" else 0,
         before_digest="a" * 64 if action == "note.update" else None,
     )
     await _persist(database, effect)
@@ -581,7 +581,7 @@ async def test_rollback_approval_persists_the_two_closed_authority_forms(
     assert approval.rollback_evidence_id == (
         authority.evidence.evidence_id if authority.evidence else None
     )
-    assert approval.expected_current_revision > 0
+    assert approval.expected_current_revision == (5 if action == "note.update" else 0)
 
 
 @pytest.mark.parametrize(
@@ -591,7 +591,7 @@ async def test_rollback_approval_persists_the_two_closed_authority_forms(
         {"rollback_action": "note.delete.rollback"},
         {"rollback_target_kind": "arbitrary_state"},
         {"rollback_action": "note.update.rollback"},
-        {"expected_current_revision": 0},
+        {"expected_current_revision": 1},
         {"expected_current_revision": -1},
         {"original_plan_digest": "bad"},
         {"effect_after_state_digest": "B" * 64},
@@ -607,6 +607,17 @@ async def test_rollback_approval_rejects_invalid_closed_contract(
     authority = await _seed_rollback_authority_context(database, action="note.create")
     with pytest.raises(IntegrityError):
         await _persist_authority(database, _rollback_approval(authority, **updates))
+
+
+@pytest.mark.parametrize("revision", [0, -1])
+async def test_update_rollback_approval_rejects_nonpositive_expected_revision(
+    database: Database, revision: int
+) -> None:
+    authority = await _seed_rollback_authority_context(database, action="note.update")
+    with pytest.raises(IntegrityError):
+        await _persist_authority(
+            database, _rollback_approval(authority, expected_current_revision=revision)
+        )
 
 
 async def test_rollback_approval_rejects_invalid_evidence_shape_and_scope(
@@ -650,6 +661,7 @@ async def test_rollback_result_persists_the_two_closed_success_forms(
 
     assert result.rollback_approval_id == approval.rollback_approval_id
     if action == "note.create":
+        assert result.expected_pre_rollback_revision == 0
         assert result.resulting_revision is None
     else:
         assert result.resulting_revision is not None and result.resulting_revision > 0
@@ -661,7 +673,8 @@ async def test_rollback_result_persists_the_two_closed_success_forms(
         {"forward_action": "note.delete"},
         {"rollback_action": "note.update.rollback"},
         {"rollback_target_kind": "arbitrary_state"},
-        {"expected_pre_rollback_revision": 0},
+        {"expected_pre_rollback_revision": 1},
+        {"expected_pre_rollback_revision": -1},
         {"resulting_revision": 1},
         {"pre_rollback_state_digest": "bad"},
         {"post_rollback_target_digest": "BAD" * 22},
@@ -678,15 +691,30 @@ async def test_create_rollback_result_rejects_invalid_closed_contract(
         await _persist_authority(database, _rollback_result(authority, approval, **updates))
 
 
-async def test_update_rollback_result_rejects_missing_resulting_revision(
-    database: Database,
+@pytest.mark.parametrize("resulting_revision", [None, 0, -1])
+async def test_update_rollback_result_rejects_nonpositive_or_missing_resulting_revision(
+    database: Database, resulting_revision: int | None
 ) -> None:
     authority = await _seed_rollback_authority_context(database, action="note.update")
     approval = _rollback_approval(authority)
     await _persist_authority(database, approval)
     with pytest.raises(IntegrityError):
         await _persist_authority(
-            database, _rollback_result(authority, approval, resulting_revision=None)
+            database,
+            _rollback_result(authority, approval, resulting_revision=resulting_revision),
+        )
+
+
+@pytest.mark.parametrize("revision", [0, -1])
+async def test_update_rollback_result_rejects_nonpositive_expected_revision(
+    database: Database, revision: int
+) -> None:
+    authority = await _seed_rollback_authority_context(database, action="note.update")
+    approval = _rollback_approval(authority)
+    await _persist_authority(database, approval)
+    with pytest.raises(IntegrityError):
+        await _persist_authority(
+            database, _rollback_result(authority, approval, expected_pre_rollback_revision=revision)
         )
 
 

@@ -1781,8 +1781,13 @@ class ControlledAgentReversibleWriteRollbackApproval(Base):
             name="ck_agent_rollback_approval_action_shape",
         ),
         CheckConstraint(
-            "expected_current_revision > 0",
-            name="ck_agent_rollback_approval_expected_revision_positive",
+            "(forward_action = 'note.create' "
+            "AND rollback_action = 'note.create.rollback' "
+            "AND expected_current_revision = 0) OR "
+            "(forward_action = 'note.update' "
+            "AND rollback_action = 'note.update.rollback' "
+            "AND expected_current_revision > 0)",
+            name="ck_agent_rollback_approval_expected_revision_action",
         ),
         CheckConstraint(
             "length(scoped_idempotency_key) > 0",
@@ -1965,8 +1970,13 @@ class ControlledAgentReversibleWriteRollbackResult(Base):
             name="ck_agent_rollback_result_action_shape",
         ),
         CheckConstraint(
-            "expected_pre_rollback_revision > 0",
-            name="ck_agent_rollback_result_expected_revision_positive",
+            "(forward_action = 'note.create' "
+            "AND rollback_action = 'note.create.rollback' "
+            "AND expected_pre_rollback_revision = 0) OR "
+            "(forward_action = 'note.update' "
+            "AND rollback_action = 'note.update.rollback' "
+            "AND expected_pre_rollback_revision > 0)",
+            name="ck_agent_rollback_result_expected_revision_action",
         ),
         CheckConstraint(
             "length(scoped_idempotency_key) > 0",
