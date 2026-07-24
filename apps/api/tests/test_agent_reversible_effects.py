@@ -17,6 +17,7 @@ from opencanvas_api.db.models import (
     ControlledAgentAuditEvent,
     ControlledAgentCapabilityGrant,
     ControlledAgentReversibleWriteEffect,
+    ControlledAgentReversibleWriteRollbackApproval,
     ControlledAgentReversibleWriteRollbackEvidence,
     TraceEvent,
 )
@@ -29,6 +30,15 @@ from opencanvas_api.services.agents.contracts import (
     contract_digest,
 )
 from opencanvas_api.services.agents.reversible_write_effects import ReversibleWriteEffectService
+from opencanvas_api.services.agents.reversible_write_rollback_approvals import (
+    ReversibleWriteRollbackApprovalService,
+)
+from opencanvas_api.services.agents.reversible_writes import (
+    ROLLBACK_APPROVAL_TTL,
+    RollbackApprovalDigestInput,
+    authoritative_absence_digest,
+    rollback_approval_digest,
+)
 from tests.test_canvas_api import _create_canvas, _create_node
 
 
@@ -400,6 +410,102 @@ async def test_rollback_review_rejects_forward_capability_without_mutation(
         effect = await session.get(ControlledAgentReversibleWriteEffect, effect_id)
         node = await session.get(CanvasNode, uuid.UUID(before["noteId"]))
     assert effect is not None and node is not None and node.revision == before["revision"]
+
+
+@pytest.mark.parametrize(
+    ("action", "capability"),
+    [
+        ("note.create", Capability.CANVAS_NOTE_CREATE_ROLLBACK),
+        ("note.update", Capability.CANVAS_NOTE_UPDATE_ROLLBACK),
+    ],
+)
+async def test_successful_rollback_approval_issuance(
+    client: httpx.AsyncClient,
+    database: Database,
+    api_prefix: str,
+    action: str,
+    capability: Capability,
+) -> None:
+    canvas = await _create_canvas(client, api_prefix, "Rollback approval canvas")
+    node = None
+    if action == "note.update":
+        node = await _create_node(
+            client, api_prefix, canvas["id"], title="Before", text="Before text"
+        )
+    _, proposal, route = await _approved_proposal(
+        client, api_prefix, action=action, node=node, canvas=canvas
+    )
+    applied = await _effect(client, route, proposal)
+    assert applied.status_code == 200, applied.text
+    effect_id = uuid.UUID(applied.json()["effectId"])
+    await _install_rollback_grant(database, effect_id=effect_id, capability=capability)
+    key = f"rollback-approval-{uuid.uuid4().hex}"
+    async with database.sessions() as session:
+        issued = await ReversibleWriteRollbackApprovalService(session).issue(
+            authenticated_user_id=SYSTEM_USER_ID,
+            workspace_id=uuid.UUID(canvas["workspaceId"]),
+            canvas_id=uuid.UUID(canvas["id"]),
+            effect_id=effect_id,
+            idempotency_key=key,
+        )
+        await session.commit()
+    async with database.sessions() as session:
+        approval = await session.get(
+            ControlledAgentReversibleWriteRollbackApproval, issued.approval.rollback_approval_id
+        )
+        effect = await session.get(ControlledAgentReversibleWriteEffect, effect_id)
+        grant = (
+            await session.scalar(
+                select(ControlledAgentCapabilityGrant).where(
+                    ControlledAgentCapabilityGrant.execution_id == effect.execution_id
+                )
+            )
+            if effect
+            else None
+        )
+        evidence = await session.scalar(
+            select(ControlledAgentReversibleWriteRollbackEvidence).where(
+                ControlledAgentReversibleWriteRollbackEvidence.effect_id == effect_id
+            )
+        )
+    assert approval is not None and effect is not None and grant is not None
+    assert approval.grant_id == grant.grant_id
+    assert approval.expires_at - approval.created_at == ROLLBACK_APPROVAL_TTL
+    if action == "note.create":
+        assert approval.expected_current_revision == 0
+        assert approval.rollback_target_kind == "authoritative_absence"
+        assert approval.rollback_target_digest == authoritative_absence_digest()
+        assert approval.rollback_evidence_id is None
+    else:
+        assert approval.expected_current_revision > 0
+        assert approval.rollback_target_kind == "exact_prior_state"
+        assert evidence is not None and approval.rollback_evidence_id == evidence.evidence_id
+        assert approval.rollback_target_digest == evidence.before_digest
+    digest = rollback_approval_digest(
+        RollbackApprovalDigestInput(
+            execution_id=approval.execution_id,
+            user_id=approval.user_id,
+            workspace_id=approval.workspace_id,
+            canvas_id=approval.canvas_id,
+            note_id=approval.note_id,
+            proposal_id=approval.proposal_id,
+            effect_id=approval.effect_id,
+            forward_action=approval.forward_action,
+            rollback_action=approval.rollback_action,
+            original_plan_digest=approval.original_plan_digest,
+            expected_current_revision=approval.expected_current_revision,
+            effect_after_state_digest=approval.effect_after_state_digest,
+            rollback_target_kind=approval.rollback_target_kind,
+            rollback_target_digest=approval.rollback_target_digest,
+            rollback_evidence_id=approval.rollback_evidence_id,
+            grant_id=approval.grant_id,
+            scoped_idempotency_key=approval.scoped_idempotency_key,
+            expires_at=approval.expires_at.replace(tzinfo=UTC)
+            if approval.expires_at.tzinfo is None
+            else approval.expires_at,
+        )
+    )
+    assert approval.approval_digest == digest
 
 
 def _state_digest(state: dict[str, object]) -> str:
