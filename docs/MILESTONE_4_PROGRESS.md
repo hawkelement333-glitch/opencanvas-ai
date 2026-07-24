@@ -2,6 +2,34 @@
 
 Last updated: 2026-07-23 (America/Chicago)
 
+## Milestone 4.2 Sol checkpoint 3C — immutable selected context
+
+- Starting local and remote SHA:
+  `18b995e` (`Enforce controlled execution lifecycle`).
+- Added an internal immutable selected-context resolver that accepts only a previously authorized,
+  server-owned execution boundary. It reloads the stored append-only snapshot, verifies execution,
+  user, workspace, canvas, snapshot identity, and stored digest, and rejects duplicate selections.
+- Exact canvas revisions, node revisions, document-version rows, and chunk document versions are
+  resolved through ownership-scoped joins. Unsupported resource kinds, missing versions, deleted
+  resources, altered content, current-version substitution, and cross-scope access fail closed.
+- Every resolved resource has a domain-separated canonical digest. The returned package has its own
+  stable resolution digest bound to the stored context snapshot and exact ordered evidence.
+- Uploaded/node text remains explicitly marked `untrusted_content`; prompt-injection text is
+  preserved only as evidence and cannot alter authority, scope, action, or lifecycle decisions.
+- Tests prove exact ordered resolution, stable returned content after later workspace mutation,
+  rejection on a second resolution after a selected revision changes, altered-digest rejection,
+  deleted-version rejection, authenticated-user mismatch denial, and prompt-injection isolation.
+- Focused immutable-context/contract/authority tests: `19 passed`.
+- Ruff format/lint: passed. Focused mypy for `execution.py`: passed.
+- `git diff --check`: passed.
+- No migration was required for this unit. No provider, API, UI, workspace effect, cancellation,
+  result publication, worker, queue, scheduler, delegation, Terra, Luna, or Milestone 3.75 work was
+  added.
+- Exact next unit: add authoritative idempotent cancellation and result-acceptance guards that
+  recheck current lifecycle, immutable context identity, grant revocation, and authority expiry at
+  publication time; rejected late results must append safe audit evidence and never change a
+  terminal outcome.
+
 ## Milestone 4.2 Sol checkpoint 3B — lifecycle transition safety
 
 - Starting local and remote SHA:

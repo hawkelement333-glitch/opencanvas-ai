@@ -12,12 +12,21 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from opencanvas_api.db.models import Canvas, ControlledAgentRequestIdentity, Workspace
+from opencanvas_api.db.models import (
+    Canvas,
+    CanvasNode,
+    ControlledAgentRequestIdentity,
+    Document,
+    DocumentChunk,
+    DocumentVersion,
+    Workspace,
+)
 from opencanvas_api.services.agents.contracts import (
     SCHEMA_VERSION,
     AuditAttribute,
     AuditEvent,
     Capability,
+    ContextSnapshot,
     ContractModel,
     Digest,
     PlanSnapshot,
@@ -178,6 +187,60 @@ class IdempotencyConflict(RuntimeError):
 
 class IdempotencyPersistenceConflict(RuntimeError):
     pass
+
+
+class ImmutableContextDenied(RuntimeError):
+    def __init__(self, reason_code: str) -> None:
+        super().__init__(reason_code)
+        self.reason_code = reason_code
+
+
+class ResolvedContextResource(ContractModel):
+    """Exact untrusted evidence resolved from one approved selected-context resource."""
+
+    contract_kind: Literal["resolved_context_resource"] = "resolved_context_resource"
+    schema_version: Literal["controlled-agent-v1"] = SCHEMA_VERSION
+    scope: ResourceScope
+    canvas_id: uuid.UUID
+    title: str = Field(min_length=1, max_length=500)
+    content: str = Field(min_length=1)
+    document_id: uuid.UUID | None = None
+    document_version: int | None = Field(default=None, ge=1)
+    untrusted_content: Literal[True] = True
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedSelectedContext:
+    snapshot_id: uuid.UUID
+    context_digest: Digest
+    resolution_digest: Digest
+    resources: tuple[ResolvedContextResource, ...]
+
+
+def resolved_resource_digest(resource: ResolvedContextResource) -> Digest:
+    return contract_digest(resource)
+
+
+def resolved_context_digest(
+    *,
+    snapshot_id: uuid.UUID,
+    context_digest: Digest,
+    resources: tuple[ResolvedContextResource, ...],
+) -> Digest:
+    class ResolutionEnvelope(ContractModel):
+        contract_kind: Literal["resolved_selected_context"] = "resolved_selected_context"
+        schema_version: Literal["controlled-agent-v1"] = SCHEMA_VERSION
+        snapshot_id: uuid.UUID
+        context_digest: Digest
+        resources: tuple[ResolvedContextResource, ...]
+
+    return contract_digest(
+        ResolutionEnvelope(
+            snapshot_id=snapshot_id,
+            context_digest=context_digest,
+            resources=resources,
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -389,6 +452,195 @@ class ExecutionAuthorityPreflight:
         )
 
 
+class ImmutableSelectedContextResolver:
+    """Resolve only the exact stored selection at the approved execution boundary."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+        self.repository = ControlledAgentRepository(session)
+
+    async def resolve(
+        self,
+        *,
+        authenticated_user_id: uuid.UUID,
+        authorized: AuthorizedPreflight,
+    ) -> ResolvedSelectedContext:
+        if authenticated_user_id != authorized.user_id:
+            raise ImmutableContextDenied("user_scope_mismatch")
+        try:
+            inspection = await self.repository.inspect_execution(
+                user_id=authenticated_user_id,
+                workspace_id=authorized.workspace_id,
+                execution_id=authorized.execution_id,
+                limit=100,
+                offset=0,
+            )
+        except AgentPersistenceNotFound as exc:
+            raise ImmutableContextDenied("context_not_found") from exc
+        if (
+            inspection.execution.context_snapshot_id != authorized.context_snapshot_id
+            or inspection.context.snapshot_id != authorized.context_snapshot_id
+            or inspection.context.payload_digest != authorized.context_digest
+        ):
+            raise ImmutableContextDenied("context_identity_mismatch")
+        context = self.repository._load_contract(
+            ContextSnapshot,
+            inspection.context.payload,
+            inspection.context.payload_digest,
+        )
+        expected_scope = (
+            authorized.user_id,
+            authorized.workspace_id,
+            authorized.execution_id,
+        )
+        if expected_scope != (context.user_id, context.workspace_id, context.execution_id):
+            raise ImmutableContextDenied("context_scope_mismatch")
+        scopes = tuple(resource.scope for resource in context.resources)
+        if len(scopes) != len(set(scopes)):
+            raise ImmutableContextDenied("context_duplicate_resource")
+
+        resolved = tuple(
+            [
+                await self._resolve_resource(
+                    authorized=authorized,
+                    scope=resource.scope,
+                    expected_digest=resource.content_digest,
+                )
+                for resource in context.resources
+            ]
+        )
+        return ResolvedSelectedContext(
+            snapshot_id=context.snapshot_id,
+            context_digest=inspection.context.payload_digest,
+            resolution_digest=resolved_context_digest(
+                snapshot_id=context.snapshot_id,
+                context_digest=inspection.context.payload_digest,
+                resources=resolved,
+            ),
+            resources=resolved,
+        )
+
+    async def _resolve_resource(
+        self,
+        *,
+        authorized: AuthorizedPreflight,
+        scope: ResourceScope,
+        expected_digest: Digest,
+    ) -> ResolvedContextResource:
+        if scope.version is None:
+            raise ImmutableContextDenied("context_version_missing")
+        resource: ResolvedContextResource
+        if scope.kind is ResourceKind.CANVAS:
+            row = await self.session.scalar(
+                select(Canvas)
+                .join(Workspace, Workspace.id == Canvas.workspace_id)
+                .where(
+                    Canvas.id == scope.resource_id,
+                    Canvas.id == authorized.canvas_id,
+                    Canvas.workspace_id == authorized.workspace_id,
+                    Canvas.revision == scope.version,
+                    Workspace.owner_id == authorized.user_id,
+                    Workspace.deleted_at.is_(None),
+                    Workspace.lifecycle_state != "deleted",
+                )
+            )
+            if row is None:
+                raise ImmutableContextDenied("context_resource_missing")
+            resource = ResolvedContextResource(
+                scope=scope,
+                canvas_id=row.id,
+                title=row.name,
+                content=f"Canvas revision {row.revision}",
+            )
+        elif scope.kind is ResourceKind.NODE:
+            row = await self.session.scalar(
+                select(CanvasNode)
+                .join(Canvas, Canvas.id == CanvasNode.canvas_id)
+                .join(Workspace, Workspace.id == Canvas.workspace_id)
+                .where(
+                    CanvasNode.id == scope.resource_id,
+                    CanvasNode.canvas_id == authorized.canvas_id,
+                    CanvasNode.revision == scope.version,
+                    Canvas.workspace_id == authorized.workspace_id,
+                    Workspace.owner_id == authorized.user_id,
+                    Workspace.deleted_at.is_(None),
+                    Workspace.lifecycle_state != "deleted",
+                )
+            )
+            if row is None:
+                raise ImmutableContextDenied("context_resource_missing")
+            resource = ResolvedContextResource(
+                scope=scope,
+                canvas_id=row.canvas_id,
+                title=row.title,
+                content=row.text,
+            )
+        elif scope.kind is ResourceKind.DOCUMENT_VERSION:
+            row = await self.session.scalar(
+                select(DocumentVersion)
+                .join(Document, Document.id == DocumentVersion.document_id)
+                .join(Canvas, Canvas.id == Document.canvas_id)
+                .join(Workspace, Workspace.id == Canvas.workspace_id)
+                .where(
+                    DocumentVersion.id == scope.resource_id,
+                    DocumentVersion.version == scope.version,
+                    DocumentVersion.deleted_at.is_(None),
+                    DocumentVersion.status == "ready",
+                    Document.canvas_id == authorized.canvas_id,
+                    Document.deleted_at.is_(None),
+                    Document.status == "ready",
+                    Canvas.workspace_id == authorized.workspace_id,
+                    Workspace.owner_id == authorized.user_id,
+                    Workspace.deleted_at.is_(None),
+                    Workspace.lifecycle_state != "deleted",
+                )
+            )
+            if row is None or not row.extracted_text:
+                raise ImmutableContextDenied("context_resource_missing")
+            resource = ResolvedContextResource(
+                scope=scope,
+                canvas_id=authorized.canvas_id,
+                title=row.file_name,
+                content=row.extracted_text,
+                document_id=row.document_id,
+                document_version=row.version,
+            )
+        elif scope.kind is ResourceKind.CHUNK:
+            row = await self.session.scalar(
+                select(DocumentChunk)
+                .join(Document, Document.id == DocumentChunk.document_id)
+                .join(Canvas, Canvas.id == Document.canvas_id)
+                .join(Workspace, Workspace.id == Canvas.workspace_id)
+                .where(
+                    DocumentChunk.id == scope.resource_id,
+                    DocumentChunk.document_version == scope.version,
+                    Document.canvas_id == authorized.canvas_id,
+                    Document.deleted_at.is_(None),
+                    Document.status == "ready",
+                    Canvas.workspace_id == authorized.workspace_id,
+                    Workspace.owner_id == authorized.user_id,
+                    Workspace.deleted_at.is_(None),
+                    Workspace.lifecycle_state != "deleted",
+                )
+            )
+            if row is None:
+                raise ImmutableContextDenied("context_resource_missing")
+            resource = ResolvedContextResource(
+                scope=scope,
+                canvas_id=authorized.canvas_id,
+                title=row.heading or f"Chunk {row.chunk_index + 1}",
+                content=row.content,
+                document_id=row.document_id,
+                document_version=row.document_version,
+            )
+        else:
+            raise ImmutableContextDenied("context_resource_kind_unsupported")
+
+        if resolved_resource_digest(resource) != expected_digest:
+            raise ImmutableContextDenied("context_content_hash_mismatch")
+        return resource
+
+
 __all__ = [
     "ACTION_REGISTRY",
     "GROUND_DRAFT_STAGES",
@@ -404,6 +656,12 @@ __all__ = [
     "IdempotencyConflict",
     "IdempotencyFingerprint",
     "IdempotencyPersistenceConflict",
+    "ImmutableContextDenied",
+    "ImmutableSelectedContextResolver",
     "RequestReservation",
+    "ResolvedContextResource",
+    "ResolvedSelectedContext",
     "idempotency_digest",
+    "resolved_context_digest",
+    "resolved_resource_digest",
 ]
