@@ -194,12 +194,6 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["note_id", "canvas_id"],
-            ["nodes.id", "nodes.canvas_id"],
-            name="fk_agent_rollback_approval_note_canvas",
-            ondelete="RESTRICT",
-        ),
-        sa.ForeignKeyConstraint(
             ["grant_id", "execution_id", "user_id", "workspace_id"],
             [
                 f"{GRANT_TABLE}.grant_id",
@@ -352,12 +346,6 @@ def upgrade() -> None:
                 f"{EFFECT_TABLE}.resulting_resource_id",
             ],
             name="fk_agent_rollback_result_effect_scope",
-            ondelete="RESTRICT",
-        ),
-        sa.ForeignKeyConstraint(
-            ["note_id", "canvas_id"],
-            ["nodes.id", "nodes.canvas_id"],
-            name="fk_agent_rollback_result_note_canvas",
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("rollback_result_id"),

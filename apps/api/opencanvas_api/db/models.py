@@ -1741,12 +1741,6 @@ class ControlledAgentReversibleWriteRollbackApproval(Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["note_id", "canvas_id"],
-            ["nodes.id", "nodes.canvas_id"],
-            name="fk_agent_rollback_approval_note_canvas",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
             ["grant_id", "execution_id", "user_id", "workspace_id"],
             [
                 "controlled_agent_capability_grants.grant_id",
@@ -1937,12 +1931,6 @@ class ControlledAgentReversibleWriteRollbackResult(Base):
                 "controlled_agent_reversible_write_effects.resulting_resource_id",
             ],
             name="fk_agent_rollback_result_effect_scope",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
-            ["note_id", "canvas_id"],
-            ["nodes.id", "nodes.canvas_id"],
-            name="fk_agent_rollback_result_note_canvas",
             ondelete="RESTRICT",
         ),
         UniqueConstraint("rollback_approval_id", name="uq_agent_rollback_result_approval"),

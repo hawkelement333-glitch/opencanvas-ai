@@ -679,6 +679,40 @@ async def test_rollback_result_persists_the_two_closed_success_forms(
         assert result.resulting_revision is not None and result.resulting_revision > 0
 
 
+async def test_create_rollback_authority_outlives_the_deleted_note(
+    database: Database,
+) -> None:
+    authority = await _seed_rollback_authority_context(database, action="note.create")
+    approval = _rollback_approval(authority)
+    await _persist_authority(database, approval)
+
+    async with database.sessions() as session:
+        note = await session.get(CanvasNode, authority.note_id)
+        assert note is not None
+        await session.delete(note)
+        await session.commit()
+
+    result = _rollback_result(authority, approval)
+    await _persist_authority(database, result)
+
+    async with database.sessions() as session:
+        assert await session.get(CanvasNode, authority.note_id) is None
+        assert (
+            await session.get(
+                ControlledAgentReversibleWriteRollbackApproval,
+                approval.rollback_approval_id,
+            )
+            is not None
+        )
+        assert (
+            await session.get(
+                ControlledAgentReversibleWriteRollbackResult,
+                result.rollback_result_id,
+            )
+            is not None
+        )
+
+
 @pytest.mark.parametrize(
     "updates",
     [
