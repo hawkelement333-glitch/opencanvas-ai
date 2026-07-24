@@ -2,6 +2,42 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 atomic rollback execution complete — local only
+
+- Starting SHA: `75a83551275222465a30cb1fb670a90ade3e8c7f`.
+- Persistence correction: `15b0913` (`Allow rollback records to outlive deleted notes`).
+- Atomic execution implementation: `8f1d22e` (`Execute approved note rollbacks atomically`).
+- `canvas.note.create.rollback` verifies the exact approved create effect and current legacy note
+  digest, removes only that note with revision/content compare-and-set protection, and records the
+  canonical authoritative-absence target.
+- `canvas.note.update.rollback` verifies exact immutable prior-state evidence and current completed
+  effect state, restores only the prior title/text, increments the note revision, and records the
+  canonical evidence digest.
+- The note inverse, canvas revision, immutable rollback result, rollback audit event, and started/
+  succeeded Trace events share one transaction. Injected failures after mutation, after result
+  construction, and after audit insertion roll back every write and leave no false evidence.
+- Exact duplicates return the existing immutable result without repeating the inverse mutation.
+  Conflicting scoped keys, second attempts, expired/revoked/mis-scoped authority, changed state,
+  invalid evidence/digests, wrong capabilities, inaccessible scope, and unsupported/unsuccessful
+  effects fail closed.
+- The authenticated POST route accepts only its path authority plus one idempotency key, enforces
+  CSRF, rejects unknown authority-bearing fields, and returns an explicit safe result allowlist.
+- Defects corrected:
+  - unpublished `20260724_0014` and its ORM model no longer apply live-node foreign keys to immutable
+    rollback approval/result note IDs; those IDs are historical evidence that must survive a create
+    rollback deleting the note;
+  - duplicate result timestamps are normalized through the existing UTC response helper so first
+    and replayed API responses remain identical.
+- Validation:
+  - complete reversible-effects module: `62 passed`;
+  - affected rollback, approval, persistence, policy, API, ownership, and CSRF group: `183 passed`;
+  - SQLite rollback-authority migration cycle `0013 -> 0014 -> 0013 -> 0014`: passed;
+  - focused Ruff, strict mypy, compilation/imports, mapper validation, and sole Alembic head
+    `20260724_0014`: passed.
+- Not run: frontend, PostgreSQL runtime, unrelated full suites, or network tools.
+- Exact next checkpoint: separately authorized frontend integration for the completed rollback
+  review/approval/execution API. Do not begin Milestone 4.4 or Milestone 5 automatically.
+
 ## Milestone 4.3 rollback approval issuance validated — local only
 
 - Starting SHA: `70be72c0b6216aed0245bc6fcea37678c430ef14`.

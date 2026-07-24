@@ -1,5 +1,42 @@
 # Milestone 4.3 Terra Handoff
 
+## Atomic rollback execution complete locally
+
+- Starting SHA: `75a83551275222465a30cb1fb670a90ade3e8c7f`.
+- Persistence correction: `15b0913`.
+- Atomic execution implementation: `8f1d22e`.
+
+The backend now executes only the two approved inverse actions. Create rollback removes the exact
+unchanged note produced by its effect and records canonical authoritative absence. Update rollback
+restores only immutable evidence title/text through revision/content compare-and-set and advances
+the note revision. The server derives every action, target, digest, evidence, grant, scope, and
+result field from persisted authority.
+
+The inverse note change, canvas revision, immutable result, audit event, and Trace start/completion
+are one transaction. Three injected failure points prove rollback after note mutation, after result
+construction, and after audit insertion. Exact duplicate delivery returns one existing result;
+conflicting keys and later attempts do not repeat the mutation.
+
+The authenticated CSRF-protected endpoint accepts only path identifiers and one idempotency key.
+Unknown authority fields fail schema validation, inaccessible scope fails closed, and safe responses
+omit prior state, evidence/grant material, policy internals, SQL, and exception details.
+
+Two concrete defects were corrected. The unpublished `0014` live-node foreign keys were removed
+from immutable approval/result note references so create rollback can delete the note while
+preserving historical evidence. Duplicate result timestamps now use the existing UTC serializer,
+keeping first and replayed API responses identical.
+
+Validation: `62 passed` in the complete reversible-effects module and `183 passed` in the affected
+SQLite regression group. The rollback-authority migration upgraded, downgraded, and re-upgraded
+successfully. Ruff, strict mypy, compilation/imports, mapper validation, and sole Alembic head
+`20260724_0014` passed. PostgreSQL runtime, frontend, unrelated full suites, and network tools were
+not run.
+
+### Exact next checkpoint
+
+Begin only separately authorized frontend integration for the completed rollback review, approval,
+and execution APIs. Do not begin Milestone 4.4 or Milestone 5 automatically.
+
 ## Rollback approval issuance validated locally
 
 - Starting SHA: `70be72c0b6216aed0245bc6fcea37678c430ef14`.
