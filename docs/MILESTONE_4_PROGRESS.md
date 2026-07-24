@@ -2,6 +2,35 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 Sol safety architecture — local only
+
+- Authorized base and starting SHA: `21aee1f86b47424ee774f3245c0d0d3599215846`.
+- Current local branch: `milestone-4.3-reversible-writes-local`; no upstream.
+- Architecture checkpoint: `e7f18d5299b365a98caeb46413f6efed007130a5` (`Define reversible-write
+  safety architecture`).
+- Completed: closed reversible note action/capability vocabulary; frozen server-owned proposal,
+  preview, destination/resource/revision, expiry, and idempotency contract; canonical-digest proof;
+  architecture for approval/replay/revocation/CSRF, transaction/CAS, rollback, audit/Trace,
+  migration/API/UI sequence, demo separation, and Terra validation.
+- Added files: `apps/api/opencanvas_api/services/agents/reversible_writes.py`,
+  `apps/api/tests/test_agent_reversible_write_contracts.py`, and
+  `docs/MILESTONE_4_3_SOL_HANDOFF.md`; updated this ledger and the architecture document.
+- Partial: no persistence, migration, route, workspace mutation, effectful UI, rollback, worker,
+  queue, scheduler, delegation, provider, or autonomous behavior was added.
+- Focused checks: Ruff format and lint for the two Python files passed; contract/policy-focused tests
+  passed (`23 passed`); strict mypy for the new module passed.
+- Broader checks: full backend tests passed (`205 passed, 1 skipped`); strict mypy passed (`54` source
+  files); repository hygiene and built-in secret scan passed (`230` source files); `git diff --check`
+  and the focused prohibited-scope scan passed. Full backend lint still reports the documented,
+  untouched backlog in `grounded_draft.py` and `postgres_support.py`. Documentation Prettier was not
+  run because no local Prettier binary was installed and the package runner attempted a blocked
+  ignored-build install; no dependency state is retained from that attempt.
+- Exact next authorized step: Terra implements only immutable proposal persistence if needed and
+  CSRF-protected server-owned proposal/approval APIs, then stops before any effect.
+- Protected tag remains object `acbde89b6e2cc3e41c372887794726d393836716`, peeled commit
+  `b45b7763b65861f9dfb3be7edf9b5eb271950917`; `main` untouched.
+- Remote freeze proof: branch was created locally with no upstream; no remote write occurred.
+
 ## Milestone 4 visual integration checkpoint — local only
 
 - Verified Milestone 4.2 source: `milestone-4-controlled-agents` at
