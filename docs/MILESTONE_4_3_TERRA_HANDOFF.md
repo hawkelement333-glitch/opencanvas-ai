@@ -1,5 +1,38 @@
 # Milestone 4.3 Terra Handoff
 
+## Rollback eligibility review complete locally
+
+- Starting SHA: `2fd3b09d28e83e7aaae9ef7d70483bb04f20d9c1`.
+- Implementation SHA: `784a46ad2f94496e7aa6828abde0aeaf19a339a3`.
+- Branch: `milestone-4.3-reversible-writes-local`; upstream: none; remote freeze preserved.
+
+`GET /workspaces/{workspace_id}/agent-executions/canvases/{canvas_id}/reversible-effects/{effect_id}/rollback-review`
+is the sole new operation. It is authenticated, scoped, and read-only: request authority is limited
+to workspace, canvas, and original effect. It derives the closed rollback action, target kind, and
+required rollback capability from persisted state; it neither creates an approval/result nor mutates
+a grant, note, Trace, or any other record.
+
+Create reviews recompute only the legacy ID/revision/title/text note digest. Update reviews require
+the immutable evidence record, exact `{title, text}` prior-state contract, matching canonical
+before/after digests, and `verify_completed_effect_state`; no cross-format fallback exists. The
+review denies on missing/stale/changed note state, malformed or mismatched evidence, a prior rollback
+result, and absent/expired/revoked/mis-scoped rollback grants. Safe responses omit prior state,
+digests, raw grants, and authority records.
+
+Focused validation: the review and affected reversible-write group reported `85 passed` on SQLite.
+Focused Ruff format/lint, strict mypy, compilation, Alembic sole-head inspection (`20260724_0014`),
+diff/whitespace, secret-like-material, and prohibited-scope checks passed. PostgreSQL runtime,
+frontend, rollback approval issuance/execution, unrelated suites, and network tools were not run.
+
+`main` remains `f04ace592e253c48172d129331ed8cd9bc4d4f4f`; `competition-demo-v1` remains
+`b45b7763b65861f9dfb3be7edf9b5eb271950917`; no remote operation occurred.
+
+### Exact next checkpoint
+
+Implement server-authoritative rollback approval issuance only: re-run this review immediately before
+minting one immutable approval tied to its exact effect, note, revision, evidence, target digest, and
+rollback capability. Do not execute rollback or begin frontend, final audit, Milestone 4.4, or 5.
+
 ## Note-create effect digest contract complete locally
 
 - Starting SHA: `12faee145c03d1b776fd0941e7d1ad4caa2ff1ea`.

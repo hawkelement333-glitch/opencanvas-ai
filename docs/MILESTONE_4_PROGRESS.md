@@ -2,6 +2,28 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 rollback eligibility review — local only
+
+- Starting SHA: `2fd3b09d28e83e7aaae9ef7d70483bb04f20d9c1`; implementation SHA:
+  `784a46ad2f94496e7aa6828abde0aeaf19a339a3`.
+- Branch: `milestone-4.3-reversible-writes-local`; upstream: none; implementation working tree was
+  clean before this documentation record.
+- Complete: one authenticated GET-only review endpoint and server-authoritative service. It receives
+  only workspace/canvas/effect IDs, derives every rollback decision from persisted scope/effect/
+  proposal/note/evidence/result/grant state, and has no mutation path.
+- Create uses the legacy exact note digest; update uses only immutable canonical rollback evidence.
+  Both require `verify_completed_effect_state`; no digest fallback is permitted.
+- Tests: focused plus affected reversible-write backend group `85 passed` (SQLite). Ruff format/lint,
+  strict mypy, compilation, `20260724_0014` sole Alembic head, diff/whitespace, secret-like-material,
+  and prohibited-scope scans passed.
+- Not run: PostgreSQL runtime, frontend, approval issuance/execution, unrelated full suites, and
+  network tools. No known failures in the focused gate.
+- Protected state: main remains `f04ace592e253c48172d129331ed8cd9bc4d4f4f`; protected tag remains
+  `b45b7763b65861f9dfb3be7edf9b5eb271950917`; no remote operation occurred.
+- Exact continuation: server-authoritative rollback approval issuance, immediately revalidating the
+  review state and binding one new immutable approval to the exact effect/note/revision/evidence/
+  target/capability. Do not execute rollback.
+
 ## Milestone 4.3 note-create digest compatibility — local only
 
 - Starting SHA: `12faee145c03d1b776fd0941e7d1ad4caa2ff1ea`; implementation SHA:
