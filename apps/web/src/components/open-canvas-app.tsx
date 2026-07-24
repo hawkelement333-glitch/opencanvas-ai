@@ -47,6 +47,7 @@ import {
 
 import { AssistantPanel } from "@/components/assistant-panel";
 import { ControlledDraftPanel } from "@/components/controlled-draft-panel";
+import { ReversibleEffectRollback } from "@/components/reversible-effect-rollback";
 import { CanvasNodeActionsProvider, CanvasNodeCard } from "@/components/canvas/canvas-node";
 import { DocumentNodeCard } from "@/components/canvas/document-node";
 import { DocumentPreviewPanel } from "@/components/document-preview-panel";
@@ -332,7 +333,7 @@ function CanvasSidebar({
   );
 }
 
-export function OpenCanvasApp() {
+export function OpenCanvasApp({ rollbackEffectId }: { rollbackEffectId?: string } = {}) {
   const queryClient = useQueryClient();
   const [chosenWorkspaceId, setChosenWorkspaceId] = useState<string | null>(null);
   const [chosenCanvasId, setChosenCanvasId] = useState<string | null>(null);
@@ -488,6 +489,7 @@ export function OpenCanvasApp() {
               snapshot={snapshotQuery.data}
               workspace={activeWorkspace}
               runtime={runtimeQuery.data ?? null}
+              rollbackEffectId={rollbackEffectId}
               onReload={() => void snapshotQuery.refetch()}
             />
           </ReactFlowProvider>
@@ -501,10 +503,17 @@ interface CanvasWorkspaceProps {
   snapshot: Awaited<ReturnType<typeof canvasApi.getSnapshot>>;
   workspace: Workspace | null;
   runtime: RuntimeMode | null;
+  rollbackEffectId?: string;
   onReload: () => void;
 }
 
-function CanvasWorkspace({ snapshot, workspace, runtime, onReload }: CanvasWorkspaceProps) {
+function CanvasWorkspace({
+  snapshot,
+  workspace,
+  runtime,
+  rollbackEffectId,
+  onReload,
+}: CanvasWorkspaceProps) {
   const flow = useReactFlow<CanvasFlowNode, CanvasFlowEdge>();
   const stageRef = useRef<HTMLDivElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -1231,6 +1240,49 @@ function CanvasWorkspace({ snapshot, workspace, runtime, onReload }: CanvasWorks
   );
   const activeGalaxy = workspaceRole({ name: workspace?.name ?? "Current workspace" });
   const activeSolarSystem = canvasRole(snapshot.canvas);
+  const loadRollbackReview = useCallback(
+    (signal?: AbortSignal) => {
+      if (!workspace || !rollbackEffectId) {
+        return Promise.reject(new Error("Rollback effect is unavailable."));
+      }
+      return agentApi.reviewReversibleWriteRollback(
+        workspace.id,
+        snapshot.canvas.id,
+        rollbackEffectId,
+        signal,
+      );
+    },
+    [rollbackEffectId, snapshot.canvas.id, workspace],
+  );
+  const requestRollbackApproval = useCallback(
+    (idempotencyKey: string) => {
+      if (!workspace || !rollbackEffectId) {
+        return Promise.reject(new Error("Rollback effect is unavailable."));
+      }
+      return agentApi.issueReversibleWriteRollbackApproval(
+        workspace.id,
+        snapshot.canvas.id,
+        rollbackEffectId,
+        idempotencyKey,
+      );
+    },
+    [rollbackEffectId, snapshot.canvas.id, workspace],
+  );
+  const executeRollback = useCallback(
+    (rollbackApprovalId: string, idempotencyKey: string) => {
+      if (!workspace || !rollbackEffectId) {
+        return Promise.reject(new Error("Rollback effect is unavailable."));
+      }
+      return agentApi.executeReversibleWriteRollback(
+        workspace.id,
+        snapshot.canvas.id,
+        rollbackEffectId,
+        rollbackApprovalId,
+        idempotencyKey,
+      );
+    },
+    [rollbackEffectId, snapshot.canvas.id, workspace],
+  );
 
   const clearSelection = useCallback(() => {
     replaceNodes(nodesRef.current.map((node) => ({ ...node, selected: false })));
@@ -1495,6 +1547,19 @@ function CanvasWorkspace({ snapshot, workspace, runtime, onReload }: CanvasWorks
           document={preview.document}
           citation={preview.citation}
           onClose={() => setPreview(null)}
+        />
+      )}
+
+      {runtime?.mode !== "deterministic_replay" && workspace && rollbackEffectId && (
+        <ReversibleEffectRollback
+          key={rollbackEffectId}
+          effectId={rollbackEffectId}
+          loadReview={loadRollbackReview}
+          requestApproval={requestRollbackApproval}
+          executeRollback={executeRollback}
+          onComplete={async () => {
+            await onReload();
+          }}
         />
       )}
 

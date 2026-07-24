@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { APIError, canvasApi } from "./api-client";
+import { agentApi, APIError, canvasApi } from "./api-client";
 
 const validCanvas = {
   id: "canvas-1",
@@ -117,5 +117,115 @@ describe("canvas API client", () => {
     expect(uploaded).toBeInstanceOf(File);
     expect((uploaded as File).name).toBe("facts.md");
     expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), 180_000);
+  });
+});
+
+describe("rollback API client", () => {
+  const workspaceId = "10000000-0000-4000-8000-000000000001";
+  const canvasId = "20000000-0000-4000-8000-000000000001";
+  const effectId = "30000000-0000-4000-8000-000000000001";
+  const rollbackApprovalId = "40000000-0000-4000-8000-000000000001";
+
+  it("loads only the server-derived rollback review", async () => {
+    const review = {
+      effectId,
+      forwardAction: "note.create",
+      noteId: "50000000-0000-4000-8000-000000000001",
+      effectRevision: 0,
+      currentRevision: 0,
+      rollbackAction: "note.create.rollback",
+      rollbackTargetKind: "authoritative_absence",
+      requiredCapability: "canvas.note.create.rollback",
+      eligible: true,
+      approvalRequired: true,
+      denialReason: null,
+      conflict: false,
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(review), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(
+      agentApi.reviewReversibleWriteRollback(workspaceId, canvasId, effectId),
+    ).resolves.toEqual(review);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain(
+      `/workspaces/${workspaceId}/agent-executions/canvases/${canvasId}/reversible-effects/${effectId}/rollback-review`,
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBeUndefined();
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
+  });
+
+  it("sends only idempotency material when requesting approval", async () => {
+    document.cookie = "mobius_session_csrf=rollback-csrf";
+    const approval = {
+      rollbackApprovalId,
+      effectId,
+      noteId: "50000000-0000-4000-8000-000000000001",
+      forwardAction: "note.create",
+      rollbackAction: "note.create.rollback",
+      expectedCurrentRevision: 0,
+      rollbackTargetKind: "authoritative_absence",
+      expiresAt: "2026-07-24T19:15:00Z",
+      duplicate: false,
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(approval), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await agentApi.issueReversibleWriteRollbackApproval(
+      workspaceId,
+      canvasId,
+      effectId,
+      "approval_key",
+    );
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({ idempotencyKey: "approval_key" });
+    expect(init?.headers).toMatchObject({ "X-CSRF-Token": "rollback-csrf" });
+    expect(String(init?.body)).not.toMatch(
+      /capability|digest|revision|evidence|grant|action|expiry/i,
+    );
+  });
+
+  it("sends only idempotency material when executing an approved rollback", async () => {
+    const rollback = {
+      rollbackResultId: "60000000-0000-4000-8000-000000000001",
+      rollbackApprovalId,
+      effectId,
+      noteId: "50000000-0000-4000-8000-000000000001",
+      rollbackAction: "note.update.rollback",
+      rollbackTargetKind: "exact_prior_state",
+      resultingRevision: 3,
+      createdAt: "2026-07-24T19:01:00Z",
+      duplicate: false,
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(rollback), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await agentApi.executeReversibleWriteRollback(
+      workspaceId,
+      canvasId,
+      effectId,
+      rollbackApprovalId,
+      "execute_key",
+    );
+
+    const call = fetchMock.mock.calls[0];
+    expect(call?.[0]).toContain(`/rollback-approvals/${rollbackApprovalId}/execute`);
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ idempotencyKey: "execute_key" });
+    expect(String(call?.[1]?.body)).not.toMatch(
+      /capability|digest|revision|evidence|grant|action|expiry/i,
+    );
   });
 });

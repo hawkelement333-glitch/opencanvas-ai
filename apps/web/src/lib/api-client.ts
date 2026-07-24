@@ -11,6 +11,10 @@ import {
   controlledDraftSchema,
   controlledDraftPreparedSchema,
   controlledDraftStartInputSchema,
+  reversibleWriteRollbackApprovalSchema,
+  reversibleWriteRollbackInputSchema,
+  reversibleWriteRollbackResultSchema,
+  reversibleWriteRollbackReviewSchema,
   createCanvasInputSchema,
   createEdgeInputSchema,
   createNodeInputSchema,
@@ -42,6 +46,9 @@ import {
   type DocumentSearchInput,
   type UpdateNodeInput,
   type RuntimeMode,
+  type ReversibleWriteRollbackApproval,
+  type ReversibleWriteRollbackResult,
+  type ReversibleWriteRollbackReview,
 } from "./contracts";
 
 const DEFAULT_API_URL = "http://localhost:8000/api/v1";
@@ -346,6 +353,48 @@ export const canvasApi = {
 };
 
 export const agentApi = {
+  reviewReversibleWriteRollback(
+    workspaceId: string,
+    canvasId: string,
+    effectId: string,
+    signal?: AbortSignal,
+  ): Promise<ReversibleWriteRollbackReview> {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/agent-executions/canvases/${encodeURIComponent(canvasId)}/reversible-effects/${encodeURIComponent(effectId)}/rollback-review`,
+      reversibleWriteRollbackReviewSchema,
+      { signal },
+    );
+  },
+
+  issueReversibleWriteRollbackApproval(
+    workspaceId: string,
+    canvasId: string,
+    effectId: string,
+    idempotencyKey: string,
+  ): Promise<ReversibleWriteRollbackApproval> {
+    const input = reversibleWriteRollbackInputSchema.parse({ idempotencyKey });
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/agent-executions/canvases/${encodeURIComponent(canvasId)}/reversible-effects/${encodeURIComponent(effectId)}/rollback-approval`,
+      reversibleWriteRollbackApprovalSchema,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+
+  executeReversibleWriteRollback(
+    workspaceId: string,
+    canvasId: string,
+    effectId: string,
+    rollbackApprovalId: string,
+    idempotencyKey: string,
+  ): Promise<ReversibleWriteRollbackResult> {
+    const input = reversibleWriteRollbackInputSchema.parse({ idempotencyKey });
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/agent-executions/canvases/${encodeURIComponent(canvasId)}/reversible-effects/${encodeURIComponent(effectId)}/rollback-approvals/${encodeURIComponent(rollbackApprovalId)}/execute`,
+      reversibleWriteRollbackResultSchema,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+
   prepareGroundedDraft(
     workspaceId: string,
     rawInput: ControlledDraftStartInput,

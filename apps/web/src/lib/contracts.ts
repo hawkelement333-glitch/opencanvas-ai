@@ -249,6 +249,55 @@ export const controlledDraftCancellationSchema = z.object({
   reasonCode: z.string().min(1),
 });
 
+export const reversibleWriteRollbackReviewSchema = z.object({
+  effectId: z.string().uuid(),
+  forwardAction: z.enum(["note.create", "note.update"]).nullable(),
+  noteId: z.string().uuid().nullable(),
+  effectRevision: z.number().int().nonnegative().nullable(),
+  currentRevision: z.number().int().nonnegative().nullable(),
+  rollbackAction: z.enum(["note.create.rollback", "note.update.rollback"]).nullable(),
+  rollbackTargetKind: z.enum(["authoritative_absence", "exact_prior_state"]).nullable(),
+  requiredCapability: z.string().nullable(),
+  eligible: z.boolean(),
+  approvalRequired: z.boolean(),
+  denialReason: z.string().nullable(),
+  conflict: z.boolean(),
+});
+
+export const reversibleWriteRollbackInputSchema = z
+  .object({
+    idempotencyKey: z
+      .string()
+      .min(8)
+      .max(128)
+      .regex(/^[A-Za-z0-9_-]+$/),
+  })
+  .strict();
+
+export const reversibleWriteRollbackApprovalSchema = z.object({
+  rollbackApprovalId: z.string().uuid(),
+  effectId: z.string().uuid(),
+  noteId: z.string().uuid(),
+  forwardAction: z.enum(["note.create", "note.update"]),
+  rollbackAction: z.enum(["note.create.rollback", "note.update.rollback"]),
+  expectedCurrentRevision: z.number().int().nonnegative(),
+  rollbackTargetKind: z.enum(["authoritative_absence", "exact_prior_state"]),
+  expiresAt: timestampSchema,
+  duplicate: z.boolean().default(false),
+});
+
+export const reversibleWriteRollbackResultSchema = z.object({
+  rollbackResultId: z.string().uuid(),
+  rollbackApprovalId: z.string().uuid(),
+  effectId: z.string().uuid(),
+  noteId: z.string().uuid(),
+  rollbackAction: z.enum(["note.create.rollback", "note.update.rollback"]),
+  rollbackTargetKind: z.enum(["authoritative_absence", "exact_prior_state"]),
+  resultingRevision: z.number().int().nonnegative().nullable(),
+  createdAt: timestampSchema,
+  duplicate: z.boolean().default(false),
+});
+
 export const documentUploadResultSchema = z.object({
   document: documentMetadataSchema,
   node: canvasNodeSchema,
@@ -371,6 +420,10 @@ export type ControlledDraft = z.infer<typeof controlledDraftSchema>;
 export type ControlledDraftPrepared = z.infer<typeof controlledDraftPreparedSchema>;
 export type ControlledDraftCitation = z.infer<typeof controlledDraftCitationSchema>;
 export type ControlledDraftCancellation = z.infer<typeof controlledDraftCancellationSchema>;
+export type ReversibleWriteRollbackReview = z.infer<typeof reversibleWriteRollbackReviewSchema>;
+export type ReversibleWriteRollbackInput = z.infer<typeof reversibleWriteRollbackInputSchema>;
+export type ReversibleWriteRollbackApproval = z.infer<typeof reversibleWriteRollbackApprovalSchema>;
+export type ReversibleWriteRollbackResult = z.infer<typeof reversibleWriteRollbackResultSchema>;
 export type Point = z.infer<typeof pointSchema>;
 export type Citation = z.infer<typeof citationSchema>;
 export type DocumentFileType = z.infer<typeof documentFileTypeSchema>;
