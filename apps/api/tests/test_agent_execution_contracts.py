@@ -106,9 +106,11 @@ def test_idempotency_fingerprint_ignores_transport_metadata_but_binds_authority(
         update={"client_request_id": "browser-request-2", "correlation_id": "correlation-2"}
     )
     conflict = request.model_copy(update={"expected_context_digest": "c" * 64})
+    changed_instruction = request.model_copy(update={"instruction": "Different grounded question"})
 
     assert idempotency_digest(request) == idempotency_digest(retry)
     assert idempotency_digest(request) != idempotency_digest(conflict)
+    assert idempotency_digest(request) != idempotency_digest(changed_instruction)
 
 
 def test_request_and_plan_are_immutable() -> None:

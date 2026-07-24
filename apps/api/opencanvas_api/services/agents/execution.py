@@ -111,6 +111,11 @@ class ControlledExecutionRequest(ContractModel):
     grant_id: uuid.UUID
     approval_id: uuid.UUID | None = None
     idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
+    instruction: str = Field(
+        default="Create a grounded draft from the selected evidence.",
+        min_length=1,
+        max_length=8_000,
+    )
     client_request_id: str | None = Field(default=None, min_length=1, max_length=128)
     correlation_id: str = Field(min_length=1, max_length=64)
 
@@ -120,6 +125,14 @@ class ControlledExecutionRequest(ContractModel):
         if value is not None and value != value.strip():
             raise ValueError("request identifiers must not contain surrounding whitespace")
         return value
+
+    @field_validator("instruction")
+    @classmethod
+    def normalize_instruction(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("instruction must not be blank")
+        return normalized
 
 
 class ControlledExecutionPlan(ContractModel):
@@ -154,6 +167,7 @@ class IdempotencyFingerprint(ContractModel):
     execution_id: uuid.UUID
     action: ControlledAction
     idempotency_key: str
+    instruction: str
     context_snapshot_id: uuid.UUID
     context_digest: Digest
     plan_id: uuid.UUID
@@ -173,6 +187,7 @@ def idempotency_digest(request: ControlledExecutionRequest) -> Digest:
             execution_id=request.execution_id,
             action=request.action,
             idempotency_key=request.idempotency_key,
+            instruction=request.instruction,
             context_snapshot_id=request.context_snapshot_id,
             context_digest=request.expected_context_digest,
             plan_id=request.plan_id,

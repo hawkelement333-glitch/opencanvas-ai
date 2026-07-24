@@ -2,6 +2,36 @@
 
 Last updated: 2026-07-23 (America/Chicago)
 
+## Milestone 4.2 Terra checkpoint 1 — immutable grounded-draft application bridge
+
+- Terra started from the clean, normally pushed Sol safety-core SHA
+  `7b968146b413a1d0c09c42564915d06c2b5efc41` on
+  `milestone-4-controlled-agents`; the protected tag peeled commit remains
+  `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- Added an internal synchronous `ControlledGroundedDraftService`. It reserves the existing
+  request identity, calls the existing authority preflight and approval consumption boundary,
+  resolves immutable selected context once, records the closed lifecycle states, and accepts the
+  result only through the existing late-result-suppression boundary.
+- The bridge reuses the configured reasoning-provider interface and existing grounded-result
+  validator. It introduces no provider, embedding, worker, queue, scheduler, delegation, or
+  workspace mutation. The request contract now binds the bounded instruction into its existing
+  idempotency digest.
+- Exact selected chunk content is persisted as immutable execution evidence with citations,
+  supported/insufficient-evidence claims, provider metadata, usage/cost metadata, and complete
+  Trace start/completion/failure records. Trace metadata contains only identifiers, digests, and
+  safe provider metadata; raw evidence remains in the authorized execution records.
+- Focused validation: `apps/api/tests/test_agent_grounded_draft.py` — `3 passed`; Ruff format and
+  lint passed; focused mypy for `grounded_draft.py` and `execution.py` passed; `git diff --check`
+  passed before this ledger update.
+- Defect corrected during focused testing: explicit flush ordering is required because execution
+  snapshot models use scalar foreign keys rather than ORM relationships. A late provider result
+  now retains the Sol rejection/audit path instead of attempting a new terminal state.
+- Not started in this checkpoint: server-owned start contract creation, authenticated start/cancel
+  routes, read-only UI, API tests, final Terra validation, or Luna work.
+- Exact next Terra unit: add the narrow server-owned start contract builder and authenticated
+  start/cancel boundary using this application service; do not add a worker, queue, scheduler,
+  delegation, external provider, or workspace effect.
+
 ## Milestone 4.2 Sol final security gate
 
 - Recovery started clean with local and remote SHA
