@@ -72,6 +72,9 @@ This register prevents the competition demo and public materials from implying c
   actions.
 - The proposed `v0.3.0-buildweek-demo` tag has not been created or published.
 
-## Recommended next milestone
+## Recommended next checkpoint
 
-Attach Phase 2 document/chunk identities to canonical objects, then add semantic memory, hybrid lexical/vector/graph search, and workspace-wide knowledge discovery with provenance-preserving Trace.
+Implement Milestone 5.1, Knowledge Graph Foundation, following the completed
+local architecture pass. Preserve the limitation that visual edges are not
+semantic facts, and add explicit bindings and provenance before graph-aware
+retrieval.

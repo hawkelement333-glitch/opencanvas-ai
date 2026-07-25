@@ -261,15 +261,18 @@ inference/conflict classification, and no complete end-user Trace explorer. See 
 Milestone 4 controlled agents are complete locally. The future roadmap is recorded, not
 implemented:
 
-5. Living Knowledge Graph and AI Workflows
+5. Living Knowledge Graph and AI Workflows — architecture complete locally;
+   implementation checkpoints pending
 6. Multi-Workspace Collaboration
    - Nested and Federated Mobius Workspaces
 7. Production Hardening
 8. Public Portfolio and Product Release
 9. SolarPlexus Agent Ecosystem
 
-The next authorized work is Milestone 5 architecture. See
-[docs/MILESTONE_4_COMPLETION.md](docs/MILESTONE_4_COMPLETION.md).
+The next authorized work is Milestone 5.1, Knowledge Graph Foundation. See
+[docs/MILESTONE_5_ARCHITECTURE.md](docs/MILESTONE_5_ARCHITECTURE.md),
+[docs/MILESTONE_5_IMPLEMENTATION_PLAN.md](docs/MILESTONE_5_IMPLEMENTATION_PLAN.md),
+and [docs/MILESTONE_5_PROGRESS.md](docs/MILESTONE_5_PROGRESS.md).
 
 ## Competition and release status
 
