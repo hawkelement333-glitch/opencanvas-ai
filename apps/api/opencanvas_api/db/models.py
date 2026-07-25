@@ -1347,6 +1347,402 @@ class CanonicalRelationshipHistory(Base):
     )
 
 
+class WorkspaceEventSequence(Base):
+    """Server-owned monotonic sequence for one workspace event stream."""
+
+    __tablename__ = "workspace_event_sequences"
+    __table_args__ = (
+        CheckConstraint("last_sequence >= 0", name="ck_workspace_event_sequence_nonnegative"),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    last_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class DomainEventRecord(Base):
+    """Immutable scoped business fact; distinct from audit and Trace evidence."""
+
+    __tablename__ = "domain_events"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["canvas_id", "workspace_id"],
+            ["canvases.id", "canvases.workspace_id"],
+            name="fk_domain_events_canvas_workspace",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_executions.id",
+                "controlled_agent_executions.user_id",
+                "controlled_agent_executions.workspace_id",
+            ],
+            name="fk_domain_events_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "scope_id",
+            "event_type",
+            "source_identity",
+            name="uq_domain_events_idempotency_scope",
+        ),
+        UniqueConstraint(
+            "event_id",
+            "user_id",
+            "workspace_id",
+            name="uq_domain_events_scope",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "sequence",
+            name="uq_domain_events_workspace_sequence",
+        ),
+        CheckConstraint(
+            "registry_version = 'mobius-domain-events-v1'",
+            name="ck_domain_events_registry_version",
+        ),
+        CheckConstraint(
+            "schema_version = 'domain-event-v1'",
+            name="ck_domain_events_schema_version",
+        ),
+        CheckConstraint(
+            "event_type IN ("
+            "'graph.relationship.created', "
+            "'graph.relationship.superseded', "
+            "'graph.relationship.deactivated', "
+            "'canonical.resource.created', "
+            "'canonical.resource.updated', "
+            "'canonical.resource.historical', "
+            "'controlled.execution.started', "
+            "'controlled.execution.completed', "
+            "'controlled.execution.failed', "
+            "'controlled.execution.canceled', "
+            "'controlled.effect.committed', "
+            "'controlled.rollback.committed', "
+            "'evidence.bundle.requested', "
+            "'evidence.bundle.generation_started', "
+            "'evidence.bundle.completed', "
+            "'evidence.bundle.failed', "
+            "'evidence.bundle.accessed', "
+            "'evidence.bundle.export_denied', "
+            "'citation.rendering.completed', "
+            "'citation.rendering.failed')",
+            name="ck_domain_events_type",
+        ),
+        CheckConstraint(
+            "subject_kind IN ('canonical_resource', 'graph_relationship', "
+            "'controlled_execution', 'controlled_effect', 'controlled_rollback', "
+            "'evidence_bundle', 'citation')",
+            name="ck_domain_events_subject_kind",
+        ),
+        CheckConstraint("sequence > 0", name="ck_domain_events_sequence_positive"),
+        CheckConstraint(
+            "length(payload_digest) = 64 AND length(request_digest) = 64",
+            name="ck_domain_events_digest_length",
+        ),
+        CheckConstraint(
+            "graph_revision IS NULL OR graph_revision > 0",
+            name="ck_domain_events_graph_revision_positive",
+        ),
+        Index(
+            "ix_domain_events_workspace_timeline",
+            "user_id",
+            "workspace_id",
+            "sequence",
+            "event_id",
+        ),
+        Index(
+            "ix_domain_events_canvas_timeline",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "sequence",
+        ),
+        Index(
+            "ix_domain_events_subject_timeline",
+            "user_id",
+            "workspace_id",
+            "subject_id",
+            "sequence",
+        ),
+        Index("ix_domain_events_trace", "trace_id"),
+        Index("ix_domain_events_execution", "execution_id"),
+    )
+
+    event_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    canvas_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    scope_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    registry_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    related_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    execution_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    source_identity: Mapped[str] = mapped_column(String(128), nullable=False)
+    graph_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class DomainEventProvenance(Base):
+    """Immutable operational provenance for one domain event."""
+
+    __tablename__ = "domain_event_provenance"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "user_id", "workspace_id"],
+            ["domain_events.event_id", "domain_events.user_id", "domain_events.workspace_id"],
+            name="fk_domain_event_provenance_event_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_executions.id",
+                "controlled_agent_executions.user_id",
+                "controlled_agent_executions.workspace_id",
+            ],
+            name="fk_domain_event_provenance_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("event_id", name="uq_domain_event_provenance_event"),
+        CheckConstraint(
+            "origin_type IN ('authenticated_user', 'canonical_service', "
+            "'controlled_execution', 'reserved_future_contract')",
+            name="ck_domain_event_provenance_origin",
+        ),
+        CheckConstraint(
+            "length(provenance_digest) = 64",
+            name="ck_domain_event_provenance_digest_length",
+        ),
+        Index("ix_domain_event_provenance_trace", "trace_id"),
+    )
+
+    provenance_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    event_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    origin_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    execution_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    graph_relationship_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    graph_history_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    effect_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    rollback_result_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    provenance_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class DomainEventOutbox(Base):
+    """Server-owned bounded delivery state for one domain event."""
+
+    __tablename__ = "domain_event_outbox"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "user_id", "workspace_id"],
+            ["domain_events.event_id", "domain_events.user_id", "domain_events.workspace_id"],
+            name="fk_domain_event_outbox_event_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "outbox_id",
+            "event_id",
+            name="uq_domain_event_outbox_identity",
+        ),
+        UniqueConstraint("event_id", name="uq_domain_event_outbox_event"),
+        CheckConstraint(
+            "delivery_state IN ('pending', 'delivering', 'retry_wait', "
+            "'delivered', 'terminal_failure')",
+            name="ck_domain_event_outbox_state",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0 AND attempt_count <= max_attempts AND max_attempts > 0",
+            name="ck_domain_event_outbox_attempts_bounded",
+        ),
+        CheckConstraint(
+            "lease_generation >= 0",
+            name="ck_domain_event_outbox_generation_nonnegative",
+        ),
+        CheckConstraint(
+            "(delivery_state = 'delivering' AND lease_owner_id IS NOT NULL "
+            "AND lease_acquired_at IS NOT NULL AND lease_expires_at IS NOT NULL "
+            "AND lease_expires_at > lease_acquired_at) OR "
+            "(delivery_state <> 'delivering' AND lease_owner_id IS NULL "
+            "AND lease_acquired_at IS NULL AND lease_expires_at IS NULL)",
+            name="ck_domain_event_outbox_lease_shape",
+        ),
+        CheckConstraint(
+            "(delivery_state = 'delivered' AND completed_at IS NOT NULL "
+            "AND terminal_at IS NULL) OR "
+            "(delivery_state = 'terminal_failure' AND terminal_at IS NOT NULL) OR "
+            "(delivery_state NOT IN ('delivered', 'terminal_failure') "
+            "AND completed_at IS NULL AND terminal_at IS NULL)",
+            name="ck_domain_event_outbox_terminal_shape",
+        ),
+        Index(
+            "ix_domain_event_outbox_claimable",
+            "delivery_state",
+            "eligible_at",
+            "lease_expires_at",
+            "outbox_id",
+        ),
+        Index(
+            "ix_domain_event_outbox_scope",
+            "user_id",
+            "workspace_id",
+            "created_at",
+        ),
+    )
+
+    outbox_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    event_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    delivery_state: Mapped[str] = mapped_column(String(24), nullable=False)
+    eligible_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    lease_owner_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lease_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lease_acquired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    failure_classification: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    terminal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class DomainEventDeliveryAttempt(Base):
+    """Append-only evidence for one dispatcher result."""
+
+    __tablename__ = "domain_event_delivery_attempts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["outbox_id", "event_id"],
+            ["domain_event_outbox.outbox_id", "domain_event_outbox.event_id"],
+            name="fk_domain_event_attempt_outbox",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "outbox_id",
+            "lease_generation",
+            name="uq_domain_event_attempt_generation",
+        ),
+        CheckConstraint(
+            "outcome IN ('delivered', 'retry_scheduled', 'terminal_failure')",
+            name="ck_domain_event_attempt_outcome",
+        ),
+        CheckConstraint("attempt_number > 0", name="ck_domain_event_attempt_number_positive"),
+        Index("ix_domain_event_attempt_event", "event_id", "recorded_at"),
+    )
+
+    attempt_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    outbox_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    event_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    lease_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    outcome: Mapped[str] = mapped_column(String(24), nullable=False)
+    failure_classification: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DomainActivityEntry(Base):
+    """Idempotent append-only timeline projection derived from one event."""
+
+    __tablename__ = "domain_activity_entries"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "user_id", "workspace_id"],
+            ["domain_events.event_id", "domain_events.user_id", "domain_events.workspace_id"],
+            name="fk_domain_activity_event_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("event_id", name="uq_domain_activity_event"),
+        CheckConstraint(
+            "projection_version = 'activity-v1'",
+            name="ck_domain_activity_projection_version",
+        ),
+        Index(
+            "ix_domain_activity_workspace_timeline",
+            "user_id",
+            "workspace_id",
+            "sequence",
+            "activity_id",
+        ),
+        Index(
+            "ix_domain_activity_canvas_timeline",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "sequence",
+        ),
+        Index(
+            "ix_domain_activity_subject_timeline",
+            "user_id",
+            "workspace_id",
+            "subject_id",
+            "sequence",
+        ),
+    )
+
+    activity_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    event_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    subject_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    projection_version: Mapped[str] = mapped_column(String(24), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class ControlledAgentExecution(Base):
     """Immutable authority identity plus server-owned bounded reliability state."""
 
@@ -2508,6 +2904,13 @@ KNOWLEDGE_GRAPH_IMMUTABLE_MODELS = (
     CanonicalRelationshipHistory,
 )
 
+DOMAIN_EVENT_IMMUTABLE_MODELS = (
+    DomainEventRecord,
+    DomainEventProvenance,
+    DomainEventDeliveryAttempt,
+    DomainActivityEntry,
+)
+
 
 def _reject_controlled_agent_mutation(_mapper: Any, _connection: Any, target: object) -> None:
     raise ValueError(f"{type(target).__name__} records are append-only")
@@ -2534,6 +2937,22 @@ def _reject_execution_authority_mutation(_mapper: Any, _connection: Any, target:
         raise ValueError("ControlledAgentExecution authority fields are immutable")
 
 
+def _reject_outbox_identity_mutation(_mapper: Any, _connection: Any, target: object) -> None:
+    state = sa_inspect(target)
+    if state is None:
+        raise ValueError("DomainEventOutbox state is unavailable")
+    immutable_fields = (
+        "outbox_id",
+        "event_id",
+        "user_id",
+        "workspace_id",
+        "max_attempts",
+        "created_at",
+    )
+    if any(state.attrs[field].history.has_changes() for field in immutable_fields):
+        raise ValueError("DomainEventOutbox identity and scope fields are immutable")
+
+
 event.listen(
     ControlledAgentExecution,
     "before_update",
@@ -2553,3 +2972,10 @@ for _immutable_model in CONTROLLED_AGENT_IMMUTABLE_MODELS:
 for _graph_immutable_model in KNOWLEDGE_GRAPH_IMMUTABLE_MODELS:
     event.listen(_graph_immutable_model, "before_update", _reject_controlled_agent_mutation)
     event.listen(_graph_immutable_model, "before_delete", _reject_controlled_agent_mutation)
+
+for _domain_event_immutable_model in DOMAIN_EVENT_IMMUTABLE_MODELS:
+    event.listen(_domain_event_immutable_model, "before_update", _reject_controlled_agent_mutation)
+    event.listen(_domain_event_immutable_model, "before_delete", _reject_controlled_agent_mutation)
+
+event.listen(DomainEventOutbox, "before_delete", _reject_controlled_agent_mutation)
+event.listen(DomainEventOutbox, "before_update", _reject_outbox_identity_mutation)
