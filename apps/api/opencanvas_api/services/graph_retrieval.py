@@ -259,7 +259,10 @@ class GraphAwareRetrievalService:
             if existing.request_digest != request_digest:
                 raise GraphRetrievalConflictError()
             return await self._record(existing, duplicate=True)
-        retrieval_id = uuid.uuid5(uuid.NAMESPACE_URL, f"mobius-retrieval:{request_digest}")
+        retrieval_id = uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"mobius-retrieval:{request_digest}:{command.idempotency_key}",
+        )
         try:
             context = await self.trace.start_trace(
                 StartTraceInput(

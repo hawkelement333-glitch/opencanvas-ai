@@ -11,6 +11,7 @@ from opencanvas_api.api.routes import (
     health,
     knowledge_graph,
     traces,
+    workflows,
 )
 
 api_router = APIRouter()
@@ -24,3 +25,4 @@ api_router.include_router(knowledge_graph.router, tags=["knowledge-graph"])
 api_router.include_router(domain_events.router, tags=["living-state-events"])
 api_router.include_router(graph_retrieval.router, tags=["graph-aware-retrieval"])
 api_router.include_router(agents.router, tags=["controlled-agent-inspection"])
+api_router.include_router(workflows.router, tags=["controlled-ai-workflows"])

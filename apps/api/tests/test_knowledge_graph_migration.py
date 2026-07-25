@@ -4,13 +4,14 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from alembic.config import Config
-
 from alembic import command
+from alembic.config import Config
 
 
 def _config(database_path: Path) -> Config:
-    config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
+    api_directory = Path(__file__).parents[1]
+    config = Config(str(api_directory / "alembic.ini"))
+    config.set_main_option("script_location", str(api_directory / "alembic"))
     config.set_main_option(
         "sqlalchemy.url",
         f"sqlite+aiosqlite:///{database_path.as_posix()}",
@@ -26,7 +27,7 @@ def test_knowledge_graph_migration_cycle_and_sqlite_append_only_guards(
     command.upgrade(config, "head")
     with sqlite3.connect(database_path) as connection:
         head = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-        assert head == ("20260725_0018",)
+        assert head == ("20260725_0019",)
         trigger_names = {
             row[0]
             for row in connection.execute(
@@ -92,5 +93,5 @@ def test_knowledge_graph_migration_cycle_and_sqlite_append_only_guards(
     command.upgrade(config, "head")
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "20260725_0018",
+            "20260725_0019",
         )

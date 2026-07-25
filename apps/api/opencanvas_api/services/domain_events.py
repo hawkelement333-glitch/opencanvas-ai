@@ -57,6 +57,29 @@ DomainEventType = Literal[
     "evidence.bundle.export_denied",
     "citation.rendering.completed",
     "citation.rendering.failed",
+    "workflow.definition.created",
+    "workflow.version.created",
+    "workflow.version.validated",
+    "workflow.version.activated",
+    "workflow.version.disabled",
+    "workflow.execution.requested",
+    "workflow.execution.planned",
+    "workflow.execution.started",
+    "workflow.execution.awaiting_approval",
+    "workflow.execution.completed",
+    "workflow.execution.failed",
+    "workflow.execution.canceled",
+    "workflow.compensation.started",
+    "workflow.compensation.completed",
+    "workflow.compensation.failed",
+    "workflow.step.started",
+    "workflow.step.completed",
+    "workflow.step.failed",
+    "workflow.step.retry_scheduled",
+    "workflow.step.awaiting_approval",
+    "workflow.approval.requested",
+    "workflow.approval.accepted",
+    "workflow.approval.denied",
 ]
 SubjectKind = Literal[
     "canonical_resource",
@@ -66,6 +89,10 @@ SubjectKind = Literal[
     "controlled_rollback",
     "evidence_bundle",
     "citation",
+    "workflow_definition",
+    "workflow_version",
+    "workflow_execution",
+    "workflow_step",
 ]
 OriginType = Literal[
     "authenticated_user",
@@ -104,6 +131,23 @@ _EXECUTION_PAYLOAD = frozenset({"status", "reasonCode"})
 _EFFECT_PAYLOAD = frozenset({"action", "noteId", "resultingRevision"})
 _BUNDLE_PAYLOAD = frozenset({"retrievalId", "bundleState", "artifactSha256", "failureCode"})
 _CITATION_PAYLOAD = frozenset({"retrievalId", "style", "status", "failureCode"})
+_WORKFLOW_VERSION_PAYLOAD = frozenset(
+    {"workflowKind", "versionNumber", "lifecycleState", "reasonCode"}
+)
+_WORKFLOW_EXECUTION_PAYLOAD = frozenset(
+    {"workflowDefinitionId", "workflowVersionId", "status", "outcome", "reasonCode"}
+)
+_WORKFLOW_STEP_PAYLOAD = frozenset(
+    {
+        "workflowExecutionId",
+        "stepType",
+        "status",
+        "failureClass",
+        "attemptNumber",
+        "retryAt",
+        "approvalStatus",
+    }
+)
 
 EVENT_TYPE_REGISTRY: dict[DomainEventType, EventTypeSpec] = {
     "graph.relationship.created": EventTypeSpec(
@@ -182,6 +226,75 @@ EVENT_TYPE_REGISTRY: dict[DomainEventType, EventTypeSpec] = {
         "citation", _CITATION_PAYLOAD, canvas_required=True
     ),
     "citation.rendering.failed": EventTypeSpec("citation", _CITATION_PAYLOAD, canvas_required=True),
+    "workflow.definition.created": EventTypeSpec(
+        "workflow_definition", _WORKFLOW_VERSION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.version.created": EventTypeSpec(
+        "workflow_version", _WORKFLOW_VERSION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.version.validated": EventTypeSpec(
+        "workflow_version", _WORKFLOW_VERSION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.version.activated": EventTypeSpec(
+        "workflow_version", _WORKFLOW_VERSION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.version.disabled": EventTypeSpec(
+        "workflow_version", _WORKFLOW_VERSION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.execution.requested": EventTypeSpec(
+        "workflow_execution", _WORKFLOW_EXECUTION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.execution.planned": EventTypeSpec(
+        "workflow_execution", _WORKFLOW_EXECUTION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.execution.started": EventTypeSpec(
+        "workflow_execution", _WORKFLOW_EXECUTION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.execution.awaiting_approval": EventTypeSpec(
+        "workflow_execution", _WORKFLOW_EXECUTION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.execution.completed": EventTypeSpec(
+        "workflow_execution", _WORKFLOW_EXECUTION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.execution.failed": EventTypeSpec(
+        "workflow_execution", _WORKFLOW_EXECUTION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.execution.canceled": EventTypeSpec(
+        "workflow_execution", _WORKFLOW_EXECUTION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.compensation.started": EventTypeSpec(
+        "workflow_execution", _WORKFLOW_EXECUTION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.compensation.completed": EventTypeSpec(
+        "workflow_execution", _WORKFLOW_EXECUTION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.compensation.failed": EventTypeSpec(
+        "workflow_execution", _WORKFLOW_EXECUTION_PAYLOAD, canvas_required=True
+    ),
+    "workflow.step.started": EventTypeSpec(
+        "workflow_step", _WORKFLOW_STEP_PAYLOAD, canvas_required=True
+    ),
+    "workflow.step.completed": EventTypeSpec(
+        "workflow_step", _WORKFLOW_STEP_PAYLOAD, canvas_required=True
+    ),
+    "workflow.step.failed": EventTypeSpec(
+        "workflow_step", _WORKFLOW_STEP_PAYLOAD, canvas_required=True
+    ),
+    "workflow.step.retry_scheduled": EventTypeSpec(
+        "workflow_step", _WORKFLOW_STEP_PAYLOAD, canvas_required=True
+    ),
+    "workflow.step.awaiting_approval": EventTypeSpec(
+        "workflow_step", _WORKFLOW_STEP_PAYLOAD, canvas_required=True
+    ),
+    "workflow.approval.requested": EventTypeSpec(
+        "workflow_step", _WORKFLOW_STEP_PAYLOAD, canvas_required=True
+    ),
+    "workflow.approval.accepted": EventTypeSpec(
+        "workflow_step", _WORKFLOW_STEP_PAYLOAD, canvas_required=True
+    ),
+    "workflow.approval.denied": EventTypeSpec(
+        "workflow_step", _WORKFLOW_STEP_PAYLOAD, canvas_required=True
+    ),
 }
 
 

@@ -1434,13 +1434,37 @@ class DomainEventRecord(Base):
             "'evidence.bundle.accessed', "
             "'evidence.bundle.export_denied', "
             "'citation.rendering.completed', "
-            "'citation.rendering.failed')",
+            "'citation.rendering.failed', "
+            "'workflow.definition.created', "
+            "'workflow.version.created', "
+            "'workflow.version.validated', "
+            "'workflow.version.activated', "
+            "'workflow.version.disabled', "
+            "'workflow.execution.requested', "
+            "'workflow.execution.planned', "
+            "'workflow.execution.started', "
+            "'workflow.execution.awaiting_approval', "
+            "'workflow.execution.completed', "
+            "'workflow.execution.failed', "
+            "'workflow.execution.canceled', "
+            "'workflow.compensation.started', "
+            "'workflow.compensation.completed', "
+            "'workflow.compensation.failed', "
+            "'workflow.step.started', "
+            "'workflow.step.completed', "
+            "'workflow.step.failed', "
+            "'workflow.step.retry_scheduled', "
+            "'workflow.step.awaiting_approval', "
+            "'workflow.approval.requested', "
+            "'workflow.approval.accepted', "
+            "'workflow.approval.denied')",
             name="ck_domain_events_type",
         ),
         CheckConstraint(
             "subject_kind IN ('canonical_resource', 'graph_relationship', "
             "'controlled_execution', 'controlled_effect', 'controlled_rollback', "
-            "'evidence_bundle', 'citation')",
+            "'evidence_bundle', 'citation', 'workflow_definition', 'workflow_version', "
+            "'workflow_execution', 'workflow_step')",
             name="ck_domain_events_subject_kind",
         ),
         CheckConstraint("sequence > 0", name="ck_domain_events_sequence_positive"),
@@ -2027,6 +2051,616 @@ class TraceEvidenceBundle(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class ControlledWorkflowDefinition(Base):
+    """Stable scoped identity; executable content lives only in immutable versions."""
+
+    __tablename__ = "controlled_workflow_definitions"
+    __table_args__ = (
+        UniqueConstraint(
+            "definition_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            name="uq_workflow_definition_scope",
+        ),
+        CheckConstraint(
+            "schema_version = 'controlled-workflow-v1'",
+            name="ck_workflow_definition_schema",
+        ),
+        CheckConstraint(
+            "kind IN ('grounded_answer', 'evidence_package', 'approved_reversible_note')",
+            name="ck_workflow_definition_kind",
+        ),
+        Index(
+            "ix_workflow_definition_scope_time",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "created_at",
+        ),
+    )
+
+    definition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    canvas_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("canvases.id", ondelete="RESTRICT"), nullable=False
+    )
+    schema_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str] = mapped_column(String(1000), nullable=False)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ControlledWorkflowVersion(Base):
+    """Immutable normalized workflow definition version."""
+
+    __tablename__ = "controlled_workflow_versions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["definition_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "controlled_workflow_definitions.definition_id",
+                "controlled_workflow_definitions.user_id",
+                "controlled_workflow_definitions.workspace_id",
+                "controlled_workflow_definitions.canvas_id",
+            ],
+            name="fk_workflow_version_definition_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "definition_id",
+            "version_number",
+            name="uq_workflow_version_number",
+        ),
+        UniqueConstraint(
+            "version_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            name="uq_workflow_version_scope",
+        ),
+        UniqueConstraint(
+            "definition_id",
+            "idempotency_key",
+            name="uq_workflow_version_idempotency",
+        ),
+        CheckConstraint(
+            "schema_version = 'controlled-workflow-v1'",
+            name="ck_workflow_version_schema",
+        ),
+        CheckConstraint("version_number > 0", name="ck_workflow_version_number"),
+        CheckConstraint("max_steps > 0 AND max_steps <= 32", name="ck_workflow_version_steps"),
+        CheckConstraint(
+            "max_duration_seconds > 0 AND max_duration_seconds <= 900",
+            name="ck_workflow_version_duration",
+        ),
+        CheckConstraint(
+            "max_retries_per_step >= 0 AND max_retries_per_step <= 3",
+            name="ck_workflow_version_retries",
+        ),
+        CheckConstraint(
+            "compensation_policy IN ('none', 'predefined_saga')",
+            name="ck_workflow_version_compensation",
+        ),
+        CheckConstraint("length(content_digest) = 64", name="ck_workflow_version_digest"),
+        Index("ix_workflow_version_definition_time", "definition_id", "created_at"),
+    )
+
+    version_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    definition_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    input_schema_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    output_schema_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    content_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    normalized_definition: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    max_steps: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_retries_per_step: Mapped[int] = mapped_column(Integer, nullable=False)
+    compensation_policy: Mapped[str] = mapped_column(String(32), nullable=False)
+    supersedes_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("controlled_workflow_versions.version_id", ondelete="RESTRICT")
+    )
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ControlledWorkflowVersionState(Base):
+    __tablename__ = "controlled_workflow_version_states"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["version_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "controlled_workflow_versions.version_id",
+                "controlled_workflow_versions.user_id",
+                "controlled_workflow_versions.workspace_id",
+                "controlled_workflow_versions.canvas_id",
+            ],
+            name="fk_workflow_version_state_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "version_id",
+            "sequence",
+            name="uq_workflow_version_state_sequence",
+        ),
+        CheckConstraint(
+            "state IN ('draft', 'validated', 'active', 'superseded', 'disabled', 'retired')",
+            name="ck_workflow_version_state",
+        ),
+        CheckConstraint("sequence >= 0", name="ck_workflow_version_state_sequence"),
+        Index("ix_workflow_version_state_time", "version_id", "sequence"),
+    )
+
+    state_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(64))
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ControlledWorkflowStep(Base):
+    __tablename__ = "controlled_workflow_steps"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["version_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "controlled_workflow_versions.version_id",
+                "controlled_workflow_versions.user_id",
+                "controlled_workflow_versions.workspace_id",
+                "controlled_workflow_versions.canvas_id",
+            ],
+            name="fk_workflow_step_version_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "version_id",
+            "step_id",
+            name="uq_workflow_step_version_id",
+        ),
+        UniqueConstraint("version_id", "step_key", name="uq_workflow_step_key"),
+        UniqueConstraint("version_id", "ordinal", name="uq_workflow_step_ordinal"),
+        CheckConstraint("ordinal >= 0 AND ordinal < 32", name="ck_workflow_step_ordinal"),
+        CheckConstraint(
+            "step_type IN ('validate_input', 'capture_context', 'graph_retrieval', "
+            "'evaluate_evidence', 'grounded_model', 'render_citations', "
+            "'evidence_bundle', 'human_approval', 'controlled_effect', "
+            "'compensation', 'record_output')",
+            name="ck_workflow_step_type",
+        ),
+        CheckConstraint(
+            "risk_class IN ('r0_observation', 'r1_draft', 'r2_transient_action', "
+            "'r3_durable_write')",
+            name="ck_workflow_step_risk",
+        ),
+        CheckConstraint(
+            "max_attempts > 0 AND max_attempts <= 4",
+            name="ck_workflow_step_attempts",
+        ),
+        CheckConstraint("length(step_digest) = 64", name="ck_workflow_step_digest"),
+        Index("ix_workflow_step_version_order", "version_id", "ordinal"),
+    )
+
+    step_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    step_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    step_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    capability: Mapped[str] = mapped_column(String(80), nullable=False)
+    risk_class: Mapped[str] = mapped_column(String(32), nullable=False)
+    approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    config: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    step_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    compensation_step_key: Mapped[str | None] = mapped_column(String(64))
+
+
+class ControlledWorkflowDependency(Base):
+    __tablename__ = "controlled_workflow_dependencies"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["version_id", "step_id"],
+            ["controlled_workflow_steps.version_id", "controlled_workflow_steps.step_id"],
+            name="fk_workflow_dependency_step",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["version_id", "depends_on_step_id"],
+            ["controlled_workflow_steps.version_id", "controlled_workflow_steps.step_id"],
+            name="fk_workflow_dependency_predecessor",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "version_id",
+            "step_id",
+            "depends_on_step_id",
+            name="uq_workflow_dependency_edge",
+        ),
+        CheckConstraint("step_id <> depends_on_step_id", name="ck_workflow_dependency_self"),
+        Index("ix_workflow_dependency_step", "version_id", "step_id"),
+    )
+
+    dependency_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    step_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    depends_on_step_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+
+
+class ControlledWorkflowExecution(Base):
+    __tablename__ = "controlled_workflow_executions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["version_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "controlled_workflow_versions.version_id",
+                "controlled_workflow_versions.user_id",
+                "controlled_workflow_versions.workspace_id",
+                "controlled_workflow_versions.canvas_id",
+            ],
+            name="fk_workflow_execution_version_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "execution_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            name="uq_workflow_execution_scope",
+        ),
+        UniqueConstraint(
+            "execution_id",
+            "user_id",
+            "workspace_id",
+            name="uq_workflow_execution_owner_scope",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "idempotency_key",
+            name="uq_workflow_execution_idempotency",
+        ),
+        CheckConstraint(
+            "status IN ('requested', 'planned', 'awaiting_approval', 'ready', 'running', "
+            "'cancel_requested', 'canceling', 'compensating', 'completed', 'failed', "
+            "'canceled', 'compensated', 'compensation_failed')",
+            name="ck_workflow_execution_status",
+        ),
+        CheckConstraint(
+            "outcome IS NULL OR outcome IN ('supported', 'conflicting_evidence', "
+            "'insufficient_evidence', 'bounded_result', 'effect_committed', "
+            "'compensated', 'canceled', 'failed')",
+            name="ck_workflow_execution_outcome",
+        ),
+        CheckConstraint("deadline_at > created_at", name="ck_workflow_execution_deadline"),
+        CheckConstraint("length(request_digest) = 64", name="ck_workflow_execution_request_digest"),
+        CheckConstraint("length(plan_digest) = 64", name="ck_workflow_execution_plan_digest"),
+        CheckConstraint("length(input_digest) = 64", name="ck_workflow_execution_input_digest"),
+        Index(
+            "ix_workflow_execution_scope_time",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "created_at",
+        ),
+        Index("ix_workflow_execution_status", "status", "deadline_at"),
+    )
+
+    execution_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    definition_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    plan_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    normalized_input: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    selected_object_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    graph_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    outcome: Mapped[str | None] = mapped_column(String(32))
+    output: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    output_digest: Mapped[str | None] = mapped_column(String(64))
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ControlledWorkflowPlanSnapshot(Base):
+    __tablename__ = "controlled_workflow_plan_snapshots"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_workflow_executions.execution_id",
+                "controlled_workflow_executions.user_id",
+                "controlled_workflow_executions.workspace_id",
+            ],
+            name="fk_workflow_plan_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("execution_id", name="uq_workflow_plan_execution"),
+        CheckConstraint(
+            "schema_version = 'controlled-workflow-plan-v1'",
+            name="ck_workflow_plan_schema",
+        ),
+        CheckConstraint("length(plan_digest) = 64", name="ck_workflow_plan_digest"),
+    )
+
+    plan_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ControlledWorkflowExecutionTransition(Base):
+    __tablename__ = "controlled_workflow_execution_transitions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_workflow_executions.execution_id",
+                "controlled_workflow_executions.user_id",
+                "controlled_workflow_executions.workspace_id",
+            ],
+            name="fk_workflow_execution_transition_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "execution_id",
+            "sequence",
+            name="uq_workflow_execution_transition_sequence",
+        ),
+        CheckConstraint("sequence >= 0", name="ck_workflow_execution_transition_sequence"),
+        Index("ix_workflow_execution_transition_time", "execution_id", "sequence"),
+    )
+
+    transition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(32))
+    to_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(64))
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ControlledWorkflowStepExecution(Base):
+    __tablename__ = "controlled_workflow_step_executions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workflow_execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_workflow_executions.execution_id",
+                "controlled_workflow_executions.user_id",
+                "controlled_workflow_executions.workspace_id",
+            ],
+            name="fk_workflow_step_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["step_definition_id"],
+            ["controlled_workflow_steps.step_id"],
+            name="fk_workflow_step_execution_definition",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "workflow_execution_id",
+            "step_definition_id",
+            name="uq_workflow_step_execution",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'blocked', 'awaiting_approval', 'ready', 'claimed', "
+            "'running', 'succeeded', 'retry_waiting', 'failed', 'canceled', "
+            "'compensating', 'compensated', 'compensation_failed', 'skipped')",
+            name="ck_workflow_step_execution_status",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0 AND attempt_count <= max_attempts",
+            name="ck_workflow_step_execution_attempts",
+        ),
+        CheckConstraint(
+            "(lease_owner_id IS NULL AND lease_expires_at IS NULL) OR "
+            "(lease_owner_id IS NOT NULL AND lease_expires_at IS NOT NULL)",
+            name="ck_workflow_step_execution_lease",
+        ),
+        CheckConstraint(
+            "lease_generation >= 0",
+            name="ck_workflow_step_execution_generation",
+        ),
+        Index("ix_workflow_step_execution_ready", "status", "next_retry_at"),
+        Index(
+            "ix_workflow_step_execution_run",
+            "workflow_execution_id",
+            "step_definition_id",
+        ),
+    )
+
+    step_execution_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    workflow_execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    step_definition_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    controlled_execution_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("controlled_agent_executions.id", ondelete="RESTRICT")
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_owner_id: Mapped[str | None] = mapped_column(String(128))
+    lease_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approval_id: Mapped[uuid.UUID | None] = mapped_column()
+    retrieval_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("graph_retrieval_runs.retrieval_id", ondelete="RESTRICT")
+    )
+    bundle_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("trace_evidence_bundles.bundle_id", ondelete="RESTRICT")
+    )
+    effect_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("controlled_agent_reversible_write_effects.effect_id", ondelete="RESTRICT")
+    )
+    rollback_result_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "controlled_agent_reversible_write_rollback_results.rollback_result_id",
+            ondelete="RESTRICT",
+        )
+    )
+    output: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    output_digest: Mapped[str | None] = mapped_column(String(64))
+    safe_failure_class: Mapped[str | None] = mapped_column(String(64))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ControlledWorkflowStepTransition(Base):
+    __tablename__ = "controlled_workflow_step_transitions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["step_execution_id"],
+            ["controlled_workflow_step_executions.step_execution_id"],
+            name="fk_workflow_step_transition_execution",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "step_execution_id",
+            "sequence",
+            name="uq_workflow_step_transition_sequence",
+        ),
+        CheckConstraint("sequence >= 0", name="ck_workflow_step_transition_sequence"),
+        Index("ix_workflow_step_transition_time", "step_execution_id", "sequence"),
+    )
+
+    transition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    step_execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(32))
+    to_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(64))
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ControlledWorkflowStepAttempt(Base):
+    __tablename__ = "controlled_workflow_step_attempts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["step_execution_id"],
+            ["controlled_workflow_step_executions.step_execution_id"],
+            name="fk_workflow_step_attempt_execution",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "step_execution_id",
+            "attempt_number",
+            name="uq_workflow_step_attempt_number",
+        ),
+        CheckConstraint("attempt_number > 0", name="ck_workflow_step_attempt_number"),
+        CheckConstraint(
+            "outcome IN ('succeeded', 'retry_scheduled', 'failed', 'canceled')",
+            name="ck_workflow_step_attempt_outcome",
+        ),
+        CheckConstraint("length(input_digest) = 64", name="ck_workflow_step_attempt_input_digest"),
+        CheckConstraint(
+            "output_digest IS NULL OR length(output_digest) = 64",
+            name="ck_workflow_step_attempt_output_digest",
+        ),
+        Index("ix_workflow_step_attempt_time", "step_execution_id", "attempt_number"),
+    )
+
+    attempt_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    step_execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    lease_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    output_digest: Mapped[str | None] = mapped_column(String(64))
+    outcome: Mapped[str] = mapped_column(String(24), nullable=False)
+    failure_class: Mapped[str | None] = mapped_column(String(64))
+    provider_id: Mapped[str | None] = mapped_column(String(64))
+    model_id: Mapped[str | None] = mapped_column(String(160))
+    provider_configuration_version: Mapped[str | None] = mapped_column(String(128))
+    prompt_version: Mapped[str | None] = mapped_column(String(128))
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ControlledWorkflowEvidenceLink(Base):
+    __tablename__ = "controlled_workflow_evidence_links"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workflow_execution_id"],
+            ["controlled_workflow_executions.execution_id"],
+            name="fk_workflow_evidence_execution",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["step_execution_id"],
+            ["controlled_workflow_step_executions.step_execution_id"],
+            name="fk_workflow_evidence_step",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "workflow_execution_id",
+            "step_execution_id",
+            "evidence_kind",
+            "evidence_id",
+            name="uq_workflow_evidence_link",
+        ),
+        CheckConstraint(
+            "evidence_kind IN ('retrieval', 'citation', 'evidence_bundle', "
+            "'controlled_effect', 'controlled_rollback', 'approval', 'model_output')",
+            name="ck_workflow_evidence_kind",
+        ),
+        CheckConstraint("length(evidence_digest) = 64", name="ck_workflow_evidence_digest"),
+        Index("ix_workflow_evidence_execution", "workflow_execution_id", "step_execution_id"),
+    )
+
+    evidence_link_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    workflow_execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    step_execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    evidence_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    evidence_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID | None] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class ControlledAgentExecution(Base):
@@ -3204,6 +3838,19 @@ GRAPH_RETRIEVAL_IMMUTABLE_MODELS = (
     TraceEvidenceBundle,
 )
 
+CONTROLLED_WORKFLOW_IMMUTABLE_MODELS = (
+    ControlledWorkflowDefinition,
+    ControlledWorkflowVersion,
+    ControlledWorkflowVersionState,
+    ControlledWorkflowStep,
+    ControlledWorkflowDependency,
+    ControlledWorkflowPlanSnapshot,
+    ControlledWorkflowExecutionTransition,
+    ControlledWorkflowStepTransition,
+    ControlledWorkflowStepAttempt,
+    ControlledWorkflowEvidenceLink,
+)
+
 
 def _reject_controlled_agent_mutation(_mapper: Any, _connection: Any, target: object) -> None:
     raise ValueError(f"{type(target).__name__} records are append-only")
@@ -3246,6 +3893,51 @@ def _reject_outbox_identity_mutation(_mapper: Any, _connection: Any, target: obj
         raise ValueError("DomainEventOutbox identity and scope fields are immutable")
 
 
+def _reject_workflow_execution_identity_mutation(
+    _mapper: Any, _connection: Any, target: object
+) -> None:
+    state = sa_inspect(target)
+    if state is None:
+        raise ValueError("ControlledWorkflowExecution state is unavailable")
+    immutable_fields = (
+        "execution_id",
+        "definition_id",
+        "version_id",
+        "user_id",
+        "workspace_id",
+        "canvas_id",
+        "idempotency_key",
+        "request_digest",
+        "plan_id",
+        "plan_digest",
+        "input_digest",
+        "normalized_input",
+        "selected_object_ids",
+        "graph_revision",
+        "trace_id",
+        "created_at",
+        "deadline_at",
+    )
+    if any(state.attrs[field].history.has_changes() for field in immutable_fields):
+        raise ValueError("ControlledWorkflowExecution identity and authority are immutable")
+
+
+def _reject_workflow_step_identity_mutation(_mapper: Any, _connection: Any, target: object) -> None:
+    state = sa_inspect(target)
+    if state is None:
+        raise ValueError("ControlledWorkflowStepExecution state is unavailable")
+    immutable_fields = (
+        "step_execution_id",
+        "workflow_execution_id",
+        "step_definition_id",
+        "user_id",
+        "workspace_id",
+        "max_attempts",
+    )
+    if any(state.attrs[field].history.has_changes() for field in immutable_fields):
+        raise ValueError("ControlledWorkflowStepExecution identity and bounds are immutable")
+
+
 event.listen(
     ControlledAgentExecution,
     "before_update",
@@ -3273,6 +3965,31 @@ for _domain_event_immutable_model in DOMAIN_EVENT_IMMUTABLE_MODELS:
 for _retrieval_immutable_model in GRAPH_RETRIEVAL_IMMUTABLE_MODELS:
     event.listen(_retrieval_immutable_model, "before_update", _reject_controlled_agent_mutation)
     event.listen(_retrieval_immutable_model, "before_delete", _reject_controlled_agent_mutation)
+
+for _workflow_immutable_model in CONTROLLED_WORKFLOW_IMMUTABLE_MODELS:
+    event.listen(_workflow_immutable_model, "before_update", _reject_controlled_agent_mutation)
+    event.listen(_workflow_immutable_model, "before_delete", _reject_controlled_agent_mutation)
+
+event.listen(
+    ControlledWorkflowExecution,
+    "before_update",
+    _reject_workflow_execution_identity_mutation,
+)
+event.listen(
+    ControlledWorkflowExecution,
+    "before_delete",
+    _reject_controlled_agent_mutation,
+)
+event.listen(
+    ControlledWorkflowStepExecution,
+    "before_update",
+    _reject_workflow_step_identity_mutation,
+)
+event.listen(
+    ControlledWorkflowStepExecution,
+    "before_delete",
+    _reject_controlled_agent_mutation,
+)
 
 event.listen(DomainEventOutbox, "before_delete", _reject_controlled_agent_mutation)
 event.listen(DomainEventOutbox, "before_update", _reject_outbox_identity_mutation)

@@ -39,6 +39,8 @@ class Capability(StrEnum):
     CANVAS_NOTE_CREATE_ROLLBACK = "canvas.note.create.rollback"
     CANVAS_NOTE_UPDATE_ROLLBACK = "canvas.note.update.rollback"
     KNOWLEDGE_GRAPH_RELATIONSHIP_WRITE = "knowledge_graph.relationship.write"
+    WORKFLOW_STEP_EXECUTE = "workflow.step.execute"
+    EVIDENCE_BUNDLE_CREATE = "evidence.bundle.create"
     EXECUTION_CANCEL = "execution.cancel"
 
 
@@ -50,6 +52,7 @@ class ResourceKind(StrEnum):
     CHUNK = "chunk"
     TRACE = "trace"
     CANONICAL_RELATIONSHIP = "canonical_relationship"
+    CANONICAL_OBJECT = "canonical_object"
 
 
 class RiskClass(StrEnum):
