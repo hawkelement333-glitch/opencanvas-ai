@@ -29,6 +29,42 @@ Delivered:
 Events/outbox, graph-aware retrieval, workflows, frontend graph visualization,
 Agent Studio, federation, and repository ingestion remain deferred.
 
+## Permanent traceability contract
+
+Approved data
+→ grounded questions
+→ traceable workflows
+→ adaptive agent proposals
+→ governed agents
+→ traceable results
+
+> Every answer, workflow, agent definition, approval, action, retry, failure,
+> and result must remain connected to the authority and evidence that produced
+> it. Trace means auditable provenance and execution evidence, not private model
+> chain of thought.
+
+Focused inspection confirms that 5.1 is a stable foundation for this rule:
+
+- graph entities resolve to canonical resources under exact user, workspace,
+  and canvas scope;
+- relationship type, direction, endpoints, scope, provenance, and lifecycle
+  history are reconstructable;
+- public user-created relationships identify the authenticated actor;
+- controlled-agent provenance requires the responsible same-user/workspace
+  controlled execution;
+- imported or citation-derived provenance identifies its source reference, and
+  deterministic provenance identifies its rule and version;
+- deactivation and supersession append history while retaining original
+  identity, provenance, and predecessor evidence;
+- graph APIs expose bounded operational provenance and Trace identities without
+  private reasoning, policy, grant, or hidden authority details; and
+- later answers, workflows, and agent definitions can reference stable graph,
+  provenance, and history identities without rewriting historical records.
+
+No production defect was found during this amendment. No production code,
+migration, event, retrieval, workflow, frontend, or Agent Studio implementation
+changed, and checkpoint 5.2 was not started.
+
 ## Entity kinds
 
 The first-stage registry contains only repository-backed canonical kinds:
@@ -220,6 +256,27 @@ production claims.
 - 9. SolarPlexus Agent Ecosystem
 
 Milestone 5 is not complete. Stop before 5.2.
+
+Later acceptance criteria now require:
+
+- 5.3 to trace selected context, relationships traversed, retrieved passages,
+  citations, inclusion/exclusion decisions, conflicts, insufficient-evidence
+  outcomes, and traversal/context-budget limits;
+- 5.4 to trace workflow identity/version, approved inputs, every step/outcome,
+  models/tools/APIs, evidence/outputs, approvals, retries/recovery/cancellation,
+  proposed/completed mutations, compensation/rollback, and final result;
+- 5.6 to trace source framework, served workflow/job, proposed specialist
+  roles, approved sources/tools, capabilities/limits, creator/approver,
+  provider/model, validation/activation, and revisions, executions, suspension,
+  retirement, and replacement; and
+- 5.7 to prove approved data → canonical graph and provenance → grounded
+  question and citations → versioned workflow → adaptive agent proposal →
+  validation and human activation → governed execution → traceable result.
+
+The Adaptive Agent Architect may propose specialized agent definitions from
+approved frameworks, data structures, and workflows. It cannot activate
+agents, grant authority, assign private data, install unreviewed tools, or
+increase limits. Activation requires policy validation and human approval.
 
 ## Protected local Git state
 

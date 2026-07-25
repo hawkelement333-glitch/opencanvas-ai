@@ -11,6 +11,20 @@ resumably-backfillable migrations. SQLite remains the correctness baseline;
 PostgreSQL-specific concurrency and plans require marked tests. No event,
 projection, client, workflow, import, or AI output may grant authority.
 
+Permanent product loop:
+
+Approved data
+→ grounded questions
+→ traceable workflows
+→ adaptive agent proposals
+→ governed agents
+→ traceable results
+
+> Every answer, workflow, agent definition, approval, action, retry, failure,
+> and result must remain connected to the authority and evidence that produced
+> it. Trace means auditable provenance and execution evidence, not private model
+> chain of thought.
+
 Dependencies: 5.2 requires 5.1; 5.3 requires 5.1–5.2; 5.4 requires 5.1–5.3
 and Milestone 4; 5.5 may begin after 5.1 but requires 5.2/5.4 to complete; 5.6
 requires 5.4; 5.7 requires 5.1–5.6.
@@ -83,6 +97,10 @@ checks; revoked/altered/missing/stale/cross-scope failures; deterministic
 ranking/path/citations; conflicts; cancellation/deadline/lease/stale result;
 seeded query and latency bounds.
 
+Trace acceptance: selected context; relationships traversed; retrieved
+passages; citations; inclusion and exclusion decisions; conflicts;
+insufficient-evidence outcomes; and traversal and context-budget limits.
+
 ## 5.4 — Controlled AI Workflows
 
 Start: `MILESTONE 5.4 STARTED LOCALLY — CONTROLLED AI WORKFLOWS`
@@ -104,6 +122,11 @@ duplicate start/resume/step/result/compensation; retry succeeds once; stale,
 canceled, or expired workers cannot commit; invalid authority fails closed;
 compensation order/approval/conflict/partial state; no partial success evidence
 after transaction failure.
+
+Trace acceptance: workflow identity and version; approved inputs; every step
+and outcome; models, tools, and APIs used; evidence and outputs; approvals;
+retries, recovery, and cancellation; proposed and completed mutations;
+compensation or rollback; and the final result.
 
 ## 5.5 — Dynamic Universe Interface
 
@@ -137,13 +160,23 @@ Model/reasoning: `gpt-5.6-sol`, xhigh.
 Deliver template/agent identities, immutable versions/digests, proposal
 evidence, activation, declarative bounds, and effective-authority review.
 Runtime authority remains Milestone 4. Prohibit delegation, descendants,
-arbitrary code/tools/connectors, agent creation, and policy changes.
+arbitrary code/tools/connectors, agent-initiated creation, and policy changes.
+
+The Adaptive Agent Architect may propose specialized agent definitions from
+approved frameworks, data structures, and workflows. It cannot activate
+agents, grant authority, assign private data, install unreviewed tools, or
+increase limits. Activation requires policy validation and human approval.
 
 Migration `2026xxxx_0021`: templates, agents, versions, proposals, activation.
 
 Gate: schemas/digests/immutability; malicious data confinement; no
 self-activation/standing grant; strict runtime authority intersection;
 revocation/replacement/stale/prohibited capability; accessible browser smoke.
+
+Trace acceptance: source framework; workflow or job being served; proposed
+specialist roles; approved sources and tools; capabilities and limits; creator
+and approver; provider and model; validation and activation; and revisions,
+executions, suspension, retirement, and replacement.
 
 ## 5.7 — Final Combined Milestone 5 Audit
 
@@ -159,6 +192,17 @@ recovery, stale, cancel, deadline, and invalid-authority cases; failure
 injection; event replay; migration cycles; concurrency; PostgreSQL-marked
 tests; browser/accessibility; typing, lint, formatting, build, mappers,
 compilation, imports, hygiene, secrets, whitespace, diff, and prohibited scope.
+
+The combined acceptance scenario must prove:
+
+approved data
+→ canonical graph and provenance
+→ grounded question and citations
+→ versioned workflow
+→ adaptive agent proposal
+→ validation and human activation
+→ governed execution
+→ traceable result
 
 Create the completion document only after the combined gates pass. Milestone 6
 still requires explicit authorization.

@@ -24,6 +24,48 @@ checkpoint is 5.2, Living State and Event System.
 
 Only checkpoint 5.1 is complete. Milestone 5 is not complete.
 
+## Permanent traceability contract
+
+Approved data
+→ grounded questions
+→ traceable workflows
+→ adaptive agent proposals
+→ governed agents
+→ traceable results
+
+> Every answer, workflow, agent definition, approval, action, retry, failure,
+> and result must remain connected to the authority and evidence that produced
+> it. Trace means auditable provenance and execution evidence, not private model
+> chain of thought.
+
+This contract amendment does not reopen 5.1 or start 5.2. The completed 5.1
+implementation already provides stable canonical scoped identities,
+reconstructable relationship direction/endpoints/provenance/history,
+authenticated user attribution, same-scope controlled-execution provenance,
+source/rule origin records, evidence-preserving lifecycle transitions, and
+safe operational graph API provenance. Later records can reference those
+identities without rewriting history.
+
+Later checkpoint acceptance now requires:
+
+- 5.3 traces selected context, traversed relationships, passages, citations,
+  inclusion/exclusion decisions, conflicts, insufficient evidence, and
+  traversal/context-budget limits.
+- 5.4 traces the versioned workflow, approved inputs, steps, models/tools/APIs,
+  evidence, approvals, retry/recovery/cancellation, mutations,
+  compensation/rollback, and final result.
+- 5.6 traces the source framework, served workflow/job, proposed roles,
+  approved sources/tools, bounds, creator/approver, provider/model, validation,
+  activation, and the full definition/execution lifecycle.
+- 5.7 proves approved data through canonical graph provenance, grounded
+  citations, a versioned workflow, an adaptive proposal, human activation,
+  governed execution, and a traceable result.
+
+The Adaptive Agent Architect may propose specialized definitions from approved
+frameworks, data structures, and workflows. It cannot activate agents, grant
+authority, assign private data, install unreviewed tools, or increase limits;
+policy validation and human approval are mandatory for activation.
+
 ## 5.1 completion evidence
 
 - Canonical entity kinds: document, note, execution.

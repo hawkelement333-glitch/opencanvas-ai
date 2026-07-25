@@ -42,6 +42,46 @@ Repository inspection established:
   Ownership, path scope, CSRF, and optimistic versions are established.
   Milestone 5 remains owner-only and single-workspace.
 
+## Permanent product loop and Trace contract
+
+Milestone 5 and every later milestone preserve this product loop:
+
+Approved data
+→ grounded questions
+→ traceable workflows
+→ adaptive agent proposals
+→ governed agents
+→ traceable results
+
+> Every answer, workflow, agent definition, approval, action, retry, failure,
+> and result must remain connected to the authority and evidence that produced
+> it. Trace means auditable provenance and execution evidence, not private model
+> chain of thought.
+
+`Trace` therefore records safe operational provenance, lifecycle, and
+execution evidence. It does not store or expose private model chain of thought.
+Authority remains in the established policy, grant, approval, audit, and
+execution contracts; a Trace reference describes those decisions without
+becoming authority.
+
+The completed 5.1 foundation is stable for this contract:
+
+- graph entities resolve to canonical resources in an exact user, workspace,
+  and canvas scope;
+- relationship type, direction, endpoints, scope, provenance, and append-only
+  lifecycle history are reconstructable;
+- user-created relationships record the authenticated actor;
+- execution-created provenance requires the responsible same-scope controlled
+  execution;
+- imported, citation-derived, and deterministic relationships record their
+  actual source reference or named rule and version;
+- supersession and deactivation append history while preserving original
+  identity and evidence;
+- graph APIs expose bounded operational provenance without private reasoning,
+  grants, policies, or hidden authority details; and
+- later answers, workflows, and agents can reference stable graph and
+  provenance identities without rewriting historical records.
+
 ## Decisions
 
 ### Canonical graph and identity
@@ -125,6 +165,11 @@ average away conflicts. Missing, stale, unsupported, or uncitable evidence
 returns insufficient evidence. New graph resource/capability contracts require
 an explicit reviewed Milestone 4 contract version/digest change.
 
+Every retrieval result must trace selected context, relationships traversed,
+retrieved passages, citations, inclusion and exclusion decisions, conflicts,
+insufficient-evidence outcomes, and applied traversal and context-budget
+limits.
+
 Rejected: provider-directed recursion, whole-component loading, client-supplied
 expansion, and citations without immutable evidence.
 
@@ -151,6 +196,11 @@ Rollback is a saga: freeze forward work, create an immutable reverse-effect
 plan, skip read-only steps, and route each reversible effect through existing
 rollback review, fresh approval, version checks, idempotency, and execution.
 Stop on conflict/failure and retain truthful partial state.
+
+Every workflow run must trace workflow identity and version, approved inputs,
+every step and outcome, models, tools, and APIs used, evidence and outputs,
+approvals, retries, recovery, cancellation, proposed and completed mutations,
+compensation or rollback, and the final result.
 
 Rejected: script runners, a standing workflow grant, reusing one controlled
 execution across steps, transactions spanning providers/approvals, and blind
@@ -180,8 +230,19 @@ explicit activation transitions. AI output is an untrusted proposal. Server
 policy validates and displays effective bounds; a human activates it.
 Activation grants no runtime authority—every run uses Milestone 4.
 
-Prohibit agent creation, delegation, descendants, arbitrary connectors/tools/
-code, and policy modification. These belong to Milestone 9.
+The Adaptive Agent Architect may propose specialized agent definitions from
+approved frameworks, data structures, and workflows. It cannot activate
+agents, grant authority, assign private data, install unreviewed tools, or
+increase limits. Activation requires policy validation and human approval.
+
+Every Agent Studio lifecycle must trace the source framework, workflow or job
+being served, proposed specialist roles, approved sources and tools,
+capabilities and limits, creator and approver, provider and model, validation
+and activation, and all revisions, executions, suspensions, retirements, and
+replacements.
+
+Prohibit agent-initiated creation, delegation, descendants, arbitrary
+connectors/tools/code, and policy modification. These belong to Milestone 9.
 
 ## Logical model, service, and API outline
 
@@ -232,6 +293,17 @@ compensation, viewport selection/pagination/cache/accessibility, and prohibited
 capabilities. PostgreSQL-marked tests validate graph locks, uniqueness, outbox
 claims, event sequences, traversal plans, migration locks, and optional spatial
 indexes before reliance on PostgreSQL behavior.
+
+The final combined audit must prove the complete chain:
+
+approved data
+→ canonical graph and provenance
+→ grounded question and citations
+→ versioned workflow
+→ adaptive agent proposal
+→ validation and human activation
+→ governed execution
+→ traceable result
 
 Primary risks and mitigations:
 
