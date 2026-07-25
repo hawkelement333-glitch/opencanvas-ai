@@ -110,6 +110,74 @@ provenance, reliability, and cost controls; human promotion; approved
 activation; reconstructable/reversible prior version; and the safe complete
 source → workflow → agent → evaluation → promotion Trace chain.
 
+## English Expert, evidence-bundle, and APA requirements
+
+Milestone 5.6 now records the future controlled **Adaptive English
+Communication Expert**. It improves grammar, clarity, concision, tone, reading
+level, terminology, and audience fit while preserving supported facts,
+citations, technical meaning, uncertainty, limits, and safety warnings.
+
+It learns only from approved corrections, rewrite decisions, user-controlled
+profiles, organization guides, glossaries, audience requirements, examples,
+human feedback, evaluations, and immutable prior frameworks/Trace. It may
+propose immutable writing-framework, instruction, terminology, tone/
+reading-level, template, editing-workflow, and evaluation-case versions, but
+cannot silently change factual content, invent information, cross private
+scope, universalize one user’s style, deceptively imitate a person,
+self-promote, alter active agents without approval, or autonomously train model
+weights.
+
+Communication profiles may control tone, formality, reading level, sentence
+length, technical detail, terminology, prohibited phrases, organization style,
+and optional writing rules. George Orwell’s six prose rules are an optional
+profile only. Grounded revisions trace original text, sources/evidence,
+workflow/agent versions, requested profile, edits, decisions, and approvals.
+
+The governed English process identifies audience/tone/reading level, proposes
+a fact-preserving revision, marks material edits, evaluates language and fact/
+citation preservation, collects human feedback, proposes a new immutable
+framework only on repeated evidence, compares fixed cases, requires human
+promotion, and retains prior/rejected evidence for rollback.
+
+The future **Trace Evidence Bundle** is an immutable, authority-filtered ZIP
+containing the exact evidence used by a grounded answer, workflow/agent result,
+evaluation, or training proposal. It distinguishes selected, retrieved,
+included, excluded, conflicting, insufficient, full-source-authorized, and
+referenced-but-not-exportable evidence.
+
+The practical package contains `README.md`, `manifest.json`,
+`trace-report.md`, `references.md`, `citations.json`, exact `excerpts/`,
+optional authorized immutable `authorized-sources/`, and deterministic
+`integrity/sha256sums.txt`. The manifest records safe scope/result identities,
+every file/hash, source authority/status/version, Trace/audit references, and
+redaction/omission reasons. ZIP paths are deterministic, unique, traversal-
+safe, and size-bounded.
+
+APA 7 is the initial human-readable citation style. Parenthetical, narrative,
+direct-quotation, and References formatting uses only authoritative metadata;
+missing author/date/publisher/URL data is never invented. Private sources never
+leak internal locations. Presentation always retains canonical source/version/
+hash/locator/export-authority mapping through `citations.json`,
+`manifest.json`, and Trace.
+
+Checkpoint responsibilities are now:
+
+- 5.2 defines future-compatible evidence-bundle lifecycle/access/denial and
+  citation-rendering success/failure event semantics without implementing them
+  in this amendment.
+- 5.3 builds authorized bundles, excerpts/full-source selection, APA rendering,
+  citation mapping, manifests, SHA-256 integrity, redaction, and safe
+  references.
+- 5.4 attaches bundles to supported workflow results and each step’s evidence.
+- 5.5 provides authority-aware evidence, citation, References, and download
+  controls.
+- 5.6 attaches bundles/citations to agent executions, evaluations, candidate
+  comparisons, training proposals, and applicable English revisions.
+- 5.7 proves real sources, authoritative/non-fabricated metadata, exact quotes/
+  locators, export authority, safe ZIP paths, matching hashes, distinct
+  evidence classes, Trace reconstruction, durable source versions, and
+  fact-preserving English improvement.
+
 ## Future Milestone 9 scope recorded
 
 Milestone 5.6 establishes only foundations. The complete **SolarPlexus Academy
@@ -120,6 +188,12 @@ Trace-backed transcripts, version-specific certifications, remedial training,
 controlled skill transfer, candidate comparisons, human graduation and
 activation, retraining, suspension, quarantine, rehabilitation, retirement,
 replacement, and rollback.
+
+The future Academy includes the **School of Language, Communication, and
+Explanation**, with possible departments for Plain English, Technical Writing,
+Academic Writing, Professional Communication, Instruction and Teaching,
+Documentation, Editing and Quality Review, and Audience and Accessibility
+Adaptation.
 
 Academy records retain exact source/course/case/agent/trainer/evaluator/result/
 feedback/promotion/capability/lifecycle provenance. The Academy may teach,

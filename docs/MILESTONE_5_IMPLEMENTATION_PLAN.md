@@ -74,6 +74,11 @@ Deliver transactional events/outbox, workspace sequences, post-commit
 dispatch, checkpoints/replay, projections, poison-event handling, retries,
 stale-claim fencing, and observability. Preserve event/audit/Trace separation.
 
+Define future-compatible, non-authorizing events for evidence-bundle requested,
+generation started/completed/failed, bundle accessed, export denied, and
+citation rendering completed/failed. This documentation amendment does not
+implement them.
+
 Migration `2026xxxx_0017`: events, outbox evidence, sequences, checkpoints, and
 initial projections. Seed only reconstructable facts.
 
@@ -93,6 +98,17 @@ Deliver connected-context opt-in, closed traversal, immutable resolved
 path/context, deterministic graph/vector ranking, exact citations, conflict
 handling, and insufficient-evidence results by extending grounded drafts.
 
+Implement bounded Trace Evidence Bundle construction; exact excerpt and
+authorized-source selection; APA 7 in-text and References rendering;
+`citations.json`; manifest generation; deterministic SHA-256 integrity records;
+export-authority enforcement; redaction; and safe references.
+
+ZIP is the initial container. It contains `README.md`, `manifest.json`,
+`trace-report.md`, `references.md`, `citations.json`, exact permitted
+`excerpts/`, optional complete immutable `authorized-sources/`, and
+`integrity/sha256sums.txt`. Filenames and ordering are deterministic; unsafe/
+traversal/duplicate paths are rejected; total size is bounded.
+
 Migration `2026xxxx_0018`: graph-context/path evidence and traversal indexes.
 
 Gate: exact roots and all budgets/allowlists; scope/lifecycle/version/evidence
@@ -103,6 +119,9 @@ seeded query and latency bounds.
 Trace acceptance: selected context; relationships traversed; retrieved
 passages; citations; inclusion and exclusion decisions; conflicts;
 insufficient-evidence outcomes; and traversal and context-budget limits.
+Bundles separately represent each category and never export unrelated,
+unauthorized, secret, hidden-policy, private-chain-of-thought, or insufficiently
+redacted material.
 
 ## 5.4 — Controlled AI Workflows
 
@@ -116,6 +135,9 @@ Deliver immutable definitions/digests, closed DAG steps/branches, user-started
 runs, append-only transitions, one Milestone 4 execution per executable step,
 authority intersection/revalidation, layered idempotency, bounded failure, and
 immutable saga compensation.
+
+Attach evidence bundles to supported workflow results and preserve exact
+evidence for each workflow step.
 
 Migration `2026xxxx_0019`: definitions, versions, steps, branches, runs,
 transitions, M4 bindings, and compensation plans/items.
@@ -143,6 +165,10 @@ contract review.
 Deliver viewport/boundary/selection/activity/workflow/MiniMap APIs, portable
 tiling, normalized cache, visible rendering, prefetch/eviction with pinned
 selection, editing/conflict preservation, and accessible navigation/status.
+
+Provide safe **View Evidence**, **Open Citation**, **View References**, and
+**Download Evidence Bundle** controls. UI availability never grants export
+authority.
 
 Migration `2026xxxx_0020`: layout tiles, summaries, portable indexes. Optional
 PostgreSQL spatial indexes require measured proof.
@@ -225,6 +251,51 @@ datasets, privacy and scope review, dataset/model versioning, held-out security
 and grounding evaluations, human-controlled promotion, monitoring, and
 rollback.
 
+The future controlled **Adaptive English Communication Expert** improves clear,
+correct, concise, audience-appropriate English while preserving facts,
+citations, technical meaning, uncertainty, and safety warnings. It supports
+grammar/mechanics, plain English, concision, approved tone and reading level,
+audience explanation, terminology, document/result editing, complexity review,
+precision-preserving technical language, and explained before/after edits.
+
+It may learn from approved corrections, accepted/rejected rewrites, user style/
+tone preferences, organization guides, glossaries, audience requirements,
+examples, reviewer feedback, evaluations, and immutable prior frameworks/
+Trace. It may propose immutable writing-framework, instruction, terminology,
+tone/reading-level profile, template, editing-workflow, and language-case
+versions.
+
+It distinguishes fact correction, grammar, clarity, tone, reading level,
+terminology normalization, and unsupported content. It cannot silently alter
+facts/names/dates/numbers/citations/claims; remove uncertainty/limits/warnings;
+invent content; substitute inaccurate terms; cross private scope; universalize
+one user’s style; deceptively imitate a person; self-promote; alter an active
+agent without approval; or train model weights autonomously.
+
+Grounded revisions trace original text, canonical source versions, evidence/
+citations, workflow/agent versions, audience/style profile, accepted/rejected
+edits, and approvals. User profiles control tone, formality, reading level,
+sentence length, technical detail, terminology, prohibited phrases,
+organization guide, and optional writing rules. George Orwell’s six prose rules
+are optional, not universal.
+
+English improvement must:
+
+1. receive approved text and communication goal;
+2. identify audience, tone, and reading level;
+3. propose a fact-preserving revision;
+4. mark and explain material edits;
+5. evaluate grammar, clarity, precision, readability, terminology, citation
+   preservation, and factual preservation;
+6. collect approved feedback;
+7. propose an immutable framework version only on repeated evidence;
+8. compare fixed writing and fact-preservation cases;
+9. require human promotion approval; and
+10. preserve prior versions, evaluations, and rejected edits for Trace/rollback.
+
+Attach bundles/citations to agent executions, evaluations, candidate
+comparisons, training proposals, and applicable Adaptive English revisions.
+
 Migration `2026xxxx_0021`: templates, agents, versions, proposals, approved
 feedback, fixed evaluation cases, candidate evaluations, promotion, and
 activation.
@@ -285,6 +356,22 @@ It must also prove:
 Academy, quarantine, rehabilitation, and tribunal systems remain future
 Milestone 9 scope and are not 5.7 implementation requirements.
 
+It must prove for evidence bundles, APA 7, and English revisions:
+
+- citations map to real canonical sources and authoritative metadata;
+- missing metadata is never fabricated;
+- quotations/locators match immutable sources;
+- full files and excerpts satisfy export authority;
+- ZIP paths/names are safe and manifest/SHA-256 values agree;
+- included/excluded/conflicting/insufficient evidence remain distinct;
+- bundle and Trace reconstruct the same evidence path;
+- later source changes do not obscure used versions;
+- clarity/correctness improve without changing facts, names, dates, numbers,
+  citations, required technical terms, uncertainty, limits, or safety meaning;
+- tone/reading level follow the approved profile;
+- unsupported content is flagged, not invented; and
+- original/revised text and accepted/rejected edits remain reconstructable.
+
 Create the completion document only after the combined gates pass. Milestone 6
 still requires explicit authorization.
 
@@ -301,6 +388,12 @@ Trace-backed transcripts, version-specific certifications, remedial training,
 controlled skill transfer, candidate comparisons, human graduation/
 activation, retraining, suspension, quarantine, rehabilitation, retirement,
 replacement, and rollback.
+
+The Academy includes the future **School of Language, Communication, and
+Explanation**, with possible Plain English, Technical Writing, Academic
+Writing, Professional Communication, Instruction and Teaching, Documentation,
+Editing and Quality Review, and Audience and Accessibility Adaptation
+departments.
 
 Academy records trace sources, course/framework versions, cases, student-agent
 version, trainers/evaluators, results/feedback, promotion/rejection,

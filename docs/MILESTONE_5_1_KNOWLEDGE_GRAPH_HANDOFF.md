@@ -112,6 +112,119 @@ is deferred. Any future fine-tuning requires licensed approved datasets,
 privacy and scope review, dataset/model versions, held-out security and
 grounding evaluations, human-controlled promotion, monitoring, and rollback.
 
+## Future English Expert, evidence bundle, and APA contract
+
+Milestone 5.6 records a future controlled **Adaptive English Communication
+Expert** for clear, correct, concise, audience-appropriate English that
+preserves facts, citations, technical meaning, uncertainty, and safety
+warnings.
+
+It may improve mechanics, plain English, concision, approved tone/reading
+level, audience explanation, terminology, documents/messages/reports/workflow
+and agent results, unclear or repetitive language, precision-critical
+technical terms, and explained before/after edits. It learns only from approved
+corrections, accepted/rejected rewrites, user style preferences, organization
+guides, terminology/glossaries, audience requirements, examples, reviewer
+feedback, evaluations, immutable frameworks, and Trace.
+
+It may propose immutable writing-framework, communication-instruction,
+terminology, tone/reading-level, response-template, editing-workflow, and
+language-evaluation versions. It distinguishes factual correction, grammar,
+clarity, tone, reading level, terminology normalization, and unsupported
+content needing human review.
+
+It cannot silently alter facts/names/dates/numbers/citations/claims; remove
+uncertainty, limits, or safety warnings; invent content; substitute inaccurate
+technical terms; cross private scope; universalize one user’s style;
+deceptively imitate a person; self-promote; alter an active agent without
+approval; or autonomously train model weights.
+
+Profiles may define tone, formality, reading level, sentence length, technical
+detail, terminology, prohibited phrases, organization style, and optional
+writing rules. George Orwell’s six prose rules are an optional profile, never a
+universal rule. Grounded edits trace original/source/evidence/workflow/agent/
+profile identities, accepted/rejected changes, and approvals.
+
+The ten-step future improvement process receives approved text and a goal,
+identifies audience/tone/reading level, proposes a fact-preserving revision,
+marks/explains material edits, evaluates language plus fact/citation
+preservation, collects approved feedback, proposes an immutable framework only
+on repeated evidence, runs fixed writing/fact cases, requires human promotion,
+and preserves previous versions/evaluations/rejected edits for Trace/rollback.
+
+The future **Trace Evidence Bundle** is an immutable, authority-filtered export
+for grounded answers, workflow/agent results, evaluations, and training
+proposals. It distinguishes selected, retrieved, included, excluded,
+conflicting, insufficient, full-source-authorized, and referenced-but-not-
+exportable evidence. It records applicable tasks/results; canonical source
+identity/version/hash/locator; exact excerpts; repository path/commit; graph/
+retrieval decisions; workflow/agent/framework/model/provider/tool identities;
+permissions/approvals; audit/Trace; times; and integrity.
+
+ZIP is the initial practical format:
+
+```text
+trace-evidence-bundle.zip
+├── README.md
+├── manifest.json
+├── trace-report.md
+├── references.md
+├── citations.json
+├── excerpts/
+├── authorized-sources/
+└── integrity/
+    └── sha256sums.txt
+```
+
+The README explains requester/scope/content/omissions/integrity. The manifest
+lists safe scope and task/result identities, every file and SHA-256 hash,
+source authority/export status/version, Trace/audit references, and redaction/
+omission reasons. The report explains the task/result/context/retrieval/graph/
+evidence/conflicts/insufficiency/execution/approvals/actions. References
+contains only cited APA 7 entries. `citations.json` maps displayed citations to
+canonical identity/version/hash/excerpt/locator/claim-or-step/Trace.
+
+Excerpts contain only permitted exact passages. Full immutable files appear
+only under authorized export; that directory is omitted otherwise. Checksums
+cover every other file in deterministic path order and match the manifest.
+Construction rejects unsafe/traversal/duplicate paths and enforces a bounded
+size. The package excludes unrelated/unauthorized content, private chain of
+thought, grants, credentials/secrets, lease secrets, policy internals, and
+unredacted private information. Streaming, encryption, signatures, download
+links, retention/cleanup, and regional controls remain Milestone 7.
+
+APA 7 is the initial display style for parenthetical, narrative, direct-quote,
+and References citations. Only authoritative author/organization/date/title/
+type/publisher/journal-or-site/edition/version/DOI/authorized-URL/locator
+metadata may be used. Missing metadata is never fabricated: organization
+authorship requires source support, `n.d.` means no available date, title or
+approved internal name substitutes for absent author, and incompleteness is
+flagged when material.
+
+Private/internal sources never gain invented public publishers/URLs or leak
+unauthorized locations. APA presentation never replaces canonical Trace
+identity, immutable source version, hash, locator, or export authority. Every
+ZIP citation and References entry maps through the citation and manifest files
+to a real source/version/passage/claim-or-step and its access/export decision.
+
+Planned placement:
+
+- 5.2 defines future-compatible bundle request/generation/access/denial and
+  citation-rendering completion/failure event semantics.
+- 5.3 implements bundle/APA construction, authority filtering, redaction,
+  manifest/citation records, and SHA-256 integrity.
+- 5.4 attaches bundles and per-step evidence to supported workflow results.
+- 5.5 exposes safe evidence/citation/References/download controls.
+- 5.6 attaches bundles/citations to agent work, evaluations, comparisons,
+  training proposals, and applicable English revisions.
+- 5.7 proves authentic citations/metadata/passages/locators, authorized safe
+  ZIPs, matching integrity, distinct evidence classes, Trace reconstruction,
+  durable source identity, and fact-preserving English improvement.
+
+This is documentation only. It creates no code, migration, test, model, API,
+capability, event type, citation renderer, exporter, agent, workflow, or
+frontend and does not start Milestone 5.2.
+
 ## Entity kinds
 
 The first-stage registry contains only repository-backed canonical kinds:
@@ -345,6 +458,12 @@ human-controlled graduation/activation, retraining, suspension, quarantine,
 rehabilitation, retirement, replacement, and rollback. Its records trace all
 sources, versions, cases, identities, results, feedback, decisions,
 post-graduation capabilities, and later adverse outcomes.
+
+The future Academy includes the **School of Language, Communication, and
+Explanation**, with possible Plain English, Technical Writing, Academic
+Writing, Professional Communication, Instruction and Teaching, Documentation,
+Editing and Quality Review, and Audience and Accessibility Adaptation
+departments.
 
 The Academy may teach, evaluate, compare, certify, recommend, and propose
 retraining or rehabilitation. It cannot self-activate/promote, grant authority,

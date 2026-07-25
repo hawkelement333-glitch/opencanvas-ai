@@ -135,6 +135,12 @@ Trace (operation lifecycle/diagnostics/provenance) remain distinct.
 Events may mark work eligible but never grant authority or start an AI
 workflow. Explicit authenticated user start/resume remains mandatory.
 
+The future-compatible event contract reserves evidence-bundle requested,
+generation started, generation completed, generation failed, bundle accessed,
+export denied, citation rendering completed, and citation rendering failed.
+Milestone 5.2 must establish their safe event semantics without this
+documentation amendment implementing event types.
+
 Rejected: the process-local pre-commit bus as truth, audit/Trace as an event
 stream, and autonomous event-triggered workflows.
 
@@ -176,6 +182,103 @@ limits.
 Rejected: provider-directed recursion, whole-component loading, client-supplied
 expansion, and citations without immutable evidence.
 
+### Trace Evidence Bundle and APA 7
+
+The future **Trace Evidence Bundle** is an immutable export package containing
+the exact permitted evidence used for a grounded answer, workflow result, agent
+result, evaluation, or training proposal. It distinguishes selected,
+retrieved, included, excluded, conflicting, and insufficient evidence; full
+source files included under export authority; and referenced sources that are
+not exportable.
+
+Where applicable, a bundle records the question/task and final result;
+canonical source IDs, names, types, immutable versions, and hashes; exact cited
+excerpts and page/section/paragraph/line/character locators; repository paths
+and commit IDs; traversed graph entities/relationships; retrieval rankings and
+inclusion/exclusion reasons; conflict and insufficient-evidence records;
+workflow/agent/framework identities and versions; model/provider; tools/APIs;
+permissions/approvals; audit/Trace references; creation/access times; and an
+integrity manifest.
+
+Full-source export includes immutable copies only when authorized. Otherwise,
+the bundle contains only permitted excerpts, redacted metadata, canonical
+references, version hashes, and safe access references. It never includes
+unrelated workspace content, out-of-authority material, private model chain of
+thought, raw grants, credentials/secrets, worker/lease secrets, hidden policy
+internals, or private information requiring redaction.
+
+ZIP is the initial practical container:
+
+```text
+trace-evidence-bundle.zip
+├── README.md
+├── manifest.json
+├── trace-report.md
+├── references.md
+├── citations.json
+├── excerpts/
+│   ├── source-001-excerpt.txt
+│   └── source-002-excerpt.txt
+├── authorized-sources/
+│   ├── source-001.pdf
+│   └── source-002.docx
+└── integrity/
+    └── sha256sums.txt
+```
+
+`README.md` explains the bundle, requester, scope, included/omitted material,
+and integrity verification. `manifest.json` records bundle/schema identity,
+creation time, safe requester/workspace/canvas identifiers, task/result
+identity, every file and SHA-256 hash, source authority/export status,
+canonical source version, Trace/audit references, and redaction/omission
+reasons.
+
+`trace-report.md` gives the human-readable task/result, selected context,
+retrieval/graph summary, used/excluded/conflicting/insufficient evidence,
+workflow or agent summary, approvals, and relevant actions. `references.md`
+contains an APA 7 References section with exactly the cited sources.
+`citations.json` maps displayed citation text to canonical source ID, immutable
+version, hash, exact excerpt, locator, supported answer claim or workflow step,
+and Trace reference.
+
+`excerpts/` contains exact permitted passages under stable manifest-linked
+filenames and no unauthorized surrounding content. `authorized-sources/`
+contains only authorized complete immutable files and is absent when none are
+authorized. `integrity/sha256sums.txt` contains the SHA-256 value of every
+exported file except itself, in deterministic path order, matching the
+manifest.
+
+ZIP construction uses deterministic filenames, rejects unsafe paths and path
+traversal, prevents duplicates, and enforces a bounded total size. Streaming
+large files, encryption, signed manifests, temporary download links, retention,
+cleanup, and regional export controls remain Milestone 7.
+
+APA 7th edition is the initial human-readable citation style. When
+authoritative metadata supports it, Mobius renders parenthetical citations
+such as `(Author, Year)`, narrative citations such as `Author (Year)`, direct
+quotations such as `(Author, Year, p. 12)`, and one References entry per cited
+source. Every citation links through Trace to the canonical source version and
+exact passage.
+
+Citation metadata comes only from authoritative individual/organization
+author, publication date, title, document type, publisher, journal/site,
+edition/version, DOI, authorized URL, and accurate locator fields. Mobius never
+invents missing metadata. It uses the best supported form, uses an organization
+as author only when identified as such, uses `n.d.` only when no date exists,
+uses the source title or approved internal-document name when no author exists,
+and flags material metadata incompleteness when needed.
+
+Private/internal citations never invent a public publisher or URL and never
+expose an internal location to an unauthorized recipient. Canonical source ID,
+immutable version, hash, and exact locator remain privately traceable even when
+not displayed.
+
+APA formatting is presentation only. It never replaces canonical Trace
+identity, immutable source version, source hash, exact locator, or export-
+authority enforcement. Each ZIP citation and References entry maps through
+`citations.json` and `manifest.json` to a real canonical source, exact version,
+accurate locator, supported claim/step, and export/access authority.
+
 ### Controlled workflows and rollback
 
 Use stable workflow registry identities with immutable definition versions and
@@ -205,6 +308,9 @@ every step and outcome, models, tools, and APIs used, evidence and outputs,
 approvals, retries, recovery, cancellation, proposed and completed mutations,
 compensation or rollback, and the final result.
 
+Supported workflow results attach an immutable evidence bundle and preserve the
+evidence used by each workflow step.
+
 Rejected: script runners, a standing workflow grant, reusing one controlled
 execution across steps, transactions spanning providers/approvals, and blind
 inverse writes.
@@ -221,6 +327,10 @@ Use normalized client caches keyed by ID/version, visible rendering, neighbor
 prefetch, bounded LRU eviction, pinned selection/context, and a server-derived
 MiniMap summary. Workflow states need text/icon equivalents, keyboard/list
 navigation, announcements, reduced motion, and safe errors.
+
+The interface provides authority-aware **View Evidence**, **Open Citation**,
+**View References**, and **Download Evidence Bundle** controls without treating
+client visibility as export authority.
 
 Rejected: continued full snapshots, PostgreSQL-only correctness, client-derived
 scope, and color-only state.
@@ -328,6 +438,69 @@ privacy review, data-scope validation, dataset and model versioning, held-out
 evaluations, security and grounding evaluation, human-controlled promotion,
 monitoring, and rollback.
 
+#### Adaptive English Communication Expert
+
+Milestone 5.6 records the **Adaptive English Communication Expert** as a future
+controlled role. Its purpose is clear, correct, concise, audience-appropriate
+English that preserves supported facts, citations, technical meaning,
+uncertainty, and safety warnings.
+
+It may assist with grammar, spelling, punctuation, sentence structure,
+plain-English rewriting, concision, professional/academic/technical/
+instructional/conversational tone, reading-level adjustment, audience-specific
+explanations, consistent terminology, editing documents/messages/reports/
+workflow results/agent outputs, identifying vague/repetitive/confusing/
+needlessly complex language, retaining technical terms needed for precision,
+and before/after explanations of material edits.
+
+It may learn only from approved user corrections; accepted/rejected rewrites;
+user-controlled tone/style preferences; organization style guides;
+terminology/glossary lists; audience/reading-level requirements; examples;
+reviewer feedback; evaluations; and prior immutable framework versions and
+Trace. It may propose immutable new versions of writing frameworks,
+communication instructions, terminology rules, tone/reading-level profiles,
+response templates, editing workflows, and language evaluation cases.
+
+Every review distinguishes factual correction, grammar correction, clarity
+improvement, tone change, reading-level adjustment, terminology normalization,
+and unsupported content requiring human review.
+
+It must not silently alter facts, names, dates, numbers, citations, or supported
+claims; remove uncertainty, limits, or safety warnings to sound confident;
+invent missing information; replace technical terms inaccurately; cross private
+scope; universalize one user’s style; deceptively imitate a real person;
+self-promote a framework; alter an active agent without approval; or perform
+autonomous model-weight training.
+
+Grounded rewrites preserve Trace links to original text, canonical source
+versions, evidence/citations, workflow and agent versions, requested audience/
+style profile, accepted/rejected changes, and human approvals.
+
+User-controlled communication profiles may define tone, formality, reading
+level, sentence-length preference, technical-detail level, terminology
+preferences, prohibited phrases, organization style guide, and optional
+writing-rule profiles. George Orwell’s six prose rules are one optional
+supported profile, never a universal system rule.
+
+The governed improvement process is:
+
+1. Receive approved source text and a communication goal.
+2. Identify audience, tone, and reading level.
+3. Propose a revision without changing supported facts.
+4. Mark material edits and explain their purpose.
+5. Evaluate grammar, clarity, precision, readability, terminology, citation
+   preservation, and factual preservation.
+6. Collect approved human feedback.
+7. Propose a new immutable communication-framework version only after repeated
+   supporting evidence.
+8. Compare it against fixed writing and fact-preservation cases.
+9. Require human approval before promotion.
+10. Preserve previous versions, evaluations, and rejected edits for Trace and
+    rollback.
+
+Where applicable, English revisions and their evaluations, candidate
+comparisons, and training proposals attach citations and evidence bundles.
+
 ## Logical model, service, and API outline
 
 Planned records:
@@ -407,6 +580,23 @@ It must also prove the governed-improvement chain:
 Quarantine, rehabilitation, and Academy systems remain future Milestone 9
 scope, not Milestone 5.7 implementation requirements.
 
+Evidence-bundle and communication acceptance must prove:
+
+- every citation maps to a real source and authoritative metadata;
+- missing metadata is not fabricated;
+- quoted passages and locators match immutable sources;
+- every exported file is authorized;
+- ZIP names/paths are safe and manifest/SHA-256 values match;
+- included, excluded, conflicting, and insufficient evidence remain distinct;
+- bundle and Trace reconstruct the same path after later source changes;
+- English revisions improve clarity/correctness while preserving factual
+  meaning, names, dates, numbers, citations, technical terms, uncertainty, and
+  limitations;
+- approved tone and reading level are followed;
+- unsupported content is flagged rather than invented; and
+- original/revised text plus accepted/rejected edits remain reconstructable and
+  traceable.
+
 Primary risks and mitigations:
 
 | Risk                          | Mitigation                                         |
@@ -429,6 +619,12 @@ cases, isolated candidate testing, Adaptive Agent Architect proposals,
 Adaptive Training and Evaluation Agent proposals, human-controlled promotion,
 and version rollback. Milestone 9 expands those foundations into the complete
 SolarPlexus Academy.
+
+The Academy includes a future **School of Language, Communication, and
+Explanation**, with possible departments for Plain English, Technical Writing,
+Academic Writing, Professional Communication, Instruction and Teaching,
+Documentation, Editing and Quality Review, and Audience and Accessibility
+Adaptation.
 
 The Academy supports schools organized by broad technology or knowledge
 domains; departments organized by specialist roles; versioned courses for
