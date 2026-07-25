@@ -29,10 +29,12 @@ from opencanvas_api.services.agents.contracts import (
     ApprovalRecord,
     AuditAttribute,
     AuditEvent,
+    Capability,
     CapabilityGrant,
     PlanSnapshot,
     ResourceKind,
     ResourceScope,
+    RiskClass,
     contract_digest,
 )
 from opencanvas_api.services.agents.persistence import (
@@ -128,7 +130,7 @@ class ReversibleWriteEffectService:
             )
             if decision.outcome.value != "allow":
                 raise ReversibleEffectError(decision.reason_code, "Effect authority is inactive.")
-            node, before_state, before_digest = await self._apply_note(proposal, canvas)
+            node, before_state, before_digest = await self._apply_note(proposal, canvas, grant)
             if self.after_mutation is not None:
                 await self.after_mutation()
             after_digest = (
@@ -361,10 +363,28 @@ class ReversibleWriteEffectService:
             execution.plan_digest != plan_row.payload_digest
             or grant.plan_digest != plan_row.payload_digest
             or approval.plan_digest != grant.plan_digest
-            or len(plan.actions) != 1
+            or len(plan.actions) not in {1, 2}
             or plan.actions[0].expected_result_digest != contract_digest(proposal)
         ):
             raise AgentContractIntegrityError("Effect authority digest binding is invalid.")
+        if len(plan.actions) == 2:
+            rollback_capability = (
+                Capability.CANVAS_NOTE_CREATE_ROLLBACK
+                if proposal.action is ReversibleWriteAction.NOTE_CREATE
+                else Capability.CANVAS_NOTE_UPDATE_ROLLBACK
+            )
+            rollback_resource = self._rollback_resource(proposal)
+            rollback_action = plan.actions[1]
+            if (
+                rollback_action.ordinal != 1
+                or rollback_action.capability is not rollback_capability
+                or rollback_action.resource != rollback_resource
+                or rollback_action.risk_class is not RiskClass.R3_DURABLE_WRITE
+                or rollback_action.expected_result_digest != contract_digest(proposal)
+                or rollback_capability not in grant.capabilities
+                or rollback_resource not in grant.resources
+            ):
+                raise AgentContractIntegrityError("Rollback authority binding is invalid.")
         return approval, grant
 
     async def _assert_authority(
@@ -394,10 +414,13 @@ class ReversibleWriteEffectService:
         return proposal.resource or proposal.canvas
 
     async def _apply_note(
-        self, proposal: ReversibleWriteProposal, canvas: Canvas
+        self, proposal: ReversibleWriteProposal, canvas: Canvas, grant: CapabilityGrant
     ) -> tuple[CanvasNode, dict[str, str] | None, str | None]:
         if proposal.action is ReversibleWriteAction.NOTE_CREATE:
+            rollback_resource = self._rollback_resource(proposal)
+            has_rollback_authority = Capability.CANVAS_NOTE_CREATE_ROLLBACK in grant.capabilities
             node = CanvasNode(
+                id=rollback_resource.resource_id if has_rollback_authority else uuid.uuid4(),
                 canvas_id=canvas.id,
                 type="note",
                 title=proposal.preview.title,
@@ -442,6 +465,22 @@ class ReversibleWriteEffectService:
             raise ReversibleEffectError("stale_revision", "Note revision changed.")
         await self._bump_canvas(canvas.id)
         return updated_node, before_state, before_digest
+
+    @staticmethod
+    def _rollback_resource(proposal: ReversibleWriteProposal) -> ResourceScope:
+        if proposal.action is ReversibleWriteAction.NOTE_CREATE:
+            return ResourceScope(
+                kind=ResourceKind.NODE,
+                resource_id=uuid.uuid5(proposal.execution_id, "created-note"),
+                version=0,
+            )
+        if proposal.resource is None or proposal.resource.version is None:
+            raise AgentContractIntegrityError("Update proposal rollback scope is missing.")
+        return ResourceScope(
+            kind=ResourceKind.NODE,
+            resource_id=proposal.resource.resource_id,
+            version=proposal.resource.version + 1,
+        )
 
     async def _bump_canvas(self, canvas_id: uuid.UUID) -> None:
         await self.session.execute(

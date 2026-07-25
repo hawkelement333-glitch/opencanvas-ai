@@ -2159,6 +2159,7 @@ class ControlledWorkflowService:
                         else None
                     ),
                     idempotency_key=f"wf-effect-{row.step_execution_id}",
+                    include_rollback_authority=step.compensation_step_key is not None,
                 )
                 row.controlled_execution_id = prepared.proposal.execution_id
                 row.approval_id = prepared.approval_id
@@ -2812,6 +2813,26 @@ class ControlledWorkflowService:
             canvas_id=execution.canvas_id,
             execution_id=execution.execution_id,
         )
+        definitions = {item.step_id: item for item in await self._steps(execution.version_id)}
+        compensation_required = execution.cancel_requested_at is not None and any(
+            WorkflowStepType(definitions[row.step_definition_id].step_type)
+            is WorkflowStepType.COMPENSATION
+            and WorkflowStepStatus(row.status) is not WorkflowStepStatus.SKIPPED
+            for row in record.steps
+        )
+        if not compensation_required:
+            for row in record.steps:
+                definition = definitions[row.step_definition_id]
+                if (
+                    WorkflowStepType(definition.step_type) is WorkflowStepType.COMPENSATION
+                    and row.status == WorkflowStepStatus.BLOCKED.value
+                ):
+                    await self._step_transition(
+                        row,
+                        WorkflowStepStatus.SKIPPED,
+                        from_status=WorkflowStepStatus.BLOCKED,
+                        reason_code="compensation_not_required",
+                    )
         statuses = {WorkflowStepStatus(item.status) for item in record.steps}
         if WorkflowStepStatus.AWAITING_APPROVAL in statuses:
             await self._execution_transition_if_needed(
@@ -2843,13 +2864,13 @@ class ControlledWorkflowService:
                 "required_step_failed",
             )
             return
-        if WorkflowExecutionStatus(execution.status) is WorkflowExecutionStatus.COMPENSATING:
+        if compensation_required:
             execution.outcome = WorkflowOutcome.COMPENSATED.value
             execution.completed_at = self.now
             await self._execution_transition(
                 execution,
                 WorkflowExecutionStatus.COMPENSATED,
-                from_status=WorkflowExecutionStatus.COMPENSATING,
+                from_status=WorkflowExecutionStatus(execution.status),
             )
             await self._event(
                 "workflow.compensation.completed",

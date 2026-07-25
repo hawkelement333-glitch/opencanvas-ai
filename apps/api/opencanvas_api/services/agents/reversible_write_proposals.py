@@ -52,6 +52,8 @@ from opencanvas_api.services.agents.reversible_writes import (
     NotePreview,
     ReversibleWriteAction,
     ReversibleWriteProposal,
+    ReversibleWriteRollbackAction,
+    rollback_capability_for,
 )
 
 POLICY_VERSION = "reversible-write-v1"
@@ -92,6 +94,7 @@ class ReversibleWriteProposalService:
         note_id: uuid.UUID | None,
         expected_revision: int | None,
         idempotency_key: str,
+        include_rollback_authority: bool = False,
     ) -> PreparedReversibleProposal:
         canvas = await self._owned_canvas(authenticated_user_id, workspace_id, canvas_id)
         existing = await self.session.scalar(
@@ -123,6 +126,15 @@ class ReversibleWriteProposalService:
             )
             if existing_grant is None or existing_grant.approval_id is None:
                 raise AgentContractIntegrityError("Proposal grant binding is missing.")
+            stored_grant = ControlledAgentRepository._load_contract(
+                CapabilityGrant, existing_grant.payload, existing_grant.payload_digest
+            )
+            rollback_capability = self._rollback_capability(action)
+            if (rollback_capability in stored_grant.capabilities) != include_rollback_authority:
+                raise ReversibleProposalError(
+                    "idempotency_conflict",
+                    "The idempotency key was already used with different rollback authority.",
+                )
             return PreparedReversibleProposal(
                 proposal, existing.trace_id, existing_grant.approval_id, True
             )
@@ -161,6 +173,8 @@ class ReversibleWriteProposalService:
             expires_at=self.now + PROPOSAL_TTL,
             idempotency_key=idempotency_key,
         )
+        rollback_capability = self._rollback_capability(action)
+        rollback_resource = self._rollback_resource(proposal)
         context = ContextSnapshot(
             snapshot_id=uuid.uuid4(),
             user_id=authenticated_user_id,
@@ -177,6 +191,27 @@ class ReversibleWriteProposalService:
             ),
         )
         plan_resource = resource or canvas_scope
+        plan_actions = [
+            PlanAction(
+                action_id=uuid.uuid4(),
+                ordinal=0,
+                capability=capability,
+                resource=plan_resource,
+                risk_class=RiskClass.R3_DURABLE_WRITE,
+                expected_result_digest=contract_digest(proposal),
+            )
+        ]
+        if include_rollback_authority:
+            plan_actions.append(
+                PlanAction(
+                    action_id=uuid.uuid5(execution_id, "rollback-action"),
+                    ordinal=1,
+                    capability=rollback_capability,
+                    resource=rollback_resource,
+                    risk_class=RiskClass.R3_DURABLE_WRITE,
+                    expected_result_digest=contract_digest(proposal),
+                )
+            )
         plan = PlanSnapshot(
             plan_id=uuid.uuid4(),
             user_id=authenticated_user_id,
@@ -184,16 +219,7 @@ class ReversibleWriteProposalService:
             execution_id=execution_id,
             role=AgentRole.CONTROLLED_ACTION_EXECUTOR,
             created_at=self.now,
-            actions=(
-                PlanAction(
-                    action_id=uuid.uuid4(),
-                    ordinal=0,
-                    capability=capability,
-                    resource=plan_resource,
-                    risk_class=RiskClass.R3_DURABLE_WRITE,
-                    expected_result_digest=contract_digest(proposal),
-                ),
-            ),
+            actions=tuple(plan_actions),
         )
         approval_id = uuid.uuid4()
         grant = CapabilityGrant(
@@ -204,8 +230,14 @@ class ReversibleWriteProposalService:
             workspace_id=workspace_id,
             execution_id=execution_id,
             role=AgentRole.CONTROLLED_ACTION_EXECUTOR,
-            capabilities=(capability,),
-            resources=(canvas_scope,) if resource is None else (canvas_scope, resource),
+            capabilities=(
+                (capability, rollback_capability) if include_rollback_authority else (capability,)
+            ),
+            resources=(
+                canvas_scope,
+                *((resource,) if resource is not None else ()),
+                *((rollback_resource,) if include_rollback_authority else ()),
+            ),
             context_digest=contract_digest(context),
             plan_digest=contract_digest(plan),
             issued_at=self.now,
@@ -287,6 +319,31 @@ class ReversibleWriteProposalService:
                 "idempotency_conflict", "Proposal already exists."
             ) from exc
         return PreparedReversibleProposal(proposal, trace_id, approval_id, False)
+
+    @staticmethod
+    def _rollback_capability(action: ReversibleWriteAction) -> Capability:
+        rollback_action = (
+            ReversibleWriteRollbackAction.NOTE_CREATE_ROLLBACK
+            if action is ReversibleWriteAction.NOTE_CREATE
+            else ReversibleWriteRollbackAction.NOTE_UPDATE_ROLLBACK
+        )
+        return rollback_capability_for(rollback_action)
+
+    @staticmethod
+    def _rollback_resource(proposal: ReversibleWriteProposal) -> ResourceScope:
+        if proposal.action is ReversibleWriteAction.NOTE_CREATE:
+            return ResourceScope(
+                kind=ResourceKind.NODE,
+                resource_id=uuid.uuid5(proposal.execution_id, "created-note"),
+                version=0,
+            )
+        if proposal.resource is None or proposal.resource.version is None:
+            raise AgentContractIntegrityError("Update proposal rollback scope is missing.")
+        return ResourceScope(
+            kind=ResourceKind.NODE,
+            resource_id=proposal.resource.resource_id,
+            version=proposal.resource.version + 1,
+        )
 
     async def approve(
         self,

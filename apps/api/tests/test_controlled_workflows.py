@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import cast
 
 import httpx
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from opencanvas_api.db.models import (
     SYSTEM_USER_ID,
     SYSTEM_WORKSPACE_ID,
+    Base,
     CanvasNode,
     ControlledAgentAuditEvent,
     ControlledWorkflowEvidenceLink,
@@ -20,9 +23,12 @@ from opencanvas_api.db.models import (
     ControlledWorkflowPlanSnapshot,
     ControlledWorkflowStep,
     ControlledWorkflowStepAttempt,
+    ControlledWorkflowStepExecution,
     DomainEventOutbox,
     DomainEventRecord,
     TraceEvent,
+    User,
+    Workspace,
 )
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.agents.contracts import ApprovalDecision
@@ -848,3 +854,263 @@ async def test_workflow_evidence_is_append_only(database: Database) -> None:
         await session.delete(attempt)
         with pytest.raises(ValueError, match="append-only"):
             await session.flush()
+
+
+@pytest.mark.anyio
+async def test_predefined_compensation_requires_approval_and_removes_created_note(
+    database: Database,
+) -> None:
+    version = WorkflowVersionInput(
+        compensation_policy="predefined_saga",
+        steps=(
+            WorkflowStepInput(
+                step_key="effect",
+                step_type=WorkflowStepType.CONTROLLED_EFFECT,
+                config={"action": "note.create", "title": "Compensate", "text": "Remove me"},
+                compensation_step_key="rollback",
+            ),
+            WorkflowStepInput(
+                step_key="gate",
+                step_type=WorkflowStepType.HUMAN_APPROVAL,
+                depends_on=("effect",),
+            ),
+            WorkflowStepInput(
+                step_key="output",
+                step_type=WorkflowStepType.RECORD_OUTPUT,
+                depends_on=("gate",),
+            ),
+            WorkflowStepInput(
+                step_key="rollback",
+                step_type=WorkflowStepType.COMPENSATION,
+                config={"effectStepKey": "effect"},
+            ),
+        ),
+    )
+    canvas_id, objects, version_id = await _activate(
+        database,
+        kind=WorkflowKind.APPROVED_REVERSIBLE_NOTE,
+        version=version,
+        key="compensation-workflow",
+    )
+    async with database.sessions() as session:
+        service = _service(session)
+        first_pause = await service.start(
+            StartWorkflow(
+                user_id=SYSTEM_USER_ID,
+                workspace_id=SYSTEM_WORKSPACE_ID,
+                canvas_id=canvas_id,
+                version_id=version_id,
+                query="Create then compensate",
+                selected_object_ids=(objects["note_one"],),
+                seed_object_ids=(objects["note_one"],),
+                idempotency_key="compensation-run",
+            )
+        )
+        effect_step = next(
+            item
+            for item in first_pause.steps
+            if item.status == WorkflowStepStatus.AWAITING_APPROVAL
+        )
+        second_pause = await service.decide_approval(
+            user_id=SYSTEM_USER_ID,
+            workspace_id=SYSTEM_WORKSPACE_ID,
+            canvas_id=canvas_id,
+            execution_id=first_pause.execution.execution_id,
+            step_execution_id=effect_step.step_execution_id,
+            decision=ApprovalDecision.APPROVED,
+            session_id=uuid.uuid4(),
+        )
+        assert second_pause.execution.status == WorkflowExecutionStatus.AWAITING_APPROVAL
+        effect_result = next(item for item in second_pause.steps if item.effect_id is not None)
+        effect_row = await session.get(
+            ControlledWorkflowStepExecution,
+            effect_result.step_execution_id,
+        )
+        assert effect_row is not None and effect_row.output is not None
+        created_id = uuid.UUID(cast(str, effect_row.output["resourceId"]))
+        assert await session.get(CanvasNode, created_id) is not None
+
+        compensation_pause = await service.request_cancellation(
+            user_id=SYSTEM_USER_ID,
+            workspace_id=SYSTEM_WORKSPACE_ID,
+            canvas_id=canvas_id,
+            execution_id=first_pause.execution.execution_id,
+        )
+        assert compensation_pause.execution.status == WorkflowExecutionStatus.AWAITING_APPROVAL, [
+            (item.status, item.safe_failure_class) for item in compensation_pause.steps
+        ]
+        compensation_step = next(
+            item
+            for item in compensation_pause.steps
+            if item.status == WorkflowStepStatus.AWAITING_APPROVAL
+        )
+        compensated = await service.decide_approval(
+            user_id=SYSTEM_USER_ID,
+            workspace_id=SYSTEM_WORKSPACE_ID,
+            canvas_id=canvas_id,
+            execution_id=first_pause.execution.execution_id,
+            step_execution_id=compensation_step.step_execution_id,
+            decision=ApprovalDecision.APPROVED,
+            session_id=uuid.uuid4(),
+        )
+        assert compensated.execution.status == WorkflowExecutionStatus.COMPENSATED
+        assert compensated.execution.outcome == WorkflowOutcome.COMPENSATED
+        assert await session.get(CanvasNode, created_id) is None
+        duplicate = await service.request_cancellation(
+            user_id=SYSTEM_USER_ID,
+            workspace_id=SYSTEM_WORKSPACE_ID,
+            canvas_id=canvas_id,
+            execution_id=first_pause.execution.execution_id,
+        )
+        assert duplicate.execution.status == WorkflowExecutionStatus.COMPENSATED
+
+
+@pytest.mark.anyio
+async def test_cancellation_generation_fences_stale_step_completion(database: Database) -> None:
+    version = WorkflowVersionInput(
+        steps=(
+            WorkflowStepInput(
+                step_key="effect",
+                step_type=WorkflowStepType.CONTROLLED_EFFECT,
+                config={"action": "note.create", "title": "Fence", "text": "No commit"},
+            ),
+            WorkflowStepInput(
+                step_key="output",
+                step_type=WorkflowStepType.RECORD_OUTPUT,
+                depends_on=("effect",),
+            ),
+        )
+    )
+    canvas_id, objects, version_id = await _activate(
+        database,
+        kind=WorkflowKind.APPROVED_REVERSIBLE_NOTE,
+        version=version,
+        key="fence-workflow",
+    )
+    async with database.sessions() as session:
+        service = _service(session)
+        paused = await service.start(
+            StartWorkflow(
+                user_id=SYSTEM_USER_ID,
+                workspace_id=SYSTEM_WORKSPACE_ID,
+                canvas_id=canvas_id,
+                version_id=version_id,
+                query="Fence stale completion",
+                selected_object_ids=(objects["note_one"],),
+                seed_object_ids=(objects["note_one"],),
+                idempotency_key="fence-run",
+            )
+        )
+        row = next(
+            item for item in paused.steps if item.status == WorkflowStepStatus.AWAITING_APPROVAL
+        )
+        owner = "stale-worker"
+        generation = row.lease_generation
+        await session.execute(
+            update(ControlledWorkflowStepExecution)
+            .where(ControlledWorkflowStepExecution.step_execution_id == row.step_execution_id)
+            .values(
+                status=WorkflowStepStatus.RUNNING.value,
+                lease_owner_id=owner,
+                lease_expires_at=datetime.now(UTC) + timedelta(minutes=1),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        canceled = await service.request_cancellation(
+            user_id=SYSTEM_USER_ID,
+            workspace_id=SYSTEM_WORKSPACE_ID,
+            canvas_id=canvas_id,
+            execution_id=paused.execution.execution_id,
+        )
+        assert canceled.execution.status == WorkflowExecutionStatus.CANCELED
+        stale = await session.scalar(
+            update(ControlledWorkflowStepExecution)
+            .where(
+                ControlledWorkflowStepExecution.step_execution_id == row.step_execution_id,
+                ControlledWorkflowStepExecution.status == WorkflowStepStatus.RUNNING.value,
+                ControlledWorkflowStepExecution.lease_owner_id == owner,
+                ControlledWorkflowStepExecution.lease_generation == generation,
+            )
+            .values(
+                status=WorkflowStepStatus.SUCCEEDED.value,
+                output={"unsafe": "stale"},
+            )
+            .execution_options(synchronize_session=False)
+            .returning(ControlledWorkflowStepExecution.step_execution_id)
+        )
+        assert stale is None
+        persisted = await session.get(ControlledWorkflowStepExecution, row.step_execution_id)
+        assert persisted is not None
+        await session.refresh(persisted)
+        assert persisted.status == WorkflowStepStatus.CANCELED
+        assert persisted.output is None
+
+
+@pytest.mark.anyio
+async def test_competing_identical_workflow_starts_converge_on_one_execution(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "workflow-contention.db"
+    database = Database(f"sqlite+aiosqlite:///{path.as_posix()}")
+    async with database.engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    async with database.sessions() as session:
+        session.add(
+            User(
+                id=SYSTEM_USER_ID,
+                email="workflow-contention@mobius.invalid",
+                email_normalized="workflow-contention@mobius.invalid",
+                password_hash="test-only",
+                display_name="Workflow contention",
+                email_verified=True,
+            )
+        )
+        session.add(
+            Workspace(
+                id=SYSTEM_WORKSPACE_ID,
+                owner_id=SYSTEM_USER_ID,
+                name="Workflow contention",
+            )
+        )
+        await session.commit()
+    canvas_id, objects, version_id = await _activate(
+        database,
+        kind=WorkflowKind.GROUNDED_ANSWER,
+        version=_version(include_bundle=False),
+        key="contention-workflow",
+    )
+    command = StartWorkflow(
+        user_id=SYSTEM_USER_ID,
+        workspace_id=SYSTEM_WORKSPACE_ID,
+        canvas_id=canvas_id,
+        version_id=version_id,
+        query="First",
+        selected_object_ids=(objects["note_one"], objects["note_two"]),
+        seed_object_ids=(objects["note_one"],),
+        idempotency_key="contention-run",
+    )
+
+    async def start() -> uuid.UUID | None:
+        async with database.sessions() as session:
+            try:
+                result = await _service(session).start(command)
+                await session.commit()
+                return result.execution.execution_id
+            except WorkflowStorageError:
+                await session.rollback()
+                return None
+
+    try:
+        results = await asyncio.gather(start(), start())
+        async with database.sessions() as session:
+            replay = await _service(session).start(command)
+            await session.commit()
+            authoritative = replay.execution.execution_id
+        assert {item for item in results if item is not None} <= {authoritative}
+        async with database.sessions() as session:
+            assert (
+                await session.scalar(select(func.count()).select_from(ControlledWorkflowExecution))
+                == 1
+            )
+    finally:
+        await database.dispose()
