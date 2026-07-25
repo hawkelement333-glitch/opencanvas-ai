@@ -6,6 +6,7 @@ from opencanvas_api.api.routes import (
     canonical,
     canvases,
     documents,
+    domain_events,
     health,
     knowledge_graph,
     traces,
@@ -19,4 +20,5 @@ api_router.include_router(documents.router, tags=["documents"])
 api_router.include_router(traces.router, tags=["traces"])
 api_router.include_router(canonical.router, tags=["canonical"])
 api_router.include_router(knowledge_graph.router, tags=["knowledge-graph"])
+api_router.include_router(domain_events.router, tags=["living-state-events"])
 api_router.include_router(agents.router, tags=["controlled-agent-inspection"])
