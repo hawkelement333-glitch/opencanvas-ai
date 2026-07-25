@@ -259,8 +259,9 @@ inference/conflict classification, and no complete end-user Trace explorer. See 
 [known-limitations register](docs/KNOWN_LIMITATIONS.md).
 
 Milestone 4 controlled agents and Milestone 5 architecture and checkpoints
-5.1–5.7 are complete locally. Milestone 6 is next. The required roadmap order
-is:
+5.1–5.7 are complete locally. Milestone 6 architecture is complete locally,
+Milestone 6 implementation has not started, and 6.1 — Workspace Membership and
+Invitations is next. The required roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
 2. Milestone 7 — Production Hardening, including deterministic indexing
@@ -303,7 +304,11 @@ See
 [docs/MILESTONE_5_IMPLEMENTATION_PLAN.md](docs/MILESTONE_5_IMPLEMENTATION_PLAN.md),
 [docs/MILESTONE_5_PROGRESS.md](docs/MILESTONE_5_PROGRESS.md),
 [docs/MILESTONE_5_7_FINAL_AUDIT_HANDOFF.md](docs/MILESTONE_5_7_FINAL_AUDIT_HANDOFF.md),
-and [docs/MILESTONE_5_COMPLETION.md](docs/MILESTONE_5_COMPLETION.md).
+[docs/MILESTONE_5_COMPLETION.md](docs/MILESTONE_5_COMPLETION.md),
+[docs/MILESTONE_6_ARCHITECTURE.md](docs/MILESTONE_6_ARCHITECTURE.md),
+[docs/MILESTONE_6_IMPLEMENTATION_PLAN.md](docs/MILESTONE_6_IMPLEMENTATION_PLAN.md),
+[docs/MILESTONE_6_PROGRESS.md](docs/MILESTONE_6_PROGRESS.md), and
+[docs/MILESTONE_6_ARCHITECTURE_HANDOFF.md](docs/MILESTONE_6_ARCHITECTURE_HANDOFF.md).
 
 ## Competition and release status
 
