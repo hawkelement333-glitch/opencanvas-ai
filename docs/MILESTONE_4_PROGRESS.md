@@ -2,6 +2,80 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.4 cancellation and stale-result suppression complete — local only
+
+- Authorized baseline: `0a610a54565664674c8d12e76385b8b74df08349`.
+- Branch: `milestone-4.4-bounded-execution-reliability-local`; upstream: none.
+- Local implementation checkpoint:
+  - `8d03d8e` — server-authoritative cancellation, deadline termination, lease-generation fencing,
+    stale-result suppression, safe derived health, grounded-draft lease integration, API/CSRF
+    boundaries, concurrency, and failure-injection tests.
+- User cancellation remains the existing authenticated, CSRF-protected endpoint with a minimal
+  idempotency key. It accepts no outcome, deadline, attempt, retry, lease, capability, grant,
+  canvas, effect, or result authority fields. Owned claimable, retry-waiting, and actively leased
+  executions may be cancelled; terminal success/failure/denial remains closed.
+- Active cancellation atomically clears lease/retry state, advances the fencing generation,
+  appends the existing `cancelled` lifecycle state, synchronizes terminal metadata, and records one
+  audit plus one Trace event. Exact replay returns the existing result and creates no duplicate
+  transition or evidence. The service is cooperative and does not claim OS-process termination.
+- Deadline evaluation is internal, server-owned, and idempotent. At or after the immutable
+  deadline it fences ownership, clears retry eligibility, terminalizes as `cancelled` with safe
+  classification `execution_deadline_exceeded`, and records one audit plus one Trace event. It
+  cannot be invoked to extend or replace the deadline.
+- Grounded draft execution now uses the checkpoint-1 atomic lease claim rather than directly
+  appending `running`. Result acceptance requires the exact server-held owner and generation,
+  unexpired lease, open deadline, current running state, and fresh authority in the same
+  transaction as terminal acceptance. Cancellation, deadline, recovery, authority expiry or
+  revocation, a newer generation, and prior completion all suppress stale publication.
+- Reversible note retries continue through the Milestone 4.3 atomic effect service. Focused tests
+  prove cancellation or deadline termination before delivery produces no note or effect.
+- Derived health safely distinguishes `waiting_claimable`, `actively_leased`, `waiting_retry`,
+  `cancelled`, `deadline_exceeded`, `completed`, `failed`, `exhausted`, and `inconsistent`.
+  Inspection exposes bounded attempt/deadline/retry booleans and counts, but not lease owner,
+  private worker identity, grant material, policy internals, SQL, or stack details.
+- Validation:
+  - directly affected cancellation, reliability, grounded-draft, API, and reversible-effect
+    modules: `134 passed`;
+  - broader affected authority, lifecycle, persistence, policy, idempotency, contracts,
+    reversible-write, Trace, and migration group: `303 passed`;
+  - focused Ruff format/lint: passed;
+  - full backend strict mypy: passed for `60 source files`;
+  - Python compilation/imports and SQLAlchemy mapper validation: passed (`51` mapped tables);
+  - Alembic sole head: `20260724_0015`;
+  - repository hygiene and built-in secret scan: passed for `251 source files`;
+  - committed diff, whitespace, and prohibited-scope scans: passed.
+- Deterministic SQLite concurrency:
+  - competing cancellations create one terminal cancellation and one duplicate or safe conflict,
+    never duplicate audit/Trace evidence;
+  - the cancellation race test passed three consecutive runs;
+  - checkpoint-2 competing retry delivery still provides the terminal-completion race boundary.
+    PostgreSQL runtime was not run or claimed.
+- Failure injection proves full rollback after lease fencing, after the cancellation transition,
+  during cancellation Trace persistence, and during deadline Trace persistence. No partial
+  terminal metadata, cleared lease, advanced generation, audit event, or Trace event remains.
+- Defects corrected:
+  - cancellation now advances the active lease generation rather than relying only on terminal
+    state and cleared ownership;
+  - cancellation and result lifecycle events now persist Trace evidence with audit evidence;
+  - grounded result acceptance now validates lease generation/expiry and deadline;
+  - SQLite cancellation contention no longer leaks a raw database-lock exception and instead
+    fails closed with a safe conflict;
+  - formatting the touched grounded-draft module exposed broad `object`/ignore annotations; the
+    existing repository `AgentInspection` type now provides precise strict typing.
+- No migration was needed or added. Migration `20260724_0015` remains the sole head. The unrelated
+  legacy validator pinned to `20260724_0012` remains documented and unchanged.
+- Explicitly deferred: frontend cancellation controls and the final Milestone 4.4 reliability
+  audit. No worker, queue, scheduler, polling loop, autonomous behavior, delegation, new
+  capability, broader write authority, provider, external call, Milestone 5, or later work was
+  added.
+- Protected state remains: `main` at `f04ace592e253c48172d129331ed8cd9bc4d4f4f`;
+  `competition-demo-v1` at `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- No push, pull, fetch, sync, upstream, PR, remote branch/tag, publication, upload, deployment, or
+  other remote operation occurred.
+- Exact next action: perform only the separately authorized final Milestone 4.4 reliability audit,
+  including the complete affected gate and documentation reconciliation. Do not begin frontend
+  feature work, the combined Milestone 4 audit, or Milestone 5.
+
 ## Milestone 4.4 recovery and bounded retry execution complete — local only
 
 - Authorized baseline: `5d5a7b83c901fb8955e2602682ebc99de60b18cf`.
