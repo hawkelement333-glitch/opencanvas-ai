@@ -6,8 +6,8 @@ Branch: `milestone-5-living-knowledge-workflows-architecture-local`
 
 Baseline: `dadf114cfb33c557d6d1be7d8f98a4bb3ba36818`
 
-Milestone 5 architecture and checkpoint 5.1 are complete locally. The next
-checkpoint is 5.2, Living State and Event System.
+Milestone 5 architecture and checkpoints 5.1–5.2 are complete locally. The
+next checkpoint is 5.3, Graph-Aware Retrieval.
 
 `MILESTONE 5 ARCHITECTURE COMPLETE LOCALLY — READY FOR KNOWLEDGE GRAPH FOUNDATION`
 
@@ -15,14 +15,14 @@ checkpoint is 5.2, Living State and Event System.
 | --------------------------------- | ---------------- | ------------------------ |
 | Architecture                      | Complete locally | Completed Milestone 4    |
 | 5.1 Knowledge Graph Foundation    | Complete locally | Architecture             |
-| 5.2 Living State and Event System | Not started      | 5.1                      |
+| 5.2 Living State and Event System | Complete locally | 5.1                      |
 | 5.3 Graph-Aware Retrieval         | Not started      | 5.1–5.2                  |
 | 5.4 Controlled AI Workflows       | Not started      | 5.1–5.3 and M4           |
 | 5.5 Dynamic Universe Interface    | Not started      | 5.1; 5.2/5.4 to complete |
 | 5.6 Bounded Agent Studio          | Not started      | 5.4                      |
 | 5.7 Final Combined Audit          | Not started      | 5.1–5.6                  |
 
-Only checkpoint 5.1 is complete. Milestone 5 is not complete.
+Only checkpoints 5.1 and 5.2 are complete. Milestone 5 is not complete.
 
 ## Permanent traceability contract
 
@@ -41,7 +41,7 @@ Approved data
 > evidence that produced it. Trace means auditable provenance and execution
 > evidence, not private model chain of thought.
 
-This contract amendment does not reopen 5.1 or start 5.2. The completed 5.1
+This contract amendment did not reopen 5.1. The completed 5.1
 implementation already provides stable canonical scoped identities,
 reconstructable relationship direction/endpoints/provenance/history,
 authenticated user attribution, same-scope controlled-execution provenance,
@@ -224,7 +224,27 @@ plan → evaluation → human decision → outcome.
 
 Academy, quarantine, rehabilitation, and tribunal systems are not Milestone 5.7
 implementation requirements. No such production system exists in this
-checkpoint, and Milestone 5.2 remains not started.
+checkpoint.
+
+## 5.2 completion evidence
+
+- Closed versioned registry: 12 existing-feature event contracts and 8
+  non-emittable evidence-bundle/citation contracts.
+- Immutable event, provenance, delivery-attempt, and activity evidence.
+- Transactional event/outbox integration for graph mutations, approved
+  effects, and rollback results.
+- Server-derived scope, identity, digest, sequence, timing, attempts, retry,
+  ownership, and safe failure classification.
+- Bounded lease/generation fencing, retry, delivery, and terminal handling.
+- Idempotent deterministic internal activity projection; no autonomous
+  event-triggered agents.
+- Authenticated, scope-checked, bounded, allowlist event/activity/status APIs.
+- Migration and sole head: `20260725_0017`.
+- SQLite migration cycle and append-only triggers validated; deterministic
+  local contention validated with SQLite’s coarse-lock limitation recorded.
+- PostgreSQL DDL compiles offline; runtime locking is not claimed.
+- Handoff:
+  [`MILESTONE_5_2_LIVING_STATE_EVENT_HANDOFF.md`](MILESTONE_5_2_LIVING_STATE_EVENT_HANDOFF.md).
 
 ## 5.1 completion evidence
 
@@ -292,4 +312,4 @@ Deferred:
   - Agent Justice, Quarantine, and Rehabilitation System
 
 Next authorized start:
-`MILESTONE 5.2 STARTED LOCALLY — LIVING STATE AND EVENT SYSTEM`
+`MILESTONE 5.3 STARTED LOCALLY — GRAPH-AWARE RETRIEVAL`

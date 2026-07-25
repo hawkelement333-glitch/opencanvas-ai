@@ -1,6 +1,6 @@
 # Milestone 5 Architecture — Living Knowledge Graph and AI Workflows
 
-Status: architecture complete locally; implementation not started
+Status: architecture and checkpoints 5.1–5.2 complete locally; 5.3–5.7 pending
 
 Baseline: `dadf114cfb33c557d6d1be7d8f98a4bb3ba36818`
 
@@ -23,6 +23,30 @@ contract. This pass contains architecture and planning only.
 Repository inspection established:
 
 - `CanvasNode` and `Edge` are canvas-local presentation models.
+
+## Implemented 5.2 event foundation
+
+Milestone 5.2 implements a closed `mobius-domain-events-v1` registry,
+immutable scoped event/provenance evidence, an event-per-workspace sequence,
+and one transactional outbox row per event. Graph relationship creation and
+lifecycle transitions, approved controlled effects, and approved rollbacks
+write their event evidence inside the authoritative mutation transaction.
+Exact idempotent replay returns the original event; conflicting reuse fails
+closed.
+
+The local deterministic consumer creates only an append-only `activity-v1`
+projection. It cannot invoke models, start agents or workflows, grant
+authority, or mutate unrelated authoritative state. Dispatch claims use
+server-owned bounded attempts, expiring leases, monotonically increasing
+generations, stale-owner fencing, closed failure classifications, and terminal
+states that cannot reopen. Authenticated bounded read APIs expose allowlisted
+activity, event, and delivery status only.
+
+Evidence-bundle and citation lifecycle names are reserved contracts. They have
+no producer and cannot be emitted during 5.2. All Adaptive Agent, Training,
+Academy, English, Evidence Bundle, APA, Quarantine, Rehabilitation, and
+Tribunal requirements remain unchanged future acceptance criteria.
+
 - `CanonicalObject` and `CanonicalRelationship` are the versioned,
   workspace-scoped semantic foundation. Relationships already enforce closed
   types, same-workspace endpoints, uniqueness, and no self-edge.

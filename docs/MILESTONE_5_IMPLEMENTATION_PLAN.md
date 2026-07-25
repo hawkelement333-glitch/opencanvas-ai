@@ -1,7 +1,7 @@
 # Milestone 5 Implementation Plan
 
-Status: architecture and checkpoint 5.1 complete locally; checkpoints 5.2–5.7
-pending.
+Status: architecture and checkpoints 5.1–5.2 complete locally; checkpoints
+5.3–5.7 pending.
 
 This plan implements
 [`MILESTONE_5_ARCHITECTURE.md`](MILESTONE_5_ARCHITECTURE.md) sequentially.
@@ -64,6 +64,8 @@ available. See
 
 ## 5.2 — Living State and Event System
 
+Status: complete locally.
+
 Start: `MILESTONE 5.2 STARTED LOCALLY — LIVING STATE AND EVENT SYSTEM`
 
 Complete: `MILESTONE 5.2 COMPLETE LOCALLY — READY FOR GRAPH-AWARE RETRIEVAL`
@@ -79,12 +81,21 @@ generation started/completed/failed, bundle accessed, export denied, and
 citation rendering completed/failed. This documentation amendment does not
 implement them.
 
-Migration `2026xxxx_0017`: events, outbox evidence, sequences, checkpoints, and
-initial projections. Seed only reconstructable facts.
+Migration `20260725_0017`: events, provenance, outbox evidence, delivery
+attempts, workspace sequences, and the initial activity projection. It is
+additive and seeds no inferred historical facts.
 
 Gate: mutation/event/Trace atomicity; rollback has no event; duplicate delivery
 applies once; deterministic replay; safe gap handling; stale projector fencing;
 events cannot grant/start execution; PostgreSQL outbox/sequence concurrency.
+
+Implemented with closed registry/schema validation, scoped server-derived
+identity, transactional graph/effect/rollback event producers, append-only
+evidence, bounded local delivery, stale-generation fencing, idempotent activity
+projection, safe read APIs, failure injection, deterministic SQLite contention
+tests, migration cycling, and PostgreSQL offline DDL compilation. PostgreSQL
+runtime locking remains unclaimed and pending a configured runtime. See
+[`MILESTONE_5_2_LIVING_STATE_EVENT_HANDOFF.md`](MILESTONE_5_2_LIVING_STATE_EVENT_HANDOFF.md).
 
 ## 5.3 — Graph-Aware Retrieval
 
