@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import importlib.util
 import sqlite3
 import uuid
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from alembic import command
@@ -10,6 +12,30 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from opencanvas_api.core.config import get_settings
+
+
+def _load_migration_validator() -> ModuleType:
+    repository_root = Path(__file__).resolve().parents[3]
+    validator_path = repository_root / "scripts" / "validate_migrations.py"
+    spec = importlib.util.spec_from_file_location("validate_migrations", validator_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Unable to load the migration validator.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_standalone_migration_validator_tracks_current_head() -> None:
+    api_directory = Path(__file__).resolve().parents[1]
+    config = Config(api_directory / "alembic.ini")
+    config.set_main_option("script_location", str(api_directory / "alembic"))
+    scripts = ScriptDirectory.from_config(config)
+    heads = scripts.get_heads()
+    assert len(heads) == 1
+
+    validator = _load_migration_validator()
+    assert heads[0] == validator.EXPECTED_HEAD
+    assert scripts.get_revision(heads[0]).down_revision == validator.PREVIOUS_REVISION
 
 
 def test_initial_migration_upgrades_sqlite(tmp_path: Path) -> None:
@@ -833,12 +859,12 @@ def test_execution_reliability_migration_backfills_and_cycles_sqlite(tmp_path: P
     command.downgrade(config, "20260724_0014")
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-        columns = {
+        column_names = {
             row[1] for row in connection.execute("PRAGMA table_info(controlled_agent_executions)")
         }
     assert revision == ("20260724_0014",)
-    assert "deadline_at" not in columns
-    assert "lease_owner_id" not in columns
+    assert "deadline_at" not in column_names
+    assert "lease_owner_id" not in column_names
 
     command.upgrade(config, "20260724_0015")
     with sqlite3.connect(database_path) as connection:
