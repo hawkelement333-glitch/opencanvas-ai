@@ -20,6 +20,9 @@ from opencanvas_api.db.models import (
     CanonicalRelationshipHistory,
     CanonicalRelationshipProvenance,
     Canvas,
+    DomainEventOutbox,
+    DomainEventProvenance,
+    DomainEventRecord,
     TraceEvent,
     User,
     WorkspaceGraphState,
@@ -36,6 +39,10 @@ from opencanvas_api.services.canonical.lifecycle import (
 from opencanvas_api.services.canonical.service import (
     CanonicalService,
     CreateObjectInput,
+)
+from opencanvas_api.services.domain_events import (
+    DomainEventService,
+    DomainEventStorageError,
 )
 from opencanvas_api.services.knowledge_graph import (
     CreateGraphRelationship,
@@ -463,6 +470,83 @@ async def test_failure_injection_rolls_back_graph_provenance_history_and_success
         assert [trace.status for trace in traces] == ["started", "failed"]
         state = await session.get(WorkspaceGraphState, SYSTEM_WORKSPACE_ID)
         assert state is None
+
+
+async def test_graph_mutation_event_provenance_and_outbox_commit_once(
+    database: Database,
+) -> None:
+    canvas_id, objects = await _foundation(database)
+    command = _create(
+        canvas_id,
+        objects,
+        "references",
+        "document_one",
+        "document",
+        "note_one",
+        "note",
+        "event-atomicity",
+    )
+    async with database.sessions() as session:
+        graph = KnowledgeGraphService(session)
+        created = await graph.create_relationship(command)
+        replayed = await graph.create_relationship(command)
+        assert replayed.graph.relationship_id == created.graph.relationship_id
+        await session.commit()
+        event = await session.scalar(select(DomainEventRecord))
+        assert event is not None
+        assert event.subject_id == created.graph.relationship_id
+        assert event.graph_revision == created.current_history.graph_revision
+        assert event.canvas_id == canvas_id
+        assert await session.scalar(select(func.count()).select_from(DomainEventRecord)) == 1
+        assert await session.scalar(select(func.count()).select_from(DomainEventProvenance)) == 1
+        assert await session.scalar(select(func.count()).select_from(DomainEventOutbox)) == 1
+
+
+async def test_event_outbox_failure_rolls_back_complete_graph_transaction(
+    database: Database,
+) -> None:
+    canvas_id, objects = await _foundation(database)
+
+    def fail_after_outbox() -> None:
+        raise DomainEventStorageError("injected outbox failure")
+
+    async with database.sessions() as session:
+        events = DomainEventService(session, after_outbox=fail_after_outbox)
+        graph = KnowledgeGraphService(session, event_service=events)
+        with pytest.raises(CanonicalStorageError, match="event persistence"):
+            await graph.create_relationship(
+                _create(
+                    canvas_id,
+                    objects,
+                    "references",
+                    "document_one",
+                    "document",
+                    "note_one",
+                    "note",
+                    "outbox-atomicity",
+                )
+            )
+        await session.commit()
+
+    async with database.sessions() as session:
+        for model in (
+            CanonicalGraphRelationship,
+            CanonicalRelationshipProvenance,
+            CanonicalRelationshipHistory,
+            DomainEventRecord,
+            DomainEventProvenance,
+            DomainEventOutbox,
+        ):
+            assert await session.scalar(select(func.count()).select_from(model)) == 0
+        traces = (
+            await session.scalars(
+                select(TraceEvent).where(
+                    TraceEvent.operation == "knowledge_graph.relationship.create"
+                )
+            )
+        ).all()
+        assert [trace.status for trace in traces] == ["started", "failed"]
+        assert await session.get(WorkspaceGraphState, SYSTEM_WORKSPACE_ID) is None
 
 
 async def test_trace_completion_failure_rolls_back_graph_and_records_failure(

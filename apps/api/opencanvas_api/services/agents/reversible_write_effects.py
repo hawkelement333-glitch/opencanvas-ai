@@ -44,6 +44,7 @@ from opencanvas_api.services.agents.reversible_writes import (
     ReversibleWriteAction,
     ReversibleWriteProposal,
 )
+from opencanvas_api.services.domain_events import CreateDomainEvent, DomainEventService
 from opencanvas_api.services.trace import CompleteTraceInput, StartTraceInput, TraceService
 
 
@@ -203,9 +204,10 @@ class ReversibleWriteEffectService:
                         created_at=self.now,
                     )
                 )
+            audit_event_id = uuid.uuid4()
             await self.repository.append_audit_event(
                 AuditEvent(
-                    event_id=uuid.uuid4(),
+                    event_id=audit_event_id,
                     trace_id=trace_id,
                     execution_id=execution_id,
                     user_id=authenticated_user_id,
@@ -237,6 +239,28 @@ class ReversibleWriteEffectService:
                         "effectId": str(effect.effect_id),
                         "resultingRevision": node.revision,
                     },
+                )
+            )
+            await DomainEventService(self.session).record(
+                CreateDomainEvent(
+                    event_type="controlled.effect.committed",
+                    user_id=authenticated_user_id,
+                    workspace_id=workspace_id,
+                    canvas_id=canvas.id,
+                    subject_id=effect.effect_id,
+                    related_id=node.id,
+                    actor_user_id=authenticated_user_id,
+                    execution_id=execution_id,
+                    source_identity=idempotency_key,
+                    trace_id=trace_id,
+                    audit_event_id=audit_event_id,
+                    payload={
+                        "action": proposal.action.value,
+                        "noteId": str(node.id),
+                        "resultingRevision": node.revision,
+                    },
+                    origin_type="controlled_execution",
+                    effect_id=effect.effect_id,
                 )
             )
             await self.session.flush()

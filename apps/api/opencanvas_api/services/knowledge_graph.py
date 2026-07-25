@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal
 
+from pydantic import JsonValue
 from sqlalchemy import Select, or_, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +31,11 @@ from opencanvas_api.services.canonical.lifecycle import (
     CanonicalNotFoundError,
     CanonicalStorageError,
     CanonicalValidationError,
+)
+from opencanvas_api.services.domain_events import (
+    CreateDomainEvent,
+    DomainEventError,
+    DomainEventService,
 )
 from opencanvas_api.services.trace import (
     CompleteTraceInput,
@@ -139,9 +145,15 @@ class GraphRelationshipRecord:
 class KnowledgeGraphService:
     """Scoped canonical graph commands and bounded history reads."""
 
-    def __init__(self, session: AsyncSession, trace_service: TraceService | None = None) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        trace_service: TraceService | None = None,
+        event_service: DomainEventService | None = None,
+    ) -> None:
         self._session = session
         self._trace = trace_service or TraceService(session)
+        self._events = event_service or DomainEventService(session)
 
     async def create_relationship(
         self, command: CreateGraphRelationship
@@ -319,8 +331,11 @@ class KnowledgeGraphService:
         return await self._run_traced(
             user_id=command.user_id,
             workspace_id=command.workspace_id,
+            canvas_id=command.canvas_id,
             object_id=relationship_id,
             operation="knowledge_graph.relationship.create",
+            event_type="graph.relationship.created",
+            source_identity=command.idempotency_key,
             parent_trace_id=command.parent_trace_id,
             mutation=mutation,
         )
@@ -427,8 +442,15 @@ class KnowledgeGraphService:
         return await self._run_traced(
             user_id=command.user_id,
             workspace_id=command.workspace_id,
+            canvas_id=command.canvas_id,
             object_id=command.relationship_id,
             operation="knowledge_graph.relationship.deactivate",
+            event_type=(
+                "graph.relationship.superseded"
+                if command.target_state == "superseded"
+                else "graph.relationship.deactivated"
+            ),
+            source_identity=command.idempotency_key,
             parent_trace_id=command.parent_trace_id,
             mutation=mutation,
         )
@@ -793,8 +815,11 @@ class KnowledgeGraphService:
         *,
         user_id: uuid.UUID,
         workspace_id: uuid.UUID,
+        canvas_id: uuid.UUID,
         object_id: uuid.UUID,
         operation: str,
+        event_type: str,
+        source_identity: str,
         parent_trace_id: uuid.UUID | None,
         mutation: Callable[[TraceContext], Awaitable[GraphRelationshipRecord]],
     ) -> GraphRelationshipRecord:
@@ -833,6 +858,31 @@ class KnowledgeGraphService:
                         metadata={"graphRevision": result.current_history.graph_revision},
                     )
                 )
+                event_payload: dict[str, JsonValue] = {
+                    "relationshipType": result.relationship.relationship_type,
+                    "state": result.current_history.state,
+                    "graphRevision": result.current_history.graph_revision,
+                }
+                if result.current_history.reason_code is not None:
+                    event_payload["reasonCode"] = result.current_history.reason_code
+                await self._events.record(
+                    CreateDomainEvent(
+                        event_type=event_type,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        canvas_id=canvas_id,
+                        subject_id=result.graph.relationship_id,
+                        related_id=result.current_history.history_id,
+                        actor_user_id=user_id,
+                        source_identity=source_identity,
+                        trace_id=context.trace_id,
+                        payload=event_payload,
+                        origin_type="authenticated_user",
+                        graph_revision=result.current_history.graph_revision,
+                        graph_relationship_id=result.graph.relationship_id,
+                        graph_history_id=result.current_history.history_id,
+                    )
+                )
         except CanonicalDomainError as exc:
             await self._record_failure(context, user_id, workspace_id, object_id, operation, exc)
             raise
@@ -842,6 +892,10 @@ class KnowledgeGraphService:
             raise error from exc
         except TracePersistenceError as exc:
             error = CanonicalStorageError("Knowledge graph trace completion failed.")
+            await self._record_failure(context, user_id, workspace_id, object_id, operation, error)
+            raise error from exc
+        except DomainEventError as exc:
+            error = CanonicalStorageError("Knowledge graph event persistence failed.")
             await self._record_failure(context, user_id, workspace_id, object_id, operation, error)
             raise error from exc
         return result

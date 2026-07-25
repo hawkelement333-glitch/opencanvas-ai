@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from pydantic import JsonValue
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +38,7 @@ from opencanvas_api.services.agents.reversible_writes import (
     authoritative_absence_digest,
     rollback_approval_digest,
 )
+from opencanvas_api.services.domain_events import CreateDomainEvent, DomainEventService
 from opencanvas_api.services.trace import CompleteTraceInput, StartTraceInput, TraceService
 
 FailureHook = Callable[[], Awaitable[None]]
@@ -237,9 +239,10 @@ class ReversibleWriteRollbackService:
                 ) from exc
             if self.after_result is not None:
                 await self.after_result()
+            audit_event_id = uuid.uuid4()
             await self.repository.append_audit_event(
                 AuditEvent(
-                    event_id=uuid.uuid4(),
+                    event_id=audit_event_id,
                     trace_id=trace_id,
                     execution_id=effect.execution_id,
                     user_id=authenticated_user_id,
@@ -277,6 +280,31 @@ class ReversibleWriteRollbackService:
                         "rollbackResultId": str(result.rollback_result_id),
                         "resultingRevision": resulting_revision,
                     },
+                )
+            )
+            event_payload: dict[str, JsonValue] = {
+                "action": approval.rollback_action,
+                "noteId": str(approval.note_id),
+            }
+            if resulting_revision is not None:
+                event_payload["resultingRevision"] = resulting_revision
+            await DomainEventService(self.session).record(
+                CreateDomainEvent(
+                    event_type="controlled.rollback.committed",
+                    user_id=authenticated_user_id,
+                    workspace_id=workspace_id,
+                    canvas_id=canvas_id,
+                    subject_id=result.rollback_result_id,
+                    related_id=effect.effect_id,
+                    actor_user_id=authenticated_user_id,
+                    execution_id=effect.execution_id,
+                    source_identity=idempotency_key,
+                    trace_id=trace_id,
+                    audit_event_id=audit_event_id,
+                    payload=event_payload,
+                    origin_type="controlled_execution",
+                    effect_id=effect.effect_id,
+                    rollback_result_id=result.rollback_result_id,
                 )
             )
             await self.session.flush()
