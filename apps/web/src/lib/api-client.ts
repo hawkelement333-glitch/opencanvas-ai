@@ -50,6 +50,19 @@ import {
   type ReversibleWriteRollbackResult,
   type ReversibleWriteRollbackReview,
 } from "./contracts";
+import {
+  activitySchema,
+  apaRenderSchema,
+  evidenceBundleSchema,
+  graphRelationshipSchema,
+  graphRetrievalSchema,
+  retrievalTraceSummarySchema,
+  universeViewportSchema,
+  workflowExecutionSchema,
+  type EvidenceBundle,
+  type UniverseViewport,
+  type WorkflowExecution,
+} from "./universe-contracts";
 
 const DEFAULT_API_URL = "http://localhost:8000/api/v1";
 const API_TIMEOUT_MS = 20_000;
@@ -187,6 +200,50 @@ async function requestWithoutBody(path: string, init: RequestInit): Promise<void
     throw new APIError("Could not reach the SolarPlexus Mobius server.", {
       status: 0,
       code: "network_error",
+    });
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function requestZip(path: string): Promise<Blob> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort("timeout"), LONG_OPERATION_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${getApiBaseUrl()}${path}`, {
+      method: "POST",
+      signal: controller.signal,
+      credentials: "include",
+      headers: { Accept: "application/zip", ...csrfHeaders("POST") },
+    });
+    if (!response.ok) throw await parseError(response);
+    const contentType = response.headers.get("content-type")?.split(";").at(0)?.trim();
+    if (!["application/zip", "application/octet-stream"].includes(contentType ?? "")) {
+      throw new APIError("The evidence bundle response was not a safe ZIP file.", {
+        status: 502,
+        code: "unsafe_bundle_response",
+      });
+    }
+    const declaredSize = Number(response.headers.get("content-length") ?? "0");
+    if (Number.isFinite(declaredSize) && declaredSize > 100_000_000) {
+      throw new APIError("The evidence bundle exceeds the download limit.", {
+        status: 413,
+        code: "bundle_too_large",
+      });
+    }
+    const blob = await response.blob();
+    if (blob.size > 100_000_000) {
+      throw new APIError("The evidence bundle exceeds the download limit.", {
+        status: 413,
+        code: "bundle_too_large",
+      });
+    }
+    return blob;
+  } catch (error) {
+    if (error instanceof APIError) throw error;
+    throw new APIError("Could not download the evidence bundle.", {
+      status: controller.signal.aborted ? 408 : 0,
+      code: controller.signal.aborted ? "request_aborted" : "network_error",
     });
   } finally {
     window.clearTimeout(timeout);
@@ -451,6 +508,174 @@ export const workspaceApi = {
       method: "POST",
       body: JSON.stringify({ name }),
     });
+  },
+};
+
+export const universeApi = {
+  getViewport(
+    canvasId: string,
+    options: {
+      minX?: number;
+      minY?: number;
+      maxX?: number;
+      maxY?: number;
+      limit?: number;
+      cursor?: string;
+      expectedCanvasRevision?: number;
+      selectionIds?: readonly string[];
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<UniverseViewport> {
+    const query = new URLSearchParams({
+      minX: String(options.minX ?? -50_000),
+      minY: String(options.minY ?? -50_000),
+      maxX: String(options.maxX ?? 50_000),
+      maxY: String(options.maxY ?? 50_000),
+      limit: String(options.limit ?? 100),
+    });
+    if (options.cursor) query.set("cursor", options.cursor);
+    if (options.expectedCanvasRevision !== undefined) {
+      query.set("expectedCanvasRevision", String(options.expectedCanvasRevision));
+    }
+    options.selectionIds?.forEach((id) => query.append("selectionId", id));
+    return request(
+      `/canvases/${encodeURIComponent(canvasId)}/universe-viewport?${query.toString()}`,
+      universeViewportSchema,
+      { signal: options.signal },
+    );
+  },
+
+  getRelationships(
+    workspaceId: string,
+    canvasId: string,
+    entityId: string,
+    options: {
+      includeInactive?: boolean;
+      limit?: number;
+      offset?: number;
+      signal?: AbortSignal;
+    } = {},
+  ) {
+    const query = new URLSearchParams({
+      includeInactive: String(options.includeInactive ?? true),
+      limit: String(options.limit ?? 50),
+      offset: String(options.offset ?? 0),
+    });
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/knowledge-graph/entities/${encodeURIComponent(entityId)}/relationships?${query.toString()}`,
+      z.array(graphRelationshipSchema).max(100),
+      { signal: options.signal },
+    );
+  },
+
+  getActivity(
+    workspaceId: string,
+    canvasId: string,
+    options: { limit?: number; offset?: number; signal?: AbortSignal } = {},
+  ) {
+    const query = new URLSearchParams({
+      limit: String(options.limit ?? 30),
+      offset: String(options.offset ?? 0),
+    });
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/activity?${query.toString()}`,
+      z.array(activitySchema).max(100),
+      { signal: options.signal },
+    );
+  },
+
+  getRetrieval(workspaceId: string, canvasId: string, retrievalId: string, signal?: AbortSignal) {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/graph-retrievals/${encodeURIComponent(retrievalId)}`,
+      graphRetrievalSchema,
+      { signal },
+    );
+  },
+
+  getRetrievalTrace(
+    workspaceId: string,
+    canvasId: string,
+    retrievalId: string,
+    signal?: AbortSignal,
+  ) {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/graph-retrievals/${encodeURIComponent(retrievalId)}/trace`,
+      retrievalTraceSummarySchema,
+      { signal },
+    );
+  },
+
+  renderApa(workspaceId: string, canvasId: string, retrievalId: string) {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/graph-retrievals/${encodeURIComponent(retrievalId)}/citations/render`,
+      apaRenderSchema,
+      { method: "POST" },
+    );
+  },
+
+  getWorkflow(
+    workspaceId: string,
+    canvasId: string,
+    executionId: string,
+    signal?: AbortSignal,
+  ): Promise<WorkflowExecution> {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/workflows/executions/${encodeURIComponent(executionId)}`,
+      workflowExecutionSchema,
+      { signal },
+    );
+  },
+
+  decideApproval(
+    workspaceId: string,
+    canvasId: string,
+    executionId: string,
+    stepExecutionId: string,
+    decision: "approved" | "denied",
+  ): Promise<WorkflowExecution> {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/workflows/executions/${encodeURIComponent(executionId)}/steps/${encodeURIComponent(stepExecutionId)}/approval`,
+      workflowExecutionSchema,
+      { method: "POST", body: JSON.stringify({ decision }) },
+    );
+  },
+
+  cancelWorkflow(
+    workspaceId: string,
+    canvasId: string,
+    executionId: string,
+  ): Promise<WorkflowExecution> {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/workflows/executions/${encodeURIComponent(executionId)}/cancel`,
+      workflowExecutionSchema,
+      { method: "POST" },
+    );
+  },
+
+  generateBundle(
+    workspaceId: string,
+    canvasId: string,
+    retrievalId: string,
+  ): Promise<EvidenceBundle> {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/graph-retrievals/${encodeURIComponent(retrievalId)}/evidence-bundle`,
+      evidenceBundleSchema,
+      { method: "POST", body: JSON.stringify({ includeAuthorizedSources: false }) },
+    );
+  },
+
+  getBundle(workspaceId: string, canvasId: string, bundleId: string, signal?: AbortSignal) {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/evidence-bundles/${encodeURIComponent(bundleId)}`,
+      evidenceBundleSchema,
+      { signal },
+    );
+  },
+
+  downloadBundle(workspaceId: string, canvasId: string, bundleId: string) {
+    return requestZip(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/evidence-bundles/${encodeURIComponent(bundleId)}/download`,
+    );
   },
 };
 

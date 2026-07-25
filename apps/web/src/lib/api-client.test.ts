@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { agentApi, APIError, canvasApi } from "./api-client";
+import { agentApi, APIError, canvasApi, universeApi } from "./api-client";
 
 const validCanvas = {
   id: "canvas-1",
@@ -227,5 +227,103 @@ describe("rollback API client", () => {
     expect(String(call?.[1]?.body)).not.toMatch(
       /capability|digest|revision|evidence|grant|action|expiry/i,
     );
+  });
+});
+
+describe("Dynamic Universe API client", () => {
+  const workspaceId = "10000000-0000-4000-8000-000000000001";
+  const canvasId = "20000000-0000-4000-8000-000000000001";
+  const executionId = "30000000-0000-4000-8000-000000000001";
+  const stepId = "40000000-0000-4000-8000-000000000001";
+  const bundleId = "50000000-0000-4000-8000-000000000001";
+
+  it("requests bounded viewport pages with revision fencing and selection hydration", async () => {
+    const response = {
+      canvas: { ...validCanvas, id: canvasId, workspaceId },
+      canvasRevision: 3,
+      graphRevision: 8,
+      nodes: [],
+      edges: [],
+      boundaryNodes: [],
+      selectedNodes: [],
+      nextCursor: null,
+      bounded: false,
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await universeApi.getViewport(canvasId, {
+      minX: -100,
+      minY: -200,
+      maxX: 900,
+      maxY: 800,
+      limit: 50,
+      cursor: bundleId,
+      expectedCanvasRevision: 3,
+      selectionIds: [stepId],
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(url.pathname).toContain(`/canvases/${canvasId}/universe-viewport`);
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+      minX: "-100",
+      minY: "-200",
+      maxX: "900",
+      maxY: "800",
+      limit: "50",
+      cursor: bundleId,
+      expectedCanvasRevision: "3",
+      selectionId: stepId,
+    });
+  });
+
+  it("sends only an approval decision with CSRF and never client authority fields", async () => {
+    document.cookie = "mobius_session_csrf=universe-csrf";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ status: "changed" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(
+      universeApi.decideApproval(workspaceId, canvasId, executionId, stepId, "approved"),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(init?.method).toBe("POST");
+    expect(init?.headers).toMatchObject({ "X-CSRF-Token": "universe-csrf" });
+    expect(JSON.parse(String(init?.body))).toEqual({ decision: "approved" });
+    expect(String(init?.body)).not.toMatch(/grant|policy|capability|risk|resource|lease/i);
+  });
+
+  it("accepts only bounded ZIP responses for evidence downloads", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([80, 75, 3, 4]), {
+          status: 200,
+          headers: { "Content-Type": "application/zip", "Content-Length": "4" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("<html>not a bundle</html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        }),
+      );
+
+    await expect(
+      universeApi.downloadBundle(workspaceId, canvasId, bundleId),
+    ).resolves.toHaveProperty("size", 4);
+    await expect(universeApi.downloadBundle(workspaceId, canvasId, bundleId)).rejects.toMatchObject(
+      { code: "unsafe_bundle_response", status: 502 },
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      "X-CSRF-Token": "universe-csrf",
+    });
   });
 });

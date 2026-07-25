@@ -25,6 +25,7 @@ import {
   FolderOpen,
   ExternalLink,
   LoaderCircle,
+  Orbit,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -1392,6 +1393,14 @@ function CanvasWorkspace({
                   : "Saved"}
           </span>
           <div className="canvas-toolbar__actions">
+            {workspace && (
+              <a
+                className="canvas-toolbar__link"
+                href={`/universe?workspaceId=${encodeURIComponent(workspace.id)}&canvasId=${encodeURIComponent(snapshot.canvas.id)}`}
+              >
+                <Orbit size={15} aria-hidden="true" /> Universe
+              </a>
+            )}
             {selected.length === 2 && (
               <button type="button" onClick={connectSelected} data-testid="connect-selected">
                 <ArrowRight size={15} aria-hidden="true" /> Connect
