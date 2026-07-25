@@ -158,9 +158,9 @@ async def _seed_all_tables(connection: asyncpg.Connection) -> dict[str, uuid.UUI
     await connection.execute(
         """INSERT INTO controlled_agent_executions
            (id, user_id, workspace_id, schema_version, role, context_snapshot_id,
-            context_digest, plan_id, plan_digest, grant_id, created_at)
+            context_digest, plan_id, plan_digest, grant_id, created_at, deadline_at)
            VALUES ($1, $2, $3, 'controlled-agent-v1', 'evidence_verifier',
-                   $4, $5, $6, $7, $8, $9)""",
+                   $4, $5, $6, $7, $8, $9, $9 + INTERVAL '15 minutes')""",
         execution_id,
         user_id,
         workspace_id,

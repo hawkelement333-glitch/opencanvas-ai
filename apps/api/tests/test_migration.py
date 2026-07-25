@@ -5,10 +5,10 @@ import uuid
 from pathlib import Path
 
 import pytest
+from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
-from alembic import command
 from opencanvas_api.core.config import get_settings
 
 
@@ -138,7 +138,7 @@ def test_migration_uses_configured_database_url(
 
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("20260724_0014",)
+    assert revision == ("20260724_0015",)
 
 
 def test_phase_two_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) -> None:
@@ -170,7 +170,7 @@ def test_phase_two_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) ->
     command.upgrade(config, "head")
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("20260724_0014",)
+    assert revision == ("20260724_0015",)
 
 
 def test_trace_foundation_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) -> None:
@@ -195,7 +195,7 @@ def test_trace_foundation_migration_downgrades_and_reupgrades_sqlite(tmp_path: P
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
         indexes = {row[1] for row in connection.execute("PRAGMA index_list(trace_events)")}
-    assert revision == ("20260724_0014",)
+    assert revision == ("20260724_0015",)
     assert {
         "ix_trace_events_trace_time",
         "ix_trace_events_workspace_time",
@@ -236,7 +236,7 @@ def test_canonical_migration_backfills_canvases_and_reverses_sqlite(tmp_path: Pa
             "SELECT id, legacy_canvas_id FROM workspaces WHERE id = ?",
             (removed_canvas_id,),
         ).fetchone()
-    assert revision == ("20260724_0014",)
+    assert revision == ("20260724_0015",)
     assert workspaces == [
         (removed_canvas_id, "Removed canvas", 1, "active", "{}", removed_canvas_id),
         (retained_canvas_id, "Retained canvas", 1, "active", "{}", retained_canvas_id),
@@ -272,7 +272,7 @@ def test_canonical_migration_backfills_canvases_and_reverses_sqlite(tmp_path: Pa
         workspaces = connection.execute(
             "SELECT id, legacy_canvas_id, lifecycle_state FROM workspaces"
         ).fetchall()
-    assert revision == ("20260724_0014",)
+    assert revision == ("20260724_0015",)
     assert workspaces == [(retained_canvas_id, retained_canvas_id, "active")]
 
 
@@ -300,8 +300,8 @@ def test_controlled_agent_migration_is_append_only_and_reversible_sqlite(
         connection.execute(
             """INSERT INTO controlled_agent_executions
                (id, user_id, workspace_id, schema_version, role, context_snapshot_id,
-                context_digest, plan_id, plan_digest, grant_id, created_at)
-               VALUES (?, ?, ?, 'controlled-agent-v1', 'evidence_verifier', ?, ?, ?, ?, ?, ?)""",
+                context_digest, plan_id, plan_digest, grant_id, created_at, deadline_at)
+               VALUES (?, ?, ?, 'controlled-agent-v1', 'evidence_verifier', ?, ?, ?, ?, ?, ?, ?)""",
             (
                 execution_id,
                 user_id,
@@ -311,10 +311,11 @@ def test_controlled_agent_migration_is_append_only_and_reversible_sqlite(
                 plan_id,
                 "b" * 64,
                 grant_id,
-                "2026-07-21T18:00:00+00:00",
+                "2026-07-21 18:00:00.000000",
+                "2026-07-21 18:15:00.000000",
             ),
         )
-        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        with pytest.raises(sqlite3.IntegrityError, match="authority is immutable"):
             connection.execute(
                 "UPDATE controlled_agent_executions SET plan_digest = ? WHERE id = ?",
                 ("c" * 64, execution_id),
@@ -337,7 +338,7 @@ def test_controlled_agent_migration_is_append_only_and_reversible_sqlite(
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
-    assert revision == ("20260724_0014",)
+    assert revision == ("20260724_0015",)
     assert "controlled_agent_approval_consumptions" in tables
 
 
@@ -352,7 +353,7 @@ def test_reversible_effect_migration_upgrades_downgrades_and_reupgrades_sqlite(
 
     command.upgrade(config, "20260724_0011")
     command.upgrade(config, "20260724_0012")
-    assert ScriptDirectory.from_config(config).get_heads() == ["20260724_0014"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20260724_0015"]
 
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
@@ -468,7 +469,7 @@ def test_rollback_evidence_migration_upgrades_downgrades_and_reupgrades_sqlite(
 
     command.upgrade(config, "20260724_0012")
     command.upgrade(config, "20260724_0013")
-    assert ScriptDirectory.from_config(config).get_heads() == ["20260724_0014"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20260724_0015"]
 
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
@@ -605,7 +606,7 @@ def test_rollback_evidence_migration_upgrades_downgrades_and_reupgrades_sqlite(
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
     assert revision == ("20260724_0013",)
-    assert ScriptDirectory.from_config(config).get_heads() == ["20260724_0014"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20260724_0015"]
 
 
 def test_rollback_authority_migration_upgrades_downgrades_and_reupgrades_sqlite(
@@ -767,4 +768,80 @@ def test_rollback_authority_migration_upgrades_downgrades_and_reupgrades_sqlite(
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
     assert revision == ("20260724_0014",)
-    assert ScriptDirectory.from_config(config).get_heads() == ["20260724_0014"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20260724_0015"]
+
+
+def test_execution_reliability_migration_backfills_and_cycles_sqlite(tmp_path: Path) -> None:
+    database_path = tmp_path / "execution-reliability-migration-cycle.db"
+    api_directory = Path(__file__).resolve().parents[1]
+    config = Config(api_directory / "alembic.ini")
+    config.set_main_option("script_location", str(api_directory / "alembic"))
+    config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{database_path.as_posix()}")
+
+    command.upgrade(config, "20260724_0014")
+    execution_id = uuid.uuid4().hex
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """INSERT INTO controlled_agent_executions
+               (id, user_id, workspace_id, schema_version, role, context_snapshot_id,
+                context_digest, plan_id, plan_digest, grant_id, created_at)
+               VALUES (?, ?, ?, 'controlled-agent-v1', 'evidence_verifier', ?, ?, ?, ?, ?, ?)""",
+            (
+                execution_id,
+                uuid.uuid4().hex,
+                uuid.uuid4().hex,
+                uuid.uuid4().hex,
+                "a" * 64,
+                uuid.uuid4().hex,
+                "b" * 64,
+                uuid.uuid4().hex,
+                "2026-07-24 12:00:00.000000",
+            ),
+        )
+
+    command.upgrade(config, "20260724_0015")
+    with sqlite3.connect(database_path) as connection:
+        revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+        columns = {
+            row[1]: row
+            for row in connection.execute("PRAGMA table_info(controlled_agent_executions)")
+        }
+        indexes = {
+            row[1] for row in connection.execute("PRAGMA index_list(controlled_agent_executions)")
+        }
+        table_sql = connection.execute(
+            """SELECT sql FROM sqlite_master
+               WHERE type = 'table' AND name = 'controlled_agent_executions'"""
+        ).fetchone()
+        reliability = connection.execute(
+            """SELECT deadline_at, max_attempts, attempt_count, lease_generation
+               FROM controlled_agent_executions WHERE id = ?""",
+            (execution_id,),
+        ).fetchone()
+    assert revision == ("20260724_0015",)
+    assert columns["deadline_at"][3] == 1
+    assert {
+        "ix_agent_execution_claimable",
+        "ix_agent_execution_lease_expiry",
+    } <= indexes
+    assert table_sql is not None
+    assert "ck_agent_execution_attempt_count_bounded" in table_sql[0]
+    assert "ck_agent_execution_lease_shape" in table_sql[0]
+    assert "ck_agent_execution_terminal_shape" in table_sql[0]
+    assert reliability == ("2026-07-24 12:15:00", 3, 0, 0)
+
+    command.downgrade(config, "20260724_0014")
+    with sqlite3.connect(database_path) as connection:
+        revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(controlled_agent_executions)")
+        }
+    assert revision == ("20260724_0014",)
+    assert "deadline_at" not in columns
+    assert "lease_owner_id" not in columns
+
+    command.upgrade(config, "20260724_0015")
+    with sqlite3.connect(database_path) as connection:
+        revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+    assert revision == ("20260724_0015",)
+    assert ScriptDirectory.from_config(config).get_heads() == ["20260724_0015"]

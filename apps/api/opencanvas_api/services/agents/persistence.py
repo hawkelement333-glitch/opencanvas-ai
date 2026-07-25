@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from pydantic import ValidationError
@@ -71,6 +71,9 @@ TERMINAL_EXECUTION_STATUSES = frozenset(
         ExecutionStatus.DENIED,
     }
 )
+
+DEFAULT_EXECUTION_DEADLINE = timedelta(minutes=15)
+DEFAULT_EXECUTION_MAX_ATTEMPTS = 3
 
 ALLOWED_EXECUTION_TRANSITIONS = {
     ExecutionStatus.PROPOSED: frozenset(
@@ -183,6 +186,10 @@ class ControlledAgentRepository:
                 plan_digest=execution.plan_digest,
                 grant_id=execution.grant_id,
                 created_at=execution.created_at,
+                deadline_at=execution.created_at + DEFAULT_EXECUTION_DEADLINE,
+                max_attempts=DEFAULT_EXECUTION_MAX_ATTEMPTS,
+                attempt_count=0,
+                lease_generation=0,
             )
         )
         await self.session.flush()
@@ -306,6 +313,24 @@ class ControlledAgentRepository:
                 await self.session.flush()
                 self.session.add(transition_row)
                 await self.session.flush()
+                if state.status in TERMINAL_EXECUTION_STATUSES:
+                    execution = await self._owned_execution(
+                        state.user_id,
+                        state.workspace_id,
+                        state.execution_id,
+                    )
+                    execution.completed_at = state.recorded_at
+                    execution.terminal_outcome = state.status.value
+                    execution.failure_classification = (
+                        None
+                        if state.status is ExecutionStatus.SUCCEEDED
+                        else state.safe_reason_code or f"execution_{state.status.value}"
+                    )
+                    execution.next_retry_at = None
+                    execution.lease_owner_id = None
+                    execution.lease_acquired_at = None
+                    execution.lease_expires_at = None
+                    await self.session.flush()
         except IntegrityError:
             raise AgentStateConflict("execution_state_changed") from None
 
@@ -711,6 +736,8 @@ class ControlledAgentRepository:
 
 __all__ = [
     "ALLOWED_EXECUTION_TRANSITIONS",
+    "DEFAULT_EXECUTION_DEADLINE",
+    "DEFAULT_EXECUTION_MAX_ATTEMPTS",
     "TERMINAL_EXECUTION_STATUSES",
     "AgentContractIntegrityError",
     "AgentInspection",

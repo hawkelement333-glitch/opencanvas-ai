@@ -21,6 +21,9 @@ from sqlalchemy import (
     event,
     func,
 )
+from sqlalchemy import (
+    inspect as sa_inspect,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -987,7 +990,7 @@ class CanonicalRelationship(Base):
 
 
 class ControlledAgentExecution(Base):
-    """Immutable identity for a proposed controlled-agent execution."""
+    """Immutable authority identity plus server-owned bounded reliability state."""
 
     __tablename__ = "controlled_agent_executions"
     __table_args__ = (
@@ -999,7 +1002,64 @@ class ControlledAgentExecution(Base):
             "'drafting_assistant', 'controlled_action_executor')",
             name="ck_agent_execution_role",
         ),
+        CheckConstraint(
+            "deadline_at > created_at",
+            name="ck_agent_execution_deadline_after_creation",
+        ),
+        CheckConstraint(
+            "max_attempts > 0",
+            name="ck_agent_execution_max_attempts_positive",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0 AND attempt_count <= max_attempts",
+            name="ck_agent_execution_attempt_count_bounded",
+        ),
+        CheckConstraint(
+            "next_retry_at IS NULL OR next_retry_at <= deadline_at",
+            name="ck_agent_execution_retry_before_deadline",
+        ),
+        CheckConstraint(
+            "(lease_owner_id IS NULL AND lease_acquired_at IS NULL "
+            "AND lease_expires_at IS NULL) OR "
+            "(lease_owner_id IS NOT NULL AND length(lease_owner_id) > 0 "
+            "AND lease_acquired_at IS NOT NULL AND lease_expires_at IS NOT NULL "
+            "AND lease_expires_at > lease_acquired_at "
+            "AND lease_expires_at <= deadline_at)",
+            name="ck_agent_execution_lease_shape",
+        ),
+        CheckConstraint(
+            "lease_generation >= 0",
+            name="ck_agent_execution_lease_generation_nonnegative",
+        ),
+        CheckConstraint(
+            "(completed_at IS NULL AND terminal_outcome IS NULL "
+            "AND failure_classification IS NULL) OR "
+            "(completed_at IS NOT NULL AND terminal_outcome IS NOT NULL "
+            "AND terminal_outcome IN ('succeeded', 'failed', 'cancelled', 'denied') "
+            "AND lease_owner_id IS NULL AND lease_acquired_at IS NULL "
+            "AND lease_expires_at IS NULL AND next_retry_at IS NULL)",
+            name="ck_agent_execution_terminal_shape",
+        ),
+        CheckConstraint(
+            "terminal_outcome IS NULL OR "
+            "(terminal_outcome = 'succeeded' AND failure_classification IS NULL) OR "
+            "(terminal_outcome IN ('failed', 'cancelled', 'denied') "
+            "AND failure_classification IS NOT NULL "
+            "AND length(failure_classification) > 0)",
+            name="ck_agent_execution_terminal_classification",
+        ),
+        CheckConstraint(
+            "completed_at IS NULL OR completed_at >= created_at",
+            name="ck_agent_execution_completion_after_creation",
+        ),
         Index("ix_agent_execution_owner_created", "user_id", "workspace_id", "created_at"),
+        Index(
+            "ix_agent_execution_claimable",
+            "deadline_at",
+            "next_retry_at",
+            "attempt_count",
+        ),
+        Index("ix_agent_execution_lease_expiry", "lease_expires_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
@@ -1017,6 +1077,23 @@ class ControlledAgentExecution(Base):
     plan_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     grant_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    max_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3, server_default="3"
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_owner_id: Mapped[str | None] = mapped_column(String(128))
+    lease_acquired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    terminal_outcome: Mapped[str | None] = mapped_column(String(24))
+    failure_classification: Mapped[str | None] = mapped_column(String(64))
 
 
 class ControlledAgentExecutionState(Base):
@@ -2047,7 +2124,6 @@ class ControlledAgentReversibleWriteRollbackResult(Base):
 
 
 CONTROLLED_AGENT_IMMUTABLE_MODELS = (
-    ControlledAgentExecution,
     ControlledAgentExecutionState,
     ControlledAgentStateTransition,
     ControlledAgentContextSnapshot,
@@ -2069,6 +2145,39 @@ CONTROLLED_AGENT_IMMUTABLE_MODELS = (
 
 def _reject_controlled_agent_mutation(_mapper: Any, _connection: Any, target: object) -> None:
     raise ValueError(f"{type(target).__name__} records are append-only")
+
+
+def _reject_execution_authority_mutation(_mapper: Any, _connection: Any, target: object) -> None:
+    state = sa_inspect(target)
+    if state is None:
+        raise ValueError("ControlledAgentExecution state is unavailable")
+    immutable_fields = (
+        "id",
+        "user_id",
+        "workspace_id",
+        "schema_version",
+        "role",
+        "context_snapshot_id",
+        "context_digest",
+        "plan_id",
+        "plan_digest",
+        "grant_id",
+        "created_at",
+    )
+    if any(state.attrs[field].history.has_changes() for field in immutable_fields):
+        raise ValueError("ControlledAgentExecution authority fields are immutable")
+
+
+event.listen(
+    ControlledAgentExecution,
+    "before_update",
+    _reject_execution_authority_mutation,
+)
+event.listen(
+    ControlledAgentExecution,
+    "before_delete",
+    _reject_controlled_agent_mutation,
+)
 
 
 for _immutable_model in CONTROLLED_AGENT_IMMUTABLE_MODELS:
