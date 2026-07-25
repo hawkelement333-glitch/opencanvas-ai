@@ -276,14 +276,42 @@ AI and embeddings, and no external provider call.
 
 ## Roadmap and protected scope
 
+The post-completion roadmap amendment assigns deterministic indexing and
+reindexing infrastructure to Milestone 7 Production Hardening. The Indexer is
+a technical ingestion and retrieval-support service, not an autonomous agent.
+Its future acceptance boundary includes deterministic parsing/chunking,
+immutable source-version indexes, stable identities and hashes, bounded
+idempotent operation, exact scope, safe recovery, operational health,
+malware-scanning and storage boundaries, PostgreSQL runtime validation,
+monitoring, recovery exercises, load validation, human-authorized reindexing,
+and Trace/audit/event/outbox/activity evidence. It cannot authorize access,
+broaden context, change evidence, fabricate metadata, silently replace
+versions, cross workspace boundaries, or approve itself.
+
+The same amendment assigns the governed Librarian Agent to Milestone 9 Agent
+Society. It depends on the completed Milestone 7 Indexer and Milestone 4–7
+authority, evidence, collaboration, and production controls. It may make
+bounded, evidence-backed catalog-quality proposals and review queues; it
+cannot independently mutate, delete, archive, restore, share, authorize,
+reindex, or reclassify authoritative resources, cross workspace boundaries,
+approve its proposals, activate or promote itself, suppress conflict, or
+rewrite history. Human review and the existing deny-by-default controlled
+workflow remain authoritative.
+
+The Indexer and Librarian remain separate future systems. This amendment added
+neither and did not reopen the completed Milestone 5 audit.
+
 The required order after this audit is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
-2. Milestone 7 — Production Hardening
+2. Milestone 7 — Production Hardening, including deterministic indexing
 3. Milestone 8 — Controlled Public Portfolio and Product Release
 4. Future Advanced Real-Time Collaboration
-5. Milestone 9 — SolarPlexus Agent Society
+5. Milestone 9 — SolarPlexus Agent Society, including the governed Librarian
 6. Milestone 10 — Civilization and Simulated Worlds
+7. Milestone 11 — Embodied and Spatial Intelligence
+8. Milestone 12 — Federated Intelligence Network
+9. Milestone 13 — Continuity and Evolution Framework
 
 Milestone 6 owns memberships, invitations, closed collaboration roles and
 permissions, ownership and administration, scoped canvas/resource/workflow/
@@ -301,7 +329,8 @@ controlled release.
 Academy, Catalog, Agent Society, marketplace, quarantine, rehabilitation,
 Tribunal, autonomous self-activation/promotion, model-weight training,
 arbitrary execution/tools/connectors, scheduling, federation, production
-infrastructure, and Milestone 6–10 implementation were not started.
+infrastructure, deterministic production indexing, the Librarian Agent, and
+Milestone 6–13 implementation were not started.
 
 All work remained local under the Git freeze. No push, pull, fetch, sync,
 upstream, pull request, remote branch/tag, upload, publication, deployment, or

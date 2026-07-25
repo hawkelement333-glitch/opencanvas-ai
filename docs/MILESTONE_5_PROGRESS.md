@@ -458,14 +458,49 @@ explosion, provenance volume, stale graph writes, partial compensation,
 PostgreSQL behavior differences, viewport selection loss, and trusted-looking
 AI configuration. The architecture assigns explicit gates to each.
 
+## Indexing and Librarian roadmap amendment
+
+The completed Milestone 5 documentation now records these future acceptance
+boundaries:
+
+- Milestone 7 Production Hardening owns deterministic technical indexing and
+  reindexing: controlled ingestion, deterministic parsing/chunking, immutable
+  source-version indexes, stable identities and hashes, duplicate detection,
+  bounded idempotent requests, closed lifecycle/failure registries, safe
+  recovery, freshness/coverage/health/drift reporting, exact scoped retention
+  and reindex rules, malware-scanning boundary, production persistence and
+  storage validation, operational controls, monitoring, recovery exercises,
+  load validation, and Trace/audit/event/outbox/activity integration.
+- Milestone 9 Agent Society owns the governed Librarian Agent. It may propose
+  evidence-backed catalog improvements, classifications, relationships,
+  consolidation, reindexing, archival review, metadata work, and bounded
+  human-review queues. It cannot independently mutate sources, versions,
+  access, sharing, membership, roles, context, or historical evidence and
+  cannot approve, activate, or promote itself.
+- The Indexer is deterministic technical infrastructure. The Librarian is a
+  proposal-bounded governed agent that depends on that completed
+  infrastructure. They are not one autonomous system.
+
+This is documentation-only future scope. No indexing worker, persistence,
+queue, parser/chunker change, reindex API, storage integration, malware
+scanner, Librarian model/workflow/API/event/frontend, migration, or Milestone
+6/7/9 implementation exists as a result. Milestone 5 remains complete and
+Milestone 6 remains next.
+
 Required roadmap after the final Milestone 5 audit:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
-2. Milestone 7 — Production Hardening
+2. Milestone 7 — Production Hardening, including deterministic indexing
 3. Milestone 8 — Controlled Public Portfolio and Product Release
 4. Future Advanced Real-Time Collaboration
-5. Milestone 9 — SolarPlexus Agent Society
+5. Milestone 9 — SolarPlexus Agent Society, including the governed Librarian
 6. Milestone 10 — Civilization and Simulated Worlds
+7. Milestone 11 — Embodied and Spatial Intelligence
+8. Milestone 12 — Federated Intelligence Network
+9. Milestone 13 — Continuity and Evolution Framework
+
+This current roadmap supersedes shorter sequences in historical checkpoint
+handoffs without rewriting their evidence.
 
 Only Advanced Real-Time Collaboration is deferred until after Milestone 8.
 Milestone 6 remains required before Milestones 7 and 8.

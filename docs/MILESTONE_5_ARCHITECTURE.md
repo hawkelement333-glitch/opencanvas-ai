@@ -908,17 +908,115 @@ future documentation and acceptance criteria only. Milestone 5 creates none of
 their persistence models, APIs, capabilities, events, workflows, agents,
 evaluations, or frontend components.
 
+## Future Milestone 7 — Deterministic Indexing Infrastructure
+
+Milestone 7 — Production Hardening includes deterministic production indexing
+and reindexing infrastructure. This is technical ingestion and
+retrieval-support infrastructure, not an autonomous agent.
+
+Required future scope:
+
+- a controlled document-ingestion pipeline;
+- deterministic parsing and chunking;
+- immutable source-version indexing;
+- metadata extraction for supported source formats;
+- duplicate and near-duplicate detection;
+- stable index and chunk identities;
+- content and metadata hashing;
+- bounded indexing and reindexing;
+- idempotent indexing requests;
+- closed indexing lifecycle and failure registries;
+- safe retry and failure recovery;
+- queues, leases, backpressure, and stale-worker fencing where justified;
+- index freshness, coverage, health, and drift reporting;
+- explicit deletion, archival, supersession, retention, and reindex behavior;
+- a malware-scanning boundary before unsafe uploads enter indexing;
+- exact user, workspace, canvas, source, and immutable-version scope;
+- PostgreSQL runtime validation;
+- managed object-storage validation where applicable;
+- monitoring and alerting;
+- backup, restore, and recovery exercises;
+- bounded capacity and load testing;
+- Trace, audit, domain-event, outbox, and activity integration; and
+- safe human-authorized operational reindexing controls.
+
+The Indexer cannot grant or revoke access, broaden selected context, change
+authoritative source evidence, fabricate metadata, silently replace immutable
+source versions, create unauthorized cross-workspace relationships, delete or
+archive authoritative resources without exact authority, or approve its own
+decisions.
+
+The deterministic demo remains isolated from this production infrastructure.
+It continues to require no production index, managed storage, paid provider,
+or network access.
+
+## Future Milestone 9 — Governed Librarian Agent
+
+Milestone 9 — SolarPlexus Agent Society includes a governed Librarian Agent.
+It uses the completed Milestone 7 indexing infrastructure together with
+Milestone 4 deny-by-default authority; Milestone 5 graph, retrieval, citation,
+Trace, workflow, event, and agent systems; Milestone 6 membership, role,
+sharing, and tenant-isolation systems; and Milestone 7 production controls.
+
+Permitted bounded functions may include:
+
+- proposing titles, tags, collections, taxonomies, and classifications;
+- detecting duplicate, conflicting, stale, superseded, uncited, or weakly
+  connected material;
+- recommending reindexing, archival review, graph relationships, and source
+  consolidation;
+- identifying missing metadata;
+- evaluating index quality and coverage;
+- explaining classifications and recommendations;
+- creating bounded human-review queues; and
+- creating Trace-linked catalog-quality reports.
+
+Every recommendation preserves exact user, workspace, canvas, and source
+scope; immutable source identity and version; provenance; supporting evidence;
+citation identities where applicable; proposal identity; human decision;
+Trace; audit; domain events; and activity history.
+
+The Librarian cannot independently delete, archive, or restore a source; alter
+authoritative source content or immutable source versions; fabricate metadata;
+broaden selected context; grant or revoke access; share resources; change
+membership or collaboration roles; create cross-workspace relationships;
+approve its own proposals; activate or promote itself; suppress conflicting
+evidence; or rewrite historical Trace or evaluation evidence.
+
+Destructive, sharing, access, archival, relationship, taxonomy, and reindexing
+actions remain human reviewed and pass the established deny-by-default
+capability, approval, scope, and controlled-workflow boundaries. The Librarian
+may propose catalog improvements; it is not the authority over the catalog.
+
+### Indexer and Librarian boundary
+
+- **Indexer:** deterministic technical ingestion and indexing infrastructure,
+  implemented and production-hardened during Milestone 7.
+- **Librarian:** governed curation and catalog-quality agent, implemented
+  during Milestone 9 using the completed indexing infrastructure.
+
+They must not be merged into one unrestricted autonomous system. This roadmap
+amendment creates no Indexer or Librarian production model, service, worker,
+queue, migration, API, event, workflow, agent, or frontend behavior.
+
 ## Roadmap after Milestone 5
 
 Core Milestone 6 is required in its original position. It is not deferred until
 after Milestone 8.
 
 1. Milestone 6 — Multi-Workspace Collaboration
-2. Milestone 7 — Production Hardening
+2. Milestone 7 — Production Hardening, including deterministic indexing
 3. Milestone 8 — Controlled Public Portfolio and Product Release
 4. Future Advanced Real-Time Collaboration
-5. Milestone 9 — SolarPlexus Agent Society
+5. Milestone 9 — SolarPlexus Agent Society, including the governed Librarian
 6. Milestone 10 — Civilization and Simulated Worlds
+7. Milestone 11 — Embodied and Spatial Intelligence
+8. Milestone 12 — Federated Intelligence Network
+9. Milestone 13 — Continuity and Evolution Framework
+
+This nine-item sequence is the current authoritative roadmap and supersedes
+shorter roadmap snapshots in historical checkpoint handoffs. Those handoffs
+remain unchanged as evidence of their completed checkpoints.
 
 Milestone 6 core scope includes workspace memberships; invitations; closed
 owner, administrator, editor, approver, member, and viewer roles/permissions

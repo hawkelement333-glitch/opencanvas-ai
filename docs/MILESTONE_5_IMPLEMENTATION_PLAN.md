@@ -554,16 +554,72 @@ without review rules; release without evaluation and human approval; or erase
 the truth of original behavior. These are documentation and future acceptance
 criteria only.
 
+## Future Milestone 7 — Deterministic Indexing Infrastructure
+
+Milestone 7 Production Hardening must implement deterministic technical
+indexing and reindexing infrastructure. It is not an agent.
+
+The Milestone 7 architecture and implementation plan must cover controlled
+ingestion; deterministic parsing and chunking; immutable source-version
+indexes; supported-format metadata extraction; duplicate and near-duplicate
+detection; stable index/chunk identities; content and metadata hashes; bounded
+and idempotent indexing/reindexing; closed lifecycle and failure registries;
+safe retry/recovery; justified queues, leases, backpressure, and stale-worker
+fencing; freshness, coverage, health, and drift reporting; deletion, archival,
+supersession, retention, and reindex rules; pre-index malware scanning; exact
+user/workspace/canvas/source/version scope; PostgreSQL and applicable managed
+object-storage validation; monitoring and alerting; backup/restore/recovery
+exercises; bounded capacity/load validation; Trace/audit/event/outbox/activity
+integration; and human-authorized operational reindex controls.
+
+The Indexer cannot authorize access, broaden context, change source evidence,
+fabricate metadata, replace immutable versions, cross workspace boundaries,
+perform unauthorized deletion or archival, or approve itself. The
+deterministic demo cannot depend on the production Indexer, managed storage,
+paid providers, or network access.
+
+## Future Milestone 9 — Governed Librarian Agent
+
+Milestone 9 Agent Society must implement the governed Librarian Agent on the
+completed Milestone 7 Indexer and the completed Milestone 4–7 authority,
+graph, retrieval, citation, Trace, workflow, event, agent, collaboration,
+tenant-isolation, and production-control foundations.
+
+The Librarian may make bounded, evidence-backed proposals for titles, tags,
+collections, taxonomies, classifications, duplicate/conflict handling,
+stale/superseded/uncited/weakly connected material, reindexing, archival
+review, graph relationships, source consolidation, missing metadata, and
+catalog/index quality. It may explain recommendations, create bounded
+human-review queues, and produce Trace-linked catalog-quality reports.
+
+Every proposal retains exact scope, immutable source/version identity,
+provenance, evidence, applicable citations, proposal identity, human decision,
+Trace, audit, events, and activity. The Librarian cannot independently mutate
+or share sources; change versions, access, membership, or roles; broaden
+context; fabricate metadata; cross workspace boundaries; approve, activate,
+or promote itself; suppress conflicts; or rewrite history. Destructive,
+sharing, access, archival, relationship, taxonomy, and reindex operations
+require human review plus existing capability, approval, scope, and
+controlled-workflow enforcement.
+
+The Indexer is deterministic Milestone 7 infrastructure. The Librarian is a
+governed, proposal-bounded Milestone 9 agent. They cannot be combined into one
+unrestricted autonomous system. Neither is implemented by this documentation
+amendment.
+
 ## Roadmap after Milestone 5
 
 The required sequence is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
-2. Milestone 7 — Production Hardening
+2. Milestone 7 — Production Hardening, including deterministic indexing
 3. Milestone 8 — Controlled Public Portfolio and Product Release
 4. Future Advanced Real-Time Collaboration
-5. Milestone 9 — SolarPlexus Agent Society
+5. Milestone 9 — SolarPlexus Agent Society, including the governed Librarian
 6. Milestone 10 — Civilization and Simulated Worlds
+7. Milestone 11 — Embodied and Spatial Intelligence
+8. Milestone 12 — Federated Intelligence Network
+9. Milestone 13 — Continuity and Evolution Framework
 
 Milestone 6 implements memberships, invitation lifecycle, closed collaboration
 roles and permissions, approved owner/administrator/editor/approver/member/

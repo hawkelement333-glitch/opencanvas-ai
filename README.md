@@ -258,16 +258,19 @@ database-backed rather than broker-backed job queue, non-streaming AI responses,
 inference/conflict classification, and no complete end-user Trace explorer. See the complete
 [known-limitations register](docs/KNOWN_LIMITATIONS.md).
 
-Milestone 4 controlled agents and Milestone 5 checkpoints 5.1–5.6 are complete
-locally. Milestone 5.7 is next. The required roadmap order is:
+Milestone 4 controlled agents and Milestone 5 architecture and checkpoints
+5.1–5.7 are complete locally. Milestone 6 is next. The required roadmap order
+is:
 
-1. Milestone 5.7 — Final Milestone 5 Audit
-2. Milestone 6 — Core Multi-Workspace Collaboration
-3. Milestone 7 — Production Hardening
-4. Milestone 8 — Controlled Public Portfolio and Product Release
-5. Future Advanced Real-Time Collaboration
-6. Milestone 9 — SolarPlexus Agent Society
-7. Milestone 10 — Civilization and Simulated Worlds
+1. Milestone 6 — Core Multi-Workspace Collaboration
+2. Milestone 7 — Production Hardening, including deterministic indexing
+3. Milestone 8 — Controlled Public Portfolio and Product Release
+4. Future Advanced Real-Time Collaboration
+5. Milestone 9 — SolarPlexus Agent Society, including the governed Librarian
+6. Milestone 10 — Civilization and Simulated Worlds
+7. Milestone 11 — Embodied and Spatial Intelligence
+8. Milestone 12 — Federated Intelligence Network
+9. Milestone 13 — Continuity and Evolution Framework
 
 Milestone 6 remains a normal required milestone before Milestones 7 and 8. Its
 core scope covers membership and invitation lifecycle, closed roles and
@@ -282,11 +285,25 @@ production real-time load/recovery testing belong to the separate Future
 Advanced Real-Time Collaboration phase after the initial Milestone 8
 controlled release.
 
+Milestone 7 includes deterministic technical indexing and reindexing
+infrastructure. The Indexer is not an autonomous agent: it supports controlled,
+scoped, immutable-version ingestion and retrieval operations and cannot grant
+authority, broaden context, alter evidence, fabricate metadata, or approve
+itself.
+
+Milestone 9 includes a governed Librarian Agent built on the completed
+indexing, authority, graph, retrieval, workflow, collaboration, and production
+foundations. It may make evidence-backed catalog-quality proposals but cannot
+independently mutate, archive, share, authorize, reindex, or reclassify
+authoritative resources or approve itself. Human review and controlled
+workflows remain authoritative.
+
 See
 [docs/MILESTONE_5_ARCHITECTURE.md](docs/MILESTONE_5_ARCHITECTURE.md),
 [docs/MILESTONE_5_IMPLEMENTATION_PLAN.md](docs/MILESTONE_5_IMPLEMENTATION_PLAN.md),
-[docs/MILESTONE_5_PROGRESS.md](docs/MILESTONE_5_PROGRESS.md), and
-[docs/MILESTONE_5_6_BOUNDED_AGENT_STUDIO_HANDOFF.md](docs/MILESTONE_5_6_BOUNDED_AGENT_STUDIO_HANDOFF.md).
+[docs/MILESTONE_5_PROGRESS.md](docs/MILESTONE_5_PROGRESS.md),
+[docs/MILESTONE_5_7_FINAL_AUDIT_HANDOFF.md](docs/MILESTONE_5_7_FINAL_AUDIT_HANDOFF.md),
+and [docs/MILESTONE_5_COMPLETION.md](docs/MILESTONE_5_COMPLETION.md).
 
 ## Competition and release status
 

@@ -165,9 +165,45 @@ simultaneous editing, CRDTs, operational transforms, offline/reconnect
 merging, deterministic conflict resolution, distributed presence, and
 production real-time load/recovery testing are not required for Milestone 6.
 
+Milestone 7 Production Hardening includes deterministic production indexing
+and reindexing infrastructure. The Indexer is a technical service for
+controlled ingestion, deterministic parsing/chunking, immutable
+source-version indexes, stable identities/hashes, bounded idempotent
+operation, exact scope, safe recovery, health/drift reporting, production
+storage and PostgreSQL validation, malware-scanning boundaries, monitoring,
+recovery exercises, load validation, human-authorized reindexing, and
+Trace/audit/event/outbox/activity evidence. It is not an autonomous agent and
+cannot grant authority, broaden context, change evidence, fabricate metadata,
+silently replace versions, cross workspace boundaries, or approve itself.
+
+Milestone 9 Agent Society includes the governed Librarian Agent. It uses the
+completed Indexer and Milestone 4–7 authority, evidence, collaboration, and
+production controls to make bounded, Trace-linked catalog-quality proposals.
+It cannot independently mutate, archive, restore, share, authorize,
+reclassify, or reindex authoritative resources; change membership or roles;
+cross workspace boundaries; approve itself; suppress conflict; or rewrite
+history. Human review and controlled workflows remain authoritative.
+
+The Indexer and Librarian are deliberately separate future systems. This
+documentation amendment implements neither.
+
 Milestone 9 Agent Society, Academy, AI Catalog, marketplace, quarantine,
 rehabilitation, Tribunal, and other future systems remain documentation and
-acceptance criteria only. Milestones 6–10 were not implemented.
+acceptance criteria only.
+
+The authoritative roadmap order is:
+
+1. Milestone 6 — Core Multi-Workspace Collaboration
+2. Milestone 7 — Production Hardening, including deterministic indexing
+3. Milestone 8 — Controlled Public Portfolio and Product Release
+4. Future Advanced Real-Time Collaboration
+5. Milestone 9 — SolarPlexus Agent Society, including the governed Librarian
+6. Milestone 10 — Civilization and Simulated Worlds
+7. Milestone 11 — Embodied and Spatial Intelligence
+8. Milestone 12 — Federated Intelligence Network
+9. Milestone 13 — Continuity and Evolution Framework
+
+Milestones 6–13 were not implemented.
 
 ## Local Git boundary
 
