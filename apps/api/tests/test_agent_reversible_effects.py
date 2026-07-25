@@ -17,6 +17,7 @@ from opencanvas_api.db.models import (
     ControlledAgentApprovalConsumption,
     ControlledAgentAuditEvent,
     ControlledAgentCapabilityGrant,
+    ControlledAgentExecution,
     ControlledAgentReversibleWriteEffect,
     ControlledAgentReversibleWriteProposal,
     ControlledAgentReversibleWriteRollbackApproval,
@@ -33,8 +34,15 @@ from opencanvas_api.services.agents.contracts import (
     RevocationRecord,
     contract_digest,
 )
+from opencanvas_api.services.agents.execution import (
+    CancellationRequest,
+    ControlledExecutionLifecycle,
+)
 from opencanvas_api.services.agents.persistence import ControlledAgentRepository
-from opencanvas_api.services.agents.reliability import ControlledExecutionReliability
+from opencanvas_api.services.agents.reliability import (
+    ControlledExecutionReliability,
+    ExecutionReliabilityDenied,
+)
 from opencanvas_api.services.agents.reversible_write_effects import ReversibleWriteEffectService
 from opencanvas_api.services.agents.reversible_write_rollback_approvals import (
     ReversibleWriteRollbackApprovalService,
@@ -198,6 +206,70 @@ async def test_bounded_retry_reuses_atomic_reversible_effect_and_suppresses_dupl
     assert duplicate.duplicate is True
     assert effect_count == 1
     assert note_count == 1
+
+
+@pytest.mark.parametrize("termination", ["cancelled", "deadline"])
+async def test_terminal_execution_rejects_reversible_effect_before_mutation(
+    client: httpx.AsyncClient,
+    database: Database,
+    api_prefix: str,
+    termination: str,
+) -> None:
+    canvas, proposal, _ = await _approved_proposal(client, api_prefix)
+    user_id = SYSTEM_USER_ID
+    workspace_id = uuid.UUID(canvas["workspaceId"])
+    execution_id = uuid.UUID(proposal["executionId"])
+    terminated_at = datetime.now(UTC)
+
+    async with database.sessions() as session:
+        if termination == "cancelled":
+            await ControlledExecutionLifecycle(session).cancel(
+                authenticated_user_id=user_id,
+                request=CancellationRequest(
+                    cancellation_id=uuid.uuid4(),
+                    execution_id=execution_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    requested_at=terminated_at,
+                ),
+                trace_id=uuid.uuid4(),
+            )
+        else:
+            await session.execute(
+                update(ControlledAgentExecution)
+                .where(ControlledAgentExecution.id == execution_id)
+                .values(deadline_at=terminated_at)
+            )
+            await ControlledExecutionReliability(session).terminate_expired(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                execution_id=execution_id,
+                evaluated_at=terminated_at,
+            )
+        with pytest.raises(ExecutionReliabilityDenied, match="execution_not_claimable"):
+            await ControlledExecutionReliability(session).execute_reversible_write_retry(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                execution_id=execution_id,
+                attempted_at=terminated_at + timedelta(seconds=1),
+            )
+        await session.commit()
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(ControlledAgentReversibleWriteEffect)
+                .where(ControlledAgentReversibleWriteEffect.execution_id == execution_id)
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(CanvasNode)
+                .where(CanvasNode.canvas_id == uuid.UUID(canvas["id"]))
+            )
+            == 0
+        )
 
 
 async def test_approved_update_uses_exact_revision_and_preserves_before_after_evidence(
@@ -1198,7 +1270,7 @@ async def test_rollback_approval_api_enforces_authentication_csrf_and_scope(
                 json={"idempotencyKey": "unauthenticated-execution"},
                 headers=headers,
             )
-        assert unauthenticated.status_code == 401
+            assert unauthenticated.status_code == 401
         assert unauthenticated_execution.status_code == 401
         for response in (
             missing,
@@ -1216,6 +1288,128 @@ async def test_rollback_approval_api_enforces_authentication_csrf_and_scope(
             assert "traceback" not in serialized
             assert "sql" not in serialized
             assert "database" not in serialized
+
+
+@pytest.mark.security
+async def test_execution_cancellation_api_enforces_authentication_csrf_and_authority_boundary(
+    app: FastAPI,
+    database: Database,
+    api_prefix: str,
+) -> None:
+    _enable_real_auth(app)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as owner:
+        owner_session = await _sign_up(
+            owner,
+            api_prefix,
+            email="cancellation-owner@example.test",
+            display_name="Cancellation Owner",
+        )
+        headers = _csrf(owner_session)
+        workspace = cast(
+            dict[str, Any],
+            (await owner.get(f"{api_prefix}/workspaces")).json()[0],
+        )
+        canvas_response = await owner.post(
+            f"{api_prefix}/canvases",
+            json={"name": "Cancellation API canvas", "workspaceId": workspace["id"]},
+            headers=headers,
+        )
+        assert canvas_response.status_code == 201, canvas_response.text
+        canvas = cast(dict[str, Any], canvas_response.json())
+        _, proposal, route = await _approved_proposal(
+            owner,
+            api_prefix,
+            canvas=canvas,
+            headers=headers,
+        )
+        endpoint = f"{route}/{proposal['executionId']}/cancel"
+        payload = {"idempotencyKey": "cancel-api-valid-001"}
+
+        missing = await owner.post(endpoint, json=payload)
+        invalid = await owner.post(
+            endpoint,
+            json=payload,
+            headers={"X-CSRF-Token": "invalid"},
+        )
+        assert missing.status_code == invalid.status_code == 403
+        assert missing.json()["code"] == invalid.json()["code"] == "csrf_validation_failed"
+
+        authority_override = await owner.post(
+            endpoint,
+            json={
+                **payload,
+                "outcome": "succeeded",
+                "leaseGeneration": 900,
+                "deadline": datetime.now(UTC).isoformat(),
+                "grantId": str(uuid.uuid4()),
+                "canvasId": str(uuid.uuid4()),
+                "resultDigest": "f" * 64,
+            },
+            headers=headers,
+        )
+        assert authority_override.status_code == 422
+
+        inaccessible = await owner.post(
+            endpoint.replace(str(workspace["id"]), str(uuid.uuid4())),
+            json={"idempotencyKey": "cancel-api-inaccessible"},
+            headers=headers,
+        )
+        assert inaccessible.status_code == 404
+        assert inaccessible.json()["code"] == "agent_execution_not_found"
+
+        valid = await owner.post(endpoint, json=payload, headers=headers)
+        duplicate = await owner.post(endpoint, json=payload, headers=headers)
+        assert valid.status_code == duplicate.status_code == 200
+        assert valid.json()["cancelled"] is True
+        assert valid.json()["duplicate"] is False
+        assert duplicate.json() == {**valid.json(), "duplicate": True}
+        serialized = valid.text.lower()
+        for private_term in (
+            "leaseowner",
+            "grantdigest",
+            "policy",
+            "traceback",
+            "database",
+            "sql",
+        ):
+            assert private_term not in serialized
+
+        async with database.sessions() as session:
+            execution_id = uuid.UUID(proposal["executionId"])
+            assert (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(ControlledAgentAuditEvent)
+                    .where(
+                        ControlledAgentAuditEvent.execution_id == execution_id,
+                        ControlledAgentAuditEvent.event_type == "execution.cancelled",
+                    )
+                )
+                == 1
+            )
+            assert (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(TraceEvent)
+                    .where(
+                        TraceEvent.object_id == execution_id,
+                        TraceEvent.event_type == "execution.cancelled",
+                    )
+                )
+                == 1
+            )
+
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://test",
+        ) as anonymous:
+            unauthenticated = await anonymous.post(
+                endpoint,
+                json={"idempotencyKey": "cancel-api-anonymous"},
+                headers=headers,
+            )
+            assert unauthenticated.status_code == 401
 
 
 @pytest.mark.parametrize("changed_field", ["revision", "title", "text", "state_digest"])

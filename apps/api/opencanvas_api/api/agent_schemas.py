@@ -90,6 +90,29 @@ class AgentAuditEventOut(ApiModel):
     attributes: tuple[AgentAuditAttributeOut, ...] = ()
 
 
+class AgentExecutionHealthOut(ApiModel):
+    status: Literal[
+        "waiting_claimable",
+        "actively_leased",
+        "waiting_retry",
+        "cancelled",
+        "deadline_exceeded",
+        "completed",
+        "failed",
+        "exhausted",
+        "inconsistent",
+    ]
+    lifecycle_status: str | None
+    claimable: bool
+    terminal: bool
+    lease_active: bool
+    attempt_count: int
+    max_attempts: int
+    deadline_at: datetime
+    next_retry_at: datetime | None
+    safe_reason_code: str | None
+
+
 class AgentExecutionInspectionOut(ApiModel):
     execution_id: uuid.UUID
     user_id: uuid.UUID
@@ -97,6 +120,7 @@ class AgentExecutionInspectionOut(ApiModel):
     schema_version: str
     role: str
     created_at: datetime
+    health: AgentExecutionHealthOut
     context: AgentContextReferenceOut
     plan: AgentPlanReferenceOut
     states: tuple[AgentStateOut, ...] = ()

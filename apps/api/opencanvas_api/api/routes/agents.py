@@ -20,6 +20,7 @@ from opencanvas_api.api.agent_schemas import (
     AgentDraftStart,
     AgentExecutionCancel,
     AgentExecutionCancelOut,
+    AgentExecutionHealthOut,
     AgentExecutionInspectionOut,
     AgentGrantOut,
     AgentPlanReferenceOut,
@@ -48,7 +49,7 @@ from opencanvas_api.api.dependencies import (
 from opencanvas_api.api.errors import ApiError
 from opencanvas_api.api.serialization import utc
 from opencanvas_api.core.config import Settings, get_settings
-from opencanvas_api.services.agents.contracts import contract_digest
+from opencanvas_api.services.agents.contracts import ExecutionStatus, contract_digest
 from opencanvas_api.services.agents.execution import (
     CancellationRequest,
     ControlledExecutionLifecycle,
@@ -61,8 +62,10 @@ from opencanvas_api.services.agents.grounded_draft import (
 from opencanvas_api.services.agents.persistence import (
     AgentInspection,
     AgentPersistenceNotFound,
+    AgentStateConflict,
     ControlledAgentRepository,
 )
+from opencanvas_api.services.agents.reliability import derive_execution_health
 from opencanvas_api.services.agents.reversible_write_effects import (
     ReversibleEffectError,
     ReversibleWriteEffectService,
@@ -440,6 +443,12 @@ async def cancel_agent_execution(
             "agent_execution_not_found",
             "Controlled-agent execution not found.",
         ) from exc
+    except AgentStateConflict as exc:
+        raise ApiError(
+            http_status.HTTP_409_CONFLICT,
+            "cancellation_conflict",
+            "The cancellation request conflicted with a concurrent execution change.",
+        ) from exc
     return AgentExecutionCancelOut(
         execution_id=execution_id,
         cancelled=outcome.cancelled,
@@ -477,6 +486,12 @@ async def inspect_agent_execution(
 
 def _inspection_out(inspection: AgentInspection) -> AgentExecutionInspectionOut:
     execution = inspection.execution
+    lifecycle_status = ExecutionStatus(inspection.states[-1].status) if inspection.states else None
+    health = derive_execution_health(
+        execution,
+        lifecycle_status=lifecycle_status,
+        evaluated_at=datetime.now(UTC),
+    )
     return AgentExecutionInspectionOut(
         execution_id=execution.id,
         user_id=execution.user_id,
@@ -484,6 +499,20 @@ def _inspection_out(inspection: AgentInspection) -> AgentExecutionInspectionOut:
         schema_version=execution.schema_version,
         role=execution.role,
         created_at=utc(execution.created_at),
+        health=AgentExecutionHealthOut(
+            status=health.status.value,
+            lifecycle_status=(
+                health.lifecycle_status.value if health.lifecycle_status is not None else None
+            ),
+            claimable=health.claimable,
+            terminal=health.terminal,
+            lease_active=health.lease_active,
+            attempt_count=health.attempt_count,
+            max_attempts=health.max_attempts,
+            deadline_at=health.deadline_at,
+            next_retry_at=health.next_retry_at,
+            safe_reason_code=health.safe_reason_code,
+        ),
         context=AgentContextReferenceOut(
             snapshot_id=inspection.context.snapshot_id,
             digest=inspection.context.payload_digest,

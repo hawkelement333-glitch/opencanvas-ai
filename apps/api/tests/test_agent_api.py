@@ -58,6 +58,21 @@ async def test_inspection_endpoint_is_read_only_paginated_and_secret_safe(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["executionId"] == str(bundle.execution.execution_id)
+    assert set(body["health"]) == {
+        "status",
+        "lifecycleStatus",
+        "claimable",
+        "terminal",
+        "leaseActive",
+        "attemptCount",
+        "maxAttempts",
+        "deadlineAt",
+        "nextRetryAt",
+        "safeReasonCode",
+    }
+    assert body["health"]["status"] == "deadline_exceeded"
+    assert body["health"]["leaseActive"] is False
+    assert "leaseOwner" not in response.text
     assert body["context"] == {
         "snapshotId": str(bundle.context.snapshot_id),
         "digest": bundle.execution.context_digest,
@@ -175,8 +190,10 @@ async def test_prepared_draft_exposes_server_id_for_authoritative_cancellation(
     prepared = await client.post(
         f"{route}/drafts/prepare",
         json={
-            "canvasId": canvas["id"], "instruction": "What is supported?",
-            "selectedNodeIds": [node["id"]], "idempotencyKey": "terra-prepared-cancel-001",
+            "canvasId": canvas["id"],
+            "instruction": "What is supported?",
+            "selectedNodeIds": [node["id"]],
+            "idempotencyKey": "terra-prepared-cancel-001",
         },
     )
     assert prepared.status_code == 201, prepared.text
@@ -189,6 +206,11 @@ async def test_prepared_draft_exposes_server_id_for_authoritative_cancellation(
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["cancelled"] is True
     assert cancelled.json()["status"] == "cancelled"
+    inspection = await client.get(f"{route}/{execution_id}")
+    assert inspection.status_code == 200
+    assert inspection.json()["health"]["status"] == "cancelled"
+    assert inspection.json()["health"]["terminal"] is True
+    assert inspection.json()["health"]["leaseActive"] is False
     refused = await client.post(f"{route}/{execution_id}/run")
     assert refused.status_code == 409
     assert refused.json()["code"] == "execution_not_runnable"

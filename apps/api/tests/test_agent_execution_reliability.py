@@ -26,13 +26,22 @@ from opencanvas_api.services.agents.contracts import (
     ExecutionStatus,
     RevocationRecord,
 )
-from opencanvas_api.services.agents.persistence import ControlledAgentRepository
+from opencanvas_api.services.agents.execution import (
+    CancellationRequest,
+    ControlledExecutionLifecycle,
+)
+from opencanvas_api.services.agents.persistence import (
+    AgentStateConflict,
+    ControlledAgentRepository,
+)
 from opencanvas_api.services.agents.reliability import (
     EXECUTION_LEASE_DURATION,
     ControlledExecutionReliability,
+    ExecutionHealthStatus,
     ExecutionReliabilityDenied,
     RetryActionError,
     RetryFailureClassification,
+    derive_execution_health,
     retry_delay,
 )
 from opencanvas_api.services.trace import RecordTraceEventInput, TraceService
@@ -1145,5 +1154,363 @@ async def test_competing_retry_deliveries_execute_action_once(tmp_path: Path) ->
         execution = await _execution(database, bundle)
         assert execution.attempt_count == 1
         assert execution.terminal_outcome == ExecutionStatus.SUCCEEDED.value
+    finally:
+        await database.dispose()
+
+
+async def test_active_lease_cancellation_fences_generation_and_is_idempotent(
+    database: Database,
+) -> None:
+    bundle = await _ready_bundle(database)
+    claimed_at = NOW + timedelta(minutes=1)
+    cancellation = CancellationRequest(
+        cancellation_id=uuid.uuid4(),
+        execution_id=bundle.execution.execution_id,
+        user_id=bundle.execution.user_id,
+        workspace_id=bundle.execution.workspace_id,
+        requested_at=claimed_at + timedelta(seconds=10),
+    )
+    async with database.sessions() as session:
+        reliability = ControlledExecutionReliability(session)
+        lease = await reliability.claim(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            claimed_at=claimed_at,
+        )
+        lifecycle = ControlledExecutionLifecycle(session)
+        first = await lifecycle.cancel(
+            authenticated_user_id=bundle.execution.user_id,
+            request=cancellation,
+            trace_id=uuid.uuid4(),
+        )
+        duplicate = await lifecycle.cancel(
+            authenticated_user_id=bundle.execution.user_id,
+            request=cancellation,
+            trace_id=uuid.uuid4(),
+        )
+        with pytest.raises(ExecutionReliabilityDenied, match="execution_not_running"):
+            await reliability.renew(
+                user_id=bundle.execution.user_id,
+                workspace_id=bundle.execution.workspace_id,
+                execution_id=bundle.execution.execution_id,
+                owner_id=lease.owner_id,
+                generation=lease.generation,
+                renewed_at=claimed_at + timedelta(seconds=11),
+            )
+        await session.commit()
+        execution = await session.get(ControlledAgentExecution, bundle.execution.execution_id)
+        assert execution is not None
+        assert first.cancelled and not first.duplicate
+        assert duplicate.cancelled and duplicate.duplicate
+        assert execution.lease_generation == lease.generation + 1
+        assert execution.lease_owner_id is None
+        assert execution.next_retry_at is None
+        assert execution.terminal_outcome == ExecutionStatus.CANCELLED.value
+        assert execution.failure_classification == "user_cancelled"
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(ControlledAgentAuditEvent)
+                .where(ControlledAgentAuditEvent.event_type == "execution.cancelled")
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(TraceEvent)
+                .where(TraceEvent.event_type == "execution.cancelled")
+            )
+            == 1
+        )
+
+
+async def test_retry_waiting_execution_can_be_cancelled(database: Database) -> None:
+    bundle = await _ready_bundle(database)
+
+    async def transient(_: object) -> None:
+        raise RetryActionError(RetryFailureClassification.PROVIDER_TIMEOUT)
+
+    async with database.sessions() as session:
+        result = await ControlledExecutionReliability(session).execute_retry(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            attempted_at=NOW + timedelta(minutes=1),
+            action=transient,
+        )
+        assert result.status is ExecutionStatus.READY
+        cancelled = await ControlledExecutionLifecycle(session).cancel(
+            authenticated_user_id=bundle.execution.user_id,
+            request=CancellationRequest(
+                cancellation_id=uuid.uuid4(),
+                execution_id=bundle.execution.execution_id,
+                user_id=bundle.execution.user_id,
+                workspace_id=bundle.execution.workspace_id,
+                requested_at=NOW + timedelta(minutes=1, seconds=1),
+            ),
+            trace_id=uuid.uuid4(),
+        )
+        await session.commit()
+        execution = await session.get(ControlledAgentExecution, bundle.execution.execution_id)
+        assert cancelled.cancelled
+        assert execution is not None
+        assert execution.next_retry_at is None
+        assert execution.terminal_outcome == ExecutionStatus.CANCELLED.value
+        with pytest.raises(ExecutionReliabilityDenied, match="execution_not_claimable"):
+            await ControlledExecutionReliability(session).claim(
+                user_id=bundle.execution.user_id,
+                workspace_id=bundle.execution.workspace_id,
+                execution_id=bundle.execution.execution_id,
+                claimed_at=NOW + timedelta(minutes=2),
+            )
+
+
+@pytest.mark.parametrize("failure_stage", ["fence", "transition", "trace"])
+async def test_cancellation_failure_rolls_back_fence_transition_audit_and_trace(
+    database: Database,
+    failure_stage: str,
+) -> None:
+    bundle = await _ready_bundle(database)
+    claimed_at = NOW + timedelta(minutes=1)
+
+    async def fail() -> None:
+        raise RuntimeError("injected cancellation failure")
+
+    async with database.sessions() as session:
+        lease = await ControlledExecutionReliability(session).claim(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            claimed_at=claimed_at,
+        )
+        await session.commit()
+
+    async with database.sessions() as session:
+        lifecycle = ControlledExecutionLifecycle(
+            session,
+            trace_service=(_FailingTraceService(session) if failure_stage == "trace" else None),
+            after_lease_fence=fail if failure_stage == "fence" else None,
+            after_cancel_transition=fail if failure_stage == "transition" else None,
+        )
+        with pytest.raises(RuntimeError):
+            await lifecycle.cancel(
+                authenticated_user_id=bundle.execution.user_id,
+                request=CancellationRequest(
+                    cancellation_id=uuid.uuid4(),
+                    execution_id=bundle.execution.execution_id,
+                    user_id=bundle.execution.user_id,
+                    workspace_id=bundle.execution.workspace_id,
+                    requested_at=claimed_at + timedelta(seconds=10),
+                ),
+                trace_id=uuid.uuid4(),
+            )
+        await session.commit()
+
+    async with database.sessions() as session:
+        execution = await session.get(ControlledAgentExecution, bundle.execution.execution_id)
+        assert execution is not None
+        assert execution.lease_owner_id == lease.owner_id
+        assert execution.lease_generation == lease.generation
+        assert execution.completed_at is None
+        current = await ControlledAgentRepository(session).current_state(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+        )
+        assert current is not None and current.status == ExecutionStatus.RUNNING.value
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(ControlledAgentAuditEvent)
+                .where(ControlledAgentAuditEvent.event_type == "execution.cancelled")
+            )
+            == 0
+        )
+
+
+async def test_deadline_termination_fences_active_lease_and_is_idempotent(
+    database: Database,
+) -> None:
+    bundle = await _ready_bundle(database)
+    claimed_at = NOW + timedelta(minutes=1)
+    async with database.sessions() as session:
+        reliability = ControlledExecutionReliability(session)
+        lease = await reliability.claim(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            claimed_at=claimed_at,
+        )
+        before = await reliability.terminate_expired(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            evaluated_at=NOW + timedelta(minutes=14),
+        )
+        first = await reliability.terminate_expired(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            evaluated_at=NOW + timedelta(minutes=15),
+        )
+        duplicate = await reliability.terminate_expired(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            evaluated_at=NOW + timedelta(minutes=16),
+        )
+        await session.commit()
+        execution = await session.get(ControlledAgentExecution, bundle.execution.execution_id)
+        assert not before.terminated
+        assert first.terminated and not first.duplicate
+        assert duplicate.terminated and duplicate.duplicate
+        assert execution is not None
+        assert execution.lease_generation == lease.generation + 1
+        assert execution.lease_owner_id is None
+        assert execution.next_retry_at is None
+        assert execution.terminal_outcome == ExecutionStatus.CANCELLED.value
+        assert execution.failure_classification == "execution_deadline_exceeded"
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(ControlledAgentAuditEvent)
+                .where(ControlledAgentAuditEvent.event_type == "execution.deadline_exceeded")
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(TraceEvent)
+                .where(TraceEvent.event_type == "execution.deadline_exceeded")
+            )
+            == 1
+        )
+
+
+async def test_deadline_trace_failure_restores_active_lease(database: Database) -> None:
+    bundle = await _ready_bundle(database)
+    async with database.sessions() as session:
+        lease = await ControlledExecutionReliability(session).claim(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            claimed_at=NOW + timedelta(minutes=1),
+        )
+        await session.commit()
+    async with database.sessions() as session:
+        service = ControlledExecutionReliability(
+            session,
+            trace_service=_FailingTraceService(session),
+        )
+        with pytest.raises(RuntimeError, match="injected trace failure"):
+            await service.terminate_expired(
+                user_id=bundle.execution.user_id,
+                workspace_id=bundle.execution.workspace_id,
+                execution_id=bundle.execution.execution_id,
+                evaluated_at=NOW + timedelta(minutes=15),
+            )
+        await session.commit()
+    execution = await _execution(database, bundle)
+    assert execution.completed_at is None
+    assert execution.lease_owner_id == lease.owner_id
+    assert execution.lease_generation == lease.generation
+
+
+async def test_derived_health_omits_owner_and_maps_reliability_states(
+    database: Database,
+) -> None:
+    bundle = await _ready_bundle(database)
+    async with database.sessions() as session:
+        execution = await session.get(ControlledAgentExecution, bundle.execution.execution_id)
+        assert execution is not None
+        ready = derive_execution_health(
+            execution,
+            lifecycle_status=ExecutionStatus.READY,
+            evaluated_at=NOW + timedelta(seconds=1),
+        )
+        assert ready.status is ExecutionHealthStatus.WAITING_CLAIMABLE
+        assert ready.claimable and not ready.lease_active
+        assert not hasattr(ready, "lease_owner_id")
+
+        await ControlledExecutionReliability(session).claim(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            claimed_at=NOW + timedelta(minutes=1),
+        )
+        await session.refresh(execution)
+        active = derive_execution_health(
+            execution,
+            lifecycle_status=ExecutionStatus.RUNNING,
+            evaluated_at=NOW + timedelta(minutes=1, seconds=1),
+        )
+        assert active.status is ExecutionHealthStatus.ACTIVELY_LEASED
+        assert active.lease_active and not active.claimable
+
+        inconsistent = derive_execution_health(
+            execution,
+            lifecycle_status=ExecutionStatus.READY,
+            evaluated_at=NOW + timedelta(minutes=1, seconds=1),
+        )
+        assert inconsistent.status is ExecutionHealthStatus.INCONSISTENT
+
+
+async def test_competing_sqlite_cancellations_create_one_terminal_outcome(
+    tmp_path: Path,
+) -> None:
+    database = await _file_database(tmp_path / "cancel-race.db")
+    try:
+        bundle = await _ready_bundle(database)
+        cancellation = CancellationRequest(
+            cancellation_id=uuid.uuid4(),
+            execution_id=bundle.execution.execution_id,
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            requested_at=NOW + timedelta(minutes=1),
+        )
+
+        async def cancel() -> str:
+            async with database.sessions() as session:
+                try:
+                    result = await ControlledExecutionLifecycle(session).cancel(
+                        authenticated_user_id=bundle.execution.user_id,
+                        request=cancellation,
+                        trace_id=uuid.uuid4(),
+                    )
+                    await session.commit()
+                    return "duplicate" if result.duplicate else result.status.value
+                except AgentStateConflict:
+                    await session.rollback()
+                    return "conflict"
+
+        outcomes = await asyncio.gather(cancel(), cancel())
+        assert "cancelled" in outcomes
+        assert set(outcomes) <= {"cancelled", "duplicate", "conflict"}
+        async with database.sessions() as session:
+            execution = await session.get(
+                ControlledAgentExecution,
+                bundle.execution.execution_id,
+            )
+            assert execution is not None
+            assert execution.terminal_outcome == ExecutionStatus.CANCELLED.value
+            assert (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(ControlledAgentAuditEvent)
+                    .where(ControlledAgentAuditEvent.event_type == "execution.cancelled")
+                )
+                == 1
+            )
+            assert (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(TraceEvent)
+                    .where(TraceEvent.event_type == "execution.cancelled")
+                )
+                == 1
+            )
     finally:
         await database.dispose()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from contextlib import suppress
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -9,14 +9,15 @@ from types import MappingProxyType
 from typing import Literal, Self
 
 from pydantic import Field, field_validator, model_validator
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from opencanvas_api.db.models import (
     Canvas,
     CanvasNode,
     ControlledAgentAuditEvent,
+    ControlledAgentExecution,
     ControlledAgentRequestIdentity,
     Document,
     DocumentChunk,
@@ -49,6 +50,7 @@ from opencanvas_api.services.agents.persistence import (
     ApprovalConsumptionAttempt,
     ControlledAgentRepository,
 )
+from opencanvas_api.services.trace import RecordTraceEventInput, TraceService
 
 
 class ControlledAction(StrEnum):
@@ -697,6 +699,8 @@ class ResultAcceptanceRequest(ContractModel):
     resolution_digest: Digest = Field(pattern=r"^[0-9a-f]{64}$")
     result_digest: Digest = Field(pattern=r"^[0-9a-f]{64}$")
     produced_at: datetime
+    lease_owner_id: str = Field(min_length=1, max_length=128)
+    lease_generation: int = Field(ge=1)
 
     _produced_at_is_utc = field_validator("produced_at")(_require_aware_utc)
 
@@ -716,11 +720,40 @@ def _database_utc(value: datetime) -> datetime:
 class ControlledExecutionLifecycle:
     """Authoritative cancellation and result-publication boundary for synchronous execution."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        trace_service: TraceService | None = None,
+        after_lease_fence: Callable[[], Awaitable[None]] | None = None,
+        after_cancel_transition: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         self.session = session
         self.repository = ControlledAgentRepository(session)
+        self.trace_service = trace_service or TraceService(session)
+        self.after_lease_fence = after_lease_fence
+        self.after_cancel_transition = after_cancel_transition
 
     async def cancel(
+        self,
+        *,
+        authenticated_user_id: uuid.UUID,
+        request: CancellationRequest,
+        trace_id: uuid.UUID,
+    ) -> CancellationOutcome:
+        try:
+            async with self.session.begin_nested():
+                return await self._cancel(
+                    authenticated_user_id=authenticated_user_id,
+                    request=request,
+                    trace_id=trace_id,
+                )
+        except OperationalError as exc:
+            if "database is locked" not in str(exc).lower():
+                raise
+            raise AgentStateConflict("execution_state_changed") from None
+
+    async def _cancel(
         self,
         *,
         authenticated_user_id: uuid.UUID,
@@ -800,25 +833,47 @@ class ControlledExecutionLifecycle:
                 reason_code="execution_already_terminal",
             )
         if current_status is ExecutionStatus.CANCELLED:
-            await self._append_lifecycle_event(
-                event_id=request.cancellation_id,
-                trace_id=trace_id,
-                execution_id=request.execution_id,
-                user_id=request.user_id,
-                workspace_id=request.workspace_id,
-                event_type="execution.cancelled",
-                recorded_at=request.requested_at,
-                attributes=(
-                    AuditAttribute(key="reason", value=request.reason_code),
-                    AuditAttribute(key="status", value=ExecutionStatus.CANCELLED.value),
-                ),
-            )
             return CancellationOutcome(
                 cancelled=True,
-                duplicate=False,
+                duplicate=True,
                 status=ExecutionStatus.CANCELLED,
-                reason_code=request.reason_code,
+                reason_code="execution_already_cancelled",
             )
+
+        execution = await self.repository._owned_execution(
+            request.user_id,
+            request.workspace_id,
+            request.execution_id,
+        )
+        if execution.lease_owner_id is not None:
+            fenced_id = await self.session.scalar(
+                update(ControlledAgentExecution)
+                .where(
+                    ControlledAgentExecution.id == request.execution_id,
+                    ControlledAgentExecution.user_id == request.user_id,
+                    ControlledAgentExecution.workspace_id == request.workspace_id,
+                    ControlledAgentExecution.completed_at.is_(None),
+                    ControlledAgentExecution.lease_generation == execution.lease_generation,
+                )
+                .values(
+                    lease_owner_id=None,
+                    lease_acquired_at=None,
+                    lease_expires_at=None,
+                    lease_generation=ControlledAgentExecution.lease_generation + 1,
+                    next_retry_at=None,
+                )
+                .returning(ControlledAgentExecution.id)
+                .execution_options(synchronize_session=False)
+            )
+            if fenced_id is None:
+                return await self._record_cancel_race_rejection(
+                    request=request,
+                    trace_id=trace_id,
+                    status=await self._required_current_status(request),
+                )
+            await self.session.refresh(execution)
+            if self.after_lease_fence is not None:
+                await self.after_lease_fence()
 
         try:
             await self.repository.append_state(
@@ -832,6 +887,8 @@ class ControlledExecutionLifecycle:
                     safe_reason_code=request.reason_code,
                 )
             )
+            if self.after_cancel_transition is not None:
+                await self.after_cancel_transition()
         except AgentStateConflict:
             current_status = await self._required_current_status(request)
             if current_status is not ExecutionStatus.CANCELLED:
@@ -921,23 +978,49 @@ class ControlledExecutionLifecycle:
                 reason_code=f"execution_{current_status.value}",
             )
 
+        execution = await self.repository._owned_execution(
+            request.user_id,
+            request.workspace_id,
+            request.execution_id,
+        )
+        if _database_utc(execution.deadline_at) <= accepted_at:
+            from opencanvas_api.services.agents.reliability import (
+                ControlledExecutionReliability,
+            )
+
+            await ControlledExecutionReliability(self.session).terminate_expired(
+                user_id=request.user_id,
+                workspace_id=request.workspace_id,
+                execution_id=request.execution_id,
+                evaluated_at=accepted_at,
+            )
+            return await self._reject_result(
+                request=request,
+                trace_id=trace_id,
+                accepted_at=accepted_at,
+                status=ExecutionStatus.CANCELLED,
+                reason_code="execution_deadline_exceeded",
+            )
         authority_failure = await self._authority_failure(
             authorized=authorized,
             evaluated_at=accepted_at,
         )
         if authority_failure is not None:
-            with suppress(AgentStateConflict):
-                await self.repository.append_state(
-                    ExecutionStateRecord(
-                        state_id=uuid.uuid4(),
-                        execution_id=request.execution_id,
-                        user_id=request.user_id,
-                        workspace_id=request.workspace_id,
-                        status=ExecutionStatus.CANCELLED,
-                        recorded_at=accepted_at,
-                        safe_reason_code=authority_failure,
-                    )
-                )
+            await self.cancel(
+                authenticated_user_id=request.user_id,
+                request=CancellationRequest(
+                    cancellation_id=uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"opencanvas:authority-cancel:{request.execution_id}:{authority_failure}",
+                    ),
+                    execution_id=request.execution_id,
+                    user_id=request.user_id,
+                    workspace_id=request.workspace_id,
+                    requested_at=accepted_at,
+                    reason_code=authority_failure,
+                ),
+                trace_id=trace_id,
+            )
             current_status = await self._required_current_status(request)
             return await self._reject_result(
                 request=request,
@@ -945,6 +1028,30 @@ class ControlledExecutionLifecycle:
                 accepted_at=accepted_at,
                 status=current_status,
                 reason_code=authority_failure,
+            )
+        lease_id = await self.session.scalar(
+            update(ControlledAgentExecution)
+            .where(
+                ControlledAgentExecution.id == request.execution_id,
+                ControlledAgentExecution.user_id == request.user_id,
+                ControlledAgentExecution.workspace_id == request.workspace_id,
+                ControlledAgentExecution.completed_at.is_(None),
+                ControlledAgentExecution.lease_owner_id == request.lease_owner_id,
+                ControlledAgentExecution.lease_generation == request.lease_generation,
+                ControlledAgentExecution.lease_expires_at > accepted_at,
+                ControlledAgentExecution.deadline_at > accepted_at,
+            )
+            .values(lease_expires_at=ControlledAgentExecution.lease_expires_at)
+            .returning(ControlledAgentExecution.id)
+            .execution_options(synchronize_session=False)
+        )
+        if lease_id is None:
+            return await self._reject_result(
+                request=request,
+                trace_id=trace_id,
+                accepted_at=accepted_at,
+                status=current_status,
+                reason_code="stale_execution_lease",
             )
 
         try:
@@ -1203,6 +1310,30 @@ class ControlledExecutionLifecycle:
                 event_type=event_type,
                 recorded_at=recorded_at,
                 attributes=attributes,
+            )
+        )
+        await self.trace_service.record_event(
+            RecordTraceEventInput(
+                trace_id=trace_id,
+                event_type=event_type,
+                actor_type="service",
+                user_id=user_id,
+                workspace_id=workspace_id,
+                object_id=execution_id,
+                object_type="controlled_agent_execution",
+                operation=event_type,
+                status="succeeded",
+                metadata={
+                    "eventId": str(event_id),
+                    "reason": next(
+                        (
+                            str(attribute.value)
+                            for attribute in attributes
+                            if attribute.key == "reason"
+                        ),
+                        "",
+                    ),
+                },
             )
         )
 

@@ -48,6 +48,18 @@ class RetryFailureClassification(StrEnum):
     UNSUPPORTED_ACTION = "unsupported_action"
 
 
+class ExecutionHealthStatus(StrEnum):
+    WAITING_CLAIMABLE = "waiting_claimable"
+    ACTIVELY_LEASED = "actively_leased"
+    WAITING_RETRY = "waiting_retry"
+    CANCELLED = "cancelled"
+    DEADLINE_EXCEEDED = "deadline_exceeded"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    EXHAUSTED = "exhausted"
+    INCONSISTENT = "inconsistent"
+
+
 RETRYABLE_FAILURES = frozenset(
     {
         RetryFailureClassification.PROVIDER_TIMEOUT,
@@ -112,6 +124,31 @@ class RetryExecutionResult:
     next_retry_at: datetime | None
     duplicate: bool
     trace_id: uuid.UUID
+
+
+@dataclass(frozen=True, slots=True)
+class DeadlineTermination:
+    execution_id: uuid.UUID
+    terminated: bool
+    duplicate: bool
+    status: ExecutionStatus
+    reason_code: str
+    generation: int
+    trace_id: uuid.UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionHealth:
+    status: ExecutionHealthStatus
+    lifecycle_status: ExecutionStatus | None
+    claimable: bool
+    terminal: bool
+    lease_active: bool
+    attempt_count: int
+    max_attempts: int
+    deadline_at: datetime
+    next_retry_at: datetime | None
+    safe_reason_code: str | None
 
 
 class ControlledExecutionReliability:
@@ -610,6 +647,131 @@ class ControlledExecutionReliability:
             action=apply_reversible_effect,
         )
 
+    async def terminate_expired(
+        self,
+        *,
+        user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        execution_id: uuid.UUID,
+        evaluated_at: datetime,
+    ) -> DeadlineTermination:
+        """Idempotently terminalize one execution whose immutable deadline passed."""
+
+        evaluated_at = _aware_utc(evaluated_at)
+        async with self.session.begin_nested():
+            execution = await self.repository._owned_execution(
+                user_id,
+                workspace_id,
+                execution_id,
+            )
+            current = await self.repository.current_state(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                execution_id=execution_id,
+            )
+            current_status = ExecutionStatus(current.status) if current is not None else None
+            if _aware_utc(execution.deadline_at) > evaluated_at:
+                return DeadlineTermination(
+                    execution_id=execution_id,
+                    terminated=False,
+                    duplicate=False,
+                    status=current_status or ExecutionStatus.PROPOSED,
+                    reason_code="execution_deadline_open",
+                    generation=execution.lease_generation,
+                    trace_id=None,
+                )
+            if execution.completed_at is not None:
+                deadline_terminal = (
+                    execution.terminal_outcome == ExecutionStatus.CANCELLED.value
+                    and execution.failure_classification == "execution_deadline_exceeded"
+                )
+                return DeadlineTermination(
+                    execution_id=execution_id,
+                    terminated=deadline_terminal,
+                    duplicate=deadline_terminal,
+                    status=ExecutionStatus(
+                        execution.terminal_outcome or ExecutionStatus.FAILED.value
+                    ),
+                    reason_code=(
+                        "execution_deadline_exceeded"
+                        if deadline_terminal
+                        else "execution_already_terminal"
+                    ),
+                    generation=execution.lease_generation,
+                    trace_id=None,
+                )
+            if current is None:
+                await self.repository.append_state(
+                    ExecutionStateRecord(
+                        state_id=uuid.uuid4(),
+                        execution_id=execution_id,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        status=ExecutionStatus.PROPOSED,
+                        recorded_at=evaluated_at,
+                        safe_reason_code="deadline_before_start",
+                    )
+                )
+
+            fenced_id = await self.session.scalar(
+                update(ControlledAgentExecution)
+                .where(
+                    ControlledAgentExecution.id == execution_id,
+                    ControlledAgentExecution.user_id == user_id,
+                    ControlledAgentExecution.workspace_id == workspace_id,
+                    ControlledAgentExecution.completed_at.is_(None),
+                    ControlledAgentExecution.deadline_at <= evaluated_at,
+                )
+                .values(
+                    lease_owner_id=None,
+                    lease_acquired_at=None,
+                    lease_expires_at=None,
+                    lease_generation=ControlledAgentExecution.lease_generation + 1,
+                    next_retry_at=None,
+                )
+                .returning(ControlledAgentExecution.id)
+                .execution_options(synchronize_session=False)
+            )
+            if fenced_id is None:
+                raise ExecutionReliabilityDenied("deadline_termination_conflict")
+            await self.session.refresh(execution)
+            await self.repository.append_state(
+                ExecutionStateRecord(
+                    state_id=uuid.uuid4(),
+                    execution_id=execution_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    status=ExecutionStatus.CANCELLED,
+                    recorded_at=evaluated_at,
+                    safe_reason_code="execution_deadline_exceeded",
+                )
+            )
+            trace_id = uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"opencanvas:execution-deadline:{user_id}:{workspace_id}:{execution_id}",
+            )
+            await self.session.refresh(execution)
+            await self._record_event(
+                trace_id=trace_id,
+                execution=execution,
+                event_type="execution.deadline_exceeded",
+                recorded_at=evaluated_at,
+                metadata={
+                    "attemptCount": execution.attempt_count,
+                    "leaseGeneration": execution.lease_generation,
+                    "status": ExecutionStatus.CANCELLED.value,
+                },
+            )
+        return DeadlineTermination(
+            execution_id=execution_id,
+            terminated=True,
+            duplicate=False,
+            status=ExecutionStatus.CANCELLED,
+            reason_code="execution_deadline_exceeded",
+            generation=execution.lease_generation,
+            trace_id=trace_id,
+        )
+
     async def _record_retry_failure(
         self,
         *,
@@ -931,12 +1093,97 @@ def retry_delay(attempt_count: int) -> timedelta:
     return timedelta(seconds=seconds)
 
 
+def derive_execution_health(
+    execution: ControlledAgentExecution,
+    *,
+    lifecycle_status: ExecutionStatus | None,
+    evaluated_at: datetime,
+) -> ExecutionHealth:
+    """Derive a safe operational status without exposing lease identity."""
+
+    evaluated_at = _aware_utc(evaluated_at)
+    deadline_at = _aware_utc(execution.deadline_at)
+    next_retry_at = (
+        _aware_utc(execution.next_retry_at) if execution.next_retry_at is not None else None
+    )
+    lease_active = (
+        execution.lease_owner_id is not None
+        and execution.lease_expires_at is not None
+        and _aware_utc(execution.lease_expires_at) > evaluated_at
+    )
+    terminal = execution.completed_at is not None
+    inconsistent = (
+        lifecycle_status is None
+        or terminal
+        != (
+            lifecycle_status
+            in {
+                ExecutionStatus.SUCCEEDED,
+                ExecutionStatus.FAILED,
+                ExecutionStatus.CANCELLED,
+                ExecutionStatus.DENIED,
+            }
+        )
+        or (lifecycle_status is ExecutionStatus.RUNNING and not lease_active)
+        or (lifecycle_status is ExecutionStatus.READY and execution.lease_owner_id is not None)
+    )
+    if inconsistent:
+        status = ExecutionHealthStatus.INCONSISTENT
+    elif terminal and lifecycle_status is ExecutionStatus.SUCCEEDED:
+        status = ExecutionHealthStatus.COMPLETED
+    elif terminal and lifecycle_status is ExecutionStatus.CANCELLED:
+        status = (
+            ExecutionHealthStatus.DEADLINE_EXCEEDED
+            if execution.failure_classification == "execution_deadline_exceeded"
+            else ExecutionHealthStatus.CANCELLED
+        )
+    elif terminal and execution.failure_classification == "execution_attempts_exhausted":
+        status = ExecutionHealthStatus.EXHAUSTED
+    elif terminal:
+        status = ExecutionHealthStatus.FAILED
+    elif deadline_at <= evaluated_at:
+        status = ExecutionHealthStatus.DEADLINE_EXCEEDED
+    elif lifecycle_status is ExecutionStatus.RUNNING and lease_active:
+        status = ExecutionHealthStatus.ACTIVELY_LEASED
+    elif (
+        lifecycle_status is ExecutionStatus.READY
+        and next_retry_at is not None
+        and next_retry_at > evaluated_at
+    ):
+        status = ExecutionHealthStatus.WAITING_RETRY
+    elif lifecycle_status is ExecutionStatus.READY:
+        status = ExecutionHealthStatus.WAITING_CLAIMABLE
+    else:
+        status = ExecutionHealthStatus.WAITING_CLAIMABLE
+    claimable = (
+        status is ExecutionHealthStatus.WAITING_CLAIMABLE
+        and lifecycle_status is ExecutionStatus.READY
+        and execution.attempt_count < execution.max_attempts
+        and deadline_at > evaluated_at
+    )
+    return ExecutionHealth(
+        status=status,
+        lifecycle_status=lifecycle_status,
+        claimable=claimable,
+        terminal=terminal,
+        lease_active=lease_active,
+        attempt_count=execution.attempt_count,
+        max_attempts=execution.max_attempts,
+        deadline_at=deadline_at,
+        next_retry_at=next_retry_at,
+        safe_reason_code=execution.failure_classification,
+    )
+
+
 __all__ = [
     "EXECUTION_LEASE_DURATION",
     "RETRYABLE_FAILURES",
     "RETRY_BASE_DELAY",
     "RETRY_MAX_DELAY",
     "ControlledExecutionReliability",
+    "DeadlineTermination",
+    "ExecutionHealth",
+    "ExecutionHealthStatus",
     "ExecutionLease",
     "ExecutionLeaseChange",
     "ExecutionRecovery",
@@ -944,5 +1191,6 @@ __all__ = [
     "RetryActionError",
     "RetryExecutionResult",
     "RetryFailureClassification",
+    "derive_execution_health",
     "retry_delay",
 ]
