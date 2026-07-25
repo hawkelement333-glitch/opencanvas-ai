@@ -14,16 +14,19 @@ projection, client, workflow, import, or AI output may grant authority.
 Permanent product loop:
 
 Approved data
-→ grounded questions
+→ grounded answers
 → traceable workflows
 → adaptive agent proposals
 → governed agents
 → traceable results
+→ evaluated feedback
+→ governed agent improvement
 
 > Every answer, workflow, agent definition, approval, action, retry, failure,
-> and result must remain connected to the authority and evidence that produced
-> it. Trace means auditable provenance and execution evidence, not private model
-> chain of thought.
+> evaluation, training proposal, quarantine decision, rehabilitation plan,
+> promotion decision, and result must remain connected to the authority and
+> evidence that produced it. Trace means auditable provenance and execution
+> evidence, not private model chain of thought.
 
 Dependencies: 5.2 requires 5.1; 5.3 requires 5.1–5.2; 5.4 requires 5.1–5.3
 and Milestone 4; 5.5 may begin after 5.1 but requires 5.2/5.4 to complete; 5.6
@@ -162,21 +165,81 @@ evidence, activation, declarative bounds, and effective-authority review.
 Runtime authority remains Milestone 4. Prohibit delegation, descendants,
 arbitrary code/tools/connectors, agent-initiated creation, and policy changes.
 
-The Adaptive Agent Architect may propose specialized agent definitions from
-approved frameworks, data structures, and workflows. It cannot activate
-agents, grant authority, assign private data, install unreviewed tools, or
-increase limits. Activation requires policy validation and human approval.
+The future controlled Adaptive Agent Architect may analyze approved user goals,
+selected/scoped data structures, repeated questions and tasks, versioned
+workflows, evidence requirements, specialist-role needs, registered tools and
+providers, required outputs, approval points, and time/token/cost/retry limits.
+It may propose an immutable versioned definition containing purpose/role,
+operating framework, specialist perspectives, approved sources, proposed
+tools/providers, workflow bindings, evidence/testing standards, output schema,
+escalation rules, recommended limits, prohibited actions, and evaluation
+criteria.
 
-Migration `2026xxxx_0021`: templates, agents, versions, proposals, activation.
+The Architect cannot self-activate or self-approve, grant capabilities, assign
+private data, install tools, choose unrestricted authority, increase budgets or
+limits, bypass policy validation, create unrestricted descendants, or hide
+inherited instructions, sources, conflicts, or risks. Mobius validates every
+proposal against registered capabilities, tools, providers, exact user/
+workspace/canvas scopes, data permissions, policies, approvals, resources, and
+cost limits. Human approval is required before activation.
+
+The separate future controlled Adaptive Training and Evaluation Agent may
+analyze approved execution Trace records, workflow outcomes, evidence and
+citations, human corrections, approval/rejection decisions, evaluation scores,
+retry/failure/cancellation/rollback evidence, reliability and latency,
+resource/cost use, grounding/citation quality, and later quarantine/
+rehabilitation outcomes. It identifies one supported weakness and may propose a
+new immutable agent or workflow version changing instructions/frameworks,
+retrieval, workflow steps, tool-selection rules, schemas, evaluation cases,
+approval-threshold recommendations, server-controlled limit recommendations,
+restrictions, or remedial training.
+
+The Training Agent cannot silently alter active definitions; self-approve or
+self-promote; release quarantine; grant capabilities or data; weaken approval,
+policy, or security; combine private scopes; treat successful execution as
+correctness; delete failed versions or unfavorable evaluations; hide results;
+train on unapproved data; create unrestricted descendants; or autonomously
+train model weights.
+
+Governed improvement must:
+
+1. collect approved Trace, result, evaluation, and feedback records;
+2. identify one evidence-supported weakness;
+3. propose a new immutable agent or workflow version;
+4. evaluate it in isolation against fixed cases;
+5. compare it with the active version across grounding, citation accuracy,
+   task accuracy, security, authority boundaries, reliability, latency, and
+   cost;
+6. reject any candidate weakening security, scope, provenance, reliability, or
+   approval requirements;
+7. require human promotion approval;
+8. activate only that approved version;
+9. retain the prior version for audit, comparison, and rollback; and
+10. record later failure, retraining, restriction, quarantine, retirement, or
+    replacement.
+
+Initial training changes only frameworks, instructions, retrieval, workflows,
+tools, schemas, limits, and evaluation cases. Autonomous model-weight training
+is deferred. Future fine-tuning additionally requires licensed approved
+datasets, privacy and scope review, dataset/model versioning, held-out security
+and grounding evaluations, human-controlled promotion, monitoring, and
+rollback.
+
+Migration `2026xxxx_0021`: templates, agents, versions, proposals, approved
+feedback, fixed evaluation cases, candidate evaluations, promotion, and
+activation.
 
 Gate: schemas/digests/immutability; malicious data confinement; no
 self-activation/standing grant; strict runtime authority intersection;
-revocation/replacement/stale/prohibited capability; accessible browser smoke.
+revocation/replacement/stale/prohibited capability; isolated fixed-case
+candidate comparison; feedback/evaluation provenance; human-controlled
+promotion; prior-version reconstruction/rollback; accessible browser smoke.
 
 Trace acceptance: source framework; workflow or job being served; proposed
 specialist roles; approved sources and tools; capabilities and limits; creator
 and approver; provider and model; validation and activation; and revisions,
-executions, suspension, retirement, and replacement.
+executions, suspension, retirement, and replacement. Later Milestone 9 records
+extend this chain with quarantine and rehabilitation.
 
 ## 5.7 — Final Combined Milestone 5 Audit
 
@@ -204,8 +267,91 @@ approved data
 → governed execution
 → traceable result
 
+It must also prove:
+
+1. A specialized agent completes a traceable workflow.
+2. Approved human feedback or an evaluation score is recorded.
+3. The Training Agent identifies a supported weakness.
+4. A new immutable candidate version is proposed.
+5. Old and new versions are evaluated against fixed cases.
+6. The candidate cannot weaken security, permissions, grounding, provenance,
+   reliability, or cost controls.
+7. Human approval controls promotion.
+8. The approved version is activated.
+9. The earlier version remains reconstructable and reversible.
+10. The safe Trace chain preserves source → workflow → agent → evaluation →
+    promotion.
+
+Academy, quarantine, rehabilitation, and tribunal systems remain future
+Milestone 9 scope and are not 5.7 implementation requirements.
+
 Create the completion document only after the combined gates pass. Milestone 6
 still requires explicit authorization.
+
+## Future Milestone 9 — Academy and agent review systems
+
+Milestone 5.6 establishes only immutable agent/workflow versions, approved
+feedback/evaluations, fixed cases, isolated candidate testing, proposal-only
+Architect and Training Agent roles, human-controlled promotion, and rollback.
+Milestone 9 expands them into the SolarPlexus Academy and Adaptive Training
+System with domain schools, specialist departments, versioned courses,
+approved lessons/frameworks/examples/tools/procedures, examinations, trainer/
+mentor/student/evaluator identities, lineage, approved programs/datasets,
+Trace-backed transcripts, version-specific certifications, remedial training,
+controlled skill transfer, candidate comparisons, human graduation/
+activation, retraining, suspension, quarantine, rehabilitation, retirement,
+replacement, and rollback.
+
+Academy records trace sources, course/framework versions, cases, student-agent
+version, trainers/evaluators, results/feedback, promotion/rejection,
+post-graduation capabilities, and later adverse lifecycle outcomes. The Academy
+may teach, evaluate, compare, certify, recommend, and propose retraining or
+rehabilitation. It cannot activate/promote itself, grant authority, release
+quarantine, cross private scopes, silently rewrite definitions, hide failure,
+weaken security/approval, infer correctness from repetition, create
+unrestricted descendants, or autonomously train model weights.
+
+Milestone 9 also owns the **Agent Justice, Quarantine, and Rehabilitation
+System**, composed of the Agent Quarantine Center, Agent Rehabilitation Center,
+and Agent Review Tribunal. “Jail” is only an optional UI metaphor for isolating
+unsafe software behavior, never punishment or personhood.
+
+Evidence-supported quarantine eligibility includes unauthorized action,
+repeated policy/scope violation, unsafe/corrupted/materially unreliable output,
+identity/version/signature/integrity failure, revoked dependency use, behavior
+drift, repeated resource-limit violations, poisoned-data instructions, failed
+required Academy evaluation/certification, and hidden delegation or authority
+expansion. Server-authoritative quarantine can stop work, fence leases, revoke
+temporary grants, block delegation/cross-planet travel, isolate ordinary
+workspace access, preserve required configuration/memory references/versions/
+Trace/evidence, prevent evidence destruction, and notify authorized humans.
+
+Rehabilitation reproduces and diagnoses the supported failure in isolation,
+proposes corrective training and a new immutable version, evaluates and
+compares it, requires authorized human release approval, restores only minimum
+approved capabilities, and preserves the old version. The human-controlled
+Tribunal reviews evidence, findings, evaluations, plans, recommendations,
+appeals, and retirement. Outcomes include release, restricted release,
+remedial Academy training, retraining, replacement, continued suspension or
+quarantine, retirement, archival, and legally/technically permitted deletion
+that preserves required audit evidence.
+
+Every case traces trigger → evidence → quarantine decision → investigation →
+rehabilitation/training plan → evaluation → human decision → release,
+restriction, replacement, retirement, or continued quarantine. Unsupported
+agent claims alone can never justify quarantine, restriction, restoration, or
+retirement.
+
+> Agents may detect, classify, and report unsafe behavior, but only
+> server-enforced policy and authorized humans may quarantine, restrict,
+> restore, release, replace, or retire an agent.
+
+The system cannot let agents punish, release, or retire one another; erase
+adverse evidence; rewrite Trace history; grant authority through
+rehabilitation; combine private evidence across scopes; quarantine indefinitely
+without review rules; release without evaluation and human approval; or erase
+the truth of original behavior. These are documentation and future acceptance
+criteria only.
 
 ## Deferred
 
@@ -214,3 +360,5 @@ still requires explicit authorization.
 - 7. Production Hardening
 - 8. Public Portfolio and Product Release
 - 9. SolarPlexus Agent Ecosystem
+  - SolarPlexus Academy and Adaptive Training System
+  - Agent Justice, Quarantine, and Rehabilitation System

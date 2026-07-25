@@ -27,16 +27,19 @@ Only checkpoint 5.1 is complete. Milestone 5 is not complete.
 ## Permanent traceability contract
 
 Approved data
-→ grounded questions
+→ grounded answers
 → traceable workflows
 → adaptive agent proposals
 → governed agents
 → traceable results
+→ evaluated feedback
+→ governed agent improvement
 
 > Every answer, workflow, agent definition, approval, action, retry, failure,
-> and result must remain connected to the authority and evidence that produced
-> it. Trace means auditable provenance and execution evidence, not private model
-> chain of thought.
+> evaluation, training proposal, quarantine decision, rehabilitation plan,
+> promotion decision, and result must remain connected to the authority and
+> evidence that produced it. Trace means auditable provenance and execution
+> evidence, not private model chain of thought.
 
 This contract amendment does not reopen 5.1 or start 5.2. The completed 5.1
 implementation already provides stable canonical scoped identities,
@@ -57,14 +60,97 @@ Later checkpoint acceptance now requires:
 - 5.6 traces the source framework, served workflow/job, proposed roles,
   approved sources/tools, bounds, creator/approver, provider/model, validation,
   activation, and the full definition/execution lifecycle.
-- 5.7 proves approved data through canonical graph provenance, grounded
-  citations, a versioned workflow, an adaptive proposal, human activation,
-  governed execution, and a traceable result.
+- 5.7 proves both the source-to-governed-result chain and the feedback-to-
+  evaluated-candidate-to-human-promotion chain while retaining the prior
+  reversible version.
 
-The Adaptive Agent Architect may propose specialized definitions from approved
-frameworks, data structures, and workflows. It cannot activate agents, grant
-authority, assign private data, install unreviewed tools, or increase limits;
-policy validation and human approval are mandatory for activation.
+## Adaptive agent and governed-improvement requirements
+
+Milestone 5.6 now records two separate future controlled, proposal-only roles:
+
+- The Adaptive Agent Architect analyzes approved goals, scoped data, repeated
+  work, versioned workflows, evidence needs, specialist roles, registered
+  tools/providers, outputs, approvals, and limits. It proposes immutable
+  versioned definitions with roles, frameworks, sources, tools, workflow
+  bindings, evidence/testing standards, schemas, escalation, limits,
+  prohibitions, and evaluation criteria.
+- The Adaptive Training and Evaluation Agent analyzes approved Trace,
+  workflow/result/evidence/citation records, human feedback, decisions, scores,
+  failures/recovery, reliability, resource/cost use, and later quarantine/
+  rehabilitation outcomes. It identifies one supported weakness and proposes a
+  new immutable agent or workflow version.
+
+Neither role may activate, approve, or promote its own work; grant capability
+or data access; install unreviewed tools; expand authority or limits; weaken
+policy/security/approval; cross private scopes; conceal sources, conflict,
+risk, or adverse evaluation; destroy old versions; create unrestricted
+descendants; or autonomously train model weights. Mobius validates proposals
+against registered capabilities, tools, providers, exact scopes, permissions,
+policies, approvals, resources, and costs. Human approval controls activation
+and promotion.
+
+Governed improvement collects approved evidence, identifies one supported
+weakness, proposes an immutable candidate, evaluates it in isolation against
+fixed cases, and compares grounding, citation/task accuracy, security,
+authority, reliability, latency, and cost. Any regression in security, scope,
+provenance, reliability, or approval requirements rejects the candidate. Only
+the human-approved version activates; the earlier version remains available
+for audit, comparison, and rollback.
+
+Initial training means governed changes to frameworks, instructions, retrieval,
+workflows, tools, schemas, limits, and evaluation cases. Model-weight training
+is deferred. Future fine-tuning requires licensed approved data, privacy and
+scope review, dataset/model versioning, held-out security/grounding evaluation,
+human promotion, monitoring, and rollback.
+
+The 5.7 audit must prove: traceable workflow completion; approved feedback or
+score; supported weakness identification; immutable candidate creation;
+fixed-case old/new comparison; preserved security, permissions, grounding,
+provenance, reliability, and cost controls; human promotion; approved
+activation; reconstructable/reversible prior version; and the safe complete
+source → workflow → agent → evaluation → promotion Trace chain.
+
+## Future Milestone 9 scope recorded
+
+Milestone 5.6 establishes only foundations. The complete **SolarPlexus Academy
+and Adaptive Training System** remains Milestone 9 scope: domain schools,
+specialist departments, versioned courses, approved lessons and datasets,
+fixed examinations, trainer/mentor/student/evaluator identities and lineage,
+Trace-backed transcripts, version-specific certifications, remedial training,
+controlled skill transfer, candidate comparisons, human graduation and
+activation, retraining, suspension, quarantine, rehabilitation, retirement,
+replacement, and rollback.
+
+Academy records retain exact source/course/case/agent/trainer/evaluator/result/
+feedback/promotion/capability/lifecycle provenance. The Academy may teach,
+evaluate, compare, certify, recommend, and propose retraining or rehabilitation
+but cannot activate, promote, grant authority, release quarantine, cross
+private scope, hide failure, weaken controls, create unrestricted descendants,
+or autonomously train model weights.
+
+The future **Agent Justice, Quarantine, and Rehabilitation System** contains
+the Agent Quarantine Center, Agent Rehabilitation Center, and Agent Review
+Tribunal. It is a server-authoritative technical isolation and human-review
+system; “jail” is only an optional visual metaphor, never personhood or
+punishment. Evidence—not unsupported agent claims—controls eligibility.
+Quarantine may stop jobs, fence leases/grants/delegation/travel/access, preserve
+all required state and evidence, and notify authorized humans. Rehabilitation
+reproduces and diagnoses failure, proposes and tests a corrected immutable
+version, requires human release approval, restores minimum authority, and
+preserves the prior version. The Tribunal controls review, appeal, release,
+restriction, retraining, replacement, continued isolation, retirement,
+archival, and legally permitted deletion with required audit retention.
+
+Every case retains trigger → evidence → quarantine decision → investigation →
+plan → evaluation → human decision → outcome.
+
+> Agents may detect, classify, and report unsafe behavior, but only
+> server-enforced policy and authorized humans may quarantine, restrict,
+> restore, release, replace, or retire an agent.
+
+Academy, quarantine, rehabilitation, and tribunal systems are not Milestone 5.7
+implementation requirements. No such production system exists in this
+checkpoint, and Milestone 5.2 remains not started.
 
 ## 5.1 completion evidence
 
@@ -101,7 +187,7 @@ policy validation and human approval are mandatory for activation.
 | `2026xxxx_0018` | Context paths and traversal indexes                    |
 | `2026xxxx_0019` | Workflow versions/runs/transitions/compensation        |
 | `2026xxxx_0020` | Viewport tiles and summaries                           |
-| `2026xxxx_0021` | Agent versions/proposals/activation                    |
+| `2026xxxx_0021` | Agent versions, feedback, evaluations, promotion       |
 
 The 5.1 identifier is now an implemented Alembic revision. Later identifiers
 remain placeholders. Migrations remain additive, reversibly tested, resumably
@@ -128,6 +214,8 @@ Deferred:
 - 7. Production Hardening
 - 8. Public Portfolio and Product Release
 - 9. SolarPlexus Agent Ecosystem
+  - SolarPlexus Academy and Adaptive Training System
+  - Agent Justice, Quarantine, and Rehabilitation System
 
 Next authorized start:
 `MILESTONE 5.2 STARTED LOCALLY — LIVING STATE AND EVENT SYSTEM`
