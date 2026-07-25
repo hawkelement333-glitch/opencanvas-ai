@@ -25,6 +25,7 @@ from opencanvas_api.services.auth import (
 )
 from opencanvas_api.services.authorization import AuthorizationError, require_owned_workspace
 from opencanvas_api.services.canonical.service import CanonicalService
+from opencanvas_api.services.knowledge_graph import KnowledgeGraphService
 from opencanvas_api.services.trace import TraceService
 
 
@@ -51,6 +52,12 @@ def get_canonical_service(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CanonicalService:
     return CanonicalService(session)
+
+
+def get_knowledge_graph_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> KnowledgeGraphService:
+    return KnowledgeGraphService(session)
 
 
 async def get_current_principal(
