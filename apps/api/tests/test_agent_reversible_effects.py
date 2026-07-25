@@ -34,6 +34,7 @@ from opencanvas_api.services.agents.contracts import (
     contract_digest,
 )
 from opencanvas_api.services.agents.persistence import ControlledAgentRepository
+from opencanvas_api.services.agents.reliability import ControlledExecutionReliability
 from opencanvas_api.services.agents.reversible_write_effects import ReversibleWriteEffectService
 from opencanvas_api.services.agents.reversible_write_rollback_approvals import (
     ReversibleWriteRollbackApprovalService,
@@ -146,6 +147,70 @@ async def test_approved_creation_is_atomic_idempotent_and_traced(
     assert audit is not None
     assert {event.status for event in trace} == {"started", "succeeded"}
     assert canvas["id"]
+
+
+async def test_bounded_retry_reuses_atomic_reversible_effect_and_suppresses_duplicate(
+    client: httpx.AsyncClient,
+    database: Database,
+    api_prefix: str,
+) -> None:
+    canvas, proposal, _ = await _approved_proposal(client, api_prefix)
+    attempted_at = datetime.now(UTC)
+    user_id = SYSTEM_USER_ID
+    workspace_id = uuid.UUID(canvas["workspaceId"])
+    execution_id = uuid.UUID(proposal["executionId"])
+    action_calls = 0
+
+    async with database.sessions() as session:
+
+        async def apply_effect(_: object) -> object:
+            nonlocal action_calls
+            action_calls += 1
+            return await ReversibleWriteEffectService(session, now=attempted_at).apply(
+                authenticated_user_id=user_id,
+                workspace_id=workspace_id,
+                execution_id=execution_id,
+                idempotency_key=proposal["_idempotencyKey"],
+            )
+
+        reliability = ControlledExecutionReliability(session)
+        applied = await reliability.execute_retry(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+            attempted_at=attempted_at,
+            action=apply_effect,
+        )
+        duplicate = await reliability.execute_retry(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+            attempted_at=attempted_at + timedelta(seconds=1),
+            action=apply_effect,
+        )
+        await session.commit()
+        effect_count = int(
+            await session.scalar(
+                select(func.count())
+                .select_from(ControlledAgentReversibleWriteEffect)
+                .where(ControlledAgentReversibleWriteEffect.execution_id == execution_id)
+            )
+            or 0
+        )
+        note_count = int(
+            await session.scalar(
+                select(func.count())
+                .select_from(CanvasNode)
+                .where(CanvasNode.canvas_id == uuid.UUID(canvas["id"]))
+            )
+            or 0
+        )
+
+    assert applied.status.value == "succeeded"
+    assert duplicate.duplicate is True
+    assert action_calls == 1
+    assert effect_count == 1
+    assert note_count == 1
 
 
 async def test_approved_update_uses_exact_revision_and_preserves_before_after_evidence(
