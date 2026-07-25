@@ -190,10 +190,11 @@ checksums, source-export denial, safe APIs, append-only evidence, transactional
 failure injection, migration cycling, SQLite triggers, and PostgreSQL offline
 DDL compilation.
 
-Ruff, strict mypy, compilation, imports, mapper configuration, migration-head
-validation, deterministic bundle verification, path/secret/prohibited-scope
+Ruff passed. Strict mypy passed all 69 source files. Compilation, imports,
+mapper configuration, sole-head and `0018 → 0017 → 0018` migration validation,
+deterministic bundle verification, ZIP-path safety, secret/prohibited-scope
 scans, documentation formatting, whitespace, repository hygiene, and Git
-object integrity are final handoff gates.
+object integrity passed.
 
 SQLite validates local constraints, triggers, deterministic ordering, and
 transaction rollback. It does not prove PostgreSQL row locking, isolation,
