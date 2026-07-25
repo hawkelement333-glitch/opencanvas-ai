@@ -258,23 +258,35 @@ database-backed rather than broker-backed job queue, non-streaming AI responses,
 inference/conflict classification, and no complete end-user Trace explorer. See the complete
 [known-limitations register](docs/KNOWN_LIMITATIONS.md).
 
-Milestone 4 controlled agents are complete locally. The future roadmap is recorded, not
-implemented:
+Milestone 4 controlled agents and Milestone 5 checkpoints 5.1–5.6 are complete
+locally. Milestone 5.7 is next. The required roadmap order is:
 
-5. Living Knowledge Graph and AI Workflows — architecture complete locally;
-   implementation checkpoints pending
-6. Multi-Workspace Collaboration
-   - Nested and Federated Mobius Workspaces
-7. Production Hardening
-8. Public Portfolio and Product Release
-9. SolarPlexus Agent Ecosystem
+1. Milestone 5.7 — Final Milestone 5 Audit
+2. Milestone 6 — Core Multi-Workspace Collaboration
+3. Milestone 7 — Production Hardening
+4. Milestone 8 — Controlled Public Portfolio and Product Release
+5. Future Advanced Real-Time Collaboration
+6. Milestone 9 — SolarPlexus Agent Society
+7. Milestone 10 — Civilization and Simulated Worlds
 
-Milestone 5.1 is complete locally. The next checkpoint is Milestone 5.2,
-Living State and Event System. See
+Milestone 6 remains a normal required milestone before Milestones 7 and 8. Its
+core scope covers membership and invitation lifecycle, closed roles and
+permissions, scoped sharing of canvases/resources/workflows/agents, comments
+and collaboration activity, ownership transfer, revocation, tenant isolation,
+and collaboration security/audit. It does not require simultaneous editing.
+
+Live cursors, detailed presence, simultaneous same-resource editing, CRDT or
+operational-transform synchronization, offline editing, reconnect merging,
+deterministic conflict resolution, distributed presence infrastructure, and
+production real-time load/recovery testing belong to the separate Future
+Advanced Real-Time Collaboration phase after the initial Milestone 8
+controlled release.
+
+See
 [docs/MILESTONE_5_ARCHITECTURE.md](docs/MILESTONE_5_ARCHITECTURE.md),
 [docs/MILESTONE_5_IMPLEMENTATION_PLAN.md](docs/MILESTONE_5_IMPLEMENTATION_PLAN.md),
 [docs/MILESTONE_5_PROGRESS.md](docs/MILESTONE_5_PROGRESS.md), and
-[docs/MILESTONE_5_1_KNOWLEDGE_GRAPH_HANDOFF.md](docs/MILESTONE_5_1_KNOWLEDGE_GRAPH_HANDOFF.md).
+[docs/MILESTONE_5_6_BOUNDED_AGENT_STUDIO_HANDOFF.md](docs/MILESTONE_5_6_BOUNDED_AGENT_STUDIO_HANDOFF.md).
 
 ## Competition and release status
 

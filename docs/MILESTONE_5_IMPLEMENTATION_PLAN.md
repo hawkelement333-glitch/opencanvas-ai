@@ -1,7 +1,7 @@
 # Milestone 5 Implementation Plan
 
-Status: architecture and checkpoints 5.1–5.4 complete locally; checkpoints
-5.5–5.7 pending.
+Status: architecture and checkpoints 5.1–5.6 complete locally; checkpoint 5.7
+pending.
 
 This plan implements
 [`MILESTONE_5_ARCHITECTURE.md`](MILESTONE_5_ARCHITECTURE.md) sequentially.
@@ -249,6 +249,8 @@ Complete: `MILESTONE 5.6 COMPLETE LOCALLY — READY FOR FINAL COMBINED AUDIT`
 
 Model/reasoning: `gpt-5.6-sol`, xhigh.
 
+Status: complete locally on 2026-07-25.
+
 Deliver template/agent identities, immutable versions/digests, proposal
 evidence, activation, declarative bounds, and effective-authority review.
 Runtime authority remains Milestone 4. Prohibit delegation, descendants,
@@ -359,9 +361,14 @@ English improvement must:
 Attach bundles/citations to agent executions, evaluations, candidate
 comparisons, training proposals, and applicable Adaptive English revisions.
 
-Migration `2026xxxx_0021`: templates, agents, versions, proposals, approved
-feedback, fixed evaluation cases, candidate evaluations, promotion, and
-activation.
+Implemented migration `20260725_0020`: immutable agent identities and
+lifecycle state, versions and version state, exact workflow bindings,
+capability requirements, validation reports, activation requests/decisions,
+invocations, proposals/decisions, evaluations, scoped communication
+profiles/versions, and communication revisions/decisions. Every table uses
+append-only enforcement and exact server-derived user/workspace/canvas scope.
+No fixed-case Academy, autonomous training, collaboration, membership, or
+Milestone 9 system is introduced.
 
 Gate: schemas/digests/immutability; malicious data confinement; no
 self-activation/standing grant; strict runtime authority intersection;
@@ -374,6 +381,25 @@ specialist roles; approved sources and tools; capabilities and limits; creator
 and approver; provider and model; validation and activation; and revisions,
 executions, suspension, retirement, and replacement. Later Milestone 9 records
 extend this chain with quarantine and rehabilitation.
+
+Future Milestone 6 compatibility acceptance:
+
+- all new identities, versions, validation reports, activation records,
+  workflow bindings, invocations, evaluations, proposals, communication
+  profiles and revisions, Trace records, events, projections, and API
+  operations retain exact server-derived user/workspace/canvas scope;
+- creator identity, workspace ownership, resource ownership, membership, role,
+  action authority, and approval authority remain distinct;
+- one operation-level authorization seam runs before creation, versioning,
+  validation, activation, invocation, evaluation, proposal acceptance,
+  suspension, restoration, and retirement;
+- opaque identities and composite scoped references prevent cross-workspace and
+  cross-canvas bindings;
+- the client-selected workspace, visual adjacency, and future sharing do not
+  authorize an operation; and
+- no membership, invitation, collaboration-role, sharing, comment, presence,
+  cursor, cross-workspace agent/binding, Milestone 6 API/frontend behavior, or
+  speculative Milestone 6 field is added.
 
 ## 5.7 — Final Combined Milestone 5 Audit
 
@@ -400,6 +426,18 @@ approved data
 → validation and human activation
 → governed execution
 → traceable result
+
+The combined audit must explicitly verify the future Milestone 6 compatibility
+acceptance recorded in 5.6: exact server-derived scope on every Agent Studio
+record and operation, distinct creator/ownership/membership/role/action/
+approval concepts, authorization seams before every governed action,
+cross-scope fail-closed behavior, and absence of Milestone 6 schema, API, or
+frontend implementation.
+
+It must also verify the roadmap distinction: core Milestone 6 remains scheduled
+immediately after Milestone 5 and before Milestones 7 and 8; only the separate
+Advanced Real-Time Collaboration phase is deferred until after the initial
+Milestone 8 controlled release.
 
 It must also prove:
 
@@ -509,12 +547,27 @@ without review rules; release without evaluation and human approval; or erase
 the truth of original behavior. These are documentation and future acceptance
 criteria only.
 
-## Deferred
+## Roadmap after Milestone 5
 
-- 6. Multi-Workspace Collaboration
-  - Nested and Federated Mobius Workspaces
-- 7. Production Hardening
-- 8. Public Portfolio and Product Release
-- 9. SolarPlexus Agent Ecosystem
-  - SolarPlexus Academy and Adaptive Training System
-  - Agent Justice, Quarantine, and Rehabilitation System
+The required sequence is:
+
+1. Milestone 6 — Core Multi-Workspace Collaboration
+2. Milestone 7 — Production Hardening
+3. Milestone 8 — Controlled Public Portfolio and Product Release
+4. Future Advanced Real-Time Collaboration
+5. Milestone 9 — SolarPlexus Agent Society
+6. Milestone 10 — Civilization and Simulated Worlds
+
+Milestone 6 implements memberships, invitation lifecycle, closed collaboration
+roles and permissions, approved owner/administrator/editor/approver/member/
+viewer boundaries, scoped canvas/resource/workflow/agent sharing, comments,
+collaboration activity, ownership transfer, revocation, exact tenant isolation,
+security, and final audit. Bounded basic presence is optional. Nested and
+federated Mobius Workspaces are resolved in the Milestone 6 architecture pass.
+
+Milestone 6 completion does not depend on Google-Docs-style simultaneous
+editing. Live cursors, detailed presence, simultaneous same-resource editing,
+CRDT and operational-transform synchronization, offline editing, reconnect
+merging, deterministic conflict resolution, distributed presence
+infrastructure, and production real-time load/recovery testing are separately
+deferred until after the initial Milestone 8 controlled release.

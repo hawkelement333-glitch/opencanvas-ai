@@ -1,6 +1,6 @@
 # Milestone 5 Architecture — Living Knowledge Graph and AI Workflows
 
-Status: architecture and checkpoints 5.1–5.4 complete locally; 5.5–5.7 pending
+Status: architecture and checkpoints 5.1–5.6 complete locally; 5.7 pending
 
 Baseline: `dadf114cfb33c557d6d1be7d8f98a4bb3ba36818`
 
@@ -478,6 +478,36 @@ Activation grants no runtime authority—every run uses Milestone 4.
 Prohibit agent-initiated creation, delegation, descendants, arbitrary
 connectors/tools/code, and policy modification. These belong to Milestone 9.
 
+#### Future Milestone 6 collaboration compatibility
+
+Milestone 5.6 preserves a narrow compatibility boundary for future
+Multi-Workspace Collaboration without implementing collaboration behavior.
+Every agent identity, version, validation report, activation record, workflow
+binding, invocation, evaluation, proposal, communication profile and revision,
+Trace, domain event, activity projection, and API operation retains exact
+server-derived user, workspace, and canvas scope. Identities are opaque. A
+client-selected current workspace, visual adjacency, or future sharing state
+is never authoritative.
+
+The following concepts remain distinct even while the current implementation
+is owner-only: creator identity, workspace ownership, resource ownership,
+membership, role, action authority, and approval authority. Agent Studio
+services expose a single operation-level authorization boundary before agent
+creation, version creation, validation, activation, invocation, evaluation,
+proposal acceptance, suspension, restoration, and retirement. Future
+membership and role policy can replace the current owner-only decision at
+those seams without rewriting immutable Agent Studio history or weakening
+Milestone 4 authority checks.
+
+The implementation does not assume that a user belongs to one workspace, that
+the creator remains sole authority, or that future members have equal
+permissions. Agents, workflows, approvals, grants, evaluations, proposals,
+communication profiles, and invocations cannot cross workspace or canvas
+scope. No workspace-membership table, invitation, collaboration role, sharing
+record, comment, presence, cursor, cross-workspace binding, collaboration API,
+frontend collaboration behavior, or speculative Milestone 6 migration field
+is introduced.
+
 #### Adaptive Agent Architect
 
 Milestone 5.6 records the Adaptive Agent Architect as a future controlled,
@@ -694,6 +724,19 @@ approved data
 → governed execution
 → traceable result
 
+The 5.7 audit must also verify the future Milestone 6 compatibility boundary:
+all Agent Studio records, Trace records, events, projections, and operations
+retain exact server-derived user/workspace/canvas scope; creator, ownership,
+membership, role, action authority, and approval authority remain distinct;
+authorization insertion seams precede every governed operation; cross-scope
+references fail closed; and no Milestone 6 schema, API, or frontend behavior
+was introduced.
+
+It must separately verify that core Milestone 6 remains scheduled immediately
+after Milestone 5 and before Milestones 7 and 8, while Advanced Real-Time
+Collaboration is a distinct future phase after the initial Milestone 8
+controlled release.
+
 It must also prove the governed-improvement chain:
 
 1. A specialized agent completes a traceable workflow.
@@ -865,12 +908,31 @@ future documentation and acceptance criteria only. Milestone 5 creates none of
 their persistence models, APIs, capabilities, events, workflows, agents,
 evaluations, or frontend components.
 
-## Deferred
+## Roadmap after Milestone 5
 
-- 6. Multi-Workspace Collaboration
-  - Nested and Federated Mobius Workspaces
-- 7. Production Hardening
-- 8. Public Portfolio and Product Release
-- 9. SolarPlexus Agent Ecosystem
-  - SolarPlexus Academy and Adaptive Training System
-  - Agent Justice, Quarantine, and Rehabilitation System
+Core Milestone 6 is required in its original position. It is not deferred until
+after Milestone 8.
+
+1. Milestone 6 — Multi-Workspace Collaboration
+2. Milestone 7 — Production Hardening
+3. Milestone 8 — Controlled Public Portfolio and Product Release
+4. Future Advanced Real-Time Collaboration
+5. Milestone 9 — SolarPlexus Agent Society
+6. Milestone 10 — Civilization and Simulated Worlds
+
+Milestone 6 core scope includes workspace memberships; invitations; closed
+owner, administrator, editor, approver, member, and viewer roles/permissions
+where approved by its architecture; canvas/resource/workflow/agent sharing;
+comments and collaboration activity; ownership transfer; access revocation;
+exact user/workspace/canvas/tenant isolation; collaboration security; and its
+final audit. Bounded basic online-presence indicators are optional only when
+they do not delay core scope. Nested and federated Mobius Workspaces remain
+part of the approved Milestone 6 architecture pass rather than Milestone 5.6.
+
+Milestone 6 does not require Google-Docs-style simultaneous editing. Live
+cursors, detailed presence, same-document/canvas simultaneous editing, CRDTs,
+operational transforms, offline editing, reconnect merging, deterministic
+conflict resolution, distributed presence infrastructure, and production
+real-time collaboration load/recovery testing are separately deferred to
+Future Advanced Real-Time Collaboration after the initial Milestone 8
+controlled release.

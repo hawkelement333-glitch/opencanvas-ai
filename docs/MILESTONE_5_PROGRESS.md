@@ -6,8 +6,8 @@ Branch: `milestone-5-living-knowledge-workflows-architecture-local`
 
 Baseline: `dadf114cfb33c557d6d1be7d8f98a4bb3ba36818`
 
-Milestone 5 architecture and checkpoints 5.1–5.5 are complete locally. The
-next checkpoint is 5.6, Bounded Agent Studio.
+Milestone 5 architecture and checkpoints 5.1–5.6 are complete locally. The
+next checkpoint is 5.7, the final combined Milestone 5 audit.
 
 `MILESTONE 5 ARCHITECTURE COMPLETE LOCALLY — READY FOR KNOWLEDGE GRAPH FOUNDATION`
 
@@ -19,11 +19,83 @@ next checkpoint is 5.6, Bounded Agent Studio.
 | 5.3 Graph-Aware Retrieval         | Complete locally | 5.1–5.2               |
 | 5.4 Controlled AI Workflows       | Complete locally | 5.1–5.3 and M4        |
 | 5.5 Dynamic Universe Interface    | Complete locally | 5.1–5.4 complete      |
-| 5.6 Bounded Agent Studio          | Not started      | 5.4                   |
+| 5.6 Bounded Agent Studio          | Complete locally | 5.4                   |
 | 5.7 Final Combined Audit          | Not started      | 5.1–5.6               |
 
-Only checkpoints 5.1, 5.2, 5.3, 5.4, and 5.5 are complete. Milestone 5 is not
-complete.
+Only checkpoints 5.1 through 5.6 are complete. Milestone 5 is not complete
+until the 5.7 combined audit succeeds.
+
+## Milestone 5.6 completion
+
+The dedicated bounded `/agents` route and scoped Agent Studio API now provide
+immutable agent identities and versions, closed provider/model/capability/
+resource/risk registries, deterministic validation, exact human activation,
+approved-workflow invocation, immutable evaluations, proposal-only adaptive
+improvement, fact-preserving communication revision review, and explicit
+suspension/restoration/retirement.
+
+Activation creates no capability grant. Invocation rechecks the exact active
+agent version, activation evidence, workflow version and digest, scope, and
+limits, then delegates execution to the completed Milestone 5.4 workflow
+service. The Agent Studio introduces no executor, standing grant, autonomous
+trigger, arbitrary tool, connector, code execution, scheduling, or
+self-activation path.
+
+Migration `20260725_0020` is the sole Alembic head. The new Agent Studio records
+are append-only and retain exact server-derived user/workspace/canvas scope.
+Safe API responses omit the private system instruction and raw authority
+details. Transactional Trace and domain-event/outbox production extends the
+existing systems; activity remains a rebuildable projection and never
+authorizes an action.
+
+The Adaptive Agent Architect, Adaptive Training and Evaluation Agent, and
+Adaptive English Communication Expert are bounded proposal/evaluation roles.
+They cannot activate agents, grant authority, assign private data, install
+unreviewed tools, increase limits, silently alter active definitions, cross
+private scope, or change protected facts. Human review and policy validation
+control activation, proposal acceptance, and communication revision
+acceptance.
+
+The checkpoint handoff is
+[`MILESTONE_5_6_BOUNDED_AGENT_STUDIO_HANDOFF.md`](MILESTONE_5_6_BOUNDED_AGENT_STUDIO_HANDOFF.md).
+
+### Future Milestone 6 collaboration compatibility
+
+The current owner-only implementation deliberately preserves future
+Multi-Workspace Collaboration insertion points without implementing Milestone 6. All agent, workflow-binding, activation, invocation, evaluation, proposal,
+communication, Trace, event, projection, and API records carry exact opaque
+server-derived user/workspace/canvas identity. Creator identity, workspace
+ownership, resource ownership, membership, role, action authority, and
+approval authority remain distinct concepts.
+
+An operation-level authorization boundary precedes creation, versioning,
+validation, activation, invocation, evaluation, proposal acceptance,
+suspension, restoration, and retirement. A future membership/role policy may
+replace the current owner-only decision at those seams. No client-selected
+workspace, visual adjacency, or future sharing record grants authority.
+
+No membership table, invitation, collaboration role, sharing record, comment,
+presence, live cursor, cross-workspace agent, cross-workspace workflow
+binding, Milestone 6 API, Milestone 6 frontend behavior, or speculative
+Milestone 6 migration field was added. The 5.7 audit must verify this exact
+compatibility boundary and cross-scope failure behavior.
+
+Core Milestone 6 remains scheduled normally after the final Milestone 5 audit
+and before Milestones 7 and 8. It owns required memberships, invitations,
+closed roles/permissions, sharing, comments/activity, ownership transfer,
+revocation, tenant isolation, collaboration security, and audit. Optional
+bounded basic presence cannot delay that core.
+
+Advanced Real-Time Collaboration is separate and comes only after the initial
+Milestone 8 controlled release. It owns live cursors, detailed presence,
+simultaneous editing, CRDT/operational-transform synchronization, offline
+editing, reconnect merging, deterministic conflict resolution, distributed
+presence, and production real-time load/recovery testing. None is required for
+Milestone 6 completion.
+
+The 5.7 audit must verify both that 5.6 preserved the collaboration
+authorization seams and that this roadmap distinction/order remains
+authoritative.
 
 ## Milestone 5.5 completion
 
@@ -329,12 +401,12 @@ checkpoint.
 | `20260725_0017` | Complete: events/outbox, sequences, activity projection |
 | `20260725_0018` | Complete: retrieval, citations, evidence bundles        |
 | `20260725_0019` | Complete: workflows/runs/transitions/compensation       |
-| `2026xxxx_0020` | Viewport tiles and summaries                            |
-| `2026xxxx_0021` | Agent versions, feedback, evaluations, promotion        |
+| No migration    | Complete: bounded Dynamic Universe read interface       |
+| `20260725_0020` | Complete: bounded Agent Studio immutable records        |
 
-The 5.1–5.4 identifiers are implemented Alembic revisions. Later identifiers
-remain placeholders. Migrations remain additive, reversibly tested, resumably
-backfillable, and retain legacy tables.
+The 5.1–5.4 and 5.6 identifiers are implemented Alembic revisions. Migrations
+remain additive, reversibly tested, and retain legacy tables. Milestone 5.5
+required no migration.
 
 ## Preserved Milestone 4 contracts
 
@@ -350,15 +422,17 @@ explosion, provenance volume, stale graph writes, partial compensation,
 PostgreSQL behavior differences, viewport selection loss, and trusted-looking
 AI configuration. The architecture assigns explicit gates to each.
 
-Deferred:
+Required roadmap after the final Milestone 5 audit:
 
-- 6. Multi-Workspace Collaboration
-  - Nested and Federated Mobius Workspaces
-- 7. Production Hardening
-- 8. Public Portfolio and Product Release
-- 9. SolarPlexus Agent Ecosystem
-  - SolarPlexus Academy and Adaptive Training System
-  - Agent Justice, Quarantine, and Rehabilitation System
+1. Milestone 6 — Core Multi-Workspace Collaboration
+2. Milestone 7 — Production Hardening
+3. Milestone 8 — Controlled Public Portfolio and Product Release
+4. Future Advanced Real-Time Collaboration
+5. Milestone 9 — SolarPlexus Agent Society
+6. Milestone 10 — Civilization and Simulated Worlds
+
+Only Advanced Real-Time Collaboration is deferred until after Milestone 8.
+Milestone 6 remains required before Milestones 7 and 8.
 
 ## Completed 5.4 checkpoint
 
@@ -387,4 +461,4 @@ Deferred:
   [`MILESTONE_5_4_CONTROLLED_AI_WORKFLOWS_HANDOFF.md`](MILESTONE_5_4_CONTROLLED_AI_WORKFLOWS_HANDOFF.md).
 
 Next authorized start:
-`MILESTONE 5.5 STARTED LOCALLY — DYNAMIC UNIVERSE INTERFACE`
+`MILESTONE 5.7 STARTED LOCALLY — FINAL COMBINED MILESTONE 5 AUDIT`
