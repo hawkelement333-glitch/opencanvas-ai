@@ -12,8 +12,8 @@ from alembic.config import Config
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 API_ROOT = REPOSITORY_ROOT / "apps" / "api"
-EXPECTED_HEAD = "20260725_0019"
-PREVIOUS_REVISION = "20260725_0018"
+EXPECTED_HEAD = "20260725_0020"
+PREVIOUS_REVISION = "20260725_0019"
 
 
 def revision(database_path: Path) -> str:

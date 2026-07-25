@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from opencanvas_api.api.routes import (
+    agent_studio,
     agents,
     auth,
     canonical,
@@ -26,3 +27,4 @@ api_router.include_router(domain_events.router, tags=["living-state-events"])
 api_router.include_router(graph_retrieval.router, tags=["graph-aware-retrieval"])
 api_router.include_router(agents.router, tags=["controlled-agent-inspection"])
 api_router.include_router(workflows.router, tags=["controlled-ai-workflows"])
+api_router.include_router(agent_studio.router, tags=["bounded-agent-studio"])

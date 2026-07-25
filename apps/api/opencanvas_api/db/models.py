@@ -1457,14 +1457,34 @@ class DomainEventRecord(Base):
             "'workflow.step.awaiting_approval', "
             "'workflow.approval.requested', "
             "'workflow.approval.accepted', "
-            "'workflow.approval.denied')",
+            "'workflow.approval.denied', "
+            "'agent.identity.created', "
+            "'agent.version.created', "
+            "'agent.version.validated', "
+            "'agent.version.validation_failed', "
+            "'agent.version.activated', "
+            "'agent.activation.requested', "
+            "'agent.activation.approved', "
+            "'agent.activation.denied', "
+            "'agent.invocation.started', "
+            "'agent.proposal.created', "
+            "'agent.proposal.accepted', "
+            "'agent.proposal.rejected', "
+            "'agent.evaluation.recorded', "
+            "'agent.communication.revision_proposed', "
+            "'agent.communication.revision_accepted', "
+            "'agent.communication.revision_rejected', "
+            "'agent.suspended', "
+            "'agent.retired')",
             name="ck_domain_events_type",
         ),
         CheckConstraint(
             "subject_kind IN ('canonical_resource', 'graph_relationship', "
             "'controlled_execution', 'controlled_effect', 'controlled_rollback', "
             "'evidence_bundle', 'citation', 'workflow_definition', 'workflow_version', "
-            "'workflow_execution', 'workflow_step')",
+            "'workflow_execution', 'workflow_step', 'agent_identity', 'agent_version', "
+            "'agent_activation', 'agent_invocation', 'agent_proposal', "
+            "'agent_evaluation', 'communication_revision')",
             name="ck_domain_events_subject_kind",
         ),
         CheckConstraint("sequence > 0", name="ck_domain_events_sequence_positive"),
@@ -2663,6 +2683,843 @@ class ControlledWorkflowEvidenceLink(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class BoundedAgentIdentity(Base):
+    """Stable scoped identity for a governed Agent Studio definition."""
+
+    __tablename__ = "bounded_agent_identities"
+    __table_args__ = (
+        UniqueConstraint(
+            "agent_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            name="uq_bounded_agent_scope",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "idempotency_key",
+            name="uq_bounded_agent_create_idempotency",
+        ),
+        CheckConstraint(
+            "schema_version = 'bounded-agent-studio-v1'",
+            name="ck_bounded_agent_schema",
+        ),
+        CheckConstraint(
+            "kind IN ('workflow_assistant', 'grounded_research_assistant', "
+            "'document_analysis_assistant', 'controlled_operations_assistant', "
+            "'communication_assistant', 'evaluation_assistant', 'agent_design_assistant')",
+            name="ck_bounded_agent_kind",
+        ),
+        CheckConstraint("length(request_digest) = 64", name="ck_bounded_agent_request_digest"),
+        Index(
+            "ix_bounded_agent_scope_time",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "created_at",
+        ),
+    )
+
+    agent_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    canvas_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("canvases.id", ondelete="RESTRICT"), nullable=False
+    )
+    schema_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    kind: Mapped[str] = mapped_column(String(48), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str] = mapped_column(String(1000), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedAgentLifecycleState(Base):
+    __tablename__ = "bounded_agent_lifecycle_states"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["agent_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "bounded_agent_identities.agent_id",
+                "bounded_agent_identities.user_id",
+                "bounded_agent_identities.workspace_id",
+                "bounded_agent_identities.canvas_id",
+            ],
+            name="fk_bounded_agent_state_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("agent_id", "sequence", name="uq_bounded_agent_state_sequence"),
+        CheckConstraint(
+            "state IN ('draft', 'proposed', 'validation_failed', 'validated', "
+            "'awaiting_activation_approval', 'active', 'suspended', 'superseded', "
+            "'retired', 'rejected')",
+            name="ck_bounded_agent_state",
+        ),
+        CheckConstraint("sequence >= 0", name="ck_bounded_agent_state_sequence"),
+        Index("ix_bounded_agent_state_time", "agent_id", "sequence"),
+    )
+
+    state_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    agent_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(40), nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(64))
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedAgentVersion(Base):
+    """Immutable normalized definition. Editing always creates a new row."""
+
+    __tablename__ = "bounded_agent_versions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["agent_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "bounded_agent_identities.agent_id",
+                "bounded_agent_identities.user_id",
+                "bounded_agent_identities.workspace_id",
+                "bounded_agent_identities.canvas_id",
+            ],
+            name="fk_bounded_agent_version_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("agent_id", "version_number", name="uq_bounded_agent_version_number"),
+        UniqueConstraint(
+            "version_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            name="uq_bounded_agent_version_scope",
+        ),
+        UniqueConstraint(
+            "agent_id",
+            "idempotency_key",
+            name="uq_bounded_agent_version_idempotency",
+        ),
+        CheckConstraint(
+            "schema_version = 'bounded-agent-definition-v1'",
+            name="ck_bounded_agent_version_schema",
+        ),
+        CheckConstraint("version_number > 0", name="ck_bounded_agent_version_number"),
+        CheckConstraint(
+            "provider IN ('mock', 'openai')",
+            name="ck_bounded_agent_version_provider",
+        ),
+        CheckConstraint(
+            "risk_class IN ('r0_observation', 'r1_draft', 'r2_transient_action', "
+            "'r3_durable_write')",
+            name="ck_bounded_agent_version_risk",
+        ),
+        CheckConstraint(
+            "selected_context_policy IN ('required_explicit', 'optional_explicit')",
+            name="ck_bounded_agent_context_policy",
+        ),
+        CheckConstraint(
+            "evaluation_policy IN ('human_review', 'deterministic_evidence_review')",
+            name="ck_bounded_agent_evaluation_policy",
+        ),
+        CheckConstraint("length(content_digest) = 64", name="ck_bounded_agent_version_digest"),
+        Index("ix_bounded_agent_version_time", "agent_id", "version_number"),
+    )
+
+    version_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    agent_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(2000), nullable=False)
+    system_instruction: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt_template_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    selected_context_policy: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider: Mapped[str] = mapped_column(String(24), nullable=False)
+    model: Mapped[str] = mapped_column(String(160), nullable=False)
+    limits: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    communication_policy: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    evaluation_policy: Mapped[str] = mapped_column(String(48), nullable=False)
+    risk_class: Mapped[str] = mapped_column(String(32), nullable=False)
+    normalized_definition: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    content_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    supersedes_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("bounded_agent_versions.version_id", ondelete="RESTRICT")
+    )
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedAgentVersionState(Base):
+    __tablename__ = "bounded_agent_version_states"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["version_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "bounded_agent_versions.version_id",
+                "bounded_agent_versions.user_id",
+                "bounded_agent_versions.workspace_id",
+                "bounded_agent_versions.canvas_id",
+            ],
+            name="fk_bounded_agent_version_state_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "version_id",
+            "sequence",
+            name="uq_bounded_agent_version_state_sequence",
+        ),
+        CheckConstraint(
+            "state IN ('draft', 'proposed', 'validation_failed', 'validated', "
+            "'awaiting_activation_approval', 'approved', 'active', 'superseded', "
+            "'rejected', 'retired')",
+            name="ck_bounded_agent_version_state",
+        ),
+        CheckConstraint("sequence >= 0", name="ck_bounded_agent_version_state_sequence"),
+        Index("ix_bounded_agent_version_state_time", "version_id", "sequence"),
+    )
+
+    state_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(40), nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(64))
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedAgentWorkflowBinding(Base):
+    __tablename__ = "bounded_agent_workflow_bindings"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["agent_version_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "bounded_agent_versions.version_id",
+                "bounded_agent_versions.user_id",
+                "bounded_agent_versions.workspace_id",
+                "bounded_agent_versions.canvas_id",
+            ],
+            name="fk_bounded_agent_workflow_agent_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workflow_version_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "controlled_workflow_versions.version_id",
+                "controlled_workflow_versions.user_id",
+                "controlled_workflow_versions.workspace_id",
+                "controlled_workflow_versions.canvas_id",
+            ],
+            name="fk_bounded_agent_workflow_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "agent_version_id",
+            "workflow_version_id",
+            name="uq_bounded_agent_workflow_binding",
+        ),
+        CheckConstraint("ordinal >= 0 AND ordinal < 16", name="ck_bounded_agent_workflow_ordinal"),
+        Index("ix_bounded_agent_workflow_order", "agent_version_id", "ordinal"),
+    )
+
+    binding_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    agent_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workflow_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    workflow_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedAgentCapabilityRequirement(Base):
+    __tablename__ = "bounded_agent_capability_requirements"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["agent_version_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "bounded_agent_versions.version_id",
+                "bounded_agent_versions.user_id",
+                "bounded_agent_versions.workspace_id",
+                "bounded_agent_versions.canvas_id",
+            ],
+            name="fk_bounded_agent_capability_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "agent_version_id",
+            "capability",
+            "resource_kind",
+            name="uq_bounded_agent_capability_requirement",
+        ),
+        CheckConstraint(
+            "capability IN ('workspace.metadata.read', 'canvas.snapshot.read', "
+            "'context.selected.read', 'document.version.read', 'trace.scoped.read', "
+            "'retrieval.selected.search', 'draft.note.create', 'draft.answer.create', "
+            "'canvas.note.create', 'canvas.note.update', 'canvas.note.create.rollback', "
+            "'canvas.note.update.rollback', 'knowledge_graph.relationship.write', "
+            "'workflow.step.execute', 'evidence.bundle.create', 'execution.cancel')",
+            name="ck_bounded_agent_capability",
+        ),
+        CheckConstraint(
+            "resource_kind IN ('workspace', 'canvas', 'node', 'document_version', "
+            "'chunk', 'trace', 'canonical_relationship', 'canonical_object')",
+            name="ck_bounded_agent_resource_kind",
+        ),
+        Index("ix_bounded_agent_capability_version", "agent_version_id"),
+    )
+
+    requirement_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    agent_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    capability: Mapped[str] = mapped_column(String(80), nullable=False)
+    resource_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedAgentValidationReport(Base):
+    __tablename__ = "bounded_agent_validation_reports"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["agent_version_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "bounded_agent_versions.version_id",
+                "bounded_agent_versions.user_id",
+                "bounded_agent_versions.workspace_id",
+                "bounded_agent_versions.canvas_id",
+            ],
+            name="fk_bounded_agent_validation_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "agent_version_id",
+            "content_digest",
+            name="uq_bounded_agent_validation_digest",
+        ),
+        UniqueConstraint(
+            "validation_id",
+            "agent_version_id",
+            name="uq_bounded_agent_validation_version",
+        ),
+        CheckConstraint(
+            "outcome IN ('valid', 'invalid_schema', 'invalid_workflow', "
+            "'invalid_capability', 'invalid_scope', 'invalid_provider', 'invalid_limits', "
+            "'invalid_prompt_contract', 'invalid_communication_policy', "
+            "'risk_exceeds_allowed_boundary', 'approval_required', 'unsupported_version')",
+            name="ck_bounded_agent_validation_outcome",
+        ),
+        CheckConstraint("length(content_digest) = 64", name="ck_bounded_agent_validation_digest"),
+        Index("ix_bounded_agent_validation_time", "agent_version_id", "created_at"),
+    )
+
+    validation_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    agent_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    content_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(48), nullable=False)
+    issues: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    registry_versions: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    validator_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedAgentActivationRequest(Base):
+    __tablename__ = "bounded_agent_activation_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["agent_version_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "bounded_agent_versions.version_id",
+                "bounded_agent_versions.user_id",
+                "bounded_agent_versions.workspace_id",
+                "bounded_agent_versions.canvas_id",
+            ],
+            name="fk_bounded_agent_activation_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["validation_id", "agent_version_id"],
+            [
+                "bounded_agent_validation_reports.validation_id",
+                "bounded_agent_validation_reports.agent_version_id",
+            ],
+            name="fk_bounded_agent_activation_validation",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "agent_version_id",
+            "idempotency_key",
+            name="uq_bounded_agent_activation_idempotency",
+        ),
+        UniqueConstraint(
+            "activation_request_id",
+            "agent_version_id",
+            name="uq_bounded_agent_activation_version",
+        ),
+        CheckConstraint("length(request_digest) = 64", name="ck_bounded_agent_activation_digest"),
+        CheckConstraint("expires_at > created_at", name="ck_bounded_agent_activation_expiry"),
+        Index("ix_bounded_agent_activation_time", "agent_version_id", "created_at"),
+    )
+
+    activation_request_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    agent_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    validation_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    authority_summary: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    requested_by_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedAgentActivationDecision(Base):
+    __tablename__ = "bounded_agent_activation_decisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["activation_request_id", "agent_version_id"],
+            [
+                "bounded_agent_activation_requests.activation_request_id",
+                "bounded_agent_activation_requests.agent_version_id",
+            ],
+            name="fk_bounded_agent_activation_decision_request",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "activation_request_id",
+            name="uq_bounded_agent_activation_decision",
+        ),
+        CheckConstraint(
+            "decision IN ('approved', 'denied')", name="ck_bounded_agent_activation_decision"
+        ),
+        CheckConstraint("length(request_digest) = 64", name="ck_bounded_agent_decision_digest"),
+        Index("ix_bounded_agent_activation_decision_time", "agent_version_id", "decided_at"),
+    )
+
+    activation_decision_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    activation_request_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    agent_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    decided_by_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    session_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedAgentInvocation(Base):
+    __tablename__ = "bounded_agent_invocations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["agent_version_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "bounded_agent_versions.version_id",
+                "bounded_agent_versions.user_id",
+                "bounded_agent_versions.workspace_id",
+                "bounded_agent_versions.canvas_id",
+            ],
+            name="fk_bounded_agent_invocation_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workflow_execution_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "controlled_workflow_executions.execution_id",
+                "controlled_workflow_executions.user_id",
+                "controlled_workflow_executions.workspace_id",
+                "controlled_workflow_executions.canvas_id",
+            ],
+            name="fk_bounded_agent_invocation_workflow",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "idempotency_key",
+            name="uq_bounded_agent_invocation_idempotency",
+        ),
+        UniqueConstraint(
+            "invocation_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            name="uq_bounded_agent_invocation_scope",
+        ),
+        CheckConstraint("length(request_digest) = 64", name="ck_bounded_agent_invocation_digest"),
+        Index("ix_bounded_agent_invocation_time", "agent_id", "created_at"),
+    )
+
+    invocation_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    agent_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    agent_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workflow_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workflow_execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    selected_object_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    graph_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedAgentProposal(Base):
+    __tablename__ = "bounded_agent_proposals"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "idempotency_key",
+            name="uq_bounded_agent_proposal_idempotency",
+        ),
+        UniqueConstraint(
+            "proposal_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            name="uq_bounded_agent_proposal_scope",
+        ),
+        CheckConstraint(
+            "kind IN ('agent_creation', 'agent_version_improvement', 'workflow_binding', "
+            "'capability_requirement', 'provider_policy', 'communication_revision', "
+            "'evaluation_recommendation')",
+            name="ck_bounded_agent_proposal_kind",
+        ),
+        CheckConstraint("length(request_digest) = 64", name="ck_bounded_agent_proposal_request"),
+        CheckConstraint("length(payload_digest) = 64", name="ck_bounded_agent_proposal_payload"),
+        Index(
+            "ix_bounded_agent_proposal_time", "user_id", "workspace_id", "canvas_id", "created_at"
+        ),
+    )
+
+    proposal_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("bounded_agent_identities.agent_id", ondelete="RESTRICT")
+    )
+    source_invocation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("bounded_agent_invocations.invocation_id", ondelete="RESTRICT")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    kind: Mapped[str] = mapped_column(String(48), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(48), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedAgentProposalDecision(Base):
+    __tablename__ = "bounded_agent_proposal_decisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["proposal_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "bounded_agent_proposals.proposal_id",
+                "bounded_agent_proposals.user_id",
+                "bounded_agent_proposals.workspace_id",
+                "bounded_agent_proposals.canvas_id",
+            ],
+            name="fk_bounded_agent_proposal_decision_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("proposal_id", name="uq_bounded_agent_proposal_decision"),
+        CheckConstraint(
+            "decision IN ('accepted', 'rejected')", name="ck_bounded_agent_proposal_decision"
+        ),
+    )
+
+    decision_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    proposal_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    decided_by_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resulting_agent_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    resulting_version_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedAgentEvaluation(Base):
+    __tablename__ = "bounded_agent_evaluations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["invocation_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "bounded_agent_invocations.invocation_id",
+                "bounded_agent_invocations.user_id",
+                "bounded_agent_invocations.workspace_id",
+                "bounded_agent_invocations.canvas_id",
+            ],
+            name="fk_bounded_agent_evaluation_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "invocation_id",
+            "idempotency_key",
+            name="uq_bounded_agent_evaluation_idempotency",
+        ),
+        CheckConstraint(
+            "outcome IN ('meets_requirements', 'partially_meets_requirements', "
+            "'fails_requirements', 'unsafe_result', 'insufficient_evidence', "
+            "'bounded_result', 'evaluation_unavailable')",
+            name="ck_bounded_agent_evaluation_outcome",
+        ),
+        CheckConstraint("length(evidence_digest) = 64", name="ck_bounded_agent_evaluation_digest"),
+        Index("ix_bounded_agent_evaluation_time", "invocation_id", "created_at"),
+    )
+
+    evaluation_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    invocation_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    outcome: Mapped[str] = mapped_column(String(48), nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    summary: Mapped[str] = mapped_column(String(2000), nullable=False)
+    recommendations: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedCommunicationProfile(Base):
+    __tablename__ = "bounded_communication_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "profile_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            name="uq_bounded_communication_profile_scope",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "idempotency_key",
+            name="uq_bounded_communication_profile_idempotency",
+        ),
+        CheckConstraint("length(request_digest) = 64", name="ck_bounded_profile_request_digest"),
+        Index(
+            "ix_bounded_communication_profile_time",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "created_at",
+        ),
+    )
+
+    profile_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    canvas_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("canvases.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedCommunicationProfileVersion(Base):
+    __tablename__ = "bounded_communication_profile_versions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["profile_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "bounded_communication_profiles.profile_id",
+                "bounded_communication_profiles.user_id",
+                "bounded_communication_profiles.workspace_id",
+                "bounded_communication_profiles.canvas_id",
+            ],
+            name="fk_bounded_profile_version_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("profile_id", "version_number", name="uq_bounded_profile_version_number"),
+        UniqueConstraint(
+            "profile_id",
+            "idempotency_key",
+            name="uq_bounded_profile_version_idempotency",
+        ),
+        UniqueConstraint(
+            "profile_version_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            name="uq_bounded_profile_version_scope",
+        ),
+        CheckConstraint(
+            "audience IN ('general', 'executive', 'technical', 'academic')",
+            name="ck_bounded_profile_audience",
+        ),
+        CheckConstraint(
+            "reading_level IN ('plain', 'standard', 'advanced')",
+            name="ck_bounded_profile_reading_level",
+        ),
+        CheckConstraint(
+            "formality IN ('conversational', 'neutral', 'formal')",
+            name="ck_bounded_profile_formality",
+        ),
+        CheckConstraint(
+            "verbosity IN ('concise', 'balanced', 'detailed')",
+            name="ck_bounded_profile_verbosity",
+        ),
+        CheckConstraint(
+            "technical_depth IN ('low', 'medium', 'high')",
+            name="ck_bounded_profile_technical_depth",
+        ),
+        CheckConstraint("length(content_digest) = 64", name="ck_bounded_profile_digest"),
+    )
+
+    profile_version_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    profile_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    audience: Mapped[str] = mapped_column(String(24), nullable=False)
+    reading_level: Mapped[str] = mapped_column(String(24), nullable=False)
+    formality: Mapped[str] = mapped_column(String(24), nullable=False)
+    verbosity: Mapped[str] = mapped_column(String(24), nullable=False)
+    technical_depth: Mapped[str] = mapped_column(String(24), nullable=False)
+    orwell_rules: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    content_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedCommunicationRevision(Base):
+    __tablename__ = "bounded_communication_revisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["profile_version_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "bounded_communication_profile_versions.profile_version_id",
+                "bounded_communication_profile_versions.user_id",
+                "bounded_communication_profile_versions.workspace_id",
+                "bounded_communication_profile_versions.canvas_id",
+            ],
+            name="fk_bounded_revision_profile_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "idempotency_key",
+            name="uq_bounded_communication_revision_idempotency",
+        ),
+        CheckConstraint(
+            "preservation_status IN ('preserved', 'rejected')",
+            name="ck_bounded_communication_preservation",
+        ),
+        CheckConstraint("length(original_digest) = 64", name="ck_bounded_revision_original_digest"),
+        CheckConstraint("length(revised_digest) = 64", name="ck_bounded_revision_revised_digest"),
+        CheckConstraint(
+            "length(protected_facts_digest) = 64", name="ck_bounded_revision_facts_digest"
+        ),
+        Index(
+            "ix_bounded_communication_revision_time",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "created_at",
+        ),
+    )
+
+    revision_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    profile_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    source_invocation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("bounded_agent_invocations.invocation_id", ondelete="RESTRICT")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    original_text: Mapped[str] = mapped_column(Text, nullable=False)
+    revised_text: Mapped[str] = mapped_column(Text, nullable=False)
+    original_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    revised_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    protected_facts: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    protected_facts_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    preservation_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    safe_failure_code: Mapped[str | None] = mapped_column(String(64))
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoundedCommunicationRevisionDecision(Base):
+    __tablename__ = "bounded_communication_revision_decisions"
+    __table_args__ = (
+        UniqueConstraint("revision_id", name="uq_bounded_communication_revision_decision"),
+        CheckConstraint(
+            "decision IN ('accepted', 'rejected')", name="ck_bounded_revision_decision"
+        ),
+    )
+
+    decision_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    revision_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("bounded_communication_revisions.revision_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    decided_by_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ControlledAgentExecution(Base):
     """Immutable authority identity plus server-owned bounded reliability state."""
 
@@ -3851,6 +4708,26 @@ CONTROLLED_WORKFLOW_IMMUTABLE_MODELS = (
     ControlledWorkflowEvidenceLink,
 )
 
+BOUNDED_AGENT_STUDIO_IMMUTABLE_MODELS = (
+    BoundedAgentIdentity,
+    BoundedAgentLifecycleState,
+    BoundedAgentVersion,
+    BoundedAgentVersionState,
+    BoundedAgentWorkflowBinding,
+    BoundedAgentCapabilityRequirement,
+    BoundedAgentValidationReport,
+    BoundedAgentActivationRequest,
+    BoundedAgentActivationDecision,
+    BoundedAgentInvocation,
+    BoundedAgentProposal,
+    BoundedAgentProposalDecision,
+    BoundedAgentEvaluation,
+    BoundedCommunicationProfile,
+    BoundedCommunicationProfileVersion,
+    BoundedCommunicationRevision,
+    BoundedCommunicationRevisionDecision,
+)
+
 
 def _reject_controlled_agent_mutation(_mapper: Any, _connection: Any, target: object) -> None:
     raise ValueError(f"{type(target).__name__} records are append-only")
@@ -3969,6 +4846,10 @@ for _retrieval_immutable_model in GRAPH_RETRIEVAL_IMMUTABLE_MODELS:
 for _workflow_immutable_model in CONTROLLED_WORKFLOW_IMMUTABLE_MODELS:
     event.listen(_workflow_immutable_model, "before_update", _reject_controlled_agent_mutation)
     event.listen(_workflow_immutable_model, "before_delete", _reject_controlled_agent_mutation)
+
+for _agent_studio_immutable_model in BOUNDED_AGENT_STUDIO_IMMUTABLE_MODELS:
+    event.listen(_agent_studio_immutable_model, "before_update", _reject_controlled_agent_mutation)
+    event.listen(_agent_studio_immutable_model, "before_delete", _reject_controlled_agent_mutation)
 
 event.listen(
     ControlledWorkflowExecution,

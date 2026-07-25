@@ -80,6 +80,24 @@ DomainEventType = Literal[
     "workflow.approval.requested",
     "workflow.approval.accepted",
     "workflow.approval.denied",
+    "agent.identity.created",
+    "agent.version.created",
+    "agent.version.validated",
+    "agent.version.validation_failed",
+    "agent.version.activated",
+    "agent.activation.requested",
+    "agent.activation.approved",
+    "agent.activation.denied",
+    "agent.invocation.started",
+    "agent.proposal.created",
+    "agent.proposal.accepted",
+    "agent.proposal.rejected",
+    "agent.evaluation.recorded",
+    "agent.communication.revision_proposed",
+    "agent.communication.revision_accepted",
+    "agent.communication.revision_rejected",
+    "agent.suspended",
+    "agent.retired",
 ]
 SubjectKind = Literal[
     "canonical_resource",
@@ -93,6 +111,13 @@ SubjectKind = Literal[
     "workflow_version",
     "workflow_execution",
     "workflow_step",
+    "agent_identity",
+    "agent_version",
+    "agent_activation",
+    "agent_invocation",
+    "agent_proposal",
+    "agent_evaluation",
+    "communication_revision",
 ]
 OriginType = Literal[
     "authenticated_user",
@@ -146,6 +171,24 @@ _WORKFLOW_STEP_PAYLOAD = frozenset(
         "attemptNumber",
         "retryAt",
         "approvalStatus",
+    }
+)
+_AGENT_PAYLOAD = frozenset(
+    {
+        "agentId",
+        "agentVersionId",
+        "agentKind",
+        "versionNumber",
+        "lifecycleState",
+        "validationOutcome",
+        "activationDecision",
+        "workflowVersionId",
+        "workflowExecutionId",
+        "proposalKind",
+        "evaluationOutcome",
+        "preservationStatus",
+        "decision",
+        "reasonCode",
     }
 )
 
@@ -295,6 +338,46 @@ EVENT_TYPE_REGISTRY: dict[DomainEventType, EventTypeSpec] = {
     "workflow.approval.denied": EventTypeSpec(
         "workflow_step", _WORKFLOW_STEP_PAYLOAD, canvas_required=True
     ),
+    "agent.identity.created": EventTypeSpec("agent_identity", _AGENT_PAYLOAD, canvas_required=True),
+    "agent.version.created": EventTypeSpec("agent_version", _AGENT_PAYLOAD, canvas_required=True),
+    "agent.version.validated": EventTypeSpec("agent_version", _AGENT_PAYLOAD, canvas_required=True),
+    "agent.version.validation_failed": EventTypeSpec(
+        "agent_version", _AGENT_PAYLOAD, canvas_required=True
+    ),
+    "agent.version.activated": EventTypeSpec("agent_version", _AGENT_PAYLOAD, canvas_required=True),
+    "agent.activation.requested": EventTypeSpec(
+        "agent_activation", _AGENT_PAYLOAD, canvas_required=True
+    ),
+    "agent.activation.approved": EventTypeSpec(
+        "agent_activation", _AGENT_PAYLOAD, canvas_required=True
+    ),
+    "agent.activation.denied": EventTypeSpec(
+        "agent_activation", _AGENT_PAYLOAD, canvas_required=True
+    ),
+    "agent.invocation.started": EventTypeSpec(
+        "agent_invocation", _AGENT_PAYLOAD, canvas_required=True
+    ),
+    "agent.proposal.created": EventTypeSpec("agent_proposal", _AGENT_PAYLOAD, canvas_required=True),
+    "agent.proposal.accepted": EventTypeSpec(
+        "agent_proposal", _AGENT_PAYLOAD, canvas_required=True
+    ),
+    "agent.proposal.rejected": EventTypeSpec(
+        "agent_proposal", _AGENT_PAYLOAD, canvas_required=True
+    ),
+    "agent.evaluation.recorded": EventTypeSpec(
+        "agent_evaluation", _AGENT_PAYLOAD, canvas_required=True
+    ),
+    "agent.communication.revision_proposed": EventTypeSpec(
+        "communication_revision", _AGENT_PAYLOAD, canvas_required=True
+    ),
+    "agent.communication.revision_accepted": EventTypeSpec(
+        "communication_revision", _AGENT_PAYLOAD, canvas_required=True
+    ),
+    "agent.communication.revision_rejected": EventTypeSpec(
+        "communication_revision", _AGENT_PAYLOAD, canvas_required=True
+    ),
+    "agent.suspended": EventTypeSpec("agent_identity", _AGENT_PAYLOAD, canvas_required=True),
+    "agent.retired": EventTypeSpec("agent_identity", _AGENT_PAYLOAD, canvas_required=True),
 }
 
 
