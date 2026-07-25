@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from opencanvas_api.db.models import (
     ControlledAgentExecution,
     ControlledAgentReversibleWriteEffect,
+    ControlledAgentReversibleWriteProposal,
 )
 from opencanvas_api.services.agents.contracts import (
     ApprovalDecision,
@@ -565,6 +566,49 @@ class ControlledExecutionReliability:
                 failed_at=attempted_at,
                 trace_id=trace_id,
             )
+
+    async def execute_reversible_write_retry(
+        self,
+        *,
+        user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        execution_id: uuid.UUID,
+        attempted_at: datetime,
+    ) -> RetryExecutionResult:
+        """Retry the persisted reversible proposal without caller authority input."""
+
+        proposal = await self.session.scalar(
+            select(ControlledAgentReversibleWriteProposal).where(
+                ControlledAgentReversibleWriteProposal.execution_id == execution_id,
+                ControlledAgentReversibleWriteProposal.user_id == user_id,
+                ControlledAgentReversibleWriteProposal.workspace_id == workspace_id,
+            )
+        )
+        if proposal is None:
+            raise ExecutionReliabilityDenied("approved_action_not_found")
+
+        async def apply_reversible_effect(_: ExecutionLease) -> object:
+            from opencanvas_api.services.agents.reversible_write_effects import (
+                ReversibleWriteEffectService,
+            )
+
+            return await ReversibleWriteEffectService(
+                self.session,
+                now=_aware_utc(attempted_at),
+            ).apply(
+                authenticated_user_id=user_id,
+                workspace_id=workspace_id,
+                execution_id=execution_id,
+                idempotency_key=proposal.idempotency_key,
+            )
+
+        return await self.execute_retry(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+            attempted_at=attempted_at,
+            action=apply_reversible_effect,
+        )
 
     async def _record_retry_failure(
         self,

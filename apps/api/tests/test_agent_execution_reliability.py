@@ -777,10 +777,11 @@ async def test_retryable_failure_rolls_back_action_and_schedules_retry(
     async with database.sessions() as session:
         workspace = await session.get(Workspace, bundle.execution.workspace_id)
         assert workspace is not None
-        original_name = workspace.name
+        owned_workspace: Workspace = workspace
+        original_name = owned_workspace.name
 
         async def fail_after_mutation(_: object) -> None:
-            workspace.name = "must roll back"
+            owned_workspace.name = "must roll back"
             await session.flush()
             raise RetryActionError(RetryFailureClassification.PROVIDER_TIMEOUT)
 
@@ -993,10 +994,11 @@ async def test_retry_trace_failure_rolls_back_action_claim_and_terminal_state(
     async with database.sessions() as session:
         workspace = await session.get(Workspace, bundle.execution.workspace_id)
         assert workspace is not None
-        original_name = workspace.name
+        owned_workspace: Workspace = workspace
+        original_name = owned_workspace.name
 
         async def mutate(_: object) -> None:
-            workspace.name = "must roll back with trace"
+            owned_workspace.name = "must roll back with trace"
             await session.flush()
 
         service = ControlledExecutionReliability(
@@ -1027,3 +1029,121 @@ async def test_retry_trace_failure_rolls_back_action_claim_and_terminal_state(
             execution_id=bundle.execution.execution_id,
         )
         assert current is not None and current.status == ExecutionStatus.READY.value
+
+
+async def test_retry_schedule_trace_failure_rolls_back_claim_and_schedule(
+    database: Database,
+) -> None:
+    bundle = await _ready_bundle(database)
+
+    async def transient(_: object) -> None:
+        raise RetryActionError(RetryFailureClassification.PROVIDER_TIMEOUT)
+
+    async with database.sessions() as session:
+        service = ControlledExecutionReliability(
+            session,
+            trace_service=_FailingTraceService(session),
+        )
+        with pytest.raises(RuntimeError, match="injected trace failure"):
+            await service.execute_retry(
+                user_id=bundle.execution.user_id,
+                workspace_id=bundle.execution.workspace_id,
+                execution_id=bundle.execution.execution_id,
+                attempted_at=NOW + timedelta(minutes=1),
+                action=transient,
+            )
+        await session.commit()
+
+    async with database.sessions() as session:
+        execution = await session.get(ControlledAgentExecution, bundle.execution.execution_id)
+        assert execution is not None
+        assert execution.attempt_count == 0
+        assert execution.lease_generation == 0
+        assert execution.next_retry_at is None
+        assert execution.lease_owner_id is None
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(ControlledAgentAuditEvent)
+                .where(ControlledAgentAuditEvent.event_type == "execution.retry_scheduled")
+            )
+            == 0
+        )
+
+
+async def test_recovery_trace_failure_restores_expired_owner(database: Database) -> None:
+    bundle = await _ready_bundle(database)
+    claimed_at = NOW + timedelta(minutes=1)
+    async with database.sessions() as session:
+        lease = await ControlledExecutionReliability(session).claim(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            claimed_at=claimed_at,
+        )
+        await session.commit()
+
+    async with database.sessions() as session:
+        service = ControlledExecutionReliability(
+            session,
+            trace_service=_FailingTraceService(session),
+        )
+        with pytest.raises(RuntimeError, match="injected trace failure"):
+            await service.recover_expired_lease(
+                user_id=bundle.execution.user_id,
+                workspace_id=bundle.execution.workspace_id,
+                execution_id=bundle.execution.execution_id,
+                expected_generation=lease.generation,
+                recovered_at=lease.expires_at,
+            )
+        await session.commit()
+
+    execution = await _execution(database, bundle)
+    assert execution.lease_owner_id == lease.owner_id
+    assert execution.lease_generation == lease.generation
+    assert execution.next_retry_at is None
+
+
+async def test_competing_retry_deliveries_execute_action_once(tmp_path: Path) -> None:
+    database = await _file_database(tmp_path / "retry-race.db")
+    try:
+        bundle = await _ready_bundle(database)
+        calls = 0
+
+        async def run_retry() -> str:
+            nonlocal calls
+            async with database.sessions() as session:
+
+                async def action(_: object) -> None:
+                    nonlocal calls
+                    calls += 1
+                    await asyncio.sleep(0.05)
+
+                try:
+                    result = await ControlledExecutionReliability(session).execute_retry(
+                        user_id=bundle.execution.user_id,
+                        workspace_id=bundle.execution.workspace_id,
+                        execution_id=bundle.execution.execution_id,
+                        attempted_at=NOW + timedelta(minutes=1),
+                        action=action,
+                    )
+                    await session.commit()
+                    return "duplicate" if result.duplicate else result.status.value
+                except ExecutionReliabilityDenied as exc:
+                    await session.rollback()
+                    return exc.reason_code
+
+        outcomes = await asyncio.gather(run_retry(), run_retry())
+        assert "succeeded" in outcomes
+        assert set(outcomes) <= {
+            "succeeded",
+            "duplicate",
+            "execution_claim_conflict",
+            "execution_not_claimable",
+        }
+        assert calls == 1
+        execution = await _execution(database, bundle)
+        assert execution.attempt_count == 1
+        assert execution.terminal_outcome == ExecutionStatus.SUCCEEDED.value
+    finally:
+        await database.dispose()

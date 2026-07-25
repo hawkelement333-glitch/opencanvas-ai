@@ -4,7 +4,7 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import httpx
 import pytest
@@ -46,6 +46,8 @@ from opencanvas_api.services.agents.reversible_write_rollbacks import (
 )
 from opencanvas_api.services.agents.reversible_writes import (
     ROLLBACK_APPROVAL_TTL,
+    ReversibleWriteAction,
+    ReversibleWriteRollbackAction,
     RollbackApprovalDigestInput,
     authoritative_absence_digest,
     rollback_approval_digest,
@@ -159,34 +161,20 @@ async def test_bounded_retry_reuses_atomic_reversible_effect_and_suppresses_dupl
     user_id = SYSTEM_USER_ID
     workspace_id = uuid.UUID(canvas["workspaceId"])
     execution_id = uuid.UUID(proposal["executionId"])
-    action_calls = 0
 
     async with database.sessions() as session:
-
-        async def apply_effect(_: object) -> object:
-            nonlocal action_calls
-            action_calls += 1
-            return await ReversibleWriteEffectService(session, now=attempted_at).apply(
-                authenticated_user_id=user_id,
-                workspace_id=workspace_id,
-                execution_id=execution_id,
-                idempotency_key=proposal["_idempotencyKey"],
-            )
-
         reliability = ControlledExecutionReliability(session)
-        applied = await reliability.execute_retry(
+        applied = await reliability.execute_reversible_write_retry(
             user_id=user_id,
             workspace_id=workspace_id,
             execution_id=execution_id,
             attempted_at=attempted_at,
-            action=apply_effect,
         )
-        duplicate = await reliability.execute_retry(
+        duplicate = await reliability.execute_reversible_write_retry(
             user_id=user_id,
             workspace_id=workspace_id,
             execution_id=execution_id,
             attempted_at=attempted_at + timedelta(seconds=1),
-            action=apply_effect,
         )
         await session.commit()
         effect_count = int(
@@ -208,7 +196,6 @@ async def test_bounded_retry_reuses_atomic_reversible_effect_and_suppresses_dupl
 
     assert applied.status.value == "succeeded"
     assert duplicate.duplicate is True
-    assert action_calls == 1
     assert effect_count == 1
     assert note_count == 1
 
@@ -649,12 +636,15 @@ async def test_successful_rollback_approval_issuance(
             note_id=approval.note_id,
             proposal_id=approval.proposal_id,
             effect_id=approval.effect_id,
-            forward_action=approval.forward_action,
-            rollback_action=approval.rollback_action,
+            forward_action=ReversibleWriteAction(approval.forward_action),
+            rollback_action=ReversibleWriteRollbackAction(approval.rollback_action),
             original_plan_digest=approval.original_plan_digest,
             expected_current_revision=approval.expected_current_revision,
             effect_after_state_digest=approval.effect_after_state_digest,
-            rollback_target_kind=approval.rollback_target_kind,
+            rollback_target_kind=cast(
+                Literal["authoritative_absence", "exact_prior_state"],
+                approval.rollback_target_kind,
+            ),
             rollback_target_digest=approval.rollback_target_digest,
             rollback_evidence_id=approval.rollback_evidence_id,
             grant_id=approval.grant_id,
