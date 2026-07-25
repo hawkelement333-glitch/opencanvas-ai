@@ -102,6 +102,8 @@ _GRAPH_PAYLOAD = frozenset({"relationshipType", "state", "reasonCode", "graphRev
 _CANONICAL_PAYLOAD = frozenset({"objectType", "version", "lifecycleState"})
 _EXECUTION_PAYLOAD = frozenset({"status", "reasonCode"})
 _EFFECT_PAYLOAD = frozenset({"action", "noteId", "resultingRevision"})
+_BUNDLE_PAYLOAD = frozenset({"retrievalId", "bundleState", "artifactSha256", "failureCode"})
+_CITATION_PAYLOAD = frozenset({"retrievalId", "style", "status", "failureCode"})
 
 EVENT_TYPE_REGISTRY: dict[DomainEventType, EventTypeSpec] = {
     "graph.relationship.created": EventTypeSpec(
@@ -159,29 +161,27 @@ EVENT_TYPE_REGISTRY: dict[DomainEventType, EventTypeSpec] = {
         execution_required=True,
     ),
     "evidence.bundle.requested": EventTypeSpec(
-        "evidence_bundle", frozenset(), canvas_required=True, reserved=True
+        "evidence_bundle", _BUNDLE_PAYLOAD, canvas_required=True
     ),
     "evidence.bundle.generation_started": EventTypeSpec(
-        "evidence_bundle", frozenset(), canvas_required=True, reserved=True
+        "evidence_bundle", _BUNDLE_PAYLOAD, canvas_required=True
     ),
     "evidence.bundle.completed": EventTypeSpec(
-        "evidence_bundle", frozenset(), canvas_required=True, reserved=True
+        "evidence_bundle", _BUNDLE_PAYLOAD, canvas_required=True
     ),
     "evidence.bundle.failed": EventTypeSpec(
-        "evidence_bundle", frozenset(), canvas_required=True, reserved=True
+        "evidence_bundle", _BUNDLE_PAYLOAD, canvas_required=True
     ),
     "evidence.bundle.accessed": EventTypeSpec(
-        "evidence_bundle", frozenset(), canvas_required=True, reserved=True
+        "evidence_bundle", _BUNDLE_PAYLOAD, canvas_required=True
     ),
     "evidence.bundle.export_denied": EventTypeSpec(
-        "evidence_bundle", frozenset(), canvas_required=True, reserved=True
+        "evidence_bundle", _BUNDLE_PAYLOAD, canvas_required=True
     ),
     "citation.rendering.completed": EventTypeSpec(
-        "citation", frozenset(), canvas_required=True, reserved=True
+        "citation", _CITATION_PAYLOAD, canvas_required=True
     ),
-    "citation.rendering.failed": EventTypeSpec(
-        "citation", frozenset(), canvas_required=True, reserved=True
-    ),
+    "citation.rendering.failed": EventTypeSpec("citation", _CITATION_PAYLOAD, canvas_required=True),
 }
 
 
