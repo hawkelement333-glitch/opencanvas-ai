@@ -451,6 +451,46 @@ async def test_terminal_transition_clears_lease_and_blocks_renewal_and_release(
         assert execution.attempt_count == 1
 
 
+async def test_revoked_authority_blocks_renewal_without_changing_lease(
+    database: Database,
+) -> None:
+    bundle = await _ready_bundle(database)
+    async with database.sessions() as session:
+        service = ControlledExecutionReliability(session)
+        lease = await service.claim(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            claimed_at=NOW + timedelta(minutes=1),
+        )
+        await ControlledAgentRepository(session).append_revocation(
+            RevocationRecord(
+                revocation_id=uuid.uuid4(),
+                subject_kind="grant",
+                subject_id=bundle.grant.grant_id,
+                user_id=bundle.execution.user_id,
+                workspace_id=bundle.execution.workspace_id,
+                execution_id=bundle.execution.execution_id,
+                revoked_at=NOW + timedelta(minutes=1, seconds=5),
+                reason_code="owner_revoked",
+            )
+        )
+        with pytest.raises(ExecutionReliabilityDenied, match="grant_revoked"):
+            await service.renew(
+                user_id=bundle.execution.user_id,
+                workspace_id=bundle.execution.workspace_id,
+                execution_id=bundle.execution.execution_id,
+                owner_id=lease.owner_id,
+                generation=lease.generation,
+                renewed_at=NOW + timedelta(minutes=1, seconds=10),
+            )
+        execution = await session.get(ControlledAgentExecution, bundle.execution.execution_id)
+        assert execution is not None
+        assert execution.lease_expires_at is not None
+        assert execution.lease_expires_at.replace(tzinfo=NOW.tzinfo) == lease.expires_at
+        assert execution.attempt_count == 1
+
+
 @pytest.mark.parametrize(
     ("owner_delta", "generation_delta", "seconds", "reason"),
     [

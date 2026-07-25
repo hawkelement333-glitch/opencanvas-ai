@@ -190,6 +190,12 @@ class ControlledExecutionReliability:
             raise ExecutionReliabilityDenied("lease_identity_invalid")
         trace_id = uuid.uuid4()
         async with self.session.begin_nested():
+            await self._validate_claim_authority(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                execution_id=execution_id,
+                evaluated_at=renewed_at,
+            )
             current = await self.repository.current_state(
                 user_id=user_id,
                 workspace_id=workspace_id,
