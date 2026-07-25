@@ -6,8 +6,8 @@ Branch: `milestone-5-living-knowledge-workflows-architecture-local`
 
 Baseline: `dadf114cfb33c557d6d1be7d8f98a4bb3ba36818`
 
-Milestone 5 architecture and checkpoints 5.1–5.2 are complete locally. The
-next checkpoint is 5.3, Graph-Aware Retrieval.
+Milestone 5 architecture and checkpoints 5.1–5.3 are complete locally. The
+next checkpoint is 5.4, Controlled AI Workflows.
 
 `MILESTONE 5 ARCHITECTURE COMPLETE LOCALLY — READY FOR KNOWLEDGE GRAPH FOUNDATION`
 
@@ -16,13 +16,13 @@ next checkpoint is 5.3, Graph-Aware Retrieval.
 | Architecture                      | Complete locally | Completed Milestone 4    |
 | 5.1 Knowledge Graph Foundation    | Complete locally | Architecture             |
 | 5.2 Living State and Event System | Complete locally | 5.1                      |
-| 5.3 Graph-Aware Retrieval         | Not started      | 5.1–5.2                  |
+| 5.3 Graph-Aware Retrieval         | Complete locally | 5.1–5.2                  |
 | 5.4 Controlled AI Workflows       | Not started      | 5.1–5.3 and M4           |
 | 5.5 Dynamic Universe Interface    | Not started      | 5.1; 5.2/5.4 to complete |
 | 5.6 Bounded Agent Studio          | Not started      | 5.4                      |
 | 5.7 Final Combined Audit          | Not started      | 5.1–5.6                  |
 
-Only checkpoints 5.1 and 5.2 are complete. Milestone 5 is not complete.
+Only checkpoints 5.1, 5.2, and 5.3 are complete. Milestone 5 is not complete.
 
 ## Permanent traceability contract
 
@@ -246,6 +246,31 @@ checkpoint.
 - Handoff:
   [`MILESTONE_5_2_LIVING_STATE_EVENT_HANDOFF.md`](MILESTONE_5_2_LIVING_STATE_EVENT_HANDOFF.md).
 
+## 5.3 completion evidence
+
+- Selected canonical objects are an exact allowlist; graph connectivity never
+  broadens authority.
+- Closed versioned traversal, outcome, decision-reason, citation, APA, and
+  evidence-bundle registries.
+- Deterministic bounded traversal over all eight completed graph relationship
+  kinds with direction enforcement, cycle termination, stable ranking, graph
+  revision capture, and source-version retention.
+- Immutable retrieval runs, inclusion/exclusion evidence, exact citations,
+  hashes, locators, relationship paths, and Trace linkage.
+- Distinct supported, conflicting, insufficient-evidence, and bounded-result
+  outcomes; insufficient evidence creates no citations.
+- Deterministic APA 7 output using only authoritative repository metadata.
+- Deterministic ZIP evidence bundle with exact excerpts, manifest, citation
+  map, References, Trace report, and SHA-256 verification.
+- Full-source export fails closed and records `export_not_authorized`.
+- All eight evidence-bundle/citation event contracts are now emittable through
+  real producers with transactional outbox evidence.
+- Migration and sole head: `20260725_0018`.
+- No external search, autonomous agent/workflow trigger, frontend, workflow,
+  Agent Studio, Academy, English, quarantine, rehabilitation, or tribunal code.
+- Handoff:
+  [`MILESTONE_5_3_GRAPH_AWARE_RETRIEVAL_HANDOFF.md`](MILESTONE_5_3_GRAPH_AWARE_RETRIEVAL_HANDOFF.md).
+
 ## 5.1 completion evidence
 
 - Canonical entity kinds: document, note, execution.
@@ -274,16 +299,16 @@ checkpoint.
 
 ## Planned migration outline
 
-| Placeholder     | Scope                                                  |
-| --------------- | ------------------------------------------------------ |
-| `20260725_0016` | Complete: graph state, bindings, relationship evidence |
-| `2026xxxx_0017` | Events/outbox, sequences, projector checkpoints        |
-| `2026xxxx_0018` | Context paths and traversal indexes                    |
-| `2026xxxx_0019` | Workflow versions/runs/transitions/compensation        |
-| `2026xxxx_0020` | Viewport tiles and summaries                           |
-| `2026xxxx_0021` | Agent versions, feedback, evaluations, promotion       |
+| Placeholder     | Scope                                                   |
+| --------------- | ------------------------------------------------------- |
+| `20260725_0016` | Complete: graph state, bindings, relationship evidence  |
+| `20260725_0017` | Complete: events/outbox, sequences, activity projection |
+| `20260725_0018` | Complete: retrieval, citations, evidence bundles        |
+| `2026xxxx_0019` | Workflow versions/runs/transitions/compensation         |
+| `2026xxxx_0020` | Viewport tiles and summaries                            |
+| `2026xxxx_0021` | Agent versions, feedback, evaluations, promotion        |
 
-The 5.1 identifier is now an implemented Alembic revision. Later identifiers
+The 5.1–5.3 identifiers are implemented Alembic revisions. Later identifiers
 remain placeholders. Migrations remain additive, reversibly tested, resumably
 backfillable, and retain legacy tables.
 
@@ -312,4 +337,4 @@ Deferred:
   - Agent Justice, Quarantine, and Rehabilitation System
 
 Next authorized start:
-`MILESTONE 5.3 STARTED LOCALLY — GRAPH-AWARE RETRIEVAL`
+`MILESTONE 5.4 STARTED LOCALLY — CONTROLLED AI WORKFLOWS`

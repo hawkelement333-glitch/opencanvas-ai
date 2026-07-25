@@ -1,7 +1,7 @@
 # Milestone 5 Implementation Plan
 
-Status: architecture and checkpoints 5.1–5.2 complete locally; checkpoints
-5.3–5.7 pending.
+Status: architecture and checkpoints 5.1–5.3 complete locally; checkpoints
+5.4–5.7 pending.
 
 This plan implements
 [`MILESTONE_5_ARCHITECTURE.md`](MILESTONE_5_ARCHITECTURE.md) sequentially.
@@ -99,6 +99,8 @@ runtime locking remains unclaimed and pending a configured runtime. See
 
 ## 5.3 — Graph-Aware Retrieval
 
+Status: complete locally.
+
 Start: `MILESTONE 5.3 STARTED LOCALLY — GRAPH-AWARE RETRIEVAL`
 
 Complete: `MILESTONE 5.3 COMPLETE LOCALLY — READY FOR CONTROLLED AI WORKFLOWS`
@@ -120,7 +122,18 @@ ZIP is the initial container. It contains `README.md`, `manifest.json`,
 `integrity/sha256sums.txt`. Filenames and ordering are deterministic; unsafe/
 traversal/duplicate paths are rejected; total size is bounded.
 
-Migration `2026xxxx_0018`: graph-context/path evidence and traversal indexes.
+Implemented with migration `20260725_0018`, selected-context graph traversal,
+closed decision/outcome registries, immutable exact citations, deterministic
+APA rendering, database-backed deterministic evidence ZIPs, safe scoped APIs,
+and activation of the eight evidence-bundle/citation domain-event contracts.
+Complete-source export remains fail-closed because no general export authority
+exists. PostgreSQL DDL compiles offline; runtime locking and managed object
+storage remain unvalidated. See
+[`MILESTONE_5_3_GRAPH_AWARE_RETRIEVAL_HANDOFF.md`](MILESTONE_5_3_GRAPH_AWARE_RETRIEVAL_HANDOFF.md).
+
+Migration `20260725_0018`: complete locally; retrieval runs, decision/path
+evidence, immutable citations, verified bundle artifacts, indexes, and
+append-only protection.
 
 Gate: exact roots and all budgets/allowlists; scope/lifecycle/version/evidence
 checks; revoked/altered/missing/stale/cross-scope failures; deterministic

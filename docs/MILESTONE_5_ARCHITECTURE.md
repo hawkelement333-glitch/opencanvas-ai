@@ -1,6 +1,6 @@
 # Milestone 5 Architecture — Living Knowledge Graph and AI Workflows
 
-Status: architecture and checkpoints 5.1–5.2 complete locally; 5.3–5.7 pending
+Status: architecture and checkpoints 5.1–5.3 complete locally; 5.4–5.7 pending
 
 Baseline: `dadf114cfb33c557d6d1be7d8f98a4bb3ba36818`
 
@@ -46,6 +46,41 @@ Evidence-bundle and citation lifecycle names are reserved contracts. They have
 no producer and cannot be emitted during 5.2. All Adaptive Agent, Training,
 Academy, English, Evidence Bundle, APA, Quarantine, Rehabilitation, and
 Tribunal requirements remain unchanged future acceptance criteria.
+
+## Implemented 5.3 retrieval and evidence foundation
+
+Milestone 5.3 extends the canonical graph, existing document chunks/embeddings,
+Trace, and transactional event/outbox boundary. A retrieval begins from
+authenticated, user-selected canonical objects bound to the exact workspace
+and canvas. Seed objects must be a subset of that selected allowlist. A graph
+relationship never grants access to an unselected object.
+
+`graph-retrieval-v1` performs deterministic bounded traversal over active
+`references`, `derived_from`, `related_to`, `cites`, `supports`,
+`contradicts`, `produced_by`, and `affected_by` relationships. Direction is
+forward except `related_to` and `contradicts`, which are bidirectional.
+Server-owned limits are 50 selected objects, 50 seeds, depth 3, 250 visited
+entities, 500 considered relationships, 200 candidates, 50 passages, and
+60,000 serialized evidence characters. Existing deterministic mock embeddings
+remain the demo/test boundary; no external retrieval or paid dependency was
+added.
+
+Retrieval runs, decisions, and `graph-citation-v1` passage evidence are
+append-only and bind graph revision, canonical/source version, source/excerpt
+hash, exact locator, relationship path, and Trace. Outcomes are closed to
+supported, conflicting evidence, insufficient evidence, and bounded result.
+APA 7 rendering uses only existing repository metadata, emits `n.d.` where
+date metadata does not exist, labels internal/uploaded material, emits no
+invented author/publisher/URL, and escapes Markdown-significant text.
+
+`trace-evidence-bundle-v1` produces a deterministic ZIP containing README,
+manifest, Trace report, references, citation mapping, exact excerpts, and
+SHA-256 checksums. Complete sources are omitted with
+`export_not_authorized` because no general source-export authority exists.
+The verified opaque ZIP bytes are stored transactionally in the database.
+All eight previously reserved evidence-bundle/citation event contracts now
+have real 5.3 producers and transactional outbox records. Events cannot start
+agents or workflows.
 
 - `CanonicalObject` and `CanonicalRelationship` are the versioned,
   workspace-scoped semantic foundation. Relationships already enforce closed
