@@ -63,6 +63,23 @@ import {
   type UniverseViewport,
   type WorkflowExecution,
 } from "./universe-contracts";
+import {
+  agentActivationRequestSchema,
+  agentEvaluationSchema,
+  agentInvocationSchema,
+  agentProposalSchema,
+  agentRegistriesSchema,
+  agentValidationSchema,
+  boundedAgentSchema,
+  communicationProfileSchema,
+  communicationRevisionSchema,
+  type AgentActivationRequest,
+  type AgentInvocation,
+  type AgentRegistries,
+  type BoundedAgent,
+  type CommunicationProfile,
+  type CommunicationRevision,
+} from "./agent-studio-contracts";
 
 const DEFAULT_API_URL = "http://localhost:8000/api/v1";
 const API_TIMEOUT_MS = 20_000;
@@ -727,6 +744,210 @@ export const accountApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password, confirmation: "DELETE MY ACCOUNT" }),
     });
+  },
+};
+
+function agentStudioPath(workspaceId: string, canvasId: string): string {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/agent-studio`;
+}
+
+export const agentStudioApi = {
+  registries(
+    workspaceId: string,
+    canvasId: string,
+    signal?: AbortSignal,
+  ): Promise<AgentRegistries> {
+    return request(`${agentStudioPath(workspaceId, canvasId)}/registries`, agentRegistriesSchema, {
+      signal,
+    });
+  },
+
+  list(
+    workspaceId: string,
+    canvasId: string,
+    lifecycle?: string,
+    signal?: AbortSignal,
+  ): Promise<BoundedAgent[]> {
+    const query = lifecycle ? `?lifecycle=${encodeURIComponent(lifecycle)}` : "";
+    return request(
+      `${agentStudioPath(workspaceId, canvasId)}/agents${query}`,
+      z.array(boundedAgentSchema).max(100),
+      { signal },
+    );
+  },
+
+  create(workspaceId: string, canvasId: string, input: unknown): Promise<BoundedAgent> {
+    return request(`${agentStudioPath(workspaceId, canvasId)}/agents`, boundedAgentSchema, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  createVersion(
+    workspaceId: string,
+    canvasId: string,
+    agentId: string,
+    input: unknown,
+  ): Promise<BoundedAgent> {
+    return request(
+      `${agentStudioPath(workspaceId, canvasId)}/agents/${encodeURIComponent(agentId)}/versions`,
+      boundedAgentSchema,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+
+  validate(workspaceId: string, canvasId: string, versionId: string) {
+    return request(
+      `${agentStudioPath(workspaceId, canvasId)}/versions/${encodeURIComponent(versionId)}/validate`,
+      agentValidationSchema,
+      { method: "POST" },
+    );
+  },
+
+  requestActivation(
+    workspaceId: string,
+    canvasId: string,
+    versionId: string,
+    idempotencyKey: string,
+  ): Promise<AgentActivationRequest> {
+    return request(
+      `${agentStudioPath(workspaceId, canvasId)}/versions/${encodeURIComponent(versionId)}/activation-requests`,
+      agentActivationRequestSchema,
+      { method: "POST", body: JSON.stringify({ idempotencyKey }) },
+    );
+  },
+
+  decideActivation(
+    workspaceId: string,
+    canvasId: string,
+    requestId: string,
+    decision: "approved" | "denied",
+  ): Promise<AgentActivationRequest> {
+    return request(
+      `${agentStudioPath(workspaceId, canvasId)}/activation-requests/${encodeURIComponent(requestId)}/decision`,
+      agentActivationRequestSchema,
+      { method: "POST", body: JSON.stringify({ decision }) },
+    );
+  },
+
+  invoke(
+    workspaceId: string,
+    canvasId: string,
+    agentId: string,
+    input: unknown,
+  ): Promise<AgentInvocation> {
+    return request(
+      `${agentStudioPath(workspaceId, canvasId)}/agents/${encodeURIComponent(agentId)}/invocations`,
+      agentInvocationSchema,
+      { method: "POST", body: JSON.stringify(input) },
+      LONG_OPERATION_TIMEOUT_MS,
+    );
+  },
+
+  evaluate(workspaceId: string, canvasId: string, invocationId: string, input: unknown) {
+    return request(
+      `${agentStudioPath(workspaceId, canvasId)}/invocations/${encodeURIComponent(invocationId)}/evaluations`,
+      agentEvaluationSchema,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+
+  createProposal(workspaceId: string, canvasId: string, input: unknown) {
+    return request(`${agentStudioPath(workspaceId, canvasId)}/proposals`, agentProposalSchema, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  decideProposal(
+    workspaceId: string,
+    canvasId: string,
+    proposalId: string,
+    decision: "accepted" | "rejected",
+  ) {
+    return request(
+      `${agentStudioPath(workspaceId, canvasId)}/proposals/${encodeURIComponent(proposalId)}/decision`,
+      agentProposalSchema,
+      { method: "POST", body: JSON.stringify({ decision }) },
+    );
+  },
+
+  listProfiles(
+    workspaceId: string,
+    canvasId: string,
+    signal?: AbortSignal,
+  ): Promise<CommunicationProfile[]> {
+    return request(
+      `${agentStudioPath(workspaceId, canvasId)}/communication-profiles`,
+      z.array(communicationProfileSchema).max(100),
+      { signal },
+    );
+  },
+
+  createProfile(
+    workspaceId: string,
+    canvasId: string,
+    input: unknown,
+  ): Promise<CommunicationProfile> {
+    return request(
+      `${agentStudioPath(workspaceId, canvasId)}/communication-profiles`,
+      communicationProfileSchema,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+
+  createProfileVersion(
+    workspaceId: string,
+    canvasId: string,
+    profileId: string,
+    input: unknown,
+  ): Promise<CommunicationProfile> {
+    return request(
+      `${agentStudioPath(workspaceId, canvasId)}/communication-profiles/${encodeURIComponent(profileId)}/versions`,
+      communicationProfileSchema,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+
+  proposeRevision(
+    workspaceId: string,
+    canvasId: string,
+    input: unknown,
+  ): Promise<CommunicationRevision> {
+    return request(
+      `${agentStudioPath(workspaceId, canvasId)}/communication-revisions`,
+      communicationRevisionSchema,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+
+  decideRevision(
+    workspaceId: string,
+    canvasId: string,
+    revisionId: string,
+    decision: "accepted" | "rejected",
+  ): Promise<CommunicationRevision> {
+    return request(
+      `${agentStudioPath(workspaceId, canvasId)}/communication-revisions/${encodeURIComponent(revisionId)}/decision`,
+      communicationRevisionSchema,
+      { method: "POST", body: JSON.stringify({ decision }) },
+    );
+  },
+
+  lifecycle(
+    workspaceId: string,
+    canvasId: string,
+    agentId: string,
+    operation: "suspend" | "restore" | "retire",
+  ): Promise<BoundedAgent> {
+    return request(
+      `${agentStudioPath(workspaceId, canvasId)}/agents/${encodeURIComponent(agentId)}/lifecycle`,
+      boundedAgentSchema,
+      {
+        method: "POST",
+        body: JSON.stringify({ operation, reasonCode: `human_${operation}` }),
+      },
+    );
   },
 };
 
