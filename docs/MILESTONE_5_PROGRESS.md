@@ -6,8 +6,8 @@ Branch: `milestone-5-living-knowledge-workflows-architecture-local`
 
 Baseline: `dadf114cfb33c557d6d1be7d8f98a4bb3ba36818`
 
-Milestone 5 architecture and checkpoints 5.1–5.4 are complete locally. The
-next checkpoint is 5.5, Dynamic Universe Interface.
+Milestone 5 architecture and checkpoints 5.1–5.5 are complete locally. The
+next checkpoint is 5.6, Bounded Agent Studio.
 
 `MILESTONE 5 ARCHITECTURE COMPLETE LOCALLY — READY FOR KNOWLEDGE GRAPH FOUNDATION`
 
@@ -18,12 +18,33 @@ next checkpoint is 5.5, Dynamic Universe Interface.
 | 5.2 Living State and Event System | Complete locally | 5.1                   |
 | 5.3 Graph-Aware Retrieval         | Complete locally | 5.1–5.2               |
 | 5.4 Controlled AI Workflows       | Complete locally | 5.1–5.3 and M4        |
-| 5.5 Dynamic Universe Interface    | Not started      | 5.1–5.4 complete      |
+| 5.5 Dynamic Universe Interface    | Complete locally | 5.1–5.4 complete      |
 | 5.6 Bounded Agent Studio          | Not started      | 5.4                   |
 | 5.7 Final Combined Audit          | Not started      | 5.1–5.6               |
 
-Only checkpoints 5.1, 5.2, 5.3, and 5.4 are complete. Milestone 5 is not
+Only checkpoints 5.1, 5.2, 5.3, 5.4, and 5.5 are complete. Milestone 5 is not
 complete.
+
+## Milestone 5.5 completion
+
+The Dynamic Universe is a dedicated bounded `/universe` route over
+authoritative Milestone 4 and Milestone 5.1–5.4 state. It uses the existing
+React Flow DOM/SVG renderer, React Query cache, authenticated API client,
+design tokens, and scoped backend services. It adds no Agent Studio, agent,
+autonomous trigger, schedule, provider, deployment, or collaboration behavior.
+
+The route provides revision-fenced viewport pages, boundary and off-screen
+selection hydration, all registered relationship meanings, exact selected
+context, retrieval decisions and citations, APA 7 presentation, workflow DAG
+and lifecycle state, deliberate approval/denial and cancellation, effects and
+compensation status, bounded activity, safe Trace summaries, and
+authority-filtered Evidence Bundle controls. Visual placement, proximity,
+animation, color, or interaction never grants context, authority, approval, or
+export permission.
+
+No durable state or migration was required. Alembic remains at sole head
+`20260725_0019`. See
+[`MILESTONE_5_5_DYNAMIC_UNIVERSE_INTERFACE_HANDOFF.md`](MILESTONE_5_5_DYNAMIC_UNIVERSE_INTERFACE_HANDOFF.md).
 
 ## Permanent traceability contract
 

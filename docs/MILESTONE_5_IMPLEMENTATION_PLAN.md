@@ -197,21 +197,44 @@ See
 
 Start: `MILESTONE 5.5 STARTED LOCALLY — DYNAMIC UNIVERSE INTERFACE`
 
-Complete: `MILESTONE 5.5 COMPLETE LOCALLY — READY FOR BOUNDED AGENT STUDIO`
+Complete:
+`MILESTONE 5.5 DYNAMIC UNIVERSE INTERFACE COMPLETE LOCALLY — READY FOR BOUNDED AGENT STUDIO`
 
 Model/reasoning: `gpt-5.6-terra`, high, plus `gpt-5.6-sol` xhigh security/data
 contract review.
 
-Deliver viewport/boundary/selection/activity/workflow/MiniMap APIs, portable
-tiling, normalized cache, visible rendering, prefetch/eviction with pinned
-selection, editing/conflict preservation, and accessible navigation/status.
+Status: complete locally on 2026-07-25.
+
+Delivered:
+
+- revision-fenced, keyset-paginated viewport bounds with 200-node and 500-edge
+  response ceilings, boundary stubs, selection hydration, graph revision, and
+  safe stale-page conflicts;
+- the existing React Flow DOM/SVG renderer with authoritative resource
+  coordinates and a deterministic, read-only workflow DAG layout;
+- all eight closed knowledge-relationship meanings, direction labels,
+  historical treatment, selected-context boundaries, bounded warnings, search,
+  MiniMap, and an accessible keyboard list;
+- server-authored retrieval outcomes, inclusion/exclusion decisions, paths,
+  ranks, contradictions, insufficient-evidence and bounded states, exact
+  citations/locators/versions/hashes, APA 7 rendering, and source focus;
+- controlled workflow lifecycle, dependencies, attempts, approvals, deadlines,
+  effects, rollback and compensation linkage, deliberate approve/deny and
+  cancellation confirmation, and authoritative refresh;
+- bounded deduplicated activity, safe Trace summaries and scoped Trace links,
+  and authority-filtered Evidence Bundle generation/status/ZIP download;
+- direct navigation, refresh, desktop/tablet/mobile inspection, reduced motion,
+  safe empty/error/loading states, and renderer cleanup through React unmount.
 
 Provide safe **View Evidence**, **Open Citation**, **View References**, and
 **Download Evidence Bundle** controls. UI availability never grants export
 authority.
 
-Migration `2026xxxx_0020`: layout tiles, summaries, portable indexes. Optional
-PostgreSQL spatial indexes require measured proof.
+No migration was created. Existing positions and indexes satisfied the
+measured local bounded view; sole head remains `20260725_0019`. Durable tiles,
+server MiniMap summaries, optional PostgreSQL spatial indexes, and more
+advanced prefetch/LRU behavior require measured proof and a later explicit
+performance contract.
 
 Gate: stable revision cursors; no duplicates/omissions; boundary/off-screen
 selection; cache bounds; no full-snapshot regression; projection lag; keyboard,

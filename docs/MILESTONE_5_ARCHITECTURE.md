@@ -424,23 +424,48 @@ inverse writes.
 
 ### Universe interface
 
-Add a server viewport API accepting bounds, graph revision, and cursor and
-returning visible node projections, interior edges, boundary stubs, versions,
-selection hydration, and a stable continuation marker. Use portable fixed
-coordinate integer tiles and B-tree indexes for correctness; PostgreSQL
-spatial indexes are optional after measurement.
+Milestone 5.5 adds a scoped server viewport API accepting portable coordinate
+bounds, a keyset cursor, expected canvas revision, and up to 50 selected
+resource identifiers. It returns at most 200 visible node projections, 500
+incident edges, boundary stubs, off-screen selection hydration, canvas and
+graph revisions, a stable continuation marker, and an explicit bounded flag.
+Continuation is revision-fenced: a canvas mutation produces a safe conflict
+instead of mixing pages from different authoritative states.
 
-Use normalized client caches keyed by ID/version, visible rendering, neighbor
-prefetch, bounded LRU eviction, pinned selection/context, and a server-derived
-MiniMap summary. Workflow states need text/icon equivalents, keyboard/list
-navigation, announcements, reduced motion, and safe errors.
+The current persisted float coordinates and existing canvas indexes remain the
+source of layout truth. Direct inspection did not justify durable tile or
+summary state, an empty migration, or PostgreSQL-only spatial behavior.
+Portable fixed-coordinate tiling, server-derived MiniMap summaries, measured
+neighbor prefetch, and bounded LRU eviction remain performance evolutions for
+workspaces that exceed the current bounded local budget. This decision avoids
+new state whose integrity and invalidation would otherwise need another
+authority contract.
+
+The client uses the existing React Query cache, existing React Flow DOM/SVG
+renderer, and presentation-only view models. It does not add Three.js, WebGL,
+a second graph model, a second API client, or another state framework.
+Resource coordinates remain authoritative presentation data; deterministic
+workflow DAG coordinates are derived from immutable dependencies and never
+write back to a workflow version. React Flow unmount owns renderer and event
+cleanup, and no animation loop or WebGL context is created.
+
+Workflow states use text and icon equivalents. The spatial graph has a
+keyboard-operable list for exact selected-context review, clear focus,
+announcements, reduced motion, safe errors, and a stacked narrow-screen
+inspection layout. Color is supplemental, never the sole relationship or
+lifecycle signal.
 
 The interface provides authority-aware **View Evidence**, **Open Citation**,
 **View References**, and **Download Evidence Bundle** controls without treating
-client visibility as export authority.
+client visibility as export authority. Approval and cancellation require an
+authenticated deliberate confirmation and an authoritative refresh. The
+client submits only closed decisions; it never supplies authority, risk,
+effect, compensation, or lifecycle state.
 
-Rejected: continued full snapshots, PostgreSQL-only correctness, client-derived
-scope, and color-only state.
+Rejected: using the legacy full snapshot for the Dynamic Universe route,
+durable tile persistence without measured need, PostgreSQL-only correctness,
+client-derived scope or retrieval results, unrestricted workflow editing,
+WebGL as a requirement, visual proximity as context, and color-only state.
 
 ### Bounded Agent Studio
 
