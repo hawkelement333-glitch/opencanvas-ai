@@ -1,6 +1,6 @@
 # Milestone 4.4 Recovery and Retry Execution Handoff
 
-Status: checkpoint 2 complete locally; ready for separately authorized checkpoint 3.
+Status: checkpoint 2 closed by completed checkpoints 3–4; Milestone 4.4 is complete locally.
 
 ## Repository state
 
@@ -133,16 +133,8 @@ Checkpoint 2 added no:
 The only lifecycle expansion is the explicit `running -> ready` transition required for persisted
 bounded retry.
 
-## Exact checkpoint-3 handoff
+## Checkpoint closure
 
-Checkpoint 3 must implement only authoritative cancellation and stale-result suppression. It should:
-
-1. bind cancellation to the owned execution and current lifecycle state;
-2. atomically terminalize cancellation and clear active lease/retry fields;
-3. fence the current generation so late owners cannot accept or persist results;
-4. reject late action, effect, lifecycle, audit, and Trace completion after cancellation;
-5. preserve one safe cancellation outcome under duplicate/concurrent requests;
-6. add focused transaction, stale-generation, concurrent cancellation, and no-partial-result tests.
-
-Do not add frontend work, a worker, queue, scheduler, polling loop, autonomous behavior, a new
-capability/provider, or the final checkpoint-4 audit while implementing checkpoint 3.
+Checkpoint 3 completed authoritative cancellation and stale-result suppression, and checkpoint 4
+completed the final reliability audit. The authoritative current record is
+`docs/MILESTONE_4_4_COMPLETION.md`; do not resume this historical handoff.

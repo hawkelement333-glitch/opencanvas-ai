@@ -1,6 +1,9 @@
 # Milestone 4.4 Cancellation and Stale-Result Suppression Handoff
 
-Status: checkpoint 3 complete locally; ready for a separately authorized final reliability audit.
+Status: checkpoint 3 closed by the completed final Milestone 4.4 reliability audit.
+
+The authoritative completion record is `docs/MILESTONE_4_4_COMPLETION.md`. Milestone 4.4 is
+complete locally and ready only for a separately authorized combined Milestone 4 audit.
 
 ## Repository state
 
@@ -181,11 +184,15 @@ Checkpoint 3 added no:
 - capability, provider, embedding call, external service, or broader write authority;
 - rollback redesign, final Milestone 4.4 audit, combined Milestone 4 audit, or Milestone 5 work.
 
-The legacy standalone migration helper pinned to `20260724_0012` remains documented and unchanged.
+The later final audit corrected the standalone migration helper from obsolete head
+`20260724_0012` to the authoritative `20260724_0015` and added a graph-based regression test.
 
-## Exact final-audit handoff
+## Final-audit closure
 
-The next checkpoint must be only the separately authorized final Milestone 4.4 reliability audit.
-It should reconcile checkpoints 1–3, run the complete required affected gate once, verify local
-demo safety where applicable, and update final completion documentation. It must not add frontend
-features, new runtime behavior, later milestones, or remote operations.
+The final audit reconciled checkpoints 1–3, ran the complete affected backend gate, corrected the
+stale migration validator, and recorded the final architecture, concurrency, failure-injection,
+migration, security, and protected-Git evidence in `docs/MILESTONE_4_4_COMPLETION.md`.
+
+There is no incomplete Milestone 4.4 checkpoint. The next action is only a separately authorized
+combined Milestone 4 audit. Do not add frontend features, begin Milestone 5, or perform a remote
+operation automatically.

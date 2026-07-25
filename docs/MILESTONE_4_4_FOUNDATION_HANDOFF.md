@@ -1,6 +1,6 @@
 # Milestone 4.4 Execution Ownership Foundation Handoff
 
-Status: checkpoint 1 complete locally; Milestone 4.4 is not complete.
+Status: checkpoint 1 closed by completed checkpoints 2–4; Milestone 4.4 is complete locally.
 
 ## Repository state
 
@@ -144,11 +144,8 @@ No recovery runner, retry loop, worker, queue, scheduler, cancellation change, s
 frontend, public reliability API, capability, write authority, provider, autonomous execution, or
 later milestone was added in checkpoint 1.
 
-## Exact continuation
+## Checkpoint closure
 
-Start from the clean local handoff commit on
-`milestone-4.4-bounded-execution-reliability-local`. Read this document and
-`docs/MILESTONE_4_PROGRESS.md`, then design the smallest server-authoritative expired-lease takeover
-and retry state transition atop migration `0015`. Preserve the existing authority revalidation,
-lease generation fencing, audit/Trace transaction, and attempt/deadline bounds. Stop before
-cancellation, stale-result suppression, frontend work, or the final Milestone 4.4 audit.
+Checkpoints 2 and 3 completed the recovery/retry and cancellation/stale-result work described
+above. The final reliability audit closed checkpoint 4. The authoritative current record is
+`docs/MILESTONE_4_4_COMPLETION.md`; do not resume this historical continuation.

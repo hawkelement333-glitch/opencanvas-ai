@@ -1,6 +1,50 @@
 # Milestone 4 Controlled Agents Progress Ledger
 
-Last updated: 2026-07-24 (America/Chicago)
+Last updated: 2026-07-25 (America/Chicago)
+
+## Milestone 4.4 bounded execution reliability complete — local only
+
+- Final-audit baseline: `8ab476d411f58639ea093662b5024d60c2e37752`.
+- Branch: `milestone-4.4-bounded-execution-reliability-local`; upstream: none.
+- Migration-validator correction:
+  - `787c80f` — updates the standalone cycle from stale `0012 -> 0011` expectations to the
+    authoritative `0015 -> 0014` graph and adds a regression test tied to the actual Alembic head.
+- The final audit proves the complete durable ownership, lease generation, deadline, attempt,
+  recovery, deterministic retry, duplicate suppression, cancellation, deadline termination,
+  stale-result fencing, safe health, and atomic audit/Trace contracts. No competing execution
+  framework or mutable consumed flag exists.
+- Concurrency on SQLite covers competing claims, recovery, retry delivery, cancellation, terminal
+  completion, and stale results after recovery, cancellation, deadline, or another worker's
+  success. Each race produces one authoritative result and safe duplicate/conflict behavior.
+  PostgreSQL runtime was not run or claimed.
+- Failure injection covers claim, mutation/effect, lifecycle completion, retry scheduling,
+  recovery, cancellation fencing and transition, terminal metadata, audit, and Trace boundaries.
+  Every failure leaves no partial mutation, effect, lease, attempt, schedule, terminal state,
+  audit event, or Trace event.
+- Validation:
+  - complete affected backend group: `307 passed`;
+  - complete migration module: `11 passed`;
+  - clean SQLite migration validation: `0015 -> 0014 -> 0015`;
+  - migration backfill cycle: `0014 -> 0015 -> 0014 -> 0015`;
+  - focused changed-file Ruff format/lint: passed;
+  - strict backend mypy: passed for `60 source files`;
+  - changed validator/test mypy: passed for `2 source files`;
+  - compilation/imports and SQLAlchemy mapper validation: passed (`51` tables);
+  - Alembic sole head: `20260724_0015`;
+  - repository hygiene and built-in secret scan: passed for `253 source files`;
+  - diff, whitespace, and prohibited-scope checks: passed.
+- A read-only repository-wide style check found older findings outside the final-audit diff in
+  migrations `0008`/`0010`, `apps/api/scripts/demo.py`, and `tests/postgres_support.py`. They were
+  not changed; every audit-touched file passes focused format and lint.
+- Frontend suites, network-dependent checks, and PostgreSQL runtime were not run, as required.
+  Frontend cancellation controls remain deferred.
+- Completion record: `docs/MILESTONE_4_4_COMPLETION.md`.
+- Protected state remains: `main` at `f04ace592e253c48172d129331ed8cd9bc4d4f4f`;
+  `competition-demo-v1` at `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- No push, pull, fetch, sync, upstream, PR, remote branch/tag, publication, upload, deployment, or
+  other remote operation occurred.
+- Exact next action: perform only a separately authorized combined Milestone 4 audit. Do not begin
+  Milestone 5 automatically.
 
 ## Milestone 4.4 cancellation and stale-result suppression complete — local only
 
