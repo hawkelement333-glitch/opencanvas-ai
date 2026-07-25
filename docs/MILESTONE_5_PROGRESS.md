@@ -6,8 +6,9 @@ Branch: `milestone-5-living-knowledge-workflows-architecture-local`
 
 Baseline: `dadf114cfb33c557d6d1be7d8f98a4bb3ba36818`
 
-Milestone 5 architecture and checkpoints 5.1–5.6 are complete locally. The
-next checkpoint is 5.7, the final combined Milestone 5 audit.
+Milestone 5 architecture and checkpoints 5.1–5.7 are complete locally.
+Milestone 5 is complete locally. The next required milestone is Milestone 6 —
+Core Multi-Workspace Collaboration.
 
 `MILESTONE 5 ARCHITECTURE COMPLETE LOCALLY — READY FOR KNOWLEDGE GRAPH FOUNDATION`
 
@@ -20,10 +21,45 @@ next checkpoint is 5.7, the final combined Milestone 5 audit.
 | 5.4 Controlled AI Workflows       | Complete locally | 5.1–5.3 and M4        |
 | 5.5 Dynamic Universe Interface    | Complete locally | 5.1–5.4 complete      |
 | 5.6 Bounded Agent Studio          | Complete locally | 5.4                   |
-| 5.7 Final Combined Audit          | Not started      | 5.1–5.6               |
+| 5.7 Final Combined Audit          | Complete locally | 5.1–5.6               |
 
-Only checkpoints 5.1 through 5.6 are complete. Milestone 5 is not complete
-until the 5.7 combined audit succeeds.
+All seven checkpoints are complete locally. See
+[`MILESTONE_5_7_FINAL_AUDIT_HANDOFF.md`](MILESTONE_5_7_FINAL_AUDIT_HANDOFF.md)
+and [`MILESTONE_5_COMPLETION.md`](MILESTONE_5_COMPLETION.md).
+
+## Milestone 5.7 completion
+
+The final audit inspected the completed Milestone 4 and Milestone 5.1–5.6
+production models, migrations, services, registries, schemas, routes,
+frontend state, tests, demo, and documentation as one integrated system.
+Exact scope, deny-by-default authority, immutable evidence, closed lifecycle
+registries, atomicity, idempotency, deterministic SQLite contention,
+failure behavior, API safety, frontend/backend agreement, accessibility
+support, boundedness, migration integrity, demo isolation, roadmap order, and
+repository hygiene passed. No production defect was proved, so the final
+audit changed documentation only and added no migration.
+
+Final validation:
+
+- backend: 487 passed, 1 PostgreSQL-marked test deselected;
+- security: 29 passed, 459 deselected;
+- PostgreSQL marker: 1 skipped, 487 deselected because no runtime exists;
+- migration suites: 20 passed; `0020 → 0019 → 0020` passed;
+- frontend: 66 passed across 15 files;
+- Chromium: 6 passed and 2 PostgreSQL-dependent real-flow tests skipped;
+- production build, TypeScript, zero-warning ESLint, Prettier, Ruff format and
+  lint, strict MyPy, Python compilation, imports, and 96 SQLAlchemy mappers:
+  passed;
+- deterministic demo reset/check/smoke: passed with mock providers and no
+  external call;
+- hygiene and built-in secret scan: passed for 310 source files;
+- diff, whitespace review, local-path review, dependency, prohibited-scope,
+  sole-head, and Git object-integrity checks: passed.
+
+The PostgreSQL runtime, external providers, managed storage, production load,
+outside penetration testing, backup/restore, deployment, and complete WCAG
+certification remain explicit Milestone 7 or environment limitations. This is
+not a production-readiness claim.
 
 ## Milestone 5.6 completion
 
@@ -460,5 +496,5 @@ Milestone 6 remains required before Milestones 7 and 8.
 - Handoff:
   [`MILESTONE_5_4_CONTROLLED_AI_WORKFLOWS_HANDOFF.md`](MILESTONE_5_4_CONTROLLED_AI_WORKFLOWS_HANDOFF.md).
 
-Next authorized start:
-`MILESTONE 5.7 STARTED LOCALLY — FINAL COMBINED MILESTONE 5 AUDIT`
+Next authorized architecture start:
+`MILESTONE 6 — CORE MULTI-WORKSPACE COLLABORATION`

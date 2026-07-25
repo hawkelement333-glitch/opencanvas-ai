@@ -403,9 +403,10 @@ Future Milestone 6 compatibility acceptance:
 
 ## 5.7 — Final Combined Milestone 5 Audit
 
-Start: `MILESTONE 5.7 STARTED LOCALLY — FINAL COMBINED MILESTONE 5 AUDIT`
+Status: complete locally on 2026-07-25.
 
-Complete: `MILESTONE 5.7 COMPLETE LOCALLY — READY FOR MILESTONE 6 ARCHITECTURE`
+Completion:
+`MILESTONE 5.7 FINAL AUDIT COMPLETE LOCALLY — MILESTONE 5 COMPLETE — READY FOR MILESTONE 6 MULTI-WORKSPACE COLLABORATION`
 
 Model/reasoning: `gpt-5.6-sol`, max.
 
@@ -475,6 +476,12 @@ It must prove for evidence bundles, APA 7, and English revisions:
 
 Create the completion document only after the combined gates pass. Milestone 6
 still requires explicit authorization.
+
+The combined gates passed without a proved production defect. The final audit
+changed documentation only. Complete results, findings, limitations, and
+protected Git evidence are recorded in
+[`MILESTONE_5_7_FINAL_AUDIT_HANDOFF.md`](MILESTONE_5_7_FINAL_AUDIT_HANDOFF.md)
+and [`MILESTONE_5_COMPLETION.md`](MILESTONE_5_COMPLETION.md).
 
 ## Future Milestone 9 — Academy and agent review systems
 

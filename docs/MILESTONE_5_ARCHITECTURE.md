@@ -936,3 +936,46 @@ conflict resolution, distributed presence infrastructure, and production
 real-time collaboration load/recovery testing are separately deferred to
 Future Advanced Real-Time Collaboration after the initial Milestone 8
 controlled release.
+
+## Milestone 5 final audit closure
+
+Milestone 5.7 completed locally on 2026-07-25. The final audit inspected
+Milestone 4 and Milestone 5.1–5.6 as one integrated system and found no
+unresolved architecture, authority, scope, lifecycle, persistence,
+transaction, idempotency, concurrency, security, frontend, migration, demo,
+documentation, or repository-contract blocker.
+
+The audit confirmed:
+
+- the canonical graph, living-state events/outbox, graph-aware retrieval,
+  exact citations, APA 7, Trace Evidence Bundles, controlled workflows,
+  Dynamic Universe, and Bounded Agent Studio extend the established
+  canonical, authority, audit, event, and Trace boundaries rather than create
+  parallel systems;
+- exact server-derived user, workspace, and canvas scope survives across
+  identities, immutable versions, provenance, approvals, effects,
+  compensation, activations, invocations, evaluations, proposals,
+  communication revisions, Trace, events, outbox, activity, APIs, and
+  frontend query boundaries;
+- closed registries and lifecycle transitions agree across database
+  constraints, ORM values, services, serializers, frontend labels, tests, and
+  documentation, and unknown or terminal-invalid states fail closed;
+- transaction, idempotency, failure-injection, and deterministic SQLite
+  contention tests leave no false success or partial authoritative evidence;
+- Milestone 5.6 preserves future membership/role authorization seams while
+  keeping creator identity, ownership, membership, role, action authority,
+  and approval authority distinct; and
+- no Milestone 6, Advanced Real-Time Collaboration, production
+  infrastructure, Academy, Agent Society, Catalog, marketplace, quarantine,
+  rehabilitation, Tribunal, autonomous self-activation/promotion, or
+  arbitrary execution system was added.
+
+Alembic remains at sole head `20260725_0020`. Full results and honest local
+limitations are recorded in
+[`MILESTONE_5_7_FINAL_AUDIT_HANDOFF.md`](MILESTONE_5_7_FINAL_AUDIT_HANDOFF.md)
+and [`MILESTONE_5_COMPLETION.md`](MILESTONE_5_COMPLETION.md).
+
+Milestone 5 completion is local and bounded. It is not a production-readiness,
+deployment, public-release, PostgreSQL-runtime, external-provider,
+managed-storage, load-capacity, penetration-test, backup/restore, or WCAG
+certification claim.
