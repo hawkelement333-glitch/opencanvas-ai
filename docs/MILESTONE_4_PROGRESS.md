@@ -2,6 +2,68 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.4 recovery and bounded retry execution complete — local only
+
+- Authorized baseline: `5d5a7b83c901fb8955e2602682ebc99de60b18cf`.
+- Branch: `milestone-4.4-bounded-execution-reliability-local`; upstream: none.
+- Local implementation checkpoints:
+  - `74a32bd` — expired-lease recovery, deterministic closed retry policy, atomic bounded retry
+    execution, terminal exhaustion, and focused reliability coverage;
+  - `af99981` — real reversible-note retry integration and duplicate-effect suppression;
+  - `f062069` — persisted-proposal action derivation, SQLite retry concurrency, and recovery/retry
+    failure-injection coverage.
+- Recovery requires an owned `running` execution, the exact expired lease generation, active
+  stored authority, an open deadline, remaining attempts, and no authoritative reversible effect.
+  It atomically fences the abandoned generation, clears ownership, schedules deterministic retry
+  eligibility, transitions to `ready`, and records one audit event plus one Trace event.
+- Retry delays are server-owned, deterministic exponential intervals of 5, 10, 20, 40, then at
+  most 60 seconds. Only the closed timeout, provider-unavailable, and temporary-storage classes are
+  retryable. Unknown and terminal classes fail closed. Callers cannot supply a delay, attempt,
+  classification, lease identity, proposal identity, capability, grant, or effect idempotency key.
+- The reversible-note retry entry point loads the existing scoped proposal and derives the effect
+  idempotency identity on the server. It calls the Milestone 4.3 atomic effect service rather than
+  implementing a second mutation path.
+- Each retry claim, action savepoint, effect, lifecycle outcome, retry schedule, audit event, and
+  Trace event remains inside one outer transaction. Transient action failure rolls back action
+  mutations before persisting retry eligibility. Terminal/exhausted outcomes clear lease and retry
+  state. Successful duplicate delivery returns the completed result without another claim or
+  action.
+- Validation:
+  - focused reliability and reversible-effect modules: `105 passed`;
+  - affected reliability, lifecycle, persistence, policy, API, reversible-effect, Trace, and
+    migration regression group: `265 passed`;
+  - SQLite concurrent retry delivery: one action and one terminal success;
+  - focused Ruff format/lint: passed;
+  - full backend strict mypy: passed for `60 source files`;
+  - Python compilation/imports and SQLAlchemy mapper validation: passed (`51` mapped tables);
+  - Alembic sole head: `20260724_0015`;
+  - repository hygiene and built-in secret scan: passed for `250 source files`;
+  - committed diff, whitespace, and prohibited-scope scans: passed.
+- Failure injection proves:
+  - action mutation plus retryable failure rolls back the mutation before scheduling;
+  - success-path Trace failure rolls back the action mutation, claim, attempt, lifecycle, audit,
+    and terminal state;
+  - retry-schedule Trace failure rolls back the claim, generation, attempt, and schedule;
+  - recovery Trace failure restores the abandoned lease and leaves no partial recovery.
+- No migration was needed or added. Migration `20260724_0015` remains the sole head.
+- The standalone `scripts/validate_migrations.py` helper remains pre-existingly pinned to
+  `20260724_0012` and therefore reports `Migration upgrade did not reach 20260724_0012` after
+  successfully upgrading through `20260724_0015`. The authoritative migration module regression
+  passed, and `alembic heads` reports the expected sole head. This checkpoint did not alter the
+  unrelated stale helper.
+- Explicitly deferred to checkpoint 3: authoritative cancellation, deadline-driven cancellation,
+  stale-worker/result suppression after cancellation, and their focused safety tests.
+- Also deferred: frontend work and the final Milestone 4.4 audit. No worker, queue, scheduler,
+  autonomous loop, delegation, new capability, new provider, rollback redesign, or later milestone
+  work was added.
+- Protected state remains: `main` at `f04ace592e253c48172d129331ed8cd9bc4d4f4f`;
+  `competition-demo-v1` at `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- No push, pull, fetch, sync, upstream, PR, remote branch/tag, publication, upload, deployment, or
+  other remote operation occurred.
+- Exact next action: implement only checkpoint 3 authoritative cancellation and stale-result
+  suppression atop the current lease-generation and terminal-state contracts. Do not begin
+  frontend work or the final audit in that checkpoint.
+
 ## Milestone 4.4 execution ownership foundation complete — local only
 
 - Authorized baseline: `57488d77573a0f099384de6fd12d02de2827d33d`.
