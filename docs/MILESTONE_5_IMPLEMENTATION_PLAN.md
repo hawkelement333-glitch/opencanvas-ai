@@ -1,7 +1,7 @@
 # Milestone 5 Implementation Plan
 
-Status: architecture and checkpoints 5.1–5.3 complete locally; checkpoints
-5.4–5.7 pending.
+Status: architecture and checkpoints 5.1–5.4 complete locally; checkpoints
+5.5–5.7 pending.
 
 This plan implements
 [`MILESTONE_5_ARCHITECTURE.md`](MILESTONE_5_ARCHITECTURE.md) sequentially.
@@ -149,6 +149,8 @@ redacted material.
 
 ## 5.4 — Controlled AI Workflows
 
+Status: complete locally.
+
 Start: `MILESTONE 5.4 STARTED LOCALLY — CONTROLLED AI WORKFLOWS`
 
 Complete: `MILESTONE 5.4 COMPLETE LOCALLY — READY FOR DYNAMIC UNIVERSE INTERFACE`
@@ -163,8 +165,10 @@ immutable saga compensation.
 Attach evidence bundles to supported workflow results and preserve exact
 evidence for each workflow step.
 
-Migration `2026xxxx_0019`: definitions, versions, steps, branches, runs,
-transitions, M4 bindings, and compensation plans/items.
+Migration `20260725_0019`: complete locally; definitions, immutable versions,
+DAG steps/dependencies, executions, deterministic plan snapshots, append-only
+execution/step transitions and attempts, Milestone 4 bindings, compensation,
+and immutable evidence links.
 
 Gate: digest/cycle/limit validation; exact version binding; typed branches;
 duplicate start/resume/step/result/compensation; retry succeeds once; stale,
@@ -176,6 +180,18 @@ Trace acceptance: workflow identity and version; approved inputs; every step
 and outcome; models, tools, and APIs used; evidence and outputs; approvals;
 retries, recovery, and cancellation; proposed and completed mutations;
 compensation or rollback; and the final result.
+
+Implemented with closed registries and schemas, explicit validation and human
+activation, server-derived idempotent execution identity, one controlled
+authority boundary per executable step, selected-context retrieval and exact
+citation reuse, server-controlled grounded model execution, exact approval
+gates, bounded claims/retries/deadlines, cancellation generation fencing,
+predefined human-approved saga compensation, transactional Trace/audit/event/
+outbox linkage, scoped CSRF-protected APIs, append-only evidence, deterministic
+SQLite contention and failure injection, migration cycling, and PostgreSQL
+offline DDL compilation. No external provider or PostgreSQL runtime was used.
+See
+[`MILESTONE_5_4_CONTROLLED_AI_WORKFLOWS_HANDOFF.md`](MILESTONE_5_4_CONTROLLED_AI_WORKFLOWS_HANDOFF.md).
 
 ## 5.5 — Dynamic Universe Interface
 

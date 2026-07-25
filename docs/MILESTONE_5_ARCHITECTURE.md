@@ -1,6 +1,6 @@
 # Milestone 5 Architecture — Living Knowledge Graph and AI Workflows
 
-Status: architecture and checkpoints 5.1–5.3 complete locally; 5.4–5.7 pending
+Status: architecture and checkpoints 5.1–5.4 complete locally; 5.5–5.7 pending
 
 Baseline: `dadf114cfb33c557d6d1be7d8f98a4bb3ba36818`
 
@@ -337,6 +337,54 @@ identity, immutable source version, source hash, exact locator, or export-
 authority enforcement. Each ZIP citation and References entry maps through
 `citations.json` and `manifest.json` to a real canonical source, exact version,
 accurate locator, supported claim/step, and export/access authority.
+
+## Implemented 5.4 controlled workflow foundation
+
+Milestone 5.4 implements `controlled-workflow-v1` as a server-owned,
+human-started DAG over the completed Milestone 4 and Milestone 5.3 services.
+Definitions have stable scoped identities. Every edit creates an immutable
+version with a canonical SHA-256 digest, deterministic step/dependency
+identities, a frozen plan snapshot, and append-only lifecycle evidence.
+Only an explicitly validated and activated version executes.
+
+The closed initial workflow kinds are grounded answer, evidence package, and
+approved reversible note. The closed step registry contains input validation,
+selected-context capture, graph retrieval, evidence evaluation, grounded
+model use, citation rendering, evidence-bundle generation, human approval,
+controlled effect, predefined compensation, and bounded output recording.
+There are no script, SQL, shell, HTTP, filesystem, plugin, MCP, dynamic-step,
+loop, recursive, event-triggered, scheduled, or recurring steps.
+
+Runs bind the authenticated user, workspace, canvas, immutable version and
+plan, normalized request digest, exact selected canonical identities, graph
+revision, server-derived execution and step identities, deadline,
+idempotency, Trace, audit, and transactional domain-event/outbox evidence.
+Non-effect executable steps receive their own Milestone 4 context, plan,
+execution, and narrow capability grant. Retrieval, citations, APA rendering,
+and evidence bundles reuse Milestone 5.3 directly. Provider/model selection
+remains server controlled and deterministic demo tests make no network call.
+
+Claims use expiring leases and monotonically increasing generations.
+Completion is compare-and-set fenced, retry classes and delays are closed and
+bounded, and cancellation increments generations before canceling pending
+work. Predefined saga steps declare the exact inverse before activation. A
+compensable effect includes only the matching rollback capability and exact
+post-effect node identity in its immutable plan/grant; actual rollback still
+requires fresh server review and a separate human rollback approval. Create
+rollback deletes only the created note, update rollback uses immutable
+prior-state evidence, and duplicate effect/rollback delivery converges on one
+authoritative result.
+
+Workflow APIs expose allowlisted operational state and safe evidence
+identities. They never serialize grants, policy internals, prompts, private
+reasoning, worker owners, leases, local paths, or credentials. The 23 workflow
+event types feed the existing transactional outbox and idempotent activity
+projection; they do not start workflows or grant authority.
+
+Migration `20260725_0019` adds the version, DAG, execution, plan, transition,
+attempt, and evidence-link tables with scoped constraints, indexes, and
+append-only protections. See
+[`MILESTONE_5_4_CONTROLLED_AI_WORKFLOWS_HANDOFF.md`](MILESTONE_5_4_CONTROLLED_AI_WORKFLOWS_HANDOFF.md).
 
 ### Controlled workflows and rollback
 

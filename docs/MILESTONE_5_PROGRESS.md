@@ -6,23 +6,24 @@ Branch: `milestone-5-living-knowledge-workflows-architecture-local`
 
 Baseline: `dadf114cfb33c557d6d1be7d8f98a4bb3ba36818`
 
-Milestone 5 architecture and checkpoints 5.1–5.3 are complete locally. The
-next checkpoint is 5.4, Controlled AI Workflows.
+Milestone 5 architecture and checkpoints 5.1–5.4 are complete locally. The
+next checkpoint is 5.5, Dynamic Universe Interface.
 
 `MILESTONE 5 ARCHITECTURE COMPLETE LOCALLY — READY FOR KNOWLEDGE GRAPH FOUNDATION`
 
-| Checkpoint                        | Status           | Dependency               |
-| --------------------------------- | ---------------- | ------------------------ |
-| Architecture                      | Complete locally | Completed Milestone 4    |
-| 5.1 Knowledge Graph Foundation    | Complete locally | Architecture             |
-| 5.2 Living State and Event System | Complete locally | 5.1                      |
-| 5.3 Graph-Aware Retrieval         | Complete locally | 5.1–5.2                  |
-| 5.4 Controlled AI Workflows       | Not started      | 5.1–5.3 and M4           |
-| 5.5 Dynamic Universe Interface    | Not started      | 5.1; 5.2/5.4 to complete |
-| 5.6 Bounded Agent Studio          | Not started      | 5.4                      |
-| 5.7 Final Combined Audit          | Not started      | 5.1–5.6                  |
+| Checkpoint                        | Status           | Dependency            |
+| --------------------------------- | ---------------- | --------------------- |
+| Architecture                      | Complete locally | Completed Milestone 4 |
+| 5.1 Knowledge Graph Foundation    | Complete locally | Architecture          |
+| 5.2 Living State and Event System | Complete locally | 5.1                   |
+| 5.3 Graph-Aware Retrieval         | Complete locally | 5.1–5.2               |
+| 5.4 Controlled AI Workflows       | Complete locally | 5.1–5.3 and M4        |
+| 5.5 Dynamic Universe Interface    | Not started      | 5.1–5.4 complete      |
+| 5.6 Bounded Agent Studio          | Not started      | 5.4                   |
+| 5.7 Final Combined Audit          | Not started      | 5.1–5.6               |
 
-Only checkpoints 5.1, 5.2, and 5.3 are complete. Milestone 5 is not complete.
+Only checkpoints 5.1, 5.2, 5.3, and 5.4 are complete. Milestone 5 is not
+complete.
 
 ## Permanent traceability contract
 
@@ -306,11 +307,11 @@ checkpoint.
 | `20260725_0016` | Complete: graph state, bindings, relationship evidence  |
 | `20260725_0017` | Complete: events/outbox, sequences, activity projection |
 | `20260725_0018` | Complete: retrieval, citations, evidence bundles        |
-| `2026xxxx_0019` | Workflow versions/runs/transitions/compensation         |
+| `20260725_0019` | Complete: workflows/runs/transitions/compensation       |
 | `2026xxxx_0020` | Viewport tiles and summaries                            |
 | `2026xxxx_0021` | Agent versions, feedback, evaluations, promotion        |
 
-The 5.1–5.3 identifiers are implemented Alembic revisions. Later identifiers
+The 5.1–5.4 identifiers are implemented Alembic revisions. Later identifiers
 remain placeholders. Migrations remain additive, reversibly tested, resumably
 backfillable, and retain legacy tables.
 
@@ -338,5 +339,31 @@ Deferred:
   - SolarPlexus Academy and Adaptive Training System
   - Agent Justice, Quarantine, and Rehabilitation System
 
+## Completed 5.4 checkpoint
+
+- Immutable scoped workflow definitions and versions; explicit validation,
+  activation, supersession, disablement, and retirement.
+- Closed workflow/step/lifecycle/outcome/failure registries and deterministic
+  bounded DAG plans.
+- Authenticated human starts with exact selected context, graph revision,
+  request digest, idempotency identity, deadline, Trace, and audit linkage.
+- One Milestone 4 authority bundle for each ordinary executable step; effects
+  and compensation reuse the completed reversible-write and rollback services.
+- Milestone 5.3 retrieval, exact citations, APA rendering, evidence outcomes,
+  and Trace Evidence Bundles integrated without a parallel evidence system.
+- Server-controlled provider boundary, deterministic offline demo behavior,
+  bounded attempts and delays, leases/generation fencing, cancellation, and
+  predefined human-approved saga compensation.
+- Transactional workflow events/outbox evidence and idempotent activity
+  projection through the completed 5.2 system.
+- Scoped authenticated APIs with CSRF enforcement for writes and allowlisted
+  responses that omit raw authority, worker, lease, policy, path, secret, and
+  private-reasoning data.
+- Migration and sole head: `20260725_0019`.
+- No frontend code, Agent Studio, adaptive-agent behavior, triggers, schedules,
+  recurring workflows, arbitrary execution steps, or Milestone 5.5 work.
+- Handoff:
+  [`MILESTONE_5_4_CONTROLLED_AI_WORKFLOWS_HANDOFF.md`](MILESTONE_5_4_CONTROLLED_AI_WORKFLOWS_HANDOFF.md).
+
 Next authorized start:
-`MILESTONE 5.4 STARTED LOCALLY — CONTROLLED AI WORKFLOWS`
+`MILESTONE 5.5 STARTED LOCALLY — DYNAMIC UNIVERSE INTERFACE`
