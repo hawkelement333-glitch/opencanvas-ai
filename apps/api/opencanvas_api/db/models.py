@@ -144,6 +144,7 @@ class TraceEvent(Base):
 class Canvas(TimestampMixin, Base):
     __tablename__ = "canvases"
     __table_args__ = (
+        UniqueConstraint("id", "workspace_id", name="uq_canvases_id_workspace"),
         CheckConstraint("revision >= 0", name="ck_canvases_revision_nonnegative"),
         CheckConstraint("viewport_zoom > 0", name="ck_canvases_viewport_zoom_positive"),
     )
@@ -958,9 +959,15 @@ class CanonicalRelationship(Base):
             "relationship_type",
             name="uq_canonical_relationships_direction_type",
         ),
+        UniqueConstraint(
+            "object_id",
+            "workspace_id",
+            name="uq_canonical_relationships_object_workspace",
+        ),
         CheckConstraint(
             "relationship_type IN "
-            "('contains', 'part_of', 'references', 'derived_from', 'related_to')",
+            "('contains', 'part_of', 'references', 'derived_from', 'related_to', "
+            "'cites', 'supports', 'contradicts', 'produced_by', 'affected_by')",
             name="ck_canonical_relationships_type",
         ),
         CheckConstraint(
@@ -987,6 +994,357 @@ class CanonicalRelationship(Base):
     relationship_type: Mapped[str] = mapped_column(String(24), nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column()
     trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+
+
+class WorkspaceGraphState(Base):
+    """Server-owned optimistic revision for one workspace's semantic graph."""
+
+    __tablename__ = "workspace_graph_states"
+    __table_args__ = (
+        CheckConstraint("revision >= 0", name="ck_workspace_graph_state_revision_nonnegative"),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CanonicalGraphEntity(Base):
+    """Stable graph identity backed by an existing canonical object."""
+
+    __tablename__ = "canonical_graph_entities"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["object_id", "workspace_id"],
+            ["canonical_objects.id", "canonical_objects.workspace_id"],
+            name="fk_graph_entities_object_workspace",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "object_id",
+            "workspace_id",
+            "user_id",
+            name="uq_graph_entities_object_scope",
+        ),
+        CheckConstraint(
+            "entity_kind IN ('document', 'note', 'execution')",
+            name="ck_graph_entities_kind",
+        ),
+        Index(
+            "ix_graph_entities_scope_kind",
+            "user_id",
+            "workspace_id",
+            "entity_kind",
+        ),
+    )
+
+    object_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    entity_kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class CanonicalCanvasObjectBinding(Base):
+    """Immutable presentation binding; semantic identity remains the canonical object."""
+
+    __tablename__ = "canonical_canvas_object_bindings"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["object_id", "workspace_id", "user_id"],
+            [
+                "canonical_graph_entities.object_id",
+                "canonical_graph_entities.workspace_id",
+                "canonical_graph_entities.user_id",
+            ],
+            name="fk_canvas_object_bindings_entity_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["canvas_id", "workspace_id"],
+            ["canvases.id", "canvases.workspace_id"],
+            name="fk_canvas_object_bindings_canvas_workspace",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "object_id",
+            "workspace_id",
+            "user_id",
+            "canvas_id",
+            name="uq_canvas_object_bindings_entity_canvas",
+        ),
+        Index(
+            "ix_canvas_object_bindings_scope",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+        ),
+    )
+
+    binding_id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    object_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class CanonicalGraphRelationship(Base):
+    """Scoped integrity extension for one canonical relationship."""
+
+    __tablename__ = "canonical_graph_relationships"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["relationship_id", "workspace_id"],
+            ["canonical_relationships.object_id", "canonical_relationships.workspace_id"],
+            name="fk_graph_relationships_canonical_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["source_object_id", "workspace_id", "user_id", "canvas_id"],
+            [
+                "canonical_canvas_object_bindings.object_id",
+                "canonical_canvas_object_bindings.workspace_id",
+                "canonical_canvas_object_bindings.user_id",
+                "canonical_canvas_object_bindings.canvas_id",
+            ],
+            name="fk_graph_relationships_source_binding",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["target_object_id", "workspace_id", "user_id", "canvas_id"],
+            [
+                "canonical_canvas_object_bindings.object_id",
+                "canonical_canvas_object_bindings.workspace_id",
+                "canonical_canvas_object_bindings.user_id",
+                "canonical_canvas_object_bindings.canvas_id",
+            ],
+            name="fk_graph_relationships_target_binding",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "relationship_id",
+            "workspace_id",
+            "user_id",
+            "canvas_id",
+            name="uq_graph_relationships_scope",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "idempotency_key",
+            name="uq_graph_relationships_idempotency",
+        ),
+        CheckConstraint(
+            "schema_version = 'knowledge-graph-v1'",
+            name="ck_graph_relationships_schema",
+        ),
+        CheckConstraint("graph_revision > 0", name="ck_graph_relationships_revision_positive"),
+        CheckConstraint(
+            "length(canonical_digest) = 64 AND length(request_digest) = 64",
+            name="ck_graph_relationships_digest_length",
+        ),
+        Index(
+            "ix_graph_relationships_source",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "source_object_id",
+        ),
+        Index(
+            "ix_graph_relationships_target",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "target_object_id",
+        ),
+    )
+
+    relationship_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    source_object_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    target_object_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    graph_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    canonical_digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class CanonicalRelationshipProvenance(Base):
+    """Immutable evidence explaining why a canonical graph relationship exists."""
+
+    __tablename__ = "canonical_relationship_provenance"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["relationship_id", "workspace_id", "user_id", "canvas_id"],
+            [
+                "canonical_graph_relationships.relationship_id",
+                "canonical_graph_relationships.workspace_id",
+                "canonical_graph_relationships.user_id",
+                "canonical_graph_relationships.canvas_id",
+            ],
+            name="fk_relationship_provenance_graph_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["execution_id", "user_id", "workspace_id"],
+            [
+                "controlled_agent_executions.id",
+                "controlled_agent_executions.user_id",
+                "controlled_agent_executions.workspace_id",
+            ],
+            name="fk_relationship_provenance_execution_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("relationship_id", name="uq_relationship_provenance_relationship"),
+        CheckConstraint(
+            "origin_type IN ('user_created', 'imported_canonical', 'citation_derived', "
+            "'controlled_agent_approved', 'deterministic_rule')",
+            name="ck_relationship_provenance_origin",
+        ),
+        CheckConstraint(
+            "(origin_type = 'controlled_agent_approved' AND execution_id IS NOT NULL) OR "
+            "(origin_type <> 'controlled_agent_approved' AND execution_id IS NULL)",
+            name="ck_relationship_provenance_execution_shape",
+        ),
+        CheckConstraint(
+            "(origin_type IN ('imported_canonical', 'citation_derived') "
+            "AND source_reference_id IS NOT NULL) OR "
+            "(origin_type NOT IN ('imported_canonical', 'citation_derived') "
+            "AND source_reference_id IS NULL)",
+            name="ck_relationship_provenance_source_shape",
+        ),
+        CheckConstraint(
+            "(origin_type = 'deterministic_rule' AND rule_id IS NOT NULL "
+            "AND rule_version IS NOT NULL) OR "
+            "(origin_type <> 'deterministic_rule' AND rule_id IS NULL "
+            "AND rule_version IS NULL)",
+            name="ck_relationship_provenance_rule_shape",
+        ),
+        CheckConstraint(
+            "length(provenance_digest) = 64",
+            name="ck_relationship_provenance_digest_length",
+        ),
+        Index("ix_relationship_provenance_trace", "trace_id"),
+    )
+
+    provenance_id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    relationship_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    origin_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    execution_id: Mapped[uuid.UUID | None] = mapped_column()
+    source_reference_id: Mapped[uuid.UUID | None] = mapped_column()
+    rule_id: Mapped[str | None] = mapped_column(String(120))
+    rule_version: Mapped[str | None] = mapped_column(String(64))
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    provenance_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class CanonicalRelationshipHistory(Base):
+    """Append-only relationship lifecycle evidence."""
+
+    __tablename__ = "canonical_relationship_history"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["relationship_id", "workspace_id", "user_id", "canvas_id"],
+            [
+                "canonical_graph_relationships.relationship_id",
+                "canonical_graph_relationships.workspace_id",
+                "canonical_graph_relationships.user_id",
+                "canonical_graph_relationships.canvas_id",
+            ],
+            name="fk_relationship_history_graph_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["previous_history_id", "relationship_id"],
+            [
+                "canonical_relationship_history.history_id",
+                "canonical_relationship_history.relationship_id",
+            ],
+            name="fk_relationship_history_previous",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "history_id",
+            "relationship_id",
+            name="uq_relationship_history_identity",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "idempotency_key",
+            name="uq_relationship_history_idempotency",
+        ),
+        CheckConstraint(
+            "state IN ('active', 'inactive', 'superseded', 'rejected')",
+            name="ck_relationship_history_state",
+        ),
+        CheckConstraint("graph_revision > 0", name="ck_relationship_history_revision_positive"),
+        CheckConstraint(
+            "length(request_digest) = 64",
+            name="ck_relationship_history_request_digest_length",
+        ),
+        Index(
+            "ix_relationship_history_timeline",
+            "relationship_id",
+            "graph_revision",
+            "history_id",
+        ),
+    )
+
+    history_id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    relationship_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(64))
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    graph_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_history_id: Mapped[uuid.UUID | None] = mapped_column()
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class ControlledAgentExecution(Base):
@@ -2142,6 +2500,14 @@ CONTROLLED_AGENT_IMMUTABLE_MODELS = (
     ControlledAgentReversibleWriteRollbackResult,
 )
 
+KNOWLEDGE_GRAPH_IMMUTABLE_MODELS = (
+    CanonicalGraphEntity,
+    CanonicalCanvasObjectBinding,
+    CanonicalGraphRelationship,
+    CanonicalRelationshipProvenance,
+    CanonicalRelationshipHistory,
+)
+
 
 def _reject_controlled_agent_mutation(_mapper: Any, _connection: Any, target: object) -> None:
     raise ValueError(f"{type(target).__name__} records are append-only")
@@ -2183,3 +2549,7 @@ event.listen(
 for _immutable_model in CONTROLLED_AGENT_IMMUTABLE_MODELS:
     event.listen(_immutable_model, "before_update", _reject_controlled_agent_mutation)
     event.listen(_immutable_model, "before_delete", _reject_controlled_agent_mutation)
+
+for _graph_immutable_model in KNOWLEDGE_GRAPH_IMMUTABLE_MODELS:
+    event.listen(_graph_immutable_model, "before_update", _reject_controlled_agent_mutation)
+    event.listen(_graph_immutable_model, "before_delete", _reject_controlled_agent_mutation)

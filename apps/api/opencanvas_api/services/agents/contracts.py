@@ -38,6 +38,7 @@ class Capability(StrEnum):
     CANVAS_NOTE_UPDATE = "canvas.note.update"
     CANVAS_NOTE_CREATE_ROLLBACK = "canvas.note.create.rollback"
     CANVAS_NOTE_UPDATE_ROLLBACK = "canvas.note.update.rollback"
+    KNOWLEDGE_GRAPH_RELATIONSHIP_WRITE = "knowledge_graph.relationship.write"
     EXECUTION_CANCEL = "execution.cancel"
 
 
@@ -48,6 +49,7 @@ class ResourceKind(StrEnum):
     DOCUMENT_VERSION = "document_version"
     CHUNK = "chunk"
     TRACE = "trace"
+    CANONICAL_RELATIONSHIP = "canonical_relationship"
 
 
 class RiskClass(StrEnum):

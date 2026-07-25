@@ -142,12 +142,24 @@ def test_canonical_relationships_enforce_same_workspace_directionally() -> None:
         ),
     }
     assert _unique_contract(CanonicalRelationship) == {
-        ("workspace_id", "source_object_id", "target_object_id", "relationship_type")
+        ("workspace_id", "source_object_id", "target_object_id", "relationship_type"),
+        ("object_id", "workspace_id"),
     }
     checks = _checks(CanonicalRelationship)
     assert all(
         relationship_type in checks
-        for relationship_type in ("contains", "part_of", "references", "derived_from", "related_to")
+        for relationship_type in (
+            "contains",
+            "part_of",
+            "references",
+            "derived_from",
+            "related_to",
+            "cites",
+            "supports",
+            "contradicts",
+            "produced_by",
+            "affected_by",
+        )
     )
     assert "source_object_id <> target_object_id" in checks
 
