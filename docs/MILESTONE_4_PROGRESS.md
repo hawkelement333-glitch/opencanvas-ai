@@ -2,6 +2,58 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.4 execution ownership foundation complete — local only
+
+- Authorized baseline: `57488d77573a0f099384de6fd12d02de2827d33d`.
+- Branch: `milestone-4.4-bounded-execution-reliability-local`; upstream: none.
+- Local implementation checkpoints:
+  - `c24fee7` — durable execution deadlines, attempt bounds, leases, terminal metadata,
+    migration `20260724_0015`, immutable-authority guards, and SQLite migration coverage;
+  - `a999856` — internal atomic claim, renew, and release service with audit/Trace,
+    concurrency, scope, authority, and transaction-failure tests;
+  - `623faf0` — fresh authority revalidation on lease renewal.
+- Server defaults are a 15-minute execution deadline, three maximum attempts, zero used attempts,
+  generation zero, and no initial lease or retry time. Claims are limited to `ready` executions and
+  atomically assign a server-generated owner, increment generation and attempts, transition to
+  `running`, and write audit plus Trace evidence in one transaction.
+- Renewal requires the exact active owner and generation, revalidates grant/approval authority,
+  rejects expired or stale leases, and cannot pass the execution deadline. Release requires the
+  exact active owner/generation and clears ownership without erasing attempt or generation history.
+- Terminal lifecycle transitions synchronously close reliability state, clear lease/retry fields,
+  record completion/failure classification, and remain non-reopenable under the existing lifecycle
+  registry.
+- Migration `20260724_0015` is the sole head. It deterministically backfills existing execution
+  deadlines and replaces only the execution table's blanket update guard with a column-level guard:
+  immutable user/workspace/context/plan/grant/identity fields and deletion remain database-protected
+  while server-owned reliability fields may change.
+- Validation:
+  - focused reliability suite: `27 passed`;
+  - affected lifecycle, persistence, schema, and complete migration module: `30 passed`;
+  - affected controlled-agent and Trace regression group: `257 passed`;
+  - SQLite `0014 -> 0015 -> 0014 -> 0015` backfill/cycle: passed;
+  - focused Ruff format/lint, strict mypy (`60 source files`), compilation/imports, SQLAlchemy mapper
+    validation, sole-head verification, `git diff --check`, repository hygiene (`249 source files`),
+    whitespace, secret-like-material, and prohibited-scope checks: passed.
+- SQLite contention coverage proves two local contenders produce one durable owner and one safe
+  closed conflict. It does not claim PostgreSQL locking validation; PostgreSQL runtime was not run.
+- Failure injection proves a Trace persistence failure leaves no lease, attempt increment, running
+  transition, audit event, or Trace event.
+- No public API, frontend, worker, queue, scheduler, retry runner, crash-recovery loop, cancellation
+  change, stale-result change, capability, provider, rollback redesign, autonomous behavior, or
+  later-milestone work was added.
+- Explicitly deferred:
+  - checkpoint 2: expired-lease takeover, crash recovery, retry scheduling/execution, and duplicate
+    result suppression;
+  - checkpoint 3: deadline-driven cancellation and stale-worker/result suppression;
+  - checkpoint 4: final failure-injection, concurrency, security, migration, and documentation audit.
+- Protected state remains: `main` at `f04ace592e253c48172d129331ed8cd9bc4d4f4f`;
+  `competition-demo-v1` at `b45b7763b65861f9dfb3be7edf9b5eb271950917`.
+- No push, pull, fetch, sync, upstream, PR, remote branch/tag, publication, upload, deployment, or
+  other remote operation occurred.
+- Exact next action: begin only Milestone 4.4 checkpoint 2 by defining server-authoritative
+  expired-lease takeover and retry eligibility atop migration `0015`; do not begin cancellation,
+  stale-result suppression, frontend work, or the final 4.4 audit.
+
 ## Milestone 4.3 final audit complete — local only
 
 - Audit baseline: `0dff4a7c44aad1a24de126b8869ae6cff42d6f9f`.
