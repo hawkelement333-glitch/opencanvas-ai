@@ -35,6 +35,8 @@ from opencanvas_api.api.schemas import (
     NodePatch,
     Point,
     SnapshotOut,
+    UniverseBoundaryNodeOut,
+    UniverseViewportOut,
     Viewport,
 )
 from opencanvas_api.api.serialization import document_metadata_out, enrich_nodes, node_out, utc
@@ -57,6 +59,7 @@ from opencanvas_api.db.models import (
     Edge,
     UsageRecord,
     Workspace,
+    WorkspaceGraphState,
 )
 from opencanvas_api.services.ai import (
     GROUNDED_PROMPT_VERSION,
@@ -336,6 +339,167 @@ async def get_snapshot(
             for node in nodes
         ],
         edges=[_edge_out(edge) for edge in edges],
+    )
+
+
+@router.get("/{canvas_id}/universe-viewport", response_model=UniverseViewportOut)
+async def get_universe_viewport(
+    canvas_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+    min_x: Annotated[float, Query(alias="minX", ge=-1_000_000, le=1_000_000)] = -50_000,
+    min_y: Annotated[float, Query(alias="minY", ge=-1_000_000, le=1_000_000)] = -50_000,
+    max_x: Annotated[float, Query(alias="maxX", ge=-1_000_000, le=1_000_000)] = 50_000,
+    max_y: Annotated[float, Query(alias="maxY", ge=-1_000_000, le=1_000_000)] = 50_000,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    cursor: Annotated[uuid.UUID | None, Query()] = None,
+    expected_canvas_revision: Annotated[
+        int | None, Query(alias="expectedCanvasRevision", ge=0)
+    ] = None,
+    selection_ids: Annotated[list[uuid.UUID] | None, Query(alias="selectionId")] = None,
+) -> UniverseViewportOut:
+    """Return a bounded, revision-fenced projection for the Dynamic Universe."""
+    if min_x >= max_x or min_y >= max_y:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "invalid_viewport_bounds",
+            "Universe viewport minimum bounds must be less than maximum bounds.",
+        )
+    if max_x - min_x > 200_000 or max_y - min_y > 200_000:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "viewport_too_large",
+            "Universe viewport bounds exceed the supported range.",
+        )
+    selected = list(dict.fromkeys(selection_ids or []))
+    if len(selected) > 50:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "selected_context_limit",
+            "Selected context cannot exceed 50 resources.",
+        )
+
+    if session.get_bind().dialect.name == "postgresql":
+        await session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+    canvas = await _require_canvas(session, canvas_id, principal)
+    if expected_canvas_revision is not None and expected_canvas_revision != canvas.revision:
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "viewport_revision_conflict",
+            "The canvas changed while this viewport was loading. Refresh and try again.",
+        )
+
+    node_filters = [
+        CanvasNode.canvas_id == canvas_id,
+        CanvasNode.position_x <= max_x,
+        CanvasNode.position_y <= max_y,
+        CanvasNode.position_x + CanvasNode.width >= min_x,
+        CanvasNode.position_y + CanvasNode.height >= min_y,
+    ]
+    if cursor is not None:
+        node_filters.append(CanvasNode.id > cursor)
+    node_rows = list(
+        (
+            await session.scalars(
+                select(CanvasNode).where(*node_filters).order_by(CanvasNode.id).limit(limit + 1)
+            )
+        ).all()
+    )
+    has_more_nodes = len(node_rows) > limit
+    nodes = node_rows[:limit]
+    visible_ids = {node.id for node in nodes}
+
+    edge_rows: list[Edge] = []
+    has_more_edges = False
+    if visible_ids:
+        loaded_edges = list(
+            (
+                await session.scalars(
+                    select(Edge)
+                    .where(
+                        Edge.canvas_id == canvas_id,
+                        (Edge.source_node_id.in_(visible_ids))
+                        | (Edge.target_node_id.in_(visible_ids)),
+                    )
+                    .order_by(Edge.id)
+                    .limit(501)
+                )
+            ).all()
+        )
+        has_more_edges = len(loaded_edges) > 500
+        edge_rows = loaded_edges[:500]
+
+    boundary_ids = {
+        endpoint
+        for edge in edge_rows
+        for endpoint in (edge.source_node_id, edge.target_node_id)
+        if endpoint not in visible_ids
+    }
+    boundary_rows = (
+        list(
+            (
+                await session.scalars(
+                    select(CanvasNode)
+                    .where(CanvasNode.canvas_id == canvas_id, CanvasNode.id.in_(boundary_ids))
+                    .order_by(CanvasNode.id)
+                )
+            ).all()
+        )
+        if boundary_ids
+        else []
+    )
+    selected_rows = (
+        list(
+            (
+                await session.scalars(
+                    select(CanvasNode)
+                    .where(CanvasNode.canvas_id == canvas_id, CanvasNode.id.in_(selected))
+                    .order_by(CanvasNode.id)
+                )
+            ).all()
+        )
+        if selected
+        else []
+    )
+    all_enriched = list({row.id: row for row in [*nodes, *selected_rows]}.values())
+    document_by_node, citations_by_node = await enrich_nodes(session, all_enriched)
+    graph_revision = await session.scalar(
+        select(WorkspaceGraphState.revision).where(
+            WorkspaceGraphState.workspace_id == canvas.workspace_id
+        )
+    )
+    return UniverseViewportOut(
+        canvas=_canvas_out(canvas),
+        canvas_revision=canvas.revision,
+        graph_revision=graph_revision or 0,
+        nodes=[
+            node_out(
+                node,
+                document=document_by_node.get(node.id),
+                citations=citations_by_node.get(node.id),
+            )
+            for node in nodes
+        ],
+        edges=[_edge_out(edge) for edge in edge_rows],
+        boundary_nodes=[
+            UniverseBoundaryNodeOut(
+                id=node.id,
+                type=cast(Literal["note", "ai_response", "document"], node.type),
+                title=node.title,
+                position=Point(x=node.position_x, y=node.position_y),
+            )
+            for node in boundary_rows
+        ],
+        selected_nodes=[
+            node_out(
+                node,
+                document=document_by_node.get(node.id),
+                citations=citations_by_node.get(node.id),
+            )
+            for node in selected_rows
+        ],
+        next_cursor=nodes[-1].id if has_more_nodes and nodes else None,
+        bounded=has_more_nodes or has_more_edges,
     )
 
 

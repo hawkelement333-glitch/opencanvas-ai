@@ -110,6 +110,65 @@ async def test_create_and_delete_directional_edge(
     assert restored["edges"] == []
 
 
+async def test_universe_viewport_is_bounded_revision_fenced_and_hydrates_boundaries(
+    client: httpx.AsyncClient, api_prefix: str
+) -> None:
+    canvas = await _create_canvas(client, api_prefix, "Bounded universe")
+    visible = await _create_node(
+        client, api_prefix, canvas["id"], title="Visible", text="Inside", x=20
+    )
+    outside = await _create_node(
+        client, api_prefix, canvas["id"], title="Outside", text="Boundary", x=5_000
+    )
+    edge = await client.post(
+        f"{api_prefix}/canvases/{canvas['id']}/edges",
+        json={
+            "sourceNodeId": visible["id"],
+            "targetNodeId": outside["id"],
+            "kind": "default",
+            "label": "bounded reference",
+        },
+    )
+    assert edge.status_code == 201
+
+    response = await client.get(
+        f"{api_prefix}/canvases/{canvas['id']}/universe-viewport",
+        params={
+            "minX": 0,
+            "minY": 0,
+            "maxX": 1_000,
+            "maxY": 1_000,
+            "limit": 1,
+            "selectionId": outside["id"],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["id"] for item in body["nodes"]] == [visible["id"]]
+    assert [item["id"] for item in body["boundaryNodes"]] == [outside["id"]]
+    assert [item["id"] for item in body["selectedNodes"]] == [outside["id"]]
+    assert body["edges"][0]["label"] == "bounded reference"
+    assert body["canvasRevision"] == 3
+    assert body["graphRevision"] == 0
+    assert body["bounded"] is False
+    assert body["nextCursor"] is None
+
+    await _create_node(client, api_prefix, canvas["id"], title="Changed", text="new", x=80)
+    stale = await client.get(
+        f"{api_prefix}/canvases/{canvas['id']}/universe-viewport",
+        params={"expectedCanvasRevision": body["canvasRevision"]},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["code"] == "viewport_revision_conflict"
+
+    oversized = await client.get(
+        f"{api_prefix}/canvases/{canvas['id']}/universe-viewport",
+        params={"minX": -200_000, "maxX": 200_000},
+    )
+    assert oversized.status_code == 422
+    assert oversized.json()["code"] == "viewport_too_large"
+
+
 async def test_duplicate_and_delete_node(client: httpx.AsyncClient, api_prefix: str) -> None:
     canvas = await _create_canvas(client, api_prefix)
     node = await _create_node(client, api_prefix, canvas["id"], title="Original", text="Body")

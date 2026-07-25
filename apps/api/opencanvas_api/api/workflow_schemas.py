@@ -139,6 +139,11 @@ class WorkflowStepExecutionOut(ApiModel):
     step_execution_id: uuid.UUID
     step_key: str
     step_type: str
+    depends_on: list[str]
+    capability: str
+    risk_class: str
+    requested_action: str | None
+    affected_resource_id: uuid.UUID | None
     status: str
     attempt_count: int
     max_attempts: int

@@ -30,6 +30,7 @@ from opencanvas_api.api.workflow_schemas import (
 )
 from opencanvas_api.core.config import Settings, get_settings
 from opencanvas_api.db.models import (
+    ControlledWorkflowDependency,
     ControlledWorkflowStep,
     ControlledWorkflowVersion,
     ControlledWorkflowVersionState,
@@ -477,6 +478,24 @@ async def _execution_out(
             )
         ).all()
     }
+    dependencies = (
+        await session.execute(
+            select(
+                ControlledWorkflowDependency.step_id,
+                ControlledWorkflowDependency.depends_on_step_id,
+            ).where(ControlledWorkflowDependency.version_id == execution.version_id)
+        )
+    ).all()
+    dependency_keys: dict[uuid.UUID, list[str]] = {}
+    for step_id, depends_on_step_id in dependencies:
+        dependency = definitions.get(depends_on_step_id)
+        if dependency is None:
+            raise ApiError(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "workflow_dependency_missing",
+                "A controlled workflow dependency is unavailable.",
+            )
+        dependency_keys.setdefault(step_id, []).append(dependency.step_key)
     steps: list[WorkflowStepExecutionOut] = []
     for row in record.steps:
         definition = definitions.get(row.step_definition_id)
@@ -491,6 +510,31 @@ async def _execution_out(
                 step_execution_id=row.step_execution_id,
                 step_key=definition.step_key,
                 step_type=definition.step_type,
+                depends_on=sorted(dependency_keys.get(definition.step_id, [])),
+                capability=definition.capability,
+                risk_class=definition.risk_class,
+                requested_action=(
+                    cast(str, definition.config.get("action"))
+                    if isinstance(definition.config.get("action"), str)
+                    else (
+                        "workflow.approval"
+                        if definition.step_type == "human_approval"
+                        else (
+                            "reversible_effect.rollback"
+                            if definition.step_type == "compensation"
+                            else None
+                        )
+                    )
+                ),
+                affected_resource_id=(
+                    uuid.UUID(cast(str, definition.config["noteId"]))
+                    if isinstance(definition.config.get("noteId"), str)
+                    else (
+                        execution.canvas_id
+                        if definition.step_type in {"controlled_effect", "compensation"}
+                        else None
+                    )
+                ),
                 status=row.status,
                 attempt_count=row.attempt_count,
                 max_attempts=row.max_attempts,

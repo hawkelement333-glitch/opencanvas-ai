@@ -240,6 +240,25 @@ class SnapshotOut(ApiModel):
     edges: list[EdgeOut]
 
 
+class UniverseBoundaryNodeOut(ApiModel):
+    id: uuid.UUID
+    type: NodeType
+    title: str
+    position: Point
+
+
+class UniverseViewportOut(ApiModel):
+    canvas: CanvasOut
+    canvas_revision: int
+    graph_revision: int
+    nodes: list[NodeOut]
+    edges: list[EdgeOut]
+    boundary_nodes: list[UniverseBoundaryNodeOut]
+    selected_nodes: list[NodeOut]
+    next_cursor: uuid.UUID | None
+    bounded: bool
+
+
 class AIQuery(ApiModel):
     instruction: str = Field(min_length=1, max_length=8_000)
     selected_node_ids: list[uuid.UUID] = Field(min_length=1, max_length=50)

@@ -380,6 +380,12 @@ async def test_workflow_api_rejects_authority_and_worker_injection(
     assert body["status"] == "completed"
     assert body["outcome"] == "supported"
     assert body["output"]["citationIds"]
+    assert body["steps"][0]["dependsOn"] == []
+    assert body["steps"][0]["capability"] == "workflow.step.execute"
+    assert body["steps"][0]["riskClass"] == "r0_observation"
+    assert body["steps"][0]["requestedAction"] is None
+    assert body["steps"][0]["affectedResourceId"] is None
+    assert body["steps"][1]["dependsOn"] == ["validate"]
     serialized = str(body)
     for forbidden in (
         "leaseOwner",
