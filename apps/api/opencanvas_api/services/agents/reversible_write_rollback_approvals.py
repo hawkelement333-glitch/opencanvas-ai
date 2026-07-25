@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Literal, cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -131,7 +132,10 @@ class ReversibleWriteRollbackApprovalService:
                 original_plan_digest=effect.plan_digest,
                 expected_current_revision=effect.resulting_revision,
                 effect_after_state_digest=effect.after_digest,
-                rollback_target_kind=review.rollback_target_kind or "",
+                rollback_target_kind=cast(
+                    Literal["authoritative_absence", "exact_prior_state"],
+                    review.rollback_target_kind,
+                ),
                 rollback_target_digest=target_digest,
                 rollback_evidence_id=evidence.evidence_id if evidence else None,
                 grant_id=grant.grant_id,

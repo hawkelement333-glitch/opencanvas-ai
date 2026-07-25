@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi import status as http_status
@@ -196,7 +196,7 @@ async def apply_reversible_write_effect(
     return ReversibleWriteEffectOut(
         effect_id=effect.effect_id,
         trace_id=effect.trace_id,
-        action=effect.action,
+        action=cast(Literal["note.create", "note.update"], effect.action),
         note_id=effect.resulting_resource_id,
         revision=effect.resulting_revision,
         duplicate=applied.duplicate,
@@ -267,10 +267,19 @@ async def issue_reversible_write_rollback_approval(
         rollback_approval_id=approval.rollback_approval_id,
         effect_id=approval.effect_id,
         note_id=approval.note_id,
-        forward_action=approval.forward_action,
-        rollback_action=approval.rollback_action,
+        forward_action=cast(
+            Literal["note.create", "note.update"],
+            approval.forward_action,
+        ),
+        rollback_action=cast(
+            Literal["note.create.rollback", "note.update.rollback"],
+            approval.rollback_action,
+        ),
         expected_current_revision=approval.expected_current_revision,
-        rollback_target_kind=approval.rollback_target_kind,
+        rollback_target_kind=cast(
+            Literal["authoritative_absence", "exact_prior_state"],
+            approval.rollback_target_kind,
+        ),
         expires_at=approval.expires_at,
         duplicate=issued.duplicate,
     )
@@ -309,8 +318,14 @@ async def execute_reversible_write_rollback(
         rollback_approval_id=result.rollback_approval_id,
         effect_id=result.effect_id,
         note_id=result.note_id,
-        rollback_action=result.rollback_action,
-        rollback_target_kind=result.rollback_target_kind,
+        rollback_action=cast(
+            Literal["note.create.rollback", "note.update.rollback"],
+            result.rollback_action,
+        ),
+        rollback_target_kind=cast(
+            Literal["authoritative_absence", "exact_prior_state"],
+            result.rollback_target_kind,
+        ),
         resulting_revision=result.resulting_revision,
         created_at=utc(result.created_at),
         duplicate=applied.duplicate,
