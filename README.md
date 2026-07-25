@@ -269,10 +269,12 @@ implemented:
 8. Public Portfolio and Product Release
 9. SolarPlexus Agent Ecosystem
 
-The next authorized work is Milestone 5.1, Knowledge Graph Foundation. See
+Milestone 5.1 is complete locally. The next checkpoint is Milestone 5.2,
+Living State and Event System. See
 [docs/MILESTONE_5_ARCHITECTURE.md](docs/MILESTONE_5_ARCHITECTURE.md),
 [docs/MILESTONE_5_IMPLEMENTATION_PLAN.md](docs/MILESTONE_5_IMPLEMENTATION_PLAN.md),
-and [docs/MILESTONE_5_PROGRESS.md](docs/MILESTONE_5_PROGRESS.md).
+[docs/MILESTONE_5_PROGRESS.md](docs/MILESTONE_5_PROGRESS.md), and
+[docs/MILESTONE_5_1_KNOWLEDGE_GRAPH_HANDOFF.md](docs/MILESTONE_5_1_KNOWLEDGE_GRAPH_HANDOFF.md).
 
 ## Competition and release status
 

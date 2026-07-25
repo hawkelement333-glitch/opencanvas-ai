@@ -74,7 +74,7 @@ This register prevents the competition demo and public materials from implying c
 
 ## Recommended next checkpoint
 
-Implement Milestone 5.1, Knowledge Graph Foundation, following the completed
-local architecture pass. Preserve the limitation that visual edges are not
-semantic facts, and add explicit bindings and provenance before graph-aware
-retrieval.
+Implement Milestone 5.2, Living State and Event System, following the completed
+local Knowledge Graph Foundation. Preserve the limitation that the current
+process-local event bus is not durable truth and must not drive autonomous
+agent execution.

@@ -6,15 +6,15 @@ Branch: `milestone-5-living-knowledge-workflows-architecture-local`
 
 Baseline: `dadf114cfb33c557d6d1be7d8f98a4bb3ba36818`
 
-Milestone 5 architecture is complete locally. Implementation has not started.
-The next authorized checkpoint is 5.1.
+Milestone 5 architecture and checkpoint 5.1 are complete locally. The next
+checkpoint is 5.2, Living State and Event System.
 
 `MILESTONE 5 ARCHITECTURE COMPLETE LOCALLY — READY FOR KNOWLEDGE GRAPH FOUNDATION`
 
 | Checkpoint                        | Status           | Dependency               |
 | --------------------------------- | ---------------- | ------------------------ |
 | Architecture                      | Complete locally | Completed Milestone 4    |
-| 5.1 Knowledge Graph Foundation    | Not started      | Architecture             |
+| 5.1 Knowledge Graph Foundation    | Complete locally | Architecture             |
 | 5.2 Living State and Event System | Not started      | 5.1                      |
 | 5.3 Graph-Aware Retrieval         | Not started      | 5.1–5.2                  |
 | 5.4 Controlled AI Workflows       | Not started      | 5.1–5.3 and M4           |
@@ -22,7 +22,21 @@ The next authorized checkpoint is 5.1.
 | 5.6 Bounded Agent Studio          | Not started      | 5.4                      |
 | 5.7 Final Combined Audit          | Not started      | 5.1–5.6                  |
 
-No implementation checkpoint is marked started or complete.
+Only checkpoint 5.1 is complete. Milestone 5 is not complete.
+
+## 5.1 completion evidence
+
+- Canonical entity kinds: document, note, execution.
+- Relationship types: references, derived_from, related_to, cites, supports,
+  contradicts, produced_by, affected_by.
+- Append-only provenance and relationship history.
+- User/workspace/canvas composite scope and server-derived authority fields.
+- Workspace graph revision and canonical/request/provenance digests.
+- Migration and sole head: `20260725_0016`.
+- Complete non-PostgreSQL backend suite: 423 passed.
+- PostgreSQL-marked suite: 1 skipped; no runtime was configured.
+- Handoff:
+  [`MILESTONE_5_1_KNOWLEDGE_GRAPH_HANDOFF.md`](MILESTONE_5_1_KNOWLEDGE_GRAPH_HANDOFF.md).
 
 ## Closed decisions
 
@@ -38,17 +52,18 @@ No implementation checkpoint is marked started or complete.
 
 ## Planned migration outline
 
-| Placeholder     | Scope                                              |
-| --------------- | -------------------------------------------------- |
-| `2026xxxx_0016` | Graph types/state, bindings, relationship evidence |
-| `2026xxxx_0017` | Events/outbox, sequences, projector checkpoints    |
-| `2026xxxx_0018` | Context paths and traversal indexes                |
-| `2026xxxx_0019` | Workflow versions/runs/transitions/compensation    |
-| `2026xxxx_0020` | Viewport tiles and summaries                       |
-| `2026xxxx_0021` | Agent versions/proposals/activation                |
+| Placeholder     | Scope                                                  |
+| --------------- | ------------------------------------------------------ |
+| `20260725_0016` | Complete: graph state, bindings, relationship evidence |
+| `2026xxxx_0017` | Events/outbox, sequences, projector checkpoints        |
+| `2026xxxx_0018` | Context paths and traversal indexes                    |
+| `2026xxxx_0019` | Workflow versions/runs/transitions/compensation        |
+| `2026xxxx_0020` | Viewport tiles and summaries                           |
+| `2026xxxx_0021` | Agent versions/proposals/activation                    |
 
-These are planning identifiers, not Alembic revisions. Migrations remain
-additive, reversibly tested, resumably backfillable, and retain legacy tables.
+The 5.1 identifier is now an implemented Alembic revision. Later identifiers
+remain placeholders. Migrations remain additive, reversibly tested, resumably
+backfillable, and retain legacy tables.
 
 ## Preserved Milestone 4 contracts
 
@@ -73,4 +88,4 @@ Deferred:
 - 9. SolarPlexus Agent Ecosystem
 
 Next authorized start:
-`MILESTONE 5.1 STARTED LOCALLY — KNOWLEDGE GRAPH FOUNDATION`
+`MILESTONE 5.2 STARTED LOCALLY — LIVING STATE AND EVENT SYSTEM`

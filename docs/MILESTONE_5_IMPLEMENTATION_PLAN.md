@@ -1,6 +1,7 @@
 # Milestone 5 Implementation Plan
 
-Status: architecture complete; all implementation checkpoints pending.
+Status: architecture and checkpoint 5.1 complete locally; checkpoints 5.2–5.7
+pending.
 
 This plan implements
 [`MILESTONE_5_ARCHITECTURE.md`](MILESTONE_5_ARCHITECTURE.md) sequentially.
@@ -16,6 +17,8 @@ requires 5.4; 5.7 requires 5.1–5.6.
 
 ## 5.1 — Knowledge Graph Foundation
 
+Status: complete locally.
+
 Start: `MILESTONE 5.1 STARTED LOCALLY — KNOWLEDGE GRAPH FOUNDATION`
 
 Complete: `MILESTONE 5.1 COMPLETE LOCALLY — READY FOR LIVING STATE AND EVENT SYSTEM`
@@ -26,7 +29,7 @@ Deliver canonical type extensions, graph revision, temporal canvas bindings,
 relationship assertions, graph services/APIs, and reviewed graph resource/
 capability contracts. Preserve visual edges.
 
-Migration `2026xxxx_0016`: additive graph types/subtypes, graph state,
+Migration `20260725_0016`: additive graph types/subtypes, graph state,
 bindings, and relationship evidence. Backfill only deterministic facts, record
 origin, infer no visual-edge semantics, and retain legacy tables.
 
@@ -34,6 +37,13 @@ Gate: mapper/constraint/index tests; concurrent/stale revisions; duplicates;
 cross-workspace failures; tombstone provenance; empty/legacy and
 upgrade/downgrade/re-upgrade/resumed-backfill cycles; PostgreSQL lock and
 uniqueness tests.
+
+Implemented with passing SQLite, API, authority, integrity, idempotency,
+separate-session competition, failure-injection, migration, mapper, typing,
+lint, formatting, compilation, and complete non-PostgreSQL backend validation.
+PostgreSQL runtime validation remains pending because no configured runtime was
+available. See
+[`MILESTONE_5_1_KNOWLEDGE_GRAPH_HANDOFF.md`](MILESTONE_5_1_KNOWLEDGE_GRAPH_HANDOFF.md).
 
 ## 5.2 — Living State and Event System
 
