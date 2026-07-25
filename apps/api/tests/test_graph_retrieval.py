@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import uuid
 import zipfile
 from dataclasses import replace
+from pathlib import Path
 
 import httpx
 import pytest
@@ -13,6 +15,7 @@ from sqlalchemy import func, select
 from opencanvas_api.db.models import (
     SYSTEM_USER_ID,
     SYSTEM_WORKSPACE_ID,
+    Base,
     DomainEventOutbox,
     DomainEventRecord,
     GraphRetrievalCitation,
@@ -20,6 +23,8 @@ from opencanvas_api.db.models import (
     GraphRetrievalRun,
     TraceEvent,
     TraceEvidenceBundle,
+    User,
+    Workspace,
 )
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.documents.embeddings import MockEmbeddingProvider
@@ -374,3 +379,57 @@ async def test_retrieval_evidence_is_append_only(database: Database) -> None:
         await session.delete(decision)
         with pytest.raises(ValueError, match="append-only"):
             await session.flush()
+
+
+@pytest.mark.anyio
+async def test_competing_identical_retrieval_creates_one_authoritative_result(
+    tmp_path: Path,
+) -> None:
+    database = Database(f"sqlite+aiosqlite:///{(tmp_path / 'retrieval.db').as_posix()}")
+    async with database.engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    async with database.sessions() as session:
+        session.add(
+            User(
+                id=SYSTEM_USER_ID,
+                email="retrieval-concurrency@mobius.invalid",
+                email_normalized="retrieval-concurrency@mobius.invalid",
+                password_hash="test-only",
+                display_name="Retrieval concurrency",
+                email_verified=True,
+            )
+        )
+        session.add(
+            Workspace(
+                id=SYSTEM_WORKSPACE_ID,
+                owner_id=SYSTEM_USER_ID,
+                name="Retrieval concurrency",
+            )
+        )
+        await session.commit()
+    canvas_id, objects = await _retrieval_foundation(database)
+    command = _command(canvas_id, objects, key="competing-identical")
+
+    async def create() -> uuid.UUID:
+        async with database.sessions() as session:
+            result = await GraphAwareRetrievalService(
+                session,
+                embedding_provider=MockEmbeddingProvider(),
+            ).retrieve(command)
+            await session.commit()
+            return result.run.retrieval_id
+
+    try:
+        results = await asyncio.gather(create(), create(), return_exceptions=True)
+        successes = [value for value in results if isinstance(value, uuid.UUID)]
+        failures = [value for value in results if isinstance(value, BaseException)]
+        assert successes
+        assert len(set(successes)) == 1
+        assert all(isinstance(value, GraphRetrievalStorageError) for value in failures)
+        async with database.sessions() as session:
+            assert await session.scalar(select(func.count()).select_from(GraphRetrievalRun)) == 1
+            assert (
+                await session.scalar(select(func.count()).select_from(GraphRetrievalCitation)) == 1
+            )
+    finally:
+        await database.dispose()

@@ -182,13 +182,14 @@ outbox dispatcher, workflow trigger, or autonomous action.
 
 ## Validation
 
-The affected backend suite passed 105 tests. The focused 5.3 plus affected
-graph/event suite passed 39 tests. Coverage includes closed registries,
+The affected backend suite passed 106 tests. The focused 5.3 plus affected
+graph/event suite passed 40 tests. Coverage includes closed registries,
 selected-context non-bypass, direction rules, supported and insufficient
 outcomes, replay/conflict, exact hashes and locators, APA output, ZIP layout and
 checksums, source-export denial, safe APIs, append-only evidence, transactional
-failure injection, migration cycling, SQLite triggers, and PostgreSQL offline
-DDL compilation.
+failure injection, migration cycling, SQLite triggers, file-backed SQLite
+contention converging on one authoritative retrieval and citation, and
+PostgreSQL offline DDL compilation.
 
 Ruff passed. Strict mypy passed all 69 source files. Compilation, imports,
 mapper configuration, sole-head and `0018 → 0017 → 0018` migration validation,

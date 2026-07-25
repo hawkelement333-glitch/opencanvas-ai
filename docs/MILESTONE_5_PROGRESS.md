@@ -265,6 +265,8 @@ checkpoint.
 - Full-source export fails closed and records `export_not_authorized`.
 - All eight evidence-bundle/citation event contracts are now emittable through
   real producers with transactional outbox evidence.
+- Duplicate replay and independent-session SQLite contention converge on one
+  authoritative retrieval and citation without partial evidence.
 - Migration and sole head: `20260725_0018`.
 - No external search, autonomous agent/workflow trigger, frontend, workflow,
   Agent Studio, Academy, English, quarantine, rehabilitation, or tribunal code.
