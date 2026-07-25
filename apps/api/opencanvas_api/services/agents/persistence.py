@@ -100,6 +100,7 @@ ALLOWED_EXECUTION_TRANSITIONS = {
     ),
     ExecutionStatus.RUNNING: frozenset(
         {
+            ExecutionStatus.READY,
             ExecutionStatus.SUCCEEDED,
             ExecutionStatus.FAILED,
             ExecutionStatus.CANCELLED,

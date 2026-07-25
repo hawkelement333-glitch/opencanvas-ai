@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 
-from sqlalchemy import or_, update
+from pydantic import JsonValue
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from opencanvas_api.db.models import ControlledAgentExecution
+from opencanvas_api.db.models import (
+    ControlledAgentExecution,
+    ControlledAgentReversibleWriteEffect,
+)
 from opencanvas_api.services.agents.contracts import (
     ApprovalDecision,
     ApprovalRecord,
@@ -25,6 +31,37 @@ from opencanvas_api.services.agents.persistence import (
 from opencanvas_api.services.trace import RecordTraceEventInput, TraceService
 
 EXECUTION_LEASE_DURATION = timedelta(minutes=1)
+RETRY_BASE_DELAY = timedelta(seconds=5)
+RETRY_MAX_DELAY = timedelta(minutes=1)
+
+
+class RetryFailureClassification(StrEnum):
+    """Closed server-owned retry vocabulary."""
+
+    PROVIDER_TIMEOUT = "provider_timeout"
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    STORAGE_TEMPORARILY_UNAVAILABLE = "storage_temporarily_unavailable"
+    AUTHORITY_INVALID = "authority_invalid"
+    ACTION_CONFLICT = "action_conflict"
+    ACTION_INVALID = "action_invalid"
+    UNSUPPORTED_ACTION = "unsupported_action"
+
+
+RETRYABLE_FAILURES = frozenset(
+    {
+        RetryFailureClassification.PROVIDER_TIMEOUT,
+        RetryFailureClassification.PROVIDER_UNAVAILABLE,
+        RetryFailureClassification.STORAGE_TEMPORARILY_UNAVAILABLE,
+    }
+)
+
+
+class RetryActionError(RuntimeError):
+    """Trusted internal action-adapter failure with a closed classification."""
+
+    def __init__(self, classification: RetryFailureClassification) -> None:
+        super().__init__(classification.value)
+        self.classification = classification
 
 
 class ExecutionReliabilityDenied(RuntimeError):
@@ -52,6 +89,27 @@ class ExecutionLeaseChange:
     generation: int
     expires_at: datetime | None
     attempt_count: int
+    trace_id: uuid.UUID
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionRecovery:
+    execution_id: uuid.UUID
+    superseded_generation: int
+    generation: int
+    next_retry_at: datetime
+    attempt_count: int
+    trace_id: uuid.UUID
+
+
+@dataclass(frozen=True, slots=True)
+class RetryExecutionResult:
+    execution_id: uuid.UUID
+    status: ExecutionStatus
+    attempt_count: int
+    failure_classification: str | None
+    next_retry_at: datetime | None
+    duplicate: bool
     trace_id: uuid.UUID
 
 
@@ -317,6 +375,363 @@ class ControlledExecutionReliability:
             trace_id=trace_id,
         )
 
+    async def recover_expired_lease(
+        self,
+        *,
+        user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        execution_id: uuid.UUID,
+        expected_generation: int,
+        recovered_at: datetime,
+    ) -> ExecutionRecovery:
+        """Fence one abandoned owner and make its execution retry-eligible."""
+
+        recovered_at = _aware_utc(recovered_at)
+        if expected_generation < 1:
+            raise ExecutionReliabilityDenied("lease_identity_invalid")
+        trace_id = uuid.uuid4()
+        async with self.session.begin_nested():
+            await self._validate_claim_authority(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                execution_id=execution_id,
+                evaluated_at=recovered_at,
+            )
+            current = await self.repository.current_state(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                execution_id=execution_id,
+            )
+            if current is None or ExecutionStatus(current.status) is not ExecutionStatus.RUNNING:
+                raise ExecutionReliabilityDenied("execution_not_recoverable")
+            execution = await self.repository._owned_execution(
+                user_id,
+                workspace_id,
+                execution_id,
+            )
+            if await self._has_authoritative_effect(execution_id):
+                raise ExecutionReliabilityDenied("authoritative_result_exists")
+            if execution.lease_expires_at is None:
+                raise ExecutionReliabilityDenied("execution_lease_missing")
+            if _aware_utc(execution.lease_expires_at) > recovered_at:
+                raise ExecutionReliabilityDenied("execution_lease_active")
+            if _aware_utc(execution.deadline_at) <= recovered_at:
+                raise ExecutionReliabilityDenied("execution_deadline_expired")
+            if execution.attempt_count >= execution.max_attempts:
+                raise ExecutionReliabilityDenied("execution_attempts_exhausted")
+            next_retry_at = recovered_at + retry_delay(execution.attempt_count)
+            if next_retry_at >= _aware_utc(execution.deadline_at):
+                raise ExecutionReliabilityDenied("execution_retry_window_exhausted")
+            recovered_id = await self.session.scalar(
+                update(ControlledAgentExecution)
+                .where(
+                    ControlledAgentExecution.id == execution_id,
+                    ControlledAgentExecution.user_id == user_id,
+                    ControlledAgentExecution.workspace_id == workspace_id,
+                    ControlledAgentExecution.completed_at.is_(None),
+                    ControlledAgentExecution.lease_generation == expected_generation,
+                    ControlledAgentExecution.lease_owner_id.is_not(None),
+                    ControlledAgentExecution.lease_expires_at <= recovered_at,
+                    ControlledAgentExecution.deadline_at > next_retry_at,
+                    ControlledAgentExecution.attempt_count < ControlledAgentExecution.max_attempts,
+                )
+                .values(
+                    lease_owner_id=None,
+                    lease_acquired_at=None,
+                    lease_expires_at=None,
+                    lease_generation=ControlledAgentExecution.lease_generation + 1,
+                    next_retry_at=next_retry_at,
+                )
+                .returning(ControlledAgentExecution.id)
+                .execution_options(synchronize_session=False)
+            )
+            if recovered_id is None:
+                raise ExecutionReliabilityDenied("execution_recovery_conflict")
+            await self.session.refresh(execution)
+            await self.repository.append_state(
+                ExecutionStateRecord(
+                    state_id=uuid.uuid4(),
+                    execution_id=execution_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    status=ExecutionStatus.READY,
+                    recorded_at=recovered_at,
+                    safe_reason_code="lease_expired",
+                )
+            )
+            await self._record_event(
+                trace_id=trace_id,
+                execution=execution,
+                event_type="execution.lease_recovered",
+                recorded_at=recovered_at,
+                metadata={
+                    "attemptCount": execution.attempt_count,
+                    "supersededGeneration": expected_generation,
+                    "leaseGeneration": execution.lease_generation,
+                    "nextRetryAt": next_retry_at.isoformat(),
+                },
+            )
+        return ExecutionRecovery(
+            execution_id=execution_id,
+            superseded_generation=expected_generation,
+            generation=execution.lease_generation,
+            next_retry_at=next_retry_at,
+            attempt_count=execution.attempt_count,
+            trace_id=trace_id,
+        )
+
+    async def execute_retry(
+        self,
+        *,
+        user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        execution_id: uuid.UUID,
+        attempted_at: datetime,
+        action: Callable[[ExecutionLease], Awaitable[object]],
+    ) -> RetryExecutionResult:
+        """Claim and execute one eligible retry in an atomic server transaction."""
+
+        attempted_at = _aware_utc(attempted_at)
+        existing = await self._terminal_duplicate(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+        )
+        if existing is not None:
+            return existing
+
+        trace_id = uuid.uuid4()
+        async with self.session.begin_nested():
+            lease = await self.claim(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                execution_id=execution_id,
+                claimed_at=attempted_at,
+            )
+            failure: RetryFailureClassification | None = None
+            try:
+                async with self.session.begin_nested():
+                    await action(lease)
+            except RetryActionError as exc:
+                failure = exc.classification
+            except Exception:
+                failure = RetryFailureClassification.ACTION_INVALID
+
+            execution = await self.repository._owned_execution(
+                user_id,
+                workspace_id,
+                execution_id,
+            )
+            await self._assert_current_lease(
+                execution=execution,
+                lease=lease,
+                evaluated_at=attempted_at,
+            )
+            if failure is None:
+                await self.repository.append_state(
+                    ExecutionStateRecord(
+                        state_id=uuid.uuid4(),
+                        execution_id=execution_id,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        status=ExecutionStatus.SUCCEEDED,
+                        recorded_at=attempted_at,
+                    )
+                )
+                await self.session.refresh(execution)
+                await self._record_event(
+                    trace_id=trace_id,
+                    execution=execution,
+                    event_type="execution.retry_succeeded",
+                    recorded_at=attempted_at,
+                    metadata={
+                        "attemptCount": execution.attempt_count,
+                        "leaseGeneration": lease.generation,
+                    },
+                )
+                return RetryExecutionResult(
+                    execution_id=execution_id,
+                    status=ExecutionStatus.SUCCEEDED,
+                    attempt_count=execution.attempt_count,
+                    failure_classification=None,
+                    next_retry_at=None,
+                    duplicate=False,
+                    trace_id=trace_id,
+                )
+            return await self._record_retry_failure(
+                execution=execution,
+                lease=lease,
+                classification=failure,
+                failed_at=attempted_at,
+                trace_id=trace_id,
+            )
+
+    async def _record_retry_failure(
+        self,
+        *,
+        execution: ControlledAgentExecution,
+        lease: ExecutionLease,
+        classification: RetryFailureClassification,
+        failed_at: datetime,
+        trace_id: uuid.UUID,
+    ) -> RetryExecutionResult:
+        retryable = classification in RETRYABLE_FAILURES
+        exhausted = execution.attempt_count >= execution.max_attempts
+        next_retry_at = failed_at + retry_delay(execution.attempt_count)
+        deadline_exhausted = next_retry_at >= _aware_utc(execution.deadline_at)
+        if not retryable or exhausted or deadline_exhausted:
+            safe_reason = (
+                "execution_attempts_exhausted"
+                if retryable and exhausted
+                else "execution_retry_window_exhausted"
+                if retryable and deadline_exhausted
+                else classification.value
+            )
+            await self.repository.append_state(
+                ExecutionStateRecord(
+                    state_id=uuid.uuid4(),
+                    execution_id=execution.id,
+                    user_id=execution.user_id,
+                    workspace_id=execution.workspace_id,
+                    status=ExecutionStatus.FAILED,
+                    recorded_at=failed_at,
+                    safe_reason_code=safe_reason,
+                )
+            )
+            await self.session.refresh(execution)
+            await self._record_event(
+                trace_id=trace_id,
+                execution=execution,
+                event_type="execution.retry_failed",
+                recorded_at=failed_at,
+                metadata={
+                    "attemptCount": execution.attempt_count,
+                    "failureClassification": safe_reason,
+                    "leaseGeneration": lease.generation,
+                },
+            )
+            return RetryExecutionResult(
+                execution_id=execution.id,
+                status=ExecutionStatus.FAILED,
+                attempt_count=execution.attempt_count,
+                failure_classification=safe_reason,
+                next_retry_at=None,
+                duplicate=False,
+                trace_id=trace_id,
+            )
+
+        updated_id = await self.session.scalar(
+            update(ControlledAgentExecution)
+            .where(
+                ControlledAgentExecution.id == execution.id,
+                ControlledAgentExecution.lease_owner_id == lease.owner_id,
+                ControlledAgentExecution.lease_generation == lease.generation,
+                ControlledAgentExecution.completed_at.is_(None),
+            )
+            .values(
+                lease_owner_id=None,
+                lease_acquired_at=None,
+                lease_expires_at=None,
+                lease_generation=ControlledAgentExecution.lease_generation + 1,
+                next_retry_at=next_retry_at,
+            )
+            .returning(ControlledAgentExecution.id)
+            .execution_options(synchronize_session=False)
+        )
+        if updated_id is None:
+            raise ExecutionReliabilityDenied("lease_not_current")
+        await self.session.refresh(execution)
+        await self.repository.append_state(
+            ExecutionStateRecord(
+                state_id=uuid.uuid4(),
+                execution_id=execution.id,
+                user_id=execution.user_id,
+                workspace_id=execution.workspace_id,
+                status=ExecutionStatus.READY,
+                recorded_at=failed_at,
+                safe_reason_code=classification.value,
+            )
+        )
+        await self._record_event(
+            trace_id=trace_id,
+            execution=execution,
+            event_type="execution.retry_scheduled",
+            recorded_at=failed_at,
+            metadata={
+                "attemptCount": execution.attempt_count,
+                "failureClassification": classification.value,
+                "leaseGeneration": execution.lease_generation,
+                "nextRetryAt": next_retry_at.isoformat(),
+            },
+        )
+        return RetryExecutionResult(
+            execution_id=execution.id,
+            status=ExecutionStatus.READY,
+            attempt_count=execution.attempt_count,
+            failure_classification=classification.value,
+            next_retry_at=next_retry_at,
+            duplicate=False,
+            trace_id=trace_id,
+        )
+
+    async def _assert_current_lease(
+        self,
+        *,
+        execution: ControlledAgentExecution,
+        lease: ExecutionLease,
+        evaluated_at: datetime,
+    ) -> None:
+        current_id = await self.session.scalar(
+            update(ControlledAgentExecution)
+            .where(
+                ControlledAgentExecution.id == execution.id,
+                ControlledAgentExecution.completed_at.is_(None),
+                ControlledAgentExecution.lease_owner_id == lease.owner_id,
+                ControlledAgentExecution.lease_generation == lease.generation,
+                ControlledAgentExecution.lease_expires_at > evaluated_at,
+            )
+            .values(lease_expires_at=ControlledAgentExecution.lease_expires_at)
+            .returning(ControlledAgentExecution.id)
+            .execution_options(synchronize_session=False)
+        )
+        if current_id is None:
+            raise ExecutionReliabilityDenied("lease_not_current")
+
+    async def _has_authoritative_effect(self, execution_id: uuid.UUID) -> bool:
+        return (
+            await self.session.scalar(
+                select(ControlledAgentReversibleWriteEffect.effect_id).where(
+                    ControlledAgentReversibleWriteEffect.execution_id == execution_id
+                )
+            )
+            is not None
+        )
+
+    async def _terminal_duplicate(
+        self,
+        *,
+        user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        execution_id: uuid.UUID,
+    ) -> RetryExecutionResult | None:
+        execution = await self.repository._owned_execution(user_id, workspace_id, execution_id)
+        current = await self.repository.current_state(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+        )
+        if current is not None and ExecutionStatus(current.status) is ExecutionStatus.SUCCEEDED:
+            return RetryExecutionResult(
+                execution_id=execution_id,
+                status=ExecutionStatus.SUCCEEDED,
+                attempt_count=execution.attempt_count,
+                failure_classification=None,
+                next_retry_at=None,
+                duplicate=True,
+                trace_id=uuid.UUID(int=0),
+            )
+        return None
+
     async def _validate_claim_authority(
         self,
         *,
@@ -438,6 +853,7 @@ class ControlledExecutionReliability:
                 attributes=attributes,
             )
         )
+        trace_metadata: dict[str, JsonValue] = dict(metadata)
         await self.trace_service.record_event(
             RecordTraceEventInput(
                 trace_id=trace_id,
@@ -449,7 +865,7 @@ class ControlledExecutionReliability:
                 object_type="controlled_agent_execution",
                 operation=event_type,
                 status="succeeded",
-                metadata=metadata,
+                metadata=trace_metadata,
             )
         )
 
@@ -460,10 +876,29 @@ def _aware_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+def retry_delay(attempt_count: int) -> timedelta:
+    """Return deterministic bounded exponential delay for the completed attempt."""
+
+    exponent = max(attempt_count - 1, 0)
+    seconds = min(
+        RETRY_BASE_DELAY.total_seconds() * (2**exponent),
+        RETRY_MAX_DELAY.total_seconds(),
+    )
+    return timedelta(seconds=seconds)
+
+
 __all__ = [
     "EXECUTION_LEASE_DURATION",
+    "RETRYABLE_FAILURES",
+    "RETRY_BASE_DELAY",
+    "RETRY_MAX_DELAY",
     "ControlledExecutionReliability",
     "ExecutionLease",
     "ExecutionLeaseChange",
+    "ExecutionRecovery",
     "ExecutionReliabilityDenied",
+    "RetryActionError",
+    "RetryExecutionResult",
+    "RetryFailureClassification",
+    "retry_delay",
 ]

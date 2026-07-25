@@ -31,6 +31,9 @@ from opencanvas_api.services.agents.reliability import (
     EXECUTION_LEASE_DURATION,
     ControlledExecutionReliability,
     ExecutionReliabilityDenied,
+    RetryActionError,
+    RetryFailureClassification,
+    retry_delay,
 )
 from opencanvas_api.services.trace import RecordTraceEventInput, TraceService
 from tests.agent_fixtures import NOW, AgentBundle, make_agent_bundle
@@ -647,3 +650,380 @@ async def test_competing_sqlite_claims_produce_one_owner(tmp_path: Path) -> None
         assert execution.attempt_count == 1
     finally:
         await database.dispose()
+
+
+def test_retry_delay_is_deterministic_and_bounded() -> None:
+    assert [retry_delay(attempt) for attempt in range(1, 7)] == [
+        timedelta(seconds=5),
+        timedelta(seconds=10),
+        timedelta(seconds=20),
+        timedelta(seconds=40),
+        timedelta(minutes=1),
+        timedelta(minutes=1),
+    ]
+
+
+async def test_expired_lease_recovery_fences_owner_and_records_retry(
+    database: Database,
+) -> None:
+    bundle = await _ready_bundle(database)
+    claimed_at = NOW + timedelta(minutes=1)
+    recovered_at = claimed_at + EXECUTION_LEASE_DURATION
+    async with database.sessions() as session:
+        service = ControlledExecutionReliability(session)
+        lease = await service.claim(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            claimed_at=claimed_at,
+        )
+        recovery = await service.recover_expired_lease(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            expected_generation=lease.generation,
+            recovered_at=recovered_at,
+        )
+        assert recovery.superseded_generation == lease.generation
+        assert recovery.generation == lease.generation + 1
+        assert recovery.next_retry_at == recovered_at + retry_delay(lease.attempt_count)
+        with pytest.raises(ExecutionReliabilityDenied, match="execution_not_running"):
+            await service.renew(
+                user_id=bundle.execution.user_id,
+                workspace_id=bundle.execution.workspace_id,
+                execution_id=bundle.execution.execution_id,
+                owner_id=lease.owner_id,
+                generation=lease.generation,
+                renewed_at=recovered_at,
+            )
+        await session.commit()
+
+    async with database.sessions() as session:
+        execution = await session.get(ControlledAgentExecution, bundle.execution.execution_id)
+        assert execution is not None
+        assert execution.lease_owner_id is None
+        assert execution.attempt_count == 1
+        assert execution.lease_generation == 2
+        assert execution.next_retry_at is not None
+        assert execution.next_retry_at.replace(tzinfo=NOW.tzinfo) == recovery.next_retry_at
+        current = await ControlledAgentRepository(session).current_state(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+        )
+        assert current is not None and current.status == ExecutionStatus.READY.value
+        assert current.safe_reason_code == "lease_expired"
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(ControlledAgentAuditEvent)
+                .where(ControlledAgentAuditEvent.event_type == "execution.lease_recovered")
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(TraceEvent)
+                .where(TraceEvent.event_type == "execution.lease_recovered")
+            )
+            == 1
+        )
+
+
+@pytest.mark.parametrize(
+    ("seconds", "generation_delta", "reason"),
+    [
+        (30, 0, "execution_lease_active"),
+        (60, 1, "execution_recovery_conflict"),
+    ],
+)
+async def test_recovery_rejects_active_or_stale_lease_without_partial_state(
+    database: Database,
+    seconds: int,
+    generation_delta: int,
+    reason: str,
+) -> None:
+    bundle = await _ready_bundle(database)
+    claimed_at = NOW + timedelta(minutes=1)
+    async with database.sessions() as session:
+        service = ControlledExecutionReliability(session)
+        lease = await service.claim(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            claimed_at=claimed_at,
+        )
+        with pytest.raises(ExecutionReliabilityDenied, match=reason):
+            await service.recover_expired_lease(
+                user_id=bundle.execution.user_id,
+                workspace_id=bundle.execution.workspace_id,
+                execution_id=bundle.execution.execution_id,
+                expected_generation=lease.generation + generation_delta,
+                recovered_at=claimed_at + timedelta(seconds=seconds),
+            )
+        execution = await session.get(ControlledAgentExecution, bundle.execution.execution_id)
+        assert execution is not None
+        assert execution.lease_owner_id == lease.owner_id
+        assert execution.lease_generation == lease.generation
+        assert execution.next_retry_at is None
+
+
+async def test_retryable_failure_rolls_back_action_and_schedules_retry(
+    database: Database,
+) -> None:
+    bundle = await _ready_bundle(database)
+    attempted_at = NOW + timedelta(minutes=1)
+    async with database.sessions() as session:
+        workspace = await session.get(Workspace, bundle.execution.workspace_id)
+        assert workspace is not None
+        original_name = workspace.name
+
+        async def fail_after_mutation(_: object) -> None:
+            workspace.name = "must roll back"
+            await session.flush()
+            raise RetryActionError(RetryFailureClassification.PROVIDER_TIMEOUT)
+
+        result = await ControlledExecutionReliability(session).execute_retry(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            attempted_at=attempted_at,
+            action=fail_after_mutation,
+        )
+        await session.commit()
+        assert result.status is ExecutionStatus.READY
+        assert result.failure_classification == "provider_timeout"
+        assert result.next_retry_at == attempted_at + timedelta(seconds=5)
+
+    async with database.sessions() as session:
+        workspace = await session.get(Workspace, bundle.execution.workspace_id)
+        execution = await session.get(ControlledAgentExecution, bundle.execution.execution_id)
+        assert workspace is not None and workspace.name == original_name
+        assert execution is not None
+        assert execution.attempt_count == 1
+        assert execution.lease_owner_id is None
+        assert execution.lease_generation == 2
+        assert execution.next_retry_at is not None
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(ControlledAgentAuditEvent)
+                .where(ControlledAgentAuditEvent.event_type == "execution.retry_scheduled")
+            )
+            == 1
+        )
+
+
+async def test_retry_succeeds_once_and_duplicate_delivery_does_not_rerun(
+    database: Database,
+) -> None:
+    bundle = await _ready_bundle(database)
+    calls = 0
+
+    async def succeed(_: object) -> None:
+        nonlocal calls
+        calls += 1
+
+    async with database.sessions() as session:
+        service = ControlledExecutionReliability(session)
+        result = await service.execute_retry(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            attempted_at=NOW + timedelta(minutes=1),
+            action=succeed,
+        )
+        duplicate = await service.execute_retry(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            attempted_at=NOW + timedelta(minutes=1, seconds=1),
+            action=succeed,
+        )
+        await session.commit()
+        assert result.status is ExecutionStatus.SUCCEEDED and not result.duplicate
+        assert duplicate.status is ExecutionStatus.SUCCEEDED and duplicate.duplicate
+        assert calls == 1
+        execution = await session.get(ControlledAgentExecution, bundle.execution.execution_id)
+        assert execution is not None
+        assert execution.attempt_count == 1
+        assert execution.terminal_outcome == ExecutionStatus.SUCCEEDED.value
+        assert execution.lease_owner_id is None
+
+
+async def test_bounded_retry_succeeds_on_next_eligible_attempt(database: Database) -> None:
+    bundle = await _ready_bundle(database)
+    calls = 0
+
+    async def transient_then_success(_: object) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RetryActionError(RetryFailureClassification.PROVIDER_UNAVAILABLE)
+
+    async with database.sessions() as session:
+        service = ControlledExecutionReliability(session)
+        first = await service.execute_retry(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            attempted_at=NOW + timedelta(minutes=1),
+            action=transient_then_success,
+        )
+        assert first.next_retry_at is not None
+        with pytest.raises(ExecutionReliabilityDenied, match="execution_retry_not_eligible"):
+            await service.execute_retry(
+                user_id=bundle.execution.user_id,
+                workspace_id=bundle.execution.workspace_id,
+                execution_id=bundle.execution.execution_id,
+                attempted_at=first.next_retry_at - timedelta(microseconds=1),
+                action=transient_then_success,
+            )
+        second = await service.execute_retry(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            attempted_at=first.next_retry_at,
+            action=transient_then_success,
+        )
+        await session.commit()
+        assert second.status is ExecutionStatus.SUCCEEDED
+        assert second.attempt_count == 2
+        assert calls == 2
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        (RetryFailureClassification.ACTION_CONFLICT, "action_conflict"),
+        (RetryFailureClassification.UNSUPPORTED_ACTION, "unsupported_action"),
+    ],
+)
+async def test_terminal_failure_classes_fail_closed_without_retry(
+    database: Database,
+    failure: RetryFailureClassification,
+    expected: str,
+) -> None:
+    bundle = await _ready_bundle(database)
+
+    async def fail(_: object) -> None:
+        raise RetryActionError(failure)
+
+    async with database.sessions() as session:
+        result = await ControlledExecutionReliability(session).execute_retry(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            attempted_at=NOW + timedelta(minutes=1),
+            action=fail,
+        )
+        await session.commit()
+        assert result.status is ExecutionStatus.FAILED
+        assert result.failure_classification == expected
+        assert result.next_retry_at is None
+
+
+async def test_attempt_exhaustion_creates_one_terminal_failure_event(
+    database: Database,
+) -> None:
+    bundle = await _ready_bundle(database)
+    async with database.sessions() as session:
+        await session.execute(
+            update(ControlledAgentExecution)
+            .where(ControlledAgentExecution.id == bundle.execution.execution_id)
+            .values(max_attempts=1)
+        )
+
+        async def fail(_: object) -> None:
+            raise RetryActionError(RetryFailureClassification.PROVIDER_TIMEOUT)
+
+        result = await ControlledExecutionReliability(session).execute_retry(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            attempted_at=NOW + timedelta(minutes=1),
+            action=fail,
+        )
+        await session.commit()
+        assert result.status is ExecutionStatus.FAILED
+        assert result.failure_classification == "execution_attempts_exhausted"
+        assert result.attempt_count == 1
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(ControlledAgentAuditEvent)
+                .where(ControlledAgentAuditEvent.event_type == "execution.retry_failed")
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(TraceEvent)
+                .where(TraceEvent.event_type == "execution.retry_failed")
+            )
+            == 1
+        )
+
+
+async def test_unknown_action_failure_is_terminal_and_safe(database: Database) -> None:
+    bundle = await _ready_bundle(database)
+
+    async def fail(_: object) -> None:
+        raise RuntimeError("private provider and database detail")
+
+    async with database.sessions() as session:
+        result = await ControlledExecutionReliability(session).execute_retry(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+            attempted_at=NOW + timedelta(minutes=1),
+            action=fail,
+        )
+        await session.commit()
+        assert result.failure_classification == "action_invalid"
+        assert "private" not in result.failure_classification
+
+
+async def test_retry_trace_failure_rolls_back_action_claim_and_terminal_state(
+    database: Database,
+) -> None:
+    bundle = await _ready_bundle(database)
+    async with database.sessions() as session:
+        workspace = await session.get(Workspace, bundle.execution.workspace_id)
+        assert workspace is not None
+        original_name = workspace.name
+
+        async def mutate(_: object) -> None:
+            workspace.name = "must roll back with trace"
+            await session.flush()
+
+        service = ControlledExecutionReliability(
+            session,
+            trace_service=_FailingTraceService(session),
+        )
+        with pytest.raises(RuntimeError, match="injected trace failure"):
+            await service.execute_retry(
+                user_id=bundle.execution.user_id,
+                workspace_id=bundle.execution.workspace_id,
+                execution_id=bundle.execution.execution_id,
+                attempted_at=NOW + timedelta(minutes=1),
+                action=mutate,
+            )
+        await session.commit()
+
+    async with database.sessions() as session:
+        workspace = await session.get(Workspace, bundle.execution.workspace_id)
+        execution = await session.get(ControlledAgentExecution, bundle.execution.execution_id)
+        assert workspace is not None and workspace.name == original_name
+        assert execution is not None
+        assert execution.attempt_count == 0
+        assert execution.completed_at is None
+        assert execution.lease_owner_id is None
+        current = await ControlledAgentRepository(session).current_state(
+            user_id=bundle.execution.user_id,
+            workspace_id=bundle.execution.workspace_id,
+            execution_id=bundle.execution.execution_id,
+        )
+        assert current is not None and current.status == ExecutionStatus.READY.value
