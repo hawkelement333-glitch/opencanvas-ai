@@ -15,6 +15,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -1743,6 +1744,291 @@ class DomainActivityEntry(Base):
     )
 
 
+class GraphRetrievalRun(Base):
+    """Immutable authoritative result of one bounded graph-aware retrieval."""
+
+    __tablename__ = "graph_retrieval_runs"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["canvas_id", "workspace_id"],
+            ["canvases.id", "canvases.workspace_id"],
+            name="fk_graph_retrieval_runs_canvas_workspace",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "idempotency_key",
+            name="uq_graph_retrieval_runs_idempotency",
+        ),
+        UniqueConstraint(
+            "retrieval_id",
+            "user_id",
+            "workspace_id",
+            name="uq_graph_retrieval_runs_scope",
+        ),
+        CheckConstraint(
+            "algorithm_version = 'graph-retrieval-v1'",
+            name="ck_graph_retrieval_runs_algorithm",
+        ),
+        CheckConstraint(
+            "schema_version = 'graph-retrieval-result-v1'",
+            name="ck_graph_retrieval_runs_schema",
+        ),
+        CheckConstraint(
+            "mode IN ('selected_graph')",
+            name="ck_graph_retrieval_runs_mode",
+        ),
+        CheckConstraint(
+            "outcome IN ('supported', 'conflicting_evidence', "
+            "'insufficient_evidence', 'bounded_result')",
+            name="ck_graph_retrieval_runs_outcome",
+        ),
+        CheckConstraint(
+            "graph_revision >= 0 AND citation_count >= 0",
+            name="ck_graph_retrieval_runs_counts",
+        ),
+        CheckConstraint(
+            "length(query_digest) = 64 AND length(request_digest) = 64",
+            name="ck_graph_retrieval_runs_digests",
+        ),
+        Index(
+            "ix_graph_retrieval_runs_scope_time",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "created_at",
+        ),
+        Index("ix_graph_retrieval_runs_trace", "trace_id"),
+    )
+
+    retrieval_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    query_text: Mapped[str] = mapped_column(Text, nullable=False)
+    query_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    selected_object_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    seed_object_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    graph_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    algorithm_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    mode: Mapped[str] = mapped_column(String(24), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    bounded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    citation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class GraphRetrievalDecision(Base):
+    """Append-only inclusion, exclusion, traversal, and ranking evidence."""
+
+    __tablename__ = "graph_retrieval_decisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["retrieval_id", "user_id", "workspace_id"],
+            [
+                "graph_retrieval_runs.retrieval_id",
+                "graph_retrieval_runs.user_id",
+                "graph_retrieval_runs.workspace_id",
+            ],
+            name="fk_graph_retrieval_decisions_run_scope",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("distance >= 0", name="ck_graph_retrieval_decisions_distance"),
+        CheckConstraint(
+            "rank IS NULL OR rank > 0",
+            name="ck_graph_retrieval_decisions_rank",
+        ),
+        CheckConstraint(
+            "reason_code IN ('selected_seed', 'direct_citation', "
+            "'supporting_relationship', 'reference_relationship', "
+            "'derivation_relationship', 'graph_related_candidate', "
+            "'exact_source_passage_match', 'approved_deterministic_fallback', "
+            "'outside_selected_context', 'unauthorized_scope', "
+            "'inactive_relationship', 'superseded_relationship', "
+            "'invalid_relationship_direction', 'unsupported_relationship_kind', "
+            "'historical_resource', 'removed_resource', "
+            "'missing_immutable_version', 'missing_source_content', "
+            "'malformed_locator', 'duplicate_candidate', "
+            "'candidate_limit_reached', 'traversal_limit_reached', "
+            "'insufficient_relevance', 'unsupported_schema_version', "
+            "'conflicting_provenance', 'unsafe_source', "
+            "'export_not_authorized')",
+            name="ck_graph_retrieval_decisions_reason",
+        ),
+        Index(
+            "ix_graph_retrieval_decisions_run_order",
+            "retrieval_id",
+            "included",
+            "rank",
+            "decision_id",
+        ),
+    )
+
+    decision_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    retrieval_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    object_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    relationship_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    included: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(48), nullable=False)
+    distance: Mapped[int] = mapped_column(Integer, nullable=False)
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    relationship_path: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    detail: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class GraphRetrievalCitation(Base):
+    """Immutable exact passage and canonical source evidence."""
+
+    __tablename__ = "graph_retrieval_citations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["retrieval_id", "user_id", "workspace_id"],
+            [
+                "graph_retrieval_runs.retrieval_id",
+                "graph_retrieval_runs.user_id",
+                "graph_retrieval_runs.workspace_id",
+            ],
+            name="fk_graph_retrieval_citations_run_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "retrieval_id",
+            "ordinal",
+            name="uq_graph_retrieval_citations_ordinal",
+        ),
+        UniqueConstraint(
+            "retrieval_id",
+            "canonical_object_id",
+            "passage_identity",
+            name="uq_graph_retrieval_citations_passage",
+        ),
+        CheckConstraint("ordinal > 0", name="ck_graph_retrieval_citations_ordinal"),
+        CheckConstraint(
+            "canonical_version > 0 AND source_version > 0",
+            name="ck_graph_retrieval_citations_versions",
+        ),
+        CheckConstraint(
+            "citation_schema_version = 'graph-citation-v1'",
+            name="ck_graph_retrieval_citations_schema",
+        ),
+        CheckConstraint(
+            "length(source_sha256) = 64 AND length(excerpt_sha256) = 64",
+            name="ck_graph_retrieval_citations_hashes",
+        ),
+        Index(
+            "ix_graph_retrieval_citations_run_order",
+            "retrieval_id",
+            "ordinal",
+        ),
+        Index("ix_graph_retrieval_citations_trace", "trace_id"),
+    )
+
+    citation_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    retrieval_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canonical_object_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canonical_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    passage_identity: Mapped[str] = mapped_column(String(96), nullable=False)
+    excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+    excerpt_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    locator: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    relationship_path: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    graph_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    citation_schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class TraceEvidenceBundle(Base):
+    """Deterministic owner-scoped bundle stored as verified opaque bytes."""
+
+    __tablename__ = "trace_evidence_bundles"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["retrieval_id", "user_id", "workspace_id"],
+            [
+                "graph_retrieval_runs.retrieval_id",
+                "graph_retrieval_runs.user_id",
+                "graph_retrieval_runs.workspace_id",
+            ],
+            name="fk_trace_evidence_bundles_run_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("retrieval_id", name="uq_trace_evidence_bundles_retrieval"),
+        CheckConstraint(
+            "schema_version = 'trace-evidence-bundle-v1'",
+            name="ck_trace_evidence_bundles_schema",
+        ),
+        CheckConstraint(
+            "state IN ('completed', 'failed')",
+            name="ck_trace_evidence_bundles_state",
+        ),
+        CheckConstraint(
+            "(state = 'completed' AND artifact_bytes IS NOT NULL "
+            "AND artifact_sha256 IS NOT NULL AND byte_size > 0) OR "
+            "(state = 'failed' AND artifact_bytes IS NULL "
+            "AND artifact_sha256 IS NULL AND byte_size = 0)",
+            name="ck_trace_evidence_bundles_artifact_shape",
+        ),
+        CheckConstraint(
+            "artifact_sha256 IS NULL OR length(artifact_sha256) = 64",
+            name="ck_trace_evidence_bundles_hash",
+        ),
+        Index(
+            "ix_trace_evidence_bundles_scope",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            "created_at",
+        ),
+    )
+
+    bundle_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    retrieval_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    manifest: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    artifact_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    artifact_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class ControlledAgentExecution(Base):
     """Immutable authority identity plus server-owned bounded reliability state."""
 
@@ -2911,6 +3197,13 @@ DOMAIN_EVENT_IMMUTABLE_MODELS = (
     DomainActivityEntry,
 )
 
+GRAPH_RETRIEVAL_IMMUTABLE_MODELS = (
+    GraphRetrievalRun,
+    GraphRetrievalDecision,
+    GraphRetrievalCitation,
+    TraceEvidenceBundle,
+)
+
 
 def _reject_controlled_agent_mutation(_mapper: Any, _connection: Any, target: object) -> None:
     raise ValueError(f"{type(target).__name__} records are append-only")
@@ -2976,6 +3269,10 @@ for _graph_immutable_model in KNOWLEDGE_GRAPH_IMMUTABLE_MODELS:
 for _domain_event_immutable_model in DOMAIN_EVENT_IMMUTABLE_MODELS:
     event.listen(_domain_event_immutable_model, "before_update", _reject_controlled_agent_mutation)
     event.listen(_domain_event_immutable_model, "before_delete", _reject_controlled_agent_mutation)
+
+for _retrieval_immutable_model in GRAPH_RETRIEVAL_IMMUTABLE_MODELS:
+    event.listen(_retrieval_immutable_model, "before_update", _reject_controlled_agent_mutation)
+    event.listen(_retrieval_immutable_model, "before_delete", _reject_controlled_agent_mutation)
 
 event.listen(DomainEventOutbox, "before_delete", _reject_controlled_agent_mutation)
 event.listen(DomainEventOutbox, "before_update", _reject_outbox_identity_mutation)

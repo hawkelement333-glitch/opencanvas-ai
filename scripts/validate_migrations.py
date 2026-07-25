@@ -13,8 +13,8 @@ from alembic import command
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 API_ROOT = REPOSITORY_ROOT / "apps" / "api"
-EXPECTED_HEAD = "20260725_0017"
-PREVIOUS_REVISION = "20260725_0016"
+EXPECTED_HEAD = "20260725_0018"
+PREVIOUS_REVISION = "20260725_0017"
 
 
 def revision(database_path: Path) -> str:

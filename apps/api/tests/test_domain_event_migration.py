@@ -25,7 +25,7 @@ def test_living_state_migration_cycle_and_append_only_guards(tmp_path: Path) -> 
     command.upgrade(config, "head")
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "20260725_0017",
+            "20260725_0018",
         )
         tables = {
             row[0]
@@ -131,7 +131,7 @@ def test_living_state_migration_cycle_and_append_only_guards(tmp_path: Path) -> 
     command.upgrade(config, "head")
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "20260725_0017",
+            "20260725_0018",
         )
 
 
