@@ -490,7 +490,7 @@ export function OpenCanvasApp({ rollbackEffectId }: { rollbackEffectId?: string 
               workspace={activeWorkspace}
               runtime={runtimeQuery.data ?? null}
               rollbackEffectId={rollbackEffectId}
-              onReload={() => void snapshotQuery.refetch()}
+              onReload={async () => (await snapshotQuery.refetch()).data}
             />
           </ReactFlowProvider>
         )}
@@ -504,7 +504,7 @@ interface CanvasWorkspaceProps {
   workspace: Workspace | null;
   runtime: RuntimeMode | null;
   rollbackEffectId?: string;
-  onReload: () => void;
+  onReload: () => Promise<Awaited<ReturnType<typeof canvasApi.getSnapshot>> | undefined>;
 }
 
 function CanvasWorkspace({
@@ -1558,7 +1558,11 @@ function CanvasWorkspace({
           requestApproval={requestRollbackApproval}
           executeRollback={executeRollback}
           onComplete={async () => {
-            await onReload();
+            const refreshed = await onReload();
+            if (refreshed) {
+              replaceNodes(refreshed.nodes.map((node) => toFlowNode(node)));
+              replaceEdges(refreshed.edges.map(toFlowEdge));
+            }
           }}
         />
       )}

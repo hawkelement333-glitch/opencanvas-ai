@@ -87,8 +87,7 @@ class ReversibleWriteRollbackService:
     ) -> AppliedRollback:
         existing = await self.session.scalar(
             select(ControlledAgentReversibleWriteRollbackResult).where(
-                ControlledAgentReversibleWriteRollbackResult.user_id
-                == authenticated_user_id,
+                ControlledAgentReversibleWriteRollbackResult.user_id == authenticated_user_id,
                 ControlledAgentReversibleWriteRollbackResult.workspace_id == workspace_id,
                 ControlledAgentReversibleWriteRollbackResult.canvas_id == canvas_id,
                 ControlledAgentReversibleWriteRollbackResult.scoped_idempotency_key
@@ -101,22 +100,17 @@ class ReversibleWriteRollbackService:
                 and existing.effect_id == effect_id
             ):
                 return AppliedRollback(existing, True)
-            raise RollbackExecutionError(
-                "idempotency_conflict", "Rollback request conflicts."
-            )
+            raise RollbackExecutionError("idempotency_conflict", "Rollback request conflicts.")
         completed = await self.session.scalar(
             select(ControlledAgentReversibleWriteRollbackResult).where(
                 ControlledAgentReversibleWriteRollbackResult.effect_id == effect_id,
-                ControlledAgentReversibleWriteRollbackResult.user_id
-                == authenticated_user_id,
+                ControlledAgentReversibleWriteRollbackResult.user_id == authenticated_user_id,
                 ControlledAgentReversibleWriteRollbackResult.workspace_id == workspace_id,
                 ControlledAgentReversibleWriteRollbackResult.canvas_id == canvas_id,
             )
         )
         if completed is not None:
-            raise RollbackExecutionError(
-                "already_rolled_back", "Rollback was already completed."
-            )
+            raise RollbackExecutionError("already_rolled_back", "Rollback was already completed.")
 
         async with self.session.begin_nested():
             approval = await self.session.scalar(
@@ -124,8 +118,7 @@ class ReversibleWriteRollbackService:
                     ControlledAgentReversibleWriteRollbackApproval.rollback_approval_id
                     == rollback_approval_id,
                     ControlledAgentReversibleWriteRollbackApproval.effect_id == effect_id,
-                    ControlledAgentReversibleWriteRollbackApproval.user_id
-                    == authenticated_user_id,
+                    ControlledAgentReversibleWriteRollbackApproval.user_id == authenticated_user_id,
                     ControlledAgentReversibleWriteRollbackApproval.workspace_id == workspace_id,
                     ControlledAgentReversibleWriteRollbackApproval.canvas_id == canvas_id,
                 )
@@ -136,12 +129,8 @@ class ReversibleWriteRollbackService:
                 )
             expires_at = self._aware(approval.expires_at)
             if self.now >= expires_at:
-                raise RollbackExecutionError(
-                    "approval_expired", "Rollback approval has expired."
-                )
-            review = await ReversibleWriteRollbackReviewService(
-                self.session, now=self.now
-            ).review(
+                raise RollbackExecutionError("approval_expired", "Rollback approval has expired.")
+            review = await ReversibleWriteRollbackReviewService(self.session, now=self.now).review(
                 authenticated_user_id=authenticated_user_id,
                 workspace_id=workspace_id,
                 canvas_id=canvas_id,
@@ -154,9 +143,7 @@ class ReversibleWriteRollbackService:
                 )
             effect = await self.session.get(ControlledAgentReversibleWriteEffect, effect_id)
             if effect is None:
-                raise RollbackExecutionError(
-                    "effect_not_found", "Rollback effect not found.", 404
-                )
+                raise RollbackExecutionError("effect_not_found", "Rollback effect not found.", 404)
             evidence = await self.session.scalar(
                 select(ControlledAgentReversibleWriteRollbackEvidence).where(
                     ControlledAgentReversibleWriteRollbackEvidence.effect_id == effect_id
@@ -181,9 +168,7 @@ class ReversibleWriteRollbackService:
                 expires_at=expires_at,
             )
             if not self._approval_matches(approval, digest_input):
-                raise RollbackExecutionError(
-                    "approval_invalid", "Rollback approval is invalid."
-                )
+                raise RollbackExecutionError("approval_invalid", "Rollback approval is invalid.")
             note = await self.session.scalar(
                 select(CanvasNode).where(
                     CanvasNode.id == approval.note_id,
@@ -192,9 +177,7 @@ class ReversibleWriteRollbackService:
                 )
             )
             if note is None:
-                raise RollbackExecutionError(
-                    "note_missing", "Rollback target is unavailable."
-                )
+                raise RollbackExecutionError("note_missing", "Rollback target is unavailable.")
             trace_id = uuid.uuid4()
             trace = TraceService(self.session)
             await trace.start_trace(
@@ -264,21 +247,15 @@ class ReversibleWriteRollbackService:
                     event_type="reversible_write.rollback_applied",
                     recorded_at=self.now,
                     attributes=(
-                        AuditAttribute(
-                            key="rollback_action", value=approval.rollback_action
-                        ),
+                        AuditAttribute(key="rollback_action", value=approval.rollback_action),
                         AuditAttribute(
                             key="rollback_approval_digest",
                             value=approval.approval_digest,
                         ),
                         AuditAttribute(key="effect_id", value=str(effect.effect_id)),
-                        AuditAttribute(
-                            key="pre_rollback_digest", value=effect.after_digest
-                        ),
+                        AuditAttribute(key="pre_rollback_digest", value=effect.after_digest),
                         AuditAttribute(key="target_digest", value=target_digest),
-                        AuditAttribute(
-                            key="resulting_revision", value=resulting_revision
-                        ),
+                        AuditAttribute(key="resulting_revision", value=resulting_revision),
                     ),
                 )
             )
@@ -320,9 +297,7 @@ class ReversibleWriteRollbackService:
                 or approval.rollback_target_digest != authoritative_absence_digest()
                 or _note_digest(note) != effect.after_digest
             ):
-                raise RollbackExecutionError(
-                    "state_conflict", "Rollback target changed."
-                )
+                raise RollbackExecutionError("state_conflict", "Rollback target changed.")
             deleted_id = (
                 await self.session.execute(
                     delete(CanvasNode)
@@ -337,14 +312,11 @@ class ReversibleWriteRollbackService:
                 )
             ).scalar_one_or_none()
             if deleted_id is None:
-                raise RollbackExecutionError(
-                    "revision_conflict", "Rollback target changed."
-                )
+                raise RollbackExecutionError("revision_conflict", "Rollback target changed.")
             await self._bump_canvas(approval.canvas_id)
             return None, authoritative_absence_digest()
         if (
-            approval.rollback_action
-            != ReversibleWriteRollbackAction.NOTE_UPDATE_ROLLBACK.value
+            approval.rollback_action != ReversibleWriteRollbackAction.NOTE_UPDATE_ROLLBACK.value
             or approval.expected_current_revision <= 0
             or approval.rollback_target_kind != "exact_prior_state"
             or evidence is None
@@ -359,8 +331,7 @@ class ReversibleWriteRollbackService:
         if (
             not isinstance(title, str)
             or not isinstance(text, str)
-            or _note_state_digest({"title": title, "text": text})
-            != approval.rollback_target_digest
+            or _note_state_digest({"title": title, "text": text}) != approval.rollback_target_digest
             or _note_state_digest(_note_state(note)) != effect.after_digest
         ):
             raise RollbackExecutionError(
@@ -385,9 +356,7 @@ class ReversibleWriteRollbackService:
             )
         ).scalar_one_or_none()
         if updated is None:
-            raise RollbackExecutionError(
-                "revision_conflict", "Rollback target changed."
-            )
+            raise RollbackExecutionError("revision_conflict", "Rollback target changed.")
         target_digest = _note_state_digest(_note_state(updated))
         if target_digest != evidence.before_digest:
             raise RollbackExecutionError(

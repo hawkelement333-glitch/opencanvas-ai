@@ -1,5 +1,50 @@
 # Milestone 4.3 Terra Handoff
 
+## Final audit complete locally
+
+- Audit baseline: `0dff4a7c44aad1a24de126b8869ae6cff42d6f9f`.
+- Branch: `milestone-4.3-reversible-writes-local`; no upstream or remote operation.
+- Protected `main`, `competition-demo-v1`, and sole Alembic head `20260724_0014` are unchanged.
+
+The final audit verifies the complete reversible-write chain: immutable proposal, explicit forward
+approval, atomic create/update effect, server-derived rollback review, rollback-specific approval,
+atomic inverse execution, immutable result, replay protection, audit/Trace evidence, and the
+frontend confirmation/approval/execution flow.
+
+Backend results: the complete reversible-effects module reported `62 passed`; the separate affected
+authority/API/authentication/persistence/audit/Trace group reported `131 passed`; the focused
+post-format group reported `65 passed`; and the SQLite `0013 -> 0014 -> 0013 -> 0014` migration
+cycle reported `1 passed`. Strict mypy, Python compilation/imports, mapper validation, and focused
+Milestone 4.3 Ruff format/lint passed.
+
+Frontend results: focused rollback coverage reported `19 passed`; the complete frontend suite
+reported `48 passed` across 11 files. TypeScript, ESLint, rollback-touched Prettier checks, and the
+production Next.js build passed.
+
+The real local Next.js UI was smoke-tested against a temporary deterministic API fixture because
+protected demo mode intentionally disables active rollback controls. The smoke verified create-note
+removal, update-note restoration, accessible confirmation, pending/disabled states, successful
+authoritative refresh, exact-duplicate completion, safe stale denial, no private evidence/grant/SQL/
+stack rendering, and no browser console errors. No external service or production data was used;
+the fixture and local processes were removed afterward.
+
+One functional defect was found and fixed: refetching after rollback updated React Query but left
+the canvas workspace's local node state stale. The completion callback now applies the returned
+authoritative snapshot to live nodes and edges while preserving the rollback completion state.
+Focused tests, TypeScript, lint, build, and browser create/update smoke passed after the fix.
+
+The audit also mechanically normalized six Milestone 4.3 backend files, corrected import order in
+local migrations `0013`/`0014`, and removed one unused proposal-test import. Diff/whitespace,
+repository hygiene, secret-like-material, and prohibited-scope scans passed.
+
+Broader checks still report pre-existing static debt in unchanged files: six backend/demo/migration
+utility files need Ruff formatting, 21 Ruff findings remain in earlier migration/grounded-draft/test
+support, and five frontend files need Prettier. They are outside the Milestone 4.3 affected scope
+and were not rewritten during this final audit.
+
+Milestone 4.3 is complete locally. Stop here; do not begin Milestone 4.4 or Milestone 5 without
+separate authorization.
+
 ## Frontend rollback flow complete locally
 
 - Starting SHA: `9b1b04b35625446e17537584ab10d88335447052`.

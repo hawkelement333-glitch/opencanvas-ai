@@ -2,6 +2,46 @@
 
 Last updated: 2026-07-24 (America/Chicago)
 
+## Milestone 4.3 final audit complete — local only
+
+- Audit baseline: `0dff4a7c44aad1a24de126b8869ae6cff42d6f9f`.
+- Branch: `milestone-4.3-reversible-writes-local`; upstream: none.
+- Protected state:
+  - `main`: `f04ace592e253c48172d129331ed8cd9bc4d4f4f`;
+  - `competition-demo-v1`: `b45b7763b65861f9dfb3be7edf9b5eb271950917`;
+  - sole Alembic head: `20260724_0014`.
+- Backend validation:
+  - complete reversible-effects module: `62 passed`;
+  - separate affected proposal/effect persistence, contracts, policy, API, ownership, persistence,
+    authentication, audit, and Trace group: `131 passed`;
+  - focused post-format regression: `65 passed`;
+  - SQLite rollback-authority migration cycle `0013 -> 0014 -> 0013 -> 0014`: `1 passed`;
+  - strict mypy: 59 source files passed;
+  - Python compilation/imports and SQLAlchemy mapper configuration: passed.
+- Frontend validation:
+  - focused rollback component/API client: `19 passed`;
+  - complete frontend unit/component suite: `48 passed` across 11 files;
+  - TypeScript, ESLint, rollback-touched Prettier checks, and production Next.js build: passed.
+- Browser smoke used the real local Next.js interface with a temporary deterministic API fixture.
+  No external service, paid provider, production data, or production credential was used. It
+  verified create-note removal, update-note prior-state restoration, accessible confirmation,
+  pending action suppression, authoritative snapshot refresh, exact-duplicate completion, safe
+  stale denial, no private rollback/grant/database/stack material, and zero console errors. The
+  temporary fixture and processes were removed after the audit.
+- Defects corrected:
+  - successful rollback now applies the refetched authoritative canvas snapshot to live canvas
+    state, so create removal and update restoration appear without losing the completion notice;
+  - six Milestone 4.3 backend files were normalized by the configured formatter;
+  - rollback migrations `0013`/`0014` import order and one unused proposal-test import were fixed.
+- Focused Milestone 4.3 Ruff format/lint, `git diff --check`, repository hygiene over 246 source
+  files, whitespace, diff-scoped secret-like-material, and prohibited-scope checks: passed.
+- Broader pre-existing static debt remains outside the Milestone 4.3 affected scope: six unchanged
+  backend/demo/migration utility files require Ruff formatting, 21 Ruff findings remain in earlier
+  migration/grounded-draft/test support, and five unchanged frontend files require Prettier. These
+  files were not modified because the final audit authorized only proven Milestone 4.3 defects.
+- No remote operation occurred. No Milestone 4.4 or Milestone 5 work was started.
+- Milestone 4.3 is complete locally. The next milestone requires separate authorization.
+
 ## Milestone 4.3 frontend rollback flow complete — local only
 
 - Starting SHA: `9b1b04b35625446e17537584ab10d88335447052`.

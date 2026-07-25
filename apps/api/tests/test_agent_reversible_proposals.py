@@ -11,7 +11,6 @@ from opencanvas_api.db.models import (
     ControlledAgentApproval,
     ControlledAgentAuditEvent,
     ControlledAgentCapabilityGrant,
-    ControlledAgentGrantRevocation,
 )
 from opencanvas_api.services.agents.contracts import RevocationRecord
 from opencanvas_api.services.agents.persistence import ControlledAgentRepository
