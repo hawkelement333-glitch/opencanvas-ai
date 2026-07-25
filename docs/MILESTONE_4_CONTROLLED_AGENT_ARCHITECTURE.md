@@ -1,6 +1,7 @@
 # Milestone 4 Controlled Agent Architecture
 
-Status: Milestone 4.0 planning contract. No active agent runtime is implemented by this document.
+Status: architecture contract retained; Milestones 4.1, 4.1B, 4.2, 4.3, and 4.4 completed and
+validated together on 2026-07-25. See `docs/MILESTONE_4_COMPLETION.md`.
 
 ## 1. Purpose and boundary
 
@@ -460,6 +461,17 @@ respecting future retention and privacy policy.
 9. Never auto-enable a functional agent because an existing visual node matches a role label.
 
 ## 18. Implementation phases
+
+Combined closure status:
+
+- [x] Milestone 4.1 — deny-by-default control-plane and authority contracts.
+- [x] Milestone 4.1B — append-only persistence and single-use approval boundary.
+- [x] Milestone 4.2 — user-started, selected-context, read-only grounded execution.
+- [x] Milestone 4.3 — explicitly approved reversible note writes and exact rollback.
+- [x] Milestone 4.4 — ownership, leases, recovery, bounded retries, cancellation, deadlines, and
+      stale-result suppression.
+
+All phase exit gates were revalidated as one system in `docs/MILESTONE_4_COMPLETION.md`.
 
 ### Milestone 4.1 — Control-plane contracts
 

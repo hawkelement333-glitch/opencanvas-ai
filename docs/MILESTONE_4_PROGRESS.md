@@ -2,6 +2,33 @@
 
 Last updated: 2026-07-25 (America/Chicago)
 
+## Combined Milestone 4 complete — local only
+
+- Combined-audit baseline: `0e9a2d23325f59a1044a32a79e38d6b7282de01c`.
+- Milestones 4.1, 4.1B, 4.2, 4.3, and 4.4 are closed as one validated system.
+- The deny-by-default authority, append-only evidence, selected-context read-only execution,
+  approved reversible note effects, exact rollback, ownership, leases, recovery, bounded retries,
+  cancellation, deadlines, and stale-result suppression boundaries passed together.
+- Required scenario coverage passed for exact citations, create/update idempotency, duplicate
+  delivery, create removal, exact update restoration, retry-once behavior, stale/cancelled/deadline
+  worker fencing, invalid authority denial, and transaction failure atomicity.
+- Complete backend: `412 passed, 1 skipped`; focused combined group:
+  `307 passed, 1 skipped`; security: `28 passed`.
+- Frontend: `48 passed`; Chromium: `2 passed, 2 PostgreSQL-gated skipped`; production build:
+  passed.
+- Full Prettier, Ruff format/lint, ESLint, TypeScript, mypy, compilation/imports, 51-table mapper
+  validation, `0015 -> 0014 -> 0015`, demo reset/check/smoke, 254-file hygiene/secret scanning,
+  whitespace, dependency-diff, and prohibited-scope checks passed.
+- Concrete fixes: stale browser smoke coverage was migrated from the superseded mutable AI flow to
+  the current UUID-bound read-only controlled prepare/run flow; previously recorded repository
+  style debt was corrected mechanically.
+- No Milestone 4 runtime or security defect was found.
+- Completion record: `docs/MILESTONE_4_COMPLETION.md`.
+- Branch remains local-only with no upstream. Protected `main`, `competition-demo-v1`, branches,
+  tags, and history remain unchanged. No remote operation occurred.
+- Next work is Milestone 5 architecture only when separately authorized. No Milestone 5
+  implementation has started.
+
 ## Milestone 4.4 bounded execution reliability complete — local only
 
 - Final-audit baseline: `8ab476d411f58639ea093662b5024d60c2e37752`.

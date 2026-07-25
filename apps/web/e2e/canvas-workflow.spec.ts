@@ -232,63 +232,19 @@ async function installMockAPI(page: Page): Promise<void> {
       return;
     }
 
-    if (path === "/canvases/canvas-e2e/ai" && method === "POST") {
-      const input = request.postDataJSON() as { instruction: string; selectedNodeIds: string[] };
-      nodeSequence += 1;
-      const timestamp = iso();
-      const responseNode: MockNode = {
-        id: `node-${nodeSequence}`,
-        canvasId: "canvas-e2e",
-        type: "ai_response",
-        title: "AI synthesis",
-        text: `Mock synthesis for: ${input.instruction}`,
-        position: { x: 720, y: 240 },
-        width: 360,
-        height: 260,
-        revision: 0,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      };
-      const generatedEdges = input.selectedNodeIds.map<MockEdge>((sourceNodeId) => {
-        edgeSequence += 1;
-        return {
-          id: `edge-${edgeSequence}`,
-          canvasId: "canvas-e2e",
-          sourceNodeId,
-          targetNodeId: responseNode.id,
-          kind: "generated_from",
-          label: null,
-          revision: 0,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        };
-      });
-      nodes.push(responseNode);
-      edges.push(...generatedEdges);
-      await json(route, {
-        requestId: "request-e2e",
-        responseId: "response-e2e",
-        traceId: "e2000000-0000-4000-8000-000000000003",
-        node: responseNode,
-        edges: generatedEdges,
-        mock: true,
-      });
-      return;
-    }
-
     await json(route, { detail: `Unhandled mock route: ${method} ${path}` }, 500);
   });
 }
 
-test("create, save, restore, connect, query, edit AI response, and restore again", async ({
-  page,
-}) => {
+test("create, save, restore, connect, and delete an edge", async ({ page }) => {
   await installMockAPI(page);
   await page.goto("/");
 
   await page.getByTestId("empty-create-canvas").click();
   await expect(
-    page.getByLabel("Canvas toolbar").getByText("My first canvas", { exact: true }),
+    page.getByRole("navigation", { name: "Canvases" }).getByRole("button", {
+      name: "Solar System · My first canvas",
+    }),
   ).toBeVisible();
 
   await page.getByTestId("add-note").click();
@@ -333,25 +289,4 @@ test("create, save, restore, connect, query, edit AI response, and restore again
   await page.keyboard.press("Delete");
   expect((await edgeDeleted).status()).toBe(204);
   await expect(page.locator(".react-flow__edge")).toHaveCount(0);
-
-  await page.getByTestId("canvas-node-node-1").locator(".canvas-node__header").click();
-  await page
-    .getByTestId("canvas-node-node-2")
-    .locator(".canvas-node__header")
-    .click({ modifiers: ["Shift"] });
-  await page
-    .getByTestId("assistant-input")
-    .fill("What product direction follows from these notes?");
-  await page.getByTestId("ask-assistant").click();
-
-  await expect(page.getByTestId("canvas-node-node-3")).toBeVisible();
-  await expect(page.getByText("Response added to your canvas")).toBeVisible();
-  await page.getByTestId("node-text-node-3").fill("Edited mock synthesis that should persist.");
-  await page.getByTestId("save-canvas").click();
-  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
-
-  await page.reload();
-  await expect(page.getByTestId("node-text-node-3")).toHaveValue(
-    "Edited mock synthesis that should persist.",
-  );
 });

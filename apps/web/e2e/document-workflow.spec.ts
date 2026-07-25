@@ -2,8 +2,16 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const timestamp = "2026-07-17T12:00:00Z";
 const workspaceId = "e2000000-0000-4000-8000-000000000002";
+const canvasId = "e2000000-0000-4000-8000-000000000010";
+const noteNodeId = "e2000000-0000-4000-8000-000000000011";
+const documentId = "e2000000-0000-4000-8000-000000000012";
+const documentNodeId = "e2000000-0000-4000-8000-000000000013";
+const duplicateDocumentNodeId = "e2000000-0000-4000-8000-000000000014";
+const chunkId = "e2000000-0000-4000-8000-000000000015";
+const firstExecutionId = "e2000000-0000-4000-8000-000000000016";
+const secondExecutionId = "e2000000-0000-4000-8000-000000000017";
 const canvas = {
-  id: "canvas-doc",
+  id: canvasId,
   workspaceId,
   name: "Grounded research",
   viewport: { x: 0, y: 0, zoom: 1 },
@@ -88,7 +96,7 @@ async function installDocumentAPI(page: Page): Promise<void> {
   let document: MockDocument | null = null;
   let nodes: MockNode[] = [
     {
-      id: "note-1",
+      id: noteNodeId,
       canvasId: canvas.id,
       type: "note",
       title: "Launch question",
@@ -102,8 +110,7 @@ async function installDocumentAPI(page: Page): Promise<void> {
     },
   ];
   let edges: MockEdge[] = [];
-  let duplicateSequence = 1;
-  let answerSequence = 0;
+  let preparedInstruction = "";
 
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -158,7 +165,7 @@ async function installDocumentAPI(page: Page): Promise<void> {
     }
     if (path === `/canvases/${canvas.id}/documents` && method === "POST") {
       document = {
-        id: "document-1",
+        id: documentId,
         canvasId: canvas.id,
         fileName: "verified-facts.pdf",
         fileType: "pdf",
@@ -173,7 +180,7 @@ async function installDocumentAPI(page: Page): Promise<void> {
         updatedAt: timestamp,
       };
       const node: MockNode = {
-        id: "document-node-1",
+        id: documentNodeId,
         canvasId: canvas.id,
         type: "document",
         title: document.fileName,
@@ -190,7 +197,7 @@ async function installDocumentAPI(page: Page): Promise<void> {
       await json(route, { document, node }, 201);
       return;
     }
-    if (path === "/documents/document-1" && method === "GET" && document) {
+    if (path === `/documents/${documentId}` && method === "GET" && document) {
       document = {
         ...document,
         pageCount: 2,
@@ -204,19 +211,19 @@ async function installDocumentAPI(page: Page): Promise<void> {
       await json(route, document);
       return;
     }
-    if (path === "/documents/document-1/text" && method === "GET") {
+    if (path === `/documents/${documentId}/text` && method === "GET") {
       await json(route, {
-        documentId: "document-1",
+        documentId,
         fileName: "verified-facts.pdf",
         text: "Product brief\nThe verified launch date is October 14, 2026.",
         sections: [{ pageNumber: 2, heading: "Product brief", startOffset: 0, endOffset: 62 }],
       });
       return;
     }
-    if (path === "/documents/document-1/chunks/chunk-1" && method === "GET") {
+    if (path === `/documents/${documentId}/chunks/${chunkId}` && method === "GET") {
       await json(route, {
-        documentId: "document-1",
-        chunkId: "chunk-1",
+        documentId,
+        chunkId,
         documentTitle: "verified-facts.pdf",
         pageNumber: 2,
         heading: "Product brief",
@@ -227,7 +234,7 @@ async function installDocumentAPI(page: Page): Promise<void> {
       });
       return;
     }
-    const nodeMatch = path.match(/^\/canvases\/canvas-doc\/nodes\/([^/]+)$/);
+    const nodeMatch = path.match(new RegExp(`^/canvases/${canvasId}/nodes/([^/]+)$`));
     if (nodeMatch?.[1] && method === "PATCH") {
       const input = request.postDataJSON() as Partial<MockNode> & { revision: number };
       const current = nodes.find((node) => node.id === nodeMatch[1]);
@@ -255,14 +262,13 @@ async function installDocumentAPI(page: Page): Promise<void> {
       return;
     }
     const duplicateMatch = path.match(
-      /^\/canvases\/canvas-doc\/nodes\/(document-node-[^/]+)\/duplicate$/,
+      new RegExp(`^/canvases/${canvasId}/nodes/([^/]+)/duplicate$`),
     );
     if (duplicateMatch && method === "POST" && document) {
-      duplicateSequence += 1;
       const input = request.postDataJSON() as { position: { x: number; y: number } };
       const duplicate: MockNode = {
         ...(nodes.find((node) => node.id === duplicateMatch[1]) as MockNode),
-        id: `document-node-${duplicateSequence}`,
+        id: duplicateDocumentNodeId,
         position: input.position,
         document,
       };
@@ -270,78 +276,57 @@ async function installDocumentAPI(page: Page): Promise<void> {
       await json(route, duplicate, 201);
       return;
     }
-    if (path === `/canvases/${canvas.id}/ai` && method === "POST") {
-      answerSequence += 1;
-      const input = request.postDataJSON() as { instruction: string; selectedNodeIds: string[] };
-      const insufficient = input.instruction.toLowerCase().includes("annual revenue");
-      const citations: MockCitation[] = insufficient
-        ? []
-        : [
-            {
-              id: "citation-1",
-              sourceId: "S1",
-              documentId: "document-1",
-              documentTitle: "verified-facts.pdf",
-              chunkId: "chunk-1",
-              chunkIndex: 0,
-              startOffset: 0,
-              endOffset: 48,
-              pageNumber: 2,
-              heading: "Product brief",
-              excerpt: "The verified launch date is October 14, 2026.",
-              claim: "The launch date is October 14, 2026.",
-              ordinal: 1,
-            },
-          ];
-      const responseNode: MockNode = {
-        id: `answer-${answerSequence}`,
-        canvasId: canvas.id,
-        type: "ai_response",
-        title: insufficient ? "Insufficient evidence" : "Grounded answer",
-        text: insufficient
-          ? "The selected sources do not contain sufficient evidence about annual revenue."
-          : "The launch date is October 14, 2026. [1]",
-        position: { x: 820, y: 180 + answerSequence * 80 },
-        width: 380,
-        height: 280,
-        revision: 0,
-        citations,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      };
-      const generatedEdges: MockEdge[] = insufficient
-        ? []
-        : [
-            {
-              id: "source-edge-1",
-              canvasId: canvas.id,
-              sourceNodeId: responseNode.id,
-              targetNodeId: "document-node-1",
-              kind: "cites",
-              label: "Source",
-              revision: 0,
-              createdAt: timestamp,
-              updatedAt: timestamp,
-            },
-          ];
-      nodes.push(responseNode);
-      edges.push(...generatedEdges);
+    if (
+      path === `/workspaces/${workspaceId}/agent-executions/drafts/prepare` &&
+      method === "POST"
+    ) {
+      const input = request.postDataJSON() as { instruction: string };
+      preparedInstruction = input.instruction;
       await json(route, {
-        requestId: `request-${answerSequence}`,
-        responseId: `response-${answerSequence}`,
-        traceId: "e2000000-0000-4000-8000-000000000004",
-        node: responseNode,
-        edges: generatedEdges,
-        mock: true,
-        grounded: !insufficient,
-        insufficientEvidence: insufficient,
-        citations,
+        executionId: preparedInstruction.toLowerCase().includes("annual revenue")
+          ? secondExecutionId
+          : firstExecutionId,
+        status: "ready",
+        duplicate: false,
       });
       return;
     }
-    if (path === "/documents/document-1" && method === "DELETE") {
+    const runMatch = path.match(
+      new RegExp(`^/workspaces/${workspaceId}/agent-executions/([^/]+)/run$`),
+    );
+    if (runMatch?.[1] && method === "POST") {
+      const insufficient = preparedInstruction.toLowerCase().includes("annual revenue");
+      await json(route, {
+        executionId: runMatch[1],
+        responseId: insufficient
+          ? "e2000000-0000-4000-8000-000000000020"
+          : "e2000000-0000-4000-8000-000000000018",
+        traceId: insufficient
+          ? "e2000000-0000-4000-8000-000000000021"
+          : "e2000000-0000-4000-8000-000000000019",
+        text: insufficient
+          ? "The selected sources do not contain sufficient evidence about annual revenue."
+          : "The launch date is October 14, 2026. [1]",
+        insufficientEvidence: insufficient,
+        citations: insufficient
+          ? []
+          : [
+              {
+                sourceId: "S1",
+                documentId,
+                documentVersion: 1,
+                chunkId,
+                claim: "The launch date is October 14, 2026.",
+                quote: "The verified launch date is October 14, 2026.",
+              },
+            ],
+        duplicate: false,
+      });
+      return;
+    }
+    if (path === `/documents/${documentId}` && method === "DELETE") {
       const removed = new Set(
-        nodes.filter((node) => node.document?.id === "document-1").map((node) => node.id),
+        nodes.filter((node) => node.document?.id === documentId).map((node) => node.id),
       );
       nodes = nodes.filter((node) => !removed.has(node.id));
       edges = edges.filter(
@@ -362,7 +347,7 @@ async function installDocumentAPI(page: Page): Promise<void> {
   });
 }
 
-test("upload, process, select, ground, cite, reject insufficient context, and delete", async ({
+test("selected context produces a read-only grounded draft with exact citations", async ({
   page,
 }) => {
   await installDocumentAPI(page);
@@ -373,48 +358,68 @@ test("upload, process, select, ground, cite, reject insufficient context, and de
     mimeType: "application/pdf",
     buffer: Buffer.from("mock PDF bytes"),
   });
-  await expect(page.getByTestId("canvas-node-document-node-1")).toBeVisible();
+  await expect(page.getByTestId(`canvas-node-${documentNodeId}`)).toBeVisible();
   await expect(page.getByText("Extracting text")).toBeVisible();
   await expect(page.getByText("Ready", { exact: true })).toBeVisible({ timeout: 5_000 });
 
-  await page.getByTestId("preview-document-document-node-1").click();
+  await page.getByTestId(`preview-document-${documentNodeId}`).click();
   await expect(page.getByTestId("document-preview")).toContainText(
     "The verified launch date is October 14, 2026.",
   );
   await page.getByLabel("Close document preview").click();
 
-  await page.getByTestId("duplicate-node-document-node-1").click();
-  await expect(page.getByTestId("canvas-node-document-node-2")).toBeVisible();
-  await expect(page.getByTestId("canvas-node-document-node-2")).toContainText("verified-facts.pdf");
+  await page.getByTestId(`duplicate-node-${documentNodeId}`).click();
+  await expect(page.getByTestId(`canvas-node-${duplicateDocumentNodeId}`)).toBeVisible();
+  await expect(page.getByTestId(`canvas-node-${duplicateDocumentNodeId}`)).toContainText(
+    "verified-facts.pdf",
+  );
 
-  await page.getByTestId("canvas-node-note-1").locator(".canvas-node__header").click();
+  await page.getByTestId(`canvas-node-${noteNodeId}`).locator(".canvas-node__header").click();
   await page
-    .getByTestId("canvas-node-document-node-1")
+    .getByTestId(`canvas-node-${documentNodeId}`)
     .locator(".canvas-node__header")
     .click({ modifiers: ["Shift"] });
   await expect(page.getByTestId("selected-node-list").getByRole("listitem")).toHaveCount(2);
 
-  await page.getByTestId("assistant-input").fill("What is the verified launch date?");
-  await page.getByTestId("ask-assistant").click();
-  await expect(page.getByText("Grounded response added with citations")).toBeVisible();
-  await expect(page.getByTestId("canvas-node-answer-1")).toContainText("October 14, 2026");
-  await page.getByTestId("citation-citation-1").click();
+  const groundedPrepare = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/agent-executions/drafts/prepare") && request.method() === "POST",
+  );
+  await page.getByTestId("controlled-draft-input").fill("What is the verified launch date?");
+  await page.getByTestId("start-controlled-draft").click();
+  const groundedRequest = (await groundedPrepare).postDataJSON() as {
+    canvasId: string;
+    instruction: string;
+    selectedNodeIds: string[];
+  };
+  expect(groundedRequest).toMatchObject({
+    canvasId,
+    instruction: "What is the verified launch date?",
+    selectedNodeIds: [noteNodeId, documentNodeId],
+  });
+  await expect(page.getByTestId("controlled-draft-result")).toContainText(
+    "The launch date is October 14, 2026. [1]",
+  );
+  await expect(page.getByTestId("controlled-draft-result").getByRole("listitem")).toHaveCount(1);
+  await page.getByRole("button", { name: "Citation [1]" }).click();
   await expect(page.getByTestId("source-passage")).toContainText(
     "The verified launch date is October 14, 2026.",
   );
   await expect(page.getByTestId("document-preview")).toContainText("Page 2");
   await page.getByLabel("Close document preview").click();
+  await expect(page.locator(".react-flow__node")).toHaveCount(3);
 
-  await page.getByTestId("canvas-node-document-node-1").locator(".canvas-node__header").click();
-  await page.getByTestId("assistant-input").fill("What is the annual revenue?");
-  await page.getByTestId("ask-assistant").click();
-  await expect(page.getByText(/lack sufficient evidence/i)).toBeVisible();
-  await expect(page.getByTestId("canvas-node-answer-2")).toContainText(
+  await page.getByTestId(`canvas-node-${documentNodeId}`).locator(".canvas-node__header").click();
+  await page.getByTestId("controlled-draft-input").fill("What is the annual revenue?");
+  await page.getByTestId("start-controlled-draft").click();
+  await expect(page.getByTestId("controlled-draft-result")).toContainText(
     "do not contain sufficient evidence",
   );
-  await expect(page.getByTestId("canvas-node-answer-2")).toContainText("No source citations");
+  await expect(page.getByText("Insufficient evidence in the selected context")).toBeVisible();
+  await expect(page.getByRole("list", { name: "Validated citations" })).toHaveCount(0);
+  await expect(page.locator(".react-flow__node")).toHaveCount(3);
 
-  await page.getByTestId("delete-document-document-node-1").click();
-  await expect(page.getByTestId("canvas-node-document-node-1")).toHaveCount(0);
-  await expect(page.getByTestId("canvas-node-document-node-2")).toHaveCount(0);
+  await page.getByTestId(`delete-document-${documentNodeId}`).click();
+  await expect(page.getByTestId(`canvas-node-${documentNodeId}`)).toHaveCount(0);
+  await expect(page.getByTestId(`canvas-node-${duplicateDocumentNodeId}`)).toHaveCount(0);
 });

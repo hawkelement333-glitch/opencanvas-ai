@@ -258,7 +258,18 @@ database-backed rather than broker-backed job queue, non-streaming AI responses,
 inference/conflict classification, and no complete end-user Trace explorer. See the complete
 [known-limitations register](docs/KNOWN_LIMITATIONS.md).
 
-Recommended next milestone: canonical ingestion adapters, then semantic memory, hybrid search, and workspace-wide knowledge discovery while preserving source identity and Trace provenance.
+Milestone 4 controlled agents are complete locally. The future roadmap is recorded, not
+implemented:
+
+5. Living Knowledge Graph and AI Workflows
+6. Multi-Workspace Collaboration
+   - Nested and Federated Mobius Workspaces
+7. Production Hardening
+8. Public Portfolio and Product Release
+9. SolarPlexus Agent Ecosystem
+
+The next authorized work is Milestone 5 architecture. See
+[docs/MILESTONE_4_COMPLETION.md](docs/MILESTONE_4_COMPLETION.md).
 
 ## Competition and release status
 

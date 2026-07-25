@@ -9,10 +9,9 @@ from pathlib import Path
 
 import asyncpg
 import pytest
+from alembic import command
 from alembic.config import Config
 from sqlalchemy import URL, make_url
-
-from alembic import command
 
 TEST_URL_ENV = "OPENCANVAS_POSTGRES_TEST_URL"
 _SAFE_DATABASE = re.compile(r"(^|[_-])(test|testing|ci)([_-]|$)", re.IGNORECASE)
