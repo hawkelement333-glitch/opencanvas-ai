@@ -136,12 +136,17 @@ complete.
 
 ## Validation record
 
-Focused event/API/migration/graph validation passes, including deterministic
+The affected backend validation passed 304 tests. Its post-commit focused
+event/API/migration/graph subset passed 29 tests, including deterministic
 idempotency, atomicity, append-only behavior, stale fencing, bounded retry,
 terminal failure, projection replay, scope-safe reads, SQLite migration
-triggers/cycle, and PostgreSQL offline DDL. The final commit records the exact
-expanded validation totals, repository hygiene, protected refs, clean tree,
-no upstream, and confirmation that no remote operation occurred.
+triggers/cycle, and PostgreSQL offline DDL. Ruff passed; strict mypy passed all
+66 source files; compilation, imports, mapper configuration, formatting,
+whitespace, secret-pattern, prohibited-scope, migration-head/cycle, repository
+hygiene, and Git object-integrity checks passed.
+
+The final audit confirmed a clean tree, no upstream, unchanged protected refs,
+and no remote operation.
 
 Next authorized checkpoint:
 `MILESTONE 5.3 STARTED LOCALLY — GRAPH-AWARE RETRIEVAL`
