@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from opencanvas_api.db.models import (
+    BoundedAgentInvocation,
     CanonicalGraphRelationship,
     Canvas,
     CollaborationComment,
@@ -24,6 +25,8 @@ from opencanvas_api.db.models import (
     CollaborationResource,
     CollaborationResourceShare,
     ControlledAgentExecution,
+    ControlledWorkflowExecution,
+    ControlledWorkflowStepExecution,
     DomainActivityEntry,
     DomainEventDeliveryAttempt,
     DomainEventOutbox,
@@ -1037,6 +1040,72 @@ class DomainEventService:
                 )
                 if subject is None:
                     raise DomainEventNotFoundError()
+        elif (
+            spec.subject_kind
+            in {
+                "workflow_execution",
+                "workflow_step",
+                "agent_invocation",
+            }
+            and command.actor_user_id != command.user_id
+        ):
+            latest_membership_transition = (
+                select(func.max(WorkspaceMembershipTransition.sequence))
+                .where(
+                    WorkspaceMembershipTransition.membership_id == WorkspaceMembership.membership_id
+                )
+                .correlate(WorkspaceMembership)
+                .scalar_subquery()
+            )
+            active_actor = await self.session.scalar(
+                select(WorkspaceMembership.user_id)
+                .join(
+                    WorkspaceMembershipTransition,
+                    WorkspaceMembershipTransition.membership_id
+                    == WorkspaceMembership.membership_id,
+                )
+                .where(
+                    WorkspaceMembership.workspace_id == command.workspace_id,
+                    WorkspaceMembership.user_id == command.actor_user_id,
+                    WorkspaceMembershipTransition.sequence == latest_membership_transition,
+                    WorkspaceMembershipTransition.current_state == "active",
+                )
+                .limit(1)
+            )
+            if active_actor is None:
+                raise DomainEventNotFoundError()
+            if spec.subject_kind == "workflow_execution":
+                subject = await self.session.scalar(
+                    select(ControlledWorkflowExecution.execution_id).where(
+                        ControlledWorkflowExecution.execution_id == command.subject_id,
+                        ControlledWorkflowExecution.user_id == command.actor_user_id,
+                        ControlledWorkflowExecution.workspace_id == command.workspace_id,
+                    )
+                )
+            elif spec.subject_kind == "workflow_step":
+                subject = await self.session.scalar(
+                    select(ControlledWorkflowStepExecution.step_execution_id)
+                    .join(
+                        ControlledWorkflowExecution,
+                        ControlledWorkflowExecution.execution_id
+                        == ControlledWorkflowStepExecution.workflow_execution_id,
+                    )
+                    .where(
+                        ControlledWorkflowStepExecution.step_execution_id == command.subject_id,
+                        ControlledWorkflowExecution.user_id == command.actor_user_id,
+                        ControlledWorkflowExecution.workspace_id == command.workspace_id,
+                    )
+                )
+            else:
+                subject = await self.session.scalar(
+                    select(BoundedAgentInvocation.invocation_id).where(
+                        BoundedAgentInvocation.invocation_id == command.subject_id,
+                        BoundedAgentInvocation.user_id == command.actor_user_id,
+                        BoundedAgentInvocation.workspace_id == command.workspace_id,
+                    )
+                )
+            if subject is None:
+                raise DomainEventNotFoundError()
         elif command.actor_user_id != command.user_id:
             raise DomainEventNotFoundError()
         if command.canvas_id is not None:

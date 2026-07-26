@@ -227,3 +227,12 @@ SHA recorded in its final handoff, with:
 - protected references unchanged; and
 - the semantic identity, backfill, authority, evidence, revocation, and
   exclusion rules in this amendment treated as authoritative.
+
+## Implementation completion cross-reference
+
+The implementation checkpoint completed the allocated migration and
+governance boundary. See
+[`MILESTONE_6_5_SHARED_WORKFLOW_AGENT_GOVERNANCE_HANDOFF.md`](MILESTONE_6_5_SHARED_WORKFLOW_AGENT_GOVERNANCE_HANDOFF.md)
+for the as-built schema, deterministic fail-closed backfill, shared visibility
+and invocation rules, evidence integration, validation results, and 6.6
+restart boundary. This amendment remains the historical design baseline.

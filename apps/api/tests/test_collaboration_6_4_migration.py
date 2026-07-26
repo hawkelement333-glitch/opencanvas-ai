@@ -22,7 +22,7 @@ def _config(tmp_path: Path) -> Config:
 
 def test_milestone_6_4_is_the_only_direct_head(tmp_path: Path) -> None:
     scripts = ScriptDirectory.from_config(_config(tmp_path))
-    assert scripts.get_heads() == ["20260725_0024"]
+    assert scripts.get_heads() == ["20260725_0025"]
     assert scripts.get_revision("20260725_0024").down_revision == "20260725_0023"
     assert scripts.get_revision("20260725_0023").down_revision == "20260725_0022"
 
@@ -62,7 +62,7 @@ def test_milestone_6_4_schema_is_append_only_and_cycles(tmp_path: Path) -> None:
         domain_event_ddl = connection.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'domain_events'"
         ).fetchone()[0]
-    assert revision == ("20260725_0024",)
+    assert revision == ("20260725_0025",)
     assert expected_tables <= tables
     assert expected_guards <= triggers
     assert "comment.created" in domain_event_ddl

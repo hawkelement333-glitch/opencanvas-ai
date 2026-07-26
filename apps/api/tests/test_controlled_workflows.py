@@ -33,6 +33,7 @@ from opencanvas_api.db.models import (
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.agents.contracts import ApprovalDecision
 from opencanvas_api.services.ai import AIProviderError, MockAIProvider
+from opencanvas_api.services.collaboration import MembershipService
 from opencanvas_api.services.documents.embeddings import MockEmbeddingProvider
 from opencanvas_api.services.workflows import (
     MAX_DEPENDENCIES_PER_STEP,
@@ -1077,6 +1078,13 @@ async def test_competing_identical_workflow_starts_converge_on_one_execution(
                 owner_id=SYSTEM_USER_ID,
                 name="Workflow contention",
             )
+        )
+        await session.flush()
+        workspace = await session.get(Workspace, SYSTEM_WORKSPACE_ID)
+        assert workspace is not None
+        await MembershipService(session).bootstrap_owner_membership(
+            workspace=workspace,
+            actor_user_id=SYSTEM_USER_ID,
         )
         await session.commit()
     canvas_id, objects, version_id = await _activate(

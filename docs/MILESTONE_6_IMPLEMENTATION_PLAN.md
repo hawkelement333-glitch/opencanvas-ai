@@ -4,9 +4,9 @@ Date: 2026-07-25
 
 Architecture baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: checkpoints 6.1–6.4 complete locally; checkpoint 6.5 not started
+Status: checkpoints 6.1–6.5 complete locally; checkpoint 6.6 not started
 
-Next checkpoint: 6.5 — Shared Workflow and Agent Governance
+Next checkpoint: 6.6 — Multi-Workspace Collaboration Interface
 
 ## Governing rules
 
@@ -37,9 +37,9 @@ Every checkpoint must:
 The repository retains one Alembic head and every migration has one direct
 parent. Current checkpoint allocation is 6.1 -> `20260725_0021` (complete),
 6.2 -> `20260725_0022` (complete), 6.3 -> `20260725_0023` (complete), and
-6.4 -> `20260725_0024` (complete). Milestone 6.5 exclusively owns planned
-revision `20260725_0025`, a direct child of `20260725_0024`; it is not
-created. Checkpoints 6.6 and 6.7 have no migration assigned.
+6.4 -> `20260725_0024` (complete), and 6.5 -> `20260725_0025` (complete).
+Revision `0025` is a direct child of `0024`. Checkpoints 6.6 and 6.7 have no
+migration assigned.
 
 ## Fixed architecture decisions
 
@@ -371,6 +371,9 @@ feed, frontend component, or 6.5 governance behavior was added.
 
 ## 6.5 — Shared Workflow and Agent Governance
 
+Status: complete locally. See
+[`MILESTONE_6_5_SHARED_WORKFLOW_AGENT_GOVERNANCE_HANDOFF.md`](MILESTONE_6_5_SHARED_WORKFLOW_AGENT_GOVERNANCE_HANDOFF.md).
+
 ### Scope
 
 - shared workflow/agent visibility and immutable-version inspection;
@@ -390,6 +393,12 @@ Trace, event, or activity services.
 
 Create and complete migration `20260725_0025` wholly within 6.5. Its direct
 parent is immutable revision `20260725_0024`.
+
+Implemented: `20260725_0025` is the sole head. It stores exact definition
+owner, invoking membership, and authority-snapshot linkage on workflow
+executions and agent invocations; reinforces immutable-version parent/owner
+scope; and fail-closed backfills only rows with one historically active exact
+membership and reconstructable ownership evidence.
 
 The final design must:
 

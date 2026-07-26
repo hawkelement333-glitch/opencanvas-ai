@@ -778,6 +778,7 @@ async def _agent_out(session: AsyncSession, record: AgentRecord) -> AgentOut:
             session,
             item,
             record.version_states[item.version_id],
+            include_private_governance=not record.shared_inspection,
         )
         for item in record.versions
     ]
@@ -847,24 +848,34 @@ async def _version_out(
     session: AsyncSession,
     row: BoundedAgentVersion,
     lifecycle: str,
+    *,
+    include_private_governance: bool = True,
 ) -> AgentVersionOut:
     bindings = (
-        await session.scalars(
-            select(BoundedAgentWorkflowBinding)
-            .where(BoundedAgentWorkflowBinding.agent_version_id == row.version_id)
-            .order_by(BoundedAgentWorkflowBinding.ordinal)
-        )
-    ).all()
-    requirements = (
-        await session.scalars(
-            select(BoundedAgentCapabilityRequirement)
-            .where(BoundedAgentCapabilityRequirement.agent_version_id == row.version_id)
-            .order_by(
-                BoundedAgentCapabilityRequirement.capability,
-                BoundedAgentCapabilityRequirement.resource_kind,
+        (
+            await session.scalars(
+                select(BoundedAgentWorkflowBinding)
+                .where(BoundedAgentWorkflowBinding.agent_version_id == row.version_id)
+                .order_by(BoundedAgentWorkflowBinding.ordinal)
             )
-        )
-    ).all()
+        ).all()
+        if include_private_governance
+        else ()
+    )
+    requirements = (
+        (
+            await session.scalars(
+                select(BoundedAgentCapabilityRequirement)
+                .where(BoundedAgentCapabilityRequirement.agent_version_id == row.version_id)
+                .order_by(
+                    BoundedAgentCapabilityRequirement.capability,
+                    BoundedAgentCapabilityRequirement.resource_kind,
+                )
+            )
+        ).all()
+        if include_private_governance
+        else ()
+    )
     return AgentVersionOut(
         version_id=row.version_id,
         version_number=row.version_number,

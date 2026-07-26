@@ -33,6 +33,7 @@ from opencanvas_api.db.models import (
     BoundedCommunicationRevision,
     BoundedCommunicationRevisionDecision,
     Canvas,
+    CollaborationAuditEvent,
     ControlledWorkflowExecution,
     ControlledWorkflowStep,
     ControlledWorkflowVersion,
@@ -40,7 +41,10 @@ from opencanvas_api.db.models import (
     Workspace,
 )
 from opencanvas_api.services.agents.contracts import Capability, ResourceKind, RiskClass
+from opencanvas_api.services.collaboration import CollaborationNotFoundError
+from opencanvas_api.services.collaboration_resources import ShareResourceKind
 from opencanvas_api.services.domain_events import CreateDomainEvent, DomainEventService
+from opencanvas_api.services.shared_governance import SharedInvocationGovernanceService
 from opencanvas_api.services.trace import CompleteTraceInput, StartTraceInput, TraceService
 from opencanvas_api.services.workflows import (
     ControlledWorkflowService,
@@ -253,6 +257,7 @@ class AgentRecord:
     evaluations: tuple[BoundedAgentEvaluation, ...]
     proposals: tuple[BoundedAgentProposal, ...]
     duplicate: bool = False
+    shared_inspection: bool = False
 
 
 class AgentStudioError(RuntimeError):
@@ -429,6 +434,17 @@ class BoundedAgentStudioService:
                 )
                 self.session.add(identity)
                 await self.session.flush()
+                await SharedInvocationGovernanceService(
+                    self.session
+                ).ensure_registered_owner_resource(
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    canvas_id=canvas_id,
+                    resource_kind=ShareResourceKind.AGENT,
+                    resource_id=agent_id,
+                    trace_id=trace_id,
+                    created_at=self.now,
+                )
                 await self._agent_state(identity, AgentLifecycle.DRAFT, trace_id=trace_id)
                 created_version = await self._persist_version(
                     identity,
@@ -1003,14 +1019,19 @@ class BoundedAgentStudioService:
         seed_object_ids: tuple[uuid.UUID, ...],
         idempotency_key: str,
     ) -> tuple[BoundedAgentInvocation, WorkflowExecutionRecord]:
-        await self._authorize_operation(
-            "agent.invoke",
-            user_id,
-            workspace_id,
-            canvas_id,
-        )
         self._idempotency(idempotency_key)
-        identity = await self._owned_agent(user_id, workspace_id, canvas_id, agent_id)
+        identity = await self._scoped_agent(workspace_id, canvas_id, agent_id)
+        try:
+            invocation_authority = await SharedInvocationGovernanceService(
+                self.session
+            ).require_invocation(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                resource_kind=ShareResourceKind.AGENT,
+                resource_id=agent_id,
+            )
+        except CollaborationNotFoundError as exc:
+            raise AgentStudioAuthorityError() from exc
         if await self._agent_lifecycle(agent_id) is not AgentLifecycle.ACTIVE:
             raise AgentStudioAuthorityError()
         version = await self._active_version(agent_id)
@@ -1096,13 +1117,21 @@ class BoundedAgentStudioService:
             f"mobius:agent-invocation:{user_id}:{workspace_id}:{canvas_id}:{idempotency_key}",
         )
         trace_id = uuid.uuid5(invocation_id, "trace")
+        agent_snapshot = await SharedInvocationGovernanceService(self.session).capture(
+            invocation_authority,
+            trace_id=trace_id,
+            workflow_execution_id=workflow.execution.execution_id,
+        )
         row = BoundedAgentInvocation(
             invocation_id=invocation_id,
             agent_id=agent_id,
             agent_version_id=version.version_id,
             workflow_version_id=workflow_version_id,
             workflow_execution_id=workflow.execution.execution_id,
+            definition_owner_user_id=identity.user_id,
             user_id=user_id,
+            invoking_membership_id=invocation_authority.membership_id,
+            authority_snapshot_id=agent_snapshot.snapshot_id,
             workspace_id=workspace_id,
             canvas_id=canvas_id,
             idempotency_key=idempotency_key,
@@ -1137,6 +1166,30 @@ class BoundedAgentStudioService:
                     )
                 )
                 self.session.add(row)
+                invocation_audit = CollaborationAuditEvent(
+                    audit_event_id=uuid.uuid5(invocation_id, "collaboration-audit"),
+                    workspace_id=workspace_id,
+                    actor_user_id=user_id,
+                    subject_kind="collaboration_resource",
+                    subject_id=agent_id,
+                    action="agent.invoke",
+                    outcome="succeeded",
+                    reason_code="authorized_invocation",
+                    metadata_digest=_digest(
+                        {
+                            "agentId": str(agent_id),
+                            "agentVersionId": str(version.version_id),
+                            "definitionOwnerUserId": str(identity.user_id),
+                            "invokingUserId": str(user_id),
+                            "invokingMembershipId": str(invocation_authority.membership_id),
+                            "authoritySnapshotId": str(agent_snapshot.snapshot_id),
+                            "workflowExecutionId": str(workflow.execution.execution_id),
+                        }
+                    ),
+                    trace_id=trace_id,
+                    recorded_at=self.now,
+                )
+                self.session.add(invocation_audit)
                 await self.session.flush()
                 await self._event(
                     "agent.invocation.started",
@@ -1144,6 +1197,8 @@ class BoundedAgentStudioService:
                     identity,
                     trace_id,
                     related_id=workflow.execution.execution_id,
+                    actor_user_id=user_id,
+                    audit_event_id=invocation_audit.audit_event_id,
                     payload={
                         "agentId": str(agent_id),
                         "agentVersionId": str(version.version_id),
@@ -1908,7 +1963,6 @@ class BoundedAgentStudioService:
         limit: int = 50,
         offset: int = 0,
     ) -> list[AgentRecord]:
-        await self._scope(user_id, workspace_id, canvas_id)
         if limit < 1 or limit > 100 or offset < 0 or offset > 10_000:
             raise AgentStudioValidationError()
         rows = list(
@@ -1916,7 +1970,6 @@ class BoundedAgentStudioService:
                 await self.session.scalars(
                     select(BoundedAgentIdentity)
                     .where(
-                        BoundedAgentIdentity.user_id == user_id,
                         BoundedAgentIdentity.workspace_id == workspace_id,
                         BoundedAgentIdentity.canvas_id == canvas_id,
                     )
@@ -1924,20 +1977,23 @@ class BoundedAgentStudioService:
                         BoundedAgentIdentity.created_at.desc(),
                         BoundedAgentIdentity.agent_id,
                     )
-                    .offset(offset)
-                    .limit(limit)
                 )
             ).all()
         )
-        records = [
-            await self.get_agent(
-                user_id=user_id,
-                workspace_id=workspace_id,
-                canvas_id=canvas_id,
-                agent_id=row.agent_id,
-            )
-            for row in rows
-        ]
+        records: list[AgentRecord] = []
+        for row in rows:
+            try:
+                records.append(
+                    await self.get_agent(
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        canvas_id=canvas_id,
+                        agent_id=row.agent_id,
+                    )
+                )
+            except AgentStudioNotFoundError:
+                continue
+        records = records[offset : offset + limit]
         return (
             records
             if lifecycle is None
@@ -1953,7 +2009,24 @@ class BoundedAgentStudioService:
         agent_id: uuid.UUID,
         duplicate: bool = False,
     ) -> AgentRecord:
-        identity = await self._owned_agent(user_id, workspace_id, canvas_id, agent_id)
+        identity = await self._scoped_agent(workspace_id, canvas_id, agent_id)
+        try:
+            await SharedInvocationGovernanceService(self.session).require_visibility(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                resource_kind=ShareResourceKind.AGENT,
+                resource_id=agent_id,
+            )
+        except CollaborationNotFoundError as exc:
+            current_workspace_owner = await self.session.scalar(
+                select(Workspace.owner_id).where(
+                    Workspace.id == workspace_id,
+                    Workspace.owner_id == user_id,
+                )
+            )
+            if identity.user_id != user_id or current_workspace_owner is None:
+                raise AgentStudioNotFoundError() from exc
+        shared_inspection = identity.user_id != user_id
         versions = tuple(
             (
                 await self.session.scalars(
@@ -2013,7 +2086,10 @@ class BoundedAgentStudioService:
             (
                 await self.session.scalars(
                     select(BoundedAgentInvocation)
-                    .where(BoundedAgentInvocation.agent_id == agent_id)
+                    .where(
+                        BoundedAgentInvocation.agent_id == agent_id,
+                        BoundedAgentInvocation.user_id == user_id,
+                    )
                     .order_by(BoundedAgentInvocation.created_at.desc())
                 )
             ).all()
@@ -2046,13 +2122,14 @@ class BoundedAgentStudioService:
             identity_state=(await self._agent_lifecycle(agent_id)).value,
             versions=versions,
             version_states=states,
-            validations=validations,
-            activation_requests=requests,
-            activation_decisions=decisions,
+            validations=() if shared_inspection else validations,
+            activation_requests=() if shared_inspection else requests,
+            activation_decisions=() if shared_inspection else decisions,
             invocations=invocations,
             evaluations=evaluations,
-            proposals=proposals,
+            proposals=() if shared_inspection else proposals,
             duplicate=duplicate,
+            shared_inspection=shared_inspection,
         )
 
     async def _persist_version(
@@ -2290,6 +2367,8 @@ class BoundedAgentStudioService:
         trace_id: uuid.UUID,
         *,
         related_id: uuid.UUID | None = None,
+        actor_user_id: uuid.UUID | None = None,
+        audit_event_id: uuid.UUID | None = None,
         payload: dict[str, object],
     ) -> None:
         await self.events.record(
@@ -2299,12 +2378,13 @@ class BoundedAgentStudioService:
                 workspace_id=identity.workspace_id,
                 canvas_id=identity.canvas_id,
                 subject_id=subject_id,
-                actor_user_id=identity.user_id,
+                actor_user_id=actor_user_id or identity.user_id,
                 source_identity=f"{event_type}:{subject_id}:{related_id or 'none'}",
                 trace_id=trace_id,
                 payload=cast(dict[str, JsonValue], _json_object(payload)),
                 origin_type="authenticated_user",
                 related_id=related_id,
+                audit_event_id=audit_event_id,
             )
         )
 
@@ -2319,6 +2399,23 @@ class BoundedAgentStudioService:
             select(BoundedAgentIdentity).where(
                 BoundedAgentIdentity.agent_id == agent_id,
                 BoundedAgentIdentity.user_id == user_id,
+                BoundedAgentIdentity.workspace_id == workspace_id,
+                BoundedAgentIdentity.canvas_id == canvas_id,
+            )
+        )
+        if row is None:
+            raise AgentStudioNotFoundError()
+        return row
+
+    async def _scoped_agent(
+        self,
+        workspace_id: uuid.UUID,
+        canvas_id: uuid.UUID,
+        agent_id: uuid.UUID,
+    ) -> BoundedAgentIdentity:
+        row = await self.session.scalar(
+            select(BoundedAgentIdentity).where(
+                BoundedAgentIdentity.agent_id == agent_id,
                 BoundedAgentIdentity.workspace_id == workspace_id,
                 BoundedAgentIdentity.canvas_id == canvas_id,
             )

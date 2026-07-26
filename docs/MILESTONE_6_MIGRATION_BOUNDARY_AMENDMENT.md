@@ -175,6 +175,14 @@ Excluded:
 `0025` must be created, completed, validated, and committed wholly within 6.5
 and remains immutable afterward.
 
+## 6.5 completion cross-reference
+
+Milestone 6.5 completed migration `20260725_0025` as the direct child of
+`20260725_0024`. Its implementation and validation record is
+[`MILESTONE_6_5_SHARED_WORKFLOW_AGENT_GOVERNANCE_HANDOFF.md`](MILESTONE_6_5_SHARED_WORKFLOW_AGENT_GOVERNANCE_HANDOFF.md).
+Migrations `0021` through `0024` remain unchanged, no later revision exists,
+and checkpoints 6.6–6.7 remain without assigned persistence.
+
 ## Checkpoint alignment
 
 - 6.1 -> `20260725_0021` — complete

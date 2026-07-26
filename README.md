@@ -260,13 +260,14 @@ inference/conflict classification, and no complete end-user Trace explorer. See 
 
 Milestone 4 controlled agents and Milestone 5 architecture and checkpoints
 5.1–5.7 are complete locally. Milestone 6 architecture and checkpoints
-6.1–6.4 are complete locally. Milestone 6.5 — Shared Workflow and Agent
-Governance is next. Its invocation-identity persistence conflict is resolved
-in the documentation-only
-[Milestone 6.5 migration amendment](docs/MILESTONE_6_5_INVOCATION_IDENTITY_MIGRATION_AMENDMENT.md):
-planned migration `20260725_0025` will separate immutable definition ownership
-from the exact invoking user and membership. Milestone 6.5 implementation and
-migration `0025` remain unstarted. The required roadmap order is:
+6.1–6.5 are complete locally. Milestone 6.6 — Multi-Workspace Collaboration
+Interface is next. The
+[Milestone 6.5 migration amendment](docs/MILESTONE_6_5_INVOCATION_IDENTITY_MIGRATION_AMENDMENT.md)
+and
+[implementation handoff](docs/MILESTONE_6_5_SHARED_WORKFLOW_AGENT_GOVERNANCE_HANDOFF.md)
+record completed migration `20260725_0025` and the separation of immutable
+definition ownership from the exact invoking user and active membership. The
+required roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
 2. Milestone 7 — Production Hardening, including deterministic indexing
@@ -319,7 +320,7 @@ positioning, and licensing, but must share authority, Trace, and audit
 contracts without copying security-critical logic. See the
 [Mobius Core product-family roadmap amendment](docs/MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md).
 
-Milestones 6.1–6.4 are complete locally. Workspace memberships now bind exact
+Milestones 6.1–6.5 are complete locally. Workspace memberships now bind exact
 authenticated users to exact workspaces, and secure invitations support
 bounded creation, delivery, resend, acceptance, decline, expiry, revocation,
 idempotency, and concurrency handling. A closed six-role and 36-permission
@@ -329,17 +330,20 @@ assignments now preserve the Milestone 4 capability and approval boundary.
 Typed canvas, canonical-object, workflow, and agent sharing, resource and
 workspace ownership transfer, immutable authority snapshots, and monotonic
 revocation fences are complete locally. Migration `20260725_0023` is the sole
-parent of the sole head `20260725_0024`. Bounded resource comments now use
+parent of migration `20260725_0024`. Bounded resource comments now use
 immutable identities, append-only revisions and lifecycle transitions,
 auditable tombstones, four-level replies, exact replay/concurrency controls,
 and the existing event/outbox/activity, Trace, and audit systems. Shared
-workflow and agent governance remains unstarted.
+workflow and agent visibility now composes current typed-resource access with
+a separate invocation permission. Executions preserve exact definition owner,
+immutable version, authenticated invoker, active membership, authority
+snapshot, Trace, audit, event, outbox, and activity evidence.
 
 Milestone 6 migrations now have checkpoint-owned immutable boundaries:
 6.2 owns completed migration `20260725_0022`, 6.3 owns completed migration
-`20260725_0023`, and 6.4 owns completed migration `20260725_0024`. Milestone
-6.5 exclusively owns planned direct child `20260725_0025`, which is not yet
-created. A migration must be completed within its owning checkpoint and must
+`20260725_0023`, 6.4 owns completed migration `20260725_0024`, and 6.5 owns
+completed direct child `20260725_0025`, the sole Alembic head. No later
+migration exists. A migration must be completed within its owning checkpoint and must
 not be rewritten by a later checkpoint.
 
 See

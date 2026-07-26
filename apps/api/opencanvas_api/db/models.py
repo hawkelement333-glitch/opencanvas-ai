@@ -2093,6 +2093,13 @@ class CollaborationAuthoritySnapshot(Base):
             name="fk_collaboration_snapshot_member_scope",
             ondelete="RESTRICT",
         ),
+        UniqueConstraint(
+            "snapshot_id",
+            "user_id",
+            "membership_id",
+            "workspace_id",
+            name="uq_collaboration_snapshot_invoker_scope",
+        ),
         ForeignKeyConstraint(
             ["resource_id", "workspace_id", "resource_kind"],
             [
@@ -4153,6 +4160,14 @@ class ControlledWorkflowVersion(Base):
             name="uq_workflow_version_scope",
         ),
         UniqueConstraint(
+            "version_id",
+            "definition_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            name="uq_workflow_version_parent_owner_scope",
+        ),
+        UniqueConstraint(
             "definition_id",
             "idempotency_key",
             name="uq_workflow_version_idempotency",
@@ -4337,14 +4352,42 @@ class ControlledWorkflowExecution(Base):
     __tablename__ = "controlled_workflow_executions"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["version_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "version_id",
+                "definition_id",
+                "definition_owner_user_id",
+                "workspace_id",
+                "canvas_id",
+            ],
             [
                 "controlled_workflow_versions.version_id",
+                "controlled_workflow_versions.definition_id",
                 "controlled_workflow_versions.user_id",
                 "controlled_workflow_versions.workspace_id",
                 "controlled_workflow_versions.canvas_id",
             ],
             name="fk_workflow_execution_version_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["invoking_membership_id", "user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_workflow_execution_invoking_membership",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["authority_snapshot_id", "user_id", "invoking_membership_id", "workspace_id"],
+            [
+                "collaboration_authority_snapshots.snapshot_id",
+                "collaboration_authority_snapshots.user_id",
+                "collaboration_authority_snapshots.membership_id",
+                "collaboration_authority_snapshots.workspace_id",
+            ],
+            name="fk_workflow_execution_authority_snapshot",
             ondelete="RESTRICT",
         ),
         UniqueConstraint(
@@ -4353,6 +4396,15 @@ class ControlledWorkflowExecution(Base):
             "workspace_id",
             "canvas_id",
             name="uq_workflow_execution_scope",
+        ),
+        UniqueConstraint(
+            "execution_id",
+            "version_id",
+            "user_id",
+            "invoking_membership_id",
+            "workspace_id",
+            "canvas_id",
+            name="uq_workflow_execution_invocation_scope",
         ),
         UniqueConstraint(
             "execution_id",
@@ -4391,12 +4443,22 @@ class ControlledWorkflowExecution(Base):
             "created_at",
         ),
         Index("ix_workflow_execution_status", "status", "deadline_at"),
+        Index(
+            "ix_workflow_execution_invoker_authority",
+            "workspace_id",
+            "user_id",
+            "invoking_membership_id",
+            "authority_snapshot_id",
+        ),
     )
 
     execution_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
     definition_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    definition_owner_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    invoking_membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    authority_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -4809,6 +4871,14 @@ class BoundedAgentVersion(Base):
             name="uq_bounded_agent_version_scope",
         ),
         UniqueConstraint(
+            "version_id",
+            "agent_id",
+            "user_id",
+            "workspace_id",
+            "canvas_id",
+            name="uq_bounded_agent_version_parent_owner_scope",
+        ),
+        UniqueConstraint(
             "agent_id",
             "idempotency_key",
             name="uq_bounded_agent_version_idempotency",
@@ -5144,9 +5214,16 @@ class BoundedAgentInvocation(Base):
     __tablename__ = "bounded_agent_invocations"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["agent_version_id", "user_id", "workspace_id", "canvas_id"],
+            [
+                "agent_version_id",
+                "agent_id",
+                "definition_owner_user_id",
+                "workspace_id",
+                "canvas_id",
+            ],
             [
                 "bounded_agent_versions.version_id",
+                "bounded_agent_versions.agent_id",
                 "bounded_agent_versions.user_id",
                 "bounded_agent_versions.workspace_id",
                 "bounded_agent_versions.canvas_id",
@@ -5155,10 +5232,40 @@ class BoundedAgentInvocation(Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["workflow_execution_id", "user_id", "workspace_id", "canvas_id"],
+            ["invoking_membership_id", "user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_bounded_agent_invocation_membership",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["authority_snapshot_id", "user_id", "invoking_membership_id", "workspace_id"],
+            [
+                "collaboration_authority_snapshots.snapshot_id",
+                "collaboration_authority_snapshots.user_id",
+                "collaboration_authority_snapshots.membership_id",
+                "collaboration_authority_snapshots.workspace_id",
+            ],
+            name="fk_bounded_agent_invocation_authority_snapshot",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            [
+                "workflow_execution_id",
+                "workflow_version_id",
+                "user_id",
+                "invoking_membership_id",
+                "workspace_id",
+                "canvas_id",
+            ],
             [
                 "controlled_workflow_executions.execution_id",
+                "controlled_workflow_executions.version_id",
                 "controlled_workflow_executions.user_id",
+                "controlled_workflow_executions.invoking_membership_id",
                 "controlled_workflow_executions.workspace_id",
                 "controlled_workflow_executions.canvas_id",
             ],
@@ -5181,6 +5288,13 @@ class BoundedAgentInvocation(Base):
         ),
         CheckConstraint("length(request_digest) = 64", name="ck_bounded_agent_invocation_digest"),
         Index("ix_bounded_agent_invocation_time", "agent_id", "created_at"),
+        Index(
+            "ix_bounded_agent_invocation_invoker_authority",
+            "workspace_id",
+            "user_id",
+            "invoking_membership_id",
+            "authority_snapshot_id",
+        ),
     )
 
     invocation_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
@@ -5188,7 +5302,10 @@ class BoundedAgentInvocation(Base):
     agent_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     workflow_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     workflow_execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    definition_owner_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    invoking_membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    authority_snapshot_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -6810,7 +6927,9 @@ def _reject_workflow_execution_identity_mutation(
         "execution_id",
         "definition_id",
         "version_id",
+        "definition_owner_user_id",
         "user_id",
+        "invoking_membership_id",
         "workspace_id",
         "canvas_id",
         "idempotency_key",
@@ -6827,6 +6946,11 @@ def _reject_workflow_execution_identity_mutation(
     )
     if any(state.attrs[field].history.has_changes() for field in immutable_fields):
         raise ValueError("ControlledWorkflowExecution identity and authority are immutable")
+    snapshot_history = state.attrs.authority_snapshot_id.history
+    if snapshot_history.has_changes() and any(
+        value is not None for value in snapshot_history.deleted
+    ):
+        raise ValueError("ControlledWorkflowExecution authority snapshot is immutable")
 
 
 def _reject_workflow_step_identity_mutation(_mapper: Any, _connection: Any, target: object) -> None:

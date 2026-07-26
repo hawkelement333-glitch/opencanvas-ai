@@ -1285,7 +1285,18 @@ Milestone 6 architecture is complete when these documents agree and all
 documentation/repository-integrity checks pass. No implementation behavior is
 claimed.
 
-Milestone 6.1–6.4 are complete locally. Milestone 6.5 must begin only under a
-separate explicit request from the committed invocation-identity migration
-amendment baseline, with a fresh repository and migration-state verification.
-Migration `20260725_0025` is allocated but not created.
+Milestone 6.1–6.5 are complete locally. The 6.5 implementation composes
+current typed-resource visibility with a separate closed invocation
+permission and the existing Milestone 4 execution authority. Migration
+`20260725_0025` is complete with direct parent `20260725_0024`; it stores exact
+definition-owner, invoker, membership, immutable-version, authority-snapshot,
+workflow-execution, workspace, and canvas scope. Versions inherit their parent
+identity and are not independent share targets.
+
+Shared invocation evidence extends the existing authority snapshot, Trace,
+collaboration audit, domain-event, transactional-outbox, and activity systems.
+Owner identity is never substituted for the authenticated invoker. Current
+visibility is re-evaluated for list/read operations, while claims, calls,
+retries, effects, compensation, export, publication, and result commit retain
+the existing revocation and stale-authority fences. Milestone 6.6 remains
+unstarted.

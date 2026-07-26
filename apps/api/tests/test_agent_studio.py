@@ -51,6 +51,7 @@ from opencanvas_api.services.agent_studio import (
 )
 from opencanvas_api.services.agents.contracts import Capability, ResourceKind
 from opencanvas_api.services.ai import MockAIProvider
+from opencanvas_api.services.collaboration import MembershipService
 from opencanvas_api.services.documents.embeddings import MockEmbeddingProvider
 from opencanvas_api.services.domain_events import (
     DomainEventOutboxService,
@@ -835,6 +836,13 @@ async def _file_database(path: Path) -> Database:
                 owner_id=SYSTEM_USER_ID,
                 name="Agent Studio concurrency",
             )
+        )
+        await session.flush()
+        workspace = await session.get(Workspace, SYSTEM_WORKSPACE_ID)
+        assert workspace is not None
+        await MembershipService(session).bootstrap_owner_membership(
+            workspace=workspace,
+            actor_user_id=SYSTEM_USER_ID,
         )
         await session.commit()
     return database

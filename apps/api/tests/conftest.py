@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -14,8 +17,12 @@ from opencanvas_api.db.models import (
     SYSTEM_USER_ID,
     SYSTEM_WORKSPACE_ID,
     Base,
+    CollaborationAuditEvent,
     User,
     Workspace,
+    WorkspaceAuthorityVersion,
+    WorkspaceMembership,
+    WorkspaceMembershipTransition,
 )
 from opencanvas_api.db.session import Database
 from opencanvas_api.main import create_app
@@ -38,11 +45,71 @@ async def database(tmp_path: Path) -> AsyncIterator[Database]:
                 email_verified=True,
             )
         )
+        workspace = Workspace(
+            id=SYSTEM_WORKSPACE_ID,
+            owner_id=SYSTEM_USER_ID,
+            name="Test workspace",
+        )
+        session.add(workspace)
+        await session.flush()
+        now = datetime.now(UTC)
+        membership_id = uuid.uuid5(SYSTEM_WORKSPACE_ID, "owner-membership")
+        trace_id = uuid.uuid5(membership_id, "bootstrap-trace")
+        audit_id = uuid.uuid5(membership_id, "bootstrap-audit")
         session.add(
-            Workspace(
-                id=SYSTEM_WORKSPACE_ID,
-                owner_id=SYSTEM_USER_ID,
-                name="Test workspace",
+            WorkspaceAuthorityVersion(
+                workspace_id=SYSTEM_WORKSPACE_ID,
+                authority_generation=1,
+                last_trace_id=trace_id,
+                updated_at=now,
+            )
+        )
+        session.add(
+            CollaborationAuditEvent(
+                audit_event_id=audit_id,
+                workspace_id=SYSTEM_WORKSPACE_ID,
+                actor_user_id=SYSTEM_USER_ID,
+                subject_kind="workspace_membership",
+                subject_id=membership_id,
+                action="membership.test_bootstrap",
+                outcome="succeeded",
+                reason_code="test_owner_bootstrap",
+                metadata_digest=hashlib.sha256(b"test-owner-bootstrap").hexdigest(),
+                trace_id=trace_id,
+                recorded_at=now,
+            )
+        )
+        session.add(
+            WorkspaceMembership(
+                membership_id=membership_id,
+                user_id=SYSTEM_USER_ID,
+                workspace_id=SYSTEM_WORKSPACE_ID,
+                created_by_user_id=SYSTEM_USER_ID,
+                accepted_invitation_id=None,
+                collaboration_policy_version="collaboration-policy-v1",
+                creation_trace_id=trace_id,
+                creation_audit_event_id=audit_id,
+                created_at=now,
+            )
+        )
+        session.add(
+            WorkspaceMembershipTransition(
+                transition_id=uuid.uuid5(membership_id, "bootstrap-transition"),
+                membership_id=membership_id,
+                user_id=SYSTEM_USER_ID,
+                workspace_id=SYSTEM_WORKSPACE_ID,
+                sequence=0,
+                previous_state=None,
+                current_state="active",
+                previous_role=None,
+                current_role="owner",
+                reason_code="test_owner_bootstrap",
+                collaboration_policy_version="collaboration-policy-v1",
+                authority_generation=1,
+                actor_user_id=SYSTEM_USER_ID,
+                trace_id=trace_id,
+                audit_event_id=audit_id,
+                recorded_at=now,
             )
         )
         await session.commit()

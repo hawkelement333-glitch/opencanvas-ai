@@ -19,6 +19,7 @@ from opencanvas_api.db.models import (
     CanonicalCanvasObjectBinding,
     CanonicalObject,
     Canvas,
+    CollaborationAuditEvent,
     ControlledAgentApproval,
     ControlledAgentCapabilityGrant,
     ControlledAgentReversibleWriteProposal,
@@ -37,7 +38,6 @@ from opencanvas_api.db.models import (
     GraphRetrievalCitation,
     GraphRetrievalRun,
     Workspace,
-    WorkspaceAuthorityVersion,
     WorkspaceGraphState,
 )
 from opencanvas_api.services.agents.contracts import (
@@ -90,10 +90,12 @@ from opencanvas_api.services.ai import (
     model_configuration,
 )
 from opencanvas_api.services.auth import Principal
-from opencanvas_api.services.collaboration_authority import CollaborationPermission
+from opencanvas_api.services.collaboration import CollaborationNotFoundError
 from opencanvas_api.services.collaboration_resources import (
     AuthorityBoundary,
     RevocationFenceService,
+    ShareResourceKind,
+    SharingService,
 )
 from opencanvas_api.services.context import ContextBundle
 from opencanvas_api.services.documents.embeddings import EmbeddingProvider
@@ -107,6 +109,7 @@ from opencanvas_api.services.graph_retrieval import (
     StartGraphRetrieval,
     TraceEvidenceBundleService,
 )
+from opencanvas_api.services.shared_governance import SharedInvocationGovernanceService
 from opencanvas_api.services.trace import (
     CompleteTraceInput,
     RecordTraceEventInput,
@@ -585,6 +588,17 @@ class ControlledWorkflowService:
                 )
                 self.session.add(definition)
                 await self.session.flush()
+                await SharedInvocationGovernanceService(
+                    self.session
+                ).ensure_registered_owner_resource(
+                    user_id=command.user_id,
+                    workspace_id=command.workspace_id,
+                    canvas_id=command.canvas_id,
+                    resource_kind=ShareResourceKind.WORKFLOW,
+                    resource_id=definition.definition_id,
+                    trace_id=trace_id,
+                    created_at=self.now,
+                )
                 version = await self._persist_version(
                     definition=definition,
                     version_id=version_id,
@@ -854,12 +868,27 @@ class ControlledWorkflowService:
 
     async def start(self, command: StartWorkflow) -> WorkflowExecutionRecord:
         self._validate_idempotency(command.idempotency_key)
-        version = await self._owned_version(
-            command.user_id,
+        version = await self._scoped_version(
             command.workspace_id,
             command.canvas_id,
             command.version_id,
         )
+        definition = await self._scoped_definition(
+            command.workspace_id,
+            command.canvas_id,
+            version.definition_id,
+        )
+        try:
+            invocation_authority = await SharedInvocationGovernanceService(
+                self.session
+            ).require_invocation(
+                user_id=command.user_id,
+                workspace_id=command.workspace_id,
+                resource_kind=ShareResourceKind.WORKFLOW,
+                resource_id=definition.definition_id,
+            )
+        except CollaborationNotFoundError as exc:
+            raise WorkflowAuthorityError() from exc
         if (
             await self._latest_version_state(version.version_id)
             is not WorkflowVersionLifecycle.ACTIVE
@@ -931,12 +960,6 @@ class ControlledWorkflowService:
                 duplicate=True,
             )
 
-        definition = await self._owned_definition(
-            command.user_id,
-            command.workspace_id,
-            command.canvas_id,
-            version.definition_id,
-        )
         steps = await self._steps(version.version_id)
         dependencies = await self._dependencies(version.version_id)
         plan_payload = self._compile_plan(version, steps, dependencies)
@@ -975,7 +998,10 @@ class ControlledWorkflowService:
                     execution_id=execution_id,
                     definition_id=definition.definition_id,
                     version_id=version.version_id,
+                    definition_owner_user_id=version.user_id,
                     user_id=command.user_id,
+                    invoking_membership_id=invocation_authority.membership_id,
+                    authority_snapshot_id=None,
                     workspace_id=command.workspace_id,
                     canvas_id=command.canvas_id,
                     idempotency_key=command.idempotency_key,
@@ -998,23 +1024,37 @@ class ControlledWorkflowService:
                 )
                 self.session.add(execution)
                 await self.session.flush()
-                authority = await self.session.get(WorkspaceAuthorityVersion, command.workspace_id)
-                if authority is not None:
-                    await RevocationFenceService(self.session).capture(
-                        principal=Principal(
-                            user_id=command.user_id,
-                            email="workflow-execution@invalid.local",
-                            display_name="Controlled workflow",
-                            session_id=None,
-                            csrf_token_hash=None,
-                            synthetic=True,
-                        ),
-                        workspace_id=command.workspace_id,
-                        permission=CollaborationPermission.WORKFLOW_INVOKE,
-                        boundary=AuthorityBoundary.CLAIM,
-                        trace_id=trace_id,
-                        workflow_execution_id=execution_id,
-                    )
+                snapshot = await SharedInvocationGovernanceService(self.session).capture(
+                    invocation_authority,
+                    trace_id=trace_id,
+                    workflow_execution_id=execution_id,
+                )
+                execution.authority_snapshot_id = snapshot.snapshot_id
+                invocation_audit = CollaborationAuditEvent(
+                    audit_event_id=uuid.uuid5(execution_id, "collaboration-audit"),
+                    workspace_id=command.workspace_id,
+                    actor_user_id=command.user_id,
+                    subject_kind="collaboration_resource",
+                    subject_id=definition.definition_id,
+                    action="workflow.invoke",
+                    outcome="succeeded",
+                    reason_code="authorized_invocation",
+                    metadata_digest=_digest(
+                        {
+                            "workflowDefinitionId": str(definition.definition_id),
+                            "workflowVersionId": str(version.version_id),
+                            "definitionOwnerUserId": str(version.user_id),
+                            "invokingUserId": str(command.user_id),
+                            "invokingMembershipId": str(invocation_authority.membership_id),
+                            "authoritySnapshotId": str(snapshot.snapshot_id),
+                            "workflowExecutionId": str(execution_id),
+                        }
+                    ),
+                    trace_id=trace_id,
+                    recorded_at=self.now,
+                )
+                self.session.add(invocation_audit)
+                await self.session.flush()
                 await _run_hook(self.after_execution)
                 plan = ControlledWorkflowPlanSnapshot(
                     plan_id=plan_id,
@@ -1084,6 +1124,7 @@ class ControlledWorkflowService:
                     trace_id,
                     source="requested",
                     related_id=version.version_id,
+                    audit_event_id=invocation_audit.audit_event_id,
                     payload={
                         "workflowDefinitionId": str(definition.definition_id),
                         "workflowVersionId": str(version.version_id),
@@ -1129,11 +1170,66 @@ class ControlledWorkflowService:
         canvas_id: uuid.UUID,
         definition_id: uuid.UUID,
     ) -> WorkflowDefinitionRecord:
-        definition = await self._owned_definition(user_id, workspace_id, canvas_id, definition_id)
+        definition = await self._scoped_definition(workspace_id, canvas_id, definition_id)
+        try:
+            await SharedInvocationGovernanceService(self.session).require_visibility(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                resource_kind=ShareResourceKind.WORKFLOW,
+                resource_id=definition_id,
+            )
+        except CollaborationNotFoundError as exc:
+            raise WorkflowNotFoundError() from exc
         return WorkflowDefinitionRecord(
             definition,
             tuple(await self._versions(definition.definition_id)),
         )
+
+    async def list_definitions(
+        self,
+        *,
+        user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        canvas_id: uuid.UUID,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[WorkflowDefinitionRecord]:
+        if limit < 1 or limit > 100 or offset < 0 or offset > 10_000:
+            raise WorkflowValidationError("Workflow page is invalid.")
+        rows = list(
+            (
+                await self.session.scalars(
+                    select(ControlledWorkflowDefinition)
+                    .where(
+                        ControlledWorkflowDefinition.workspace_id == workspace_id,
+                        ControlledWorkflowDefinition.canvas_id == canvas_id,
+                    )
+                    .order_by(
+                        ControlledWorkflowDefinition.created_at.desc(),
+                        ControlledWorkflowDefinition.definition_id,
+                    )
+                )
+            ).all()
+        )
+        visible: list[WorkflowDefinitionRecord] = []
+        governance = SharedInvocationGovernanceService(self.session)
+        for row in rows:
+            try:
+                await governance.require_visibility(
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    resource_kind=ShareResourceKind.WORKFLOW,
+                    resource_id=row.definition_id,
+                )
+            except CollaborationNotFoundError:
+                continue
+            visible.append(
+                WorkflowDefinitionRecord(
+                    row,
+                    tuple(await self._versions(row.definition_id)),
+                )
+            )
+        return visible[offset : offset + limit]
 
     async def get_execution(
         self,
@@ -3694,10 +3790,15 @@ class ControlledWorkflowService:
         execution_id: uuid.UUID | None = None,
         audit_event_id: uuid.UUID | None = None,
     ) -> None:
+        scope_owner_id = await self.session.scalar(
+            select(Workspace.owner_id).where(Workspace.id == workspace_id)
+        )
+        if scope_owner_id is None:
+            raise WorkflowNotFoundError()
         await self.events.record(
             CreateDomainEvent(
                 event_type=event_type,
-                user_id=user_id,
+                user_id=scope_owner_id,
                 workspace_id=workspace_id,
                 canvas_id=canvas_id,
                 subject_id=subject_id,
@@ -3740,7 +3841,40 @@ class ControlledWorkflowService:
         canvas_id: uuid.UUID,
         object_ids: tuple[uuid.UUID, ...],
     ) -> list[CanonicalObject]:
-        await self._scope(user_id, workspace_id, canvas_id)
+        canvas = await self.session.scalar(
+            select(Canvas).where(
+                Canvas.id == canvas_id,
+                Canvas.workspace_id == workspace_id,
+            )
+        )
+        if canvas is None:
+            raise WorkflowAuthorityError()
+        legacy_owner = (
+            await self.session.scalar(
+                select(Workspace.owner_id).where(
+                    Workspace.id == workspace_id,
+                    Workspace.owner_id == user_id,
+                )
+            )
+            is not None
+        )
+        sharing = SharingService(self.session)
+        for object_id in object_ids:
+            access = await sharing.evaluate_access(
+                principal=Principal(
+                    user_id=user_id,
+                    email="workflow-context@invalid.local",
+                    display_name="Workflow context authority",
+                    session_id=None,
+                    csrf_token_hash=None,
+                    synthetic=True,
+                ),
+                workspace_id=workspace_id,
+                resource_kind=ShareResourceKind.CANONICAL_OBJECT,
+                resource_id=object_id,
+            )
+            if not access.allowed and not legacy_owner:
+                raise WorkflowAuthorityError()
         rows = list(
             (
                 await self.session.scalars(
@@ -3762,7 +3896,6 @@ class ControlledWorkflowService:
                     select(CanonicalCanvasObjectBinding.object_id).where(
                         CanonicalCanvasObjectBinding.object_id.in_(object_ids),
                         CanonicalCanvasObjectBinding.canvas_id == canvas_id,
-                        CanonicalCanvasObjectBinding.user_id == user_id,
                         CanonicalCanvasObjectBinding.workspace_id == workspace_id,
                     )
                 )
@@ -3802,6 +3935,42 @@ class ControlledWorkflowService:
             select(ControlledWorkflowVersion).where(
                 ControlledWorkflowVersion.version_id == version_id,
                 ControlledWorkflowVersion.user_id == user_id,
+                ControlledWorkflowVersion.workspace_id == workspace_id,
+                ControlledWorkflowVersion.canvas_id == canvas_id,
+            )
+        )
+        if row is None:
+            raise WorkflowNotFoundError()
+        if _digest(row.normalized_definition) != row.content_digest:
+            raise WorkflowConflictError()
+        return row
+
+    async def _scoped_definition(
+        self,
+        workspace_id: uuid.UUID,
+        canvas_id: uuid.UUID,
+        definition_id: uuid.UUID,
+    ) -> ControlledWorkflowDefinition:
+        row = await self.session.scalar(
+            select(ControlledWorkflowDefinition).where(
+                ControlledWorkflowDefinition.definition_id == definition_id,
+                ControlledWorkflowDefinition.workspace_id == workspace_id,
+                ControlledWorkflowDefinition.canvas_id == canvas_id,
+            )
+        )
+        if row is None:
+            raise WorkflowNotFoundError()
+        return row
+
+    async def _scoped_version(
+        self,
+        workspace_id: uuid.UUID,
+        canvas_id: uuid.UUID,
+        version_id: uuid.UUID,
+    ) -> ControlledWorkflowVersion:
+        row = await self.session.scalar(
+            select(ControlledWorkflowVersion).where(
+                ControlledWorkflowVersion.version_id == version_id,
                 ControlledWorkflowVersion.workspace_id == workspace_id,
                 ControlledWorkflowVersion.canvas_id == canvas_id,
             )

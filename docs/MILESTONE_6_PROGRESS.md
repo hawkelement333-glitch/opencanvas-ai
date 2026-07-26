@@ -2,22 +2,22 @@
 
 Last updated: 2026-07-26
 
-Branch: `milestone-6-4-comments-collaboration-activity-local`
+Branch: `milestone-6-5-shared-workflow-agent-governance-local`
 
 Baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: checkpoints 6.1–6.4 complete locally; ready for 6.5
+Status: checkpoints 6.1–6.5 complete locally; ready for 6.6
 
-| Checkpoint                                       | Status                        | Dependency                        |
-| ------------------------------------------------ | ----------------------------- | --------------------------------- |
-| Architecture                                     | Complete locally              | Milestone 5 and roadmap amendment |
-| 6.1 Workspace Membership and Invitations         | Complete locally              | Architecture                      |
-| 6.2 Collaboration Roles and Permission Authority | Complete locally              | 6.1                               |
-| 6.3 Resource Sharing, Ownership, and Revocation  | Complete locally              | 6.1–6.2                           |
-| 6.4 Comments and Collaboration Activity          | Complete locally              | 6.1–6.3                           |
-| 6.5 Shared Workflow and Agent Governance         | Not started; `0025` allocated | 6.1–6.4 and Milestones 4–5        |
-| 6.6 Multi-Workspace Collaboration Interface      | Not started                   | 6.1–6.5                           |
-| 6.7 Final Collaboration Security Audit           | Not started                   | 6.1–6.6                           |
+| Checkpoint                                       | Status           | Dependency                        |
+| ------------------------------------------------ | ---------------- | --------------------------------- |
+| Architecture                                     | Complete locally | Milestone 5 and roadmap amendment |
+| 6.1 Workspace Membership and Invitations         | Complete locally | Architecture                      |
+| 6.2 Collaboration Roles and Permission Authority | Complete locally | 6.1                               |
+| 6.3 Resource Sharing, Ownership, and Revocation  | Complete locally | 6.1–6.2                           |
+| 6.4 Comments and Collaboration Activity          | Complete locally | 6.1–6.3                           |
+| 6.5 Shared Workflow and Agent Governance         | Complete locally | 6.1–6.4 and Milestones 4–5        |
+| 6.6 Multi-Workspace Collaboration Interface      | Not started      | 6.1–6.5                           |
+| 6.7 Final Collaboration Security Audit           | Not started      | 6.1–6.6                           |
 
 ## Architecture decisions
 
@@ -75,13 +75,14 @@ invocation, approval, export, or controlled-effect authority.
   comment identities, append-only revisions and lifecycle transitions,
   auditable tombstones, bounded replies, closed registries, scope/sequence
   guards, and indexes. Direct parent: `20260725_0023`.
-- `20260725_0025`: planned exclusively for 6.5 invocation identity; separates
-  immutable definition ownership from the authenticated invoking user and
-  exact active membership. Direct parent: `20260725_0024`. Not created.
+- `20260725_0025`: complete locally for 6.5 only; separates immutable
+  definition ownership from the authenticated invoking user and exact active
+  membership, reinforces composite scope, and deterministically backfills
+  provable legacy invocation authority. Direct parent: `20260725_0024`.
 
 Each migration is completed within its owning checkpoint and remains
 immutable after commit. Later changes use the next unused revision. Alembic
-has one sole head: `20260725_0024`. Checkpoints 6.6 and 6.7 have no migration
+has one sole head: `20260725_0025`. Checkpoints 6.6 and 6.7 have no migration
 assigned.
 
 ## Scope boundaries
@@ -182,6 +183,33 @@ real-service skips, strict typing, lint, formatting, production build,
 SQLite migration cycling, PostgreSQL offline DDL, mapper/import/compilation,
 demo, hygiene, diff, protected-reference, and prohibited-scope checks. Exact
 commands, warnings, and environment notes are recorded in the 6.4 handoff.
+
+Checkpoint 6.5 adds centralized shared invocation governance for workflow and
+agent identities. Safe list/read paths evaluate current typed visibility;
+invocation separately requires the closed `workflow.invoke` or `agent.invoke`
+permission. Immutable versions inherit their parent identity and cannot be
+shared independently. Execution rows preserve definition owner,
+authenticated invoker, exact active membership, immutable version, authority
+snapshot, workspace, canvas, request identity, Trace, and execution linkage.
+
+The workflow and agent services retain all Milestone 4 capability, approval,
+risk, lifecycle, selected-context, retry, cancellation, compensation, export,
+publication, and stale-result fences. Revocation checks use the invoker's
+captured collaboration authority, so definition ownership cannot keep an
+execution valid after the invoker loses access. Successful invocations create
+bounded audit evidence linked to the existing domain event, outbox, activity,
+and Trace systems. Shared inspection omits other users' private invocation,
+evaluation, proposal, activation, binding, capability, approval, and authority
+details.
+
+Final 6.5 validation includes 518 passing backend tests with 1 skipped
+PostgreSQL-runtime test, 38 passing security tests, 22 passing integration
+tests, 66 passing frontend tests, and 6 passing Chromium smoke tests with 2
+real-service skips. Strict typing, focused lint/formatting, compilation,
+121-table mapper configuration, SQLite migration cycling, PostgreSQL offline
+DDL, production build, and repository hygiene pass. Exact results and the
+pre-existing repository-wide Ruff baseline differences are recorded in the
+6.5 handoff.
 
 The attempted 6.5 start stopped before branch creation or repository changes
 because existing workflow executions and agent invocations bind their user

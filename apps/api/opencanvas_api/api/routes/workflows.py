@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Literal, cast
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import JsonValue
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -137,6 +137,30 @@ async def create_workflow(
         await session.rollback()
         raise _error(exc) from exc
     return await _definition_out(session, record)
+
+
+@router.get("", response_model=list[WorkflowDefinitionOut])
+async def list_workflows(
+    workspace_id: uuid.UUID,
+    canvas_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+    provider: ProviderDep,
+    settings: SettingsDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
+) -> list[WorkflowDefinitionOut]:
+    try:
+        records = await _service(session, provider, settings).list_definitions(
+            user_id=principal.user_id,
+            workspace_id=workspace_id,
+            canvas_id=canvas_id,
+            limit=limit,
+            offset=offset,
+        )
+    except WorkflowError as exc:
+        raise _error(exc) from exc
+    return [await _definition_out(session, record) for record in records]
 
 
 @router.get("/{definition_id}", response_model=WorkflowDefinitionOut)
