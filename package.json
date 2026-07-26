@@ -20,7 +20,7 @@
     "demo:reset": "python apps/api/scripts/demo.py reset",
     "demo:check": "python apps/api/scripts/demo.py check",
     "demo:smoke": "python apps/api/scripts/demo.py smoke",
-    "db:migrate": "cd apps/api && python -m alembic upgrade head",
+    "db:migrate": "cd apps/api && python -m scripts.migrate",
     "build": "pnpm --filter @opencanvas/web build",
     "format": "pnpm --filter @opencanvas/web exec prettier --write ../.. --ignore-path ../../.gitignore && python -m ruff format --config apps/api/pyproject.toml apps/api scripts",
     "format:api": "python -m ruff format --config apps/api/pyproject.toml apps/api scripts",

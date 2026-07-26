@@ -3,7 +3,7 @@ name: opencanvas-ai
 x-api-environment: &api-environment
   APP_MODE: development
   OPENCANVAS_APP_URL: http://localhost:3000
-  OPENCANVAS_DATABASE_URL: postgresql+asyncpg://opencanvas:opencanvas@db:5432/opencanvas
+  OPENCANVAS_DATABASE_TLS_MODE: disable
   OPENCANVAS_AI_PROVIDER: mock
   OPENCANVAS_EMBEDDING_PROVIDER: mock
   OPENCANVAS_STORAGE_PROVIDER: local
@@ -53,7 +53,9 @@ services:
     env_file: ${OPENCANVAS_ENV_FILE:-.env.example}
     environment:
       <<: *api-environment
-    command: ["alembic", "upgrade", "head"]
+      OPENCANVAS_DATABASE_URL: ${OPENCANVAS_MIGRATION_DATABASE_URL:-postgresql+asyncpg://opencanvas:opencanvas@db:5432/opencanvas}
+      OPENCANVAS_DATABASE_ROLE: migration
+    command: ["python", "-m", "scripts.migrate"]
     depends_on:
       db:
         condition: service_healthy
@@ -66,6 +68,8 @@ services:
     env_file: ${OPENCANVAS_ENV_FILE:-.env.example}
     environment:
       <<: *api-environment
+      OPENCANVAS_DATABASE_URL: ${OPENCANVAS_API_DATABASE_URL:-postgresql+asyncpg://opencanvas:opencanvas@db:5432/opencanvas}
+      OPENCANVAS_DATABASE_ROLE: api
     ports:
       - "8000:8000"
     volumes:
@@ -92,6 +96,8 @@ services:
     env_file: ${OPENCANVAS_ENV_FILE:-.env.example}
     environment:
       <<: *api-environment
+      OPENCANVAS_DATABASE_URL: ${OPENCANVAS_WORKER_DATABASE_URL:-postgresql+asyncpg://opencanvas:opencanvas@db:5432/opencanvas}
+      OPENCANVAS_DATABASE_ROLE: worker
     command: ["python", "-m", "scripts.worker"]
     volumes:
       - opencanvas-files:/app/data/documents

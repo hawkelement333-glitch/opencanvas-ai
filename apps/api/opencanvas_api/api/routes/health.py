@@ -4,22 +4,24 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel
-from sqlalchemy import select, text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from opencanvas_api import __version__
-from opencanvas_api.api.dependencies import get_session
+from opencanvas_api.api.dependencies import get_database, get_session
 from opencanvas_api.api.errors import ApiError
 from opencanvas_api.api.schemas import ApiModel
-from opencanvas_api.core.config import Settings, get_settings
+from opencanvas_api.core.config import DatabaseRole, Settings, get_settings
 from opencanvas_api.db.models import WorkerHeartbeat
+from opencanvas_api.db.runtime import DatabaseRuntimeError, validate_database_runtime
+from opencanvas_api.db.session import Database
 from opencanvas_api.services.demo import DEMO_CANVAS_ID, DEMO_TRACE_ID
 from opencanvas_api.services.documents import DocumentServiceError, build_document_storage
 
 router = APIRouter(prefix="/health")
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+DatabaseDep = Annotated[Database, Depends(get_database)]
 
 
 class HealthResponse(BaseModel):
@@ -55,13 +57,15 @@ async def liveness(settings: SettingsDep) -> HealthResponse:
 
 
 @router.get("/ready", response_model=HealthResponse)
-async def readiness(settings: SettingsDep, session: SessionDep) -> HealthResponse:
+async def readiness(
+    settings: SettingsDep, session: SessionDep, database: DatabaseDep
+) -> HealthResponse:
     try:
-        await session.execute(text("SELECT 1"))
-    except SQLAlchemyError as exc:
+        await validate_database_runtime(database.engine, settings, expected_role=DatabaseRole.API)
+    except DatabaseRuntimeError as exc:
         raise ApiError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "database_unavailable",
+            "database_not_ready",
             "The database is not ready.",
         ) from exc
     try:

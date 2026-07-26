@@ -2,7 +2,8 @@
 
 Date: 2026-07-26
 
-Status: approved architecture plan; implementation not started
+Status: approved architecture plan; checkpoint 7.1 complete locally;
+checkpoint 7.2 not started
 
 Architecture:
 [`MILESTONE_7_ARCHITECTURE.md`](MILESTONE_7_ARCHITECTURE.md)
@@ -52,6 +53,14 @@ No empty revision is reserved. If a committed migration later needs a
 correction, use the next unused revision and record an amendment.
 
 ## 3. Checkpoint 7.1 — Production Runtime Foundation and Managed PostgreSQL
+
+Implementation status: **complete locally**. The completed implementation is
+recorded in
+[`MILESTONE_7_1_PRODUCTION_RUNTIME_MANAGED_POSTGRESQL_HANDOFF.md`](MILESTONE_7_1_PRODUCTION_RUNTIME_MANAGED_POSTGRESQL_HANDOFF.md).
+No application migration or dependency was added. Local PostgreSQL execution
+was unavailable because Docker/PostgreSQL was not installed in the validation
+environment; the handoff separates passed offline/configuration validation
+from that untested runtime boundary.
 
 ### Purpose
 
@@ -147,7 +156,7 @@ guides. Record provider-neutral requirements and the exact staging evidence.
 
 ### Commit and exit
 
-Suggested local commit: `Complete Milestone 7.1 production runtime foundation`
+Required local commit: `Add production runtime and managed PostgreSQL foundation`
 
 Exit only when managed PostgreSQL behavior is proved, no unapproved fallback
 exists, no migration was created, and 7.2 is still unstarted.

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 from scripts.demo import (
     build_demo_environment,
     build_web_command,
@@ -83,7 +83,7 @@ def test_demo_startup_environment_strips_credentials_and_uses_isolated_paths() -
 
     assert environment["OPENAI_API_KEY"] == ""
     assert environment["OPENCANVAS_OPENAI_API_KEY"] == ""
-    assert settings.database_url == DEMO_DATABASE_URL
+    assert settings.database_url_value == DEMO_DATABASE_URL
     assert settings.document_storage_root == DEMO_DOCUMENT_STORAGE_ROOT
     assert settings.effective_ai_provider == "mock"
     assert settings.effective_embedding_provider == "mock"
@@ -177,7 +177,7 @@ async def test_runtime_endpoint_distinguishes_replay_from_live_mode(client, app)
     settings = demo_settings()
     # The production safety validator intentionally rejects a non-isolated database; the endpoint
     # receives an already validated test double so it can exercise only the response contract.
-    object.__setattr__(settings, "database_url", "sqlite+aiosqlite:///:memory:")
+    object.__setattr__(settings, "database_url", SecretStr("sqlite+aiosqlite:///:memory:"))
     app.dependency_overrides[get_settings] = lambda: settings
 
     response = await client.get("/api/v1/health/runtime")

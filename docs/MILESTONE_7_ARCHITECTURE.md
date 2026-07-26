@@ -2,7 +2,18 @@
 
 Date: 2026-07-26
 
-Status: architecture complete locally; implementation not started
+Status: architecture complete locally; checkpoint 7.1 implemented locally;
+checkpoint 7.2 not started
+
+Implementation-grounded clarification: checkpoint 7.1 uses the established
+`Settings`, SQLAlchemy, Alembic, lifespan, and health boundaries. PostgreSQL
+17, pgvector `0.7.0` or newer, exact schema head `20260725_0025`,
+`READ COMMITTED`, bounded pool acquisition, connection recycling, statement,
+lock, and idle-transaction timeouts, verified TLS in deployed modes, dedicated
+API/worker/migration credential declarations, and one PostgreSQL advisory lock
+are enforced without an application migration. Public readiness collapses
+database failures to a safe dependency response. Managed-provider validation
+remains a later controlled staging operation, not evidence produced locally.
 
 Baseline branch: `milestone-6-7-final-collaboration-security-audit-local`
 

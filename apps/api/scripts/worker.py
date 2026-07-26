@@ -6,8 +6,9 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
-from opencanvas_api.core.config import AppMode, get_settings
+from opencanvas_api.core.config import AppMode, DatabaseRole, get_settings
 from opencanvas_api.db.models import WorkerHeartbeat
+from opencanvas_api.db.runtime import DatabaseRuntimeError, validate_database_runtime
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.jobs import DocumentWorker
 
@@ -16,9 +17,17 @@ async def run(*, once: bool, healthcheck: bool) -> int:
     settings = get_settings()
     if settings.runtime_mode is AppMode.DEMO:
         raise RuntimeError("Demo mode does not start the production document worker.")
-    database = Database(settings.database_url)
+    database = Database.from_settings(settings, expected_role=DatabaseRole.WORKER)
     worker = DocumentWorker(settings=settings, sessions=database.sessions)
     try:
+        try:
+            await validate_database_runtime(
+                database.engine, settings, expected_role=DatabaseRole.WORKER
+            )
+        except DatabaseRuntimeError:
+            if healthcheck:
+                return 1
+            raise
         if healthcheck:
             async with database.sessions() as session:
                 heartbeat = await session.scalar(

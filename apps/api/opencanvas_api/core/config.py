@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 RUNTIME_ROOT = (PROJECT_ROOT / ".runtime").resolve()
@@ -18,6 +20,7 @@ DEMO_DOCUMENT_STORAGE_ROOT = DEMO_RUNTIME_ROOT / "documents"
 DEMO_DATABASE_URL = f"sqlite+aiosqlite:///{DEMO_DATABASE_PATH.as_posix()}"
 DEVELOPMENT_SESSION_SECRET = "development-only-session-secret-change-before-deploying"
 DEVELOPMENT_INVITATION_SECRET = "development-only-invitation-secret-change-before-deploying"
+EXPECTED_DATABASE_REVISION = "20260725_0025"
 
 
 class AppMode(StrEnum):
@@ -26,6 +29,15 @@ class AppMode(StrEnum):
     TEST = "test"
     STAGING = "staging"
     PRODUCTION = "production"
+
+
+class DatabaseRole(StrEnum):
+    API = "api"
+    WORKER = "worker"
+    MIGRATION = "migration"
+    BACKUP = "backup"
+    OBSERVABILITY = "observability"
+    EMERGENCY = "emergency"
 
 
 class Settings(BaseSettings):
@@ -49,9 +61,23 @@ class Settings(BaseSettings):
     app_url: str = "http://localhost:3000"
     api_prefix: str = "/api/v1"
 
-    database_url: str = "sqlite+aiosqlite:///./opencanvas.db"
-    database_pool_size: int = Field(default=10, ge=1, le=100)
-    database_pool_timeout_seconds: float = Field(default=15.0, ge=1.0, le=120.0)
+    database_url: SecretStr = SecretStr("sqlite+aiosqlite:///./opencanvas.db")
+    database_role: DatabaseRole = DatabaseRole.API
+    database_pool_size: int = Field(default=10, ge=1, le=50)
+    database_max_overflow: int = Field(default=0, ge=0, le=20)
+    database_pool_timeout_seconds: float = Field(default=15.0, ge=1.0, le=60.0)
+    database_pool_recycle_seconds: int = Field(default=1_800, ge=60, le=7_200)
+    database_connect_timeout_seconds: float = Field(default=10.0, ge=1.0, le=30.0)
+    database_statement_timeout_ms: int = Field(default=30_000, ge=1_000, le=120_000)
+    database_lock_timeout_ms: int = Field(default=5_000, ge=100, le=30_000)
+    database_idle_transaction_timeout_ms: int = Field(default=30_000, ge=1_000, le=120_000)
+    database_tls_mode: Literal["disable", "require", "verify-ca", "verify-full"] = "disable"
+    database_application_name: str = Field(
+        default="solarplexus-mobius", min_length=3, max_length=63, pattern=r"^[a-z0-9-]+$"
+    )
+    database_expected_revision: str = Field(
+        default=EXPECTED_DATABASE_REVISION, pattern=r"^\d{8}_\d{4}$"
+    )
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
 
     auth_enabled: bool = True
@@ -215,7 +241,7 @@ class Settings(BaseSettings):
         return self
 
     def _validate_demo_isolation(self) -> None:
-        if self.database_url != DEMO_DATABASE_URL:
+        if self.database_url_value != DEMO_DATABASE_URL:
             raise ValueError("demo mode must use the isolated project-local demo database")
         if self.openai_api_key is not None:
             raise ValueError("demo mode refuses OpenAI credentials")
@@ -230,8 +256,25 @@ class Settings(BaseSettings):
 
     def _validate_deployed_mode(self, mode: AppMode) -> None:
         label = mode.value
-        if not self.database_url.startswith("postgresql+asyncpg://"):
+        try:
+            database_url = make_url(self.database_url_value)
+        except ArgumentError as exc:
+            raise ValueError(f"{label} requires a valid managed PostgreSQL database URL") from exc
+        if database_url.drivername != "postgresql+asyncpg":
             raise ValueError(f"{label} requires a postgresql+asyncpg database URL")
+        if not database_url.host or not database_url.database or not database_url.username:
+            raise ValueError(f"{label} requires a complete managed PostgreSQL database URL")
+        if database_url.password is not None and database_url.password.lower() in {
+            "changeme",
+            "password",
+            "placeholder",
+            "secret",
+        }:
+            raise ValueError(f"{label} refuses a placeholder database credential")
+        if self.database_tls_mode != "verify-full":
+            raise ValueError(f"{label} requires verified PostgreSQL TLS")
+        if self.database_expected_revision != EXPECTED_DATABASE_REVISION:
+            raise ValueError(f"{label} requires the release's exact database revision")
         if not self.app_url.startswith("https://"):
             raise ValueError(f"{label} requires an HTTPS application URL")
         if any(not origin.startswith("https://") for origin in self.cors_origins):
@@ -275,6 +318,10 @@ class Settings(BaseSettings):
         return self.app_mode
 
     @property
+    def database_url_value(self) -> str:
+        return self.database_url.get_secret_value()
+
+    @property
     def secure_cookies(self) -> bool:
         return self.runtime_mode in {AppMode.STAGING, AppMode.PRODUCTION}
 
@@ -290,6 +337,15 @@ class Settings(BaseSettings):
     def effective_embedding_provider(self) -> Literal["mock", "openai"]:
         return self.embedding_provider
 
+    def require_database_role(self, expected: DatabaseRole) -> None:
+        if (
+            self.runtime_mode in {AppMode.STAGING, AppMode.PRODUCTION}
+            and self.database_role is not expected
+        ):
+            raise RuntimeError(
+                f"{expected.value} process requires its dedicated database credential role"
+            )
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -303,10 +359,12 @@ __all__ = [
     "DEMO_RUNTIME_ROOT",
     "DEVELOPMENT_INVITATION_SECRET",
     "DEVELOPMENT_SESSION_SECRET",
+    "EXPECTED_DATABASE_REVISION",
     "PROJECT_ROOT",
     "RUNTIME_ROOT",
     "TEST_RUNTIME_ROOT",
     "AppMode",
+    "DatabaseRole",
     "Settings",
     "get_settings",
 ]

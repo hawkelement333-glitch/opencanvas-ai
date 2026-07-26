@@ -279,8 +279,11 @@ frontend, browser, and evidence validation. The
 [architecture handoff](docs/MILESTONE_7_ARCHITECTURE_HANDOFF.md) now define
 the deterministic Indexer, managed PostgreSQL, secure object ingestion,
 durable work, shared limits, observability, recovery, resilience, and final
-production-readiness audit. Milestone 7 implementation has not started;
-checkpoint 7.1 is next. The
+production-readiness audit. [Checkpoint 7.1](docs/MILESTONE_7_1_PRODUCTION_RUNTIME_MANAGED_POSTGRESQL_HANDOFF.md)
+is complete locally: deployed modes now require verified PostgreSQL TLS,
+bounded runtime pools, exact PostgreSQL/pgvector/schema readiness, dedicated
+process credential roles, and guarded one-shot migrations. No managed provider
+was contacted, and checkpoint 7.2 remains unstarted. The
 required roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration

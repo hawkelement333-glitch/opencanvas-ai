@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from opencanvas_api.core.config import DatabaseRole, Settings
+
 
 class Database:
     def __init__(
@@ -17,14 +19,57 @@ class Database:
         *,
         pool_size: int = 10,
         pool_timeout_seconds: float = 15.0,
+        max_overflow: int = 0,
+        pool_recycle_seconds: int = 1_800,
+        connect_timeout_seconds: float = 10.0,
+        statement_timeout_ms: int = 30_000,
+        lock_timeout_ms: int = 5_000,
+        idle_transaction_timeout_ms: int = 30_000,
+        tls_mode: str = "disable",
+        application_name: str = "solarplexus-mobius",
     ) -> None:
         options: dict[str, object] = {"pool_pre_ping": True}
         if database_url.startswith("postgresql"):
-            options.update(pool_size=pool_size, pool_timeout=pool_timeout_seconds)
+            connect_args: dict[str, object] = {
+                "timeout": connect_timeout_seconds,
+                "server_settings": {
+                    "application_name": application_name,
+                    "statement_timeout": str(statement_timeout_ms),
+                    "lock_timeout": str(lock_timeout_ms),
+                    "idle_in_transaction_session_timeout": str(idle_transaction_timeout_ms),
+                },
+            }
+            if tls_mode != "disable":
+                connect_args["ssl"] = tls_mode
+            options.update(
+                pool_size=pool_size,
+                max_overflow=max_overflow,
+                pool_timeout=pool_timeout_seconds,
+                pool_recycle=pool_recycle_seconds,
+                isolation_level="READ COMMITTED",
+                connect_args=connect_args,
+            )
         self.engine = create_async_engine(database_url, **options)
         if database_url.startswith("sqlite"):
             event.listen(self.engine.sync_engine, "connect", _enable_sqlite_foreign_keys)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+
+    @classmethod
+    def from_settings(cls, settings: Settings, *, expected_role: DatabaseRole) -> Database:
+        settings.require_database_role(expected_role)
+        return cls(
+            settings.database_url_value,
+            pool_size=settings.database_pool_size,
+            pool_timeout_seconds=settings.database_pool_timeout_seconds,
+            max_overflow=settings.database_max_overflow,
+            pool_recycle_seconds=settings.database_pool_recycle_seconds,
+            connect_timeout_seconds=settings.database_connect_timeout_seconds,
+            statement_timeout_ms=settings.database_statement_timeout_ms,
+            lock_timeout_ms=settings.database_lock_timeout_ms,
+            idle_transaction_timeout_ms=settings.database_idle_transaction_timeout_ms,
+            tls_mode=settings.database_tls_mode,
+            application_name=f"{settings.database_application_name}-{expected_role.value}",
+        )
 
     async def dispose(self) -> None:
         await self.engine.dispose()

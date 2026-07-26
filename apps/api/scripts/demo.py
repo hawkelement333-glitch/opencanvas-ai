@@ -13,6 +13,8 @@ import urllib.request
 from collections.abc import Mapping
 from pathlib import Path
 
+from pydantic import SecretStr
+
 API_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = API_ROOT.parents[1]
 sys.path.insert(0, str(API_ROOT))
@@ -22,6 +24,7 @@ from opencanvas_api.core.config import (  # noqa: E402
     DEMO_DATABASE_URL,
     DEMO_DOCUMENT_STORAGE_ROOT,
     DEMO_RUNTIME_ROOT,
+    AppMode,
     Settings,
 )
 from opencanvas_api.db.session import Database  # noqa: E402
@@ -69,10 +72,10 @@ def validate_demo_environment(environment: Mapping[str, str]) -> Settings:
     if environment.get("OPENAI_API_KEY") or environment.get("OPENCANVAS_OPENAI_API_KEY"):
         raise RuntimeError("The demo environment must not contain OpenAI credentials.")
     settings = Settings(
-        app_mode="demo",
+        app_mode=AppMode.DEMO,
         environment="development",
         demo_mode=True,
-        database_url=DEMO_DATABASE_URL,
+        database_url=SecretStr(DEMO_DATABASE_URL),
         ai_provider="mock",
         embedding_provider="mock",
         storage_provider="demo",
@@ -96,7 +99,7 @@ def _migrate(environment: Mapping[str, str]) -> None:
 
 async def _seed(environment: Mapping[str, str]) -> None:
     settings = validate_demo_environment(environment)
-    database = Database(settings.database_url)
+    database = Database(settings.database_url_value)
     try:
         async with database.sessions() as session:
             result = await seed_demo(session, settings.document_storage_root)

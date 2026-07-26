@@ -2,7 +2,8 @@
 
 Date: 2026-07-26
 
-Overall status: architecture complete locally; implementation not started
+Overall status: architecture and checkpoint 7.1 complete locally; checkpoint
+7.2 not started
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -15,6 +16,9 @@ Implementation plan:
 
 Architecture handoff:
 [`MILESTONE_7_ARCHITECTURE_HANDOFF.md`](MILESTONE_7_ARCHITECTURE_HANDOFF.md)
+
+Checkpoint 7.1 handoff:
+[`MILESTONE_7_1_PRODUCTION_RUNTIME_MANAGED_POSTGRESQL_HANDOFF.md`](MILESTONE_7_1_PRODUCTION_RUNTIME_MANAGED_POSTGRESQL_HANDOFF.md)
 
 ## Baseline
 
@@ -52,7 +56,8 @@ Architecture handoff:
 | Provider/configuration/secret strategy             | Complete    |
 | Test and runbook strategy                          | Complete    |
 | Milestone 8 entry criteria                         | Complete    |
-| Production implementation                          | Not started |
+| 7.1 production runtime implementation              | Complete    |
+| 7.2–7.8 implementation                             | Not started |
 | Live infrastructure/provisioning/deployment        | Not started |
 
 ## Formal implementation checkpoints
@@ -73,7 +78,7 @@ required, and closed before the next begins.
 
 | Checkpoint | Planned revision | Direct parent   | Status                                           |
 | ---------- | ---------------- | --------------- | ------------------------------------------------ |
-| 7.1        | None             | N/A             | Runtime/configuration only                       |
+| 7.1        | None             | N/A             | Complete; runtime/configuration only             |
 | 7.2        | `20260726_0026`  | `20260725_0025` | Planned, not created                             |
 | 7.3        | `20260726_0027`  | `20260726_0026` | Planned, not created                             |
 | 7.4        | `20260726_0028`  | `20260726_0027` | Planned, not created                             |
@@ -203,4 +208,5 @@ production-readiness defect.
 
 ## Next authorized work
 
-Checkpoint 7.1 — Production Runtime Foundation and Managed PostgreSQL.
+Checkpoint 7.2 — Deterministic Indexer and Ingestion Pipeline. It remains
+unstarted at this handoff.

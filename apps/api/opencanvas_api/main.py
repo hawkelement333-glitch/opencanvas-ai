@@ -14,7 +14,8 @@ from starlette.responses import Response
 from opencanvas_api import __version__
 from opencanvas_api.api.errors import ApiError
 from opencanvas_api.api.router import api_router
-from opencanvas_api.core.config import get_settings
+from opencanvas_api.core.config import DatabaseRole, get_settings
+from opencanvas_api.db.runtime import DatabaseRuntimeError, validate_database_runtime
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.documents import reconcile_interrupted_processing
 
@@ -25,20 +26,22 @@ logger = structlog.get_logger("opencanvas_api")
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    database = Database(
-        settings.database_url,
-        pool_size=settings.database_pool_size,
-        pool_timeout_seconds=settings.database_pool_timeout_seconds,
-    )
+    database = Database.from_settings(settings, expected_role=DatabaseRole.API)
     application.state.database = database
     try:
-        async with database.engine.connect() as connection:
-            has_document_table = await connection.run_sync(
-                lambda sync_connection: inspect(sync_connection).has_table("documents")
+        try:
+            await validate_database_runtime(
+                database.engine, settings, expected_role=DatabaseRole.API
             )
-        if has_document_table:
-            async with database.sessions() as session:
-                await reconcile_interrupted_processing(session)
+            async with database.engine.connect() as connection:
+                has_document_table = await connection.run_sync(
+                    lambda sync_connection: inspect(sync_connection).has_table("documents")
+                )
+            if has_document_table:
+                async with database.sessions() as session:
+                    await reconcile_interrupted_processing(session)
+        except DatabaseRuntimeError as exc:
+            logger.warning("database_not_ready_at_startup", error_category=exc.code)
         yield
     finally:
         await database.dispose()

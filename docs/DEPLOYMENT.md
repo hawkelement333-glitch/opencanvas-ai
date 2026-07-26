@@ -10,10 +10,11 @@ object ingestion and malware quarantine, durable work, shared rate limits,
 observability, recovery exercises, capacity/resilience testing, and the final
 production-readiness audit.
 
-Those checkpoints have not been implemented. This guide describes the current
-runtime and intended operating procedure; it is not evidence that managed
-infrastructure, hostile-upload controls, failover, restore, capacity, or
-production security have passed. Checkpoint 7.1 is the next authorized work.
+Checkpoint 7.1 is complete locally. It implements the provider-neutral runtime
+contract, but no managed service was provisioned or contacted. This guide is
+not evidence that a managed database, hostile-upload controls, failover,
+restore, capacity, or production security have passed. Checkpoint 7.2 remains
+unstarted.
 
 SolarPlexus Mobius has five explicit runtime modes: `demo`, `development`, `test`, `staging`, and
 `production`. The API validates the selected mode and all mode-dependent provider configuration at
@@ -79,6 +80,10 @@ Start from `.env.example`, inject secrets through the deployment platform, and s
 - `OPENCANVAS_APP_URL=https://...`
 - `OPENCANVAS_CORS_ORIGINS=["https://..."]`
 - `OPENCANVAS_DATABASE_URL=postgresql+asyncpg://...`
+- `OPENCANVAS_DATABASE_ROLE=api` for API processes and `worker` for workers
+- `OPENCANVAS_DATABASE_TLS_MODE=verify-full`
+- bounded pool, acquisition, connection, statement, lock, idle-transaction,
+  and recycle values from `.env.example`
 - `OPENCANVAS_AUTH_ENABLED=true`
 - `OPENCANVAS_AUTH_TEST_BYPASS=false`
 - a unique `OPENCANVAS_SESSION_SECRET` containing at least 32 random bytes
@@ -94,6 +99,14 @@ Use separate databases, buckets/prefixes, session secrets, SMTP credentials, Ope
 telemetry destinations for staging and production. Never mount the demo database or demo storage
 into either environment. Never set `APP_MODE=demo` in a deployed user environment.
 
+Inject exactly one database credential into each process. API, worker, and
+migration tasks use distinct least-privilege database users. API and worker
+users must not be superusers, database/role creators, replication or RLS-bypass
+roles, or schema creators. The one-shot migration task receives
+`OPENCANVAS_DATABASE_ROLE=migration`; its credential is never injected into
+normal API or worker containers. Backup, observability, and emergency
+credentials remain separately controlled and are not application credentials.
+
 Cookies are HTTP-only for the session token and secure in staging/production. TLS must terminate
 at a trusted proxy or the service. Preserve `X-Request-ID` across that proxy and do not log cookie,
 authorization, CSRF, SMTP, storage, or OpenAI secrets.
@@ -105,7 +118,7 @@ authorization, CSRF, SMTP, storage, or OpenAI secrets.
 3. Run the migration image as a one-shot task:
 
    ```sh
-   alembic upgrade head
+   python -m scripts.migrate --expected-current 20260725_0024
    ```
 
 4. Deploy worker instances and wait for a fresh worker heartbeat.
@@ -117,6 +130,29 @@ authorization, CSRF, SMTP, storage, or OpenAI secrets.
 
 Do not run multiple application revisions against an incompatible schema. Migrations must finish
 before new API/worker instances accept traffic.
+
+The guarded runner verifies the repository target `20260725_0025`, verifies
+the operator-declared current revision (`base` for an empty database), obtains
+one PostgreSQL session advisory lock, uses a direct non-pooled connection, and
+verifies the final revision. A competing runner fails safely. API and worker
+readiness stays false while the migration lock is held or the schema differs.
+
+## Database credential replacement
+
+Credential replacement is restart-based; hot rotation is not claimed.
+
+1. Create a new least-privilege credential for exactly one process role.
+2. Validate it in an isolated staging process with verified TLS and readiness.
+3. Replace the secret reference and perform a bounded rolling restart.
+4. Removed instances stop receiving work and dispose their SQLAlchemy engine;
+   disposal closes the old pool.
+5. Require readiness on replacement instances before shifting traffic.
+6. Revoke the old credential only after old pools are drained.
+7. If validation fails, restore the prior secret reference and restart; do not
+   broaden privileges or inject migration credentials as a fallback.
+
+Migration credential rotation is a separate one-shot-task procedure and never
+changes API or worker secret references.
 
 ## Backup
 
