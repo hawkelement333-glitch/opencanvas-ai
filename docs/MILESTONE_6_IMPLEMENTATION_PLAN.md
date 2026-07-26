@@ -4,9 +4,9 @@ Date: 2026-07-25
 
 Architecture baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: checkpoints 6.1–6.3 complete locally; checkpoint 6.4 not started
+Status: checkpoints 6.1–6.4 complete locally; checkpoint 6.5 not started
 
-Next checkpoint: 6.4 — Comments and Collaboration Activity
+Next checkpoint: 6.5 — Shared Workflow and Agent Governance
 
 ## Governing rules
 
@@ -37,7 +37,7 @@ Every checkpoint must:
 The repository retains one Alembic head and every migration has one direct
 parent. Current checkpoint allocation is 6.1 -> `20260725_0021` (complete),
 6.2 -> `20260725_0022` (complete), 6.3 -> `20260725_0023` (complete), and
-6.4 -> `20260725_0024` (planned). Checkpoints 6.5–6.7 have no migration
+6.4 -> `20260725_0024` (complete). Checkpoints 6.5–6.7 have no migration
 assigned unless their later approved implementation proves new persistence is
 required.
 
@@ -359,6 +359,15 @@ GET  /workspaces/{workspaceId}/collaboration-activity
 
 Completion:
 `MILESTONE 6.4 COMPLETE LOCALLY — READY FOR 6.5 SHARED WORKFLOW AND AGENT GOVERNANCE`
+
+Implementation record: migration `20260725_0024`, with direct parent
+`20260725_0023`, implements the five scoped append-only comment/thread tables
+and database guards. `CommentService` provides exact-scope creation, bounded
+replies, author revisions, moderator/author tombstones, and thread
+resolve/reopen transitions. `CollaborationActivityService` performs
+audience-aware reads over the existing committed domain-event, transactional
+outbox, and `activity-v1` projection. No notification persistence, second
+feed, frontend component, or 6.5 governance behavior was added.
 
 ## 6.5 — Shared Workflow and Agent Governance
 

@@ -6,14 +6,15 @@ Branch: `milestone-6-multi-workspace-collaboration-architecture-local`
 
 Architecture baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: architecture and checkpoints 6.1–6.3 complete locally
+Status: architecture and checkpoints 6.1–6.4 complete locally
 
-Next checkpoint: 6.4 — Comments and Collaboration Activity
+Next checkpoint: 6.5 — Shared Workflow and Agent Governance
 
-Implementation record: checkpoints 6.1–6.3 realize the approved membership,
-authority, typed-sharing, ownership, and revocation foundation at sole
-Alembic head `20260725_0023`. They do not alter
-the remaining architecture or begin generalized collaboration authority.
+Implementation record: checkpoints 6.1–6.4 realize the approved membership,
+authority, typed-sharing, ownership, revocation, bounded-comment, and
+audience-aware activity foundation at sole Alembic head `20260725_0024`.
+They do not alter the remaining architecture or begin shared workflow/agent
+governance.
 
 ## 1. Purpose
 
@@ -672,6 +673,13 @@ author scope. Depth, size, count, and rate are server-bounded. Cross-resource
 or cross-workspace reply IDs return not found. Resolution changes thread
 state, not comment evidence.
 
+Implementation-grounded limits are 5,000 Unicode code points per comment,
+four reply levels, 500 comments per thread, 30 creations per active
+membership per minute, a default page of 50, and a maximum page of 100.
+Supported resources are canvases, canonical objects, workflow identities, and
+agent identities. Plain text may contain bare `https` URLs; HTML, raw
+Markdown, unsafe schemes, embeds, and control characters fail closed.
+
 ## 17. Events, outbox, activity, and notifications
 
 Milestone 6 extends `EVENT_TYPE_REGISTRY`, `DomainEventService`, the existing
@@ -718,6 +726,12 @@ state. Core Milestone 6 does not require notifications. If later included,
 they are a bounded in-product projection from authorized events with
 `unread/read/dismissed` state; they add no email/chat platform and grant no
 authority. Invitation email remains the only required email delivery.
+
+Checkpoint 6.4 implements the closed event types `comment.created`,
+`comment.reply.created`, `comment.revised`, `comment.tombstoned`,
+`comment.thread.resolved`, and `comment.thread.reopened`. Their payloads carry
+bounded operational facts and never comment text. Activity reads only
+delivered/projected records and re-evaluate current resource visibility.
 
 ## 18. Tenant isolation
 
@@ -945,7 +959,7 @@ Checkpoint alignment is:
 - 6.1 -> `20260725_0021` — complete;
 - 6.2 -> `20260725_0022` — complete;
 - 6.3 -> `20260725_0023` — complete locally;
-- 6.4 -> `20260725_0024` — planned, not created;
+- 6.4 -> `20260725_0024` — complete locally;
 - 6.5, 6.6, and 6.7 -> no migration currently assigned.
 
 A future checkpoint that proves new persistence is necessary uses the next
@@ -1201,6 +1215,6 @@ Milestone 6 architecture is complete when these documents agree and all
 documentation/repository-integrity checks pass. No implementation behavior is
 claimed.
 
-Milestone 6.1 is complete. Milestone 6.2 must begin only under a separate
-explicit request from the committed migration-boundary amendment baseline,
-with a fresh repository and migration-state verification.
+Milestone 6.1–6.4 are complete locally. Milestone 6.5 must begin only under a
+separate explicit request from the committed 6.4 baseline, with a fresh
+repository and migration-state verification.

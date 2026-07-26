@@ -15,6 +15,9 @@ boundary in migration `20260725_0022`; see
 Milestone 6.3 subsequently completed its separately allocated direct child
 `20260725_0023`; see
 [MILESTONE_6_3_RESOURCE_SHARING_OWNERSHIP_REVOCATION_HANDOFF.md](MILESTONE_6_3_RESOURCE_SHARING_OWNERSHIP_REVOCATION_HANDOFF.md).
+Milestone 6.4 subsequently completed its separately allocated direct child
+`20260725_0024`; see
+[MILESTONE_6_4_COMMENTS_COLLABORATION_ACTIVITY_HANDOFF.md](MILESTONE_6_4_COMMENTS_COLLABORATION_ACTIVITY_HANDOFF.md).
 
 ## Original contradiction
 
@@ -127,9 +130,9 @@ Excluded:
 ## Checkpoint alignment
 
 - 6.1 -> `20260725_0021` — complete
-- 6.2 -> `20260725_0022` — planned, not created
-- 6.3 -> `20260725_0023` — planned, not created
-- 6.4 -> `20260725_0024` — planned, not created
+- 6.2 -> `20260725_0022` — complete and immutable
+- 6.3 -> `20260725_0023` — complete and immutable
+- 6.4 -> `20260725_0024` — complete and immutable
 - 6.5 -> no migration currently assigned
 - 6.6 -> no migration currently assigned
 - 6.7 -> no migration currently assigned

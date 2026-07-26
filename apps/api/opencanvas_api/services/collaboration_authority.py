@@ -87,6 +87,12 @@ class CollaborationAction(StrEnum):
     OWNERSHIP_TRANSFER_REQUEST = "ownership_transfer.request"
     OWNERSHIP_TRANSFER_ACCEPT = "ownership_transfer.accept"
     OWNERSHIP_TRANSFER_CANCEL = "ownership_transfer.cancel"
+    COMMENT_CREATE = "comment.create"
+    COMMENT_REVISE = "comment.revise"
+    COMMENT_TOMBSTONE = "comment.tombstone"
+    COMMENT_MODERATE = "comment.moderate"
+    COMMENT_THREAD_RESOLVE = "comment.thread.resolve"
+    COLLABORATION_ACTIVITY_LIST = "collaboration_activity.list"
 
 
 _READ = frozenset(
@@ -178,6 +184,14 @@ ACTION_PERMISSIONS: dict[CollaborationAction, CollaborationPermission] = {
     ),
     CollaborationAction.OWNERSHIP_TRANSFER_CANCEL: (
         CollaborationPermission.OWNERSHIP_TRANSFER_CANCEL
+    ),
+    CollaborationAction.COMMENT_CREATE: CollaborationPermission.COMMENT_CREATE,
+    CollaborationAction.COMMENT_REVISE: CollaborationPermission.COMMENT_EDIT_OWN,
+    CollaborationAction.COMMENT_TOMBSTONE: CollaborationPermission.COMMENT_EDIT_OWN,
+    CollaborationAction.COMMENT_MODERATE: CollaborationPermission.COMMENT_MODERATE,
+    CollaborationAction.COMMENT_THREAD_RESOLVE: CollaborationPermission.COMMENT_RESOLVE,
+    CollaborationAction.COLLABORATION_ACTIVITY_LIST: (
+        CollaborationPermission.COLLABORATION_ACTIVITY_VIEW
     ),
 }
 

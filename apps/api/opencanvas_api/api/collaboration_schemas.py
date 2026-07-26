@@ -118,6 +118,116 @@ class OwnershipTransferOut(ApiModel):
     duplicate: bool = False
 
 
+class CommentCreate(ApiModel):
+    content: str = Field(min_length=1, max_length=5_000)
+    parent_comment_id: uuid.UUID | None = None
+    idempotency_key: str = Field(
+        min_length=8,
+        max_length=128,
+        pattern=IDEMPOTENCY_PATTERN,
+    )
+
+
+class CommentRevisionCreate(ApiModel):
+    expected_revision_id: uuid.UUID
+    content: str = Field(min_length=1, max_length=5_000)
+    idempotency_key: str = Field(
+        min_length=8,
+        max_length=128,
+        pattern=IDEMPOTENCY_PATTERN,
+    )
+
+
+class CommentModerate(ApiModel):
+    tombstone_kind: Literal["remove_by_author", "hide_by_moderation"]
+    reason_code: str = Field(min_length=3, max_length=64)
+    idempotency_key: str = Field(
+        min_length=8,
+        max_length=128,
+        pattern=IDEMPOTENCY_PATTERN,
+    )
+
+
+class CommentThreadStateChange(ApiModel):
+    target_state: Literal["resolved", "reopened"]
+    idempotency_key: str = Field(
+        min_length=8,
+        max_length=128,
+        pattern=IDEMPOTENCY_PATTERN,
+    )
+
+
+class CommentOut(ApiModel):
+    comment_id: uuid.UUID
+    thread_id: uuid.UUID
+    workspace_id: uuid.UUID
+    resource_kind: ResourceKind
+    resource_id: uuid.UUID
+    parent_comment_id: uuid.UUID | None
+    depth: int
+    thread_sequence: int
+    thread_state: Literal["open", "resolved", "reopened"]
+    state: Literal["active", "edited", "hidden_by_moderation", "removed_by_author"]
+    revision_id: uuid.UUID | None
+    revision_sequence: int | None
+    content: str | None
+    author_user_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+    duplicate: bool = False
+
+
+class CommentRevisionOut(ApiModel):
+    revision_id: uuid.UUID
+    comment_id: uuid.UUID
+    sequence: int
+    revision_kind: Literal["created", "edited"]
+    author_user_id: uuid.UUID
+    content: str
+    content_digest: str
+    trace_id: uuid.UUID
+    created_at: datetime
+    duplicate: bool = False
+
+
+class CommentThreadOut(ApiModel):
+    thread_id: uuid.UUID
+    workspace_id: uuid.UUID
+    resource_kind: ResourceKind
+    resource_id: uuid.UUID
+    state: Literal["open", "resolved", "reopened"]
+    updated_at: datetime
+    duplicate: bool = False
+
+
+class CollaborationActivityOut(ApiModel):
+    activity_id: uuid.UUID
+    event_id: uuid.UUID
+    event_type: Literal[
+        "comment.created",
+        "comment.reply.created",
+        "comment.revised",
+        "comment.tombstoned",
+        "comment.thread.resolved",
+        "comment.thread.reopened",
+        "resource.share.created",
+        "resource.share.changed",
+        "resource.share.revoked",
+        "resource.visibility.changed",
+        "resource.ownership_changed",
+    ]
+    workspace_id: uuid.UUID
+    canvas_id: uuid.UUID | None
+    sequence: int
+    resource_kind: ResourceKind
+    resource_id: uuid.UUID
+    comment_id: uuid.UUID | None
+    thread_id: uuid.UUID | None
+    actor_user_id: uuid.UUID
+    trace_id: uuid.UUID
+    occurred_at: datetime
+
+
 class InvitationCredentialCommand(InvitationCommand):
     token: SecretStr
 
@@ -208,6 +318,14 @@ class InvitationOut(ApiModel):
 __all__ = [
     "ApprovalAuthorityCreate",
     "ApprovalAuthorityOut",
+    "CollaborationActivityOut",
+    "CommentCreate",
+    "CommentModerate",
+    "CommentOut",
+    "CommentRevisionCreate",
+    "CommentRevisionOut",
+    "CommentThreadOut",
+    "CommentThreadStateChange",
     "InvitationCommand",
     "InvitationCreate",
     "InvitationCredentialCommand",

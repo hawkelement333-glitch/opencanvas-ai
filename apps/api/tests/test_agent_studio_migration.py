@@ -48,7 +48,7 @@ def test_agent_studio_migration_cycle_scope_and_append_only(tmp_path: Path) -> N
     command.upgrade(config, "head")
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "20260725_0023",
+            "20260725_0024",
         )
         tables = {
             row[0]
@@ -135,7 +135,7 @@ def test_agent_studio_migration_cycle_scope_and_append_only(tmp_path: Path) -> N
     command.upgrade(config, "head")
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "20260725_0023",
+            "20260725_0024",
         )
 
 
@@ -143,7 +143,7 @@ def test_agent_studio_is_sole_head_and_postgresql_ddl_compiles() -> None:
     api_directory = Path(__file__).resolve().parents[1]
     config = Config(api_directory / "alembic.ini")
     config.set_main_option("script_location", str(api_directory / "alembic"))
-    assert ScriptDirectory.from_config(config).get_heads() == ["20260725_0023"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20260725_0024"]
 
     buffer = io.StringIO()
     offline = Config(api_directory / "alembic.ini", output_buffer=buffer)

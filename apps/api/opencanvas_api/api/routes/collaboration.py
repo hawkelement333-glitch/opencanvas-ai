@@ -10,6 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from opencanvas_api.api.collaboration_schemas import (
     ApprovalAuthorityCreate,
     ApprovalAuthorityOut,
+    CollaborationActivityOut,
+    CommentCreate,
+    CommentModerate,
+    CommentOut,
+    CommentRevisionCreate,
+    CommentRevisionOut,
+    CommentThreadOut,
+    CommentThreadStateChange,
     InvitationCommand,
     InvitationCreate,
     InvitationCredentialCommand,
@@ -48,6 +56,16 @@ from opencanvas_api.services.collaboration import (
     MembershipService,
     MembershipView,
     mask_email,
+)
+from opencanvas_api.services.collaboration_comments import (
+    CollaborationActivityRecord,
+    CollaborationActivityService,
+    CommentRecord,
+    CommentService,
+    CommentThreadState,
+    CommentTombstoneKind,
+    RevisionRecord,
+    ThreadRecord,
 )
 from opencanvas_api.services.collaboration_management import (
     ApprovalAuthorityService,
@@ -865,6 +883,222 @@ async def cancel_ownership_transfer(
     )
 
 
+@router.get(
+    "/workspaces/{workspace_id}/resources/{resource_kind}/{resource_id}/comments",
+    response_model=list[CommentOut],
+)
+async def list_comments(
+    workspace_id: uuid.UUID,
+    resource_kind: ShareResourceKind,
+    resource_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=100_000),
+) -> list[CommentOut]:
+    try:
+        records = await CommentService(session).list_comments(
+            principal=principal,
+            workspace_id=workspace_id,
+            resource_kind=resource_kind,
+            resource_id=resource_id,
+            limit=limit,
+            offset=offset,
+        )
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    return [_comment_out(record) for record in records]
+
+
+@router.post(
+    "/workspaces/{workspace_id}/resources/{resource_kind}/{resource_id}/comments",
+    response_model=CommentOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_comment(
+    workspace_id: uuid.UUID,
+    resource_kind: ShareResourceKind,
+    resource_id: uuid.UUID,
+    payload: CommentCreate,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> CommentOut:
+    try:
+        record = await CommentService(session).create(
+            principal=principal,
+            workspace_id=workspace_id,
+            resource_kind=resource_kind,
+            resource_id=resource_id,
+            content=payload.content,
+            parent_comment_id=payload.parent_comment_id,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "collaboration_conflict",
+            "The collaboration request conflicts with current state.",
+        ) from exc
+    return _comment_out(record)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/comments/{comment_id}/revisions",
+    response_model=list[CommentRevisionOut],
+)
+async def list_comment_revisions(
+    workspace_id: uuid.UUID,
+    comment_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=100_000),
+) -> list[CommentRevisionOut]:
+    try:
+        revisions = await CommentService(session).list_revisions(
+            principal=principal,
+            workspace_id=workspace_id,
+            comment_id=comment_id,
+            limit=limit,
+            offset=offset,
+        )
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    return [_comment_revision_out(revision) for revision in revisions]
+
+
+@router.post(
+    "/workspaces/{workspace_id}/comments/{comment_id}/revisions",
+    response_model=CommentRevisionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def revise_comment(
+    workspace_id: uuid.UUID,
+    comment_id: uuid.UUID,
+    payload: CommentRevisionCreate,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> CommentRevisionOut:
+    try:
+        record = await CommentService(session).revise(
+            principal=principal,
+            workspace_id=workspace_id,
+            comment_id=comment_id,
+            expected_revision_id=payload.expected_revision_id,
+            content=payload.content,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "collaboration_conflict",
+            "The collaboration request conflicts with current state.",
+        ) from exc
+    return _revision_record_out(record)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/comments/{comment_id}/moderate",
+    response_model=CommentOut,
+)
+async def tombstone_comment(
+    workspace_id: uuid.UUID,
+    comment_id: uuid.UUID,
+    payload: CommentModerate,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> CommentOut:
+    try:
+        record = await CommentService(session).tombstone(
+            principal=principal,
+            workspace_id=workspace_id,
+            comment_id=comment_id,
+            tombstone_kind=CommentTombstoneKind(payload.tombstone_kind),
+            reason_code=payload.reason_code,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "collaboration_conflict",
+            "The collaboration request conflicts with current state.",
+        ) from exc
+    return _comment_out(record)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/comment-threads/{thread_id}/resolve",
+    response_model=CommentThreadOut,
+)
+async def change_comment_thread_state(
+    workspace_id: uuid.UUID,
+    thread_id: uuid.UUID,
+    payload: CommentThreadStateChange,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> CommentThreadOut:
+    try:
+        record = await CommentService(session).set_thread_state(
+            principal=principal,
+            workspace_id=workspace_id,
+            thread_id=thread_id,
+            target_state=CommentThreadState(payload.target_state),
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "collaboration_conflict",
+            "The collaboration request conflicts with current state.",
+        ) from exc
+    return _thread_out(record)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/collaboration-activity",
+    response_model=list[CollaborationActivityOut],
+)
+async def list_collaboration_activity(
+    workspace_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+    resource_kind: Annotated[ShareResourceKind | None, Query(alias="resourceKind")] = None,
+    resource_id: Annotated[uuid.UUID | None, Query(alias="resourceId")] = None,
+    event_type: Annotated[str | None, Query(alias="eventType", max_length=64)] = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=100_000),
+) -> list[CollaborationActivityOut]:
+    try:
+        records = await CollaborationActivityService(session).list_activity(
+            principal=principal,
+            workspace_id=workspace_id,
+            resource_kind=resource_kind,
+            resource_id=resource_id,
+            event_type=event_type,
+            limit=limit,
+            offset=offset,
+        )
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    return [_collaboration_activity_out(record) for record in records]
+
+
 def _share_out(record: ShareRecord) -> ShareOut:
     share = record.share
     transition = record.transition
@@ -924,6 +1158,98 @@ def _transfer_out(record: TransferRecord) -> OwnershipTransferOut:
         authority_generation=transition.authority_generation,
         expires_at=utc(transfer.expires_at),
         duplicate=record.duplicate,
+    )
+
+
+def _comment_out(record: CommentRecord) -> CommentOut:
+    comment = record.comment
+    revision = record.revision
+    return CommentOut(
+        comment_id=comment.comment_id,
+        thread_id=comment.thread_id,
+        workspace_id=comment.workspace_id,
+        resource_kind=cast(
+            Literal["canvas", "canonical_object", "workflow", "agent"],
+            comment.resource_kind,
+        ),
+        resource_id=comment.resource_id,
+        parent_comment_id=comment.parent_comment_id,
+        depth=comment.depth,
+        thread_sequence=comment.thread_sequence,
+        thread_state=cast(
+            Literal["open", "resolved", "reopened"],
+            record.thread_transition.current_state,
+        ),
+        state=cast(
+            Literal["active", "edited", "hidden_by_moderation", "removed_by_author"],
+            record.transition.current_state,
+        ),
+        revision_id=revision.revision_id if revision else None,
+        revision_sequence=revision.sequence if revision else None,
+        content=revision.content if revision else None,
+        author_user_id=comment.author_user_id,
+        created_at=utc(comment.created_at),
+        updated_at=utc(record.transition.recorded_at),
+        duplicate=record.duplicate,
+    )
+
+
+def _comment_revision_out(revision: object) -> CommentRevisionOut:
+    from opencanvas_api.db.models import CollaborationCommentRevision
+
+    row = cast(CollaborationCommentRevision, revision)
+    return CommentRevisionOut(
+        revision_id=row.revision_id,
+        comment_id=row.comment_id,
+        sequence=row.sequence,
+        revision_kind=cast(Literal["created", "edited"], row.revision_kind),
+        author_user_id=row.author_user_id,
+        content=row.content,
+        content_digest=row.content_digest,
+        trace_id=row.trace_id,
+        created_at=utc(row.created_at),
+    )
+
+
+def _revision_record_out(record: RevisionRecord) -> CommentRevisionOut:
+    return _comment_revision_out(record.revision).model_copy(update={"duplicate": record.duplicate})
+
+
+def _thread_out(record: ThreadRecord) -> CommentThreadOut:
+    return CommentThreadOut(
+        thread_id=record.thread.thread_id,
+        workspace_id=record.thread.workspace_id,
+        resource_kind=cast(
+            Literal["canvas", "canonical_object", "workflow", "agent"],
+            record.thread.resource_kind,
+        ),
+        resource_id=record.thread.resource_id,
+        state=cast(
+            Literal["open", "resolved", "reopened"],
+            record.transition.current_state,
+        ),
+        updated_at=utc(record.transition.recorded_at),
+        duplicate=record.duplicate,
+    )
+
+
+def _collaboration_activity_out(
+    record: CollaborationActivityRecord,
+) -> CollaborationActivityOut:
+    return CollaborationActivityOut(
+        activity_id=record.activity_id,
+        event_id=record.event_id,
+        event_type=record.event_type.value,
+        workspace_id=record.workspace_id,
+        canvas_id=record.canvas_id,
+        sequence=record.sequence,
+        resource_kind=record.resource_kind.value,
+        resource_id=record.resource_id,
+        comment_id=record.comment_id,
+        thread_id=record.thread_id,
+        actor_user_id=record.actor_user_id,
+        trace_id=record.trace_id,
+        occurred_at=utc(record.occurred_at),
     )
 
 

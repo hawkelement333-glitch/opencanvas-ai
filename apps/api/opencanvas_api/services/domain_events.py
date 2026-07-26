@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal, cast
 
 from pydantic import JsonValue
-from sqlalchemy import Select, and_, exists, or_, select, update
+from sqlalchemy import Select, and_, exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
@@ -18,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from opencanvas_api.db.models import (
     CanonicalGraphRelationship,
     Canvas,
+    CollaborationComment,
+    CollaborationCommentThread,
     CollaborationOwnershipTransfer,
     CollaborationResource,
     CollaborationResourceShare,
@@ -128,6 +130,12 @@ DomainEventType = Literal[
     "ownership_transfer.rejected",
     "ownership_transfer.canceled",
     "revocation.bulk_completed",
+    "comment.created",
+    "comment.reply.created",
+    "comment.revised",
+    "comment.tombstoned",
+    "comment.thread.resolved",
+    "comment.thread.reopened",
 ]
 SubjectKind = Literal[
     "canonical_resource",
@@ -155,6 +163,8 @@ SubjectKind = Literal[
     "resource_share",
     "ownership_transfer",
     "authority_fence",
+    "comment_thread",
+    "comment",
 ]
 OriginType = Literal[
     "authenticated_user",
@@ -254,6 +264,15 @@ _RESOURCE_PAYLOAD = frozenset(
         "targetCount",
         "scopeKind",
         "authorityGeneration",
+    }
+)
+_COMMENT_PAYLOAD = frozenset(
+    {
+        "resourceKind",
+        "state",
+        "revisionSequence",
+        "replyDepth",
+        "reasonCode",
     }
 )
 
@@ -514,6 +533,16 @@ EVENT_TYPE_REGISTRY: dict[DomainEventType, EventTypeSpec] = {
     ),
     "revocation.bulk_completed": EventTypeSpec(
         "authority_fence", _RESOURCE_PAYLOAD, canvas_required=False
+    ),
+    "comment.created": EventTypeSpec("comment", _COMMENT_PAYLOAD, canvas_required=False),
+    "comment.reply.created": EventTypeSpec("comment", _COMMENT_PAYLOAD, canvas_required=False),
+    "comment.revised": EventTypeSpec("comment", _COMMENT_PAYLOAD, canvas_required=False),
+    "comment.tombstoned": EventTypeSpec("comment", _COMMENT_PAYLOAD, canvas_required=False),
+    "comment.thread.resolved": EventTypeSpec(
+        "comment_thread", _COMMENT_PAYLOAD, canvas_required=False
+    ),
+    "comment.thread.reopened": EventTypeSpec(
+        "comment_thread", _COMMENT_PAYLOAD, canvas_required=False
     ),
 }
 
@@ -931,7 +960,17 @@ class DomainEventService:
             "resource_share",
             "ownership_transfer",
             "authority_fence",
+            "comment_thread",
+            "comment",
         }:
+            latest_membership_transition = (
+                select(func.max(WorkspaceMembershipTransition.sequence))
+                .where(
+                    WorkspaceMembershipTransition.membership_id == WorkspaceMembership.membership_id
+                )
+                .correlate(WorkspaceMembership)
+                .scalar_subquery()
+            )
             active_actor = await self.session.scalar(
                 select(WorkspaceMembership.user_id)
                 .join(
@@ -942,6 +981,7 @@ class DomainEventService:
                 .where(
                     WorkspaceMembership.workspace_id == command.workspace_id,
                     WorkspaceMembership.user_id == command.actor_user_id,
+                    WorkspaceMembershipTransition.sequence == latest_membership_transition,
                     WorkspaceMembershipTransition.current_state == "active",
                 )
                 .order_by(WorkspaceMembershipTransition.recorded_at.desc())
@@ -978,6 +1018,24 @@ class DomainEventService:
                     transfer.requester_user_id,
                     transfer.recipient_user_id,
                 }:
+                    raise DomainEventNotFoundError()
+            elif spec.subject_kind == "comment_thread":
+                subject = await self.session.scalar(
+                    select(CollaborationCommentThread.thread_id).where(
+                        CollaborationCommentThread.thread_id == command.subject_id,
+                        CollaborationCommentThread.workspace_id == command.workspace_id,
+                    )
+                )
+                if subject is None:
+                    raise DomainEventNotFoundError()
+            elif spec.subject_kind == "comment":
+                subject = await self.session.scalar(
+                    select(CollaborationComment.comment_id).where(
+                        CollaborationComment.comment_id == command.subject_id,
+                        CollaborationComment.workspace_id == command.workspace_id,
+                    )
+                )
+                if subject is None:
                     raise DomainEventNotFoundError()
         elif command.actor_user_id != command.user_id:
             raise DomainEventNotFoundError()

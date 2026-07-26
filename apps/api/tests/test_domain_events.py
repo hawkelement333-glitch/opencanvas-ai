@@ -130,6 +130,8 @@ async def test_closed_existing_registry_persists_event_provenance_and_outbox(
         "resource_share",
         "ownership_transfer",
         "authority_fence",
+        "comment_thread",
+        "comment",
     }
     existing_types = [
         name

@@ -1181,13 +1181,17 @@ class CollaborationRequestIdentity(Base):
             "'share.create', 'share.revoke', 'share.bulk_revoke', "
             "'resource.visibility.change', 'ownership_transfer.request', "
             "'ownership_transfer.accept', 'ownership_transfer.reject', "
-            "'ownership_transfer.cancel')",
+            "'ownership_transfer.cancel', 'comment.create', 'comment.reply', "
+            "'comment.revise', 'comment.tombstone', 'comment.thread.resolve', "
+            "'comment.thread.reopen')",
             name="ck_collaboration_request_operation",
         ),
         CheckConstraint(
             "result_kind IN ('workspace_invitation', 'workspace_membership', "
             "'approval_authority_assignment', 'resource_share_request', "
-            "'collaboration_resource', 'ownership_transfer', 'authority_fence')",
+            "'collaboration_resource', 'ownership_transfer', 'authority_fence', "
+            "'comment_thread', 'comment', 'comment_revision', "
+            "'comment_transition', 'comment_thread_transition')",
             name="ck_collaboration_request_result_kind",
         ),
         CheckConstraint(
@@ -1480,7 +1484,9 @@ class CollaborationAuditEvent(Base):
         CheckConstraint(
             "subject_kind IN ('workspace_membership', 'workspace_invitation', "
             "'approval_authority_assignment', 'collaboration_resource', "
-            "'resource_share', 'ownership_transfer', 'authority_fence')",
+            "'resource_share', 'ownership_transfer', 'authority_fence', "
+            "'comment_thread', 'comment', 'comment_revision', "
+            "'comment_transition')",
             name="ck_collaboration_audit_subject_kind",
         ),
         CheckConstraint(
@@ -2267,6 +2273,517 @@ class CollaborationRevocationFence(Base):
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class CollaborationCommentThread(Base):
+    """Immutable thread identity for one exact collaboration resource."""
+
+    __tablename__ = "collaboration_comment_threads"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["resource_id", "workspace_id", "resource_kind"],
+            [
+                "collaboration_resources.resource_id",
+                "collaboration_resources.workspace_id",
+                "collaboration_resources.resource_kind",
+            ],
+            name="fk_collaboration_comment_thread_resource_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["creator_membership_id", "creator_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_comment_thread_creator_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "thread_id",
+            "workspace_id",
+            "resource_id",
+            "resource_kind",
+            name="uq_collaboration_comment_thread_scope",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "resource_id",
+            "resource_kind",
+            "resource_sequence",
+            name="uq_collaboration_comment_thread_resource_sequence",
+        ),
+        CheckConstraint(
+            "resource_kind IN ('canvas', 'canonical_object', 'workflow', 'agent')",
+            name="ck_collaboration_comment_thread_resource_kind",
+        ),
+        CheckConstraint(
+            "resource_sequence > 0",
+            name="ck_collaboration_comment_thread_sequence",
+        ),
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_collaboration_comment_thread_generation",
+        ),
+        CheckConstraint(
+            "collaboration_policy_version = 'collaboration-policy-v1'",
+            name="ck_collaboration_comment_thread_policy",
+        ),
+        Index(
+            "ix_collaboration_comment_thread_resource",
+            "workspace_id",
+            "resource_kind",
+            "resource_id",
+            "resource_sequence",
+        ),
+        Index(
+            "ix_collaboration_comment_thread_creator",
+            "workspace_id",
+            "creator_membership_id",
+            "created_at",
+        ),
+    )
+
+    thread_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resource_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    canvas_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("canvases.id", ondelete="RESTRICT")
+    )
+    resource_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    creator_membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    creator_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    collaboration_policy_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    creation_request_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    creation_trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    creation_audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationCommentThreadTransition(Base):
+    """Append-only thread resolution and reopening evidence."""
+
+    __tablename__ = "collaboration_comment_thread_transitions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["thread_id", "workspace_id", "resource_id", "resource_kind"],
+            [
+                "collaboration_comment_threads.thread_id",
+                "collaboration_comment_threads.workspace_id",
+                "collaboration_comment_threads.resource_id",
+                "collaboration_comment_threads.resource_kind",
+            ],
+            name="fk_collaboration_comment_thread_transition_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["actor_membership_id", "actor_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_comment_thread_transition_actor_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "thread_id",
+            "sequence",
+            name="uq_collaboration_comment_thread_transition_sequence",
+        ),
+        CheckConstraint(
+            "previous_state IS NULL OR previous_state IN ('open', 'resolved', 'reopened')",
+            name="ck_collaboration_comment_thread_transition_previous",
+        ),
+        CheckConstraint(
+            "current_state IN ('open', 'resolved', 'reopened')",
+            name="ck_collaboration_comment_thread_transition_state",
+        ),
+        CheckConstraint(
+            "sequence >= 0",
+            name="ck_collaboration_comment_thread_transition_sequence",
+        ),
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_collaboration_comment_thread_transition_generation",
+        ),
+        Index(
+            "ix_collaboration_comment_thread_transition_current",
+            "workspace_id",
+            "thread_id",
+            "sequence",
+        ),
+        Index(
+            "ix_collaboration_comment_thread_transition_state",
+            "workspace_id",
+            "current_state",
+            "recorded_at",
+        ),
+    )
+
+    transition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    thread_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resource_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_state: Mapped[str | None] = mapped_column(String(16))
+    current_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    actor_membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationComment(Base):
+    """Immutable comment identity and bounded reply relationship."""
+
+    __tablename__ = "collaboration_comments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["thread_id", "workspace_id", "resource_id", "resource_kind"],
+            [
+                "collaboration_comment_threads.thread_id",
+                "collaboration_comment_threads.workspace_id",
+                "collaboration_comment_threads.resource_id",
+                "collaboration_comment_threads.resource_kind",
+            ],
+            name="fk_collaboration_comment_thread_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            [
+                "parent_comment_id",
+                "thread_id",
+                "workspace_id",
+                "resource_id",
+                "resource_kind",
+            ],
+            [
+                "collaboration_comments.comment_id",
+                "collaboration_comments.thread_id",
+                "collaboration_comments.workspace_id",
+                "collaboration_comments.resource_id",
+                "collaboration_comments.resource_kind",
+            ],
+            name="fk_collaboration_comment_parent_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["author_membership_id", "author_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_comment_author_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "comment_id",
+            "thread_id",
+            "workspace_id",
+            "resource_id",
+            "resource_kind",
+            name="uq_collaboration_comment_scope",
+        ),
+        UniqueConstraint(
+            "thread_id",
+            "thread_sequence",
+            name="uq_collaboration_comment_thread_sequence",
+        ),
+        CheckConstraint(
+            "depth BETWEEN 0 AND 4",
+            name="ck_collaboration_comment_depth",
+        ),
+        CheckConstraint(
+            "(depth = 0 AND parent_comment_id IS NULL) OR "
+            "(depth > 0 AND parent_comment_id IS NOT NULL)",
+            name="ck_collaboration_comment_parent_shape",
+        ),
+        CheckConstraint(
+            "parent_comment_id IS NULL OR parent_comment_id <> comment_id",
+            name="ck_collaboration_comment_not_self_parent",
+        ),
+        CheckConstraint(
+            "thread_sequence > 0",
+            name="ck_collaboration_comment_thread_sequence",
+        ),
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_collaboration_comment_generation",
+        ),
+        CheckConstraint(
+            "collaboration_policy_version = 'collaboration-policy-v1'",
+            name="ck_collaboration_comment_policy",
+        ),
+        Index(
+            "ix_collaboration_comment_thread_order",
+            "workspace_id",
+            "thread_id",
+            "thread_sequence",
+            "comment_id",
+        ),
+        Index(
+            "ix_collaboration_comment_author",
+            "workspace_id",
+            "author_membership_id",
+            "created_at",
+        ),
+        Index(
+            "ix_collaboration_comment_parent",
+            "workspace_id",
+            "parent_comment_id",
+            "thread_sequence",
+        ),
+    )
+
+    comment_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    thread_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resource_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    parent_comment_id: Mapped[uuid.UUID | None] = mapped_column()
+    depth: Mapped[int] = mapped_column(Integer, nullable=False)
+    thread_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    author_membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    author_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    collaboration_policy_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    creation_request_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    creation_trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    creation_audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationCommentRevision(Base):
+    """Immutable bounded plain-text content for one comment revision."""
+
+    __tablename__ = "collaboration_comment_revisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["comment_id", "thread_id", "workspace_id", "resource_id", "resource_kind"],
+            [
+                "collaboration_comments.comment_id",
+                "collaboration_comments.thread_id",
+                "collaboration_comments.workspace_id",
+                "collaboration_comments.resource_id",
+                "collaboration_comments.resource_kind",
+            ],
+            name="fk_collaboration_comment_revision_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["previous_revision_id", "comment_id", "workspace_id"],
+            [
+                "collaboration_comment_revisions.revision_id",
+                "collaboration_comment_revisions.comment_id",
+                "collaboration_comment_revisions.workspace_id",
+            ],
+            name="fk_collaboration_comment_revision_previous",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["author_membership_id", "author_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_comment_revision_author_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "revision_id",
+            "comment_id",
+            "workspace_id",
+            name="uq_collaboration_comment_revision_scope",
+        ),
+        UniqueConstraint(
+            "comment_id",
+            "sequence",
+            name="uq_collaboration_comment_revision_sequence",
+        ),
+        CheckConstraint(
+            "sequence > 0",
+            name="ck_collaboration_comment_revision_sequence",
+        ),
+        CheckConstraint(
+            "revision_kind IN ('created', 'edited')",
+            name="ck_collaboration_comment_revision_kind",
+        ),
+        CheckConstraint(
+            "(sequence = 1 AND revision_kind = 'created' AND "
+            "previous_revision_id IS NULL) OR "
+            "(sequence > 1 AND revision_kind = 'edited' AND "
+            "previous_revision_id IS NOT NULL)",
+            name="ck_collaboration_comment_revision_previous_shape",
+        ),
+        CheckConstraint(
+            "length(content) BETWEEN 1 AND 5000",
+            name="ck_collaboration_comment_revision_content_length",
+        ),
+        CheckConstraint(
+            "length(content_digest) = 64",
+            name="ck_collaboration_comment_revision_digest",
+        ),
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_collaboration_comment_revision_generation",
+        ),
+        Index(
+            "ix_collaboration_comment_revision_history",
+            "workspace_id",
+            "comment_id",
+            "sequence",
+        ),
+        Index(
+            "ix_collaboration_comment_revision_author",
+            "workspace_id",
+            "author_membership_id",
+            "created_at",
+        ),
+    )
+
+    revision_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    comment_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    thread_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resource_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_revision_id: Mapped[uuid.UUID | None] = mapped_column()
+    revision_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    author_membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    author_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    request_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationCommentTransition(Base):
+    """Append-only visible state and tombstone evidence for one comment."""
+
+    __tablename__ = "collaboration_comment_transitions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["comment_id", "thread_id", "workspace_id", "resource_id", "resource_kind"],
+            [
+                "collaboration_comments.comment_id",
+                "collaboration_comments.thread_id",
+                "collaboration_comments.workspace_id",
+                "collaboration_comments.resource_id",
+                "collaboration_comments.resource_kind",
+            ],
+            name="fk_collaboration_comment_transition_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["visible_revision_id", "comment_id", "workspace_id"],
+            [
+                "collaboration_comment_revisions.revision_id",
+                "collaboration_comment_revisions.comment_id",
+                "collaboration_comment_revisions.workspace_id",
+            ],
+            name="fk_collaboration_comment_transition_visible_revision",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["actor_membership_id", "actor_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_comment_transition_actor_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "comment_id",
+            "sequence",
+            name="uq_collaboration_comment_transition_sequence",
+        ),
+        CheckConstraint(
+            "previous_state IS NULL OR previous_state IN "
+            "('active', 'edited', 'hidden_by_moderation', 'removed_by_author')",
+            name="ck_collaboration_comment_transition_previous",
+        ),
+        CheckConstraint(
+            "current_state IN ('active', 'edited', 'hidden_by_moderation', 'removed_by_author')",
+            name="ck_collaboration_comment_transition_state",
+        ),
+        CheckConstraint(
+            "(current_state IN ('active', 'edited') AND visible_revision_id IS NOT NULL) "
+            "OR (current_state IN ('hidden_by_moderation', 'removed_by_author') "
+            "AND visible_revision_id IS NULL)",
+            name="ck_collaboration_comment_transition_visibility",
+        ),
+        CheckConstraint(
+            "sequence >= 0",
+            name="ck_collaboration_comment_transition_sequence",
+        ),
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_collaboration_comment_transition_generation",
+        ),
+        Index(
+            "ix_collaboration_comment_transition_current",
+            "workspace_id",
+            "comment_id",
+            "sequence",
+        ),
+        Index(
+            "ix_collaboration_comment_transition_state",
+            "workspace_id",
+            "current_state",
+            "recorded_at",
+        ),
+    )
+
+    transition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    comment_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    thread_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resource_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_state: Mapped[str | None] = mapped_column(String(32))
+    current_state: Mapped[str] = mapped_column(String(32), nullable=False)
+    visible_revision_id: Mapped[uuid.UUID | None] = mapped_column()
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    actor_membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class CanonicalObject(TimestampMixin, Base):
     __tablename__ = "canonical_objects"
     __table_args__ = (
@@ -2951,7 +3468,13 @@ class DomainEventRecord(Base):
             "'ownership_transfer.accepted', "
             "'ownership_transfer.rejected', "
             "'ownership_transfer.canceled', "
-            "'revocation.bulk_completed')",
+            "'revocation.bulk_completed', "
+            "'comment.created', "
+            "'comment.reply.created', "
+            "'comment.revised', "
+            "'comment.tombstoned', "
+            "'comment.thread.resolved', "
+            "'comment.thread.reopened')",
             name="ck_domain_events_type",
         ),
         CheckConstraint(
@@ -2963,7 +3486,8 @@ class DomainEventRecord(Base):
             "'agent_evaluation', 'communication_revision', "
             "'workspace_invitation', 'workspace_membership', "
             "'approval_authority_assignment', 'collaboration_resource', "
-            "'resource_share', 'ownership_transfer', 'authority_fence')",
+            "'resource_share', 'ownership_transfer', 'authority_fence', "
+            "'comment_thread', 'comment')",
             name="ck_domain_events_subject_kind",
         ),
         CheckConstraint("sequence > 0", name="ck_domain_events_sequence_positive"),
@@ -6227,6 +6751,11 @@ COLLABORATION_IMMUTABLE_MODELS = (
     CollaborationOwnershipTransferTransition,
     CollaborationAuthoritySnapshot,
     CollaborationRevocationFence,
+    CollaborationCommentThread,
+    CollaborationCommentThreadTransition,
+    CollaborationComment,
+    CollaborationCommentRevision,
+    CollaborationCommentTransition,
 )
 
 

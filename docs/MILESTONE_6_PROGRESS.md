@@ -1,12 +1,12 @@
 # Milestone 6 Progress — Core Multi-Workspace Collaboration
 
-Last updated: 2026-07-25
+Last updated: 2026-07-26
 
-Branch: `milestone-6-3-resource-sharing-ownership-revocation-local`
+Branch: `milestone-6-4-comments-collaboration-activity-local`
 
 Baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: checkpoints 6.1–6.3 complete locally; ready for 6.4
+Status: checkpoints 6.1–6.4 complete locally; ready for 6.5
 
 | Checkpoint                                       | Status           | Dependency                        |
 | ------------------------------------------------ | ---------------- | --------------------------------- |
@@ -14,7 +14,7 @@ Status: checkpoints 6.1–6.3 complete locally; ready for 6.4
 | 6.1 Workspace Membership and Invitations         | Complete locally | Architecture                      |
 | 6.2 Collaboration Roles and Permission Authority | Complete locally | 6.1                               |
 | 6.3 Resource Sharing, Ownership, and Revocation  | Complete locally | 6.1–6.2                           |
-| 6.4 Comments and Collaboration Activity          | Not started      | 6.1–6.3                           |
+| 6.4 Comments and Collaboration Activity          | Complete locally | 6.1–6.3                           |
 | 6.5 Shared Workflow and Agent Governance         | Not started      | 6.1–6.4 and Milestones 4–5        |
 | 6.6 Multi-Workspace Collaboration Interface      | Not started      | 6.1–6.5                           |
 | 6.7 Final Collaboration Security Audit           | Not started      | 6.1–6.6                           |
@@ -71,16 +71,15 @@ invocation, approval, export, or controlled-effect authority.
 - `20260725_0023`: complete for 6.3 only; typed shares, resource ownership,
   ownership transfer, authority snapshots, and revocation fencing. Direct
   parent: `20260725_0022`.
-- `20260725_0024`: planned for 6.4 only; comment threads, append-only
-  revisions/history, auditable tombstones, bounded replies, and only minimal
-  new event/activity persistence proved necessary. Direct parent:
-  `20260725_0023`.
+- `20260725_0024`: complete locally for 6.4 only; exact comment-thread and
+  comment identities, append-only revisions and lifecycle transitions,
+  auditable tombstones, bounded replies, closed registries, scope/sequence
+  guards, and indexes. Direct parent: `20260725_0023`.
 
 Each migration is completed within its owning checkpoint and remains
 immutable after commit. Later changes use the next unused revision. Alembic
-has one sole head: `20260725_0022`. Migrations `20260725_0023` and
-`20260725_0024` do not exist. Checkpoints 6.5, 6.6, and 6.7 have no migration
-assigned.
+has one sole head: `20260725_0024`. Checkpoints 6.5, 6.6, and 6.7 have no
+migration assigned.
 
 ## Scope boundaries
 
@@ -142,9 +141,36 @@ preserves exactly one owner and accepted resource transfer preserves exact
 membership ownership.
 
 Typed sharing, resource ownership, accepted ownership transfer, authority
-snapshots, and revocation fencing are complete locally. No comments,
-collaboration UI, real-time collaboration, Indexer, or Librarian work was
-added.
+snapshots, and revocation fencing are complete locally.
+
+Checkpoint 6.4 adds exact-resource comment threads, immutable comment
+identities, append-only revisions, author and moderator tombstones, bounded
+four-level replies, thread resolution/reopening, and safe list/history APIs.
+Creation is capped at 5,000 code points, 500 comments per thread, and 30
+comments per membership per minute. Pages default to 50 and stop at 100.
+All authority is server-derived through the central collaboration evaluator
+and current typed-resource visibility; stale generation, removed membership,
+hidden scope, foreign parent, stale revision, and unauthorized moderation
+fail closed.
+
+Comment changes atomically create audit, Trace, domain-event, and transactional
+outbox evidence. Collaboration activity reads the existing delivered
+`activity-v1` projection, rechecks current visibility, filters by exact
+resource/event type, and exposes no comment text or private authority facts.
+Focused tests cover concurrent duplicate creation, concurrent edit conflict,
+idempotent replay, depth bounds, revision immutability, tombstone history,
+moderation, visibility-only viewers, removed membership, activity replay and
+pagination, cross-workspace denial, unsafe text, and injected transaction
+rollback. No collaboration UI, workflow/agent governance, real-time
+collaboration, Indexer, or Librarian work was added.
+
+Final 6.4 validation includes 510 passing backend tests with 1 skipped
+PostgreSQL-only test, 38 passing security tests, 22 passing integration tests,
+66 passing frontend tests, 6 passing Chromium smoke tests with 2 expected
+real-service skips, strict typing, lint, formatting, production build,
+SQLite migration cycling, PostgreSQL offline DDL, mapper/import/compilation,
+demo, hygiene, diff, protected-reference, and prohibited-scope checks. Exact
+commands, warnings, and environment notes are recorded in the 6.4 handoff.
 
 Next authorized implementation start:
-`MILESTONE 6.4 — COMMENTS AND COLLABORATION ACTIVITY`
+`MILESTONE 6.5 — SHARED WORKFLOW AND AGENT GOVERNANCE`
