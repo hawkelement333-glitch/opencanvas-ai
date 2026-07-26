@@ -6,7 +6,12 @@ Branch: `milestone-6-migration-boundary-amendment-local`
 
 Starting commit: `b4b67d5206a862997bb962d868f785b029febeda`
 
-Status: documentation amendment complete locally; Milestone 6.2 not started
+Status: documentation amendment complete locally; fulfilled by completed
+Milestone 6.2 migration `20260725_0022`
+
+Completion cross-reference: Milestone 6.2 subsequently completed the amended
+boundary in migration `20260725_0022`; see
+[MILESTONE_6_2_COLLABORATION_ROLES_PERMISSION_AUTHORITY_HANDOFF.md](MILESTONE_6_2_COLLABORATION_ROLES_PERMISSION_AUTHORITY_HANDOFF.md).
 
 ## Original contradiction
 

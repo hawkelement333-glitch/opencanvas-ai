@@ -29,6 +29,10 @@ from opencanvas_api.db.models import (
     WorkspaceMembershipTransition,
 )
 from opencanvas_api.services.auth import AuthenticationError, Principal, normalize_email
+from opencanvas_api.services.collaboration_authority import (
+    CollaborationAction,
+    CollaborationAuthorizationService,
+)
 from opencanvas_api.services.domain_events import CreateDomainEvent, DomainEventService
 from opencanvas_api.services.trace import CompleteTraceInput, StartTraceInput, TraceService
 
@@ -126,6 +130,30 @@ class MembershipService:
         self._now_factory = now_factory or (lambda: datetime.now(UTC))
         self.trace = TraceService(session)
         self.events = DomainEventService(session)
+        self.authorization = CollaborationAuthorizationService(session)
+
+    async def require_action(
+        self,
+        *,
+        principal: Principal,
+        workspace_id: uuid.UUID,
+        action: CollaborationAction,
+    ) -> tuple[Workspace, MembershipView]:
+        decision = await self.authorization.evaluate(
+            principal=principal,
+            workspace_id=workspace_id,
+            action=action,
+        )
+        if not decision.allowed or decision.membership_id is None:
+            raise CollaborationNotFoundError()
+        workspace = await self.session.get(Workspace, workspace_id)
+        membership = await self.get(
+            membership_id=decision.membership_id,
+            workspace_id=workspace_id,
+        )
+        if workspace is None or membership is None:
+            raise CollaborationNotFoundError()
+        return workspace, membership
 
     async def bootstrap_owner_membership(
         self,
@@ -335,7 +363,11 @@ class MembershipService:
         limit: int = PAGE_DEFAULT,
         offset: int = 0,
     ) -> list[MembershipView]:
-        await self.require_owner(principal=principal, workspace_id=workspace_id)
+        await self.require_action(
+            principal=principal,
+            workspace_id=workspace_id,
+            action=CollaborationAction.MEMBERSHIP_LIST,
+        )
         _pagination(limit, offset)
         latest = (
             select(func.max(WorkspaceMembershipTransition.sequence))
@@ -470,9 +502,10 @@ class InvitationService:
         idempotency_key: str,
         expires_in_days: int = INVITATION_DEFAULT_DAYS,
     ) -> IssuedInvitation:
-        workspace, inviter_membership = await self.memberships.require_owner(
+        workspace, inviter_membership = await self.memberships.require_action(
             principal=principal,
             workspace_id=workspace_id,
+            action=CollaborationAction.INVITATION_CREATE,
         )
         role = _invitation_role(intended_role)
         _idempotency_key(idempotency_key)
@@ -642,7 +675,11 @@ class InvitationService:
         invitation_id: uuid.UUID,
         idempotency_key: str,
     ) -> IssuedInvitation:
-        await self.memberships.require_owner(principal=principal, workspace_id=workspace_id)
+        await self.memberships.require_action(
+            principal=principal,
+            workspace_id=workspace_id,
+            action=CollaborationAction.INVITATION_RESEND,
+        )
         _idempotency_key(idempotency_key)
         request_digest = _digest(
             {"workspaceId": str(workspace_id), "invitationId": str(invitation_id)}
@@ -1087,8 +1124,10 @@ class InvitationService:
         invitation_id: uuid.UUID,
         idempotency_key: str,
     ) -> InvitationView:
-        workspace, _ = await self.memberships.require_owner(
-            principal=principal, workspace_id=workspace_id
+        workspace, _ = await self.memberships.require_action(
+            principal=principal,
+            workspace_id=workspace_id,
+            action=CollaborationAction.INVITATION_REVOKE,
         )
         _idempotency_key(idempotency_key)
         request_digest = _digest(
@@ -1152,7 +1191,11 @@ class InvitationService:
         limit: int = PAGE_DEFAULT,
         offset: int = 0,
     ) -> list[InvitationView]:
-        await self.memberships.require_owner(principal=principal, workspace_id=workspace_id)
+        await self.memberships.require_action(
+            principal=principal,
+            workspace_id=workspace_id,
+            action=CollaborationAction.INVITATION_LIST,
+        )
         _pagination(limit, offset)
         latest = (
             select(func.max(WorkspaceInvitationTransition.sequence))

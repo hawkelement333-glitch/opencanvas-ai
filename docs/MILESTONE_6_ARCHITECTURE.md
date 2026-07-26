@@ -217,6 +217,13 @@ assignment or policy match for the action, resource, and risk.
 
 ## 8. Closed collaboration-permission registry
 
+Implementation status: checkpoint 6.2 implements this registry and its
+explicit role ceilings in code. The centralized evaluator resolves
+server-derived workspace membership and lifecycle state, and routes do not
+construct permissions. Exact resource ownership/share/inheritance remains a
+separate required factor assigned to 6.3; the 6.2 evaluator does not claim
+that later factor is implemented.
+
 The initial registry is separate from `Capability` and contains no free text:
 
 ```text

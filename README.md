@@ -260,8 +260,8 @@ inference/conflict classification, and no complete end-user Trace explorer. See 
 
 Milestone 4 controlled agents and Milestone 5 architecture and checkpoints
 5.1–5.7 are complete locally. Milestone 6 architecture is complete locally,
-and 6.1 — Workspace Membership and Invitations is complete locally. Milestone
-6.2 — Collaboration Roles and Permission Authority is next. The required
+and checkpoints 6.1–6.2 are complete locally. Milestone 6.3 — Resource
+Sharing, Ownership, and Revocation is next. The required
 roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
@@ -300,18 +300,22 @@ independently mutate, archive, share, authorize, reindex, or reclassify
 authoritative resources or approve itself. Human review and controlled
 workflows remain authoritative.
 
-Milestone 6.1 is complete locally. Workspace memberships now bind exact
+Milestones 6.1–6.2 are complete locally. Workspace memberships now bind exact
 authenticated users to exact workspaces, and secure invitations support
 bounded creation, delivery, resend, acceptance, decline, expiry, revocation,
-idempotency, and concurrency handling. Migration `20260725_0021` is the sole
-head. General collaboration permissions, role administration, sharing, and
-all Milestone 6.2 work remain unstarted.
+idempotency, and concurrency handling. A closed six-role and 36-permission
+registry, centralized deny-by-default evaluator, append-only role and
+membership lifecycle administration, and exact reviewer-eligibility
+assignments now preserve the Milestone 4 capability and approval boundary.
+Migration `20260725_0022` is the sole head. Typed sharing, ownership transfer,
+6.3 authority snapshots/revocation fencing, comments, and later collaboration
+work remain unstarted.
 
 Milestone 6 migrations now have checkpoint-owned immutable boundaries:
-6.2 owns planned migration `20260725_0022`, 6.3 owns planned migration
-`20260725_0023`, and 6.4 owns planned migration `20260725_0024`. None exists
-yet. A migration must be completed within its owning checkpoint and must not
-be rewritten by a later checkpoint.
+6.2 owns completed migration `20260725_0022`, 6.3 owns planned migration
+`20260725_0023`, and 6.4 owns planned migration `20260725_0024`. The latter two
+do not exist. A migration must be completed within its owning checkpoint and
+must not be rewritten by a later checkpoint.
 
 See
 [docs/MILESTONE_5_ARCHITECTURE.md](docs/MILESTONE_5_ARCHITECTURE.md),
@@ -325,7 +329,9 @@ See
 [docs/MILESTONE_6_ARCHITECTURE_HANDOFF.md](docs/MILESTONE_6_ARCHITECTURE_HANDOFF.md),
 [docs/MILESTONE_6_MIGRATION_BOUNDARY_AMENDMENT.md](docs/MILESTONE_6_MIGRATION_BOUNDARY_AMENDMENT.md),
 and
-[docs/MILESTONE_6_1_WORKSPACE_MEMBERSHIPS_INVITATIONS_HANDOFF.md](docs/MILESTONE_6_1_WORKSPACE_MEMBERSHIPS_INVITATIONS_HANDOFF.md).
+[docs/MILESTONE_6_1_WORKSPACE_MEMBERSHIPS_INVITATIONS_HANDOFF.md](docs/MILESTONE_6_1_WORKSPACE_MEMBERSHIPS_INVITATIONS_HANDOFF.md),
+and
+[docs/MILESTONE_6_2_COLLABORATION_ROLES_PERMISSION_AUTHORITY_HANDOFF.md](docs/MILESTONE_6_2_COLLABORATION_ROLES_PERMISSION_AUTHORITY_HANDOFF.md).
 
 ## Competition and release status
 

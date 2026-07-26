@@ -1174,11 +1174,15 @@ class CollaborationRequestIdentity(Base):
         ),
         CheckConstraint(
             "operation IN ('invitation.create', 'invitation.resend', "
-            "'invitation.accept', 'invitation.decline', 'invitation.revoke')",
+            "'invitation.accept', 'invitation.decline', 'invitation.revoke', "
+            "'membership.role.change', 'membership.suspend', 'membership.restore', "
+            "'membership.remove', 'approval_authority.assign', "
+            "'approval_authority.replace', 'approval_authority.revoke')",
             name="ck_collaboration_request_operation",
         ),
         CheckConstraint(
-            "result_kind IN ('workspace_invitation', 'workspace_membership')",
+            "result_kind IN ('workspace_invitation', 'workspace_membership', "
+            "'approval_authority_assignment')",
             name="ck_collaboration_request_result_kind",
         ),
         CheckConstraint(
@@ -1227,13 +1231,250 @@ class WorkspaceAuthorityVersion(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class CollaborationApprovalAuthorityAssignment(Base):
+    """Immutable exact reviewer-eligibility assignment."""
+
+    __tablename__ = "collaboration_approval_authority_assignments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["membership_id", "reviewer_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_approval_assignment_reviewer_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["issuer_membership_id", "issuer_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_approval_assignment_issuer_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "assignment_id",
+            "membership_id",
+            "reviewer_user_id",
+            "workspace_id",
+            name="uq_collaboration_approval_assignment_scope",
+        ),
+        CheckConstraint(
+            "capability IN ('workspace.metadata.read', 'canvas.snapshot.read', "
+            "'context.selected.read', 'document.version.read', 'trace.scoped.read', "
+            "'retrieval.selected.search', 'draft.note.create', 'draft.answer.create', "
+            "'canvas.note.create', 'canvas.note.update', 'canvas.note.create.rollback', "
+            "'canvas.note.update.rollback', 'knowledge_graph.relationship.write', "
+            "'workflow.step.execute', 'evidence.bundle.create', 'execution.cancel')",
+            name="ck_collaboration_approval_assignment_capability",
+        ),
+        CheckConstraint(
+            "resource_kind IN ('workspace', 'canvas', 'node', 'document_version', "
+            "'chunk', 'trace', 'canonical_relationship', 'canonical_object')",
+            name="ck_collaboration_approval_assignment_resource_kind",
+        ),
+        CheckConstraint(
+            "maximum_risk_class IN ('r0_observation', 'r1_draft', "
+            "'r2_transient_action', 'r3_durable_write')",
+            name="ck_collaboration_approval_assignment_risk",
+        ),
+        CheckConstraint(
+            "conflict_policy = 'deny_self_review'",
+            name="ck_collaboration_approval_assignment_conflict",
+        ),
+        CheckConstraint(
+            "collaboration_policy_version = 'collaboration-policy-v1'",
+            name="ck_collaboration_approval_assignment_policy",
+        ),
+        CheckConstraint(
+            "expires_at > valid_from",
+            name="ck_collaboration_approval_assignment_time_order",
+        ),
+        CheckConstraint(
+            "length(scope_digest) = 64",
+            name="ck_collaboration_approval_assignment_digest",
+        ),
+        Index(
+            "ix_collaboration_approval_assignment_reviewer",
+            "workspace_id",
+            "membership_id",
+            "valid_from",
+        ),
+        Index(
+            "ix_collaboration_approval_assignment_scope",
+            "workspace_id",
+            "capability",
+            "resource_kind",
+            "resource_id",
+        ),
+    )
+
+    assignment_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    reviewer_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    issuer_membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    issuer_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    capability: Mapped[str] = mapped_column(String(64), nullable=False)
+    resource_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    maximum_risk_class: Mapped[str] = mapped_column(String(32), nullable=False)
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    conflict_policy: Mapped[str] = mapped_column(String(32), nullable=False)
+    collaboration_policy_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    scope_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    supersedes_assignment_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "collaboration_approval_authority_assignments.assignment_id",
+            ondelete="RESTRICT",
+        )
+    )
+    creation_trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    creation_audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationApprovalAuthorityTransition(Base):
+    """Append-only approval-authority lifecycle evidence."""
+
+    __tablename__ = "collaboration_approval_authority_transitions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["assignment_id", "membership_id", "reviewer_user_id", "workspace_id"],
+            [
+                "collaboration_approval_authority_assignments.assignment_id",
+                "collaboration_approval_authority_assignments.membership_id",
+                "collaboration_approval_authority_assignments.reviewer_user_id",
+                "collaboration_approval_authority_assignments.workspace_id",
+            ],
+            name="fk_collaboration_approval_transition_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "assignment_id",
+            "sequence",
+            name="uq_collaboration_approval_transition_sequence",
+        ),
+        CheckConstraint(
+            "current_state IN ('active', 'revoked', 'superseded')",
+            name="ck_collaboration_approval_transition_state",
+        ),
+        CheckConstraint(
+            "previous_state IS NULL OR previous_state IN ('active', 'revoked', 'superseded')",
+            name="ck_collaboration_approval_transition_previous_state",
+        ),
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_collaboration_approval_transition_generation",
+        ),
+        Index(
+            "ix_collaboration_approval_transition_current",
+            "assignment_id",
+            "sequence",
+        ),
+    )
+
+    transition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    assignment_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    reviewer_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_state: Mapped[str | None] = mapped_column(String(16))
+    current_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationReviewerEligibilityEvidence(Base):
+    """Append-only proof of eligibility for one existing Milestone 4 approval."""
+
+    __tablename__ = "collaboration_reviewer_eligibility_evidence"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["approval_id", "execution_id", "requester_user_id", "workspace_id"],
+            [
+                "controlled_agent_approvals.approval_id",
+                "controlled_agent_approvals.execution_id",
+                "controlled_agent_approvals.user_id",
+                "controlled_agent_approvals.workspace_id",
+            ],
+            name="fk_collaboration_reviewer_evidence_approval_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["assignment_id", "deciding_membership_id", "deciding_user_id", "workspace_id"],
+            [
+                "collaboration_approval_authority_assignments.assignment_id",
+                "collaboration_approval_authority_assignments.membership_id",
+                "collaboration_approval_authority_assignments.reviewer_user_id",
+                "collaboration_approval_authority_assignments.workspace_id",
+            ],
+            name="fk_collaboration_reviewer_evidence_assignment_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("approval_id", name="uq_collaboration_reviewer_evidence_approval"),
+        CheckConstraint(
+            "collaboration_policy_version = 'collaboration-policy-v1'",
+            name="ck_collaboration_reviewer_evidence_policy",
+        ),
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_collaboration_reviewer_evidence_generation",
+        ),
+        CheckConstraint(
+            "length(scope_digest) = 64",
+            name="ck_collaboration_reviewer_evidence_digest",
+        ),
+        Index(
+            "ix_collaboration_reviewer_evidence_reviewer",
+            "workspace_id",
+            "deciding_membership_id",
+            "recorded_at",
+        ),
+    )
+
+    eligibility_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    approval_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    execution_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    requester_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    deciding_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    deciding_membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    assignment_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    decision_session_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    collaboration_policy_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    scope_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class CollaborationAuditEvent(Base):
     """Immutable bounded collaboration audit fact."""
 
     __tablename__ = "collaboration_audit_events"
     __table_args__ = (
         CheckConstraint(
-            "subject_kind IN ('workspace_membership', 'workspace_invitation')",
+            "subject_kind IN ('workspace_membership', 'workspace_invitation', "
+            "'approval_authority_assignment')",
             name="ck_collaboration_audit_subject_kind",
         ),
         CheckConstraint(
@@ -1936,7 +2177,14 @@ class DomainEventRecord(Base):
             "'invitation.declined', "
             "'invitation.expired', "
             "'invitation.revoked', "
-            "'membership.activated')",
+            "'membership.activated', "
+            "'membership.role_changed', "
+            "'membership.suspended', "
+            "'membership.restored', "
+            "'membership.removed', "
+            "'approval_authority.assigned', "
+            "'approval_authority.replaced', "
+            "'approval_authority.revoked')",
             name="ck_domain_events_type",
         ),
         CheckConstraint(
@@ -1946,7 +2194,8 @@ class DomainEventRecord(Base):
             "'workflow_execution', 'workflow_step', 'agent_identity', 'agent_version', "
             "'agent_activation', 'agent_invocation', 'agent_proposal', "
             "'agent_evaluation', 'communication_revision', "
-            "'workspace_invitation', 'workspace_membership')",
+            "'workspace_invitation', 'workspace_membership', "
+            "'approval_authority_assignment')",
             name="ck_domain_events_subject_kind",
         ),
         CheckConstraint("sequence > 0", name="ck_domain_events_sequence_positive"),
@@ -5199,6 +5448,9 @@ COLLABORATION_IMMUTABLE_MODELS = (
     WorkspaceInvitationDeliveryAttempt,
     CollaborationRequestIdentity,
     CollaborationAuditEvent,
+    CollaborationApprovalAuthorityAssignment,
+    CollaborationApprovalAuthorityTransition,
+    CollaborationReviewerEligibilityEvidence,
 )
 
 

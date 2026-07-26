@@ -44,6 +44,64 @@ class InvitationCredentialCommand(InvitationCommand):
     token: SecretStr
 
 
+class MembershipRoleCommand(InvitationCommand):
+    role: InvitationRole
+
+
+class ApprovalAuthorityCreate(InvitationCommand):
+    membership_id: uuid.UUID
+    capability: Literal[
+        "workspace.metadata.read",
+        "canvas.snapshot.read",
+        "context.selected.read",
+        "document.version.read",
+        "trace.scoped.read",
+        "retrieval.selected.search",
+        "draft.note.create",
+        "draft.answer.create",
+        "canvas.note.create",
+        "canvas.note.update",
+        "canvas.note.create.rollback",
+        "canvas.note.update.rollback",
+        "knowledge_graph.relationship.write",
+        "workflow.step.execute",
+        "evidence.bundle.create",
+        "execution.cancel",
+    ]
+    resource_kind: Literal[
+        "workspace",
+        "canvas",
+        "node",
+        "document_version",
+        "chunk",
+        "trace",
+        "canonical_relationship",
+        "canonical_object",
+    ]
+    resource_id: uuid.UUID
+    maximum_risk_class: Literal[
+        "r0_observation",
+        "r1_draft",
+        "r2_transient_action",
+        "r3_durable_write",
+    ]
+    expires_in_days: int = Field(default=7, ge=1, le=30)
+
+
+class ApprovalAuthorityOut(ApiModel):
+    assignment_id: uuid.UUID
+    workspace_id: uuid.UUID
+    membership_id: uuid.UUID
+    capability: str
+    resource_kind: str
+    resource_id: uuid.UUID
+    maximum_risk_class: str
+    state: Literal["active", "revoked", "superseded"]
+    valid_from: datetime
+    expires_at: datetime
+    duplicate: bool = False
+
+
 class MembershipOut(ApiModel):
     membership_id: uuid.UUID
     user_id: uuid.UUID
@@ -70,6 +128,8 @@ class InvitationOut(ApiModel):
 
 
 __all__ = [
+    "ApprovalAuthorityCreate",
+    "ApprovalAuthorityOut",
     "InvitationCommand",
     "InvitationCreate",
     "InvitationCredentialCommand",
@@ -77,6 +137,7 @@ __all__ = [
     "InvitationRole",
     "InvitationState",
     "MembershipOut",
+    "MembershipRoleCommand",
     "MembershipState",
     "WorkspaceRole",
 ]

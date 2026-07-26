@@ -175,6 +175,12 @@ Completion:
 
 ## 6.2 — Collaboration Roles and Permission Authority
 
+Status: complete locally on
+`milestone-6-2-collaboration-roles-permission-authority-local`.
+
+Implementation handoff:
+[MILESTONE_6_2_COLLABORATION_ROLES_PERMISSION_AUTHORITY_HANDOFF.md](MILESTONE_6_2_COLLABORATION_ROLES_PERMISSION_AUTHORITY_HANDOFF.md).
+
 ### Scope
 
 - full closed role and permission registries;

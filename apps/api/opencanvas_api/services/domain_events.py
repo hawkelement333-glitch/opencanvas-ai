@@ -106,6 +106,13 @@ DomainEventType = Literal[
     "invitation.expired",
     "invitation.revoked",
     "membership.activated",
+    "membership.role_changed",
+    "membership.suspended",
+    "membership.restored",
+    "membership.removed",
+    "approval_authority.assigned",
+    "approval_authority.replaced",
+    "approval_authority.revoked",
 ]
 SubjectKind = Literal[
     "canonical_resource",
@@ -128,6 +135,7 @@ SubjectKind = Literal[
     "communication_revision",
     "workspace_invitation",
     "workspace_membership",
+    "approval_authority_assignment",
 ]
 OriginType = Literal[
     "authenticated_user",
@@ -208,6 +216,11 @@ _COLLABORATION_PAYLOAD = frozenset(
         "reasonCode",
         "membershipId",
         "authorityGeneration",
+        "previousState",
+        "previousRole",
+        "capability",
+        "resourceKind",
+        "maximumRiskClass",
     }
 )
 
@@ -414,6 +427,27 @@ EVENT_TYPE_REGISTRY: dict[DomainEventType, EventTypeSpec] = {
     ),
     "membership.activated": EventTypeSpec(
         "workspace_membership", _COLLABORATION_PAYLOAD, canvas_required=False
+    ),
+    "membership.role_changed": EventTypeSpec(
+        "workspace_membership", _COLLABORATION_PAYLOAD, canvas_required=False
+    ),
+    "membership.suspended": EventTypeSpec(
+        "workspace_membership", _COLLABORATION_PAYLOAD, canvas_required=False
+    ),
+    "membership.restored": EventTypeSpec(
+        "workspace_membership", _COLLABORATION_PAYLOAD, canvas_required=False
+    ),
+    "membership.removed": EventTypeSpec(
+        "workspace_membership", _COLLABORATION_PAYLOAD, canvas_required=False
+    ),
+    "approval_authority.assigned": EventTypeSpec(
+        "approval_authority_assignment", _COLLABORATION_PAYLOAD, canvas_required=False
+    ),
+    "approval_authority.replaced": EventTypeSpec(
+        "approval_authority_assignment", _COLLABORATION_PAYLOAD, canvas_required=False
+    ),
+    "approval_authority.revoked": EventTypeSpec(
+        "approval_authority_assignment", _COLLABORATION_PAYLOAD, canvas_required=False
     ),
 }
 

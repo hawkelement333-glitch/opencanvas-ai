@@ -16,14 +16,16 @@ from opencanvas_api.db.models import (
     DomainActivityEntry,
     DomainEventOutbox,
     DomainEventRecord,
+    User,
     WorkspaceAuthorityVersion,
     WorkspaceInvitation,
     WorkspaceInvitationSecretVersion,
     WorkspaceInvitationTransition,
     WorkspaceMembership,
-    WorkspaceMembershipTransition,
 )
 from opencanvas_api.db.session import Database
+from opencanvas_api.services.agents.contracts import Capability, ResourceKind, RiskClass
+from opencanvas_api.services.auth import Principal
 from opencanvas_api.services.collaboration import (
     INVITATION_DEFAULT_DAYS,
     INVITATION_MAX_DAYS,
@@ -32,6 +34,7 @@ from opencanvas_api.services.collaboration import (
     PAGE_MAX,
     PENDING_INVITATION_LIMIT_PER_WORKSPACE,
 )
+from opencanvas_api.services.collaboration_management import ApprovalAuthorityService
 from opencanvas_api.services.domain_events import DomainEventOutboxService
 
 JsonObject = dict[str, Any]
@@ -473,19 +476,286 @@ async def test_concurrent_duplicate_acceptance_creates_one_membership(
             )
             == 1
         )
+
+
+@pytest.mark.security
+async def test_roles_lifecycle_and_approval_authority_are_scoped_and_idempotent(
+    app: FastAPI,
+    database: Database,
+    api_prefix: str,
+) -> None:
+    _enable_real_auth(app)
+    transport = httpx.ASGITransport(app=app)
+    async with (
+        httpx.AsyncClient(transport=transport, base_url="http://test") as owner,
+        httpx.AsyncClient(transport=transport, base_url="http://test") as administrator,
+        httpx.AsyncClient(transport=transport, base_url="http://test") as approver,
+    ):
+        owner_session = await _sign_up(
+            owner,
+            api_prefix,
+            email="authority-owner@example.test",
+            display_name="Authority owner",
+        )
+        administrator_session = await _sign_up(
+            administrator,
+            api_prefix,
+            email="authority-admin@example.test",
+            display_name="Authority administrator",
+        )
+        approver_session = await _sign_up(
+            approver,
+            api_prefix,
+            email="authority-approver@example.test",
+            display_name="Authority approver",
+        )
+        workspace = await _workspace(owner, api_prefix)
+
+        async def invite_and_accept(
+            *,
+            client: httpx.AsyncClient,
+            session: JsonObject,
+            email: str,
+            role: str,
+            key: str,
+        ) -> JsonObject:
+            created = await owner.post(
+                f"{api_prefix}/workspaces/{workspace['id']}/invitations",
+                json={
+                    "recipientEmail": email,
+                    "intendedRole": role,
+                    "idempotencyKey": f"{key}-create",
+                },
+                headers=_csrf(owner_session),
+            )
+            assert created.status_code == 201, created.text
+            invitation = created.json()
+            accepted = await client.post(
+                f"{api_prefix}/collaboration-invitations/{invitation['invitationId']}/accept",
+                json={
+                    "token": invitation["developmentToken"],
+                    "idempotencyKey": f"{key}-accept",
+                },
+                headers=_csrf(session),
+            )
+            assert accepted.status_code == 200, accepted.text
+            return cast(JsonObject, accepted.json())
+
+        admin_membership = await invite_and_accept(
+            client=administrator,
+            session=administrator_session,
+            email="authority-admin@example.test",
+            role="administrator",
+            key="authority-admin",
+        )
+        approver_membership = await invite_and_accept(
+            client=approver,
+            session=approver_session,
+            email="authority-approver@example.test",
+            role="approver",
+            key="authority-approver",
+        )
+
+        admin_list = await administrator.get(
+            f"{api_prefix}/workspaces/{workspace['id']}/memberships"
+        )
+        assert admin_list.status_code == 200
+        assert len(admin_list.json()) == 3
+        owner_membership = next(item for item in admin_list.json() if item["role"] == "owner")
+        protected_owner = await administrator.post(
+            f"{api_prefix}/workspaces/{workspace['id']}/memberships/"
+            f"{owner_membership['membershipId']}/role",
+            json={"role": "viewer", "idempotencyKey": "owner-demotion-denied"},
+            headers=_csrf(administrator_session),
+        )
+        assert protected_owner.status_code == 404
+
+        assigned = await owner.post(
+            f"{api_prefix}/workspaces/{workspace['id']}/approval-authority",
+            json={
+                "membershipId": approver_membership["membershipId"],
+                "capability": "workspace.metadata.read",
+                "resourceKind": "workspace",
+                "resourceId": workspace["id"],
+                "maximumRiskClass": "r3_durable_write",
+                "expiresInDays": 7,
+                "idempotencyKey": "approval-authority-assign",
+            },
+            headers=_csrf(owner_session),
+        )
+        assert assigned.status_code == 201, assigned.text
+        assignment = assigned.json()
+        assert assignment["state"] == "active"
+        duplicate = await owner.post(
+            f"{api_prefix}/workspaces/{workspace['id']}/approval-authority",
+            json={
+                "membershipId": approver_membership["membershipId"],
+                "capability": "workspace.metadata.read",
+                "resourceKind": "workspace",
+                "resourceId": workspace["id"],
+                "maximumRiskClass": "r3_durable_write",
+                "expiresInDays": 7,
+                "idempotencyKey": "approval-authority-assign",
+            },
+            headers=_csrf(owner_session),
+        )
+        assert duplicate.status_code == 201
+        assert duplicate.json()["assignmentId"] == assignment["assignmentId"]
+        assert duplicate.json()["duplicate"] is True
+        async with database.sessions() as eligibility_session:
+            reviewer = await eligibility_session.scalar(
+                select(User).where(User.email_normalized == "authority-approver@example.test")
+            )
+            assert reviewer is not None
+            reviewer_principal = Principal(
+                user_id=reviewer.id,
+                email=reviewer.email_normalized,
+                display_name=reviewer.display_name,
+                session_id=uuid.uuid4(),
+                csrf_token_hash="test-csrf",
+            )
+            eligible = await ApprovalAuthorityService(eligibility_session).evaluate_reviewer(
+                principal=reviewer_principal,
+                workspace_id=uuid.UUID(workspace["id"]),
+                requester_user_id=uuid.UUID(owner_session["user"]["id"]),
+                capability=Capability.WORKSPACE_METADATA_READ,
+                resource_kind=ResourceKind.WORKSPACE,
+                resource_id=uuid.UUID(workspace["id"]),
+                risk_class=RiskClass.R3_DURABLE_WRITE,
+            )
+            assert eligible.allowed is True
+            wrong_scope = await ApprovalAuthorityService(eligibility_session).evaluate_reviewer(
+                principal=reviewer_principal,
+                workspace_id=uuid.UUID(workspace["id"]),
+                requester_user_id=uuid.UUID(owner_session["user"]["id"]),
+                capability=Capability.WORKSPACE_METADATA_READ,
+                resource_kind=ResourceKind.WORKSPACE,
+                resource_id=uuid.uuid4(),
+                risk_class=RiskClass.R3_DURABLE_WRITE,
+            )
+            assert wrong_scope.allowed is False
+
+        self_assignment = await owner.post(
+            f"{api_prefix}/workspaces/{workspace['id']}/approval-authority",
+            json={
+                "membershipId": owner_membership["membershipId"],
+                "capability": "workspace.metadata.read",
+                "resourceKind": "workspace",
+                "resourceId": workspace["id"],
+                "maximumRiskClass": "r3_durable_write",
+                "expiresInDays": 7,
+                "idempotencyKey": "approval-self-denied",
+            },
+            headers=_csrf(owner_session),
+        )
+        assert self_assignment.status_code == 404
+
+        suspended = await owner.post(
+            f"{api_prefix}/workspaces/{workspace['id']}/memberships/"
+            f"{admin_membership['membershipId']}/suspend",
+            json={"idempotencyKey": "admin-suspend-001"},
+            headers=_csrf(owner_session),
+        )
+        assert suspended.status_code == 200
+        assert suspended.json()["state"] == "suspended"
+        denied_after_suspend = await administrator.get(
+            f"{api_prefix}/workspaces/{workspace['id']}/memberships"
+        )
+        assert denied_after_suspend.status_code == 404
+        restored = await owner.post(
+            f"{api_prefix}/workspaces/{workspace['id']}/memberships/"
+            f"{admin_membership['membershipId']}/restore",
+            json={"idempotencyKey": "admin-restore-001"},
+            headers=_csrf(owner_session),
+        )
+        assert restored.status_code == 200
+        assert restored.json()["state"] == "active"
+
+        revoked = await owner.post(
+            f"{api_prefix}/workspaces/{workspace['id']}/approval-authority/"
+            f"{assignment['assignmentId']}/revoke",
+            json={"idempotencyKey": "approval-authority-revoke"},
+            headers=_csrf(owner_session),
+        )
+        assert revoked.status_code == 200
+        assert revoked.json()["state"] == "revoked"
+        role_path = (
+            f"{api_prefix}/workspaces/{workspace['id']}/memberships/"
+            f"{approver_membership['membershipId']}/role"
+        )
+        role_body = {"role": "member", "idempotencyKey": "approver-role-change"}
+        changed_first, changed_second = await asyncio.gather(
+            owner.post(role_path, json=role_body, headers=_csrf(owner_session)),
+            owner.post(role_path, json=role_body, headers=_csrf(owner_session)),
+        )
+        assert {changed_first.status_code, changed_second.status_code} <= {200, 409}
+        assert 200 in {changed_first.status_code, changed_second.status_code}
+        changed = (
+            changed_first if changed_first.status_code == 200 else changed_second
+        )
+        assert changed.json()["role"] == "member"
+        role_replay = await owner.post(
+            role_path,
+            json=role_body,
+            headers=_csrf(owner_session),
+        )
+        assert role_replay.status_code == 200
+        removed = await owner.post(
+            f"{api_prefix}/workspaces/{workspace['id']}/memberships/"
+            f"{admin_membership['membershipId']}/remove",
+            json={"idempotencyKey": "admin-remove-001"},
+            headers=_csrf(owner_session),
+        )
+        assert removed.status_code == 200
+        assert removed.json()["state"] == "removed"
+
+    async with database.sessions() as session:
+        assert (
+            await session.scalar(
+                select(WorkspaceAuthorityVersion.authority_generation).where(
+                    WorkspaceAuthorityVersion.workspace_id == uuid.UUID(workspace["id"])
+                )
+            )
+            == 9
+        )
         assert (
             await session.scalar(
                 select(func.count())
-                .select_from(WorkspaceMembershipTransition)
-                .join(
-                    WorkspaceMembership,
-                    WorkspaceMembership.membership_id
-                    == WorkspaceMembershipTransition.membership_id,
-                )
+                .select_from(DomainEventRecord)
                 .where(
-                    WorkspaceMembership.accepted_invitation_id == invitation_id,
-                    WorkspaceMembershipTransition.current_state == "active",
+                    DomainEventRecord.workspace_id == uuid.UUID(workspace["id"]),
+                    DomainEventRecord.event_type.in_(
+                        (
+                            "membership.suspended",
+                            "membership.restored",
+                            "approval_authority.assigned",
+                            "approval_authority.revoked",
+                            "membership.role_changed",
+                            "membership.removed",
+                        )
+                    ),
                 )
             )
-            == 1
+            == 6
         )
+        outbox = DomainEventOutboxService(session)
+        while await outbox.process_one(owner_id="collaboration-authority-test-projector"):
+            pass
+        await session.commit()
+        activity_types = set(
+            (
+                await session.scalars(
+                    select(DomainActivityEntry.event_type).where(
+                        DomainActivityEntry.workspace_id == uuid.UUID(workspace["id"])
+                    )
+                )
+            ).all()
+        )
+        assert {
+            "membership.suspended",
+            "membership.restored",
+            "approval_authority.assigned",
+            "approval_authority.revoked",
+            "membership.role_changed",
+            "membership.removed",
+        } <= activity_types

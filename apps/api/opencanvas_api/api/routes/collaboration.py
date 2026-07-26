@@ -8,12 +8,15 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from opencanvas_api.api.collaboration_schemas import (
+    ApprovalAuthorityCreate,
+    ApprovalAuthorityOut,
     InvitationCommand,
     InvitationCreate,
     InvitationCredentialCommand,
     InvitationOut,
     InvitationRole,
     MembershipOut,
+    MembershipRoleCommand,
     MembershipState,
     WorkspaceRole,
 )
@@ -39,6 +42,11 @@ from opencanvas_api.services.collaboration import (
     MembershipView,
     mask_email,
 )
+from opencanvas_api.services.collaboration_management import (
+    ApprovalAuthorityService,
+    ApprovalAuthorityView,
+    MembershipAuthorityService,
+)
 from opencanvas_api.services.email import (
     EmailDeliveryError,
     deliver_workspace_invitation,
@@ -47,6 +55,236 @@ from opencanvas_api.services.email import (
 router = APIRouter()
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+
+
+@router.post(
+    "/workspaces/{workspace_id}/memberships/{membership_id}/role",
+    response_model=MembershipOut,
+)
+async def change_membership_role(
+    workspace_id: uuid.UUID,
+    membership_id: uuid.UUID,
+    payload: MembershipRoleCommand,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> MembershipOut:
+    try:
+        view = await MembershipAuthorityService(session).change_role(
+            principal=principal,
+            workspace_id=workspace_id,
+            membership_id=membership_id,
+            role=payload.role,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "collaboration_conflict",
+            "The collaboration request conflicts with current state.",
+        ) from exc
+    return _membership_out(view)
+
+
+async def _membership_lifecycle(
+    *,
+    operation: Literal["suspend", "restore", "remove"],
+    workspace_id: uuid.UUID,
+    membership_id: uuid.UUID,
+    payload: InvitationCommand,
+    principal: Principal,
+    session: AsyncSession,
+) -> MembershipOut:
+    service = MembershipAuthorityService(session)
+    try:
+        method = getattr(service, operation)
+        view = await method(
+            principal=principal,
+            workspace_id=workspace_id,
+            membership_id=membership_id,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "collaboration_conflict",
+            "The collaboration request conflicts with current state.",
+        ) from exc
+    return _membership_out(view)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/memberships/{membership_id}/suspend",
+    response_model=MembershipOut,
+)
+async def suspend_membership(
+    workspace_id: uuid.UUID,
+    membership_id: uuid.UUID,
+    payload: InvitationCommand,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> MembershipOut:
+    return await _membership_lifecycle(
+        operation="suspend",
+        workspace_id=workspace_id,
+        membership_id=membership_id,
+        payload=payload,
+        principal=principal,
+        session=session,
+    )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/memberships/{membership_id}/restore",
+    response_model=MembershipOut,
+)
+async def restore_membership(
+    workspace_id: uuid.UUID,
+    membership_id: uuid.UUID,
+    payload: InvitationCommand,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> MembershipOut:
+    return await _membership_lifecycle(
+        operation="restore",
+        workspace_id=workspace_id,
+        membership_id=membership_id,
+        payload=payload,
+        principal=principal,
+        session=session,
+    )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/memberships/{membership_id}/remove",
+    response_model=MembershipOut,
+)
+async def remove_membership(
+    workspace_id: uuid.UUID,
+    membership_id: uuid.UUID,
+    payload: InvitationCommand,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> MembershipOut:
+    return await _membership_lifecycle(
+        operation="remove",
+        workspace_id=workspace_id,
+        membership_id=membership_id,
+        payload=payload,
+        principal=principal,
+        session=session,
+    )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/approval-authority",
+    response_model=ApprovalAuthorityOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def assign_approval_authority(
+    workspace_id: uuid.UUID,
+    payload: ApprovalAuthorityCreate,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> ApprovalAuthorityOut:
+    try:
+        view = await ApprovalAuthorityService(session).assign(
+            principal=principal,
+            workspace_id=workspace_id,
+            membership_id=payload.membership_id,
+            capability=payload.capability,
+            resource_kind=payload.resource_kind,
+            resource_id=payload.resource_id,
+            maximum_risk_class=payload.maximum_risk_class,
+            expires_in_days=payload.expires_in_days,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "collaboration_conflict",
+            "The collaboration request conflicts with current state.",
+        ) from exc
+    return _approval_authority_out(view)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/approval-authority/{assignment_id}/replace",
+    response_model=ApprovalAuthorityOut,
+)
+async def replace_approval_authority(
+    workspace_id: uuid.UUID,
+    assignment_id: uuid.UUID,
+    payload: ApprovalAuthorityCreate,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> ApprovalAuthorityOut:
+    try:
+        view = await ApprovalAuthorityService(session).assign(
+            principal=principal,
+            workspace_id=workspace_id,
+            membership_id=payload.membership_id,
+            capability=payload.capability,
+            resource_kind=payload.resource_kind,
+            resource_id=payload.resource_id,
+            maximum_risk_class=payload.maximum_risk_class,
+            expires_in_days=payload.expires_in_days,
+            idempotency_key=payload.idempotency_key,
+            supersedes_assignment_id=assignment_id,
+        )
+        await session.commit()
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "collaboration_conflict",
+            "The collaboration request conflicts with current state.",
+        ) from exc
+    return _approval_authority_out(view)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/approval-authority/{assignment_id}/revoke",
+    response_model=ApprovalAuthorityOut,
+)
+async def revoke_approval_authority(
+    workspace_id: uuid.UUID,
+    assignment_id: uuid.UUID,
+    payload: InvitationCommand,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> ApprovalAuthorityOut:
+    try:
+        view = await ApprovalAuthorityService(session).revoke(
+            principal=principal,
+            workspace_id=workspace_id,
+            assignment_id=assignment_id,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "collaboration_conflict",
+            "The collaboration request conflicts with current state.",
+        ) from exc
+    return _approval_authority_out(view)
 
 
 @router.get(
@@ -431,4 +669,24 @@ def _invitation_out(
             "duplicate": issued.duplicate,
             "development_token": issued.raw_token if include_development_token else None,
         }
+    )
+
+
+def _approval_authority_out(view: ApprovalAuthorityView) -> ApprovalAuthorityOut:
+    assignment = view.assignment
+    return ApprovalAuthorityOut(
+        assignment_id=assignment.assignment_id,
+        workspace_id=assignment.workspace_id,
+        membership_id=assignment.membership_id,
+        capability=assignment.capability,
+        resource_kind=assignment.resource_kind,
+        resource_id=assignment.resource_id,
+        maximum_risk_class=assignment.maximum_risk_class,
+        state=cast(
+            Literal["active", "revoked", "superseded"],
+            view.transition.current_state,
+        ),
+        valid_from=utc(assignment.valid_from),
+        expires_at=utc(assignment.expires_at),
+        duplicate=view.duplicate,
     )

@@ -2,17 +2,17 @@
 
 Last updated: 2026-07-25
 
-Branch: `milestone-6-migration-boundary-amendment-local`
+Branch: `milestone-6-2-collaboration-roles-permission-authority-local`
 
 Baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: checkpoint 6.1 complete locally; migration boundaries clarified; ready for 6.2 architecture-preserving implementation
+Status: checkpoints 6.1–6.2 complete locally; ready for 6.3
 
 | Checkpoint                                       | Status           | Dependency                        |
 | ------------------------------------------------ | ---------------- | --------------------------------- |
 | Architecture                                     | Complete locally | Milestone 5 and roadmap amendment |
 | 6.1 Workspace Membership and Invitations         | Complete locally | Architecture                      |
-| 6.2 Collaboration Roles and Permission Authority | Not started      | 6.1                               |
+| 6.2 Collaboration Roles and Permission Authority | Complete locally | 6.1                               |
 | 6.3 Resource Sharing, Ownership, and Revocation  | Not started      | 6.1–6.2                           |
 | 6.4 Comments and Collaboration Activity          | Not started      | 6.1–6.3                           |
 | 6.5 Shared Workflow and Agent Governance         | Not started      | 6.1–6.4 and Milestones 4–5        |
@@ -64,7 +64,7 @@ invocation, approval, export, or controlled-effect authority.
 - `20260725_0021`: complete locally; memberships, invitation
   identity/state/secret/delivery, idempotency, collaboration audit,
   owner-membership backfill, and workspace authority version.
-- `20260725_0022`: planned for 6.2 only; active-to-active role-transition
+- `20260725_0022`: complete locally for 6.2 only; active-to-active role-transition
   support, approval-authority/approver-eligibility persistence, and exclusive
   6.2 constraints, indexes, tenant scope, lifecycle, and audit support. Direct
   parent: `20260725_0021`.
@@ -78,9 +78,9 @@ invocation, approval, export, or controlled-effect authority.
 
 Each migration is completed within its owning checkpoint and remains
 immutable after commit. Later changes use the next unused revision. Alembic
-has one sole head: `20260725_0021`. Migrations `20260725_0022`,
-`20260725_0023`, and `20260725_0024` do not exist. Checkpoints 6.5, 6.6, and
-6.7 have no migration assigned.
+has one sole head: `20260725_0022`. Migrations `20260725_0023` and
+`20260725_0024` do not exist. Checkpoints 6.5, 6.6, and 6.7 have no migration
+assigned.
 
 ## Scope boundaries
 
@@ -126,10 +126,23 @@ typing, lint, formatting, compilation, frontend regression, production build,
 and repository hygiene checks. Exact commands and results are recorded in the
 6.1 handoff.
 
-Milestone 6.2 remains unstarted. No role-permission engine, role changes,
-membership suspension/restoration/removal, sharing, ownership transfer,
-approval eligibility, comments, collaboration UI, real-time collaboration,
+Checkpoint 6.2 adds the closed six-role and 36-permission registries, explicit
+role ceilings, a centralized deny-by-default collaboration evaluator,
+authorized append-only active role changes and membership
+suspension/restoration/removal, and bounded approval-authority assignment,
+replacement, revocation, and exact reviewer evaluation. The existing 6.1
+membership and invitation administration paths now use formal action checks.
+
+Every authority mutation advances the workspace authority generation exactly
+once in the same transaction and records append-only audit, Trace, domain
+event, transactional outbox, and activity-projectable evidence. Exact replay
+returns the prior result without a second mutation or generation increment.
+Owner membership and owner role remain protected; ownership transfer remains
+exclusive to 6.3.
+
+No sharing, resource ownership, ownership transfer, 6.3 authority snapshots
+or revocation fencing, comments, collaboration UI, real-time collaboration,
 Indexer, or Librarian work was added.
 
 Next authorized implementation start:
-`MILESTONE 6.2 — COLLABORATION ROLES AND PERMISSION AUTHORITY`
+`MILESTONE 6.3 — RESOURCE SHARING, OWNERSHIP, AND REVOCATION`
