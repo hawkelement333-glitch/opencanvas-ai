@@ -89,14 +89,22 @@ management, and final tenant-security audit.
 
 Basic presence is optional stretch scope and not required.
 
-Advanced Real-Time Collaboration remains after the initial Milestone 8
-release. No cursors, detailed presence, simultaneous editing, CRDT, OT,
-offline merge, reconnect reconciliation, or distributed real-time
-infrastructure is designed for implementation here.
+Milestone 8.0 completes and releases the commercial SolarPlexus Mobius Core
+1.0 product. Optional Milestone 8.5, SolarPlexus Mobius Core 1.5 — Advanced
+Collaboration, follows only after Version 1 is stable. No cursors, detailed
+presence, simultaneous editing, CRDT, OT, offline merge, reconnect
+reconciliation, or distributed real-time infrastructure is designed for
+implementation in Milestone 6.
 
 Milestone 7 retains Production Hardening and the deterministic Indexer.
-Milestone 9 retains the governed Librarian and Agent Society. Milestones 7–13
+Milestone 9 begins the separate SolarPlexus Mobius Society product line and
+retains the governed Librarian. Milestones 10–13 begin Mobius Worlds,
+Spatial, Federation, and Continuity. They build on stable, versioned Core
+contracts and are not required for Mobius Core completion. Milestones 7–13
 remain unstarted.
+
+See
+[`MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md`](MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md).
 
 ## Current implementation state
 

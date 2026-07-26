@@ -1202,12 +1202,22 @@ managed PostgreSQL/storage, malware scanning, backup/restore, monitoring,
 shared rate limiting, and load/recovery validation. Indexing is not moved into
 Milestone 6.
 
-Milestone 9 retains Agent Society, the governed Librarian, AI Catalog, Academy,
-Agent Justice, Quarantine, Rehabilitation, Tribunal, and governed marketplace.
-The Librarian is not implemented in Milestone 6.
+Milestone 8 remains Controlled Public Release and Guided Onboarding. Its 8.0
+release boundary completes the commercial product SolarPlexus Mobius Core
+1.0. Optional Milestone 8.5, SolarPlexus Mobius Core 1.5 — Advanced
+Collaboration, follows only after Version 1 is stable.
 
-Advanced Real-Time Collaboration remains a separate phase after the initial
-Milestone 8 release. Milestones 7–13 remain unstarted.
+Milestone 9 begins the separate SolarPlexus Mobius Society product line and
+retains the governed Librarian, Agent Catalog, Academy, Agent Justice,
+Quarantine, Rehabilitation, appeals, and governed marketplace. Milestones
+10–13 begin Mobius Worlds, Spatial, Federation, and Continuity respectively.
+They depend on stable, versioned Mobius Core contracts and are not required
+for Core completion.
+
+The authoritative product relationship, roadmap order, release/licensing
+guidance, and preserved technical boundaries are recorded in
+[`MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md`](MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md).
+Milestones 7–13 remain unstarted.
 
 ## 30. Architecture completion boundary
 

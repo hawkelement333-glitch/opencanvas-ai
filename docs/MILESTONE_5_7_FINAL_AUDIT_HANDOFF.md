@@ -305,13 +305,14 @@ The required order after this audit is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
 2. Milestone 7 — Production Hardening, including deterministic indexing
-3. Milestone 8 — Controlled Public Portfolio and Product Release
-4. Future Advanced Real-Time Collaboration
-5. Milestone 9 — SolarPlexus Agent Society, including the governed Librarian
-6. Milestone 10 — Civilization and Simulated Worlds
-7. Milestone 11 — Embodied and Spatial Intelligence
-8. Milestone 12 — Federated Intelligence Network
-9. Milestone 13 — Continuity and Evolution Framework
+3. Milestone 8.0 — SolarPlexus Mobius Core 1.0: Controlled Public Release and
+   Guided Onboarding
+4. Milestone 8.5 — SolarPlexus Mobius Core 1.5: Advanced Collaboration
+5. Milestone 9 — SolarPlexus Mobius Society
+6. Milestone 10 — SolarPlexus Mobius Worlds
+7. Milestone 11 — SolarPlexus Mobius Spatial
+8. Milestone 12 — SolarPlexus Mobius Federation
+9. Milestone 13 — SolarPlexus Mobius Continuity
 
 Milestone 6 owns memberships, invitations, closed collaboration roles and
 permissions, ownership and administration, scoped canvas/resource/workflow/
@@ -322,9 +323,14 @@ require Google-Docs-style simultaneous editing.
 Live cursors, detailed presence, simultaneous same-resource editing, CRDT or
 operational-transform synchronization, offline editing, reconnect merging,
 deterministic conflict resolution, distributed real-time infrastructure, and
-production real-time load/recovery testing remain the separate Future
-Advanced Real-Time Collaboration phase after the initial Milestone 8
-controlled release.
+production real-time load/recovery testing remain optional Milestone 8.5
+scope after the stable Milestone 8.0 controlled release.
+
+The later documentation-only product-boundary amendment supersedes product
+positioning, not this audit evidence. Milestone 8.0 completes Mobius Core 1.0;
+Milestone 8.5 is optional; and Milestones 9–13 are separate product lines.
+See
+[`MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md`](MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md).
 
 Academy, Catalog, Agent Society, marketplace, quarantine, rehabilitation,
 Tribunal, autonomous self-activation/promotion, model-weight training,

@@ -952,7 +952,7 @@ or network access.
 
 ## Future Milestone 9 — Governed Librarian Agent
 
-Milestone 9 — SolarPlexus Agent Society includes a governed Librarian Agent.
+Milestone 9 — SolarPlexus Mobius Society includes a governed Librarian Agent.
 It uses the completed Milestone 7 indexing infrastructure together with
 Milestone 4 deny-by-default authority; Milestone 5 graph, retrieval, citation,
 Trace, workflow, event, and agent systems; Milestone 6 membership, role,
@@ -1006,17 +1006,25 @@ after Milestone 8.
 
 1. Milestone 6 — Multi-Workspace Collaboration
 2. Milestone 7 — Production Hardening, including deterministic indexing
-3. Milestone 8 — Controlled Public Portfolio and Product Release
-4. Future Advanced Real-Time Collaboration
-5. Milestone 9 — SolarPlexus Agent Society, including the governed Librarian
-6. Milestone 10 — Civilization and Simulated Worlds
-7. Milestone 11 — Embodied and Spatial Intelligence
-8. Milestone 12 — Federated Intelligence Network
-9. Milestone 13 — Continuity and Evolution Framework
+3. Milestone 8.0 — SolarPlexus Mobius Core 1.0: Controlled Public Release and
+   Guided Onboarding
+4. Milestone 8.5 — SolarPlexus Mobius Core 1.5: Advanced Collaboration
+5. Milestone 9 — SolarPlexus Mobius Society
+6. Milestone 10 — SolarPlexus Mobius Worlds
+7. Milestone 11 — SolarPlexus Mobius Spatial
+8. Milestone 12 — SolarPlexus Mobius Federation
+9. Milestone 13 — SolarPlexus Mobius Continuity
 
 This nine-item sequence is the current authoritative roadmap and supersedes
 shorter roadmap snapshots in historical checkpoint handoffs. Those handoffs
 remain unchanged as evidence of their completed checkpoints.
+
+Milestones 1–8.5 form **SolarPlexus Mobius Core**. Milestone 8 retains its
+numbered roadmap identity; Milestone 8.0 releases the complete commercial
+product SolarPlexus Mobius Core 1.0. Milestone 8.5 is an optional later Core
+1.5 edition and is not required for Version 1 completion. Milestones 9–13
+begin separate SolarPlexus product lines built on stable, versioned Core
+interfaces; they do not keep Mobius Core unfinished.
 
 Milestone 6 core scope includes workspace memberships; invitations; closed
 owner, administrator, editor, approver, member, and viewer roles/permissions
@@ -1031,9 +1039,12 @@ Milestone 6 does not require Google-Docs-style simultaneous editing. Live
 cursors, detailed presence, same-document/canvas simultaneous editing, CRDTs,
 operational transforms, offline editing, reconnect merging, deterministic
 conflict resolution, distributed presence infrastructure, and production
-real-time collaboration load/recovery testing are separately deferred to
-Future Advanced Real-Time Collaboration after the initial Milestone 8
-controlled release.
+real-time collaboration load/recovery testing are assigned to Milestone 8.5
+after the stable Milestone 8.0 controlled release.
+
+The product names, purposes, platform relationship, repository/service
+guidance, and preserved security boundaries are authoritative in
+[`MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md`](MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md).
 
 ## Milestone 5 final audit closure
 

@@ -536,7 +536,16 @@ Constants are server-owned. Clients cannot raise them.
 
 - Basic presence is optional after core Milestone 6 and is not an acceptance
   criterion.
-- Advanced Real-Time Collaboration remains after Milestone 8.
+- Milestone 8.0 completes the commercial SolarPlexus Mobius Core 1.0 product.
+- Optional Milestone 8.5 owns Advanced Collaboration after Version 1 is
+  released and stable.
 - Milestone 7 retains the deterministic Indexer and production hardening.
-- Milestone 9 retains the governed Librarian and Agent Society systems.
+- Milestone 9 begins the separate SolarPlexus Mobius Society product line and
+  retains the governed Librarian.
+- Milestones 10–13 begin Mobius Worlds, Spatial, Federation, and Continuity.
+- Later products depend on stable, versioned Core authority, Trace, audit, and
+  service contracts; they are not unfinished Core checkpoints.
 - Milestones 7–13 are not started by this plan.
+
+See
+[`MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md`](MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md).

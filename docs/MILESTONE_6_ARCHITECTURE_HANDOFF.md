@@ -269,14 +269,21 @@ Basic presence is optional stretch scope after core Milestone 6 and is not an
 acceptance requirement. Advanced Real-Time Collaboration—including live
 cursors, detailed presence, simultaneous editing, CRDT/OT synchronization,
 offline merge, reconnect reconciliation, and distributed real-time
-infrastructure—remains a separate phase after the initial Milestone 8
-controlled release. Only abstract future adapter seams are preserved; no
+infrastructure—belongs to optional Milestone 8.5 after the stable Milestone
+8.0 controlled release. Only abstract future adapter seams are preserved; no
 algorithm, field, dependency, or runtime is selected.
 
 Milestone 7 retains Production Hardening and the deterministic Indexer.
-Milestone 9 retains the governed Librarian and Agent Society. Collaboration
-scope and isolation provide their future authority foundation without moving
-either into Milestone 6. Milestones 7–13 remain not started.
+Milestone 8.0 completes SolarPlexus Mobius Core 1.0. Milestone 9 begins the
+separate SolarPlexus Mobius Society product line and retains the governed
+Librarian. Collaboration scope and isolation provide later products with a
+versioned authority foundation without moving them into Milestone 6.
+Milestones 7–13 remain not started.
+
+This historical architecture handoff adopts the later product-positioning
+boundary in
+[`MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md`](MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md)
+without changing its completed technical decisions.
 
 ## Validation record
 

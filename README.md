@@ -265,13 +265,20 @@ Governance is next. The required roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
 2. Milestone 7 — Production Hardening, including deterministic indexing
-3. Milestone 8 — Controlled Public Portfolio and Product Release
-4. Future Advanced Real-Time Collaboration
-5. Milestone 9 — SolarPlexus Agent Society, including the governed Librarian
-6. Milestone 10 — Civilization and Simulated Worlds
-7. Milestone 11 — Embodied and Spatial Intelligence
-8. Milestone 12 — Federated Intelligence Network
-9. Milestone 13 — Continuity and Evolution Framework
+3. Milestone 8.0 — SolarPlexus Mobius Core 1.0: Controlled Public Release and
+   Guided Onboarding
+4. Milestone 8.5 — SolarPlexus Mobius Core 1.5: Advanced Collaboration
+5. Milestone 9 — SolarPlexus Mobius Society
+6. Milestone 10 — SolarPlexus Mobius Worlds
+7. Milestone 11 — SolarPlexus Mobius Spatial
+8. Milestone 12 — SolarPlexus Mobius Federation
+9. Milestone 13 — SolarPlexus Mobius Continuity
+
+SolarPlexus Mobius Core consists of Milestones 1–8.5. Milestone 8 remains the
+numbered Controlled Public Release and Guided Onboarding checkpoint; its 8.0
+release boundary completes the deployable, usable commercial product
+**SolarPlexus Mobius Core 1.0**. Version 1 does not depend on Milestone 8.5 or
+Milestones 9–13.
 
 Milestone 6 remains a normal required milestone before Milestones 7 and 8. Its
 core scope covers membership and invitation lifecycle, closed roles and
@@ -282,9 +289,9 @@ and collaboration security/audit. It does not require simultaneous editing.
 Live cursors, detailed presence, simultaneous same-resource editing, CRDT or
 operational-transform synchronization, offline editing, reconnect merging,
 deterministic conflict resolution, distributed presence infrastructure, and
-production real-time load/recovery testing belong to the separate Future
-Advanced Real-Time Collaboration phase after the initial Milestone 8
-controlled release.
+production real-time load/recovery testing belong to optional Milestone 8.5,
+**SolarPlexus Mobius Core 1.5 — Advanced Collaboration**, after the stable
+Milestone 8.0 release.
 
 Milestone 7 includes deterministic technical indexing and reindexing
 infrastructure. The Indexer is not an autonomous agent: it supports controlled,
@@ -292,12 +299,20 @@ scoped, immutable-version ingestion and retrieval operations and cannot grant
 authority, broaden context, alter evidence, fabricate metadata, or approve
 itself.
 
-Milestone 9 includes a governed Librarian Agent built on the completed
+Milestone 9 begins the separate **SolarPlexus Mobius Society** product line,
+including a governed Librarian Agent built on the completed
 indexing, authority, graph, retrieval, workflow, collaboration, and production
 foundations. It may make evidence-backed catalog-quality proposals but cannot
 independently mutate, archive, share, authorize, reindex, or reclassify
 authoritative resources or approve itself. Human review and controlled
 workflows remain authoritative.
+
+SolarPlexus Mobius Worlds, Spatial, Federation, and Continuity follow as
+separate product lines built on stable, versioned Mobius Core interfaces.
+They may use independent repositories, services, release schedules, customer
+positioning, and licensing, but must share authority, Trace, and audit
+contracts without copying security-critical logic. See the
+[Mobius Core product-family roadmap amendment](docs/MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md).
 
 Milestones 6.1–6.4 are complete locally. Workspace memberships now bind exact
 authenticated users to exact workspaces, and secure invitations support
@@ -335,8 +350,9 @@ See
 [docs/MILESTONE_6_1_WORKSPACE_MEMBERSHIPS_INVITATIONS_HANDOFF.md](docs/MILESTONE_6_1_WORKSPACE_MEMBERSHIPS_INVITATIONS_HANDOFF.md),
 [docs/MILESTONE_6_2_COLLABORATION_ROLES_PERMISSION_AUTHORITY_HANDOFF.md](docs/MILESTONE_6_2_COLLABORATION_ROLES_PERMISSION_AUTHORITY_HANDOFF.md),
 [docs/MILESTONE_6_3_RESOURCE_SHARING_OWNERSHIP_REVOCATION_HANDOFF.md](docs/MILESTONE_6_3_RESOURCE_SHARING_OWNERSHIP_REVOCATION_HANDOFF.md),
-and
-[docs/MILESTONE_6_4_COMMENTS_COLLABORATION_ACTIVITY_HANDOFF.md](docs/MILESTONE_6_4_COMMENTS_COLLABORATION_ACTIVITY_HANDOFF.md).
+[docs/MILESTONE_6_4_COMMENTS_COLLABORATION_ACTIVITY_HANDOFF.md](docs/MILESTONE_6_4_COMMENTS_COLLABORATION_ACTIVITY_HANDOFF.md),
+and the
+[Mobius Core product-family roadmap amendment](docs/MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md).
 
 ## Competition and release status
 

@@ -274,6 +274,12 @@ The roadmap order is:
 7. Milestone 9 — SolarPlexus Agent Society
 8. Milestone 10 — Civilization and Simulated Worlds
 
+This list is preserved as historical checkpoint evidence. Its later product
+positioning and names are superseded by
+[`MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md`](MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md):
+Milestone 8.0 completes Mobius Core 1.0, Milestone 8.5 is optional Advanced
+Collaboration, and Milestones 9–13 are separate named product lines.
+
 Milestone 5.7 must verify two distinct items:
 
 1. Milestone 5.6 preserves all required future collaboration authorization

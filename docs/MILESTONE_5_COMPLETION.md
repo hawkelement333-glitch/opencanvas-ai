@@ -159,8 +159,8 @@ and administration, scoped sharing, comments and collaboration activity,
 ownership transfer, revocation, exact tenant isolation, and collaboration
 security/audit.
 
-Only Advanced Real-Time Collaboration is separately deferred until after the
-initial Milestone 8 controlled release. Live cursors, detailed presence,
+Advanced Real-Time Collaboration is assigned to optional Milestone 8.5 after
+the stable Milestone 8.0 controlled release. Live cursors, detailed presence,
 simultaneous editing, CRDTs, operational transforms, offline/reconnect
 merging, deterministic conflict resolution, distributed presence, and
 production real-time load/recovery testing are not required for Milestone 6.
@@ -195,13 +195,19 @@ The authoritative roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
 2. Milestone 7 — Production Hardening, including deterministic indexing
-3. Milestone 8 — Controlled Public Portfolio and Product Release
-4. Future Advanced Real-Time Collaboration
-5. Milestone 9 — SolarPlexus Agent Society, including the governed Librarian
-6. Milestone 10 — Civilization and Simulated Worlds
-7. Milestone 11 — Embodied and Spatial Intelligence
-8. Milestone 12 — Federated Intelligence Network
-9. Milestone 13 — Continuity and Evolution Framework
+3. Milestone 8.0 — SolarPlexus Mobius Core 1.0: Controlled Public Release and
+   Guided Onboarding
+4. Milestone 8.5 — SolarPlexus Mobius Core 1.5: Advanced Collaboration
+5. Milestone 9 — SolarPlexus Mobius Society
+6. Milestone 10 — SolarPlexus Mobius Worlds
+7. Milestone 11 — SolarPlexus Mobius Spatial
+8. Milestone 12 — SolarPlexus Mobius Federation
+9. Milestone 13 — SolarPlexus Mobius Continuity
+
+This completion record now follows the product boundary defined in
+[`MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md`](MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md):
+Milestone 8.0 completes Mobius Core 1.0; Milestone 8.5 is optional; and
+Milestones 9–13 are separate product lines built on versioned Core contracts.
 
 Milestones 6–13 were not implemented.
 

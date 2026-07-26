@@ -491,19 +491,26 @@ Required roadmap after the final Milestone 5 audit:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
 2. Milestone 7 — Production Hardening, including deterministic indexing
-3. Milestone 8 — Controlled Public Portfolio and Product Release
-4. Future Advanced Real-Time Collaboration
-5. Milestone 9 — SolarPlexus Agent Society, including the governed Librarian
-6. Milestone 10 — Civilization and Simulated Worlds
-7. Milestone 11 — Embodied and Spatial Intelligence
-8. Milestone 12 — Federated Intelligence Network
-9. Milestone 13 — Continuity and Evolution Framework
+3. Milestone 8.0 — SolarPlexus Mobius Core 1.0: Controlled Public Release and
+   Guided Onboarding
+4. Milestone 8.5 — SolarPlexus Mobius Core 1.5: Advanced Collaboration
+5. Milestone 9 — SolarPlexus Mobius Society
+6. Milestone 10 — SolarPlexus Mobius Worlds
+7. Milestone 11 — SolarPlexus Mobius Spatial
+8. Milestone 12 — SolarPlexus Mobius Federation
+9. Milestone 13 — SolarPlexus Mobius Continuity
 
 This current roadmap supersedes shorter sequences in historical checkpoint
 handoffs without rewriting their evidence.
 
-Only Advanced Real-Time Collaboration is deferred until after Milestone 8.
-Milestone 6 remains required before Milestones 7 and 8.
+Milestones 1–8.5 are SolarPlexus Mobius Core. Milestone 8.0 completes and
+releases the finished commercial Mobius Core 1.0 product. Optional Milestone
+8.5 follows only after Version 1 is stable. Milestones 9–13 begin distinct
+SolarPlexus product lines built on versioned Core contracts and are not
+required for Core completion.
+
+See
+[`MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md`](MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md).
 
 ## Completed 5.4 checkpoint
 

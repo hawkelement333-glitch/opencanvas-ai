@@ -613,13 +613,19 @@ The required sequence is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
 2. Milestone 7 — Production Hardening, including deterministic indexing
-3. Milestone 8 — Controlled Public Portfolio and Product Release
-4. Future Advanced Real-Time Collaboration
-5. Milestone 9 — SolarPlexus Agent Society, including the governed Librarian
-6. Milestone 10 — Civilization and Simulated Worlds
-7. Milestone 11 — Embodied and Spatial Intelligence
-8. Milestone 12 — Federated Intelligence Network
-9. Milestone 13 — Continuity and Evolution Framework
+3. Milestone 8.0 — SolarPlexus Mobius Core 1.0: Controlled Public Release and
+   Guided Onboarding
+4. Milestone 8.5 — SolarPlexus Mobius Core 1.5: Advanced Collaboration
+5. Milestone 9 — SolarPlexus Mobius Society
+6. Milestone 10 — SolarPlexus Mobius Worlds
+7. Milestone 11 — SolarPlexus Mobius Spatial
+8. Milestone 12 — SolarPlexus Mobius Federation
+9. Milestone 13 — SolarPlexus Mobius Continuity
+
+Milestones 1–8.5 define SolarPlexus Mobius Core. Milestone 8 remains the
+numbered release checkpoint, and its 8.0 boundary completes the commercial
+Mobius Core 1.0 product. Milestone 8.5 is optional after Version 1 stability.
+Milestones 9–13 are separate product lines, not unfinished Core work.
 
 Milestone 6 implements memberships, invitation lifecycle, closed collaboration
 roles and permissions, approved owner/administrator/editor/approver/member/
@@ -632,5 +638,11 @@ Milestone 6 completion does not depend on Google-Docs-style simultaneous
 editing. Live cursors, detailed presence, simultaneous same-resource editing,
 CRDT and operational-transform synchronization, offline editing, reconnect
 merging, deterministic conflict resolution, distributed presence
-infrastructure, and production real-time load/recovery testing are separately
-deferred until after the initial Milestone 8 controlled release.
+infrastructure, and production real-time load/recovery testing are assigned to
+Milestone 8.5 after the stable Milestone 8.0 controlled release.
+
+See
+[`MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md`](MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md)
+for product purposes, versioned platform boundaries, repository/service
+separation, independent release and licensing guidance, and preserved
+security contracts.
