@@ -4,13 +4,19 @@ This register prevents the competition demo and public materials from implying c
 
 ## Product
 
-- Authentication supports individual accounts and multiple owned workspaces, but not
-  organizations, invitations, shared roles, or collaboration.
-- No real-time collaboration or conflict merging; stale revisions return conflicts.
+- Authentication supports individual accounts, multiple workspaces,
+  memberships, invitations, a closed role/permission registry, typed sharing,
+  comments, and collaboration activity. Advanced Real-Time Collaboration is
+  not implemented.
+- No simultaneous editing, live cursors, detailed presence, CRDT/operational
+  transform synchronization, offline merge, or reconnect conflict resolution;
+  stale revisions return conflicts.
 - No OCR; image-only PDFs fail with guidance.
 - Supported node UI is notes, documents, and AI responses—not general code, image-generation, audio, or video objects.
 - AI responses are non-streaming.
-- No web browsing, external connectors, autonomous agents, or workspace-wide assistant retrieval.
+- No web browsing, external connectors, unbounded autonomous agents, or
+  workspace-wide unselected assistant retrieval. Controlled agents and
+  bounded Agent Studio remain deny-by-default and scoped.
 - Retrieval is deliberately limited to ready documents selected on the active canvas.
 - Inference and conflict are not automatically classified.
 - No complete end-user Trace explorer, replay, comparison, evaluation, or export UI.
@@ -40,15 +46,18 @@ This register prevents the competition demo and public materials from implying c
   The database queue is not a dedicated broker and does not yet provide long-running lease
   renewal or dead-letter administration UI.
 - Rate limiting is process-local, not distributed.
-- Canonical domain events are process-local and published before the outer API transaction commits.
-- A transactional outbox is required before external side effects or multi-replica event delivery.
+- Canonical domain events, provenance, transactional outbox delivery attempts,
+  and activity projections are durable. Production queue wake-up, operational
+  telemetry, and external multi-service delivery still require the Milestone 7
+  contract validation.
 - No published load/performance benchmarks or capacity claims.
 
 ## Canonical compatibility
 
 - Existing canvas notes and visual edges remain the working Phase 1/2 compatibility layer.
 - They are not silently converted to canonical notes or semantic relationships.
-- Canonical ingestion adapters and workspace-wide hybrid retrieval remain future work.
+- Deterministic production ingestion/indexing and workspace-wide unselected
+  retrieval remain future work.
 - Privileged raw SQL can bypass repository-level subtype and parent validation; normal APIs do not.
 - Structured JSON is sanitized but does not have independent depth/byte quotas for every metadata field.
 
@@ -58,7 +67,9 @@ This register prevents the competition demo and public materials from implying c
   formal retention schedules, and legal-hold workflows are not implemented.
 - Backup/restore/rollback procedures are documented but have not been validated against a managed
   production deployment.
-- No completed security audit, penetration test, compliance certification, or vulnerability-free guarantee.
+- Milestone 6 completed a local collaboration-security audit. No production
+  infrastructure penetration test, compliance certification, or
+  vulnerability-free guarantee exists.
 - Uploaded content and execution snapshots may be sensitive; use synthetic demo data.
 - Demo isolation protects against accidental live provider/data use when its canonical command is used, but it is not a security sandbox for hostile local users.
 
@@ -74,7 +85,8 @@ This register prevents the competition demo and public materials from implying c
 
 ## Recommended next checkpoint
 
-Implement Milestone 5.2, Living State and Event System, following the completed
-local Knowledge Graph Foundation. Preserve the limitation that the current
-process-local event bus is not durable truth and must not drive autonomous
-agent execution.
+Implement Milestone 7.1, Production Runtime Foundation and Managed PostgreSQL,
+from the completed
+[Milestone 7 architecture](MILESTONE_7_ARCHITECTURE.md). Milestone 7
+implementation, live infrastructure, deployment, and Milestone 8 remain
+unstarted.

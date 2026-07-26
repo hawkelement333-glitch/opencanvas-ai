@@ -152,8 +152,10 @@ Relationships are directional, same-workspace objects. The current controlled vo
 - Extracted content is rendered as text and treated as untrusted prompt data.
 - Document retrieval is limited to selected documents on the active canvas.
 - Demo mode enforces isolated paths, mock providers, and absence of OpenAI credentials.
-- Database-backed sessions, CSRF checks, server-side workspace ownership, authorized file proxying,
-  and not-found responses at ownership boundaries protect individual user workspaces.
+- Database-backed sessions, CSRF checks, server-derived membership and
+  workspace authority, typed sharing, authorized file proxying, revocation
+  generations, and non-enumerating responses protect multi-workspace
+  collaboration boundaries.
 
 ## Deployment
 
@@ -167,8 +169,11 @@ The reference Compose topology is:
 
 Staging/production require managed secrets, TLS/reverse proxy, PostgreSQL/pgvector, SMTP password
 reset, explicit live providers, private S3-compatible storage, and the durable worker. Remaining
-hardening includes malware scanning, distributed rate limiting, a transactional outbox, managed
-backup/restore validation, centralized monitoring, and a formal retention policy.
+hardening includes malware quarantine, deterministic immutable indexing,
+complete durable-job lease/dead-letter behavior, distributed rate limiting,
+production outbox delivery validation, managed backup/restore validation,
+centralized monitoring, and a formal retention policy. See
+`MILESTONE_7_ARCHITECTURE.md`.
 
 ## Architecture decisions
 
@@ -180,21 +185,19 @@ backup/restore validation, centralized monitoring, and a formal retention policy
 6. **Canonical migration is additive.** Stable future semantics do not risk existing canvas behavior.
 7. **Optimistic revisions reject silent loss.** Concurrent writes conflict rather than merge.
 
-## Deferred architecture
+## Current and deferred architecture
 
-### Milestone 4 controlled-agent planning boundary
+Milestone 4 controlled agents, Milestone 5 canonical graph/retrieval/workflow/
+Agent Studio systems, and Milestone 6 multi-workspace collaboration are
+complete locally. They preserve selected context, deny-by-default authority,
+human approval, exact scope, revocation fencing, immutable evidence, Trace,
+audit, domain events, transactional outbox, and activity.
 
-Milestone 4.0 adds architecture documentation only. No active agent, tool adapter, agent API,
-database model, migration, queue, scheduler, provider call, or production service is present. The
-existing document-processing queue and `DocumentWorker` remain ingestion-specific infrastructure;
-they are not a general agent runtime.
-
-Future controlled-agent work must inherit the current authentication, workspace ownership,
-selected-context retrieval, provider fail-closed behavior, usage controls, optimistic revisions,
-and Trace atomicity. The normative plan is
-`MILESTONE_4_CONTROLLED_AGENT_ARCHITECTURE.md`; the visual-role bridge remains in
-`AGENT_UNIVERSE_ARCHITECTURE.md`.
-
-Organizations/collaboration, OCR, malware scanning, broker-backed processing, automatic
-inference/conflict classification, a complete Trace explorer, canonical ingestion adapters,
-hybrid workspace search, and semantic memory remain deferred. See `KNOWN_LIMITATIONS.md`.
+Milestone 7 implementation remains deferred behind the completed
+`MILESTONE_7_ARCHITECTURE.md`. It owns managed PostgreSQL proof,
+deterministic production indexing, malware quarantine, production object
+storage validation, complete durable work, shared limits, observability,
+recovery, and resilience. OCR, a complete end-user Trace explorer,
+workspace-wide unselected retrieval, Advanced Real-Time Collaboration, and
+later product-family systems remain outside the current implementation. See
+`KNOWN_LIMITATIONS.md`.

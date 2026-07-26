@@ -273,8 +273,14 @@ responsive browser validation. The
 [Milestone 6.7 audit handoff](docs/MILESTONE_6_7_FINAL_COLLABORATION_SECURITY_AUDIT_HANDOFF.md)
 and [Milestone 6 completion report](docs/MILESTONE_6_COMPLETION.md) record the
 integrated authority, tenant-isolation, revocation, concurrency, migration,
-frontend, browser, and evidence validation. Milestone 7 Production Hardening
-architecture is next. The
+frontend, browser, and evidence validation. The
+[Milestone 7 Production Hardening architecture](docs/MILESTONE_7_ARCHITECTURE.md),
+[implementation plan](docs/MILESTONE_7_IMPLEMENTATION_PLAN.md), and
+[architecture handoff](docs/MILESTONE_7_ARCHITECTURE_HANDOFF.md) now define
+the deterministic Indexer, managed PostgreSQL, secure object ingestion,
+durable work, shared limits, observability, recovery, resilience, and final
+production-readiness audit. Milestone 7 implementation has not started;
+checkpoint 7.1 is next. The
 required roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
@@ -311,7 +317,9 @@ Milestone 7 includes deterministic technical indexing and reindexing
 infrastructure. The Indexer is not an autonomous agent: it supports controlled,
 scoped, immutable-version ingestion and retrieval operations and cannot grant
 authority, broaden context, alter evidence, fabricate metadata, or approve
-itself.
+itself. Uploaded content remains quarantined and unavailable to parsing,
+retrieval, models, downloads, or index publication until bounded validation
+and a current clean malware decision succeed.
 
 Milestone 9 begins the separate **SolarPlexus Mobius Society** product line,
 including a governed Librarian Agent built on the completed

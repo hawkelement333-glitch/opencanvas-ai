@@ -228,6 +228,29 @@ This amendment does not alter these established decisions:
 - Deny-by-default authority, human approval, exact scope, immutable evidence,
   Trace, audit, event, and controlled-workflow contracts remain unchanged.
 
+## Current Milestone 7 architecture status
+
+The documentation-only
+[Milestone 7 Production Hardening architecture](MILESTONE_7_ARCHITECTURE.md),
+[implementation plan](MILESTONE_7_IMPLEMENTATION_PLAN.md), and
+[architecture handoff](MILESTONE_7_ARCHITECTURE_HANDOFF.md) are complete
+locally.
+
+They preserve this roadmap and divide Milestone 7 into:
+
+1. production runtime foundation and managed PostgreSQL;
+2. deterministic Indexer and ingestion;
+3. private object storage, upload security, and malware quarantine;
+4. durable queues/workers/retries and shared limits;
+5. observability and operational controls;
+6. backup, restore, rollback, and disaster recovery;
+7. load, capacity, resilience, and infrastructure security; and
+8. the final production-readiness audit.
+
+Milestone 7 implementation has not started. The next authorized checkpoint is
+7.1. Milestone 8.0, optional Milestone 8.5, and Milestones 9–13 remain
+unstarted.
+
 ## Amendment boundary
 
 This amendment changes product structure, naming, release boundaries, and

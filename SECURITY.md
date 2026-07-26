@@ -20,12 +20,21 @@ data. Receipt or response times are not guaranteed until a formal disclosure cha
 
 ## Current deployment boundary
 
-Milestone 3.5 provides individual accounts, database-backed sessions, CSRF protection, multiple
-owned workspaces, and server-side authorization for workspace data, private files, executions,
-citations, and Trace records. Staging and production fail closed unless PostgreSQL, SMTP password
-reset, explicit live AI/embedding providers, private S3-compatible storage, and the durable worker
-are configured. These controls have automated coverage but are not a certification or substitute
-for a deployment-specific threat assessment and penetration test.
+Milestones 1–6 provide individual accounts, database-backed sessions, CSRF
+protection, multi-workspace memberships, closed collaboration roles and
+permissions, typed sharing, ownership/revocation controls, and server-side
+authorization for workspace data, private files, workflows, agents,
+executions, citations, events, audit, and Trace. Staging and production fail
+closed unless PostgreSQL, SMTP password reset, explicit live AI/embedding
+providers, private S3-compatible storage, and the durable worker are
+configured.
+
+The completed documentation-only Milestone 7 architecture assigns managed
+PostgreSQL validation, deterministic indexing, hostile-upload quarantine,
+shared limits, observability, recovery, resilience, and the production
+security audit to checkpoints 7.1–7.8. Those controls have not been
+implemented or certified and do not replace a deployment-specific threat
+assessment and penetration test.
 
 The checked-in PostgreSQL username and password are local-development placeholders. They must
 not be reused outside an isolated development environment.

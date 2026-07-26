@@ -1,5 +1,20 @@
 # Milestone 3.5 deployment and operations guide
 
+## Current production-readiness boundary
+
+The documentation-only
+[Milestone 7 Production Hardening architecture](MILESTONE_7_ARCHITECTURE.md)
+and [implementation plan](MILESTONE_7_IMPLEMENTATION_PLAN.md) now own managed
+PostgreSQL validation, deterministic production indexing, secure private
+object ingestion and malware quarantine, durable work, shared rate limits,
+observability, recovery exercises, capacity/resilience testing, and the final
+production-readiness audit.
+
+Those checkpoints have not been implemented. This guide describes the current
+runtime and intended operating procedure; it is not evidence that managed
+infrastructure, hostile-upload controls, failover, restore, capacity, or
+production security have passed. Checkpoint 7.1 is the next authorized work.
+
 SolarPlexus Mobius has five explicit runtime modes: `demo`, `development`, `test`, `staging`, and
 `production`. The API validates the selected mode and all mode-dependent provider configuration at
 startup. Staging and production fail closed if authentication, PostgreSQL, SMTP password reset,

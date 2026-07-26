@@ -1,9 +1,11 @@
 # Security model
 
-This is an engineering threat model for the competition artifact plus the Milestone 3.5
-productization bridge, not a certification or guarantee. Individual users authenticate, own
-multiple isolated workspaces, and are authorized server-side. Organizations, shared workspaces,
-roles, and collaboration are intentionally outside this milestone.
+This is an engineering threat model for the competition artifact and the
+completed local Milestone 1–6 system, not a certification or guarantee.
+Individual users authenticate and may hold exact memberships in multiple
+isolated workspaces. Closed roles and permissions, typed sharing, ownership,
+comments, workflow/agent visibility and invocation, approval eligibility, and
+revocation are authorized server-side.
 
 ## Assets
 
@@ -155,11 +157,11 @@ artifact generation, redaction workflows, and audit-administrator policy remain 
 
 ## Known gaps before internet deployment
 
-- Organizations, role-based sharing, invitations, and collaboration
 - Deployment-specific TLS/reverse-proxy, managed-secret, and key-rotation implementation
 - Distributed rate limiting and centralized abuse controls
 - Malware scanning and content disarm/reconstruction
-- Transactional outbox and broker-backed job administration for larger deployments
+- Production multi-service outbox delivery validation and complete durable-job
+  lease/dead-letter administration
 - Managed encryption/key policy plus executed backup/restore disaster-recovery drills
 - Trace retention, privacy requests, redaction, and audit access policy
 - Signed supply-chain attestations

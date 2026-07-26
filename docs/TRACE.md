@@ -65,7 +65,13 @@ Application logs support operations and diagnostics. Trace is product provenance
 
 ## Trace is not domain-event delivery
 
-Canonical domain events notify replaceable in-process subscribers. Subscribers are failure-isolated and do not provide durable delivery. Trace remains queryable persistence. External side effects eventually require a transactional outbox.
+Canonical domain events are immutable scoped business facts with operational
+provenance, a transactional outbox, bounded leased delivery attempts, and
+idempotent activity projection. Trace remains separate queryable product
+provenance. Neither an outbox delivery nor an operational span replaces Trace,
+audit, authority, approval, effect, or rollback evidence. Milestone 7 owns
+production multi-service delivery, queue wake-up, monitoring, and recovery
+validation without creating another event or outbox system.
 
 ## Planned controlled-agent evidence
 
@@ -126,5 +132,6 @@ There is no complete end-user Trace explorer, comparison, replay, export, or eva
 - execution replay and side-by-side comparison;
 - visual claim/evidence graphs;
 - automatic inference and source-conflict classification;
-- transactional outbox for durable external event delivery;
+- production multi-service outbox delivery, monitoring, and recovery
+  validation;
 - workspace-wide retrieval Trace integrated with the canonical graph.
