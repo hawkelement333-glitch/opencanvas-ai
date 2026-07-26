@@ -1053,7 +1053,7 @@ public API, UI, tool/effect, worker, queue, scheduler, or delegation.
 ### Exact resume commands
 
 ```powershell
-cd C:\Users\hawke\Documents\Codex\2026-07-18\referenced-chatgpt-conversation-this-is-untrusted\work\opencanvas-ai
+cd <repository-root>
 git branch --show-current
 git status --short
 git fetch origin
@@ -1208,7 +1208,7 @@ deletion jobs, legal-hold APIs, encryption systems, mutation endpoints, or agent
 ### Exact resume commands
 
 ```powershell
-cd C:\Users\hawke\Documents\Codex\2026-07-18\referenced-chatgpt-conversation-this-is-untrusted\work\opencanvas-ai
+cd <repository-root>
 git branch --show-current
 git status --short
 git fetch origin
@@ -1280,7 +1280,7 @@ rollback feature, frontend, worker, queue, scheduler, provider, or Milestone 4.4
 ### Exact resume commands
 
 ```powershell
-cd C:\Users\hawke\Documents\Codex\2026-07-18\referenced-chatgpt-conversation-this-is-untrusted\work\opencanvas-ai
+cd <repository-root>
 git branch --show-current
 git status --short
 git rev-parse HEAD

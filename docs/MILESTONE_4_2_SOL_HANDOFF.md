@@ -143,7 +143,7 @@ Luna must not redesign the implementation, import Milestone 3.75, or add later-m
 ## Resume commands
 
 ```powershell
-cd C:\Users\hawke\Documents\Codex\2026-07-18\referenced-chatgpt-conversation-this-is-untrusted\work\opencanvas-ai
+cd <repository-root>
 git branch --show-current
 git status --short
 git fetch origin

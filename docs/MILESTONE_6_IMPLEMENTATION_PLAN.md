@@ -4,9 +4,9 @@ Date: 2026-07-25
 
 Architecture baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: checkpoints 6.1–6.6 complete locally; checkpoint 6.7 not started
+Status: architecture and checkpoints 6.1–6.7 complete locally
 
-Next checkpoint: 6.7 — Final Collaboration Security Audit
+Next milestone: Milestone 7 — Production Hardening architecture
 
 ## Governing rules
 
@@ -512,6 +512,10 @@ Completion:
 
 ## 6.7 — Final Collaboration Security Audit
 
+Status: complete locally. See
+[`MILESTONE_6_7_FINAL_COLLABORATION_SECURITY_AUDIT_HANDOFF.md`](MILESTONE_6_7_FINAL_COLLABORATION_SECURITY_AUDIT_HANDOFF.md)
+and [`MILESTONE_6_COMPLETION.md`](MILESTONE_6_COMPLETION.md).
+
 Audit Milestone 4, Milestone 5, and Milestone 6 as one product.
 
 Required gates:
@@ -538,7 +542,7 @@ The final audit must not claim PostgreSQL runtime isolation, RLS, production
 load, real-time collaboration, or deployment behavior unless actually tested.
 
 Completion:
-`MILESTONE 6 COMPLETE LOCALLY — READY FOR MILESTONE 7 PRODUCTION HARDENING ARCHITECTURE`
+`MILESTONE 6.7 COMPLETE LOCALLY — MILESTONE 6 COMPLETE — READY FOR MILESTONE 7 PRODUCTION HARDENING ARCHITECTURE`
 
 ## Server-owned limits
 

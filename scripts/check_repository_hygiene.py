@@ -84,6 +84,11 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("Slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b")),
     ("private key block", re.compile(r"-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----")),
 )
+LOCAL_PATH_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("Windows user path", re.compile(r"\b[A-Za-z]:\\Users\\[^\\\s]+\\", re.IGNORECASE)),
+    ("macOS user path", re.compile("/" + r"Users/[^/\s]+/")),
+    ("Linux user path", re.compile("/" + r"home/[^/\s]+/")),
+)
 
 
 def source_files() -> list[Path]:
@@ -138,6 +143,9 @@ def secret_violations(paths: list[Path]) -> list[str]:
         for label, pattern in SECRET_PATTERNS:
             if pattern.search(content):
                 violations.append(f"{label} pattern detected in {relative}")
+        for label, pattern in LOCAL_PATH_PATTERNS:
+            if pattern.search(content):
+                violations.append(f"{label} detected in {relative}")
     return violations
 
 

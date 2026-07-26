@@ -1683,7 +1683,11 @@ function Automations({
   runAction: ActionRunner;
 }) {
   const canvases = useQuery({
-    queryKey: ["canvases", context.workspaceId, context.authorityGeneration],
+    queryKey: collaborationKeys.canvases(
+      context.authenticatedUserId,
+      context.workspaceId,
+      context.authorityGeneration,
+    ),
     queryFn: ({ signal }) => canvasApi.listCanvases(context.workspaceId, signal),
   });
   useEffect(() => {

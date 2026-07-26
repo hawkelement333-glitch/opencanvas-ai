@@ -2,11 +2,11 @@
 
 Last updated: 2026-07-26
 
-Branch: `milestone-6-6-multi-workspace-collaboration-interface-local`
+Branch: `milestone-6-7-final-collaboration-security-audit-local`
 
 Baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: checkpoints 6.1–6.6 complete locally; ready for 6.7
+Status: Milestone 6 architecture and checkpoints 6.1–6.7 complete locally
 
 | Checkpoint                                       | Status           | Dependency                        |
 | ------------------------------------------------ | ---------------- | --------------------------------- |
@@ -17,7 +17,7 @@ Status: checkpoints 6.1–6.6 complete locally; ready for 6.7
 | 6.4 Comments and Collaboration Activity          | Complete locally | 6.1–6.3                           |
 | 6.5 Shared Workflow and Agent Governance         | Complete locally | 6.1–6.4 and Milestones 4–5        |
 | 6.6 Multi-Workspace Collaboration Interface      | Complete locally | 6.1–6.5                           |
-| 6.7 Final Collaboration Security Audit           | Not started      | 6.1–6.6                           |
+| 6.7 Final Collaboration Security Audit           | Complete locally | 6.1–6.6                           |
 
 ## Architecture decisions
 
@@ -247,8 +247,31 @@ real-service skips. Production Ruff, strict MyPy across 83 source files,
 TypeScript, ESLint, Prettier, compilation/import, 121-table mapper
 configuration, production build, SQLite migration cycling, PostgreSQL offline
 DDL, deterministic demo, 355-file repository hygiene, and the focused
-accessibility/responsive assertions pass. The historical repository-wide Ruff
-test import-order baseline remains unchanged.
+accessibility/responsive assertions pass.
 
-Next authorized implementation start:
-`MILESTONE 6.7 — FINAL COLLABORATION SECURITY AUDIT`
+Checkpoint 6.7 audited all 14 integrated collaboration areas and found two
+concrete defects:
+
+1. The collaboration console's visible-canvas query key omitted authenticated
+   user scope. A focused regression reproduced the missing key family. The key
+   now includes user, workspace, authority generation, and canvas-list
+   identity, preventing same-workspace cache reuse across authenticated users.
+2. Four historical Milestone 4 command examples contained a local absolute
+   user path. They now use `<repository-root>`, and the established hygiene
+   validator rejects Windows, macOS, or Linux user-home paths.
+
+No backend, database, API, migration, authority, Trace, audit, event, outbox,
+activity, workflow, agent, or controlled-execution defect was proved. Final
+validation passed 518 backend tests with 1 expected PostgreSQL-runtime skip
+and 61 dependency warnings; 38 security tests with 481 deselections; 22
+integration tests with 1 warning; 31 focused Milestone 6 tests with 35
+dependency warnings; 74 frontend tests across 17 files; and 8 Chromium tests
+with 2 expected real-service skips. Strict typing, lint, formatting,
+compilation, imports, 121 ORM tables, production build, migration cycle,
+PostgreSQL offline DDL, deterministic demo, and 357-file hygiene passed.
+
+Migrations `0021`–`0025` retain their immutable blob hashes, no migration
+`0026` exists, and the sole head remains `20260725_0025`.
+
+Next authorized work:
+`MILESTONE 7 — PRODUCTION HARDENING ARCHITECTURE`

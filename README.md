@@ -258,10 +258,9 @@ database-backed rather than broker-backed job queue, non-streaming AI responses,
 inference/conflict classification, and no complete end-user Trace explorer. See the complete
 [known-limitations register](docs/KNOWN_LIMITATIONS.md).
 
-Milestone 4 controlled agents and Milestone 5 architecture and checkpoints
-5.1–5.7 are complete locally. Milestone 6 architecture and checkpoints
-6.1–6.6 are complete locally. Milestone 6.7 — Final Collaboration Security
-Audit is next. The
+Milestone 4 controlled agents, Milestone 5 architecture and checkpoints
+5.1–5.7, and Milestone 6 architecture and checkpoints 6.1–6.7 are complete
+locally. The
 [Milestone 6.5 migration amendment](docs/MILESTONE_6_5_INVOCATION_IDENTITY_MIGRATION_AMENDMENT.md)
 and
 [implementation handoff](docs/MILESTONE_6_5_SHARED_WORKFLOW_AGENT_GOVERNANCE_HANDOFF.md)
@@ -271,6 +270,11 @@ definition ownership from the exact invoking user and active membership. The
 records the complete bounded collaboration console, server-confirmed
 workspace/operation context, scoped cache invalidation, accessibility, and
 responsive browser validation. The
+[Milestone 6.7 audit handoff](docs/MILESTONE_6_7_FINAL_COLLABORATION_SECURITY_AUDIT_HANDOFF.md)
+and [Milestone 6 completion report](docs/MILESTONE_6_COMPLETION.md) record the
+integrated authority, tenant-isolation, revocation, concurrency, migration,
+frontend, browser, and evidence validation. Milestone 7 Production Hardening
+architecture is next. The
 required roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
@@ -324,7 +328,7 @@ positioning, and licensing, but must share authority, Trace, and audit
 contracts without copying security-critical logic. See the
 [Mobius Core product-family roadmap amendment](docs/MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md).
 
-Milestones 6.1–6.5 are complete locally. Workspace memberships now bind exact
+Milestones 6.1–6.7 are complete locally. Workspace memberships now bind exact
 authenticated users to exact workspaces, and secure invitations support
 bounded creation, delivery, resend, acceptance, decline, expiry, revocation,
 idempotency, and concurrency handling. A closed six-role and 36-permission

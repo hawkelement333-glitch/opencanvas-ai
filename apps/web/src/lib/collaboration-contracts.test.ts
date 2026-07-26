@@ -17,6 +17,16 @@ const ids = {
 
 describe("collaboration contracts", () => {
   it("partitions cache keys by user, workspace, resource, and authority generation", () => {
+    expect(collaborationKeys.canvases(ids.user, ids.workspace, 7)).toEqual([
+      "collaboration",
+      ids.user,
+      ids.workspace,
+      7,
+      "canvases",
+    ]);
+    expect(collaborationKeys.canvases(ids.member, ids.workspace, 7)).not.toEqual(
+      collaborationKeys.canvases(ids.user, ids.workspace, 7),
+    );
     expect(
       collaborationKeys.resource(ids.user, ids.workspace, 7, "workflow", ids.resource),
     ).toEqual(["collaboration", ids.user, ids.workspace, 7, "workflow", ids.resource]);

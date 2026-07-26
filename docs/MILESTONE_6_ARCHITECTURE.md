@@ -1256,8 +1256,8 @@ Basic presence is not required for any checkpoint.
 
 ## 29. Roadmap preservation
 
-Milestone 6 remains next. It provides collaboration authority and tenant
-isolation needed by later systems.
+Milestone 6 is complete locally. It provides collaboration authority and
+tenant isolation needed by later systems.
 
 Milestone 7 retains Production Hardening, the deterministic technical Indexer,
 managed PostgreSQL/storage, malware scanning, backup/restore, monitoring,
@@ -1287,7 +1287,7 @@ Milestone 6 architecture is complete when these documents agree and all
 documentation/repository-integrity checks pass. No implementation behavior is
 claimed.
 
-Milestone 6.1–6.5 are complete locally. The 6.5 implementation composes
+Milestone 6.1–6.7 are complete locally. The 6.5 implementation composes
 current typed-resource visibility with a separate closed invocation
 permission and the existing Milestone 4 execution authority. Migration
 `20260725_0025` is complete with direct parent `20260725_0024`; it stores exact
@@ -1300,5 +1300,13 @@ collaboration audit, domain-event, transactional-outbox, and activity systems.
 Owner identity is never substituted for the authenticated invoker. Current
 visibility is re-evaluated for list/read operations, while claims, calls,
 retries, effects, compensation, export, publication, and result commit retain
-the existing revocation and stale-authority fences. Milestone 6.6 remains
+the existing revocation and stale-authority fences.
+
+The completed 6.6 interface partitions collaboration cache keys by
+authenticated user, workspace, authority generation, resource/canvas, and
+automation identity. The 6.7 integrated audit corrected the one missing
+authenticated-user dimension on the visible-canvas query family and added a
+permanent repository-hygiene guard against absolute user-home paths. No new
+persistence was required; migrations `0021`–`0025` remain immutable and
+`0025` remains the sole Alembic head. Milestone 7 and later work remain
 unstarted.

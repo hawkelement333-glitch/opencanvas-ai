@@ -275,6 +275,8 @@ export const collaborationKeys = {
     ["collaboration-context", userId, workspaceId] as const,
   scoped: (userId: string, workspaceId: string, authorityGeneration: number) =>
     ["collaboration", userId, workspaceId, authorityGeneration] as const,
+  canvases: (userId: string, workspaceId: string, authorityGeneration: number) =>
+    ["collaboration", userId, workspaceId, authorityGeneration, "canvases"] as const,
   resource: (
     userId: string,
     workspaceId: string,
