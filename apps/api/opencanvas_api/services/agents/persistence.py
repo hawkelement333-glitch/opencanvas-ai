@@ -23,6 +23,7 @@ from opencanvas_api.db.models import (
     ControlledAgentPolicyDecision,
     ControlledAgentStateTransition,
     Workspace,
+    WorkspaceAuthorityVersion,
 )
 from opencanvas_api.services.agents.contracts import (
     ApprovalRecord,
@@ -41,6 +42,12 @@ from opencanvas_api.services.agents.contracts import (
     contract_digest,
 )
 from opencanvas_api.services.agents.policy import PolicyRequest, evaluate_policy
+from opencanvas_api.services.auth import Principal
+from opencanvas_api.services.collaboration_authority import CollaborationPermission
+from opencanvas_api.services.collaboration_resources import (
+    AuthorityBoundary,
+    RevocationFenceService,
+)
 
 
 class AgentPersistenceError(RuntimeError):
@@ -239,6 +246,23 @@ class ControlledAgentRepository:
         if approval is not None:
             self.session.add(self._approval_row(approval))
         await self.session.flush()
+        authority = await self.session.get(WorkspaceAuthorityVersion, execution.workspace_id)
+        if authority is not None:
+            await RevocationFenceService(self.session).capture(
+                principal=Principal(
+                    user_id=execution.user_id,
+                    email="controlled-execution@invalid.local",
+                    display_name="Controlled execution",
+                    session_id=None,
+                    csrf_token_hash=None,
+                    synthetic=True,
+                ),
+                workspace_id=execution.workspace_id,
+                permission=CollaborationPermission.WORKSPACE_VIEW,
+                boundary=AuthorityBoundary.CLAIM,
+                trace_id=execution.execution_id,
+                controlled_execution_id=execution.execution_id,
+            )
 
     async def append_state(self, state: ExecutionStateRecord) -> None:
         """Append one validated transition with database-backed successor exclusivity."""

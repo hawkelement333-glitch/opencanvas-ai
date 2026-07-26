@@ -2,18 +2,18 @@
 
 Last updated: 2026-07-25
 
-Branch: `milestone-6-2-collaboration-roles-permission-authority-local`
+Branch: `milestone-6-3-resource-sharing-ownership-revocation-local`
 
 Baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: checkpoints 6.1–6.2 complete locally; ready for 6.3
+Status: checkpoints 6.1–6.3 complete locally; ready for 6.4
 
 | Checkpoint                                       | Status           | Dependency                        |
 | ------------------------------------------------ | ---------------- | --------------------------------- |
 | Architecture                                     | Complete locally | Milestone 5 and roadmap amendment |
 | 6.1 Workspace Membership and Invitations         | Complete locally | Architecture                      |
 | 6.2 Collaboration Roles and Permission Authority | Complete locally | 6.1                               |
-| 6.3 Resource Sharing, Ownership, and Revocation  | Not started      | 6.1–6.2                           |
+| 6.3 Resource Sharing, Ownership, and Revocation  | Complete locally | 6.1–6.2                           |
 | 6.4 Comments and Collaboration Activity          | Not started      | 6.1–6.3                           |
 | 6.5 Shared Workflow and Agent Governance         | Not started      | 6.1–6.4 and Milestones 4–5        |
 | 6.6 Multi-Workspace Collaboration Interface      | Not started      | 6.1–6.5                           |
@@ -68,7 +68,7 @@ invocation, approval, export, or controlled-effect authority.
   support, approval-authority/approver-eligibility persistence, and exclusive
   6.2 constraints, indexes, tenant scope, lifecycle, and audit support. Direct
   parent: `20260725_0021`.
-- `20260725_0023`: planned for 6.3 only; typed shares, resource ownership,
+- `20260725_0023`: complete for 6.3 only; typed shares, resource ownership,
   ownership transfer, authority snapshots, and revocation fencing. Direct
   parent: `20260725_0022`.
 - `20260725_0024`: planned for 6.4 only; comment threads, append-only
@@ -137,12 +137,14 @@ Every authority mutation advances the workspace authority generation exactly
 once in the same transaction and records append-only audit, Trace, domain
 event, transactional outbox, and activity-projectable evidence. Exact replay
 returns the prior result without a second mutation or generation increment.
-Owner membership and owner role remain protected; ownership transfer remains
-exclusive to 6.3.
+Owner membership and owner role remain protected. Accepted workspace transfer
+preserves exactly one owner and accepted resource transfer preserves exact
+membership ownership.
 
-No sharing, resource ownership, ownership transfer, 6.3 authority snapshots
-or revocation fencing, comments, collaboration UI, real-time collaboration,
-Indexer, or Librarian work was added.
+Typed sharing, resource ownership, accepted ownership transfer, authority
+snapshots, and revocation fencing are complete locally. No comments,
+collaboration UI, real-time collaboration, Indexer, or Librarian work was
+added.
 
 Next authorized implementation start:
-`MILESTONE 6.3 — RESOURCE SHARING, OWNERSHIP, AND REVOCATION`
+`MILESTONE 6.4 — COMMENTS AND COLLABORATION ACTIVITY`

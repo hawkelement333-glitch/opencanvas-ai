@@ -937,6 +937,17 @@ class ControlledExecutionLifecycle:
         trace_id: uuid.UUID,
     ) -> ResultAcceptanceOutcome:
         _require_aware_utc(accepted_at)
+        from opencanvas_api.services.collaboration_resources import (
+            AuthorityBoundary,
+            RevocationFenceService,
+        )
+
+        await RevocationFenceService(self.session).require_controlled_execution(
+            execution_id=request.execution_id,
+            user_id=request.user_id,
+            workspace_id=request.workspace_id,
+            boundary=AuthorityBoundary.PUBLICATION,
+        )
         self._validate_result_identity(
             authenticated_user_id=authenticated_user_id,
             authorized=authorized,

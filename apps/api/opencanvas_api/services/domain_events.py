@@ -18,6 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from opencanvas_api.db.models import (
     CanonicalGraphRelationship,
     Canvas,
+    CollaborationOwnershipTransfer,
+    CollaborationResource,
+    CollaborationResourceShare,
     ControlledAgentExecution,
     DomainActivityEntry,
     DomainEventDeliveryAttempt,
@@ -28,6 +31,7 @@ from opencanvas_api.db.models import (
     WorkspaceEventSequence,
     WorkspaceInvitation,
     WorkspaceMembership,
+    WorkspaceMembershipTransition,
 )
 
 EVENT_REGISTRY_VERSION = "mobius-domain-events-v1"
@@ -113,6 +117,17 @@ DomainEventType = Literal[
     "approval_authority.assigned",
     "approval_authority.replaced",
     "approval_authority.revoked",
+    "resource.share.created",
+    "resource.share.changed",
+    "resource.share.revoked",
+    "resource.share.expired",
+    "resource.visibility.changed",
+    "resource.ownership_changed",
+    "ownership_transfer.requested",
+    "ownership_transfer.accepted",
+    "ownership_transfer.rejected",
+    "ownership_transfer.canceled",
+    "revocation.bulk_completed",
 ]
 SubjectKind = Literal[
     "canonical_resource",
@@ -136,6 +151,10 @@ SubjectKind = Literal[
     "workspace_invitation",
     "workspace_membership",
     "approval_authority_assignment",
+    "collaboration_resource",
+    "resource_share",
+    "ownership_transfer",
+    "authority_fence",
 ]
 OriginType = Literal[
     "authenticated_user",
@@ -221,6 +240,20 @@ _COLLABORATION_PAYLOAD = frozenset(
         "capability",
         "resourceKind",
         "maximumRiskClass",
+    }
+)
+_RESOURCE_PAYLOAD = frozenset(
+    {
+        "resourceKind",
+        "accessLevel",
+        "state",
+        "audienceKind",
+        "visibilityPolicy",
+        "ownerKind",
+        "transferKind",
+        "targetCount",
+        "scopeKind",
+        "authorityGeneration",
     }
 )
 
@@ -448,6 +481,39 @@ EVENT_TYPE_REGISTRY: dict[DomainEventType, EventTypeSpec] = {
     ),
     "approval_authority.revoked": EventTypeSpec(
         "approval_authority_assignment", _COLLABORATION_PAYLOAD, canvas_required=False
+    ),
+    "resource.share.created": EventTypeSpec(
+        "resource_share", _RESOURCE_PAYLOAD, canvas_required=False
+    ),
+    "resource.share.changed": EventTypeSpec(
+        "resource_share", _RESOURCE_PAYLOAD, canvas_required=False
+    ),
+    "resource.share.revoked": EventTypeSpec(
+        "resource_share", _RESOURCE_PAYLOAD, canvas_required=False
+    ),
+    "resource.share.expired": EventTypeSpec(
+        "resource_share", _RESOURCE_PAYLOAD, canvas_required=False
+    ),
+    "resource.visibility.changed": EventTypeSpec(
+        "collaboration_resource", _RESOURCE_PAYLOAD, canvas_required=False
+    ),
+    "resource.ownership_changed": EventTypeSpec(
+        "collaboration_resource", _RESOURCE_PAYLOAD, canvas_required=False
+    ),
+    "ownership_transfer.requested": EventTypeSpec(
+        "ownership_transfer", _RESOURCE_PAYLOAD, canvas_required=False
+    ),
+    "ownership_transfer.accepted": EventTypeSpec(
+        "ownership_transfer", _RESOURCE_PAYLOAD, canvas_required=False
+    ),
+    "ownership_transfer.rejected": EventTypeSpec(
+        "ownership_transfer", _RESOURCE_PAYLOAD, canvas_required=False
+    ),
+    "ownership_transfer.canceled": EventTypeSpec(
+        "ownership_transfer", _RESOURCE_PAYLOAD, canvas_required=False
+    ),
+    "revocation.bulk_completed": EventTypeSpec(
+        "authority_fence", _RESOURCE_PAYLOAD, canvas_required=False
     ),
 }
 
@@ -860,6 +926,59 @@ class DomainEventService:
                 membership_actor,
             }:
                 raise DomainEventNotFoundError()
+        elif spec.subject_kind in {
+            "collaboration_resource",
+            "resource_share",
+            "ownership_transfer",
+            "authority_fence",
+        }:
+            active_actor = await self.session.scalar(
+                select(WorkspaceMembership.user_id)
+                .join(
+                    WorkspaceMembershipTransition,
+                    WorkspaceMembershipTransition.membership_id
+                    == WorkspaceMembership.membership_id,
+                )
+                .where(
+                    WorkspaceMembership.workspace_id == command.workspace_id,
+                    WorkspaceMembership.user_id == command.actor_user_id,
+                    WorkspaceMembershipTransition.current_state == "active",
+                )
+                .order_by(WorkspaceMembershipTransition.recorded_at.desc())
+                .limit(1)
+            )
+            if active_actor is None:
+                raise DomainEventNotFoundError()
+            if spec.subject_kind == "collaboration_resource":
+                subject = await self.session.scalar(
+                    select(CollaborationResource.resource_id).where(
+                        CollaborationResource.resource_id == command.subject_id,
+                        CollaborationResource.workspace_id == command.workspace_id,
+                    )
+                )
+                if subject is None:
+                    raise DomainEventNotFoundError()
+            elif spec.subject_kind == "resource_share":
+                subject = await self.session.scalar(
+                    select(CollaborationResourceShare.share_id).where(
+                        CollaborationResourceShare.share_id == command.subject_id,
+                        CollaborationResourceShare.workspace_id == command.workspace_id,
+                    )
+                )
+                if subject is None:
+                    raise DomainEventNotFoundError()
+            elif spec.subject_kind == "ownership_transfer":
+                transfer = await self.session.scalar(
+                    select(CollaborationOwnershipTransfer).where(
+                        CollaborationOwnershipTransfer.transfer_id == command.subject_id,
+                        CollaborationOwnershipTransfer.workspace_id == command.workspace_id,
+                    )
+                )
+                if transfer is None or command.actor_user_id not in {
+                    transfer.requester_user_id,
+                    transfer.recipient_user_id,
+                }:
+                    raise DomainEventNotFoundError()
         elif command.actor_user_id != command.user_id:
             raise DomainEventNotFoundError()
         if command.canvas_id is not None:

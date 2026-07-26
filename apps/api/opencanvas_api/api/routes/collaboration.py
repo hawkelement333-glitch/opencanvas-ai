@@ -18,6 +18,13 @@ from opencanvas_api.api.collaboration_schemas import (
     MembershipOut,
     MembershipRoleCommand,
     MembershipState,
+    OwnershipTransferCreate,
+    OwnershipTransferOut,
+    ResourceOwnershipOut,
+    ShareBatchCreate,
+    ShareOut,
+    ShareRevoke,
+    VisibilityChange,
     WorkspaceRole,
 )
 from opencanvas_api.api.dependencies import MutatingPrincipalDep, PrincipalDep, get_session
@@ -46,6 +53,19 @@ from opencanvas_api.services.collaboration_management import (
     ApprovalAuthorityService,
     ApprovalAuthorityView,
     MembershipAuthorityService,
+)
+from opencanvas_api.services.collaboration_resources import (
+    OwnershipTransferKind,
+    OwnershipTransferService,
+    ResourceRecord,
+    ResourceVisibilityPolicy,
+    ShareAccessLevel,
+    ShareAudienceKind,
+    ShareRecord,
+    ShareResourceKind,
+    ShareTarget,
+    SharingService,
+    TransferRecord,
 )
 from opencanvas_api.services.email import (
     EmailDeliveryError,
@@ -582,6 +602,328 @@ async def _deliver(
         channel=cast(Literal["development_token", "smtp"], channel),
         outcome="delivered",
         trace_id=issued.trace_id,
+    )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/shares",
+    response_model=list[ShareOut],
+)
+async def list_resource_shares(
+    workspace_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> list[ShareOut]:
+    try:
+        records = await SharingService(session).list_shares(
+            principal=principal,
+            workspace_id=workspace_id,
+            limit=limit,
+            offset=offset,
+        )
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    return [_share_out(record) for record in records]
+
+
+@router.post(
+    "/workspaces/{workspace_id}/shares",
+    response_model=list[ShareOut],
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_resource_shares(
+    workspace_id: uuid.UUID,
+    payload: ShareBatchCreate,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> list[ShareOut]:
+    targets = [
+        ShareTarget(
+            resource_kind=ShareResourceKind(item.resource_kind),
+            resource_id=item.resource_id,
+            audience_kind=ShareAudienceKind(item.audience_kind),
+            audience_membership_id=item.audience_membership_id,
+            access_level=ShareAccessLevel(item.access_level),
+            expires_in_days=item.expires_in_days,
+        )
+        for item in payload.targets
+    ]
+    try:
+        records = await SharingService(session).create(
+            principal=principal,
+            workspace_id=workspace_id,
+            targets=targets,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "collaboration_conflict",
+            "The collaboration request conflicts with current state.",
+        ) from exc
+    return [_share_out(record) for record in records]
+
+
+@router.post(
+    "/workspaces/{workspace_id}/shares/revoke",
+    response_model=list[ShareOut],
+)
+async def revoke_resource_shares(
+    workspace_id: uuid.UUID,
+    payload: ShareRevoke,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> list[ShareOut]:
+    try:
+        records = await SharingService(session).revoke(
+            principal=principal,
+            workspace_id=workspace_id,
+            share_ids=payload.share_ids,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "collaboration_conflict",
+            "The collaboration request conflicts with current state.",
+        ) from exc
+    return [_share_out(record) for record in records]
+
+
+@router.post(
+    "/workspaces/{workspace_id}/resources/{resource_kind}/{resource_id}/visibility",
+    response_model=ResourceOwnershipOut,
+)
+async def change_resource_visibility(
+    workspace_id: uuid.UUID,
+    resource_kind: ShareResourceKind,
+    resource_id: uuid.UUID,
+    payload: VisibilityChange,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> ResourceOwnershipOut:
+    try:
+        record = await SharingService(session).set_visibility(
+            principal=principal,
+            workspace_id=workspace_id,
+            resource_kind=resource_kind,
+            resource_id=resource_id,
+            visibility_policy=ResourceVisibilityPolicy(payload.visibility_policy),
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "collaboration_conflict",
+            "The collaboration request conflicts with current state.",
+        ) from exc
+    return _resource_out(record)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/ownership-transfers",
+    response_model=OwnershipTransferOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def request_ownership_transfer(
+    workspace_id: uuid.UUID,
+    payload: OwnershipTransferCreate,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> OwnershipTransferOut:
+    try:
+        record = await OwnershipTransferService(session).request(
+            principal=principal,
+            workspace_id=workspace_id,
+            transfer_kind=OwnershipTransferKind(payload.transfer_kind),
+            recipient_membership_id=payload.recipient_membership_id,
+            idempotency_key=payload.idempotency_key,
+            resource_kind=(
+                ShareResourceKind(payload.resource_kind) if payload.resource_kind else None
+            ),
+            resource_id=payload.resource_id,
+            expires_in_hours=payload.expires_in_hours,
+            former_owner_role=payload.former_owner_role,
+        )
+        await session.commit()
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "collaboration_conflict",
+            "The collaboration request conflicts with current state.",
+        ) from exc
+    return _transfer_out(record)
+
+
+async def _decide_ownership_transfer(
+    *,
+    decision: Literal["accept", "reject", "cancel"],
+    workspace_id: uuid.UUID,
+    transfer_id: uuid.UUID,
+    payload: InvitationCommand,
+    principal: Principal,
+    session: AsyncSession,
+) -> OwnershipTransferOut:
+    try:
+        method = getattr(OwnershipTransferService(session), decision)
+        record = await method(
+            principal=principal,
+            workspace_id=workspace_id,
+            transfer_id=transfer_id,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except CollaborationError as exc:
+        await _finish_error(session, exc)
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "collaboration_conflict",
+            "The collaboration request conflicts with current state.",
+        ) from exc
+    return _transfer_out(record)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/ownership-transfers/{transfer_id}/accept",
+    response_model=OwnershipTransferOut,
+)
+async def accept_ownership_transfer(
+    workspace_id: uuid.UUID,
+    transfer_id: uuid.UUID,
+    payload: InvitationCommand,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> OwnershipTransferOut:
+    return await _decide_ownership_transfer(
+        decision="accept",
+        workspace_id=workspace_id,
+        transfer_id=transfer_id,
+        payload=payload,
+        principal=principal,
+        session=session,
+    )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/ownership-transfers/{transfer_id}/reject",
+    response_model=OwnershipTransferOut,
+)
+async def reject_ownership_transfer(
+    workspace_id: uuid.UUID,
+    transfer_id: uuid.UUID,
+    payload: InvitationCommand,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> OwnershipTransferOut:
+    return await _decide_ownership_transfer(
+        decision="reject",
+        workspace_id=workspace_id,
+        transfer_id=transfer_id,
+        payload=payload,
+        principal=principal,
+        session=session,
+    )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/ownership-transfers/{transfer_id}/cancel",
+    response_model=OwnershipTransferOut,
+)
+async def cancel_ownership_transfer(
+    workspace_id: uuid.UUID,
+    transfer_id: uuid.UUID,
+    payload: InvitationCommand,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> OwnershipTransferOut:
+    return await _decide_ownership_transfer(
+        decision="cancel",
+        workspace_id=workspace_id,
+        transfer_id=transfer_id,
+        payload=payload,
+        principal=principal,
+        session=session,
+    )
+
+
+def _share_out(record: ShareRecord) -> ShareOut:
+    share = record.share
+    transition = record.transition
+    return ShareOut(
+        share_id=share.share_id,
+        workspace_id=share.workspace_id,
+        resource_kind=cast(
+            Literal["canvas", "canonical_object", "workflow", "agent"], share.resource_kind
+        ),
+        resource_id=share.resource_id,
+        audience_kind=cast(Literal["workspace", "membership"], share.audience_kind),
+        audience_membership_id=share.audience_membership_id,
+        access_level=cast(Literal["view", "contribute", "manage"], transition.access_level),
+        state=cast(Literal["active", "revoked", "expired", "superseded"], transition.current_state),
+        authority_generation=transition.authority_generation,
+        expires_at=utc(transition.expires_at) if transition.expires_at else None,
+        duplicate=record.duplicate,
+    )
+
+
+def _resource_out(record: ResourceRecord) -> ResourceOwnershipOut:
+    ownership = record.ownership
+    return ResourceOwnershipOut(
+        resource_kind=cast(
+            Literal["canvas", "canonical_object", "workflow", "agent"],
+            record.resource.resource_kind,
+        ),
+        resource_id=record.resource.resource_id,
+        owner_kind=cast(Literal["workspace", "membership"], ownership.current_owner_kind),
+        owner_membership_id=ownership.current_owner_membership_id,
+        owner_user_id=ownership.current_owner_user_id,
+        visibility_policy=cast(
+            Literal["private", "inherit", "workspace_visible"], ownership.visibility_policy
+        ),
+        authority_generation=ownership.authority_generation,
+    )
+
+
+def _transfer_out(record: TransferRecord) -> OwnershipTransferOut:
+    transfer = record.transfer
+    transition = record.transition
+    return OwnershipTransferOut(
+        transfer_id=transfer.transfer_id,
+        workspace_id=transfer.workspace_id,
+        transfer_kind=cast(Literal["workspace", "resource"], transfer.transfer_kind),
+        resource_kind=cast(
+            Literal["canvas", "canonical_object", "workflow", "agent"] | None,
+            transfer.resource_kind,
+        ),
+        resource_id=transfer.resource_id,
+        requester_membership_id=transfer.requester_membership_id,
+        recipient_membership_id=transfer.recipient_membership_id,
+        state=cast(
+            Literal["pending", "accepted", "rejected", "canceled", "expired", "superseded"],
+            transition.current_state,
+        ),
+        authority_generation=transition.authority_generation,
+        expires_at=utc(transfer.expires_at),
+        duplicate=record.duplicate,
     )
 
 

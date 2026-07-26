@@ -1177,12 +1177,17 @@ class CollaborationRequestIdentity(Base):
             "'invitation.accept', 'invitation.decline', 'invitation.revoke', "
             "'membership.role.change', 'membership.suspend', 'membership.restore', "
             "'membership.remove', 'approval_authority.assign', "
-            "'approval_authority.replace', 'approval_authority.revoke')",
+            "'approval_authority.replace', 'approval_authority.revoke', "
+            "'share.create', 'share.revoke', 'share.bulk_revoke', "
+            "'resource.visibility.change', 'ownership_transfer.request', "
+            "'ownership_transfer.accept', 'ownership_transfer.reject', "
+            "'ownership_transfer.cancel')",
             name="ck_collaboration_request_operation",
         ),
         CheckConstraint(
             "result_kind IN ('workspace_invitation', 'workspace_membership', "
-            "'approval_authority_assignment')",
+            "'approval_authority_assignment', 'resource_share_request', "
+            "'collaboration_resource', 'ownership_transfer', 'authority_fence')",
             name="ck_collaboration_request_result_kind",
         ),
         CheckConstraint(
@@ -1474,7 +1479,8 @@ class CollaborationAuditEvent(Base):
     __table_args__ = (
         CheckConstraint(
             "subject_kind IN ('workspace_membership', 'workspace_invitation', "
-            "'approval_authority_assignment')",
+            "'approval_authority_assignment', 'collaboration_resource', "
+            "'resource_share', 'ownership_transfer', 'authority_fence')",
             name="ck_collaboration_audit_subject_kind",
         ),
         CheckConstraint(
@@ -1508,6 +1514,756 @@ class CollaborationAuditEvent(Base):
     reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
     metadata_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationResource(Base):
+    """Typed shareable resource identity with real target foreign keys."""
+
+    __tablename__ = "collaboration_resources"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["canvas_id", "workspace_id"],
+            ["canvases.id", "canvases.workspace_id"],
+            name="fk_collaboration_resource_canvas_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["canonical_object_id", "workspace_id"],
+            ["canonical_objects.id", "canonical_objects.workspace_id"],
+            name="fk_collaboration_resource_object_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["workflow_definition_id", "target_user_id", "workspace_id", "canvas_id"],
+            [
+                "controlled_workflow_definitions.definition_id",
+                "controlled_workflow_definitions.user_id",
+                "controlled_workflow_definitions.workspace_id",
+                "controlled_workflow_definitions.canvas_id",
+            ],
+            name="fk_collaboration_resource_workflow_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["agent_id", "target_user_id", "workspace_id", "canvas_id"],
+            [
+                "bounded_agent_identities.agent_id",
+                "bounded_agent_identities.user_id",
+                "bounded_agent_identities.workspace_id",
+                "bounded_agent_identities.canvas_id",
+            ],
+            name="fk_collaboration_resource_agent_scope",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "resource_kind IN ('canvas', 'canonical_object', 'workflow', 'agent')",
+            name="ck_collaboration_resource_kind",
+        ),
+        CheckConstraint(
+            "(resource_kind = 'canvas' AND resource_id = canvas_id "
+            "AND canonical_object_id IS NULL AND workflow_definition_id IS NULL "
+            "AND agent_id IS NULL AND target_user_id IS NULL) OR "
+            "(resource_kind = 'canonical_object' AND resource_id = canonical_object_id "
+            "AND workflow_definition_id IS NULL AND agent_id IS NULL "
+            "AND target_user_id IS NULL) OR "
+            "(resource_kind = 'workflow' AND resource_id = workflow_definition_id "
+            "AND canonical_object_id IS NULL AND agent_id IS NULL "
+            "AND target_user_id IS NOT NULL AND canvas_id IS NOT NULL) OR "
+            "(resource_kind = 'agent' AND resource_id = agent_id "
+            "AND canonical_object_id IS NULL AND workflow_definition_id IS NULL "
+            "AND target_user_id IS NOT NULL AND canvas_id IS NOT NULL)",
+            name="ck_collaboration_resource_target_shape",
+        ),
+        Index(
+            "ix_collaboration_resource_workspace_kind",
+            "workspace_id",
+            "resource_kind",
+            "created_at",
+        ),
+    )
+
+    resource_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), primary_key=True
+    )
+    resource_kind: Mapped[str] = mapped_column(String(32), primary_key=True)
+    canvas_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    canonical_object_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    workflow_definition_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    target_user_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    creator_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    creation_trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationResourceOwnershipTransition(Base):
+    """Append-only current ownership and visibility-policy evidence."""
+
+    __tablename__ = "collaboration_resource_ownership_transitions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["resource_id", "workspace_id", "resource_kind"],
+            [
+                "collaboration_resources.resource_id",
+                "collaboration_resources.workspace_id",
+                "collaboration_resources.resource_kind",
+            ],
+            name="fk_collaboration_ownership_resource_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["current_owner_membership_id", "current_owner_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_ownership_current_member_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["previous_owner_membership_id", "previous_owner_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_ownership_previous_member_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "resource_id",
+            "workspace_id",
+            "resource_kind",
+            "sequence",
+            name="uq_collaboration_ownership_sequence",
+        ),
+        CheckConstraint("sequence >= 0", name="ck_collaboration_ownership_sequence"),
+        CheckConstraint(
+            "current_owner_kind IN ('workspace', 'membership')",
+            name="ck_collaboration_ownership_current_kind",
+        ),
+        CheckConstraint(
+            "previous_owner_kind IS NULL OR previous_owner_kind IN ('workspace', 'membership')",
+            name="ck_collaboration_ownership_previous_kind",
+        ),
+        CheckConstraint(
+            "(current_owner_kind = 'workspace' AND current_owner_membership_id IS NULL "
+            "AND current_owner_user_id IS NULL) OR "
+            "(current_owner_kind = 'membership' AND current_owner_membership_id IS NOT NULL "
+            "AND current_owner_user_id IS NOT NULL)",
+            name="ck_collaboration_ownership_current_shape",
+        ),
+        CheckConstraint(
+            "(previous_owner_kind IS NULL AND previous_owner_membership_id IS NULL "
+            "AND previous_owner_user_id IS NULL) OR "
+            "(previous_owner_kind = 'workspace' AND previous_owner_membership_id IS NULL "
+            "AND previous_owner_user_id IS NULL) OR "
+            "(previous_owner_kind = 'membership' AND previous_owner_membership_id IS NOT NULL "
+            "AND previous_owner_user_id IS NOT NULL)",
+            name="ck_collaboration_ownership_previous_shape",
+        ),
+        CheckConstraint(
+            "visibility_policy IN ('private', 'inherit', 'workspace_visible')",
+            name="ck_collaboration_ownership_visibility",
+        ),
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_collaboration_ownership_generation",
+        ),
+        Index(
+            "ix_collaboration_ownership_current",
+            "workspace_id",
+            "resource_kind",
+            "resource_id",
+            "sequence",
+        ),
+        Index(
+            "ix_collaboration_ownership_member",
+            "workspace_id",
+            "current_owner_membership_id",
+            "recorded_at",
+        ),
+    )
+
+    transition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    resource_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resource_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_owner_kind: Mapped[str | None] = mapped_column(String(16))
+    previous_owner_membership_id: Mapped[uuid.UUID | None] = mapped_column()
+    previous_owner_user_id: Mapped[uuid.UUID | None] = mapped_column()
+    current_owner_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    current_owner_membership_id: Mapped[uuid.UUID | None] = mapped_column()
+    current_owner_user_id: Mapped[uuid.UUID | None] = mapped_column()
+    visibility_policy: Mapped[str] = mapped_column(String(24), nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    actor_membership_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace_memberships.membership_id", ondelete="RESTRICT")
+    )
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT")
+    )
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationResourceShare(Base):
+    """Immutable typed share identity; lifecycle and access are transitions."""
+
+    __tablename__ = "collaboration_resource_shares"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["resource_id", "workspace_id", "resource_kind"],
+            [
+                "collaboration_resources.resource_id",
+                "collaboration_resources.workspace_id",
+                "collaboration_resources.resource_kind",
+            ],
+            name="fk_collaboration_share_resource_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["audience_membership_id", "audience_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_share_audience_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["created_by_membership_id", "created_by_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_share_creator_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "share_id",
+            "workspace_id",
+            name="uq_collaboration_share_scope",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "resource_kind",
+            "resource_id",
+            "audience_key",
+            name="uq_collaboration_share_audience",
+        ),
+        CheckConstraint(
+            "audience_kind IN ('workspace', 'membership')",
+            name="ck_collaboration_share_audience_kind",
+        ),
+        CheckConstraint(
+            "(audience_kind = 'workspace' AND audience_membership_id IS NULL "
+            "AND audience_user_id IS NULL) OR "
+            "(audience_kind = 'membership' AND audience_membership_id IS NOT NULL "
+            "AND audience_user_id IS NOT NULL)",
+            name="ck_collaboration_share_audience_shape",
+        ),
+        CheckConstraint(
+            "collaboration_policy_version = 'collaboration-policy-v1'",
+            name="ck_collaboration_share_policy",
+        ),
+        CheckConstraint(
+            "length(request_digest) = 64",
+            name="ck_collaboration_share_request_digest",
+        ),
+        Index(
+            "ix_collaboration_share_resource",
+            "workspace_id",
+            "resource_kind",
+            "resource_id",
+            "created_at",
+        ),
+        Index(
+            "ix_collaboration_share_audience",
+            "workspace_id",
+            "audience_membership_id",
+            "created_at",
+        ),
+        Index("ix_collaboration_share_request", "workspace_id", "creation_request_id"),
+    )
+
+    share_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    resource_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    audience_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    audience_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    audience_membership_id: Mapped[uuid.UUID | None] = mapped_column()
+    audience_user_id: Mapped[uuid.UUID | None] = mapped_column()
+    created_by_membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    collaboration_policy_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    creation_request_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    creation_trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    creation_audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationResourceShareTransition(Base):
+    """Append-only share access, expiration, and revocation evidence."""
+
+    __tablename__ = "collaboration_resource_share_transitions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["share_id", "workspace_id"],
+            [
+                "collaboration_resource_shares.share_id",
+                "collaboration_resource_shares.workspace_id",
+            ],
+            name="fk_collaboration_share_transition_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "share_id",
+            "sequence",
+            name="uq_collaboration_share_transition_sequence",
+        ),
+        CheckConstraint("sequence >= 0", name="ck_collaboration_share_transition_sequence"),
+        CheckConstraint(
+            "current_state IN ('active', 'revoked')",
+            name="ck_collaboration_share_transition_state",
+        ),
+        CheckConstraint(
+            "previous_state IS NULL OR previous_state IN ('active', 'revoked')",
+            name="ck_collaboration_share_transition_previous_state",
+        ),
+        CheckConstraint(
+            "access_level IN ('view', 'contribute', 'manage')",
+            name="ck_collaboration_share_transition_access",
+        ),
+        CheckConstraint(
+            "expires_at IS NULL OR expires_at > recorded_at",
+            name="ck_collaboration_share_transition_expiry",
+        ),
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_collaboration_share_transition_generation",
+        ),
+        Index(
+            "ix_collaboration_share_transition_current",
+            "share_id",
+            "sequence",
+        ),
+        Index(
+            "ix_collaboration_share_transition_expiry",
+            "workspace_id",
+            "current_state",
+            "expires_at",
+        ),
+    )
+
+    transition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    share_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_state: Mapped[str | None] = mapped_column(String(16))
+    current_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    access_level: Mapped[str] = mapped_column(String(16), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    actor_membership_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace_memberships.membership_id", ondelete="RESTRICT"), nullable=False
+    )
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationOwnershipTransfer(Base):
+    """Immutable workspace or resource ownership-transfer request."""
+
+    __tablename__ = "collaboration_ownership_transfers"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["resource_id", "workspace_id", "resource_kind"],
+            [
+                "collaboration_resources.resource_id",
+                "collaboration_resources.workspace_id",
+                "collaboration_resources.resource_kind",
+            ],
+            name="fk_collaboration_transfer_resource_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["requester_membership_id", "requester_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_transfer_requester_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["recipient_membership_id", "recipient_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_transfer_recipient_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "transfer_id",
+            "workspace_id",
+            name="uq_collaboration_transfer_scope",
+        ),
+        CheckConstraint(
+            "transfer_kind IN ('workspace', 'resource')",
+            name="ck_collaboration_transfer_kind",
+        ),
+        CheckConstraint(
+            "(transfer_kind = 'workspace' AND resource_id IS NULL "
+            "AND resource_kind IS NULL) OR "
+            "(transfer_kind = 'resource' AND resource_id IS NOT NULL "
+            "AND resource_kind IS NOT NULL)",
+            name="ck_collaboration_transfer_target_shape",
+        ),
+        CheckConstraint(
+            "requester_membership_id <> recipient_membership_id",
+            name="ck_collaboration_transfer_distinct_memberships",
+        ),
+        CheckConstraint(
+            "former_owner_role IN ('administrator', 'editor', 'approver', 'member', 'viewer')",
+            name="ck_collaboration_transfer_former_owner_role",
+        ),
+        CheckConstraint(
+            "expires_at > created_at",
+            name="ck_collaboration_transfer_expiry",
+        ),
+        CheckConstraint(
+            "collaboration_policy_version = 'collaboration-policy-v1'",
+            name="ck_collaboration_transfer_policy",
+        ),
+        CheckConstraint(
+            "length(request_digest) = 64",
+            name="ck_collaboration_transfer_request_digest",
+        ),
+        Index(
+            "ix_collaboration_transfer_workspace_time",
+            "workspace_id",
+            "transfer_kind",
+            "created_at",
+        ),
+        Index(
+            "ix_collaboration_transfer_recipient",
+            "workspace_id",
+            "recipient_membership_id",
+            "created_at",
+        ),
+    )
+
+    transfer_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    transfer_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    resource_id: Mapped[uuid.UUID | None] = mapped_column()
+    resource_kind: Mapped[str | None] = mapped_column(String(32))
+    requester_membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    requester_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    recipient_membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    recipient_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    former_owner_role: Mapped[str] = mapped_column(String(24), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    collaboration_policy_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    creation_trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    creation_audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationOwnershipTransferTransition(Base):
+    """Append-only transfer lifecycle evidence."""
+
+    __tablename__ = "collaboration_ownership_transfer_transitions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["transfer_id", "workspace_id"],
+            [
+                "collaboration_ownership_transfers.transfer_id",
+                "collaboration_ownership_transfers.workspace_id",
+            ],
+            name="fk_collaboration_transfer_transition_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "transfer_id",
+            "sequence",
+            name="uq_collaboration_transfer_transition_sequence",
+        ),
+        CheckConstraint("sequence >= 0", name="ck_collaboration_transfer_transition_sequence"),
+        CheckConstraint(
+            "current_state IN ('pending', 'accepted', 'rejected', 'canceled', "
+            "'expired', 'superseded')",
+            name="ck_collaboration_transfer_transition_state",
+        ),
+        CheckConstraint(
+            "previous_state IS NULL OR previous_state IN "
+            "('pending', 'accepted', 'rejected', 'canceled', 'expired', 'superseded')",
+            name="ck_collaboration_transfer_transition_previous_state",
+        ),
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_collaboration_transfer_transition_generation",
+        ),
+        Index(
+            "ix_collaboration_transfer_transition_current",
+            "transfer_id",
+            "sequence",
+        ),
+        Index(
+            "ix_collaboration_transfer_transition_workspace",
+            "workspace_id",
+            "recorded_at",
+        ),
+    )
+
+    transition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    transfer_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_state: Mapped[str | None] = mapped_column(String(16))
+    current_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    actor_membership_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace_memberships.membership_id", ondelete="RESTRICT"), nullable=False
+    )
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationAuthoritySnapshot(Base):
+    """Immutable point-in-time collaboration authority evidence."""
+
+    __tablename__ = "collaboration_authority_snapshots"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["membership_id", "user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_snapshot_member_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["resource_id", "workspace_id", "resource_kind"],
+            [
+                "collaboration_resources.resource_id",
+                "collaboration_resources.workspace_id",
+                "collaboration_resources.resource_kind",
+            ],
+            name="fk_collaboration_snapshot_resource_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["share_id", "workspace_id"],
+            [
+                "collaboration_resource_shares.share_id",
+                "collaboration_resource_shares.workspace_id",
+            ],
+            name="fk_collaboration_snapshot_share_scope",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "role IN ('owner', 'administrator', 'editor', 'approver', 'member', 'viewer')",
+            name="ck_collaboration_snapshot_role",
+        ),
+        CheckConstraint(
+            "boundary IN ('claim', 'service_call', 'tool_call', 'retry', 'effect', "
+            "'compensation', 'export', 'publication', 'share_decision', "
+            "'ownership_decision')",
+            name="ck_collaboration_snapshot_boundary",
+        ),
+        CheckConstraint(
+            "(resource_id IS NULL AND resource_kind IS NULL) OR "
+            "(resource_id IS NOT NULL AND resource_kind IS NOT NULL)",
+            name="ck_collaboration_snapshot_resource_shape",
+        ),
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_collaboration_snapshot_generation",
+        ),
+        CheckConstraint(
+            "collaboration_policy_version = 'collaboration-policy-v1'",
+            name="ck_collaboration_snapshot_policy",
+        ),
+        CheckConstraint(
+            "length(scope_digest) = 64",
+            name="ck_collaboration_snapshot_digest",
+        ),
+        Index(
+            "ix_collaboration_snapshot_controlled_execution",
+            "controlled_execution_id",
+            "captured_at",
+        ),
+        Index(
+            "ix_collaboration_snapshot_workflow_execution",
+            "workflow_execution_id",
+            "captured_at",
+        ),
+        Index(
+            "ix_collaboration_snapshot_scope",
+            "workspace_id",
+            "membership_id",
+            "captured_at",
+        ),
+    )
+
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    role: Mapped[str] = mapped_column(String(24), nullable=False)
+    permission: Mapped[str] = mapped_column(String(64), nullable=False)
+    boundary: Mapped[str] = mapped_column(String(32), nullable=False)
+    resource_id: Mapped[uuid.UUID | None] = mapped_column()
+    resource_kind: Mapped[str | None] = mapped_column(String(32))
+    share_id: Mapped[uuid.UUID | None] = mapped_column()
+    ownership_transition_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "collaboration_resource_ownership_transitions.transition_id",
+            ondelete="RESTRICT",
+        )
+    )
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    controlled_execution_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("controlled_agent_executions.id", ondelete="RESTRICT")
+    )
+    workflow_execution_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("controlled_workflow_executions.execution_id", ondelete="RESTRICT")
+    )
+    request_identity_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("collaboration_request_identities.request_id", ondelete="RESTRICT")
+    )
+    collaboration_policy_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    scope_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationRevocationFence(Base):
+    """Append-only monotonic authority-generation advance evidence."""
+
+    __tablename__ = "collaboration_revocation_fences"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["membership_id", "membership_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_collaboration_fence_member_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["share_id", "workspace_id"],
+            [
+                "collaboration_resource_shares.share_id",
+                "collaboration_resource_shares.workspace_id",
+            ],
+            name="fk_collaboration_fence_share_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["resource_id", "workspace_id", "resource_kind"],
+            [
+                "collaboration_resources.resource_id",
+                "collaboration_resources.workspace_id",
+                "collaboration_resources.resource_kind",
+            ],
+            name="fk_collaboration_fence_resource_scope",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "scope_kind IN ('workspace', 'membership', 'share', 'resource_ownership', "
+            "'resource_visibility', 'approval_authority')",
+            name="ck_collaboration_fence_scope_kind",
+        ),
+        CheckConstraint(
+            "authority_generation = previous_authority_generation + 1",
+            name="ck_collaboration_fence_monotonic",
+        ),
+        CheckConstraint(
+            "(resource_id IS NULL AND resource_kind IS NULL) OR "
+            "(resource_id IS NOT NULL AND resource_kind IS NOT NULL)",
+            name="ck_collaboration_fence_resource_shape",
+        ),
+        Index(
+            "ix_collaboration_fence_workspace_generation",
+            "workspace_id",
+            "authority_generation",
+        ),
+        Index("ix_collaboration_fence_share", "share_id", "recorded_at"),
+        Index("ix_collaboration_fence_membership", "membership_id", "recorded_at"),
+    )
+
+    fence_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    scope_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    membership_id: Mapped[uuid.UUID | None] = mapped_column()
+    membership_user_id: Mapped[uuid.UUID | None] = mapped_column()
+    share_id: Mapped[uuid.UUID | None] = mapped_column()
+    resource_id: Mapped[uuid.UUID | None] = mapped_column()
+    resource_kind: Mapped[str | None] = mapped_column(String(32))
+    previous_authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    actor_membership_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace_memberships.membership_id", ondelete="RESTRICT"), nullable=False
+    )
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -2184,7 +2940,18 @@ class DomainEventRecord(Base):
             "'membership.removed', "
             "'approval_authority.assigned', "
             "'approval_authority.replaced', "
-            "'approval_authority.revoked')",
+            "'approval_authority.revoked', "
+            "'resource.share.created', "
+            "'resource.share.changed', "
+            "'resource.share.revoked', "
+            "'resource.share.expired', "
+            "'resource.visibility.changed', "
+            "'resource.ownership_changed', "
+            "'ownership_transfer.requested', "
+            "'ownership_transfer.accepted', "
+            "'ownership_transfer.rejected', "
+            "'ownership_transfer.canceled', "
+            "'revocation.bulk_completed')",
             name="ck_domain_events_type",
         ),
         CheckConstraint(
@@ -2195,7 +2962,8 @@ class DomainEventRecord(Base):
             "'agent_activation', 'agent_invocation', 'agent_proposal', "
             "'agent_evaluation', 'communication_revision', "
             "'workspace_invitation', 'workspace_membership', "
-            "'approval_authority_assignment')",
+            "'approval_authority_assignment', 'collaboration_resource', "
+            "'resource_share', 'ownership_transfer', 'authority_fence')",
             name="ck_domain_events_subject_kind",
         ),
         CheckConstraint("sequence > 0", name="ck_domain_events_sequence_positive"),
@@ -5451,6 +6219,14 @@ COLLABORATION_IMMUTABLE_MODELS = (
     CollaborationApprovalAuthorityAssignment,
     CollaborationApprovalAuthorityTransition,
     CollaborationReviewerEligibilityEvidence,
+    CollaborationResource,
+    CollaborationResourceOwnershipTransition,
+    CollaborationResourceShare,
+    CollaborationResourceShareTransition,
+    CollaborationOwnershipTransfer,
+    CollaborationOwnershipTransferTransition,
+    CollaborationAuthoritySnapshot,
+    CollaborationRevocationFence,
 )
 
 

@@ -123,7 +123,14 @@ async def test_closed_existing_registry_persists_event_provenance_and_outbox(
     database: Database,
 ) -> None:
     canvas_id, execution_id = await _scope(database)
-    collaboration_subjects = {"workspace_invitation", "workspace_membership"}
+    collaboration_subjects = {
+        "workspace_invitation",
+        "workspace_membership",
+        "collaboration_resource",
+        "resource_share",
+        "ownership_transfer",
+        "authority_fence",
+    }
     existing_types = [
         name
         for name, spec in EVENT_TYPE_REGISTRY.items()

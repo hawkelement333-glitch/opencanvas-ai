@@ -37,6 +37,7 @@ from opencanvas_api.db.models import (
     GraphRetrievalCitation,
     GraphRetrievalRun,
     Workspace,
+    WorkspaceAuthorityVersion,
     WorkspaceGraphState,
 )
 from opencanvas_api.services.agents.contracts import (
@@ -87,6 +88,12 @@ from opencanvas_api.services.ai import (
     AIProviderError,
     GroundedSource,
     model_configuration,
+)
+from opencanvas_api.services.auth import Principal
+from opencanvas_api.services.collaboration_authority import CollaborationPermission
+from opencanvas_api.services.collaboration_resources import (
+    AuthorityBoundary,
+    RevocationFenceService,
 )
 from opencanvas_api.services.context import ContextBundle
 from opencanvas_api.services.documents.embeddings import EmbeddingProvider
@@ -991,6 +998,23 @@ class ControlledWorkflowService:
                 )
                 self.session.add(execution)
                 await self.session.flush()
+                authority = await self.session.get(WorkspaceAuthorityVersion, command.workspace_id)
+                if authority is not None:
+                    await RevocationFenceService(self.session).capture(
+                        principal=Principal(
+                            user_id=command.user_id,
+                            email="workflow-execution@invalid.local",
+                            display_name="Controlled workflow",
+                            session_id=None,
+                            csrf_token_hash=None,
+                            synthetic=True,
+                        ),
+                        workspace_id=command.workspace_id,
+                        permission=CollaborationPermission.WORKFLOW_INVOKE,
+                        boundary=AuthorityBoundary.CLAIM,
+                        trace_id=trace_id,
+                        workflow_execution_id=execution_id,
+                    )
                 await _run_hook(self.after_execution)
                 plan = ControlledWorkflowPlanSnapshot(
                     plan_id=plan_id,
@@ -1585,6 +1609,13 @@ class ControlledWorkflowService:
         step: ControlledWorkflowStep,
         row: ControlledWorkflowStepExecution,
     ) -> None:
+        fence = RevocationFenceService(self.session)
+        await fence.require_workflow_execution(
+            execution_id=execution.execution_id,
+            user_id=execution.user_id,
+            workspace_id=execution.workspace_id,
+            boundary=AuthorityBoundary.CLAIM,
+        )
         owner = str(uuid.uuid4())
         generation = row.lease_generation + 1
         claimed = await self.session.scalar(
@@ -1683,7 +1714,23 @@ class ControlledWorkflowService:
             }
         )
         try:
+            boundary = {
+                WorkflowStepType.CONTROLLED_EFFECT.value: AuthorityBoundary.EFFECT,
+                WorkflowStepType.COMPENSATION.value: AuthorityBoundary.COMPENSATION,
+            }.get(step.step_type, AuthorityBoundary.SERVICE_CALL)
+            await fence.require_workflow_execution(
+                execution_id=execution.execution_id,
+                user_id=execution.user_id,
+                workspace_id=execution.workspace_id,
+                boundary=boundary,
+            )
             output = await self._handler(execution, step, row, step_trace_id)
+            await fence.require_workflow_execution(
+                execution_id=execution.execution_id,
+                user_id=execution.user_id,
+                workspace_id=execution.workspace_id,
+                boundary=AuthorityBoundary.PUBLICATION,
+            )
             if isinstance(output, _PauseForApproval):
                 row.attempt_count = max(0, row.attempt_count - 1)
                 row.lease_owner_id = None

@@ -6,12 +6,13 @@ Branch: `milestone-6-multi-workspace-collaboration-architecture-local`
 
 Architecture baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: architecture complete locally; checkpoint 6.1 complete locally
+Status: architecture and checkpoints 6.1–6.3 complete locally
 
-Next checkpoint: 6.2 — Collaboration Roles and Permission Authority
+Next checkpoint: 6.4 — Comments and Collaboration Activity
 
-Implementation record: checkpoint 6.1 realizes the approved membership and
-invitation foundation at sole Alembic head `20260725_0021`. It does not alter
+Implementation record: checkpoints 6.1–6.3 realize the approved membership,
+authority, typed-sharing, ownership, and revocation foundation at sole
+Alembic head `20260725_0023`. They do not alter
 the remaining architecture or begin generalized collaboration authority.
 
 ## 1. Purpose
@@ -942,8 +943,8 @@ committed.
 Checkpoint alignment is:
 
 - 6.1 -> `20260725_0021` — complete;
-- 6.2 -> `20260725_0022` — planned, not created;
-- 6.3 -> `20260725_0023` — planned, not created;
+- 6.2 -> `20260725_0022` — complete;
+- 6.3 -> `20260725_0023` — complete locally;
 - 6.4 -> `20260725_0024` — planned, not created;
 - 6.5, 6.6, and 6.7 -> no migration currently assigned.
 

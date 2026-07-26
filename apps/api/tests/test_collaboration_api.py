@@ -690,9 +690,7 @@ async def test_roles_lifecycle_and_approval_authority_are_scoped_and_idempotent(
         )
         assert {changed_first.status_code, changed_second.status_code} <= {200, 409}
         assert 200 in {changed_first.status_code, changed_second.status_code}
-        changed = (
-            changed_first if changed_first.status_code == 200 else changed_second
-        )
+        changed = changed_first if changed_first.status_code == 200 else changed_second
         assert changed.json()["role"] == "member"
         role_replay = await owner.post(
             role_path,

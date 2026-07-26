@@ -29,6 +29,10 @@ from opencanvas_api.services.agents.persistence import (
     AgentPersistenceNotFound,
     ControlledAgentRepository,
 )
+from opencanvas_api.services.collaboration_resources import (
+    AuthorityBoundary,
+    RevocationFenceService,
+)
 from opencanvas_api.services.trace import RecordTraceEventInput, TraceService
 
 EXECUTION_LEASE_DURATION = timedelta(minutes=1)
@@ -177,6 +181,12 @@ class ControlledExecutionReliability:
         owner_id = str(uuid.uuid4())
         lease_expires_at: datetime
         async with self.session.begin_nested():
+            await RevocationFenceService(self.session).require_controlled_execution(
+                execution_id=execution_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                boundary=AuthorityBoundary.CLAIM,
+            )
             await self._validate_claim_authority(
                 user_id=user_id,
                 workspace_id=workspace_id,
@@ -286,6 +296,12 @@ class ControlledExecutionReliability:
             raise ExecutionReliabilityDenied("lease_identity_invalid")
         trace_id = uuid.uuid4()
         async with self.session.begin_nested():
+            await RevocationFenceService(self.session).require_controlled_execution(
+                execution_id=execution_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                boundary=AuthorityBoundary.SERVICE_CALL,
+            )
             await self._validate_claim_authority(
                 user_id=user_id,
                 workspace_id=workspace_id,

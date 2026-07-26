@@ -12,6 +12,9 @@ Milestone 6.2 migration `20260725_0022`
 Completion cross-reference: Milestone 6.2 subsequently completed the amended
 boundary in migration `20260725_0022`; see
 [MILESTONE_6_2_COLLABORATION_ROLES_PERMISSION_AUTHORITY_HANDOFF.md](MILESTONE_6_2_COLLABORATION_ROLES_PERMISSION_AUTHORITY_HANDOFF.md).
+Milestone 6.3 subsequently completed its separately allocated direct child
+`20260725_0023`; see
+[MILESTONE_6_3_RESOURCE_SHARING_OWNERSHIP_REVOCATION_HANDOFF.md](MILESTONE_6_3_RESOURCE_SHARING_OWNERSHIP_REVOCATION_HANDOFF.md).
 
 ## Original contradiction
 

@@ -260,9 +260,8 @@ inference/conflict classification, and no complete end-user Trace explorer. See 
 
 Milestone 4 controlled agents and Milestone 5 architecture and checkpoints
 5.1–5.7 are complete locally. Milestone 6 architecture is complete locally,
-and checkpoints 6.1–6.2 are complete locally. Milestone 6.3 — Resource
-Sharing, Ownership, and Revocation is next. The required
-roadmap order is:
+and checkpoints 6.1–6.3 are complete locally. Milestone 6.4 — Comments and
+Collaboration Activity is next. The required roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
 2. Milestone 7 — Production Hardening, including deterministic indexing
@@ -300,21 +299,22 @@ independently mutate, archive, share, authorize, reindex, or reclassify
 authoritative resources or approve itself. Human review and controlled
 workflows remain authoritative.
 
-Milestones 6.1–6.2 are complete locally. Workspace memberships now bind exact
+Milestones 6.1–6.3 are complete locally. Workspace memberships now bind exact
 authenticated users to exact workspaces, and secure invitations support
 bounded creation, delivery, resend, acceptance, decline, expiry, revocation,
 idempotency, and concurrency handling. A closed six-role and 36-permission
 registry, centralized deny-by-default evaluator, append-only role and
 membership lifecycle administration, and exact reviewer-eligibility
 assignments now preserve the Milestone 4 capability and approval boundary.
-Migration `20260725_0022` is the sole head. Typed sharing, ownership transfer,
-6.3 authority snapshots/revocation fencing, comments, and later collaboration
-work remain unstarted.
+Typed canvas, canonical-object, workflow, and agent sharing, resource and
+workspace ownership transfer, immutable authority snapshots, and monotonic
+revocation fences are complete locally. Migration `20260725_0023` is the sole
+head. Comments and later collaboration work remain unstarted.
 
 Milestone 6 migrations now have checkpoint-owned immutable boundaries:
-6.2 owns completed migration `20260725_0022`, 6.3 owns planned migration
-`20260725_0023`, and 6.4 owns planned migration `20260725_0024`. The latter two
-do not exist. A migration must be completed within its owning checkpoint and
+6.2 owns completed migration `20260725_0022`, 6.3 owns completed migration
+`20260725_0023`, and 6.4 owns planned migration `20260725_0024`. Revision
+`20260725_0024` does not exist. A migration must be completed within its owning checkpoint and
 must not be rewritten by a later checkpoint.
 
 See

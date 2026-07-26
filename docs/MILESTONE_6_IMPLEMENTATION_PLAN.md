@@ -4,9 +4,9 @@ Date: 2026-07-25
 
 Architecture baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: checkpoint 6.1 complete locally; later checkpoints not started
+Status: checkpoints 6.1–6.3 complete locally; checkpoint 6.4 not started
 
-Next checkpoint: 6.2 — Collaboration Roles and Permission Authority
+Next checkpoint: 6.4 — Comments and Collaboration Activity
 
 ## Governing rules
 
@@ -36,7 +36,7 @@ Every checkpoint must:
 
 The repository retains one Alembic head and every migration has one direct
 parent. Current checkpoint allocation is 6.1 -> `20260725_0021` (complete),
-6.2 -> `20260725_0022` (planned), 6.3 -> `20260725_0023` (planned), and
+6.2 -> `20260725_0022` (complete), 6.3 -> `20260725_0023` (complete), and
 6.4 -> `20260725_0024` (planned). Checkpoints 6.5–6.7 have no migration
 assigned unless their later approved implementation proves new persistence is
 required.

@@ -12,6 +12,10 @@ WorkspaceRole = Literal["owner", "administrator", "editor", "approver", "member"
 InvitationRole = Literal["administrator", "editor", "approver", "member", "viewer"]
 MembershipState = Literal["active", "suspended", "removed"]
 InvitationState = Literal["pending", "accepted", "declined", "expired", "revoked"]
+ResourceKind = Literal["canvas", "canonical_object", "workflow", "agent"]
+ShareAccess = Literal["view", "contribute", "manage"]
+ShareAudience = Literal["workspace", "membership"]
+VisibilityPolicy = Literal["private", "inherit", "workspace_visible"]
 
 IDEMPOTENCY_PATTERN = r"^[A-Za-z0-9._:-]+$"
 
@@ -38,6 +42,80 @@ class InvitationCommand(ApiModel):
         max_length=128,
         pattern=IDEMPOTENCY_PATTERN,
     )
+
+
+class ShareTargetIn(ApiModel):
+    resource_kind: ResourceKind
+    resource_id: uuid.UUID
+    audience_kind: ShareAudience
+    audience_membership_id: uuid.UUID | None = None
+    access_level: ShareAccess
+    expires_in_days: int | None = Field(default=None, ge=1, le=30)
+
+
+class ShareBatchCreate(ApiModel):
+    targets: list[ShareTargetIn] = Field(min_length=1, max_length=50)
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=IDEMPOTENCY_PATTERN)
+
+
+class ShareRevoke(ApiModel):
+    share_ids: list[uuid.UUID] = Field(min_length=1, max_length=50)
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=IDEMPOTENCY_PATTERN)
+
+
+class ShareOut(ApiModel):
+    share_id: uuid.UUID
+    workspace_id: uuid.UUID
+    resource_kind: ResourceKind
+    resource_id: uuid.UUID
+    audience_kind: ShareAudience
+    audience_membership_id: uuid.UUID | None
+    access_level: ShareAccess
+    state: Literal["active", "revoked", "expired", "superseded"]
+    authority_generation: int = Field(ge=1)
+    expires_at: datetime | None
+    duplicate: bool = False
+
+
+class VisibilityChange(ApiModel):
+    visibility_policy: VisibilityPolicy
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=IDEMPOTENCY_PATTERN)
+
+
+class ResourceOwnershipOut(ApiModel):
+    resource_kind: ResourceKind
+    resource_id: uuid.UUID
+    owner_kind: Literal["workspace", "membership"]
+    owner_membership_id: uuid.UUID | None
+    owner_user_id: uuid.UUID | None
+    visibility_policy: VisibilityPolicy
+    authority_generation: int = Field(ge=1)
+
+
+class OwnershipTransferCreate(ApiModel):
+    transfer_kind: Literal["workspace", "resource"]
+    recipient_membership_id: uuid.UUID
+    resource_kind: ResourceKind | None = None
+    resource_id: uuid.UUID | None = None
+    expires_in_hours: int = Field(default=48, ge=1, le=168)
+    former_owner_role: Literal["administrator", "editor", "approver", "member", "viewer"] = (
+        "administrator"
+    )
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=IDEMPOTENCY_PATTERN)
+
+
+class OwnershipTransferOut(ApiModel):
+    transfer_id: uuid.UUID
+    workspace_id: uuid.UUID
+    transfer_kind: Literal["workspace", "resource"]
+    resource_kind: ResourceKind | None
+    resource_id: uuid.UUID | None
+    requester_membership_id: uuid.UUID
+    recipient_membership_id: uuid.UUID
+    state: Literal["pending", "accepted", "rejected", "canceled", "expired", "superseded"]
+    authority_generation: int = Field(ge=1)
+    expires_at: datetime
+    duplicate: bool = False
 
 
 class InvitationCredentialCommand(InvitationCommand):
@@ -139,5 +217,13 @@ __all__ = [
     "MembershipOut",
     "MembershipRoleCommand",
     "MembershipState",
+    "OwnershipTransferCreate",
+    "OwnershipTransferOut",
+    "ResourceOwnershipOut",
+    "ShareBatchCreate",
+    "ShareOut",
+    "ShareRevoke",
+    "ShareTargetIn",
+    "VisibilityChange",
     "WorkspaceRole",
 ]

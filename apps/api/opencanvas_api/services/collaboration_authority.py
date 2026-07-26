@@ -79,6 +79,14 @@ class CollaborationAction(StrEnum):
     APPROVAL_AUTHORITY_REPLACE = "approval_authority.replace"
     APPROVAL_AUTHORITY_REVOKE = "approval_authority.revoke"
     APPROVAL_REVIEW = "approval.review"
+    SHARE_LIST = "share.list"
+    SHARE_CREATE = "share.create"
+    SHARE_REVOKE = "share.revoke"
+    SHARE_BULK_REVOKE = "share.bulk_revoke"
+    RESOURCE_VISIBILITY_CHANGE = "resource.visibility.change"
+    OWNERSHIP_TRANSFER_REQUEST = "ownership_transfer.request"
+    OWNERSHIP_TRANSFER_ACCEPT = "ownership_transfer.accept"
+    OWNERSHIP_TRANSFER_CANCEL = "ownership_transfer.cancel"
 
 
 _READ = frozenset(
@@ -157,6 +165,20 @@ ACTION_PERMISSIONS: dict[CollaborationAction, CollaborationPermission] = {
     CollaborationAction.APPROVAL_AUTHORITY_REPLACE: CollaborationPermission.ROLE_ASSIGN,
     CollaborationAction.APPROVAL_AUTHORITY_REVOKE: CollaborationPermission.ROLE_ASSIGN,
     CollaborationAction.APPROVAL_REVIEW: CollaborationPermission.APPROVAL_REVIEW,
+    CollaborationAction.SHARE_LIST: CollaborationPermission.RESOURCE_SHARE,
+    CollaborationAction.SHARE_CREATE: CollaborationPermission.RESOURCE_SHARE,
+    CollaborationAction.SHARE_REVOKE: CollaborationPermission.RESOURCE_SHARE,
+    CollaborationAction.SHARE_BULK_REVOKE: CollaborationPermission.RESOURCE_SHARE,
+    CollaborationAction.RESOURCE_VISIBILITY_CHANGE: CollaborationPermission.RESOURCE_SHARE,
+    CollaborationAction.OWNERSHIP_TRANSFER_REQUEST: (
+        CollaborationPermission.OWNERSHIP_TRANSFER_REQUEST
+    ),
+    CollaborationAction.OWNERSHIP_TRANSFER_ACCEPT: (
+        CollaborationPermission.OWNERSHIP_TRANSFER_ACCEPT
+    ),
+    CollaborationAction.OWNERSHIP_TRANSFER_CANCEL: (
+        CollaborationPermission.OWNERSHIP_TRANSFER_CANCEL
+    ),
 }
 
 
@@ -193,53 +215,74 @@ class CollaborationAuthorizationService:
         permission = ACTION_PERMISSIONS.get(closed_action)
         if permission is None:
             return self._deny(workspace_id, "unknown_permission", action=closed_action)
+        return await self.evaluate_permission(
+            principal=principal,
+            workspace_id=workspace_id,
+            permission=permission,
+            action=closed_action,
+            expected_authority_generation=expected_authority_generation,
+        )
+
+    async def evaluate_permission(
+        self,
+        *,
+        principal: Principal,
+        workspace_id: uuid.UUID,
+        permission: CollaborationPermission | str,
+        action: CollaborationAction | None = None,
+        expected_authority_generation: int | None = None,
+    ) -> CollaborationAuthorityDecision:
+        try:
+            closed_permission = CollaborationPermission(permission)
+        except ValueError:
+            return self._deny(workspace_id, "unknown_permission", action=action)
         workspace = await self.session.get(Workspace, workspace_id)
         if (
             workspace is None
             or workspace.lifecycle_state not in {"created", "active"}
             or workspace.deleted_at
         ):
-            return self._deny(workspace_id, "workspace_inactive", action=closed_action)
+            return self._deny(workspace_id, "workspace_inactive", action=action)
         row = await self._active_membership(principal.user_id, workspace_id)
         if row is None:
-            return self._deny(workspace_id, "membership_inactive", action=closed_action)
+            return self._deny(workspace_id, "membership_inactive", action=action)
         membership, transition = row
         try:
             role = CollaborationRole(transition.current_role)
         except ValueError:
-            return self._deny(workspace_id, "unknown_role", action=closed_action)
+            return self._deny(workspace_id, "unknown_role", action=action)
         authority = await self.session.get(WorkspaceAuthorityVersion, workspace_id)
         if authority is None:
-            return self._deny(workspace_id, "authority_missing", action=closed_action)
+            return self._deny(workspace_id, "authority_missing", action=action)
         if (
             expected_authority_generation is not None
             and authority.authority_generation != expected_authority_generation
         ):
-            return self._deny(workspace_id, "authority_stale", action=closed_action)
-        if permission not in ROLE_PERMISSION_CEILINGS[role]:
+            return self._deny(workspace_id, "authority_stale", action=action)
+        if closed_permission not in ROLE_PERMISSION_CEILINGS[role]:
             return CollaborationAuthorityDecision(
                 False,
                 "permission_denied",
-                closed_action,
-                permission,
+                action,
+                closed_permission,
                 role,
                 membership.membership_id,
                 workspace_id,
                 authority.authority_generation,
             )
-        if closed_action is CollaborationAction.APPROVAL_REVIEW:
+        if action is CollaborationAction.APPROVAL_REVIEW:
             return CollaborationAuthorityDecision(
                 False,
                 "assignment_required",
-                closed_action,
-                permission,
+                action,
+                closed_permission,
                 role,
                 membership.membership_id,
                 workspace_id,
                 authority.authority_generation,
             )
         if (
-            closed_action
+            action
             in {
                 CollaborationAction.APPROVAL_AUTHORITY_ASSIGN,
                 CollaborationAction.APPROVAL_AUTHORITY_REPLACE,
@@ -250,8 +293,8 @@ class CollaborationAuthorizationService:
             return CollaborationAuthorityDecision(
                 False,
                 "owner_required",
-                closed_action,
-                permission,
+                action,
+                closed_permission,
                 role,
                 membership.membership_id,
                 workspace_id,
@@ -260,8 +303,8 @@ class CollaborationAuthorizationService:
         return CollaborationAuthorityDecision(
             True,
             "allowed",
-            closed_action,
-            permission,
+            action,
+            closed_permission,
             role,
             membership.membership_id,
             workspace_id,
