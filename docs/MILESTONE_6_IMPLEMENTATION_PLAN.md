@@ -28,7 +28,18 @@ Every checkpoint must:
 - add focused cross-user/workspace/canvas tests, idempotency, concurrency, and
   failure injection before broader regression;
 - update architecture, plan, progress, and checkpoint handoff documents;
+- create and complete any owned migration within that checkpoint, never
+  leaving a partial migration for a later checkpoint to rewrite;
+- keep committed migrations immutable and use the next unused revision for
+  later corrections or newly proved persistence;
 - stop at the checkpoint boundary and perform no remote operation.
+
+The repository retains one Alembic head and every migration has one direct
+parent. Current checkpoint allocation is 6.1 -> `20260725_0021` (complete),
+6.2 -> `20260725_0022` (planned), 6.3 -> `20260725_0023` (planned), and
+6.4 -> `20260725_0024` (planned). Checkpoints 6.5–6.7 have no migration
+assigned unless their later approved implementation proves new persistence is
+required.
 
 ## Fixed architecture decisions
 
@@ -176,14 +187,21 @@ Completion:
 
 ### Persistence
 
-Begin migration `20260725_0022` with:
+Create and complete migration `20260725_0022` during 6.2. Its direct parent is
+`20260725_0021`. It contains only independently valid 6.2 persistence:
 
 - approval-authority assignment identities and transitions;
 - append-only reviewer-eligibility evidence;
+- database support for authorized active-to-active role transitions by
+  superseding the restrictive `0021` guard without modifying `0021`;
 - membership/workspace authority-generation indexes and constraints.
 
-Share/ownership tables in the same coherent migration may land in 6.3, but
-6.2 must not create unused placeholder tables.
+It may add only the constraints, indexes, lifecycle and tenant-scope
+protections, and audit-supporting fields needed to complete 6.2. It explicitly
+excludes typed shares, resource ownership, workspace/resource ownership
+transfer, 6.3 authority snapshots and revocation fencing, bulk revocation,
+comments, and all later persistence. `0022` is immutable when 6.2 is
+committed.
 
 ### Services and APIs
 
@@ -229,7 +247,8 @@ Completion:
 
 ### Persistence
 
-Complete `20260725_0022` with:
+Create and complete migration `20260725_0023` during 6.3. Its direct parent is
+`20260725_0022`. It contains:
 
 - typed resource-share identities and append-only transitions;
 - resource-ownership bindings and transitions;
@@ -238,7 +257,9 @@ Complete `20260725_0022` with:
 - required typed composite FKs, uniqueness, checks, generations, and indexes.
 
 Exactly one target family must be populated. Generic unverified UUID targets
-are prohibited.
+are prohibited. `0023` excludes comments, comment revisions and tombstones,
+unrelated collaboration-activity persistence, and all later persistence. It
+is immutable when 6.3 is committed.
 
 ### Services
 
@@ -289,15 +310,20 @@ Completion:
 
 ### Persistence
 
-Create `20260725_0023`:
+Create and complete migration `20260725_0024` during 6.4. Its direct parent is
+`20260725_0023`. It contains:
 
 - comment threads;
 - comments;
 - comment revisions;
+- auditable tombstones and bounded reply relationships;
 - comment/thread state transitions;
-- event registry and subject/audience scope extensions;
-- activity projection support;
-- notification state only if the checkpoint proves it is necessary.
+- only minimal event or activity persistence that the checkpoint proves
+  cannot use existing systems.
+
+It excludes shared workflow governance, shared agent governance,
+collaboration-interface persistence, Advanced Real-Time Collaboration, and
+Milestone 7 or later work. `0024` is immutable when 6.4 is committed.
 
 ### Services and APIs
 

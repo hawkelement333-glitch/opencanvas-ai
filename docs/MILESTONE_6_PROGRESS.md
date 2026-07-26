@@ -2,11 +2,11 @@
 
 Last updated: 2026-07-25
 
-Branch: `milestone-6-1-workspace-memberships-invitations-local`
+Branch: `milestone-6-migration-boundary-amendment-local`
 
 Baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: checkpoint 6.1 complete locally; ready for 6.2 architecture-preserving implementation
+Status: checkpoint 6.1 complete locally; migration boundaries clarified; ready for 6.2 architecture-preserving implementation
 
 | Checkpoint                                       | Status           | Dependency                        |
 | ------------------------------------------------ | ---------------- | --------------------------------- |
@@ -64,13 +64,23 @@ invocation, approval, export, or controlled-effect authority.
 - `20260725_0021`: complete locally; memberships, invitation
   identity/state/secret/delivery, idempotency, collaboration audit,
   owner-membership backfill, and workspace authority version.
-- `20260725_0022`: role/approval authority, typed shares, ownership transfer,
-  resource ownership, execution authority snapshots, revocation fencing.
-- `20260725_0023`: comments/revisions/states, collaboration event/audience and
-  activity support, optional bounded notification state only if justified.
+- `20260725_0022`: planned for 6.2 only; active-to-active role-transition
+  support, approval-authority/approver-eligibility persistence, and exclusive
+  6.2 constraints, indexes, tenant scope, lifecycle, and audit support. Direct
+  parent: `20260725_0021`.
+- `20260725_0023`: planned for 6.3 only; typed shares, resource ownership,
+  ownership transfer, authority snapshots, and revocation fencing. Direct
+  parent: `20260725_0022`.
+- `20260725_0024`: planned for 6.4 only; comment threads, append-only
+  revisions/history, auditable tombstones, bounded replies, and only minimal
+  new event/activity persistence proved necessary. Direct parent:
+  `20260725_0023`.
 
-Alembic has one sole head: `20260725_0021`. Migrations `20260725_0022` and
-`20260725_0023` do not exist.
+Each migration is completed within its owning checkpoint and remains
+immutable after commit. Later changes use the next unused revision. Alembic
+has one sole head: `20260725_0021`. Migrations `20260725_0022`,
+`20260725_0023`, and `20260725_0024` do not exist. Checkpoints 6.5, 6.6, and
+6.7 have no migration assigned.
 
 ## Scope boundaries
 

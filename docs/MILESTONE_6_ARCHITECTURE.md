@@ -860,8 +860,14 @@ server maximums.
 
 ## 22. Persistence architecture
 
-No migration is created during this architecture pass. The smallest coherent
-future sequence after `20260725_0020` is:
+No migration is created by this documentation amendment. Migration allocation
+is checkpoint-owned: a migration is created and completed within one
+checkpoint, remains immutable after commit, and is never begun in one
+checkpoint and completed in another. A later correction or extension uses the
+next unused revision. Every revision has one direct parent, and the repository
+retains one Alembic head.
+
+The amended sequence is:
 
 ### `20260725_0021` — Membership and invitations
 
@@ -876,27 +882,66 @@ future sequence after `20260725_0020` is:
 Account creation must atomically create the personal workspace and owner
 membership after this migration.
 
-### `20260725_0022` — Roles, shares, ownership, approvals, and fencing
+### `20260725_0022` — Milestone 6.2 roles and permission authority
 
-- closed role/permission checks and policy-version evidence;
-- append-only approval-authority assignments/revocations;
-- typed canvas, canonical-object, workflow, and agent shares;
-- resource ownership bindings and transitions;
-- ownership-transfer requests and transitions;
-- execution authority snapshots and revocation generations.
+- Direct parent: `20260725_0021`.
+- Closed role/permission checks and policy-version evidence.
+- Database support for authorized active-to-active membership role
+  transitions, including superseding the restrictive `0021` transition guard
+  without modifying `0021`.
+- Append-only approval-authority or approver-eligibility assignment,
+  revocation, and reviewer-eligibility evidence required by 6.2.
+- Constraints, indexes, lifecycle protections, tenant-scope protections, and
+  audit-supporting fields required exclusively by 6.2.
+
+It excludes typed shares, resource ownership, workspace or resource ownership
+transfer, 6.3 authority snapshots and revocation fencing, bulk revocation,
+comments, and all later persistence. It must be complete and immutable when
+6.2 is committed.
+
+### `20260725_0023` — Milestone 6.3 sharing, ownership, and revocation
+
+- Direct parent: `20260725_0022`.
+- Typed, revocable canvas, canonical-object, workflow, and agent shares.
+- Resource-ownership bindings and transitions.
+- Workspace/resource ownership-transfer requests, acceptance, and
+  transitions.
+- Authority snapshots, monotonic authority generations, and revocation
+  fencing required by sharing and ownership operations.
+- Constraints, indexes, lifecycle protections, and tenant-scope protections
+  required exclusively by 6.3.
 
 Typed share/ownership targets use nullable real foreign keys with a
 resource-kind check requiring exactly one target. Generic unverified UUID
-targets are rejected.
+targets are rejected. This revision excludes comments, comment history and
+tombstones, unrelated collaboration-activity persistence, and all later
+persistence. It must be complete and immutable when 6.3 is committed.
 
-### `20260725_0023` — Comments and collaboration activity
+### `20260725_0024` — Milestone 6.4 comments and collaboration activity
 
+- Direct parent: `20260725_0023`.
 - comment threads;
 - immutable comment identities;
-- append-only comment revisions and state transitions;
-- event-registry/subject extensions for real collaboration producers;
-- audience-aware activity projection support;
-- optional bounded notification state only if 6.4 explicitly justifies it.
+- append-only comment revisions, state transitions, and auditable tombstones;
+- bounded reply relationships;
+- only minimal collaboration event/activity persistence that 6.4 proves
+  cannot use the existing systems.
+
+It excludes shared workflow governance, shared agent governance,
+collaboration-interface persistence, Advanced Real-Time Collaboration, and
+Milestone 7 or later work. It must be complete and immutable when 6.4 is
+committed.
+
+Checkpoint alignment is:
+
+- 6.1 -> `20260725_0021` — complete;
+- 6.2 -> `20260725_0022` — planned, not created;
+- 6.3 -> `20260725_0023` — planned, not created;
+- 6.4 -> `20260725_0024` — planned, not created;
+- 6.5, 6.6, and 6.7 -> no migration currently assigned.
+
+A future checkpoint that proves new persistence is necessary uses the next
+unused revision rather than modifying `0022`, `0023`, or `0024`.
 
 Each migration must:
 
@@ -1148,5 +1193,6 @@ Milestone 6 architecture is complete when these documents agree and all
 documentation/repository-integrity checks pass. No implementation behavior is
 claimed.
 
-Milestone 6.1 must begin only under a separate explicit request, from the
-architecture completion commit, with a fresh baseline verification.
+Milestone 6.1 is complete. Milestone 6.2 must begin only under a separate
+explicit request from the committed migration-boundary amendment baseline,
+with a fresh repository and migration-state verification.

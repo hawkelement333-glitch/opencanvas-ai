@@ -260,8 +260,9 @@ inference/conflict classification, and no complete end-user Trace explorer. See 
 
 Milestone 4 controlled agents and Milestone 5 architecture and checkpoints
 5.1–5.7 are complete locally. Milestone 6 architecture is complete locally,
-Milestone 6 implementation has not started, and 6.1 — Workspace Membership and
-Invitations is next. The required roadmap order is:
+and 6.1 — Workspace Membership and Invitations is complete locally. Milestone
+6.2 — Collaboration Roles and Permission Authority is next. The required
+roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
 2. Milestone 7 — Production Hardening, including deterministic indexing
@@ -306,6 +307,12 @@ idempotency, and concurrency handling. Migration `20260725_0021` is the sole
 head. General collaboration permissions, role administration, sharing, and
 all Milestone 6.2 work remain unstarted.
 
+Milestone 6 migrations now have checkpoint-owned immutable boundaries:
+6.2 owns planned migration `20260725_0022`, 6.3 owns planned migration
+`20260725_0023`, and 6.4 owns planned migration `20260725_0024`. None exists
+yet. A migration must be completed within its owning checkpoint and must not
+be rewritten by a later checkpoint.
+
 See
 [docs/MILESTONE_5_ARCHITECTURE.md](docs/MILESTONE_5_ARCHITECTURE.md),
 [docs/MILESTONE_5_IMPLEMENTATION_PLAN.md](docs/MILESTONE_5_IMPLEMENTATION_PLAN.md),
@@ -316,6 +323,7 @@ See
 [docs/MILESTONE_6_IMPLEMENTATION_PLAN.md](docs/MILESTONE_6_IMPLEMENTATION_PLAN.md),
 [docs/MILESTONE_6_PROGRESS.md](docs/MILESTONE_6_PROGRESS.md), and
 [docs/MILESTONE_6_ARCHITECTURE_HANDOFF.md](docs/MILESTONE_6_ARCHITECTURE_HANDOFF.md),
+[docs/MILESTONE_6_MIGRATION_BOUNDARY_AMENDMENT.md](docs/MILESTONE_6_MIGRATION_BOUNDARY_AMENDMENT.md),
 and
 [docs/MILESTONE_6_1_WORKSPACE_MEMBERSHIPS_INVITATIONS_HANDOFF.md](docs/MILESTONE_6_1_WORKSPACE_MEMBERSHIPS_INVITATIONS_HANDOFF.md).
 

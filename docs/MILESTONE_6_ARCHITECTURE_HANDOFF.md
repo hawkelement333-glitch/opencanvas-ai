@@ -200,15 +200,26 @@ isolation.
 
 ## Planned implementation
 
-The smallest planned migration sequence after `20260725_0020` is:
+The documentation-only migration-boundary amendment supersedes the original
+combined allocation with checkpoint-owned immutable revisions:
 
-1. `20260725_0021`: memberships, invitations, invitation/idempotency state,
-   owner-membership backfill, and workspace authority version;
-2. `20260725_0022`: approval eligibility, typed shares, ownership transfer,
-   typed resource ownership, authority snapshots, and revocation fencing;
-3. `20260725_0023`: comment threads/revisions/lifecycle and the minimal
-   collaboration event/activity projection support, with notification state
-   only if implementation evidence justifies it.
+1. `20260725_0021`: complete 6.1 membership/invitation persistence; direct
+   parent `20260725_0020`;
+2. `20260725_0022`: complete 6.2-only role-transition and
+   approval-authority/approver-eligibility persistence; direct parent
+   `20260725_0021`;
+3. `20260725_0023`: complete 6.3-only typed sharing, resource ownership,
+   ownership transfer, authority snapshot, and revocation-fencing
+   persistence; direct parent `20260725_0022`;
+4. `20260725_0024`: complete 6.4-only comment history, tombstone, bounded
+   reply, and minimally necessary event/activity persistence; direct parent
+   `20260725_0023`.
+
+Migrations `0022`, `0023`, and `0024` are planned and not created. Checkpoints
+6.5–6.7 have no assigned migration. A migration is completed within one
+checkpoint, remains immutable after commit, and is never completed by a later
+checkpoint. Later corrections use the next unused revision while preserving
+one Alembic head.
 
 Each future migration requires exact scope columns, composite keys, closed
 checks, uniqueness and live-request constraints, immutable versus mutable
