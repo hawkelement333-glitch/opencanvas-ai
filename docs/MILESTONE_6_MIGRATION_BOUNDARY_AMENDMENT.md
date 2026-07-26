@@ -18,6 +18,12 @@ Milestone 6.3 subsequently completed its separately allocated direct child
 Milestone 6.4 subsequently completed its separately allocated direct child
 `20260725_0024`; see
 [MILESTONE_6_4_COMMENTS_COLLABORATION_ACTIVITY_HANDOFF.md](MILESTONE_6_4_COMMENTS_COLLABORATION_ACTIVITY_HANDOFF.md).
+Milestone 6.5 later proved that shared invocation requires a distinct
+definition-owner and invoking-actor persistence boundary. The
+documentation-only
+[Milestone 6.5 invocation-identity amendment](MILESTONE_6_5_INVOCATION_IDENTITY_MIGRATION_AMENDMENT.md)
+therefore allocates direct child `20260725_0025`; the migration and
+implementation are not created.
 
 ## Original contradiction
 
@@ -127,32 +133,78 @@ Excluded:
 
 `0024` must be complete and immutable when 6.4 is committed.
 
+## `20260725_0025` — Milestone 6.5 only
+
+Direct parent: `20260725_0024`
+
+Complete planned scope:
+
+- separate immutable workflow and agent definition-owner scope from invocation
+  actor scope;
+- preserve the authenticated invoking user on workflow executions and bounded
+  agent invocations;
+- persist the exact active invoking membership;
+- preserve exact workspace, canvas, parent identity, immutable version,
+  definition owner, invoker, membership, execution, authority snapshot,
+  Trace, and audit scope;
+- bind collaboration visibility, invocation permission, authority generation,
+  capability, approval, policy, request-idempotency, lifecycle, and revocation
+  evidence;
+- link shared-agent authority evidence to the resulting workflow execution;
+- deterministically backfill legacy owner-only rows without changing existing
+  execution identities or append-only histories; and
+- include only constraints, indexes, portability guards, and compatibility
+  behavior required to complete 6.5 independently.
+
+Before the migration is created, 6.5 must specify and test a deterministic
+fail-closed compatibility rule for any historical row whose exact invoking
+membership cannot be derived from authoritative workspace-membership
+evidence. It must not invent an actor or rewrite historical Trace/audit
+meaning.
+
+Excluded:
+
+- multi-workspace frontend or collaboration-administration UI persistence;
+- Advanced Real-Time Collaboration, presence, cursors, CRDT/OT, and offline
+  merge state;
+- Indexer or managed production infrastructure;
+- Academy, Catalog, Librarian, marketplace, reputation, or Agent Society;
+- worlds, spatial intelligence, federation, or continuity; and
+- all Milestone 6.6 or later persistence.
+
+`0025` must be created, completed, validated, and committed wholly within 6.5
+and remains immutable afterward.
+
 ## Checkpoint alignment
 
 - 6.1 -> `20260725_0021` — complete
 - 6.2 -> `20260725_0022` — complete and immutable
 - 6.3 -> `20260725_0023` — complete and immutable
 - 6.4 -> `20260725_0024` — complete and immutable
-- 6.5 -> no migration currently assigned
+- 6.5 -> `20260725_0025` — planned, exclusively allocated, not created
 - 6.6 -> no migration currently assigned
 - 6.7 -> no migration currently assigned
 
-If 6.5, 6.6, 6.7, or a later correction proves new persistence necessary, it
-uses the next unused revision rather than modifying `0022`, `0023`, or
-`0024`.
+If 6.6, 6.7, or a later correction proves new persistence necessary, it uses
+the next unused revision rather than modifying committed migrations `0021`
+through `0025`.
 
-## Unchanged implementation state
+## Historical unchanged implementation state
 
 Migration `20260725_0021` remains unchanged and is the sole Alembic head. No
 migration was created. No production code, test, dependency, configuration,
 CI, deployment, frontend, backend, or API implementation changed. Milestone
 6.2, Milestone 6.3, and all later checkpoints remain unstarted.
 
+This paragraph records the original amendment checkpoint. It is superseded for
+current implementation status by completed immutable migrations `0022`–`0024`
+and the planned, uncreated `0025` allocation above.
+
 Advanced Real-Time Collaboration remains after Milestone 8. Milestone 7
 retains the deterministic Indexer, and Milestone 9 retains the governed
 Librarian and Agent Society.
 
-## Authoritative restart baseline
+## Historical 6.2 restart baseline
 
 Milestone 6.2 may restart only from the committed local amendment branch and
 SHA recorded by its final handoff, with:

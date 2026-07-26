@@ -37,9 +37,9 @@ Every checkpoint must:
 The repository retains one Alembic head and every migration has one direct
 parent. Current checkpoint allocation is 6.1 -> `20260725_0021` (complete),
 6.2 -> `20260725_0022` (complete), 6.3 -> `20260725_0023` (complete), and
-6.4 -> `20260725_0024` (complete). Checkpoints 6.5–6.7 have no migration
-assigned unless their later approved implementation proves new persistence is
-required.
+6.4 -> `20260725_0024` (complete). Milestone 6.5 exclusively owns planned
+revision `20260725_0025`, a direct child of `20260725_0024`; it is not
+created. Checkpoints 6.6 and 6.7 have no migration assigned.
 
 ## Fixed architecture decisions
 
@@ -386,6 +386,42 @@ Use existing workflow and Agent Studio `_scope`, `_owned_*`, and
 `_authorize_operation` seams. Do not fork workflow, agent, grant, approval,
 Trace, event, or activity services.
 
+### Persistence
+
+Create and complete migration `20260725_0025` wholly within 6.5. Its direct
+parent is immutable revision `20260725_0024`.
+
+The final design must:
+
+- separate immutable workflow/agent definition-owner scope from invocation
+  actor scope;
+- preserve `user_id`, or an equivalently clear repository-conventional field,
+  as the authenticated invoking user on executions and invocations;
+- persist the exact active invoking membership;
+- bind tenant, workspace, canvas, parent identity, immutable version,
+  definition owner, invoking user, invoking membership, execution, authority
+  snapshot, Trace, and audit identities with defensive composite constraints;
+- link shared-agent authority evidence to its resulting workflow execution;
+- preserve collaboration visibility, invocation permission, current authority
+  generation, capability grant, approval, policy, request-idempotency, and
+  lifecycle evidence;
+- backfill legacy rows with definition owner and invoking user equal to the
+  existing recorded user;
+- derive invoking membership only from exact historical membership evidence;
+- define and test a deterministic fail-closed compatibility rule before
+  migration creation when exact historical membership cannot be proved;
+- preserve execution identities and append-only Trace, audit, event, outbox,
+  activity, retry, cancellation, compensation, export, and publication
+  history; and
+- pass upgrade, `0025 -> 0024 -> 0025`, SQLite constraints, and PostgreSQL
+  offline DDL validation without destructive history loss.
+
+Revision `0025` contains only persistence required for 6.5 shared workflow and
+agent governance. It excludes collaboration-interface state, real-time
+collaboration, Indexer/production infrastructure, Academy, Catalog, Librarian,
+marketplace, reputation, Agent Society, worlds, spatial, federation,
+continuity, and all 6.6 or later persistence.
+
 ### Acceptance
 
 - Visible workflow/agent cannot be invoked without exact permission,
@@ -399,6 +435,11 @@ Trace, event, or activity services.
   authority.
 - Citation, source, Trace, and Evidence Bundle reads enforce current access and
   separate export permission.
+- Definition ownership and invocation identity remain distinct in persistence,
+  services, APIs, authority snapshots, Trace, audit, activity, and retries.
+- Revocation and stale-authority checks evaluate the invoker's membership,
+  share/visibility basis, permission, generation, grants, approvals, policy,
+  and lifecycle rather than substituting definition-owner authority.
 
 Completion:
 `MILESTONE 6.5 COMPLETE LOCALLY — READY FOR 6.6 MULTI-WORKSPACE COLLABORATION INTERFACE`

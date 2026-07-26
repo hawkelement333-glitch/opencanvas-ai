@@ -213,13 +213,19 @@ combined allocation with checkpoint-owned immutable revisions:
    persistence; direct parent `20260725_0022`;
 4. `20260725_0024`: complete 6.4-only comment history, tombstone, bounded
    reply, and minimally necessary event/activity persistence; direct parent
-   `20260725_0023`.
+   `20260725_0023`;
+5. `20260725_0025`: planned 6.5-only invocation-identity persistence that
+   separates immutable workflow/agent definition ownership from the invoking
+   user and membership; direct parent `20260725_0024`.
 
-Migrations `0022`, `0023`, and `0024` are planned and not created. Checkpoints
-6.5–6.7 have no assigned migration. A migration is completed within one
-checkpoint, remains immutable after commit, and is never completed by a later
-checkpoint. Later corrections use the next unused revision while preserving
-one Alembic head.
+This historical architecture handoff predates implementation of migrations
+`0022`–`0024`; those revisions are now complete and immutable. The later
+documentation-only
+[`MILESTONE_6_5_INVOCATION_IDENTITY_MIGRATION_AMENDMENT.md`](MILESTONE_6_5_INVOCATION_IDENTITY_MIGRATION_AMENDMENT.md)
+allocates `0025`, which is not created. Checkpoints 6.6–6.7 have no assigned
+migration. A migration is completed within one checkpoint, remains immutable
+after commit, and is never completed by a later checkpoint. Later corrections
+use the next unused revision while preserving one Alembic head.
 
 Each future migration requires exact scope columns, composite keys, closed
 checks, uniqueness and live-request constraints, immutable versus mutable

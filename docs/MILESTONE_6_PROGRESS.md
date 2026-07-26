@@ -8,16 +8,16 @@ Baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
 Status: checkpoints 6.1–6.4 complete locally; ready for 6.5
 
-| Checkpoint                                       | Status           | Dependency                        |
-| ------------------------------------------------ | ---------------- | --------------------------------- |
-| Architecture                                     | Complete locally | Milestone 5 and roadmap amendment |
-| 6.1 Workspace Membership and Invitations         | Complete locally | Architecture                      |
-| 6.2 Collaboration Roles and Permission Authority | Complete locally | 6.1                               |
-| 6.3 Resource Sharing, Ownership, and Revocation  | Complete locally | 6.1–6.2                           |
-| 6.4 Comments and Collaboration Activity          | Complete locally | 6.1–6.3                           |
-| 6.5 Shared Workflow and Agent Governance         | Not started      | 6.1–6.4 and Milestones 4–5        |
-| 6.6 Multi-Workspace Collaboration Interface      | Not started      | 6.1–6.5                           |
-| 6.7 Final Collaboration Security Audit           | Not started      | 6.1–6.6                           |
+| Checkpoint                                       | Status                        | Dependency                        |
+| ------------------------------------------------ | ----------------------------- | --------------------------------- |
+| Architecture                                     | Complete locally              | Milestone 5 and roadmap amendment |
+| 6.1 Workspace Membership and Invitations         | Complete locally              | Architecture                      |
+| 6.2 Collaboration Roles and Permission Authority | Complete locally              | 6.1                               |
+| 6.3 Resource Sharing, Ownership, and Revocation  | Complete locally              | 6.1–6.2                           |
+| 6.4 Comments and Collaboration Activity          | Complete locally              | 6.1–6.3                           |
+| 6.5 Shared Workflow and Agent Governance         | Not started; `0025` allocated | 6.1–6.4 and Milestones 4–5        |
+| 6.6 Multi-Workspace Collaboration Interface      | Not started                   | 6.1–6.5                           |
+| 6.7 Final Collaboration Security Audit           | Not started                   | 6.1–6.6                           |
 
 ## Architecture decisions
 
@@ -75,11 +75,14 @@ invocation, approval, export, or controlled-effect authority.
   comment identities, append-only revisions and lifecycle transitions,
   auditable tombstones, bounded replies, closed registries, scope/sequence
   guards, and indexes. Direct parent: `20260725_0023`.
+- `20260725_0025`: planned exclusively for 6.5 invocation identity; separates
+  immutable definition ownership from the authenticated invoking user and
+  exact active membership. Direct parent: `20260725_0024`. Not created.
 
 Each migration is completed within its owning checkpoint and remains
 immutable after commit. Later changes use the next unused revision. Alembic
-has one sole head: `20260725_0024`. Checkpoints 6.5, 6.6, and 6.7 have no
-migration assigned.
+has one sole head: `20260725_0024`. Checkpoints 6.6 and 6.7 have no migration
+assigned.
 
 ## Scope boundaries
 
@@ -179,6 +182,14 @@ real-service skips, strict typing, lint, formatting, production build,
 SQLite migration cycling, PostgreSQL offline DDL, mapper/import/compilation,
 demo, hygiene, diff, protected-reference, and prohibited-scope checks. Exact
 commands, warnings, and environment notes are recorded in the 6.4 handoff.
+
+The attempted 6.5 start stopped before branch creation or repository changes
+because existing workflow executions and agent invocations bind their user
+scope to immutable definition/version ownership. That cannot truthfully
+record a different shared invoker or membership. The documentation-only
+invocation-identity amendment now allocates direct-child migration
+`20260725_0025` to resolve the conflict during 6.5. Production implementation
+and migration creation remain unstarted.
 
 Next authorized implementation start:
 `MILESTONE 6.5 — SHARED WORKFLOW AND AGENT GOVERNANCE`

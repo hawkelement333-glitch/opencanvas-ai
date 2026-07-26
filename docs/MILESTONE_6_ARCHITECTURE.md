@@ -16,6 +16,13 @@ audience-aware activity foundation at sole Alembic head `20260725_0024`.
 They do not alter the remaining architecture or begin shared workflow/agent
 governance.
 
+Migration-boundary amendment: planned revision `20260725_0025`, with direct
+parent `20260725_0024`, belongs exclusively to 6.5. It separates immutable
+definition ownership from the authenticated invoking user and active invoking
+membership. Revision `0025` is not created and 6.5 implementation remains
+unstarted. See
+[`MILESTONE_6_5_INVOCATION_IDENTITY_MIGRATION_AMENDMENT.md`](MILESTONE_6_5_INVOCATION_IDENTITY_MIGRATION_AMENDMENT.md).
+
 ## 1. Purpose
 
 Milestone 6 makes SolarPlexus Mobius usable by bounded teams without weakening
@@ -514,6 +521,30 @@ Execution records remain attributed to the invoking user and membership.
 Creator or resource-owner identity is not substituted for the invoker. Agents
 and workflows cannot bind across workspaces in core Milestone 6.
 
+Existing owner-scoped persistence cannot satisfy this rule for a shared
+invocation: workflow executions currently bind their user scope to the
+immutable workflow-version owner, while agent invocations bind the same user
+scope to both the immutable agent version and resulting workflow execution.
+Milestone 6.5 therefore owns migration `20260725_0025` to represent these
+identities separately.
+
+The migration must preserve distinct semantic identities for:
+
+- immutable workflow and agent definition ownership;
+- the authenticated invoking user;
+- the exact active invoking membership;
+- the exact parent identity and immutable version;
+- the collaboration visibility and invocation-permission basis;
+- the current authority generation and immutable authority snapshot; and
+- capability, approval, policy, request, execution, Trace, and audit evidence.
+
+Legacy executions predate shared invocation. Their definition owner and
+invoking user are both the existing recorded user. Their invoking membership
+must be derived from exact historical workspace-membership evidence. Before
+`0025` is created, implementation must choose and test a deterministic
+fail-closed compatibility rule for any row whose exact historical membership
+cannot be proved; it must not invent an actor or rewrite Trace/audit meaning.
+
 ## 13. Approval authority
 
 `approver` is a collaboration role, not an approval record. Collaboration
@@ -954,16 +985,42 @@ collaboration-interface persistence, Advanced Real-Time Collaboration, and
 Milestone 7 or later work. It must be complete and immutable when 6.4 is
 committed.
 
+### `20260725_0025` — Milestone 6.5 invocation identity
+
+- Direct parent: `20260725_0024`.
+- Separate immutable workflow/agent definition-owner scope from invocation
+  actor scope.
+- Preserve the authenticated invoking user on workflow executions and agent
+  invocations.
+- Persist the exact active invoking membership and shared-invocation authority
+  snapshot linkage.
+- Bind exact tenant, workspace, canvas, parent identity, immutable version,
+  definition owner, invoker, membership, execution, Trace, and audit scope.
+- Backfill legacy owner-only rows deterministically without changing their
+  historical execution identities or append-only evidence.
+- Preserve existing Trace, audit, event, outbox, activity, request
+  idempotency, retry, cancellation, compensation, export, and publication
+  histories.
+
+The final implementation design may choose repository-conventional column
+names, but it must preserve these semantic identities and defensive composite
+constraints. It must define the fail-closed behavior for legacy rows whose
+exact historical membership cannot be derived before creating the migration.
+Revision `0025` excludes all 6.6 or later persistence and must be created,
+completed, validated, and committed wholly within 6.5.
+
 Checkpoint alignment is:
 
 - 6.1 -> `20260725_0021` — complete;
 - 6.2 -> `20260725_0022` — complete;
 - 6.3 -> `20260725_0023` — complete locally;
 - 6.4 -> `20260725_0024` — complete locally;
-- 6.5, 6.6, and 6.7 -> no migration currently assigned.
+- 6.5 -> `20260725_0025` — planned, exclusively allocated, not created;
+- 6.6 and 6.7 -> no migration currently assigned.
 
-A future checkpoint that proves new persistence is necessary uses the next
-unused revision rather than modifying `0022`, `0023`, or `0024`.
+A future correction or checkpoint that proves additional persistence is
+necessary uses the next unused revision rather than modifying committed
+revisions `0021` through `0025`.
 
 Each migration must:
 
@@ -1173,6 +1230,9 @@ Milestone 4/5 tests green. The final matrix includes:
 - selected-context/evidence boundaries;
 - exact capability/grant checks;
 - revocation during controlled execution.
+- complete migration `20260725_0025` to distinguish definition ownership from
+  the invoking user and membership while preserving exact immutable-version
+  and authority evidence.
 
 ### 6.6 — Multi-Workspace Collaboration Interface
 
@@ -1226,5 +1286,6 @@ documentation/repository-integrity checks pass. No implementation behavior is
 claimed.
 
 Milestone 6.1–6.4 are complete locally. Milestone 6.5 must begin only under a
-separate explicit request from the committed 6.4 baseline, with a fresh
-repository and migration-state verification.
+separate explicit request from the committed invocation-identity migration
+amendment baseline, with a fresh repository and migration-state verification.
+Migration `20260725_0025` is allocated but not created.

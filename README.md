@@ -261,7 +261,12 @@ inference/conflict classification, and no complete end-user Trace explorer. See 
 Milestone 4 controlled agents and Milestone 5 architecture and checkpoints
 5.1–5.7 are complete locally. Milestone 6 architecture and checkpoints
 6.1–6.4 are complete locally. Milestone 6.5 — Shared Workflow and Agent
-Governance is next. The required roadmap order is:
+Governance is next. Its invocation-identity persistence conflict is resolved
+in the documentation-only
+[Milestone 6.5 migration amendment](docs/MILESTONE_6_5_INVOCATION_IDENTITY_MIGRATION_AMENDMENT.md):
+planned migration `20260725_0025` will separate immutable definition ownership
+from the exact invoking user and membership. Milestone 6.5 implementation and
+migration `0025` remain unstarted. The required roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
 2. Milestone 7 — Production Hardening, including deterministic indexing
@@ -332,9 +337,10 @@ workflow and agent governance remains unstarted.
 
 Milestone 6 migrations now have checkpoint-owned immutable boundaries:
 6.2 owns completed migration `20260725_0022`, 6.3 owns completed migration
-`20260725_0023`, and 6.4 owns completed migration `20260725_0024`. A migration
-must be completed within its owning checkpoint and
-must not be rewritten by a later checkpoint.
+`20260725_0023`, and 6.4 owns completed migration `20260725_0024`. Milestone
+6.5 exclusively owns planned direct child `20260725_0025`, which is not yet
+created. A migration must be completed within its owning checkpoint and must
+not be rewritten by a later checkpoint.
 
 See
 [docs/MILESTONE_5_ARCHITECTURE.md](docs/MILESTONE_5_ARCHITECTURE.md),
@@ -351,6 +357,7 @@ See
 [docs/MILESTONE_6_2_COLLABORATION_ROLES_PERMISSION_AUTHORITY_HANDOFF.md](docs/MILESTONE_6_2_COLLABORATION_ROLES_PERMISSION_AUTHORITY_HANDOFF.md),
 [docs/MILESTONE_6_3_RESOURCE_SHARING_OWNERSHIP_REVOCATION_HANDOFF.md](docs/MILESTONE_6_3_RESOURCE_SHARING_OWNERSHIP_REVOCATION_HANDOFF.md),
 [docs/MILESTONE_6_4_COMMENTS_COLLABORATION_ACTIVITY_HANDOFF.md](docs/MILESTONE_6_4_COMMENTS_COLLABORATION_ACTIVITY_HANDOFF.md),
+[docs/MILESTONE_6_5_INVOCATION_IDENTITY_MIGRATION_AMENDMENT.md](docs/MILESTONE_6_5_INVOCATION_IDENTITY_MIGRATION_AMENDMENT.md),
 and the
 [Mobius Core product-family roadmap amendment](docs/MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md).
 
