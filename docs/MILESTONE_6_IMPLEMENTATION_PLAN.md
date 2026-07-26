@@ -4,9 +4,9 @@ Date: 2026-07-25
 
 Architecture baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: approved architecture plan; implementation not started
+Status: checkpoint 6.1 complete locally; later checkpoints not started
 
-Next checkpoint: 6.1 — Workspace Membership and Invitations
+Next checkpoint: 6.2 — Collaboration Roles and Permission Authority
 
 ## Governing rules
 
@@ -55,6 +55,10 @@ Every checkpoint must:
 
 ## 6.1 — Workspace Membership and Invitations
 
+Status: complete locally in migration `20260725_0021`. The implementation
+follows the scope below and is handed off in
+`MILESTONE_6_1_WORKSPACE_MEMBERSHIPS_INVITATIONS_HANDOFF.md`.
+
 ### Scope
 
 - immutable membership identity;
@@ -78,6 +82,7 @@ Create migration `20260725_0021` only during 6.1:
 - `workspace_invitation_delivery_attempts`
 - `collaboration_request_identities`
 - `workspace_authority_versions`
+- `collaboration_audit_events`
 
 Required constraints:
 
@@ -142,6 +147,17 @@ distinctions.
 - Owner backfill and new account owner membership are atomic.
 - SQLite migration cycle, append-only guards, offline PostgreSQL DDL, focused
   security tests, and affected backend tests pass.
+
+Implemented limits are 500 active memberships/workspace, 100
+workspaces/user, 100 pending invitations/workspace, 7-day default and 30-day
+maximum invitation lifetime, 10-minute resend minimum, 5 resends per 24
+hours, and list pagination of 50 by default and 100 maximum.
+
+The checkpoint uses owner-only invitation administration as its minimum
+authorization boundary. Closed non-owner roles are persisted as ceilings, but
+no generalized permission registry, role evaluation, membership lifecycle
+administration, sharing, ownership transfer, approval eligibility, or
+revocation fencing from 6.2 or later is implemented.
 
 Completion:
 `MILESTONE 6.1 COMPLETE LOCALLY — READY FOR 6.2 COLLABORATION ROLES AND PERMISSION AUTHORITY`

@@ -33,6 +33,34 @@ async def deliver_password_reset(*, settings: Settings, recipient: str, raw_toke
         raise EmailDeliveryError("Password reset delivery failed.") from exc
 
 
+async def deliver_workspace_invitation(
+    *,
+    settings: Settings,
+    recipient: str,
+    workspace_name: str,
+    raw_token: str,
+) -> None:
+    if settings.password_reset_provider != "smtp":
+        return
+    if settings.smtp_host is None or settings.smtp_from_address is None:
+        raise EmailDeliveryError("Invitation delivery is not configured.")
+    message = EmailMessage()
+    message["Subject"] = f"Invitation to {workspace_name} in SolarPlexus Mobius"
+    message["From"] = settings.smtp_from_address
+    message["To"] = recipient
+    message.set_content(
+        f"You were invited to the SolarPlexus Mobius workspace {workspace_name!r}.\n\n"
+        "Sign in using this email address, open the invitation acceptance form, and paste "
+        "the one-time credential below. The credential is intentionally not placed in a URL.\n\n"
+        f"{raw_token}\n\n"
+        "If you did not expect this invitation, you can ignore it."
+    )
+    try:
+        await asyncio.to_thread(_send_smtp, settings, message)
+    except (OSError, smtplib.SMTPException) as exc:
+        raise EmailDeliveryError("Invitation delivery failed.") from exc
+
+
 def _send_smtp(settings: Settings, message: EmailMessage) -> None:
     assert settings.smtp_host is not None
     with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as client:

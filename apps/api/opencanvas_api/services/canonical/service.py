@@ -56,6 +56,7 @@ from opencanvas_api.services.canonical.repository import (
     CanonicalAggregate,
     CanonicalRepository,
 )
+from opencanvas_api.services.collaboration import MembershipService
 from opencanvas_api.services.trace import (
     CompleteTraceInput,
     FailTraceInput,
@@ -357,6 +358,11 @@ class CanonicalService:
                 owner_id=input_data.owner_id,
                 lifecycle_state=LifecycleState.CREATED,
                 metadata_payload=_json_object(input_data.metadata),
+            )
+            await MembershipService(self._session).bootstrap_owner_membership(
+                workspace=workspace,
+                actor_user_id=workspace.owner_id,
+                trace_id=context.trace_id,
             )
             return workspace, [
                 WorkspaceCreated(

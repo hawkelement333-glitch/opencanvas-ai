@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass
 from typing import NoReturn, cast
 
-from sqlalchemy import Select, select, update
+from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,8 @@ from opencanvas_api.db.models import (
     CanonicalRelationship,
     Document,
     Workspace,
+    WorkspaceMembership,
+    WorkspaceMembershipTransition,
 )
 from opencanvas_api.services.canonical.lifecycle import (
     CanonicalConflictError,
@@ -94,7 +96,35 @@ class CanonicalRepository:
     ) -> list[Workspace]:
         statement: Select[tuple[Workspace]] = select(Workspace)
         if owner_id is not None:
-            statement = statement.where(Workspace.owner_id == owner_id)
+            latest_membership_transition = (
+                select(func.max(WorkspaceMembershipTransition.sequence))
+                .where(
+                    WorkspaceMembershipTransition.membership_id == WorkspaceMembership.membership_id
+                )
+                .correlate(WorkspaceMembership)
+                .scalar_subquery()
+            )
+            active_membership_workspaces = (
+                select(WorkspaceMembership.workspace_id)
+                .join(
+                    WorkspaceMembershipTransition,
+                    (
+                        WorkspaceMembershipTransition.membership_id
+                        == WorkspaceMembership.membership_id
+                    )
+                    & (WorkspaceMembershipTransition.sequence == latest_membership_transition),
+                )
+                .where(
+                    WorkspaceMembership.user_id == owner_id,
+                    WorkspaceMembershipTransition.current_state == "active",
+                )
+            )
+            statement = statement.where(
+                or_(
+                    Workspace.owner_id == owner_id,
+                    Workspace.id.in_(active_membership_workspaces),
+                )
+            )
         if lifecycle_state is not None:
             statement = statement.where(Workspace.lifecycle_state == lifecycle_state.value)
         elif not include_deleted:

@@ -2,16 +2,16 @@
 
 Last updated: 2026-07-25
 
-Branch: `milestone-6-multi-workspace-collaboration-architecture-local`
+Branch: `milestone-6-1-workspace-memberships-invitations-local`
 
 Baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: architecture complete locally; implementation not started
+Status: checkpoint 6.1 complete locally; ready for 6.2 architecture-preserving implementation
 
 | Checkpoint                                       | Status           | Dependency                        |
 | ------------------------------------------------ | ---------------- | --------------------------------- |
 | Architecture                                     | Complete locally | Milestone 5 and roadmap amendment |
-| 6.1 Workspace Membership and Invitations         | Not started      | Architecture                      |
+| 6.1 Workspace Membership and Invitations         | Complete locally | Architecture                      |
 | 6.2 Collaboration Roles and Permission Authority | Not started      | 6.1                               |
 | 6.3 Resource Sharing, Ownership, and Revocation  | Not started      | 6.1–6.2                           |
 | 6.4 Comments and Collaboration Activity          | Not started      | 6.1–6.3                           |
@@ -59,17 +59,18 @@ participates only where shared; viewer is read-only.
 No role bypasses Milestone 4 or independently supplies resource visibility,
 invocation, approval, export, or controlled-effect authority.
 
-## Planned persistence
+## Persistence
 
-- `20260725_0021`: memberships, invitation identity/state/secret/delivery,
-  idempotency, owner-membership backfill, workspace authority version.
+- `20260725_0021`: complete locally; memberships, invitation
+  identity/state/secret/delivery, idempotency, collaboration audit,
+  owner-membership backfill, and workspace authority version.
 - `20260725_0022`: role/approval authority, typed shares, ownership transfer,
   resource ownership, execution authority snapshots, revocation fencing.
 - `20260725_0023`: comments/revisions/states, collaboration event/audience and
   activity support, optional bounded notification state only if justified.
 
-No migration has been created. Alembic remains at sole head
-`20260725_0020`.
+Alembic has one sole head: `20260725_0021`. Migrations `20260725_0022` and
+`20260725_0023` do not exist.
 
 ## Scope boundaries
 
@@ -90,9 +91,35 @@ remain unstarted.
 
 ## Current implementation state
 
-This architecture pass changes documentation only. It adds no backend or
-frontend code, model, schema, migration, API, test, fixture, dependency,
-configuration, CI, deployment, collaboration event, or placeholder.
+Checkpoint 6.1 adds immutable membership and invitation identities,
+append-only lifecycle, secret, delivery, idempotency, audit, Trace, event,
+outbox, and activity evidence; deterministic owner backfill; workspace
+authority versions; central membership/invitation services; and the approved
+authenticated APIs.
+
+Invitation credentials use cryptographically random bearer values and persist
+only keyed HMAC digests. Recipients bind to the exact authenticated normalized
+email/user. Resend rotates the current secret. Acceptance is one-time,
+idempotent, concurrency-safe, and atomic with membership creation, authority
+generation, audit, Trace, domain event, and outbox evidence. Safe errors do not
+distinguish foreign workspaces, invitations, recipients, or credentials.
+
+Owner membership is created atomically for new workspaces and deterministically
+backfilled for existing workspaces. Active membership resolution now allows a
+user to list their exact workspaces without rewriting historical owner/creator
+identity.
+
+Validation includes 496 passing backend tests, 1 skipped PostgreSQL-only test,
+36 deprecation warnings, focused security/concurrency/failure-injection tests,
+SQLite upgrade/downgrade/re-upgrade, PostgreSQL offline DDL, production
+typing, lint, formatting, compilation, frontend regression, production build,
+and repository hygiene checks. Exact commands and results are recorded in the
+6.1 handoff.
+
+Milestone 6.2 remains unstarted. No role-permission engine, role changes,
+membership suspension/restoration/removal, sharing, ownership transfer,
+approval eligibility, comments, collaboration UI, real-time collaboration,
+Indexer, or Librarian work was added.
 
 Next authorized implementation start:
-`MILESTONE 6.1 — WORKSPACE MEMBERSHIP AND INVITATIONS`
+`MILESTONE 6.2 — COLLABORATION ROLES AND PERMISSION AUTHORITY`

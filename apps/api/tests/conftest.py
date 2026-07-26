@@ -22,8 +22,9 @@ from opencanvas_api.main import create_app
 
 
 @pytest.fixture
-async def database() -> AsyncIterator[Database]:
-    database = Database("sqlite+aiosqlite:///:memory:")
+async def database(tmp_path: Path) -> AsyncIterator[Database]:
+    database_path = (tmp_path / "test.db").as_posix()
+    database = Database(f"sqlite+aiosqlite:///{database_path}")
     async with database.engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     async with database.sessions() as session:

@@ -6,9 +6,13 @@ Branch: `milestone-6-multi-workspace-collaboration-architecture-local`
 
 Architecture baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: architecture complete locally; implementation not started
+Status: architecture complete locally; checkpoint 6.1 complete locally
 
-Next checkpoint: 6.1 — Workspace Membership and Invitations
+Next checkpoint: 6.2 — Collaboration Roles and Permission Authority
+
+Implementation record: checkpoint 6.1 realizes the approved membership and
+invitation foundation at sole Alembic head `20260725_0021`. It does not alter
+the remaining architecture or begin generalized collaboration authority.
 
 ## 1. Purpose
 

@@ -815,6 +815,461 @@ class Workspace(TimestampMixin, Base):
     )
 
 
+class WorkspaceMembership(Base):
+    """Immutable admission identity; current state and role come from transitions."""
+
+    __tablename__ = "workspace_memberships"
+    __table_args__ = (
+        UniqueConstraint(
+            "membership_id",
+            "user_id",
+            "workspace_id",
+            name="uq_workspace_memberships_scope",
+        ),
+        UniqueConstraint(
+            "accepted_invitation_id",
+            name="uq_workspace_memberships_accepted_invitation",
+        ),
+        CheckConstraint(
+            "collaboration_policy_version = 'collaboration-policy-v1'",
+            name="ck_workspace_memberships_policy",
+        ),
+        Index(
+            "ix_workspace_memberships_user_workspace",
+            "user_id",
+            "workspace_id",
+            "created_at",
+        ),
+        Index(
+            "ix_workspace_memberships_workspace_time",
+            "workspace_id",
+            "created_at",
+            "membership_id",
+        ),
+    )
+
+    membership_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    accepted_invitation_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    collaboration_policy_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    creation_trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    creation_audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WorkspaceMembershipTransition(Base):
+    """Append-only membership lifecycle and one-role evidence."""
+
+    __tablename__ = "workspace_membership_transitions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["membership_id", "user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_workspace_membership_transition_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "membership_id",
+            "sequence",
+            name="uq_workspace_membership_transition_sequence",
+        ),
+        CheckConstraint(
+            "current_state IN ('active', 'suspended', 'removed')",
+            name="ck_workspace_membership_transition_state",
+        ),
+        CheckConstraint(
+            "previous_state IS NULL OR previous_state IN ('active', 'suspended', 'removed')",
+            name="ck_workspace_membership_transition_previous_state",
+        ),
+        CheckConstraint(
+            "current_role IN ('owner', 'administrator', 'editor', 'approver', 'member', 'viewer')",
+            name="ck_workspace_membership_transition_role",
+        ),
+        CheckConstraint(
+            "previous_role IS NULL OR previous_role IN "
+            "('owner', 'administrator', 'editor', 'approver', 'member', 'viewer')",
+            name="ck_workspace_membership_transition_previous_role",
+        ),
+        CheckConstraint(
+            "collaboration_policy_version = 'collaboration-policy-v1'",
+            name="ck_workspace_membership_transition_policy",
+        ),
+        CheckConstraint("sequence >= 0", name="ck_workspace_membership_transition_sequence"),
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_workspace_membership_transition_generation",
+        ),
+        Index(
+            "ix_workspace_membership_transition_current",
+            "membership_id",
+            "sequence",
+        ),
+        Index(
+            "ix_workspace_membership_transition_workspace",
+            "workspace_id",
+            "recorded_at",
+        ),
+    )
+
+    transition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_state: Mapped[str | None] = mapped_column(String(16))
+    current_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    previous_role: Mapped[str | None] = mapped_column(String(24))
+    current_role: Mapped[str] = mapped_column(String(24), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    collaboration_policy_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WorkspaceInvitation(Base):
+    """Immutable invitation identity with no recoverable bearer credential."""
+
+    __tablename__ = "workspace_invitations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["inviter_membership_id", "inviter_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_workspace_invitation_inviter_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "invitation_id",
+            "workspace_id",
+            name="uq_workspace_invitations_scope",
+        ),
+        CheckConstraint(
+            "intended_role IN ('administrator', 'editor', 'approver', 'member', 'viewer')",
+            name="ck_workspace_invitations_role",
+        ),
+        CheckConstraint(
+            "collaboration_policy_version = 'collaboration-policy-v1'",
+            name="ck_workspace_invitations_policy",
+        ),
+        CheckConstraint(
+            "length(recipient_digest) = 64 AND length(request_digest) = 64",
+            name="ck_workspace_invitations_digests",
+        ),
+        CheckConstraint(
+            "expires_at > created_at",
+            name="ck_workspace_invitations_expiry_order",
+        ),
+        Index(
+            "ix_workspace_invitations_workspace_recipient",
+            "workspace_id",
+            "recipient_digest",
+            "created_at",
+        ),
+        Index(
+            "ix_workspace_invitations_workspace_expiry",
+            "workspace_id",
+            "expires_at",
+        ),
+    )
+
+    invitation_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    recipient_email_normalized: Mapped[str] = mapped_column(String(320), nullable=False)
+    recipient_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    recipient_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    intended_role: Mapped[str] = mapped_column(String(24), nullable=False)
+    inviter_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    inviter_membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    collaboration_policy_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    creation_trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    creation_audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WorkspaceInvitationTransition(Base):
+    """Append-only invitation lifecycle evidence."""
+
+    __tablename__ = "workspace_invitation_transitions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["invitation_id", "workspace_id"],
+            ["workspace_invitations.invitation_id", "workspace_invitations.workspace_id"],
+            name="fk_workspace_invitation_transition_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "invitation_id",
+            "sequence",
+            name="uq_workspace_invitation_transition_sequence",
+        ),
+        UniqueConstraint(
+            "invitation_id",
+            "current_state",
+            name="uq_workspace_invitation_terminal_once",
+        ),
+        CheckConstraint(
+            "current_state IN ('pending', 'accepted', 'declined', 'expired', 'revoked')",
+            name="ck_workspace_invitation_transition_state",
+        ),
+        CheckConstraint(
+            "previous_state IS NULL OR previous_state IN "
+            "('pending', 'accepted', 'declined', 'expired', 'revoked')",
+            name="ck_workspace_invitation_transition_previous_state",
+        ),
+        CheckConstraint("sequence >= 0", name="ck_workspace_invitation_transition_sequence"),
+        Index(
+            "ix_workspace_invitation_transition_current",
+            "invitation_id",
+            "sequence",
+        ),
+    )
+
+    transition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    invitation_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_state: Mapped[str | None] = mapped_column(String(16))
+    current_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_membership_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace_memberships.membership_id", ondelete="RESTRICT")
+    )
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("collaboration_audit_events.audit_event_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WorkspaceInvitationSecretVersion(Base):
+    """Append-only nonrecoverable invitation credential version."""
+
+    __tablename__ = "workspace_invitation_secret_versions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["invitation_id", "workspace_id"],
+            ["workspace_invitations.invitation_id", "workspace_invitations.workspace_id"],
+            name="fk_workspace_invitation_secret_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "invitation_id",
+            "sequence",
+            name="uq_workspace_invitation_secret_sequence",
+        ),
+        UniqueConstraint("token_hash", name="uq_workspace_invitation_secret_hash"),
+        CheckConstraint("sequence >= 0", name="ck_workspace_invitation_secret_sequence"),
+        CheckConstraint(
+            "length(token_hash) = 64",
+            name="ck_workspace_invitation_secret_hash_length",
+        ),
+        Index(
+            "ix_workspace_invitation_secret_current",
+            "invitation_id",
+            "sequence",
+        ),
+    )
+
+    secret_version_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    invitation_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WorkspaceInvitationDeliveryAttempt(Base):
+    """Append-only safe delivery outcome without recipient or secret material."""
+
+    __tablename__ = "workspace_invitation_delivery_attempts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["invitation_id", "workspace_id"],
+            ["workspace_invitations.invitation_id", "workspace_invitations.workspace_id"],
+            name="fk_workspace_invitation_delivery_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "invitation_id",
+            "sequence",
+            name="uq_workspace_invitation_delivery_sequence",
+        ),
+        CheckConstraint(
+            "channel IN ('development_token', 'smtp')",
+            name="ck_workspace_invitation_delivery_channel",
+        ),
+        CheckConstraint(
+            "outcome IN ('delivered', 'failed')",
+            name="ck_workspace_invitation_delivery_outcome",
+        ),
+        CheckConstraint("sequence >= 0", name="ck_workspace_invitation_delivery_sequence"),
+        Index(
+            "ix_workspace_invitation_delivery_recent",
+            "invitation_id",
+            "recorded_at",
+        ),
+    )
+
+    attempt_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    invitation_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    secret_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    channel: Mapped[str] = mapped_column(String(24), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    failure_code: Mapped[str | None] = mapped_column(String(64))
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationRequestIdentity(Base):
+    """Append-only scoped idempotency result."""
+
+    __tablename__ = "collaboration_request_identities"
+    __table_args__ = (
+        UniqueConstraint(
+            "actor_user_id",
+            "workspace_id",
+            "operation",
+            "idempotency_key",
+            name="uq_collaboration_request_scope",
+        ),
+        CheckConstraint(
+            "operation IN ('invitation.create', 'invitation.resend', "
+            "'invitation.accept', 'invitation.decline', 'invitation.revoke')",
+            name="ck_collaboration_request_operation",
+        ),
+        CheckConstraint(
+            "result_kind IN ('workspace_invitation', 'workspace_membership')",
+            name="ck_collaboration_request_result_kind",
+        ),
+        CheckConstraint(
+            "length(request_digest) = 64",
+            name="ck_collaboration_request_digest",
+        ),
+        Index(
+            "ix_collaboration_request_created",
+            "workspace_id",
+            "created_at",
+        ),
+    )
+
+    request_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    operation: Mapped[str] = mapped_column(String(32), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    result_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WorkspaceAuthorityVersion(Base):
+    """Mutable server-owned current generation for collaboration authority."""
+
+    __tablename__ = "workspace_authority_versions"
+    __table_args__ = (
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_workspace_authority_generation",
+        ),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    last_trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollaborationAuditEvent(Base):
+    """Immutable bounded collaboration audit fact."""
+
+    __tablename__ = "collaboration_audit_events"
+    __table_args__ = (
+        CheckConstraint(
+            "subject_kind IN ('workspace_membership', 'workspace_invitation')",
+            name="ck_collaboration_audit_subject_kind",
+        ),
+        CheckConstraint(
+            "outcome IN ('succeeded', 'failed')",
+            name="ck_collaboration_audit_outcome",
+        ),
+        CheckConstraint(
+            "length(metadata_digest) = 64",
+            name="ck_collaboration_audit_metadata_digest",
+        ),
+        Index(
+            "ix_collaboration_audit_workspace_time",
+            "workspace_id",
+            "recorded_at",
+            "audit_event_id",
+        ),
+        Index("ix_collaboration_audit_trace", "trace_id"),
+    )
+
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    subject_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    metadata_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class CanonicalObject(TimestampMixin, Base):
     __tablename__ = "canonical_objects"
     __table_args__ = (
@@ -1475,7 +1930,13 @@ class DomainEventRecord(Base):
             "'agent.communication.revision_accepted', "
             "'agent.communication.revision_rejected', "
             "'agent.suspended', "
-            "'agent.retired')",
+            "'agent.retired', "
+            "'invitation.created', "
+            "'invitation.accepted', "
+            "'invitation.declined', "
+            "'invitation.expired', "
+            "'invitation.revoked', "
+            "'membership.activated')",
             name="ck_domain_events_type",
         ),
         CheckConstraint(
@@ -1484,7 +1945,8 @@ class DomainEventRecord(Base):
             "'evidence_bundle', 'citation', 'workflow_definition', 'workflow_version', "
             "'workflow_execution', 'workflow_step', 'agent_identity', 'agent_version', "
             "'agent_activation', 'agent_invocation', 'agent_proposal', "
-            "'agent_evaluation', 'communication_revision')",
+            "'agent_evaluation', 'communication_revision', "
+            "'workspace_invitation', 'workspace_membership')",
             name="ck_domain_events_subject_kind",
         ),
         CheckConstraint("sequence > 0", name="ck_domain_events_sequence_positive"),
@@ -4728,6 +5190,17 @@ BOUNDED_AGENT_STUDIO_IMMUTABLE_MODELS = (
     BoundedCommunicationRevisionDecision,
 )
 
+COLLABORATION_IMMUTABLE_MODELS = (
+    WorkspaceMembership,
+    WorkspaceMembershipTransition,
+    WorkspaceInvitation,
+    WorkspaceInvitationTransition,
+    WorkspaceInvitationSecretVersion,
+    WorkspaceInvitationDeliveryAttempt,
+    CollaborationRequestIdentity,
+    CollaborationAuditEvent,
+)
+
 
 def _reject_controlled_agent_mutation(_mapper: Any, _connection: Any, target: object) -> None:
     raise ValueError(f"{type(target).__name__} records are append-only")
@@ -4850,6 +5323,10 @@ for _workflow_immutable_model in CONTROLLED_WORKFLOW_IMMUTABLE_MODELS:
 for _agent_studio_immutable_model in BOUNDED_AGENT_STUDIO_IMMUTABLE_MODELS:
     event.listen(_agent_studio_immutable_model, "before_update", _reject_controlled_agent_mutation)
     event.listen(_agent_studio_immutable_model, "before_delete", _reject_controlled_agent_mutation)
+
+for _collaboration_immutable_model in COLLABORATION_IMMUTABLE_MODELS:
+    event.listen(_collaboration_immutable_model, "before_update", _reject_controlled_agent_mutation)
+    event.listen(_collaboration_immutable_model, "before_delete", _reject_controlled_agent_mutation)
 
 event.listen(
     ControlledWorkflowExecution,

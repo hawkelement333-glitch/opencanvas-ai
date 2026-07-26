@@ -136,6 +136,12 @@ async def create_account(
     )
     session.add(workspace)
     await session.flush()
+    from opencanvas_api.services.collaboration import MembershipService
+
+    await MembershipService(session).bootstrap_owner_membership(
+        workspace=workspace,
+        actor_user_id=user.id,
+    )
     return user, workspace
 
 

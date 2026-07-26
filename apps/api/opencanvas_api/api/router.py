@@ -6,6 +6,7 @@ from opencanvas_api.api.routes import (
     auth,
     canonical,
     canvases,
+    collaboration,
     documents,
     domain_events,
     graph_retrieval,
@@ -19,6 +20,7 @@ api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(auth.router, tags=["authentication"])
 api_router.include_router(canvases.router, tags=["canvases"])
+api_router.include_router(collaboration.router, tags=["workspace-collaboration"])
 api_router.include_router(documents.router, tags=["documents"])
 api_router.include_router(traces.router, tags=["traces"])
 api_router.include_router(canonical.router, tags=["canonical"])

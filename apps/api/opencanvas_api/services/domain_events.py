@@ -26,6 +26,8 @@ from opencanvas_api.db.models import (
     DomainEventRecord,
     Workspace,
     WorkspaceEventSequence,
+    WorkspaceInvitation,
+    WorkspaceMembership,
 )
 
 EVENT_REGISTRY_VERSION = "mobius-domain-events-v1"
@@ -98,6 +100,12 @@ DomainEventType = Literal[
     "agent.communication.revision_rejected",
     "agent.suspended",
     "agent.retired",
+    "invitation.created",
+    "invitation.accepted",
+    "invitation.declined",
+    "invitation.expired",
+    "invitation.revoked",
+    "membership.activated",
 ]
 SubjectKind = Literal[
     "canonical_resource",
@@ -118,6 +126,8 @@ SubjectKind = Literal[
     "agent_proposal",
     "agent_evaluation",
     "communication_revision",
+    "workspace_invitation",
+    "workspace_membership",
 ]
 OriginType = Literal[
     "authenticated_user",
@@ -189,6 +199,15 @@ _AGENT_PAYLOAD = frozenset(
         "preservationStatus",
         "decision",
         "reasonCode",
+    }
+)
+_COLLABORATION_PAYLOAD = frozenset(
+    {
+        "state",
+        "role",
+        "reasonCode",
+        "membershipId",
+        "authorityGeneration",
     }
 )
 
@@ -378,6 +397,24 @@ EVENT_TYPE_REGISTRY: dict[DomainEventType, EventTypeSpec] = {
     ),
     "agent.suspended": EventTypeSpec("agent_identity", _AGENT_PAYLOAD, canvas_required=True),
     "agent.retired": EventTypeSpec("agent_identity", _AGENT_PAYLOAD, canvas_required=True),
+    "invitation.created": EventTypeSpec(
+        "workspace_invitation", _COLLABORATION_PAYLOAD, canvas_required=False
+    ),
+    "invitation.accepted": EventTypeSpec(
+        "workspace_invitation", _COLLABORATION_PAYLOAD, canvas_required=False
+    ),
+    "invitation.declined": EventTypeSpec(
+        "workspace_invitation", _COLLABORATION_PAYLOAD, canvas_required=False
+    ),
+    "invitation.expired": EventTypeSpec(
+        "workspace_invitation", _COLLABORATION_PAYLOAD, canvas_required=False
+    ),
+    "invitation.revoked": EventTypeSpec(
+        "workspace_invitation", _COLLABORATION_PAYLOAD, canvas_required=False
+    ),
+    "membership.activated": EventTypeSpec(
+        "workspace_membership", _COLLABORATION_PAYLOAD, canvas_required=False
+    ),
 }
 
 
@@ -518,7 +555,7 @@ class DomainEventService:
         outbox_id = uuid.uuid5(event_id, "outbox")
         try:
             async with self.session.begin_nested():
-                await self._require_scope(command)
+                await self._require_scope(command, spec)
                 sequence = await self._next_sequence(command.workspace_id)
                 event = DomainEventRecord(
                     event_id=event_id,
@@ -745,14 +782,51 @@ class DomainEventService:
             duplicate=True,
         )
 
-    async def _require_scope(self, command: CreateDomainEvent) -> None:
+    async def _require_scope(self, command: CreateDomainEvent, spec: EventTypeSpec) -> None:
         workspace = await self.session.scalar(
             select(Workspace).where(
                 Workspace.id == command.workspace_id,
                 Workspace.owner_id == command.user_id,
             )
         )
-        if workspace is None or command.actor_user_id != command.user_id:
+        if workspace is None:
+            raise DomainEventNotFoundError()
+        if spec.subject_kind == "workspace_invitation":
+            invitation = await self.session.scalar(
+                select(WorkspaceInvitation).where(
+                    WorkspaceInvitation.invitation_id == command.subject_id,
+                    WorkspaceInvitation.workspace_id == command.workspace_id,
+                )
+            )
+            accepted_membership_actor = await self.session.scalar(
+                select(WorkspaceMembership.user_id).where(
+                    WorkspaceMembership.accepted_invitation_id == command.subject_id,
+                    WorkspaceMembership.workspace_id == command.workspace_id,
+                    WorkspaceMembership.user_id == command.actor_user_id,
+                )
+            )
+            if invitation is None or (
+                command.actor_user_id
+                not in {
+                    command.user_id,
+                    invitation.recipient_user_id,
+                    accepted_membership_actor,
+                }
+            ):
+                raise DomainEventNotFoundError()
+        elif spec.subject_kind == "workspace_membership":
+            membership_actor = await self.session.scalar(
+                select(WorkspaceMembership.user_id).where(
+                    WorkspaceMembership.membership_id == command.subject_id,
+                    WorkspaceMembership.workspace_id == command.workspace_id,
+                )
+            )
+            if membership_actor is None or command.actor_user_id not in {
+                command.user_id,
+                membership_actor,
+            }:
+                raise DomainEventNotFoundError()
+        elif command.actor_user_id != command.user_id:
             raise DomainEventNotFoundError()
         if command.canvas_id is not None:
             canvas = await self.session.scalar(

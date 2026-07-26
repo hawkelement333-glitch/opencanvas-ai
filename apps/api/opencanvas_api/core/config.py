@@ -17,6 +17,7 @@ DEMO_DATABASE_PATH = DEMO_RUNTIME_ROOT / "opencanvas-demo.db"
 DEMO_DOCUMENT_STORAGE_ROOT = DEMO_RUNTIME_ROOT / "documents"
 DEMO_DATABASE_URL = f"sqlite+aiosqlite:///{DEMO_DATABASE_PATH.as_posix()}"
 DEVELOPMENT_SESSION_SECRET = "development-only-session-secret-change-before-deploying"
+DEVELOPMENT_INVITATION_SECRET = "development-only-invitation-secret-change-before-deploying"
 
 
 class AppMode(StrEnum):
@@ -56,6 +57,7 @@ class Settings(BaseSettings):
     auth_enabled: bool = True
     auth_test_bypass: bool = False
     session_secret: str = Field(default=DEVELOPMENT_SESSION_SECRET, min_length=32)
+    invitation_secret: str = Field(default=DEVELOPMENT_INVITATION_SECRET, min_length=32)
     session_cookie_name: str = "mobius_session"
     session_ttl_minutes: int = Field(default=60 * 24 * 7, ge=5, le=60 * 24 * 90)
     password_reset_ttl_minutes: int = Field(default=30, ge=5, le=24 * 60)
@@ -245,6 +247,12 @@ class Settings(BaseSettings):
             or len(self.session_secret.encode("utf-8")) < 32
         ):
             raise ValueError(f"{label} requires a unique session secret of at least 32 bytes")
+        if (
+            self.invitation_secret == DEVELOPMENT_INVITATION_SECRET
+            or len(self.invitation_secret.encode("utf-8")) < 32
+            or self.invitation_secret == self.session_secret
+        ):
+            raise ValueError(f"{label} requires a distinct invitation secret of at least 32 bytes")
         if self.ai_provider != "openai" or self.embedding_provider != "openai":
             raise ValueError(f"{label} refuses mock AI and embedding providers")
         if self.storage_provider != "s3":
@@ -293,6 +301,7 @@ __all__ = [
     "DEMO_DATABASE_URL",
     "DEMO_DOCUMENT_STORAGE_ROOT",
     "DEMO_RUNTIME_ROOT",
+    "DEVELOPMENT_INVITATION_SECRET",
     "DEVELOPMENT_SESSION_SECRET",
     "PROJECT_ROOT",
     "RUNTIME_ROOT",

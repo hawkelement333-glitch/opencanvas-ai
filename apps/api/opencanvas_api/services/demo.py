@@ -38,6 +38,7 @@ from opencanvas_api.db.models import (
     User,
     Workspace,
 )
+from opencanvas_api.services.collaboration import MembershipService
 from opencanvas_api.services.documents.embeddings import MockEmbeddingProvider
 
 DEMO_CANVAS_ID = uuid.UUID("d3000000-0000-4000-8000-000000000001")
@@ -154,6 +155,11 @@ async def seed_demo(session: AsyncSession, storage_root: Path) -> DemoSeedResult
     await session.flush()
     session.add(workspace)
     await session.flush()
+    await MembershipService(session).bootstrap_owner_membership(
+        workspace=workspace,
+        actor_user_id=DEMO_USER_ID,
+        trace_id=DEMO_TRACE_ID,
+    )
     canvas = Canvas(
         id=DEMO_CANVAS_ID,
         workspace_id=DEMO_CANVAS_ID,

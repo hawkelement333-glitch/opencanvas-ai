@@ -352,13 +352,32 @@ async def delete_account(
         await session.execute(
             delete(CanonicalObject).where(CanonicalObject.workspace_id.in_(workspace_ids))
         )
-        await session.execute(delete(Workspace).where(Workspace.id.in_(workspace_ids)))
+        deleted_at = datetime.now(UTC)
+        await session.execute(
+            update(Workspace)
+            .where(Workspace.id.in_(workspace_ids))
+            .values(
+                name="Deleted workspace",
+                description=None,
+                lifecycle_state="deleted",
+                metadata_payload={},
+                settings_payload={},
+                deleted_at=deleted_at,
+                updated_at=deleted_at,
+            )
+        )
     await session.execute(
         update(UserSession)
         .where(UserSession.user_id == user.id)
         .values(revoked_at=datetime.now(UTC))
     )
-    await session.delete(user)
+    deleted_identity = f"deleted-{user.id}@mobius.invalid"
+    user.email = deleted_identity
+    user.email_normalized = deleted_identity
+    user.display_name = "Deleted user"
+    user.is_active = False
+    user.deleted_at = datetime.now(UTC)
+    user.settings_payload = {}
     await session.commit()
     _clear_session_cookies(response, settings)
 

@@ -299,6 +299,13 @@ independently mutate, archive, share, authorize, reindex, or reclassify
 authoritative resources or approve itself. Human review and controlled
 workflows remain authoritative.
 
+Milestone 6.1 is complete locally. Workspace memberships now bind exact
+authenticated users to exact workspaces, and secure invitations support
+bounded creation, delivery, resend, acceptance, decline, expiry, revocation,
+idempotency, and concurrency handling. Migration `20260725_0021` is the sole
+head. General collaboration permissions, role administration, sharing, and
+all Milestone 6.2 work remain unstarted.
+
 See
 [docs/MILESTONE_5_ARCHITECTURE.md](docs/MILESTONE_5_ARCHITECTURE.md),
 [docs/MILESTONE_5_IMPLEMENTATION_PLAN.md](docs/MILESTONE_5_IMPLEMENTATION_PLAN.md),
@@ -308,7 +315,9 @@ See
 [docs/MILESTONE_6_ARCHITECTURE.md](docs/MILESTONE_6_ARCHITECTURE.md),
 [docs/MILESTONE_6_IMPLEMENTATION_PLAN.md](docs/MILESTONE_6_IMPLEMENTATION_PLAN.md),
 [docs/MILESTONE_6_PROGRESS.md](docs/MILESTONE_6_PROGRESS.md), and
-[docs/MILESTONE_6_ARCHITECTURE_HANDOFF.md](docs/MILESTONE_6_ARCHITECTURE_HANDOFF.md).
+[docs/MILESTONE_6_ARCHITECTURE_HANDOFF.md](docs/MILESTONE_6_ARCHITECTURE_HANDOFF.md),
+and
+[docs/MILESTONE_6_1_WORKSPACE_MEMBERSHIPS_INVITATIONS_HANDOFF.md](docs/MILESTONE_6_1_WORKSPACE_MEMBERSHIPS_INVITATIONS_HANDOFF.md).
 
 ## Competition and release status
 

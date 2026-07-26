@@ -77,6 +77,7 @@ from opencanvas_api.services.authorization import (
     require_owned_canvas,
     require_owned_workspace,
 )
+from opencanvas_api.services.collaboration import MembershipService
 from opencanvas_api.services.context import ContextBundle, build_context
 from opencanvas_api.services.documents import (
     DocumentServiceError,
@@ -215,6 +216,10 @@ async def create_canvas(
         )
         session.add(workspace)
         await session.flush()
+        await MembershipService(session).bootstrap_owner_membership(
+            workspace=workspace,
+            actor_user_id=principal.user_id,
+        )
     canvas = Canvas(name=payload.name, workspace_id=workspace.id)
     session.add(canvas)
     await session.commit()
