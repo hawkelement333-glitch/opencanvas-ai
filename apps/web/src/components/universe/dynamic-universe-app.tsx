@@ -429,6 +429,7 @@ export function DynamicUniverseApp({
           </p>
         </div>
         <nav aria-label="Universe views">
+          <Link href="/collaboration">Collaboration</Link>
           {(
             [
               ["universe", Orbit, "Universe"],

@@ -17,6 +17,45 @@ ShareAccess = Literal["view", "contribute", "manage"]
 ShareAudience = Literal["workspace", "membership"]
 VisibilityPolicy = Literal["private", "inherit", "workspace_visible"]
 
+COLLABORATION_PERMISSIONS = Literal[
+    "workspace.view",
+    "workspace.settings.manage",
+    "membership.view",
+    "membership.manage",
+    "invitation.create",
+    "invitation.resend",
+    "invitation.revoke",
+    "role.assign",
+    "ownership.transfer.request",
+    "ownership.transfer.accept",
+    "ownership.transfer.cancel",
+    "canvas.view",
+    "canvas.edit",
+    "canvas.share",
+    "resource.view",
+    "resource.edit",
+    "resource.share",
+    "comment.create",
+    "comment.edit_own",
+    "comment.resolve",
+    "comment.moderate",
+    "workflow.view",
+    "workflow.edit",
+    "workflow.share",
+    "workflow.invoke",
+    "agent.view",
+    "agent.edit",
+    "agent.share",
+    "agent.activate_request",
+    "agent.invoke",
+    "approval.review",
+    "collaboration_activity.view",
+    "trace.view",
+    "source.export",
+    "evidence_bundle.view",
+    "evidence_bundle.export",
+]
+
 IDEMPOTENCY_PATTERN = r"^[A-Za-z0-9._:-]+$"
 
 
@@ -302,6 +341,19 @@ class MembershipOut(ApiModel):
     state_recorded_at: datetime
 
 
+class WorkspaceCollaborationContextOut(ApiModel):
+    workspace_id: uuid.UUID
+    workspace_name: str
+    workspace_lifecycle_state: Literal["created", "active", "archived", "deleted"]
+    workspace_owner_user_id: uuid.UUID
+    authenticated_user_id: uuid.UUID
+    membership_id: uuid.UUID
+    membership_state: Literal["active"]
+    role: WorkspaceRole
+    authority_generation: int = Field(ge=1)
+    permission_ceiling: list[COLLABORATION_PERMISSIONS]
+
+
 class InvitationOut(ApiModel):
     invitation_id: uuid.UUID
     workspace_id: uuid.UUID
@@ -343,5 +395,6 @@ __all__ = [
     "ShareRevoke",
     "ShareTargetIn",
     "VisibilityChange",
+    "WorkspaceCollaborationContextOut",
     "WorkspaceRole",
 ]

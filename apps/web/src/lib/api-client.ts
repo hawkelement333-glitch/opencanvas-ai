@@ -80,6 +80,21 @@ import {
   type CommunicationProfile,
   type CommunicationRevision,
 } from "./agent-studio-contracts";
+import {
+  approvalAuthoritySchema,
+  collaborationActivitySchema,
+  collaborationContextSchema,
+  commentRevisionSchema,
+  commentSchema,
+  commentThreadSchema,
+  invitationSchema,
+  membershipSchema,
+  ownershipTransferSchema,
+  resourceOwnershipSchema,
+  shareSchema,
+  sharedAgentSchema,
+  sharedWorkflowSchema,
+} from "./collaboration-contracts";
 
 const DEFAULT_API_URL = "http://localhost:8000/api/v1";
 const API_TIMEOUT_MS = 20_000;
@@ -525,6 +540,319 @@ export const workspaceApi = {
       method: "POST",
       body: JSON.stringify({ name }),
     });
+  },
+};
+
+function collaborationPath(workspaceId: string): string {
+  return `/workspaces/${encodeURIComponent(workspaceId)}`;
+}
+
+function resourcePath(workspaceId: string, resourceKind: string, resourceId: string): string {
+  return `${collaborationPath(workspaceId)}/resources/${encodeURIComponent(resourceKind)}/${encodeURIComponent(resourceId)}`;
+}
+
+export const collaborationApi = {
+  context(workspaceId: string, signal?: AbortSignal) {
+    return request(
+      `${collaborationPath(workspaceId)}/collaboration-context`,
+      collaborationContextSchema,
+      { signal },
+    );
+  },
+  memberships(workspaceId: string, signal?: AbortSignal) {
+    return request(`${collaborationPath(workspaceId)}/memberships`, z.array(membershipSchema), {
+      signal,
+    });
+  },
+  membershipCommand(
+    workspaceId: string,
+    membershipId: string,
+    operation: "suspend" | "restore" | "remove",
+    idempotencyKey: string,
+  ) {
+    return request(
+      `${collaborationPath(workspaceId)}/memberships/${encodeURIComponent(membershipId)}/${operation}`,
+      membershipSchema,
+      { method: "POST", body: JSON.stringify({ idempotencyKey }) },
+    );
+  },
+  changeRole(workspaceId: string, membershipId: string, role: string, idempotencyKey: string) {
+    return request(
+      `${collaborationPath(workspaceId)}/memberships/${encodeURIComponent(membershipId)}/role`,
+      membershipSchema,
+      { method: "POST", body: JSON.stringify({ role, idempotencyKey }) },
+    );
+  },
+  invitations(workspaceId: string, signal?: AbortSignal) {
+    return request(`${collaborationPath(workspaceId)}/invitations`, z.array(invitationSchema), {
+      signal,
+    });
+  },
+  createInvitation(
+    workspaceId: string,
+    input: {
+      recipientEmail: string;
+      intendedRole: string;
+      expiresInDays: number;
+      idempotencyKey: string;
+    },
+  ) {
+    return request(`${collaborationPath(workspaceId)}/invitations`, invitationSchema, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  invitationCommand(
+    workspaceId: string,
+    invitationId: string,
+    operation: "resend" | "revoke",
+    idempotencyKey: string,
+  ) {
+    return request(
+      `${collaborationPath(workspaceId)}/invitations/${encodeURIComponent(invitationId)}/${operation}`,
+      invitationSchema,
+      { method: "POST", body: JSON.stringify({ idempotencyKey }) },
+    );
+  },
+  invitationDecision(
+    invitationId: string,
+    operation: "accept" | "decline",
+    token: string,
+    idempotencyKey: string,
+  ) {
+    if (operation === "accept") {
+      return request(
+        `/collaboration-invitations/${encodeURIComponent(invitationId)}/accept`,
+        membershipSchema,
+        {
+          method: "POST",
+          body: JSON.stringify({ token, idempotencyKey }),
+        },
+      );
+    }
+    return request(
+      `/collaboration-invitations/${encodeURIComponent(invitationId)}/decline`,
+      invitationSchema,
+      {
+        method: "POST",
+        body: JSON.stringify({ token, idempotencyKey }),
+      },
+    );
+  },
+  approvalAuthorities(workspaceId: string, signal?: AbortSignal) {
+    return request(
+      `${collaborationPath(workspaceId)}/approval-authority`,
+      z.array(approvalAuthoritySchema),
+      { signal },
+    );
+  },
+  assignApprovalAuthority(workspaceId: string, input: Record<string, unknown>) {
+    return request(
+      `${collaborationPath(workspaceId)}/approval-authority`,
+      approvalAuthoritySchema,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+  revokeApprovalAuthority(workspaceId: string, assignmentId: string, idempotencyKey: string) {
+    return request(
+      `${collaborationPath(workspaceId)}/approval-authority/${encodeURIComponent(assignmentId)}/revoke`,
+      approvalAuthoritySchema,
+      { method: "POST", body: JSON.stringify({ idempotencyKey }) },
+    );
+  },
+  shares(workspaceId: string, signal?: AbortSignal) {
+    return request(`${collaborationPath(workspaceId)}/shares`, z.array(shareSchema), { signal });
+  },
+  createShares(workspaceId: string, targets: unknown[], idempotencyKey: string) {
+    return request(`${collaborationPath(workspaceId)}/shares`, z.array(shareSchema), {
+      method: "POST",
+      body: JSON.stringify({ targets, idempotencyKey }),
+    });
+  },
+  revokeShares(workspaceId: string, shareIds: string[], idempotencyKey: string) {
+    return request(`${collaborationPath(workspaceId)}/shares/revoke`, z.array(shareSchema), {
+      method: "POST",
+      body: JSON.stringify({ shareIds, idempotencyKey }),
+    });
+  },
+  ownership(workspaceId: string, resourceKind: string, resourceId: string, signal?: AbortSignal) {
+    return request(
+      `${resourcePath(workspaceId, resourceKind, resourceId)}/ownership`,
+      resourceOwnershipSchema,
+      { signal },
+    );
+  },
+  setVisibility(
+    workspaceId: string,
+    resourceKind: string,
+    resourceId: string,
+    visibilityPolicy: string,
+    idempotencyKey: string,
+  ) {
+    return request(
+      `${resourcePath(workspaceId, resourceKind, resourceId)}/visibility`,
+      resourceOwnershipSchema,
+      { method: "POST", body: JSON.stringify({ visibilityPolicy, idempotencyKey }) },
+    );
+  },
+  ownershipTransfers(workspaceId: string, signal?: AbortSignal) {
+    return request(
+      `${collaborationPath(workspaceId)}/ownership-transfers`,
+      z.array(ownershipTransferSchema),
+      { signal },
+    );
+  },
+  requestOwnershipTransfer(workspaceId: string, input: Record<string, unknown>) {
+    return request(
+      `${collaborationPath(workspaceId)}/ownership-transfers`,
+      ownershipTransferSchema,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+  ownershipTransferDecision(
+    workspaceId: string,
+    transferId: string,
+    operation: "accept" | "reject" | "cancel",
+    idempotencyKey: string,
+  ) {
+    return request(
+      `${collaborationPath(workspaceId)}/ownership-transfers/${encodeURIComponent(transferId)}/${operation}`,
+      ownershipTransferSchema,
+      { method: "POST", body: JSON.stringify({ idempotencyKey }) },
+    );
+  },
+  comments(workspaceId: string, resourceKind: string, resourceId: string, signal?: AbortSignal) {
+    return request(
+      `${resourcePath(workspaceId, resourceKind, resourceId)}/comments`,
+      z.array(commentSchema),
+      { signal },
+    );
+  },
+  createComment(
+    workspaceId: string,
+    resourceKind: string,
+    resourceId: string,
+    content: string,
+    parentCommentId: string | null,
+    idempotencyKey: string,
+  ) {
+    return request(
+      `${resourcePath(workspaceId, resourceKind, resourceId)}/comments`,
+      commentSchema,
+      { method: "POST", body: JSON.stringify({ content, parentCommentId, idempotencyKey }) },
+    );
+  },
+  commentRevisions(
+    workspaceId: string,
+    resourceKind: string,
+    resourceId: string,
+    commentId: string,
+    signal?: AbortSignal,
+  ) {
+    return request(
+      `${collaborationPath(workspaceId)}/comments/${encodeURIComponent(commentId)}/revisions`,
+      z.array(commentRevisionSchema),
+      { signal },
+    );
+  },
+  reviseComment(
+    workspaceId: string,
+    resourceKind: string,
+    resourceId: string,
+    commentId: string,
+    expectedRevisionId: string,
+    content: string,
+    idempotencyKey: string,
+  ) {
+    return request(
+      `${collaborationPath(workspaceId)}/comments/${encodeURIComponent(commentId)}/revisions`,
+      commentRevisionSchema,
+      {
+        method: "POST",
+        body: JSON.stringify({ expectedRevisionId, content, idempotencyKey }),
+      },
+    );
+  },
+  tombstoneComment(
+    workspaceId: string,
+    resourceKind: string,
+    resourceId: string,
+    commentId: string,
+    tombstoneKind: "remove_by_author" | "hide_by_moderation",
+    idempotencyKey: string,
+  ) {
+    return request(
+      `${collaborationPath(workspaceId)}/comments/${encodeURIComponent(commentId)}/moderate`,
+      commentSchema,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          tombstoneKind,
+          reasonCode: "user_requested",
+          idempotencyKey,
+        }),
+      },
+    );
+  },
+  setThreadState(
+    workspaceId: string,
+    resourceKind: string,
+    resourceId: string,
+    threadId: string,
+    targetState: "resolved" | "reopened",
+    idempotencyKey: string,
+  ) {
+    return request(
+      `${collaborationPath(workspaceId)}/comment-threads/${encodeURIComponent(threadId)}/resolve`,
+      commentThreadSchema,
+      { method: "POST", body: JSON.stringify({ targetState, idempotencyKey }) },
+    );
+  },
+  activity(workspaceId: string, signal?: AbortSignal) {
+    return request(
+      `${collaborationPath(workspaceId)}/collaboration-activity`,
+      z.array(collaborationActivitySchema),
+      { signal },
+    );
+  },
+  workflows(workspaceId: string, canvasId: string, signal?: AbortSignal) {
+    return request(
+      `${collaborationPath(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/workflows`,
+      z.array(sharedWorkflowSchema),
+      { signal },
+    );
+  },
+  startWorkflow(
+    workspaceId: string,
+    canvasId: string,
+    input: Record<string, unknown>,
+  ): Promise<WorkflowExecution> {
+    return request(
+      `${collaborationPath(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/workflows/executions`,
+      workflowExecutionSchema,
+      { method: "POST", body: JSON.stringify(input) },
+      LONG_OPERATION_TIMEOUT_MS,
+    );
+  },
+  agents(workspaceId: string, canvasId: string, signal?: AbortSignal) {
+    return request(
+      `${collaborationPath(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/agent-studio/agents`,
+      z.array(sharedAgentSchema),
+      { signal },
+    );
+  },
+  invokeAgent(
+    workspaceId: string,
+    canvasId: string,
+    agentId: string,
+    input: Record<string, unknown>,
+  ): Promise<AgentInvocation> {
+    return request(
+      `${collaborationPath(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/agent-studio/agents/${encodeURIComponent(agentId)}/invocations`,
+      agentInvocationSchema,
+      { method: "POST", body: JSON.stringify(input) },
+      LONG_OPERATION_TIMEOUT_MS,
+    );
   },
 };
 

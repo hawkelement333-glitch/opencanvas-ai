@@ -796,6 +796,57 @@ class ApprovalAuthorityService:
         ).one_or_none()
         return ApprovalAuthorityView(row[0], row[1]) if row is not None else None
 
+    async def list_for_workspace(
+        self,
+        *,
+        principal: Principal,
+        workspace_id: uuid.UUID,
+        limit: int,
+        offset: int,
+    ) -> list[ApprovalAuthorityView]:
+        decision = await self.authorization.evaluate(
+            principal=principal,
+            workspace_id=workspace_id,
+            action=CollaborationAction.APPROVAL_AUTHORITY_ASSIGN,
+        )
+        if not decision.allowed:
+            raise CollaborationNotFoundError()
+        if not 1 <= limit <= 100 or not 0 <= offset <= 100_000:
+            raise CollaborationValidationError()
+        latest = (
+            select(func.max(CollaborationApprovalAuthorityTransition.sequence))
+            .where(
+                CollaborationApprovalAuthorityTransition.assignment_id
+                == CollaborationApprovalAuthorityAssignment.assignment_id
+            )
+            .correlate(CollaborationApprovalAuthorityAssignment)
+            .scalar_subquery()
+        )
+        rows = (
+            await self.session.execute(
+                select(
+                    CollaborationApprovalAuthorityAssignment,
+                    CollaborationApprovalAuthorityTransition,
+                )
+                .join(
+                    CollaborationApprovalAuthorityTransition,
+                    CollaborationApprovalAuthorityTransition.assignment_id
+                    == CollaborationApprovalAuthorityAssignment.assignment_id,
+                )
+                .where(
+                    CollaborationApprovalAuthorityAssignment.workspace_id == workspace_id,
+                    CollaborationApprovalAuthorityTransition.sequence == latest,
+                )
+                .order_by(
+                    CollaborationApprovalAuthorityAssignment.created_at,
+                    CollaborationApprovalAuthorityAssignment.assignment_id,
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+        return [ApprovalAuthorityView(row[0], row[1]) for row in rows]
+
     async def evaluate_reviewer(
         self,
         *,

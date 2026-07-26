@@ -4,9 +4,9 @@ Date: 2026-07-25
 
 Architecture baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: checkpoints 6.1–6.5 complete locally; checkpoint 6.6 not started
+Status: checkpoints 6.1–6.6 complete locally; checkpoint 6.7 not started
 
-Next checkpoint: 6.6 — Multi-Workspace Collaboration Interface
+Next checkpoint: 6.7 — Final Collaboration Security Audit
 
 ## Governing rules
 
@@ -454,6 +454,26 @@ Completion:
 `MILESTONE 6.5 COMPLETE LOCALLY — READY FOR 6.6 MULTI-WORKSPACE COLLABORATION INTERFACE`
 
 ## 6.6 — Multi-Workspace Collaboration Interface
+
+Status: complete locally on
+`milestone-6-6-multi-workspace-collaboration-interface-local`.
+
+Implementation uses the existing Next.js application router, authenticated API
+client, TanStack Query, closed Zod contracts, design tokens, and collaboration
+services. Workspace, resource, workflow, and agent data are partitioned by
+authenticated user, workspace, resource/canvas/identity/version where
+applicable, and authority generation. Switching or losing authority cancels
+and removes prior-workspace data before server-confirmed context is rendered.
+
+Minimal backend corrections remain within completed 6.1–6.5 scope: active
+memberships now drive authorized workspace listing; visible shared canvases
+can be discovered without weakening tenant non-enumeration; a bounded current
+collaboration-context response exposes current membership, role, lifecycle,
+authority generation, and server-returned operation ceiling; existing
+approval-authority and ownership-transfer records can be listed; resource
+ownership can be inspected only through current typed visibility; and shared
+workflow/agent discovery exposes definition owner, visibility basis, and a
+server-confirmed invocation boolean. No persistence or migration was added.
 
 ### Scope
 

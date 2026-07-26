@@ -348,6 +348,11 @@ class AgentOut(ApiModel):
     kind: str
     display_name: str
     description: str
+    definition_owner_user_id: uuid.UUID
+    visibility_basis: Literal[
+        "resource_owner", "direct_share", "workspace_visible", "inherited_access"
+    ]
+    can_invoke: bool
     lifecycle_state: str
     trace_id: uuid.UUID
     created_at: datetime

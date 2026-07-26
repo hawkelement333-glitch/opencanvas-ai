@@ -2,25 +2,26 @@
 
 Date: 2026-07-25
 
-Branch: `milestone-6-multi-workspace-collaboration-architecture-local`
+Implementation branch: `milestone-6-6-multi-workspace-collaboration-interface-local`
 
 Architecture baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: architecture and checkpoints 6.1–6.4 complete locally
+Status: architecture and checkpoints 6.1–6.6 complete locally
 
-Next checkpoint: 6.5 — Shared Workflow and Agent Governance
+Next checkpoint: 6.7 — Final Collaboration Security Audit
 
-Implementation record: checkpoints 6.1–6.4 realize the approved membership,
-authority, typed-sharing, ownership, revocation, bounded-comment, and
-audience-aware activity foundation at sole Alembic head `20260725_0024`.
-They do not alter the remaining architecture or begin shared workflow/agent
-governance.
+Implementation record: checkpoints 6.1–6.6 realize the approved membership,
+authority, typed-sharing, ownership, revocation, bounded-comment,
+audience-aware activity, shared workflow/agent governance, and collaboration
+interface foundation at sole Alembic head `20260725_0025`. Milestone 6.6 adds
+no persistence and does not alter the approved architecture or begin the 6.7
+audit.
 
-Migration-boundary amendment: planned revision `20260725_0025`, with direct
+Migration-boundary amendment: completed revision `20260725_0025`, with direct
 parent `20260725_0024`, belongs exclusively to 6.5. It separates immutable
 definition ownership from the authenticated invoking user and active invoking
-membership. Revision `0025` is not created and 6.5 implementation remains
-unstarted. See
+membership. Revision `0025` is immutable; 6.6 and 6.7 have no assigned
+migration. See
 [`MILESTONE_6_5_INVOCATION_IDENTITY_MIGRATION_AMENDMENT.md`](MILESTONE_6_5_INVOCATION_IDENTITY_MIGRATION_AMENDMENT.md).
 
 ## 1. Purpose
@@ -1015,8 +1016,9 @@ Checkpoint alignment is:
 - 6.2 -> `20260725_0022` — complete;
 - 6.3 -> `20260725_0023` — complete locally;
 - 6.4 -> `20260725_0024` — complete locally;
-- 6.5 -> `20260725_0025` — planned, exclusively allocated, not created;
-- 6.6 and 6.7 -> no migration currently assigned.
+- 6.5 -> `20260725_0025` — complete and immutable;
+- 6.6 -> no migration, complete locally;
+- 6.7 -> no migration currently assigned.
 
 A future correction or checkpoint that proves additional persistence is
 necessary uses the next unused revision rather than modifying committed

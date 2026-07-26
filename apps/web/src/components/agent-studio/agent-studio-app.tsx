@@ -553,6 +553,7 @@ export function AgentStudioApp({
           <p>Design, validate, activate, invoke, and improve agents without creating authority.</p>
         </div>
         <div className="studio-header__actions">
+          <Link href="/collaboration">Collaboration</Link>
           <Link
             href={scopeReady ? `/universe?workspaceId=${workspaceId}&canvasId=${canvasId}` : "/"}
           >

@@ -78,6 +78,11 @@ from opencanvas_api.services.authorization import (
     require_owned_workspace,
 )
 from opencanvas_api.services.collaboration import MembershipService
+from opencanvas_api.services.collaboration_authority import (
+    CollaborationAuthorizationService,
+    CollaborationPermission,
+)
+from opencanvas_api.services.collaboration_resources import ShareResourceKind, SharingService
 from opencanvas_api.services.context import ContextBundle, build_context
 from opencanvas_api.services.documents import (
     DocumentServiceError,
@@ -166,15 +171,37 @@ async def list_canvases(
     workspace_id: Annotated[uuid.UUID | None, Query(alias="workspaceId")] = None,
 ) -> list[CanvasOut]:
     if workspace_id is not None:
-        try:
-            await require_owned_workspace(session, principal, workspace_id)
-        except AuthorizationError as exc:
+        workspace_access = await CollaborationAuthorizationService(session).evaluate_permission(
+            principal=principal,
+            workspace_id=workspace_id,
+            permission=CollaborationPermission.WORKSPACE_VIEW,
+        )
+        if not workspace_access.allowed:
             raise ApiError(
-                status.HTTP_404_NOT_FOUND, "workspace_not_found", "Workspace not found."
-            ) from exc
+                status.HTTP_404_NOT_FOUND,
+                "workspace_not_found",
+                "Workspace not found.",
+            )
+        candidates = (
+            await session.scalars(
+                select(Canvas)
+                .where(Canvas.workspace_id == workspace_id)
+                .order_by(Canvas.updated_at.desc(), Canvas.id)
+            )
+        ).all()
+        sharing = SharingService(session)
+        visible: list[Canvas] = []
+        for canvas in candidates:
+            decision = await sharing.evaluate_access(
+                principal=principal,
+                workspace_id=workspace_id,
+                resource_kind=ShareResourceKind.CANVAS,
+                resource_id=canvas.id,
+            )
+            if decision.allowed:
+                visible.append(canvas)
+        return [_canvas_out(canvas) for canvas in visible]
     filters = [Workspace.owner_id == principal.user_id, Workspace.deleted_at.is_(None)]
-    if workspace_id is not None:
-        filters.append(Canvas.workspace_id == workspace_id)
     canvases = (
         await session.scalars(
             select(Canvas)

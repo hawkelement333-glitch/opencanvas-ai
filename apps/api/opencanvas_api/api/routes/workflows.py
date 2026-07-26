@@ -37,7 +37,10 @@ from opencanvas_api.db.models import (
 )
 from opencanvas_api.services.agents.contracts import ApprovalDecision
 from opencanvas_api.services.ai import AIProvider
+from opencanvas_api.services.collaboration import CollaborationNotFoundError
+from opencanvas_api.services.collaboration_resources import ShareResourceKind
 from opencanvas_api.services.documents.embeddings import build_embedding_provider
+from opencanvas_api.services.shared_governance import SharedInvocationGovernanceService
 from opencanvas_api.services.workflows import (
     ControlledWorkflowService,
     CreateWorkflowDraft,
@@ -136,7 +139,7 @@ async def create_workflow(
     except WorkflowError as exc:
         await session.rollback()
         raise _error(exc) from exc
-    return await _definition_out(session, record)
+    return await _definition_out(session, record, principal.user_id)
 
 
 @router.get("", response_model=list[WorkflowDefinitionOut])
@@ -160,7 +163,7 @@ async def list_workflows(
         )
     except WorkflowError as exc:
         raise _error(exc) from exc
-    return [await _definition_out(session, record) for record in records]
+    return [await _definition_out(session, record, principal.user_id) for record in records]
 
 
 @router.get("/{definition_id}", response_model=WorkflowDefinitionOut)
@@ -182,7 +185,7 @@ async def get_workflow(
         )
     except WorkflowError as exc:
         raise _error(exc) from exc
-    return await _definition_out(session, record)
+    return await _definition_out(session, record, principal.user_id)
 
 
 @router.post("/{definition_id}/versions", response_model=WorkflowDefinitionOut)
@@ -212,7 +215,7 @@ async def create_workflow_version(
     except WorkflowError as exc:
         await session.rollback()
         raise _error(exc) from exc
-    return await _definition_out(session, record)
+    return await _definition_out(session, record, principal.user_id)
 
 
 @router.post("/versions/{version_id}/validate", response_model=WorkflowVersionOut)
@@ -436,8 +439,17 @@ async def _change_version_state(
 async def _definition_out(
     session: AsyncSession,
     record: WorkflowDefinitionRecord,
+    user_id: uuid.UUID,
 ) -> WorkflowDefinitionOut:
     definition = record.definition
+    visibility_basis, can_invoke = await _shared_metadata(
+        session,
+        user_id=user_id,
+        workspace_id=definition.workspace_id,
+        resource_kind=ShareResourceKind.WORKFLOW,
+        resource_id=definition.definition_id,
+    )
+    versions = [await _version_out(session, item) for item in record.versions]
     return WorkflowDefinitionOut(
         definition_id=definition.definition_id,
         workspace_id=definition.workspace_id,
@@ -445,12 +457,50 @@ async def _definition_out(
         kind=definition.kind,
         name=definition.name,
         description=definition.description,
+        definition_owner_user_id=definition.created_by_user_id,
+        visibility_basis=cast(
+            Literal[
+                "resource_owner",
+                "direct_share",
+                "workspace_visible",
+                "inherited_access",
+            ],
+            visibility_basis,
+        ),
+        can_invoke=can_invoke and any(item.lifecycle_state == "active" for item in versions),
         schema_version=definition.schema_version,
         trace_id=definition.trace_id,
         created_at=utc(definition.created_at),
-        versions=[await _version_out(session, item) for item in record.versions],
+        versions=versions,
         duplicate=record.duplicate,
     )
+
+
+async def _shared_metadata(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    resource_kind: ShareResourceKind,
+    resource_id: uuid.UUID,
+) -> tuple[str, bool]:
+    governance = SharedInvocationGovernanceService(session)
+    visible = await governance.require_visibility(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        resource_kind=resource_kind,
+        resource_id=resource_id,
+    )
+    try:
+        await governance.require_invocation(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            resource_kind=resource_kind,
+            resource_id=resource_id,
+        )
+    except CollaborationNotFoundError:
+        return visible.access.reason_code, False
+    return visible.access.reason_code, True
 
 
 async def _version_out(

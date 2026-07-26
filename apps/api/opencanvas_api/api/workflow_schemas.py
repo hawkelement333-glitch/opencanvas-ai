@@ -103,6 +103,11 @@ class WorkflowDefinitionOut(ApiModel):
     kind: str
     name: str
     description: str
+    definition_owner_user_id: uuid.UUID
+    visibility_basis: Literal[
+        "resource_owner", "direct_share", "workspace_visible", "inherited_access"
+    ]
+    can_invoke: bool
     schema_version: str
     trace_id: uuid.UUID
     created_at: datetime

@@ -200,6 +200,49 @@ async def test_invitation_acceptance_is_scoped_idempotent_and_traceable(
 
         recipient_workspaces = (await recipient.get(f"{api_prefix}/workspaces")).json()
         assert owner_workspace["id"] in {item["id"] for item in recipient_workspaces}
+        assert len(recipient_workspaces) == 2
+        context = await recipient.get(
+            f"{api_prefix}/workspaces/{owner_workspace['id']}/collaboration-context"
+        )
+        assert context.status_code == 200, context.text
+        assert context.json() == {
+            "workspaceId": owner_workspace["id"],
+            "workspaceName": owner_workspace["name"],
+            "workspaceLifecycleState": "active",
+            "workspaceOwnerUserId": owner_session["user"]["id"],
+            "authenticatedUserId": recipient_session["user"]["id"],
+            "membershipId": membership["membershipId"],
+            "membershipState": "active",
+            "role": "editor",
+            "authorityGeneration": 2,
+            "permissionCeiling": sorted(
+                [
+                    "agent.edit",
+                    "agent.invoke",
+                    "agent.view",
+                    "canvas.edit",
+                    "canvas.view",
+                    "collaboration_activity.view",
+                    "comment.create",
+                    "comment.edit_own",
+                    "comment.resolve",
+                    "evidence_bundle.view",
+                    "ownership.transfer.accept",
+                    "resource.edit",
+                    "resource.view",
+                    "source.export",
+                    "trace.view",
+                    "workflow.edit",
+                    "workflow.invoke",
+                    "workflow.view",
+                    "workspace.view",
+                ]
+            ),
+        }
+        attacker_context = await attacker.get(
+            f"{api_prefix}/workspaces/{owner_workspace['id']}/collaboration-context"
+        )
+        assert attacker_context.status_code == 404
 
     async with database.sessions() as session:
         invitation_record = await session.get(WorkspaceInvitation, uuid.UUID(invitation_id))
@@ -602,6 +645,17 @@ async def test_roles_lifecycle_and_approval_authority_are_scoped_and_idempotent(
         assert duplicate.status_code == 201
         assert duplicate.json()["assignmentId"] == assignment["assignmentId"]
         assert duplicate.json()["duplicate"] is True
+        listed_authority = await owner.get(
+            f"{api_prefix}/workspaces/{workspace['id']}/approval-authority"
+        )
+        assert listed_authority.status_code == 200
+        assert [item["assignmentId"] for item in listed_authority.json()] == [
+            assignment["assignmentId"]
+        ]
+        hidden_authority = await approver.get(
+            f"{api_prefix}/workspaces/{workspace['id']}/approval-authority"
+        )
+        assert hidden_authority.status_code == 404
         async with database.sessions() as eligibility_session:
             reviewer = await eligibility_session.scalar(
                 select(User).where(User.email_normalized == "authority-approver@example.test")

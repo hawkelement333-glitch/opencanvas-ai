@@ -328,7 +328,11 @@ function CanvasSidebar({
 
       <div className="canvas-sidebar__footer" title="Local-first editing with server persistence">
         <Cloud size={15} aria-hidden="true" />
-        {!collapsed && <a href="/account">Account · server-synced</a>}
+        {!collapsed && (
+          <span>
+            <a href="/collaboration">Collaboration</a> · <a href="/account">Account</a>
+          </span>
+        )}
       </div>
     </aside>
   );

@@ -7,6 +7,7 @@ from typing import Annotated, TypedDict, cast
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import JsonValue
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,8 +78,8 @@ from opencanvas_api.services.canonical.service import (
     TransitionWorkspaceInput,
     UpdateObjectInput,
     UpdateWorkspaceInput,
-    WorkspaceQueryFilters,
 )
+from opencanvas_api.services.collaboration import MembershipService
 
 router = APIRouter(dependencies=[Depends(require_path_workspace_principal)])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -120,26 +121,32 @@ async def create_workspace(
 async def list_workspaces(
     service: CanonicalServiceDep,
     principal: PrincipalDep,
+    session: SessionDep,
     owner_id: Annotated[uuid.UUID | None, Query(alias="ownerId")] = None,
     lifecycle_state: Annotated[LifecycleState | None, Query(alias="lifecycleState")] = None,
     include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
-    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
     offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
 ) -> list[WorkspaceOut]:
-    workspaces = await _read(
-        service.list_workspaces(
-            WorkspaceQueryFilters(
-                owner_id=principal.user_id,
-                lifecycle_state=_service_state(lifecycle_state),
-                include_deleted=include_deleted,
-                limit=limit,
-                offset=offset,
-            )
-        )
+    workspace_ids = await MembershipService(session).active_workspace_ids(
+        user_id=principal.user_id,
+        limit=limit,
+        offset=offset,
     )
-    return [
-        _workspace_out(workspace) for workspace in workspaces if workspace.id != SYSTEM_WORKSPACE_ID
-    ]
+    if not workspace_ids:
+        return []
+    statement = select(Workspace).where(
+        Workspace.id.in_(workspace_ids),
+        Workspace.id != SYSTEM_WORKSPACE_ID,
+    )
+    if owner_id is not None:
+        statement = statement.where(Workspace.owner_id == owner_id)
+    if lifecycle_state is not None:
+        statement = statement.where(Workspace.lifecycle_state == lifecycle_state.value)
+    if not include_deleted:
+        statement = statement.where(Workspace.deleted_at.is_(None))
+    rows = {workspace.id: workspace for workspace in await session.scalars(statement)}
+    return [_workspace_out(rows[item]) for item in workspace_ids if item in rows]
 
 
 @router.get("/workspaces/{workspace_id}", response_model=WorkspaceOut)

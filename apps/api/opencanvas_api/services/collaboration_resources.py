@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import cast
 
 from pydantic import JsonValue
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from opencanvas_api.db.models import (
@@ -1686,6 +1686,66 @@ class OwnershipTransferService:
             .limit(1)
         )
         return TransferRecord(transfer, transition) if transition is not None else None
+
+    async def list_for_workspace(
+        self,
+        *,
+        principal: Principal,
+        workspace_id: uuid.UUID,
+        limit: int,
+        offset: int,
+    ) -> list[TransferRecord]:
+        decision = await self.authorization.evaluate_permission(
+            principal=principal,
+            workspace_id=workspace_id,
+            permission=CollaborationPermission.WORKSPACE_VIEW,
+        )
+        if not decision.allowed or decision.membership_id is None or decision.role is None:
+            raise CollaborationNotFoundError()
+        if not 1 <= limit <= 100 or not 0 <= offset <= 100_000:
+            raise CollaborationValidationError()
+        latest = (
+            select(func.max(CollaborationOwnershipTransferTransition.sequence))
+            .where(
+                CollaborationOwnershipTransferTransition.transfer_id
+                == CollaborationOwnershipTransfer.transfer_id
+            )
+            .correlate(CollaborationOwnershipTransfer)
+            .scalar_subquery()
+        )
+        statement = (
+            select(
+                CollaborationOwnershipTransfer,
+                CollaborationOwnershipTransferTransition,
+            )
+            .join(
+                CollaborationOwnershipTransferTransition,
+                CollaborationOwnershipTransferTransition.transfer_id
+                == CollaborationOwnershipTransfer.transfer_id,
+            )
+            .where(
+                CollaborationOwnershipTransfer.workspace_id == workspace_id,
+                CollaborationOwnershipTransferTransition.sequence == latest,
+            )
+        )
+        if decision.role is not CollaborationRole.OWNER:
+            statement = statement.where(
+                or_(
+                    CollaborationOwnershipTransfer.requester_user_id == principal.user_id,
+                    CollaborationOwnershipTransfer.recipient_user_id == principal.user_id,
+                )
+            )
+        rows = (
+            await self.session.execute(
+                statement.order_by(
+                    CollaborationOwnershipTransfer.created_at.desc(),
+                    CollaborationOwnershipTransfer.transfer_id,
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+        return [TransferRecord(row[0], row[1]) for row in rows]
 
     async def _decide(
         self,

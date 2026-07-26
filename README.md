@@ -260,13 +260,17 @@ inference/conflict classification, and no complete end-user Trace explorer. See 
 
 Milestone 4 controlled agents and Milestone 5 architecture and checkpoints
 5.1–5.7 are complete locally. Milestone 6 architecture and checkpoints
-6.1–6.5 are complete locally. Milestone 6.6 — Multi-Workspace Collaboration
-Interface is next. The
+6.1–6.6 are complete locally. Milestone 6.7 — Final Collaboration Security
+Audit is next. The
 [Milestone 6.5 migration amendment](docs/MILESTONE_6_5_INVOCATION_IDENTITY_MIGRATION_AMENDMENT.md)
 and
 [implementation handoff](docs/MILESTONE_6_5_SHARED_WORKFLOW_AGENT_GOVERNANCE_HANDOFF.md)
 record completed migration `20260725_0025` and the separation of immutable
 definition ownership from the exact invoking user and active membership. The
+[Milestone 6.6 handoff](docs/MILESTONE_6_6_MULTI_WORKSPACE_COLLABORATION_INTERFACE_HANDOFF.md)
+records the complete bounded collaboration console, server-confirmed
+workspace/operation context, scoped cache invalidation, accessibility, and
+responsive browser validation. The
 required roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration

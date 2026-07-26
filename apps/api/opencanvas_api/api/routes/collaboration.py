@@ -33,6 +33,7 @@ from opencanvas_api.api.collaboration_schemas import (
     ShareOut,
     ShareRevoke,
     VisibilityChange,
+    WorkspaceCollaborationContextOut,
     WorkspaceRole,
 )
 from opencanvas_api.api.dependencies import MutatingPrincipalDep, PrincipalDep, get_session
@@ -56,6 +57,11 @@ from opencanvas_api.services.collaboration import (
     MembershipService,
     MembershipView,
     mask_email,
+)
+from opencanvas_api.services.collaboration_authority import (
+    ROLE_PERMISSION_CEILINGS,
+    CollaborationAuthorizationService,
+    CollaborationPermission,
 )
 from opencanvas_api.services.collaboration_comments import (
     CollaborationActivityRecord,
@@ -93,6 +99,52 @@ from opencanvas_api.services.email import (
 router = APIRouter()
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+
+
+@router.get(
+    "/workspaces/{workspace_id}/collaboration-context",
+    response_model=WorkspaceCollaborationContextOut,
+)
+async def get_collaboration_context(
+    workspace_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+) -> WorkspaceCollaborationContextOut:
+    decision = await CollaborationAuthorizationService(session).evaluate_permission(
+        principal=principal,
+        workspace_id=workspace_id,
+        permission=CollaborationPermission.WORKSPACE_VIEW,
+    )
+    workspace = await session.get(Workspace, workspace_id)
+    if (
+        not decision.allowed
+        or decision.membership_id is None
+        or decision.role is None
+        or decision.authority_generation is None
+        or workspace is None
+    ):
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            "collaboration_not_found",
+            "The requested collaboration resource was not found.",
+        )
+    return WorkspaceCollaborationContextOut(
+        workspace_id=workspace.id,
+        workspace_name=workspace.name,
+        workspace_lifecycle_state=cast(
+            Literal["created", "active", "archived", "deleted"],
+            workspace.lifecycle_state,
+        ),
+        workspace_owner_user_id=workspace.owner_id,
+        authenticated_user_id=principal.user_id,
+        membership_id=decision.membership_id,
+        membership_state="active",
+        role=decision.role.value,
+        authority_generation=decision.authority_generation,
+        permission_ceiling=sorted(
+            permission.value for permission in ROLE_PERMISSION_CEILINGS[decision.role]
+        ),
+    )
 
 
 @router.post(
@@ -323,6 +375,29 @@ async def revoke_approval_authority(
             "The collaboration request conflicts with current state.",
         ) from exc
     return _approval_authority_out(view)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/approval-authority",
+    response_model=list[ApprovalAuthorityOut],
+)
+async def list_approval_authority(
+    workspace_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = PAGE_DEFAULT,
+    offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
+) -> list[ApprovalAuthorityOut]:
+    try:
+        views = await ApprovalAuthorityService(session).list_for_workspace(
+            principal=principal,
+            workspace_id=workspace_id,
+            limit=limit,
+            offset=offset,
+        )
+    except CollaborationError as exc:
+        _raise_api_error(exc)
+    return [_approval_authority_out(view) for view in views]
 
 
 @router.get(
@@ -752,6 +827,32 @@ async def change_resource_visibility(
     return _resource_out(record)
 
 
+@router.get(
+    "/workspaces/{workspace_id}/resources/{resource_kind}/{resource_id}/ownership",
+    response_model=ResourceOwnershipOut,
+)
+async def get_resource_ownership(
+    workspace_id: uuid.UUID,
+    resource_kind: ShareResourceKind,
+    resource_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+) -> ResourceOwnershipOut:
+    decision = await SharingService(session).evaluate_access(
+        principal=principal,
+        workspace_id=workspace_id,
+        resource_kind=resource_kind,
+        resource_id=resource_id,
+    )
+    if not decision.allowed or decision.resource is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            "collaboration_not_found",
+            "The requested collaboration resource was not found.",
+        )
+    return _resource_out(decision.resource)
+
+
 @router.post(
     "/workspaces/{workspace_id}/ownership-transfers",
     response_model=OwnershipTransferOut,
@@ -788,6 +889,29 @@ async def request_ownership_transfer(
             "The collaboration request conflicts with current state.",
         ) from exc
     return _transfer_out(record)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/ownership-transfers",
+    response_model=list[OwnershipTransferOut],
+)
+async def list_ownership_transfers(
+    workspace_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = PAGE_DEFAULT,
+    offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
+) -> list[OwnershipTransferOut]:
+    try:
+        records = await OwnershipTransferService(session).list_for_workspace(
+            principal=principal,
+            workspace_id=workspace_id,
+            limit=limit,
+            offset=offset,
+        )
+    except CollaborationError as exc:
+        _raise_api_error(exc)
+    return [_transfer_out(record) for record in records]
 
 
 async def _decide_ownership_transfer(

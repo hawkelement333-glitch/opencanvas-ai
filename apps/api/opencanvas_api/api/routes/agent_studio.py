@@ -91,7 +91,10 @@ from opencanvas_api.services.agent_studio import (
 )
 from opencanvas_api.services.agents.contracts import Capability, ResourceKind, RiskClass
 from opencanvas_api.services.ai import AIProvider
+from opencanvas_api.services.collaboration import CollaborationNotFoundError
+from opencanvas_api.services.collaboration_resources import ShareResourceKind
 from opencanvas_api.services.documents.embeddings import build_embedding_provider
+from opencanvas_api.services.shared_governance import SharedInvocationGovernanceService
 from opencanvas_api.services.workflows import ControlledWorkflowService, WorkflowError
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/canvases/{canvas_id}/agent-studio")
@@ -260,7 +263,7 @@ async def create_agent(
     except (AgentStudioError, WorkflowError) as exc:
         await session.rollback()
         raise _error(exc) from exc
-    return await _agent_out(session, record)
+    return await _agent_out(session, record, principal.user_id)
 
 
 @router.get("/agents", response_model=list[AgentOut])
@@ -286,7 +289,7 @@ async def list_agents(
         )
     except AgentStudioError as exc:
         raise _error(exc) from exc
-    return [await _agent_out(session, item) for item in records]
+    return [await _agent_out(session, item, principal.user_id) for item in records]
 
 
 @router.get("/agents/{agent_id}", response_model=AgentOut)
@@ -308,7 +311,7 @@ async def get_agent(
         )
     except AgentStudioError as exc:
         raise _error(exc) from exc
-    return await _agent_out(session, record)
+    return await _agent_out(session, record, principal.user_id)
 
 
 @router.post("/agents/{agent_id}/versions", response_model=AgentOut)
@@ -336,7 +339,7 @@ async def create_agent_version(
     except AgentStudioError as exc:
         await session.rollback()
         raise _error(exc) from exc
-    return await _agent_out(session, record)
+    return await _agent_out(session, record, principal.user_id)
 
 
 @router.post("/versions/{version_id}/validate", response_model=AgentValidationOut)
@@ -766,10 +769,14 @@ async def change_agent_lifecycle(
     except AgentStudioError as exc:
         await session.rollback()
         raise _error(exc) from exc
-    return await _agent_out(session, record)
+    return await _agent_out(session, record, principal.user_id)
 
 
-async def _agent_out(session: AsyncSession, record: AgentRecord) -> AgentOut:
+async def _agent_out(
+    session: AsyncSession,
+    record: AgentRecord,
+    user_id: uuid.UUID,
+) -> AgentOut:
     decision_by_request = {
         item.activation_request_id: item.decision for item in record.activation_decisions
     }
@@ -809,6 +816,23 @@ async def _agent_out(session: AsyncSession, record: AgentRecord) -> AgentOut:
         if proposal_ids
         else {}
     )
+    governance = SharedInvocationGovernanceService(session)
+    visible = await governance.require_visibility(
+        user_id=user_id,
+        workspace_id=record.identity.workspace_id,
+        resource_kind=ShareResourceKind.AGENT,
+        resource_id=record.identity.agent_id,
+    )
+    try:
+        await governance.require_invocation(
+            user_id=user_id,
+            workspace_id=record.identity.workspace_id,
+            resource_kind=ShareResourceKind.AGENT,
+            resource_id=record.identity.agent_id,
+        )
+        can_invoke = True
+    except CollaborationNotFoundError:
+        can_invoke = False
     return AgentOut(
         agent_id=record.identity.agent_id,
         workspace_id=record.identity.workspace_id,
@@ -816,6 +840,19 @@ async def _agent_out(session: AsyncSession, record: AgentRecord) -> AgentOut:
         kind=record.identity.kind,
         display_name=record.identity.display_name,
         description=record.identity.description,
+        definition_owner_user_id=record.identity.created_by_user_id,
+        visibility_basis=cast(
+            Literal[
+                "resource_owner",
+                "direct_share",
+                "workspace_visible",
+                "inherited_access",
+            ],
+            visible.access.reason_code,
+        ),
+        can_invoke=can_invoke
+        and record.identity_state == "active"
+        and any(item.lifecycle_state == "active" for item in versions),
         lifecycle_state=record.identity_state,
         trace_id=record.identity.trace_id,
         created_at=utc(record.identity.created_at),

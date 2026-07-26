@@ -2,11 +2,11 @@
 
 Last updated: 2026-07-26
 
-Branch: `milestone-6-5-shared-workflow-agent-governance-local`
+Branch: `milestone-6-6-multi-workspace-collaboration-interface-local`
 
 Baseline: `01a38526320560d54033bed510b0f15a7e77eea7`
 
-Status: checkpoints 6.1–6.5 complete locally; ready for 6.6
+Status: checkpoints 6.1–6.6 complete locally; ready for 6.7
 
 | Checkpoint                                       | Status           | Dependency                        |
 | ------------------------------------------------ | ---------------- | --------------------------------- |
@@ -16,7 +16,7 @@ Status: checkpoints 6.1–6.5 complete locally; ready for 6.6
 | 6.3 Resource Sharing, Ownership, and Revocation  | Complete locally | 6.1–6.2                           |
 | 6.4 Comments and Collaboration Activity          | Complete locally | 6.1–6.3                           |
 | 6.5 Shared Workflow and Agent Governance         | Complete locally | 6.1–6.4 and Milestones 4–5        |
-| 6.6 Multi-Workspace Collaboration Interface      | Not started      | 6.1–6.5                           |
+| 6.6 Multi-Workspace Collaboration Interface      | Complete locally | 6.1–6.5                           |
 | 6.7 Final Collaboration Security Audit           | Not started      | 6.1–6.6                           |
 
 ## Architecture decisions
@@ -211,13 +211,44 @@ DDL, production build, and repository hygiene pass. Exact results and the
 pre-existing repository-wide Ruff baseline differences are recorded in the
 6.5 handoff.
 
-The attempted 6.5 start stopped before branch creation or repository changes
-because existing workflow executions and agent invocations bind their user
-scope to immutable definition/version ownership. That cannot truthfully
-record a different shared invoker or membership. The documentation-only
-invocation-identity amendment now allocates direct-child migration
-`20260725_0025` to resolve the conflict during 6.5. Production implementation
-and migration creation remain unstarted.
+Checkpoint 6.6 adds the bounded collaboration console at `/collaboration`.
+Authorized users can switch server-returned workspaces, inspect current
+identity/membership/role/lifecycle/authority state, administer permitted
+memberships, invitations, reviewer eligibility, shares, visibility, and
+ownership transfers, participate in bounded plain-text comment threads, read
+the existing `activity-v1` projection, and discover or invoke shared workflows
+and agents only when the server confirms invocation availability.
+
+TanStack Query keys include authenticated user, workspace, authority
+generation, resource/canvas, and automation identity. Workspace changes and
+revocation cancel and remove prior-scope queries, reset resource-bound state,
+and require a fresh server collaboration context. Closed Zod registries reject
+malformed or unknown authority, role, share, lifecycle, visibility, activity,
+workflow, and agent response values.
+
+Minimal backend corrections expose only already-approved 6.1–6.5 operations:
+active-member workspace and shared-canvas discovery, bounded collaboration
+context, approval-authority and transfer listing, visible resource ownership,
+and server-confirmed shared workflow/agent definition owner, visibility basis,
+and invocation availability. A full backend regression found and corrected
+one tenant-isolation response defect: a foreign workspace canvas-list request
+now returns non-enumerating 404 rather than an empty 200 response.
+
+Milestone 6.6 creates no migration and leaves revisions `20260725_0021`
+through `20260725_0025` immutable. The sole head remains
+`20260725_0025`. Advanced Real-Time Collaboration, Milestone 7 Indexer and
+production infrastructure, and Mobius Society/Librarian scope remain
+unstarted.
+
+Final 6.6 validation includes 518 passing backend tests with 1 skipped
+PostgreSQL-runtime test and 61 dependency deprecation warnings, 74 passing
+frontend tests across 17 files, and 8 passing Chromium tests with 2 expected
+real-service skips. Production Ruff, strict MyPy across 83 source files,
+TypeScript, ESLint, Prettier, compilation/import, 121-table mapper
+configuration, production build, SQLite migration cycling, PostgreSQL offline
+DDL, deterministic demo, 355-file repository hygiene, and the focused
+accessibility/responsive assertions pass. The historical repository-wide Ruff
+test import-order baseline remains unchanged.
 
 Next authorized implementation start:
-`MILESTONE 6.5 — SHARED WORKFLOW AND AGENT GOVERNANCE`
+`MILESTONE 6.7 — FINAL COLLABORATION SECURITY AUDIT`

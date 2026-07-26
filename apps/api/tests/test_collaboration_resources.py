@@ -265,6 +265,17 @@ async def test_typed_canvas_share_and_revocation_execute_once(
         )
         assert transfer_request.status_code == 201, transfer_request.text
         transfer = cast(JsonObject, transfer_request.json())
+        owner_transfer_list = await owner.get(
+            f"{api_prefix}/workspaces/{workspace_id}/ownership-transfers"
+        )
+        recipient_transfer_list = await recipient.get(
+            f"{api_prefix}/workspaces/{workspace_id}/ownership-transfers"
+        )
+        assert owner_transfer_list.status_code == 200
+        assert recipient_transfer_list.status_code == 200
+        assert transfer["transferId"] in {
+            item["transferId"] for item in recipient_transfer_list.json()
+        }
         accept_path = (
             f"{api_prefix}/workspaces/{workspace_id}/ownership-transfers/"
             f"{transfer['transferId']}/accept"
