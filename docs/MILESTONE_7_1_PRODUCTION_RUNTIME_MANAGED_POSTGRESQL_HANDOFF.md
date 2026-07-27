@@ -49,6 +49,14 @@ selects the identical quoted textual column expression for both definitions
 and adds exact role, initial-owner, session-independence, and schema-parity
 proof. It does not revise the original 7.1 ledger or start checkpoint 7.2.
 
+With that candidate correction present, a still later run reached
+`_backfill_owner_memberships()` and proved that the raw membership-transition
+`INSERT` target list also leaves `current_role` bare. The
+[migration 0021 owner-backfill current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+authorizes quoting exactly that one additional identifier and exact
+owner-backfill proof. It does not revise the original 7.1 ledger or start
+checkpoint 7.2.
+
 ## Implemented boundary
 
 Milestone 7.1 extends the established configuration, SQLAlchemy, Alembic,
@@ -185,6 +193,7 @@ Milestone 7.2 remains unstarted. Its planned migration
 Milestone 7.2 must not restart until the migration `0005`, migration `0021`
 plus matching ORM metadata, guarded-runner, `0023`, and `0024` compatibility
 corrections; exact `0021` role/owner/session/parity proof; exact
-closed-registry and cross-migration proof; exact `0023` UUID/null
+quoted raw owner-backfill target identity and backfill value/count/scope/
+atomicity proof; closed-registry and cross-migration proof; exact `0023` UUID/null
 resource-backfill proof; live PostgreSQL and SQLite migration cycles;
 migration hash exception ledger; and required regressions all pass.

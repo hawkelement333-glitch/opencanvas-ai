@@ -27,14 +27,20 @@ proved that both affected migrations contain references to an undefined
 mutation function. The
 [`MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md)
 authorizes exactly four references to reuse the existing equivalent deny-all
-trigger function. The latest combined validation proved that migration
+trigger function. A later combined validation proved that migration
 `0021` and its matching ORM metadata leave the `current_role` table-column
 identifier unquoted in a textual check, so PostgreSQL resolves session
 `CURRENT_ROLE` instead. The
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
 selects an identical explicitly quoted textual expression for migration and
 ORM metadata and requires exact role, initial-owner, session-independence, and
-schema-parity proof. This is not a general relaxation of migration
+schema-parity proof. With that candidate correction present, the next live
+attempt proved that `_backfill_owner_memberships()` also leaves
+`current_role` bare in the raw transition `INSERT` target list. The
+[`MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+authorizes quoting exactly that one additional SQL identifier with no data,
+scope, row-count, ownership, or history change. This is not a general
+relaxation of migration
 immutability. Migration `0026` and checkpoint 7.2 remain blocked until the
 combined PostgreSQL and SQLite validation gate passes.
 
@@ -1132,7 +1138,7 @@ The durable-state decision ledger is explicit:
   immutable exercise evidence plus existing references.
 
 Committed migrations remain immutable, and an ordinary later correction uses
-the next unused revision. The five explicitly documented PostgreSQL
+the next unused revision. The six explicitly documented PostgreSQL
 compatibility amendments are a narrow exception because a fresh database
 cannot pass the affected historical revisions to reach a corrective child.
 They require preserved original hashes, one final validated active hash per

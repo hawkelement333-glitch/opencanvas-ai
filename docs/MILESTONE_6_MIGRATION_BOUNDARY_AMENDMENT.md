@@ -56,14 +56,17 @@ tests, or migrations. This amendment resolves only that documented boundary.
 
 This remains the permanent default. The Milestone 7 PostgreSQL compatibility
 amendment chain, culminating in the
-[migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md),
-documents a narrow five-amendment exception for historical migrations that a
+[migration 0021 owner-backfill current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md),
+documents a narrow six-amendment exception for historical migrations that a
 fresh PostgreSQL database cannot pass to reach a corrective child revision.
 The earlier
 [trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md)
 remains the separate authority for four `0023`/`0024` references. The `0021`
-amendment adds only explicit table-column resolution and matching ORM
-metadata. The exception preserves revision identity and original hashes,
+check/ORM
+[amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+adds only explicit table-column resolution and matching ORM metadata; its
+successor adds only one quoted raw owner-backfill target identifier. The
+exception preserves revision identity and original hashes,
 activates only one final validated hash per corrected migration, and does not
 authorize later discretionary rewrites.
 

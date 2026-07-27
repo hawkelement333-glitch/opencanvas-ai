@@ -140,7 +140,14 @@ to special expression `CURRENT_ROLE`. The
 [migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
 selects an explicitly quoted table-column expression and requires
 session-role-independence plus migration/ORM parity proof before production
-acceptance.
+acceptance. Migration `0021`'s raw owner-backfill `INSERT` independently uses
+bare `current_role` in its target list, causing a PostgreSQL syntax failure
+before application row data can be recorded. The
+[migration 0021 owner-backfill current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+authorizes quoting only that target identifier and requires proof that the
+stored application value remains `owner`, database session identity is never
+inserted, server-derived scope remains exact, and failures leave no partial
+evidence.
 
 The original PostgreSQL controlled-agent trigger function remains the
 deny-all update/delete authority. Complete PostgreSQL proof for the later

@@ -42,13 +42,15 @@ This register prevents the competition demo and public materials from implying c
 
 ## Reliability and scale
 
-- A clean live PostgreSQL 17 migration has proved five historical
+- A clean live PostgreSQL 17 migration has proved six historical
   compatibility defect classes across four migrations. Revision
   `20260718_0005` cannot recreate the
   referenced `workspaces` primary-key structure. Revision
   `20260725_0021` uses an unquoted textual `current_role` check that
   PostgreSQL resolves as database session `CURRENT_ROLE`, rejecting valid
-  membership transitions. Revisions
+  membership transitions. Its raw owner-backfill `INSERT` also uses bare
+  `current_role` in the target list, which PostgreSQL rejects as invalid
+  syntax independently of the check. Revisions
   `20260725_0023` and `20260725_0024` cannot safely recover closed values from
   PostgreSQL-canonicalized check expressions. Revision `0023` also exposes
   untyped derived-table nulls as `text` to UUID destinations during resource
@@ -114,6 +116,9 @@ adds only four name-reference replacements and exact trigger/mutation proof.
 The
 [migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
 adds only the quoted migration/ORM constraint, role and owner-transition
-coverage, session-role independence, and metadata parity proof.
+coverage, session-role independence, and metadata parity proof. The
+[migration 0021 owner-backfill current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+adds only the quoted raw `INSERT` target identifier and exact owner-backfill
+identity, value, count, scope, atomicity, and SQLite-equivalence proof.
 Checkpoint 7.2, migration `0026`, deployment, Milestone 8, and later work
 remain unstarted until the combined restart gate passes.

@@ -38,6 +38,16 @@ metadata resolve the table column rather than PostgreSQL's special
 migration or model, apply preserved work, activate a migration hash, create a
 later revision, or relax migration integrity generally.
 
+Successor note: with this check/ORM candidate correction present, later live
+validation proved that `_backfill_owner_memberships()` independently leaves
+`current_role` bare in the raw `workspace_membership_transitions` `INSERT`
+target list. The
+[migration 0021 owner-backfill current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+authorizes quoting exactly that one additional identifier and now supplies the
+authoritative baseline, recovery source, validation procedure, and restart
+gate. This document remains the exclusive authority for the check and matching
+ORM metadata.
+
 ## Verified environment and safety state
 
 The defect was proved during an isolated local implementation attempt using:
@@ -65,8 +75,10 @@ connection string, host-private detail, or absolute local recovery path.
 
 ## Preserved implementation and recovery state
 
-The most complete blocked implementation work remains outside the working
-tree:
+The following records the most complete blocked work at this amendment's
+checkpoint. The successor owner-backfill amendment records the newer
+authoritative stash and recovery artifacts. At this checkpoint, work remained
+outside the working tree:
 
 - stash object:
   `58ffed44184ea3450a80f5883681da988a196ae7`;
@@ -100,7 +112,7 @@ All four stash objects were located by object SHA and remain present in the
 stash reference inventory. No stash was applied, popped, changed, or dropped.
 No recovery patch or manifest was modified.
 
-The newest stash preserves the separately authorized candidate work for
+At this checkpoint, the then-newest stash preserves the separately authorized candidate work for
 migration `0005`, the guarded runner, migrations `0023` and `0024`, and their
 focused tests. These candidate migration hashes remain uncommitted and
 inactive:
@@ -536,7 +548,8 @@ lease state.
 
 ## Required combined historical validation
 
-After the latest preserved stash is safely restored, validate together:
+After the current preserved stash identified by the successor amendment is
+safely restored, validate together:
 
 - migration `0005` dialect-safe correction;
 - migration `0021` quoted-column correction;
@@ -560,7 +573,7 @@ Required live and local validation includes:
 - focused migration and runner tests;
 - the complete live PostgreSQL marker suite with zero mandatory skips;
 - the migration `0004/0005`, `0020/0021`, `0022/0023`, `0023/0024`, and
-  `0024/0025` cycles required by the five amendments;
+  `0024/0025` cycles required by the six amendments;
 - exact `0023`/`0024` registries, UUID-null values, trigger/function
   identities, mutation rejection, restart persistence, and rollback;
 - Milestone 7.1, backend, security, and integration suites;
@@ -580,11 +593,14 @@ A mandatory PostgreSQL test does not pass when skipped.
 
 ## Future combined implementation procedure
 
-The next implementation checkpoint must:
+This procedure records the gate at this amendment's checkpoint. The successor
+owner-backfill amendment supersedes its stash identity and supplies the
+current authoritative procedure. The implementation checkpoint described here
+was required to:
 
 1. rotate the exposed local test credential outside the repository;
 2. branch from the exact commit containing this amendment;
-3. reverify the four stash objects and every recovery artifact;
+3. reverify the then-current four stash objects and every recovery artifact;
 4. apply, not pop, stash
    `58ffed44184ea3450a80f5883681da988a196ae7`;
 5. preserve all earlier stashes, patches, and manifests;
@@ -600,12 +616,15 @@ The next implementation checkpoint must:
 
 ## Milestone 7.2 restart gate
 
-Migration `0026` and Milestone 7.2 remain prohibited until:
+This gate is retained as the check/ORM portion of the combined requirements.
+The successor owner-backfill amendment adds its separately bounded conditions
+and current recovery procedure. Migration `0026` and Milestone 7.2 remain
+prohibited until:
 
 1. this amendment is committed locally;
 2. the exposed local PostgreSQL test credential is rotated outside the
    repository;
-3. the newest stash is applied on a new implementation branch without
+3. the then-newest stash is applied on a new implementation branch without
    removing any recovery evidence;
 4. every prior authorized correction is restored and reviewed;
 5. migration `0021` and matching ORM metadata use the selected quoted

@@ -19,7 +19,13 @@ rather than the transition row's column. The
 selects one quoted-column correction for the migration and matching ORM
 metadata. The historical SQLite/offline validation ledger below remains
 accurate for this checkpoint, but it is not live PostgreSQL constraint proof.
-Membership, invitation, owner-backfill, and role semantics are unchanged.
+With that candidate correction present, later validation proved that
+`_backfill_owner_memberships()` also leaves `current_role` bare in its raw
+transition `INSERT` target list. The
+[migration 0021 owner-backfill current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+authorizes only the corresponding quoted target identifier and exact
+PostgreSQL/SQLite backfill proof. Membership, invitation, owner-backfill, role,
+workspace-scope, ownership, and history semantics are unchanged.
 
 ## Completed scope
 

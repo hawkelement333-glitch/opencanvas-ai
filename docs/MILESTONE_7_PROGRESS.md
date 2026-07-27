@@ -4,9 +4,9 @@ Date: 2026-07-27
 
 Overall status: architecture and checkpoint 7.1 complete locally; PostgreSQL
 migration compatibility amendments for `0005`, `0021`, `0023`, and `0024`,
-including the `0021` migration/ORM current-role, `0023` UUID-null, and
-`0023`/`0024` trigger-function boundaries, recorded; combined focused
-correction pending; checkpoint 7.2 not started
+including the `0021` migration/ORM check and raw owner-backfill current-role,
+`0023` UUID-null, and `0023`/`0024` trigger-function boundaries, recorded;
+combined focused correction pending; checkpoint 7.2 not started
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -38,6 +38,9 @@ PostgreSQL migrations 0023 and 0024 trigger-function compatibility amendment:
 PostgreSQL migration 0021 current-role compatibility amendment:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
 
+PostgreSQL migration 0021 owner-backfill current-role compatibility amendment:
+[`MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+
 ## PostgreSQL migration compatibility gate
 
 An isolated Ubuntu 24.04.4/WSL 2 environment with PostgreSQL 17.10 and
@@ -60,19 +63,23 @@ append-only trigger installation and proved that `0023` and `0024` contain
 four references to an undefined
 `reject_controlled_agent_security_mutation()` function. The existing
 `reject_controlled_agent_mutation()` function supplies the exact required
-deny-all update/delete behavior. The newest run additionally proved that
+deny-all update/delete behavior. A later run additionally proved that
 migration `0021` and the matching ORM constraint use bare textual
 `current_role`, which PostgreSQL resolves as session `CURRENT_ROLE` and can
-reject a valid initial owner transition. The most complete combined work is
-preserved outside the working tree in stash
-`58ffed44184ea3450a80f5883681da988a196ae7`.
+reject a valid initial owner transition. With that candidate correction
+present, the newest run reached `_backfill_owner_memberships()` and proved a
+second, independent migration `0021` failure: the raw transition `INSERT`
+target list leaves `current_role` bare and PostgreSQL rejects the syntax. The
+most complete combined work remains inactive outside the working tree in stash
+`9196c8d9f68c1af6251530f349fdf72638b57b82`.
 
-The five documentation amendments authorize one combined, separately
+The six documentation amendments authorize one combined, separately
 implemented, hash-ledgered correction checkpoint for migration `0005`,
 migration `0021` plus its ORM metadata, the guarded runner, and migrations
-`0023` and `0024`. New `0021` authority is limited to identical explicitly
-quoted role checks and focused role, owner, session-independence, and parity
-tests. UUID-null authority is limited to `0023`'s PostgreSQL resource
+`0023` and `0024`. The two `0021` amendments separately limit authority to
+identical explicitly quoted role checks, one quoted raw transition-target
+identifier, and focused role, owner-backfill, session-independence, atomicity,
+SQLite-equivalence, and parity tests. UUID-null authority is limited to `0023`'s PostgreSQL resource
 backfill. Trigger-function authority is limited to four exact references in
 `0023` and `0024`. Migration `0026` and checkpoint 7.2 remain blocked until
 the complete clean and focused PostgreSQL and SQLite migration cycles,
@@ -227,7 +234,7 @@ Local deterministic substitutes remain available for demo and tests.
 ## Implementation parameters still to measure
 
 The production architecture remains resolved. The proved historical
-PostgreSQL migration compatibility defects are governed by the five focused
+PostgreSQL migration compatibility defects are governed by the six focused
 correction amendments and block checkpoint 7.2 until their combined
 validation gate passes. The following operating values remain intentionally
 determined from approved managed staging evidence during the owning
@@ -274,8 +281,9 @@ production-readiness defect.
 
 The combined PostgreSQL migration `0005`, migration `0021` plus matching ORM
 metadata, guarded-runner, `0023`, and `0024` correction checkpoint, including
-the narrowly authorized quoted `0021` role check, `0023` UUID-null typing, and
-four `0023`/`0024` trigger-function reference replacements, is the only next
+the narrowly authorized quoted `0021` role check and one quoted raw
+owner-backfill target identifier, `0023` UUID-null typing, and four
+`0023`/`0024` trigger-function reference replacements, is the only next
 authorized implementation work.
 Checkpoint 7.2 — Deterministic Indexer and Ingestion Pipeline — remains
 unstarted and may restart only after the combined compatibility gate passes.

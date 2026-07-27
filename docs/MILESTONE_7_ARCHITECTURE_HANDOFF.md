@@ -231,13 +231,23 @@ equivalent deny-all function. It preserves the existing trigger names,
 update/delete coverage, migration `0017` domain-event guard, and all prior
 amendment boundaries.
 
-The newest combined attempt proved a separate PostgreSQL identifier collision
+A later combined attempt proved a separate PostgreSQL identifier collision
 in migration `0021`: its textual role check and matching ORM metadata use bare
 `current_role`, which PostgreSQL resolves as session `CURRENT_ROLE`. The
 [migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
 selects the same quoted column expression for both definitions. It adds no
 membership, invitation, authority, trigger-function, parser, UUID, runner, or
 Milestone 7.2 scope.
+
+With that candidate correction present, the next attempt reached migration
+`0021`'s owner backfill and proved that its raw transition `INSERT` target list
+also leaves `current_role` bare. The
+[migration 0021 owner-backfill current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+authorizes quoting exactly that one target identifier while preserving the
+existing source, `owner` value, deterministic IDs and cardinalities, exact
+scope and history, and within-run timestamp sharing. Re-upgrade may use a fresh
+timestamp. It does not revise the completed architecture ledger or start
+checkpoint 7.2.
 
 ## Evidence and event boundary
 
@@ -358,7 +368,8 @@ The historical next-work statement below records the architecture handoff at
 the time it was written. Checkpoint 7.1 is now complete. The current next
 authorized work is the combined migration `0005`, migration `0021` plus its
 matching ORM constraint, guarded-runner, `0023`, and `0024` compatibility
-correction governed by the five amendments; checkpoint 7.2 remains blocked.
+correction governed by the six amendments, including the one-token raw
+owner-backfill target correction; checkpoint 7.2 remains blocked.
 
 The original next authorized work was exactly:
 

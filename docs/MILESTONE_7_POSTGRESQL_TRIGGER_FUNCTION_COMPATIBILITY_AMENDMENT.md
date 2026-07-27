@@ -41,6 +41,12 @@ is now the authoritative baseline and recovery procedure for the next
 combined implementation checkpoint. It preserves the exact four-reference
 authority recorded here and does not broaden it.
 
+A still later run proved the separate raw owner-backfill target-list defect in
+migration `0021`. The
+[migration 0021 owner-backfill current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+is now the authoritative baseline and recovery procedure. It does not broaden
+the exact four-reference authority recorded here.
+
 ## Preserved implementation and recovery state
 
 The most complete combined implementation attempt remains outside the working
@@ -82,8 +88,9 @@ credential, connection string, or absolute recovery path is recorded here.
 Historical note: this section records the most complete recovery state at
 this amendment's own checkpoint. The successor `0021` amendment records the
 newer stash `58ffed44184ea3450a80f5883681da988a196ae7`, its verified recovery
-patch and manifest, and the only authorized procedure for future
-application. All evidence listed here remains intact.
+patch and manifest. The later owner-backfill amendment records the current
+stash and the only authorized procedure for future application. All evidence
+listed here remains intact.
 
 ## Verified environment and failure
 

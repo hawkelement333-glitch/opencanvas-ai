@@ -7,10 +7,14 @@ historical migrations `20260718_0005`, `20260725_0021`,
 `0023`, where a separate derived-table backfill supplies untyped nulls to UUID
 destinations. After that typing was corrected in preserved work, the chain
 reached append-only trigger creation and exposed four references to the
-undefined `reject_controlled_agent_security_mutation()` function. The newest
+undefined `reject_controlled_agent_security_mutation()` function. A later
 combined run proved an earlier `0021` blocker: its unquoted textual
 `current_role` check resolves PostgreSQL session `CURRENT_ROLE` and rejects a
-valid initial owner transition. See the
+valid initial owner transition. With that candidate correction present, the
+newest run reached `_backfill_owner_memberships()` and proved that the raw
+`workspace_membership_transitions` `INSERT` target list also leaves
+`current_role` unquoted, which PostgreSQL rejects as invalid target-list
+syntax. See the
 [migration 0005 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
 and the
 [migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md),
@@ -22,7 +26,10 @@ The
 [migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
 selects identical quoted textual column expressions for migration and ORM
 metadata and requires exact role, owner-transition, session-role, and parity
-proof.
+proof. The
+[migration 0021 owner-backfill current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+authorizes quoting exactly the one additional raw target identifier and adds
+exact backfill identity, count, value, scope, and rollback proof.
 The preserved work remains unapplied and is not active.
 This does not add agent execution behavior.
 
@@ -95,6 +102,14 @@ The future combined trigger test must additionally verify:
 
 - the `0021` stored check references `"current_role"`, not session
   `CURRENT_ROLE`;
+- the `_backfill_owner_memberships()` transition `INSERT` target references
+  `"current_role"` and contains no reachable unsafe bare target identifier;
+- every valid pre-`0021` workspace produces exactly one active owner
+  membership, one sequence-zero transition with application value `owner`,
+  and the existing deterministic Trace, audit, and authority records;
+- the database session role is never inserted, workspace-derived scope remains
+  exact, duplicate transitions are absent, and failed transactions leave no
+  partial backfill row;
 - all six role values and the valid initial owner transition;
 - identical outcomes under at least two bounded disposable PostgreSQL roles;
 - exact migration/ORM constraint identity and PostgreSQL/SQLite parity;
