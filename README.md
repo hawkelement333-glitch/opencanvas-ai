@@ -374,6 +374,15 @@ positioning, and licensing, but must share authority, Trace, and audit
 contracts without copying security-critical logic. See the
 [Mobius Core product-family roadmap amendment](docs/MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md).
 
+The
+[Mobius Family Architecture Constitution](docs/MOBIUS_FAMILY_ARCHITECTURE_CONSTITUTION.md)
+defines the minimum inherited security and release-readiness requirements for
+every verified family system. New boundaries must close their applicable
+controls in the same milestone; Milestone 7.8 performs the complete
+cross-family readiness audit, and Milestone 8.0 verifies fresh evidence and
+makes the release decision. The constitution is governance, not evidence that
+a technical control is implemented, and it does not change the roadmap.
+
 Milestones 6.1–6.7 are complete locally. Workspace memberships now bind exact
 authenticated users to exact workspaces, and secure invitations support
 bounded creation, delivery, resend, acceptance, decline, expiry, revocation,

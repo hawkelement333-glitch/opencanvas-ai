@@ -5,7 +5,9 @@ Date: 2026-07-27
 Overall status: architecture and checkpoint 7.1 complete locally; combined
 PostgreSQL historical-migration correction for `0005`, `0021`, `0023`, and
 `0024` and its evidence complete locally at implementation SHA
-`a88c6117f6b58137f1014cc8b389f44966c2918f`; checkpoint 7.2 not started
+`a88c6117f6b58137f1014cc8b389f44966c2918f`; Mobius Family Architecture
+Constitution documentation checkpoint complete locally; checkpoint 7.2 not
+started
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -15,6 +17,9 @@ Architecture:
 
 Implementation plan:
 [`MILESTONE_7_IMPLEMENTATION_PLAN.md`](MILESTONE_7_IMPLEMENTATION_PLAN.md)
+
+Mobius Family Architecture Constitution:
+[`MOBIUS_FAMILY_ARCHITECTURE_CONSTITUTION.md`](MOBIUS_FAMILY_ARCHITECTURE_CONSTITUTION.md)
 
 Architecture handoff:
 [`MILESTONE_7_ARCHITECTURE_HANDOFF.md`](MILESTONE_7_ARCHITECTURE_HANDOFF.md)
@@ -39,6 +44,35 @@ PostgreSQL migration 0021 current-role compatibility amendment:
 
 PostgreSQL migration 0021 owner-backfill current-role compatibility amendment:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+
+## Mobius Family Architecture Constitution checkpoint
+
+Branch: `milestone-7-family-architecture-constitution`
+
+Parent SHA: `7189f8770e35403a9f67c7b254a1b5bd2edd5b27`
+
+This documentation-only checkpoint establishes the canonical
+[Mobius Family Architecture Constitution](MOBIUS_FAMILY_ARCHITECTURE_CONSTITUTION.md),
+including:
+
+- the Mobius Family Security Constitution;
+- the Mobius Family Release Readiness Constitution;
+- the Same-Milestone Control Rule;
+- the constitutional hierarchy and product-profile inheritance model;
+- reusable product-profile, release-readiness, exception, and
+  evidence-freshness templates; and
+- explicit separation of binding requirements, current verified evidence,
+  planned evidence, known limitations, and approved exceptions.
+
+Milestone 7.8 owns the complete cross-family readiness audit. Milestone 8.0
+must verify fresh evidence for the exact release candidate and make the
+release decision; it is not a broad deferred implementation or defect-repair
+phase.
+
+This checkpoint implements no technical control, approves no exception or
+release, and changes no code, tests, migrations, configuration, dependencies,
+lockfiles, CI, infrastructure, credentials, or deployment files. Migration
+`0026` remains absent and checkpoint 7.2 remains unstarted.
 
 ## PostgreSQL migration compatibility gate
 
@@ -155,26 +189,27 @@ is part of this correction checkpoint.
 
 ## Architecture status
 
-| Area                                               | Status      |
-| -------------------------------------------------- | ----------- |
-| Repository and gap inspection                      | Complete    |
-| 7.1 managed PostgreSQL/runtime architecture        | Complete    |
-| 7.2 deterministic Indexer architecture             | Complete    |
-| 7.3 object storage/upload/malware architecture     | Complete    |
-| 7.4 queue/worker/retry/rate-limit architecture     | Complete    |
-| 7.5 observability/operations architecture          | Complete    |
-| 7.6 backup/restore/rollback/DR architecture        | Complete    |
-| 7.7 load/capacity/resilience/security architecture | Complete    |
-| 7.8 final audit architecture                       | Complete    |
-| Migration allocation                               | Complete    |
-| Threat model                                       | Complete    |
-| Provider/configuration/secret strategy             | Complete    |
-| Test and runbook strategy                          | Complete    |
-| Milestone 8 entry criteria                         | Complete    |
-| 7.1 production runtime implementation              | Complete    |
-| Combined PostgreSQL compatibility correction       | Complete    |
-| 7.2–7.8 implementation                             | Not started |
-| Live infrastructure/provisioning/deployment        | Not started |
+| Area                                               | Status                       |
+| -------------------------------------------------- | ---------------------------- |
+| Repository and gap inspection                      | Complete                     |
+| 7.1 managed PostgreSQL/runtime architecture        | Complete                     |
+| 7.2 deterministic Indexer architecture             | Complete                     |
+| 7.3 object storage/upload/malware architecture     | Complete                     |
+| 7.4 queue/worker/retry/rate-limit architecture     | Complete                     |
+| 7.5 observability/operations architecture          | Complete                     |
+| 7.6 backup/restore/rollback/DR architecture        | Complete                     |
+| 7.7 load/capacity/resilience/security architecture | Complete                     |
+| 7.8 final audit architecture                       | Complete                     |
+| Migration allocation                               | Complete                     |
+| Threat model                                       | Complete                     |
+| Provider/configuration/secret strategy             | Complete                     |
+| Test and runbook strategy                          | Complete                     |
+| Milestone 8 entry criteria                         | Complete                     |
+| 7.1 production runtime implementation              | Complete                     |
+| Combined PostgreSQL compatibility correction       | Complete                     |
+| Mobius Family Architecture Constitution            | Complete; documentation only |
+| 7.2–7.8 implementation                             | Not started                  |
+| Live infrastructure/provisioning/deployment        | Not started                  |
 
 ## Formal implementation checkpoints
 

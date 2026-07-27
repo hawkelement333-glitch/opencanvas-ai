@@ -5,7 +5,8 @@ Date: 2026-07-26
 Status: approved architecture plan; checkpoint 7.1 complete locally; combined
 PostgreSQL historical-migration correction and evidence complete locally at
 implementation SHA `a88c6117f6b58137f1014cc8b389f44966c2918f`;
-checkpoint 7.2 not started
+Mobius Family Architecture Constitution documentation checkpoint complete
+locally; checkpoint 7.2 not started
 
 Compatibility gates:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -46,6 +47,24 @@ Architecture:
 [`MILESTONE_7_ARCHITECTURE.md`](MILESTONE_7_ARCHITECTURE.md)
 
 Current sole Alembic head: `20260725_0025`
+
+## Mobius Family Constitution inheritance
+
+The
+[Mobius Family Architecture Constitution](MOBIUS_FAMILY_ARCHITECTURE_CONSTITUTION.md)
+is the canonical family governance record. This documentation-only checkpoint
+starts from parent `7189f8770e35403a9f67c7b254a1b5bd2edd5b27` and changes no
+approved implementation scope.
+
+Each later checkpoint inherits only the constitutional controls applicable to
+the capability it introduces, while the Same-Milestone Control Rule applies
+in full to every new boundary. A capability missing those controls MUST remain
+disabled and inaccessible. Milestone 7.8 performs the complete cross-family
+readiness audit; Milestone 8.0 verifies fresh evidence and makes the release
+decision rather than serving as a broad implementation or repair phase.
+
+This record does not start checkpoint 7.2, create migration `0026`, or claim
+that any newly documented control is implemented.
 
 ## 1. Execution rules
 
