@@ -42,6 +42,12 @@ This register prevents the competition demo and public materials from implying c
 
 ## Reliability and scale
 
+- A clean live PostgreSQL 17 migration currently stops at historical revision
+  `20260718_0005` because PostgreSQL cannot recreate the referenced
+  `workspaces` primary-key structure while
+  `canonical_objects_workspace_id_fkey` depends on it. A documentation-governed
+  compatibility correction is authorized but not yet implemented; Milestone
+  7.2 remains blocked.
 - Production-shaped processing uses persisted database jobs and an independently scalable worker.
   The database queue is not a dedicated broker and does not yet provide long-running lease
   renewal or dead-letter administration UI.
@@ -85,8 +91,8 @@ This register prevents the competition demo and public materials from implying c
 
 ## Recommended next checkpoint
 
-Implement Milestone 7.1, Production Runtime Foundation and Managed PostgreSQL,
-from the completed
-[Milestone 7 architecture](MILESTONE_7_ARCHITECTURE.md). Milestone 7
-implementation, live infrastructure, deployment, and Milestone 8 remain
-unstarted.
+Implement only the focused migration 0005 and guarded-runner correction
+authorized by the
+[PostgreSQL compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
+Checkpoint 7.2, migration `0026`, deployment, Milestone 8, and later work
+remain unstarted until the amendment's restart gate passes.

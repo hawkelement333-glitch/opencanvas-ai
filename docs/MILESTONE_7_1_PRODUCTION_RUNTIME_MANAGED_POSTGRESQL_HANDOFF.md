@@ -5,6 +5,16 @@ Date: 2026-07-26
 Status: complete locally; managed-provider runtime validation not performed;
 checkpoint 7.2 not started
 
+Post-handoff compatibility note: a later isolated local PostgreSQL 17.10 and
+pgvector 0.8.5 run proved that clean migration fails at historical revision
+`20260718_0005` because its `workspaces` table recreation conflicts with
+`canonical_objects_workspace_id_fkey`. The guarded runner can then mask that
+primary error by attempting advisory unlock in the failed transaction. The
+[PostgreSQL migration 0005 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
+authorizes a separate focused correction and validation checkpoint. This note
+does not revise the original 7.1 validation ledger or claim that the
+correction has been implemented.
+
 ## Implemented boundary
 
 Milestone 7.1 extends the established configuration, SQLAlchemy, Alembic,
@@ -137,3 +147,8 @@ shared rate limits, observability rollout, recovery exercises, or load tests.
 
 Milestone 7.2 remains unstarted. Its planned migration
 `20260726_0026` remains absent.
+
+Milestone 7.2 must not restart until the migration 0005 compatibility
+correction, guarded-runner error preservation, live PostgreSQL and SQLite
+migration cycles, migration hash exception ledger, and required regressions
+all pass.

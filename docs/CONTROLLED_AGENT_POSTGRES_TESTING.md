@@ -1,10 +1,18 @@
 # Controlled-agent PostgreSQL trigger testing
 
-Status: runnable integration-test architecture. This does not add agent execution behavior.
+Status: runnable integration-test architecture. A local PostgreSQL 17.10 and
+pgvector 0.8.5 attempt is now available, but clean schema setup stops at the
+proved historical migration `20260718_0005` compatibility defect before this
+test can reach its append-only assertions. See the
+[migration compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
+This does not add agent execution behavior.
 
 Migration `20260721_0007` installs PostgreSQL triggers that reject direct `UPDATE` and `DELETE`
 against all ten controlled-agent security tables. SQLite remains the portable test path;
-PostgreSQL is authoritative for the PostgreSQL trigger function.
+PostgreSQL is authoritative for the PostgreSQL trigger function. The current
+configured run reports one setup error and 543 deselections because the
+disposable database cannot migrate beyond `0005`; it must not be reported as a
+trigger-test failure or pass.
 
 ## Safety model
 

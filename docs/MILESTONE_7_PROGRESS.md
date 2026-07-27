@@ -2,8 +2,9 @@
 
 Date: 2026-07-26
 
-Overall status: architecture and checkpoint 7.1 complete locally; checkpoint
-7.2 not started
+Overall status: architecture and checkpoint 7.1 complete locally; PostgreSQL
+migration 0005 compatibility amendment recorded; focused correction pending;
+checkpoint 7.2 not started
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -19,6 +20,25 @@ Architecture handoff:
 
 Checkpoint 7.1 handoff:
 [`MILESTONE_7_1_PRODUCTION_RUNTIME_MANAGED_POSTGRESQL_HANDOFF.md`](MILESTONE_7_1_PRODUCTION_RUNTIME_MANAGED_POSTGRESQL_HANDOFF.md)
+
+PostgreSQL compatibility amendment:
+[`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
+
+## PostgreSQL migration compatibility gate
+
+An isolated Ubuntu 24.04.4/WSL 2 environment with PostgreSQL 17.10 and
+pgvector 0.8.5 proved a clean-install failure in historical migration
+`20260718_0005`. Its unconditional `workspaces` table recreation attempts to
+replace `workspaces_pkey` while `canonical_objects_workspace_id_fkey` depends
+on that key. The guarded runner then attempts advisory unlock inside the
+failed transaction and can mask the primary exception.
+
+The documentation amendment authorizes one separately implemented,
+hash-ledgered migration compatibility correction and one focused runner
+correction. Migration `0026` and checkpoint 7.2 remain blocked until clean
+PostgreSQL and SQLite upgrade/downgrade/re-upgrade, lock cleanup, original
+error preservation, and all required regressions pass. No implementation,
+migration, or production-code change is part of the amendment.
 
 ## Baseline
 
@@ -165,9 +185,11 @@ Local deterministic substitutes remain available for demo and tests.
 
 ## Implementation parameters still to measure
 
-There is no unresolved architecture contradiction. These values are
-intentionally determined from approved managed staging evidence during the
-owning checkpoint:
+The production architecture remains resolved. The proved historical
+PostgreSQL migration compatibility defect is governed by the focused
+correction amendment and blocks checkpoint 7.2 until its validation gate
+passes. The following operating values remain intentionally determined from
+approved managed staging evidence during the owning checkpoint:
 
 - exact provider/vendor selection;
 - connection, worker, queue, upload, parser, token, concurrency, and cost
@@ -208,5 +230,7 @@ production-readiness defect.
 
 ## Next authorized work
 
-Checkpoint 7.2 — Deterministic Indexer and Ingestion Pipeline. It remains
-unstarted at this handoff.
+The focused PostgreSQL migration 0005 and guarded-runner correction checkpoint
+is the only next authorized implementation work. Checkpoint 7.2 —
+Deterministic Indexer and Ingestion Pipeline — remains unstarted and may
+restart only after the compatibility gate passes.

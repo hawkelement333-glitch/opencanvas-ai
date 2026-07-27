@@ -14,7 +14,11 @@ Checkpoint 7.1 is complete locally. It implements the provider-neutral runtime
 contract, but no managed service was provisioned or contacted. This guide is
 not evidence that a managed database, hostile-upload controls, failover,
 restore, capacity, or production security have passed. Checkpoint 7.2 remains
-unstarted.
+unstarted. Live PostgreSQL 17 validation has proved a clean-install failure in
+historical migration `20260718_0005`; no deployment or migration `0026` is
+authorized until the
+[compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
+and its separate focused correction checkpoint pass.
 
 SolarPlexus Mobius has five explicit runtime modes: `demo`, `development`, `test`, `staging`, and
 `production`. The API validates the selected mode and all mode-dependent provider configuration at
@@ -136,6 +140,12 @@ the operator-declared current revision (`base` for an empty database), obtains
 one PostgreSQL session advisory lock, uses a direct non-pooled connection, and
 verifies the final revision. A competing runner fails safely. API and worker
 readiness stays false while the migration lock is held or the schema differs.
+
+The current runner must not be used to claim a successful clean PostgreSQL
+installation: after a migration error, its advisory-unlock cleanup can execute
+inside the aborted transaction and mask the primary exception. The focused
+compatibility correction must preserve the original error and prove lock
+release on success and failure before deployment validation resumes.
 
 ## Database credential replacement
 

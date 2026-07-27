@@ -196,6 +196,16 @@ telemetry, operational incidents, and backup/restore proof do not belong in
 the application schema. Any later correction uses the next unused revision;
 committed migrations are immutable.
 
+Exception note: live PostgreSQL 17 validation after this architecture handoff
+proved that historical revision `20260718_0005` cannot execute its
+`workspaces` table recreation while an existing canonical-object foreign key
+depends on the workspace primary key. The
+[migration 0005 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
+authorizes one transparent, hash-ledgered correction to that file and a
+separate guarded-runner error-preservation correction. This narrow exception
+supersedes the general immutability statement only for the approved correction
+and does not authorize migration `0026` or checkpoint 7.2.
+
 ## Evidence and event boundary
 
 Existing domain events and the transactional outbox remain the only business

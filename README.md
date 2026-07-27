@@ -283,7 +283,12 @@ production-readiness audit. [Checkpoint 7.1](docs/MILESTONE_7_1_PRODUCTION_RUNTI
 is complete locally: deployed modes now require verified PostgreSQL TLS,
 bounded runtime pools, exact PostgreSQL/pgvector/schema readiness, dedicated
 process credential roles, and guarded one-shot migrations. No managed provider
-was contacted, and checkpoint 7.2 remains unstarted. The
+was contacted. Live PostgreSQL 17 validation subsequently proved a clean-install
+compatibility defect in historical migration `20260718_0005`. The
+[PostgreSQL migration 0005 compatibility amendment](docs/MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
+authorizes one focused, hash-ledgered correction checkpoint. Migration `0026`
+and checkpoint 7.2 remain blocked until that correction passes the required
+PostgreSQL and SQLite migration matrix. The
 required roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
