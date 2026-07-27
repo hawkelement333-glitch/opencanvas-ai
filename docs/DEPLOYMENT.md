@@ -21,6 +21,7 @@ historical migrations `20260718_0005`, `20260725_0023`, and
 the
 [migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md),
 [migration 0023 UUID-null compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md),
+[trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md),
 and their combined focused correction checkpoint pass.
 
 SolarPlexus Mobius has five explicit runtime modes: `demo`, `development`, `test`, `staging`, and
@@ -149,10 +150,13 @@ successful clean PostgreSQL installation. After a migration error, runner
 cleanup can execute inside the aborted transaction and mask the primary
 exception; migrations `0023` and `0024` also misread PostgreSQL-canonicalized
 check expressions, and `0023`'s resource backfill exposes independently typed
-`text` nulls to UUID destinations. The combined compatibility correction must
+`text` nulls to UUID destinations. With those corrections present, `0023`
+then fails because its mutation trigger references an undefined function; the
+same name drift appears in `0024`. The combined compatibility correction must
 preserve the original error, prove lock release on success and failure, prove
-exact closed constraint registries, and prove exact UUID/null backfill values
-through `0025` before deployment validation resumes.
+exact closed constraint registries and UUID/null backfill values, and prove
+all affected trigger identities plus update/delete rollback through `0025`
+before deployment validation resumes.
 
 ## Database credential replacement
 

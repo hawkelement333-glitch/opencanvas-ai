@@ -42,14 +42,17 @@ This register prevents the competition demo and public materials from implying c
 
 ## Reliability and scale
 
-- A clean live PostgreSQL 17 migration has proved three historical
-  compatibility defects. Revision `20260718_0005` cannot recreate the
+- A clean live PostgreSQL 17 migration has proved four historical
+  compatibility defect classes across three migrations. Revision
+  `20260718_0005` cannot recreate the
   referenced `workspaces` primary-key structure, and revisions
   `20260725_0023` and `20260725_0024` cannot safely recover closed values from
   PostgreSQL-canonicalized check expressions. Revision `0023` also exposes
   untyped derived-table nulls as `text` to UUID destinations during resource
-  backfill. Documentation-governed corrections are authorized but not
-  implemented; preserved combined work is not active, and Milestone 7.2
+  backfill. After those corrections, `0023` reaches append-only trigger
+  creation and exposes four `0023`/`0024` references to an undefined
+  PostgreSQL function. Documentation-governed corrections are authorized but
+  not implemented; preserved combined work is not active, and Milestone 7.2
   remains blocked.
 - Production-shaped processing uses persisted database jobs and an independently scalable worker.
   The database queue is not a dedicated broker and does not yet provide long-running lease
@@ -101,6 +104,8 @@ and the
 [migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md).
 [The migration 0023 UUID-null compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md)
 adds only the required explicit PostgreSQL UUID typing and focused backfill
-proof.
+proof. The
+[trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md)
+adds only four name-reference replacements and exact trigger/mutation proof.
 Checkpoint 7.2, migration `0026`, deployment, Milestone 8, and later work
 remain unstarted until the combined restart gate passes.

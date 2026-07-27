@@ -22,9 +22,14 @@ combined checkpoint. Live implementation validation then proved that
 as `text` before assignment to UUID destinations. The
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md)
 authorizes only explicit PostgreSQL UUID typing for those placeholders and
-focused tests. This is not a general relaxation of migration immutability.
-Migration `0026` and checkpoint 7.2 remain blocked until the combined
-PostgreSQL and SQLite validation gate passes.
+focused tests. The next live attempt reached `0023` trigger installation and
+proved that both affected migrations contain references to an undefined
+mutation function. The
+[`MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md)
+authorizes exactly four references to reuse the existing equivalent deny-all
+trigger function. This is not a general relaxation of migration
+immutability. Migration `0026` and checkpoint 7.2 remain blocked until the
+combined PostgreSQL and SQLite validation gate passes.
 
 Implementation-grounded clarification: checkpoint 7.1 uses the established
 `Settings`, SQLAlchemy, Alembic, lifespan, and health boundaries. PostgreSQL
@@ -1119,8 +1124,13 @@ The durable-state decision ledger is explicit:
 - backup and restore evidence: no application migration; use independent
   immutable exercise evidence plus existing references.
 
-Committed migrations remain immutable. Any correction after a checkpoint uses
-the next unused revision. No empty revision is reserved.
+Committed migrations remain immutable, and an ordinary later correction uses
+the next unused revision. The four explicitly documented PostgreSQL
+compatibility amendments are a narrow exception because a fresh database
+cannot pass the affected historical revisions to reach a corrective child.
+They require preserved original hashes, one final validated active hash per
+corrected migration, and complete combined validation. No empty revision is
+reserved, and no general historical-edit authority is created.
 
 ## 21. API and service boundaries
 

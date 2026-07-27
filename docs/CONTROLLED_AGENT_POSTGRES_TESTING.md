@@ -4,13 +4,17 @@ Status: runnable integration-test architecture. A local PostgreSQL 17.10 and
 pgvector 0.8.5 environment proved clean-chain compatibility defects in
 historical migrations `20260718_0005`, `20260725_0023`, and
 `20260725_0024`. Preserved combined work reaches `0023`, where a separate
-derived-table backfill also supplies untyped nulls to UUID destinations. See
-the
+derived-table backfill supplies untyped nulls to UUID destinations. After
+that typing was corrected in preserved work, the chain reached append-only
+trigger creation and exposed four references to the undefined
+`reject_controlled_agent_security_mutation()` function. See the
 [migration 0005 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
 and the
 [migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md),
 plus the
-[migration 0023 UUID-null compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md).
+[migration 0023 UUID-null compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md)
+and the
+[trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md).
 The preserved work remains unapplied and is not active.
 This does not add agent execution behavior.
 
@@ -20,6 +24,14 @@ PostgreSQL is authoritative for the PostgreSQL trigger function. The full
 trigger test remains blocked until the combined correction produces a clean
 PostgreSQL schema through `0025`; a setup failure before the assertions must
 not be reported as a trigger-test failure or pass.
+
+Migrations `0023` and `0024` add thirteen collaboration tables whose
+PostgreSQL triggers must reuse the existing zero-argument
+`reject_controlled_agent_mutation()` trigger function. Their valid inserts
+remain allowed; direct update and delete must fail and roll back. The two
+latent `_protect_domain_events()` PostgreSQL branches must contain no
+undefined reference, while the normal chain preserves the existing
+`domain_events` trigger installed by migration `0017`.
 
 ## Safety model
 
@@ -65,3 +77,18 @@ The direct-SQL integration test verifies:
 CI provides an explicitly named `opencanvas_ci` administration database and runs
 `pnpm test:postgres` against a randomly created child database. The test never relies on the normal
 application database URL implicitly.
+
+The future combined trigger test must additionally verify:
+
+- the existing function's exact signature, trigger return type, PL/pgSQL
+  language, and unconditional append-only exception;
+- absence of the undefined security-named function and ambiguous overloads;
+- exact trigger names, table bindings, operations, and function OIDs for all
+  thirteen new collaboration tables;
+- successful valid insert plus rejected update/delete for every table;
+- unchanged rows, scope, and transaction state after each rejected mutation;
+- preservation of the migration `0017` domain-event trigger;
+- isolated disposable-transaction resolution of both corrected latent
+  `_protect_domain_events()` branches; and
+- required `0022`–`0025` downgrade/re-upgrade cycles and service restart
+  reinspection.

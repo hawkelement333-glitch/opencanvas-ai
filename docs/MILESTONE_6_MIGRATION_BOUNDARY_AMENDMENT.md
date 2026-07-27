@@ -54,6 +54,15 @@ tests, or migrations. This amendment resolves only that documented boundary.
 - Documentation never describes a migration as beginning in one checkpoint
   and being completed in another.
 
+This remains the permanent default. The Milestone 7 PostgreSQL compatibility
+amendment chain, culminating in the
+[trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md),
+documents a narrow four-amendment exception for historical migrations that a
+fresh PostgreSQL database cannot pass to reach a corrective child revision.
+That exception preserves revision identity and original hashes, activates
+only one final validated hash per corrected migration, and does not authorize
+later discretionary rewrites.
+
 This allocation changes no collaboration, tenant-isolation, ownership,
 approval, revocation, append-only, Trace, event, outbox, audit, or security
 invariant.

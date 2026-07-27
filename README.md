@@ -294,10 +294,16 @@ live run proved that `0023` also passes untyped nulls through a derived-table
 backfill into UUID columns. The
 [migration 0023 UUID-null compatibility amendment](docs/MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md)
 authorizes only explicit PostgreSQL UUID typing for those placeholders and
-focused regression coverage. Combined implementation work is preserved
-outside the working tree and is not active. Migration `0026` and checkpoint
-7.2 remain blocked until all historical corrections and the runner correction
-pass the required PostgreSQL and SQLite validation matrix. The
+focused regression coverage. With that correction present, a later live run
+reached `0023` trigger installation and proved that `0023` and `0024`
+reference an undefined
+`reject_controlled_agent_security_mutation()` function. The
+[trigger-function compatibility amendment](docs/MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md)
+authorizes exactly four references to use the existing equivalent deny-all
+function. Combined implementation work is preserved outside the working tree
+and is not active. Migration `0026` and checkpoint 7.2 remain blocked until
+all historical corrections and the runner correction pass the required
+PostgreSQL and SQLite validation matrix. The
 required roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
@@ -377,7 +383,10 @@ Milestone 6 migrations now have checkpoint-owned immutable boundaries:
 `20260725_0023`, 6.4 owns completed migration `20260725_0024`, and 6.5 owns
 completed direct child `20260725_0025`, the sole Alembic head. No later
 migration exists. A migration must be completed within its owning checkpoint and must
-not be rewritten by a later checkpoint.
+not be rewritten by a later checkpoint. The four Milestone 7 PostgreSQL
+compatibility amendments record the narrow, hash-ledgered exception required
+because a fresh PostgreSQL database cannot reach a later corrective revision;
+they do not relax this default rule generally.
 
 See
 [docs/MILESTONE_5_ARCHITECTURE.md](docs/MILESTONE_5_ARCHITECTURE.md),

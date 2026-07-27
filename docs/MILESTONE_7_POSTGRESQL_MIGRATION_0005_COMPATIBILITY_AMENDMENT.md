@@ -33,6 +33,15 @@ redaction, and focused-test authority and combines it with corrections to
 exactly those two later migrations. It does not broaden the authority recorded
 here.
 
+Further combined validation reached `0023` trigger installation and proved
+that `0023` and `0024` reference an undefined PostgreSQL mutation function.
+The
+[trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md)
+authorizes exactly four name-reference corrections to the already-existing
+deny-all function. The final combined restart gate now includes exact trigger
+identity, update/delete rejection, rollback, and migration-cycle proof. It
+does not broaden this amendment's `0005` or runner authority.
+
 ## Verified environment and failure
 
 The failure was reproduced against an isolated local environment:

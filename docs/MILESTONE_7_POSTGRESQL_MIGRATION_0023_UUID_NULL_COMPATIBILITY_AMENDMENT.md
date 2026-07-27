@@ -19,9 +19,12 @@ This amendment was created from:
 
 The local commit containing this document, with message
 `Authorize PostgreSQL UUID null typing in migration 0023`, is the
-authoritative baseline for the next combined implementation checkpoint. Its
-exact SHA is recorded in the final handoff because a commit cannot contain
-its own SHA.
+historical UUID-null authorization baseline. A later
+[trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md)
+supersedes it as the authoritative baseline for the next combined
+implementation checkpoint after live validation proved a separate undefined
+trigger-function reference. That amendment does not broaden the UUID-null
+authority recorded here.
 
 This amendment authorizes one additional, exceptional PostgreSQL
 type-compatibility correction in historical migration `20260725_0023`. It
@@ -30,10 +33,10 @@ hash, create a later migration, or generally relax migration immutability.
 
 ## Preserved implementation and recovery state
 
-The latest combined implementation attempt is preserved outside the working
-tree:
+The parser/UUID implementation attempt originally governed by this amendment
+is preserved outside the working tree:
 
-- authoritative blocked-work stash object:
+- blocked-work stash object:
   `9ea4ef5a89bf6d6b62cd7718180c893bf6b87604`;
 - original provisional recovery stash object:
   `71b384404468fbfa6326a951ef063e99c9e11652`;
@@ -43,13 +46,17 @@ tree:
   `f165bdd10df4cb95112985396c8ea143c609bf883596ffecd04ae9f9cb9c6f46`.
 
 Both stash objects remained present, unchanged, unapplied, and undropped
-during this documentation checkpoint. The external patch and manifest also
-remained intact. This amendment does not approve the preserved implementation
-as complete.
-
-After this amendment is committed, the blocked-work stash is the
-authoritative recovery source for a new combined implementation branch. The
-original stash, patch, and manifest remain secondary recovery evidence.
+during this documentation checkpoint. A later combined attempt added the
+authorized UUID typing and tests, then stopped at the trigger-function defect.
+The most complete recovery source is now stash
+`d50c7020f9b9ce6add83f10d0b443510ccd33ba3`, with patch SHA-256
+`2e6726045825fa61d0302d2bc5ac59efca3aa1c1143982aea681998e380b2fca`
+and manifest SHA-256
+`a39859f68b50cebf70bd1e35982b29a499d9c7e0e47cfb3c17871a7cc1758ab8`.
+The two earlier stashes, original patch, and original manifest remain
+secondary evidence. The successor trigger-function amendment governs how the
+latest stash may be applied. This amendment does not approve any preserved
+implementation as complete.
 
 ## Verified environment and failure
 

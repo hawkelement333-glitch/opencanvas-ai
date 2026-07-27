@@ -222,6 +222,15 @@ authorizes only explicit UUID typing in that PostgreSQL backfill branch and
 focused regression coverage. It preserves the prior amendments and adds no
 Milestone 7.2 authority.
 
+The next live combined attempt reached `0023` append-only trigger creation and
+failed because migrations `0023` and `0024` contain four references to the
+undefined `reject_controlled_agent_security_mutation()` function. The
+[trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md)
+authorizes only replacement of those four references with the already-owned
+equivalent deny-all function. It preserves the existing trigger names,
+update/delete coverage, migration `0017` domain-event guard, and all prior
+amendment boundaries.
+
 ## Evidence and event boundary
 
 Existing domain events and the transactional outbox remain the only business
@@ -340,7 +349,7 @@ the implementation checkpoints.
 The historical next-work statement below records the architecture handoff at
 the time it was written. Checkpoint 7.1 is now complete. The current next
 authorized work is the combined migration `0005`, guarded-runner, `0023`, and
-`0024` compatibility correction governed by the three amendments; checkpoint
+`0024` compatibility correction governed by the four amendments; checkpoint
 7.2 remains blocked.
 
 The original next authorized work was exactly:

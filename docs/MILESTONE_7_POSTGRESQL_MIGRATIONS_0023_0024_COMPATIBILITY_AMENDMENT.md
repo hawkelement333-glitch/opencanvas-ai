@@ -35,6 +35,15 @@ authorizes only explicit UUID typing for the identified PostgreSQL null
 placeholders and focused tests. Both amendments remain independently bounded
 and apply to one future combined implementation and final `0023` hash.
 
+After the UUID-null correction allowed live PostgreSQL validation to reach
+append-only trigger installation, `0023` failed because its `_protect()`
+helper references an undefined function. The same name drift exists in
+`0024`. The
+[trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md)
+separately authorizes exactly four reference replacements with the
+already-existing deny-all trigger function. It adds no parser, registry,
+schema, or Milestone 7.2 authority.
+
 ## Preserved provisional correction boundary
 
 The prior
@@ -282,8 +291,10 @@ must then accept only those active hashes. Every unrelated migration hash must
 remain unchanged, and any later unapproved edit must fail validation. No
 handoff may claim that a corrected migration remained historically untouched.
 For `0023`, the final combined hash must also record the separately approved
-UUID-null amendment SHA; competing active hashes for parser-only and
-UUID-typing intermediate content are prohibited.
+UUID-null amendment SHA and trigger-function amendment SHA. For `0024`, it
+must record the trigger-function amendment SHA in addition to this parser
+amendment. Competing active hashes for parser-only, UUID-typing-only, or
+trigger-only intermediate content are prohibited.
 
 ## Required combined validation
 

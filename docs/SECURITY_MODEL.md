@@ -132,6 +132,15 @@ keys preserve execution/user/workspace scope, and ownership-scoped repository qu
 current workspace owner before returning data. Unknown, foreign, deleted-workspace, or malformed
 identifiers share a not-found boundary.
 
+The original PostgreSQL controlled-agent trigger function remains the
+deny-all update/delete authority. Complete PostgreSQL proof for the later
+collaboration tables is currently blocked by four undefined function-name
+references in historical migrations `0023` and `0024`. The
+[trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md)
+authorizes only reuse of the existing function; production acceptance still
+requires live trigger identity, rejection, rollback, and full migration-cycle
+validation.
+
 One-time approval use is enforced by a unique database constraint. The repository reloads the
 stored context, plan, grant, approval, revocations, and existing consumption IDs; verifies their
 original canonical digests; evaluates the pure policy contract; and writes an allow decision and

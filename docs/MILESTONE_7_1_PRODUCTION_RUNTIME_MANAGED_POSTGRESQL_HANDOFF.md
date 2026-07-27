@@ -32,6 +32,15 @@ authorizes only explicit UUID typing for those PostgreSQL placeholders and
 focused regression coverage. This does not revise the original 7.1 ledger or
 start checkpoint 7.2.
 
+With that typing present, the next live attempt reached `0023` trigger
+installation and proved that migrations `0023` and `0024` contain four
+references to an undefined mutation function. The
+[trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md)
+authorizes only replacement of those references with the already-existing
+equivalent deny-all trigger function and focused trigger/mutation proof. The
+original 7.1 validation ledger remains historical and unchanged; checkpoint
+7.2 remains blocked.
+
 ## Implemented boundary
 
 Milestone 7.1 extends the established configuration, SQLAlchemy, Alembic,
