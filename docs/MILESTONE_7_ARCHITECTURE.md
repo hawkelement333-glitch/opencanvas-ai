@@ -5,16 +5,21 @@ Date: 2026-07-26
 Status: architecture complete locally; checkpoint 7.1 implemented locally;
 checkpoint 7.2 not started
 
-PostgreSQL compatibility amendment:
+PostgreSQL compatibility amendments:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
 Live PostgreSQL 17 validation proved that historical revision
 `20260718_0005` cannot recreate `workspaces` while
 `canonical_objects_workspace_id_fkey` depends on `workspaces_pkey`. One
 documentation-governed, hash-ledgered compatibility correction to migration
 `0005`, plus focused guarded-runner error-preservation work, is authorized.
-This is not a general relaxation of migration immutability. Migration `0026`
-and checkpoint 7.2 remain blocked until the amendment's full PostgreSQL and
-SQLite validation gate passes.
+Subsequent clean-chain validation proved that migrations `20260725_0023` and
+`20260725_0024` apply the same unsafe comma parser to
+PostgreSQL-canonicalized check expressions. The
+[`MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md)
+authorizes corrections to exactly those two files within the same future
+combined checkpoint. This is not a general relaxation of migration
+immutability. Migration `0026` and checkpoint 7.2 remain blocked until the
+combined PostgreSQL and SQLite validation gate passes.
 
 Implementation-grounded clarification: checkpoint 7.1 uses the established
 `Settings`, SQLAlchemy, Alembic, lifespan, and health boundaries. PostgreSQL

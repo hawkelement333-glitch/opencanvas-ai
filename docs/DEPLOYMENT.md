@@ -14,11 +14,13 @@ Checkpoint 7.1 is complete locally. It implements the provider-neutral runtime
 contract, but no managed service was provisioned or contacted. This guide is
 not evidence that a managed database, hostile-upload controls, failover,
 restore, capacity, or production security have passed. Checkpoint 7.2 remains
-unstarted. Live PostgreSQL 17 validation has proved a clean-install failure in
-historical migration `20260718_0005`; no deployment or migration `0026` is
-authorized until the
-[compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
-and its separate focused correction checkpoint pass.
+unstarted. Live PostgreSQL 17 validation has proved clean-install failures in
+historical migrations `20260718_0005`, `20260725_0023`, and
+`20260725_0024`; no deployment or migration `0026` is authorized until the
+[migration 0005 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md),
+the
+[migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md),
+and their combined focused correction checkpoint pass.
 
 SolarPlexus Mobius has five explicit runtime modes: `demo`, `development`, `test`, `staging`, and
 `production`. The API validates the selected mode and all mode-dependent provider configuration at
@@ -141,11 +143,14 @@ one PostgreSQL session advisory lock, uses a direct non-pooled connection, and
 verifies the final revision. A competing runner fails safely. API and worker
 readiness stays false while the migration lock is held or the schema differs.
 
-The current runner must not be used to claim a successful clean PostgreSQL
-installation: after a migration error, its advisory-unlock cleanup can execute
-inside the aborted transaction and mask the primary exception. The focused
-compatibility correction must preserve the original error and prove lock
-release on success and failure before deployment validation resumes.
+The current runner and historical migrations must not be used to claim a
+successful clean PostgreSQL installation. After a migration error, runner
+cleanup can execute inside the aborted transaction and mask the primary
+exception; migrations `0023` and `0024` also misread PostgreSQL-canonicalized
+check expressions. The combined compatibility correction must preserve the
+original error, prove lock release on success and failure, and prove exact
+closed constraint registries through `0025` before deployment validation
+resumes.
 
 ## Database credential replacement
 

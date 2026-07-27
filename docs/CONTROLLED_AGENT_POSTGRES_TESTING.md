@@ -1,18 +1,21 @@
 # Controlled-agent PostgreSQL trigger testing
 
 Status: runnable integration-test architecture. A local PostgreSQL 17.10 and
-pgvector 0.8.5 attempt is now available, but clean schema setup stops at the
-proved historical migration `20260718_0005` compatibility defect before this
-test can reach its append-only assertions. See the
-[migration compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
+pgvector 0.8.5 environment proved clean-chain compatibility defects in
+historical migrations `20260718_0005`, `20260725_0023`, and
+`20260725_0024`. Provisional `0005` and guarded-runner work reaches the later
+defects but remains preserved and unapplied. See the
+[migration 0005 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
+and the
+[migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md).
 This does not add agent execution behavior.
 
 Migration `20260721_0007` installs PostgreSQL triggers that reject direct `UPDATE` and `DELETE`
 against all ten controlled-agent security tables. SQLite remains the portable test path;
-PostgreSQL is authoritative for the PostgreSQL trigger function. The current
-configured run reports one setup error and 543 deselections because the
-disposable database cannot migrate beyond `0005`; it must not be reported as a
-trigger-test failure or pass.
+PostgreSQL is authoritative for the PostgreSQL trigger function. The full
+trigger test remains blocked until the combined correction produces a clean
+PostgreSQL schema through `0025`; a setup failure before the assertions must
+not be reported as a trigger-test failure or pass.
 
 ## Safety model
 

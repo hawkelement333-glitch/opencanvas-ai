@@ -5,13 +5,15 @@ Date: 2026-07-26
 Status: approved architecture plan; checkpoint 7.1 complete locally;
 checkpoint 7.2 not started
 
-Compatibility gate:
+Compatibility gates:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
-Before checkpoint 7.2 or migration `0026` may begin, a separate focused
-checkpoint must correct the proved PostgreSQL implementation defect in
-historical revision `20260718_0005`, preserve the original migration error
-during advisory-lock cleanup, update the migration exception hash ledger, and
-pass the amendment's complete PostgreSQL 17 and SQLite migration matrix.
+[`MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md).
+Before checkpoint 7.2 or migration `0026` may begin, one combined focused
+checkpoint must correct the proved PostgreSQL defects in historical revisions
+`20260718_0005`, `20260725_0023`, and `20260725_0024`; preserve the original
+migration error during advisory-lock cleanup; update the migration exception
+hash ledger; and pass the complete combined PostgreSQL 17 and SQLite migration
+matrix. Preserved provisional `0005` and runner work is not active.
 
 Architecture:
 [`MILESTONE_7_ARCHITECTURE.md`](MILESTONE_7_ARCHITECTURE.md)
@@ -185,10 +187,13 @@ separate index construction from authorized retrieval publication.
 ### Prerequisites
 
 - 7.1 is committed and managed PostgreSQL is available for validation;
-- the migration 0005 compatibility amendment is committed and its separately
-  authorized focused correction checkpoint has passed;
+- both PostgreSQL migration compatibility amendments are committed and their
+  combined focused correction checkpoint has passed;
 - clean PostgreSQL upgrade through `0025`, downgrade to `0024`, and re-upgrade
   to `0025` have passed without masking the primary database exception;
+- focused PostgreSQL and SQLite cycles for `0004 <-> 0005`,
+  `0022 <-> 0023`, and `0023 <-> 0024` have passed with exact closed
+  registries and seeded valid-row preservation;
 - `20260725_0025` remains the sole head before migration creation;
 - current document, retrieval, graph, event, Trace, audit, and authority
   contracts are mapped;

@@ -42,12 +42,13 @@ This register prevents the competition demo and public materials from implying c
 
 ## Reliability and scale
 
-- A clean live PostgreSQL 17 migration currently stops at historical revision
-  `20260718_0005` because PostgreSQL cannot recreate the referenced
-  `workspaces` primary-key structure while
-  `canonical_objects_workspace_id_fkey` depends on it. A documentation-governed
-  compatibility correction is authorized but not yet implemented; Milestone
-  7.2 remains blocked.
+- A clean live PostgreSQL 17 migration has proved three historical
+  compatibility defects. Revision `20260718_0005` cannot recreate the
+  referenced `workspaces` primary-key structure, and revisions
+  `20260725_0023` and `20260725_0024` cannot safely recover closed values from
+  PostgreSQL-canonicalized check expressions. Documentation-governed
+  corrections are authorized but not implemented; preserved provisional
+  `0005` and runner work is not active, and Milestone 7.2 remains blocked.
 - Production-shaped processing uses persisted database jobs and an independently scalable worker.
   The database queue is not a dedicated broker and does not yet provide long-running lease
   renewal or dead-letter administration UI.
@@ -91,8 +92,10 @@ This register prevents the competition demo and public materials from implying c
 
 ## Recommended next checkpoint
 
-Implement only the focused migration 0005 and guarded-runner correction
-authorized by the
-[PostgreSQL compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
+Implement only the combined migration `0005`, guarded-runner, `0023`, and
+`0024` corrections authorized by the
+[migration 0005 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
+and the
+[migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md).
 Checkpoint 7.2, migration `0026`, deployment, Milestone 8, and later work
-remain unstarted until the amendment's restart gate passes.
+remain unstarted until the combined restart gate passes.

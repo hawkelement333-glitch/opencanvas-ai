@@ -15,6 +15,14 @@ authorizes a separate focused correction and validation checkpoint. This note
 does not revise the original 7.1 validation ledger or claim that the
 correction has been implemented.
 
+Subsequent clean-chain diagnosis proved that migrations `20260725_0023` and
+`20260725_0024` cannot safely recover closed values from
+PostgreSQL-canonicalized check expressions. The
+[PostgreSQL migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md)
+authorizes corrections to exactly those two migration files in the same
+future combined checkpoint. Provisional `0005` and runner work remains
+preserved outside the working tree and is not active.
+
 ## Implemented boundary
 
 Milestone 7.1 extends the established configuration, SQLAlchemy, Alembic,
@@ -148,7 +156,7 @@ shared rate limits, observability rollout, recovery exercises, or load tests.
 Milestone 7.2 remains unstarted. Its planned migration
 `20260726_0026` remains absent.
 
-Milestone 7.2 must not restart until the migration 0005 compatibility
-correction, guarded-runner error preservation, live PostgreSQL and SQLite
-migration cycles, migration hash exception ledger, and required regressions
-all pass.
+Milestone 7.2 must not restart until the migration `0005`, guarded-runner,
+`0023`, and `0024` compatibility corrections; exact closed-registry and
+cross-migration proof; live PostgreSQL and SQLite migration cycles; migration
+hash exception ledger; and required regressions all pass.

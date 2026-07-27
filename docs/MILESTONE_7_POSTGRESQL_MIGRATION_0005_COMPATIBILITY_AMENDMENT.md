@@ -24,6 +24,15 @@ This amendment authorizes a focused correction checkpoint. It does not
 implement the correction, change a migration, change production code, or
 relax migration integrity generally.
 
+Successor compatibility amendment:
+[`MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md).
+Later clean-chain validation proved additional, distinct PostgreSQL
+compatibility defects in migrations `20260725_0023` and `20260725_0024`.
+That amendment preserves this amendment's exact `0005`, guarded-runner,
+redaction, and focused-test authority and combines it with corrections to
+exactly those two later migrations. It does not broaden the authority recorded
+here.
+
 ## Verified environment and failure
 
 The failure was reproduced against an isolated local environment:
@@ -283,11 +292,13 @@ met:
    upstream;
 10. no critical or high-severity migration defect remains.
 
-Only after the gate is fully evidenced may Milestone 7.2 restart from the
-focused correction commit. The amendment does not authorize migration `0026`,
-Indexer implementation, object storage, quarantine, malware scanning,
-durable queues, deployment, Milestone 8, the governed Librarian, or later
-product-family work.
+The successor `0023`/`0024` amendment adds mandatory combined correction and
+validation conditions to this gate. Only after both amendments' combined gate
+is fully evidenced may Milestone 7.2 restart from the combined correction
+commit. Neither amendment authorizes migration `0026`, Indexer
+implementation, object storage, quarantine, malware scanning, durable queues,
+deployment, Milestone 8, the governed Librarian, or later product-family
+work.
 
 ## Documentation-only confirmation
 

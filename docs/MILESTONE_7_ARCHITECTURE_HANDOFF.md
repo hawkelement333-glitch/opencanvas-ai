@@ -203,8 +203,16 @@ depends on the workspace primary key. The
 [migration 0005 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
 authorizes one transparent, hash-ledgered correction to that file and a
 separate guarded-runner error-preservation correction. This narrow exception
-supersedes the general immutability statement only for the approved correction
-and does not authorize migration `0026` or checkpoint 7.2.
+supersedes the general immutability statement only for that approved
+correction.
+
+Later clean-chain validation also proved that historical revisions
+`20260725_0023` and `20260725_0024` cannot safely recover closed registries
+from PostgreSQL-canonicalized check expressions. The
+[migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md)
+authorizes corrections to exactly those two migration files. Together, the
+amendments authorize one combined focused implementation checkpoint and do
+not authorize migration `0026` or checkpoint 7.2.
 
 ## Evidence and event boundary
 
@@ -321,6 +329,12 @@ provider tests were run because production code, tests, dependencies,
 configuration, and migrations did not change. Those validations belong to
 the implementation checkpoints.
 
-The next authorized work is exactly:
+The historical next-work statement below records the architecture handoff at
+the time it was written. Checkpoint 7.1 is now complete. The current next
+authorized work is the combined migration `0005`, guarded-runner, `0023`, and
+`0024` compatibility correction governed by the two amendments; checkpoint
+7.2 remains blocked.
+
+The original next authorized work was exactly:
 
 **7.1 Production Runtime Foundation and Managed PostgreSQL**
