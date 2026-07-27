@@ -17,9 +17,14 @@ Subsequent clean-chain validation proved that migrations `20260725_0023` and
 PostgreSQL-canonicalized check expressions. The
 [`MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md)
 authorizes corrections to exactly those two files within the same future
-combined checkpoint. This is not a general relaxation of migration
-immutability. Migration `0026` and checkpoint 7.2 remain blocked until the
-combined PostgreSQL and SQLite validation gate passes.
+combined checkpoint. Live implementation validation then proved that
+`0023`'s derived-table resource backfill independently resolves untyped nulls
+as `text` before assignment to UUID destinations. The
+[`MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md)
+authorizes only explicit PostgreSQL UUID typing for those placeholders and
+focused tests. This is not a general relaxation of migration immutability.
+Migration `0026` and checkpoint 7.2 remain blocked until the combined
+PostgreSQL and SQLite validation gate passes.
 
 Implementation-grounded clarification: checkpoint 7.1 uses the established
 `Settings`, SQLAlchemy, Alembic, lifespan, and health boundaries. PostgreSQL

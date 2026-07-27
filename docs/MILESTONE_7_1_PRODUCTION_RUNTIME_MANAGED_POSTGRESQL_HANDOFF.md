@@ -23,6 +23,15 @@ authorizes corrections to exactly those two migration files in the same
 future combined checkpoint. Provisional `0005` and runner work remains
 preserved outside the working tree and is not active.
 
+The first combined live attempt subsequently proved a distinct PostgreSQL
+type-resolution failure in `0023`'s `_backfill_resources()` derived table:
+untyped null placeholders become `text` before assignment to UUID
+destinations. The
+[migration 0023 UUID-null compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md)
+authorizes only explicit UUID typing for those PostgreSQL placeholders and
+focused regression coverage. This does not revise the original 7.1 ledger or
+start checkpoint 7.2.
+
 ## Implemented boundary
 
 Milestone 7.1 extends the established configuration, SQLAlchemy, Alembic,
@@ -158,5 +167,6 @@ Milestone 7.2 remains unstarted. Its planned migration
 
 Milestone 7.2 must not restart until the migration `0005`, guarded-runner,
 `0023`, and `0024` compatibility corrections; exact closed-registry and
-cross-migration proof; live PostgreSQL and SQLite migration cycles; migration
-hash exception ledger; and required regressions all pass.
+cross-migration proof; exact `0023` UUID/null resource-backfill proof; live
+PostgreSQL and SQLite migration cycles; migration hash exception ledger; and
+required regressions all pass.

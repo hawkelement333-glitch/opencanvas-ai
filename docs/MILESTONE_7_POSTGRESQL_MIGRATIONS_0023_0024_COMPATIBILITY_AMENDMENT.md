@@ -26,6 +26,15 @@ compatibility corrections. It does not implement either correction, apply
 preserved provisional work, activate a corrected migration hash, create a
 later revision, or generally relax migration immutability.
 
+Subsequent live PostgreSQL 17 implementation validation proved a separate
+derived-table UUID-null type-resolution defect in `0023`'s
+`_backfill_resources()`. That defect is outside this amendment's parser-only
+authority. The
+[migration 0023 UUID-null compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md)
+authorizes only explicit UUID typing for the identified PostgreSQL null
+placeholders and focused tests. Both amendments remain independently bounded
+and apply to one future combined implementation and final `0023` hash.
+
 ## Preserved provisional correction boundary
 
 The prior
@@ -272,6 +281,9 @@ validation evidence, and activate only the final validated hashes. Validators
 must then accept only those active hashes. Every unrelated migration hash must
 remain unchanged, and any later unapproved edit must fail validation. No
 handoff may claim that a corrected migration remained historically untouched.
+For `0023`, the final combined hash must also record the separately approved
+UUID-null amendment SHA; competing active hashes for parser-only and
+UUID-typing intermediate content are prohibited.
 
 ## Required combined validation
 
@@ -358,6 +370,10 @@ Migration `20260726_0026` and Milestone 7.2 remain prohibited until:
     upstream;
 12. no critical or high-severity migration defect remains; and
 13. migrations `0026`, `0027`, and `0028` remain absent until this gate passes.
+
+The successor UUID-null amendment adds explicit `0023` resource-backfill
+typing and focused regression conditions to this gate. Milestone 7.2 remains
+blocked until the combined implementation satisfies both amendments.
 
 Only that combined implementation commit may become the authoritative baseline
 for restarting Milestone 7.2. This amendment does not authorize Indexer

@@ -3,8 +3,9 @@
 Date: 2026-07-26
 
 Overall status: architecture and checkpoint 7.1 complete locally; PostgreSQL
-migration compatibility amendments for `0005`, `0023`, and `0024` recorded;
-combined focused correction pending; checkpoint 7.2 not started
+migration compatibility amendments for `0005`, `0023`, and `0024`, including
+the `0023` UUID-null boundary, recorded; combined focused correction pending;
+checkpoint 7.2 not started
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -27,6 +28,9 @@ PostgreSQL compatibility amendment:
 PostgreSQL migrations 0023 and 0024 compatibility amendment:
 [`MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md)
 
+PostgreSQL migration 0023 UUID-null compatibility amendment:
+[`MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md)
+
 ## PostgreSQL migration compatibility gate
 
 An isolated Ubuntu 24.04.4/WSL 2 environment with PostgreSQL 17.10 and
@@ -41,13 +45,20 @@ the clean chain then failed in `0023`; repository inspection and a live
 SQLAlchemy probe proved that both `0023` and `0024` use the same unsafe
 comma-splitting parser for PostgreSQL-canonicalized check expressions.
 
-The documentation amendments authorize one combined, separately implemented,
-hash-ledgered correction checkpoint for migration `0005`, the guarded runner,
-and migrations `0023` and `0024`. Migration `0026` and checkpoint 7.2 remain
-blocked until the complete clean and focused PostgreSQL and SQLite migration
-cycles, cross-migration registry proof, lock cleanup, original-error
-preservation, and all required regressions pass. No implementation,
-migration, or production-code change is part of these amendments.
+The first combined live attempt then proved a separate `0023` failure:
+`_backfill_resources()` wraps untyped null UUID placeholders in a derived
+table, PostgreSQL resolves them as `text`, and assignment to UUID destinations
+fails. The latest combined work is preserved outside the working tree.
+
+The three documentation amendments authorize one combined, separately
+implemented, hash-ledgered correction checkpoint for migration `0005`, the
+guarded runner, and migrations `0023` and `0024`. New UUID-null authority is
+limited to `0023`'s PostgreSQL resource backfill. Migration `0026` and
+checkpoint 7.2 remain blocked until the complete clean and focused PostgreSQL
+and SQLite migration cycles, cross-migration registry and UUID-backfill proof,
+lock cleanup, original-error preservation, and all required regressions pass.
+No implementation, migration, or production-code change is part of these
+amendments.
 
 ## Baseline
 
@@ -195,7 +206,7 @@ Local deterministic substitutes remain available for demo and tests.
 ## Implementation parameters still to measure
 
 The production architecture remains resolved. The proved historical
-PostgreSQL migration compatibility defects are governed by the two focused
+PostgreSQL migration compatibility defects are governed by the three focused
 correction amendments and block checkpoint 7.2 until their combined
 validation gate passes. The following operating values remain intentionally
 determined from approved managed staging evidence during the owning
@@ -241,6 +252,7 @@ production-readiness defect.
 ## Next authorized work
 
 The combined PostgreSQL migration `0005`, guarded-runner, `0023`, and `0024`
-correction checkpoint is the only next authorized implementation work.
+correction checkpoint, including the narrowly authorized `0023` UUID-null
+typing, is the only next authorized implementation work.
 Checkpoint 7.2 — Deterministic Indexer and Ingestion Pipeline — remains
 unstarted and may restart only after the combined compatibility gate passes.

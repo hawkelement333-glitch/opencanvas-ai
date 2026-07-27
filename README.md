@@ -289,11 +289,15 @@ compatibility defects in historical migrations `20260718_0005`,
 [PostgreSQL migration 0005 compatibility amendment](docs/MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
 and the
 [PostgreSQL migrations 0023 and 0024 compatibility amendment](docs/MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md)
-authorize one combined, hash-ledgered correction checkpoint. Provisional
-`0005` and runner work is preserved outside the working tree and is not
-active. Migration `0026` and checkpoint 7.2 remain blocked until all three
-migration corrections and the runner correction pass the required PostgreSQL
-and SQLite validation matrix. The
+authorize one combined, hash-ledgered correction checkpoint. A subsequent
+live run proved that `0023` also passes untyped nulls through a derived-table
+backfill into UUID columns. The
+[migration 0023 UUID-null compatibility amendment](docs/MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md)
+authorizes only explicit PostgreSQL UUID typing for those placeholders and
+focused regression coverage. Combined implementation work is preserved
+outside the working tree and is not active. Migration `0026` and checkpoint
+7.2 remain blocked until all historical corrections and the runner correction
+pass the required PostgreSQL and SQLite validation matrix. The
 required roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration

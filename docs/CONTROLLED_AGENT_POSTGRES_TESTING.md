@@ -3,11 +3,15 @@
 Status: runnable integration-test architecture. A local PostgreSQL 17.10 and
 pgvector 0.8.5 environment proved clean-chain compatibility defects in
 historical migrations `20260718_0005`, `20260725_0023`, and
-`20260725_0024`. Provisional `0005` and guarded-runner work reaches the later
-defects but remains preserved and unapplied. See the
+`20260725_0024`. Preserved combined work reaches `0023`, where a separate
+derived-table backfill also supplies untyped nulls to UUID destinations. See
+the
 [migration 0005 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
 and the
-[migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md).
+[migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md),
+plus the
+[migration 0023 UUID-null compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md).
+The preserved work remains unapplied and is not active.
 This does not add agent execution behavior.
 
 Migration `20260721_0007` installs PostgreSQL triggers that reject direct `UPDATE` and `DELETE`

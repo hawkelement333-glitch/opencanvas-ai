@@ -214,6 +214,14 @@ authorizes corrections to exactly those two migration files. Together, the
 amendments authorize one combined focused implementation checkpoint and do
 not authorize migration `0026` or checkpoint 7.2.
 
+The first combined live implementation attempt subsequently proved that
+`0023`'s `_backfill_resources()` derived table resolves untyped null
+placeholders as `text` before their assignment to nullable UUID columns. The
+[migration 0023 UUID-null compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md)
+authorizes only explicit UUID typing in that PostgreSQL backfill branch and
+focused regression coverage. It preserves the prior amendments and adds no
+Milestone 7.2 authority.
+
 ## Evidence and event boundary
 
 Existing domain events and the transactional outbox remain the only business
@@ -332,7 +340,7 @@ the implementation checkpoints.
 The historical next-work statement below records the architecture handoff at
 the time it was written. Checkpoint 7.1 is now complete. The current next
 authorized work is the combined migration `0005`, guarded-runner, `0023`, and
-`0024` compatibility correction governed by the two amendments; checkpoint
+`0024` compatibility correction governed by the three amendments; checkpoint
 7.2 remains blocked.
 
 The original next authorized work was exactly:
