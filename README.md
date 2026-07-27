@@ -301,8 +301,16 @@ reference an undefined
 [trigger-function compatibility amendment](docs/MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md)
 authorizes exactly four references to use the existing equivalent deny-all
 function. Combined implementation work is preserved outside the working tree
-and is not active. Migration `0026` and checkpoint 7.2 remain blocked until
-all historical corrections and the runner correction pass the required
+and is not active. The latest controlled run also proved that migration
+`20260725_0021` and its matching ORM metadata leave the table column
+`current_role` unquoted in a textual check. PostgreSQL resolves that token as
+the database session expression `CURRENT_ROLE`, so a valid initial `owner`
+transition can fail. The
+[migration 0021 current-role compatibility amendment](docs/MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+selects the same explicitly quoted `"current_role"` expression for migration
+and ORM metadata and adds role-registry, session-role-independence, and schema
+parity proof. Migration `0026` and checkpoint 7.2 remain blocked until all
+historical corrections and the runner correction pass the required
 PostgreSQL and SQLite validation matrix. The
 required roadmap order is:
 
@@ -383,7 +391,7 @@ Milestone 6 migrations now have checkpoint-owned immutable boundaries:
 `20260725_0023`, 6.4 owns completed migration `20260725_0024`, and 6.5 owns
 completed direct child `20260725_0025`, the sole Alembic head. No later
 migration exists. A migration must be completed within its owning checkpoint and must
-not be rewritten by a later checkpoint. The four Milestone 7 PostgreSQL
+not be rewritten by a later checkpoint. The five Milestone 7 PostgreSQL
 compatibility amendments record the narrow, hash-ledgered exception required
 because a fresh PostgreSQL database cannot reach a later corrective revision;
 they do not relax this default rule generally.

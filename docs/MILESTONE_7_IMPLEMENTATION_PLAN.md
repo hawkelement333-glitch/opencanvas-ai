@@ -10,17 +10,23 @@ Compatibility gates:
 [`MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md).
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md).
 [`MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md).
+[`MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md).
 Before checkpoint 7.2 or migration `0026` may begin, one combined focused
 checkpoint must correct the proved PostgreSQL defects in historical revisions
-`20260718_0005`, `20260725_0023`, and `20260725_0024`; preserve the original
-migration error during advisory-lock cleanup; update the migration exception
-hash ledger; and pass the complete combined PostgreSQL 17 and SQLite migration
-matrix. The `0023` correction includes both exact check-registry recovery and
-explicit UUID typing for every null placeholder in its PostgreSQL
-`_backfill_resources()` derived table. The `0023` and `0024` corrections also
-replace exactly four undefined trigger-function references with the
-already-existing equivalent deny-all function and prove all thirteen
-reachable update/delete guards. Preserved combined work is not active.
+`20260718_0005`, `20260725_0021`, `20260725_0023`, and
+`20260725_0024`; correct the matching `WorkspaceMembershipTransition` ORM
+metadata; preserve the original migration error during advisory-lock cleanup;
+update the migration exception hash ledger; and pass the complete combined
+PostgreSQL 17 and SQLite migration matrix. The `0021` correction uses the
+same explicitly quoted `"current_role"` textual check in migration and ORM
+metadata and proves exact roles, initial owner creation, session-role
+independence, and schema parity. The `0023` correction includes both exact
+check-registry recovery and explicit UUID typing for every null placeholder
+in its PostgreSQL `_backfill_resources()` derived table. The `0023` and
+`0024` corrections also replace exactly four undefined trigger-function
+references with the already-existing equivalent deny-all function and prove
+all thirteen reachable update/delete guards. Preserved combined work is not
+active.
 
 Architecture:
 [`MILESTONE_7_ARCHITECTURE.md`](MILESTONE_7_ARCHITECTURE.md)
@@ -67,7 +73,7 @@ and confirmation that no remote operation occurred.
 | 8     | 7.8 Final Production-Readiness Audit                         | None            | N/A             |
 
 No empty revision is reserved. An ordinary correction to a committed
-migration uses the next unused revision. The four documented PostgreSQL
+migration uses the next unused revision. The five documented PostgreSQL
 compatibility amendments are the only current exception: the fresh chain
 cannot reach a corrective child, so their exact historical edits require
 preserved original hashes, final active hashes, and the complete combined
@@ -198,14 +204,18 @@ separate index construction from authorized retrieval publication.
 ### Prerequisites
 
 - 7.1 is committed and managed PostgreSQL is available for validation;
-- all four PostgreSQL migration compatibility amendments are committed and their
+- all five PostgreSQL migration compatibility amendments are committed and their
   combined focused correction checkpoint has passed;
 - clean PostgreSQL upgrade through `0025`, downgrade to `0024`, and re-upgrade
   to `0025` have passed without masking the primary database exception;
 - focused PostgreSQL and SQLite cycles for `0004 <-> 0005`,
-  `0022 <-> 0023`, and `0023 <-> 0024` have passed with exact closed
-  registries, exact UUID/null resource backfill, and seeded valid-row
-  preservation;
+  `0020 <-> 0021`, `0022 <-> 0023`, and `0023 <-> 0024` have passed with
+  exact closed registries, exact UUID/null resource backfill, and seeded
+  valid-row preservation;
+- migration `0021` and `WorkspaceMembershipTransition` metadata reference the
+  exact quoted table column, accept every allowed role and the initial owner
+  transition, reject invalid/null roles, behave independently of the database
+  session role, and have no schema drift;
 - all thirteen reachable new-table triggers created by `0023`/`0024` resolve
   to the existing `reject_controlled_agent_mutation()` function, reject
   update/delete without partial mutation, and preserve the migration `0017`

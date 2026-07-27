@@ -10,6 +10,17 @@ Status: complete locally; no upstream and no remote operation
 
 Next checkpoint: 6.2 — Collaboration Roles and Permission Authority
 
+Post-handoff PostgreSQL compatibility note: later live PostgreSQL 17
+validation proved that migration `0021`'s textual
+`ck_workspace_membership_transition_role` check leaves `current_role`
+unquoted, so PostgreSQL resolves it as session expression `CURRENT_ROLE`
+rather than the transition row's column. The
+[migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+selects one quoted-column correction for the migration and matching ORM
+metadata. The historical SQLite/offline validation ledger below remains
+accurate for this checkpoint, but it is not live PostgreSQL constraint proof.
+Membership, invitation, owner-backfill, and role semantics are unchanged.
+
 ## Completed scope
 
 Milestone 6.1 establishes the collaboration identity boundary without

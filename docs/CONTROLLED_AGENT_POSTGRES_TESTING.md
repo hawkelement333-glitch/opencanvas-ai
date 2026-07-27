@@ -2,12 +2,15 @@
 
 Status: runnable integration-test architecture. A local PostgreSQL 17.10 and
 pgvector 0.8.5 environment proved clean-chain compatibility defects in
-historical migrations `20260718_0005`, `20260725_0023`, and
-`20260725_0024`. Preserved combined work reaches `0023`, where a separate
-derived-table backfill supplies untyped nulls to UUID destinations. After
-that typing was corrected in preserved work, the chain reached append-only
-trigger creation and exposed four references to the undefined
-`reject_controlled_agent_security_mutation()` function. See the
+historical migrations `20260718_0005`, `20260725_0021`,
+`20260725_0023`, and `20260725_0024`. Earlier preserved combined work reached
+`0023`, where a separate derived-table backfill supplies untyped nulls to UUID
+destinations. After that typing was corrected in preserved work, the chain
+reached append-only trigger creation and exposed four references to the
+undefined `reject_controlled_agent_security_mutation()` function. The newest
+combined run proved an earlier `0021` blocker: its unquoted textual
+`current_role` check resolves PostgreSQL session `CURRENT_ROLE` and rejects a
+valid initial owner transition. See the
 [migration 0005 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
 and the
 [migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md),
@@ -15,15 +18,21 @@ plus the
 [migration 0023 UUID-null compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md)
 and the
 [trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md).
+The
+[migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+selects identical quoted textual column expressions for migration and ORM
+metadata and requires exact role, owner-transition, session-role, and parity
+proof.
 The preserved work remains unapplied and is not active.
 This does not add agent execution behavior.
 
 Migration `20260721_0007` installs PostgreSQL triggers that reject direct `UPDATE` and `DELETE`
 against all ten controlled-agent security tables. SQLite remains the portable test path;
 PostgreSQL is authoritative for the PostgreSQL trigger function. The full
-trigger test remains blocked until the combined correction produces a clean
-PostgreSQL schema through `0025`; a setup failure before the assertions must
-not be reported as a trigger-test failure or pass.
+trigger test remains blocked until the `0021` constraint and all later
+combined corrections produce a clean PostgreSQL schema through `0025`; a
+setup failure before the assertions must not be reported as a trigger-test
+failure or pass.
 
 Migrations `0023` and `0024` add thirteen collaboration tables whose
 PostgreSQL triggers must reuse the existing zero-argument
@@ -46,6 +55,10 @@ The configured URL is an administration database used only to create a random
 `opencanvas_agent_test_<uuid>` database. Alembic upgrades that disposable database to head. The
 fixture terminates its remaining connections and drops it afterward. A configured but unavailable
 server fails the test; an absent URL produces an explicit `NOT RUN` skip.
+
+The previously exposed local test credential must be rotated outside the
+repository before the next live PostgreSQL run. Do not reuse, print, or record
+that credential while preparing the correction.
 
 ## Local Docker command
 
@@ -80,6 +93,11 @@ application database URL implicitly.
 
 The future combined trigger test must additionally verify:
 
+- the `0021` stored check references `"current_role"`, not session
+  `CURRENT_ROLE`;
+- all six role values and the valid initial owner transition;
+- identical outcomes under at least two bounded disposable PostgreSQL roles;
+- exact migration/ORM constraint identity and PostgreSQL/SQLite parity;
 - the existing function's exact signature, trigger return type, PL/pgSQL
   language, and unconditional append-only exception;
 - absence of the undefined security-named function and ambiguous overloads;

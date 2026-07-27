@@ -132,6 +132,16 @@ keys preserve execution/user/workspace scope, and ownership-scoped repository qu
 current workspace owner before returning data. Unknown, foreign, deleted-workspace, or malformed
 identifiers share a not-found boundary.
 
+PostgreSQL row validation must depend only on exact application row data and
+server-derived application authority, never the database session login.
+Migration `0021` and the matching `WorkspaceMembershipTransition` metadata
+currently violate that rule because an unquoted `current_role` token resolves
+to special expression `CURRENT_ROLE`. The
+[migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+selects an explicitly quoted table-column expression and requires
+session-role-independence plus migration/ORM parity proof before production
+acceptance.
+
 The original PostgreSQL controlled-agent trigger function remains the
 deny-all update/delete authority. Complete PostgreSQL proof for the later
 collaboration tables is currently blocked by four undefined function-name

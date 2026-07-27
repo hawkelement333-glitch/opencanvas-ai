@@ -26,6 +26,13 @@ implementation checkpoint after live validation proved a separate undefined
 trigger-function reference. That amendment does not broaden the UUID-null
 authority recorded here.
 
+A still later combined run proved a separate PostgreSQL `CURRENT_ROLE`
+identifier collision in migration `0021` and its matching ORM constraint. The
+[migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+now supplies the authoritative baseline, newest preserved-stash identity, and
+restart procedure for the next combined checkpoint. It does not broaden the
+UUID-null authority recorded here.
+
 This amendment authorizes one additional, exceptional PostgreSQL
 type-compatibility correction in historical migration `20260725_0023`. It
 does not implement the correction, apply preserved work, activate a migration
@@ -57,6 +64,12 @@ The two earlier stashes, original patch, and original manifest remain
 secondary evidence. The successor trigger-function amendment governs how the
 latest stash may be applied. This amendment does not approve any preserved
 implementation as complete.
+
+Historical note: the statement above records the recovery state at this
+amendment's own checkpoint. The migration `0021` current-role amendment
+records the newer stash
+`58ffed44184ea3450a80f5883681da988a196ae7` and exclusively governs its future
+application.
 
 ## Verified environment and failure
 
@@ -252,7 +265,8 @@ This amendment preserves without broadening the existing authority for:
 - the focused PostgreSQL, SQLite, migration, locking, and redaction tests
   needed to prove those changes.
 
-The next combined implementation checkpoint must:
+At this amendment's completion, the next combined implementation checkpoint
+had to:
 
 1. branch from the exact commit containing this amendment;
 2. verify both stash objects and external recovery materials;
@@ -267,6 +281,10 @@ The next combined implementation checkpoint must:
    passes; and
 9. commit implementation and final evidence locally without starting
    Milestone 7.2.
+
+That recovery-selection procedure is historical. The successor `0021`
+current-role amendment replaces the branch and stash selection with its newer
+verified baseline and stash while retaining every UUID-null condition above.
 
 ## Migration hash exception policy
 
@@ -373,6 +391,10 @@ must stop for a deployment-specific plan. This amendment does not authorize
 production downgrade, data repair, deployment, or provider provisioning.
 
 ## Milestone 7.2 restart gate
+
+The successor `0021` current-role amendment adds its credential-rotation,
+quoted-column, ORM-parity, and session-role-independence conditions to this
+historical gate and governs the current recovery procedure.
 
 Migration `20260726_0026` and Milestone 7.2 remain prohibited until:
 

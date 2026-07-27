@@ -44,6 +44,13 @@ separately authorizes exactly four reference replacements with the
 already-existing deny-all trigger function. It adds no parser, registry,
 schema, or Milestone 7.2 authority.
 
+Later combined validation proved a separate PostgreSQL `CURRENT_ROLE`
+identifier collision in migration `0021` and its matching ORM constraint. The
+[migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+supersedes this document only as the authoritative baseline and recovery
+procedure for the next combined implementation checkpoint. It preserves this
+amendment's exact `0023`/`0024` parser authority without broadening it.
+
 ## Preserved provisional correction boundary
 
 The prior
@@ -384,7 +391,9 @@ Migration `20260726_0026` and Milestone 7.2 remain prohibited until:
 
 The successor UUID-null amendment adds explicit `0023` resource-backfill
 typing and focused regression conditions to this gate. Milestone 7.2 remains
-blocked until the combined implementation satisfies both amendments.
+blocked until the combined implementation satisfies it, the later
+trigger-function and `0021` current-role amendments, and all five amendments'
+shared gate.
 
 Only that combined implementation commit may become the authoritative baseline
 for restarting Milestone 7.2. This amendment does not authorize Indexer

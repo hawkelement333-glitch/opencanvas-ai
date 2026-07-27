@@ -42,10 +42,13 @@ This register prevents the competition demo and public materials from implying c
 
 ## Reliability and scale
 
-- A clean live PostgreSQL 17 migration has proved four historical
-  compatibility defect classes across three migrations. Revision
+- A clean live PostgreSQL 17 migration has proved five historical
+  compatibility defect classes across four migrations. Revision
   `20260718_0005` cannot recreate the
-  referenced `workspaces` primary-key structure, and revisions
+  referenced `workspaces` primary-key structure. Revision
+  `20260725_0021` uses an unquoted textual `current_role` check that
+  PostgreSQL resolves as database session `CURRENT_ROLE`, rejecting valid
+  membership transitions. Revisions
   `20260725_0023` and `20260725_0024` cannot safely recover closed values from
   PostgreSQL-canonicalized check expressions. Revision `0023` also exposes
   untyped derived-table nulls as `text` to UUID destinations during resource
@@ -97,8 +100,9 @@ This register prevents the competition demo and public materials from implying c
 
 ## Recommended next checkpoint
 
-Implement only the combined migration `0005`, guarded-runner, `0023`, and
-`0024` corrections authorized by the
+Implement only the combined migration `0005`, guarded-runner, migration `0021`
+plus matching ORM metadata, and migrations `0023` and `0024` corrections
+authorized by the
 [migration 0005 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
 and the
 [migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md).
@@ -107,5 +111,9 @@ adds only the required explicit PostgreSQL UUID typing and focused backfill
 proof. The
 [trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md)
 adds only four name-reference replacements and exact trigger/mutation proof.
+The
+[migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+adds only the quoted migration/ORM constraint, role and owner-transition
+coverage, session-role independence, and metadata parity proof.
 Checkpoint 7.2, migration `0026`, deployment, Milestone 8, and later work
 remain unstarted until the combined restart gate passes.

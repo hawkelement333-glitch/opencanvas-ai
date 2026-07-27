@@ -15,13 +15,15 @@ contract, but no managed service was provisioned or contacted. This guide is
 not evidence that a managed database, hostile-upload controls, failover,
 restore, capacity, or production security have passed. Checkpoint 7.2 remains
 unstarted. Live PostgreSQL 17 validation has proved clean-install failures in
-historical migrations `20260718_0005`, `20260725_0023`, and
-`20260725_0024`; no deployment or migration `0026` is authorized until the
+historical migrations `20260718_0005`, `20260725_0021`,
+`20260725_0023`, and `20260725_0024`; no deployment or migration `0026` is
+authorized until the
 [migration 0005 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md),
 the
 [migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md),
 [migration 0023 UUID-null compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md),
 [trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md),
+[migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md),
 and their combined focused correction checkpoint pass.
 
 SolarPlexus Mobius has five explicit runtime modes: `demo`, `development`, `test`, `staging`, and
@@ -148,15 +150,19 @@ readiness stays false while the migration lock is held or the schema differs.
 The current runner and historical migrations must not be used to claim a
 successful clean PostgreSQL installation. After a migration error, runner
 cleanup can execute inside the aborted transaction and mask the primary
-exception; migrations `0023` and `0024` also misread PostgreSQL-canonicalized
-check expressions, and `0023`'s resource backfill exposes independently typed
-`text` nulls to UUID destinations. With those corrections present, `0023`
-then fails because its mutation trigger references an undefined function; the
-same name drift appears in `0024`. The combined compatibility correction must
-preserve the original error, prove lock release on success and failure, prove
-exact closed constraint registries and UUID/null backfill values, and prove
-all affected trigger identities plus update/delete rollback through `0025`
-before deployment validation resumes.
+exception. Migration `0021` also compares session `CURRENT_ROLE` instead of
+the membership-transition row's `current_role` column. Migrations `0023` and
+`0024` misread PostgreSQL-canonicalized check expressions, and `0023`'s
+resource backfill exposes independently typed `text` nulls to UUID
+destinations. With those later corrections present, `0023` then fails because
+its mutation trigger references an undefined function; the same name drift
+appears in `0024`. Before the next live attempt, rotate the local PostgreSQL
+test credential that appeared in transient tool output. The combined
+compatibility correction must preserve the original error, prove lock release
+on success and failure, prove `0021` owner/role/session independence and
+migration/ORM parity, prove exact closed constraint registries and UUID/null
+backfill values, and prove all affected trigger identities plus update/delete
+rollback through `0025` before deployment validation resumes.
 
 ## Database credential replacement
 

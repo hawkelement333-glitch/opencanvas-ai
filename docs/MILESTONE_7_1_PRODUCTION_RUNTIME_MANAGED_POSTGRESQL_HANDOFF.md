@@ -41,6 +41,14 @@ equivalent deny-all trigger function and focused trigger/mutation proof. The
 original 7.1 validation ledger remains historical and unchanged; checkpoint
 7.2 remains blocked.
 
+A later combined run also proved that migration `0021`'s textual
+`current_role` check and the matching ORM metadata resolve PostgreSQL session
+`CURRENT_ROLE` rather than the transition-row column. The
+[migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+selects the identical quoted textual column expression for both definitions
+and adds exact role, initial-owner, session-independence, and schema-parity
+proof. It does not revise the original 7.1 ledger or start checkpoint 7.2.
+
 ## Implemented boundary
 
 Milestone 7.1 extends the established configuration, SQLAlchemy, Alembic,
@@ -174,8 +182,9 @@ shared rate limits, observability rollout, recovery exercises, or load tests.
 Milestone 7.2 remains unstarted. Its planned migration
 `20260726_0026` remains absent.
 
-Milestone 7.2 must not restart until the migration `0005`, guarded-runner,
-`0023`, and `0024` compatibility corrections; exact closed-registry and
-cross-migration proof; exact `0023` UUID/null resource-backfill proof; live
-PostgreSQL and SQLite migration cycles; migration hash exception ledger; and
-required regressions all pass.
+Milestone 7.2 must not restart until the migration `0005`, migration `0021`
+plus matching ORM metadata, guarded-runner, `0023`, and `0024` compatibility
+corrections; exact `0021` role/owner/session/parity proof; exact
+closed-registry and cross-migration proof; exact `0023` UUID/null
+resource-backfill proof; live PostgreSQL and SQLite migration cycles;
+migration hash exception ledger; and required regressions all pass.

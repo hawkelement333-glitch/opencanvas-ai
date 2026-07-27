@@ -21,9 +21,9 @@ This amendment was created from:
 
 The local commit containing this document, with message
 `Authorize PostgreSQL trigger-function correction for migrations 0023 and 0024`,
-is the authoritative baseline for the next combined implementation checkpoint.
-Its exact SHA is recorded in the final handoff because a commit cannot contain
-its own SHA.
+is `6bb7e0433fb0982038fe5bc7e7cba5e30f1f3a59`. It was the authoritative
+baseline for the next combined implementation checkpoint at this amendment's
+completion.
 
 This amendment authorizes exactly one additional exceptional historical
 PostgreSQL correction: replace four references to a nonexistent trigger
@@ -32,6 +32,14 @@ function that implements their required deny-all mutation behavior. It does
 not implement the correction, modify a migration, apply preserved work,
 activate a migration hash, create a later migration, or relax migration
 integrity generally.
+
+Successor note: later combined validation proved a separate PostgreSQL
+`CURRENT_ROLE` identifier collision in migration `0021` and its matching ORM
+constraint. The
+[migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+is now the authoritative baseline and recovery procedure for the next
+combined implementation checkpoint. It preserves the exact four-reference
+authority recorded here and does not broaden it.
 
 ## Preserved implementation and recovery state
 
@@ -70,6 +78,12 @@ Earlier recovery evidence remains intact:
 All three stash objects remained present, unchanged, unapplied, and undropped
 during this checkpoint. Neither patch nor either manifest was modified. No
 credential, connection string, or absolute recovery path is recorded here.
+
+Historical note: this section records the most complete recovery state at
+this amendment's own checkpoint. The successor `0021` amendment records the
+newer stash `58ffed44184ea3450a80f5883681da988a196ae7`, its verified recovery
+patch and manifest, and the only authorized procedure for future
+application. All evidence listed here remains intact.
 
 ## Verified environment and failure
 
@@ -546,6 +560,13 @@ After focused PostgreSQL and SQLite gates pass, run all applicable:
 A mandatory PostgreSQL skip is not a pass.
 
 ## Milestone 7.2 restart gate
+
+This list records the gate at commit
+`6bb7e0433fb0982038fe5bc7e7cba5e30f1f3a59`. The successor `0021`
+current-role amendment replaces its implementation-branch and stash-selection
+steps with the newer verified baseline and stash, adds credential rotation,
+quoted-column, ORM-parity, and session-role-independence conditions, and
+retains every trigger-function condition below.
 
 Migration `0026` and Milestone 7.2 remain prohibited until:
 

@@ -231,6 +231,14 @@ equivalent deny-all function. It preserves the existing trigger names,
 update/delete coverage, migration `0017` domain-event guard, and all prior
 amendment boundaries.
 
+The newest combined attempt proved a separate PostgreSQL identifier collision
+in migration `0021`: its textual role check and matching ORM metadata use bare
+`current_role`, which PostgreSQL resolves as session `CURRENT_ROLE`. The
+[migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+selects the same quoted column expression for both definitions. It adds no
+membership, invitation, authority, trigger-function, parser, UUID, runner, or
+Milestone 7.2 scope.
+
 ## Evidence and event boundary
 
 Existing domain events and the transactional outbox remain the only business
@@ -348,9 +356,9 @@ the implementation checkpoints.
 
 The historical next-work statement below records the architecture handoff at
 the time it was written. Checkpoint 7.1 is now complete. The current next
-authorized work is the combined migration `0005`, guarded-runner, `0023`, and
-`0024` compatibility correction governed by the four amendments; checkpoint
-7.2 remains blocked.
+authorized work is the combined migration `0005`, migration `0021` plus its
+matching ORM constraint, guarded-runner, `0023`, and `0024` compatibility
+correction governed by the five amendments; checkpoint 7.2 remains blocked.
 
 The original next authorized work was exactly:
 

@@ -42,6 +42,14 @@ deny-all function. The final combined restart gate now includes exact trigger
 identity, update/delete rejection, rollback, and migration-cycle proof. It
 does not broaden this amendment's `0005` or runner authority.
 
+Later combined validation proved a separate PostgreSQL `CURRENT_ROLE`
+identifier collision in migration `0021` and its matching ORM constraint. The
+[migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
+is the authoritative baseline for the next combined implementation
+checkpoint. It adds only the quoted-column, ORM-parity,
+session-role-independence, and focused-test boundary and does not broaden this
+amendment's `0005` or guarded-runner authority.
+
 ## Verified environment and failure
 
 The failure was reproduced against an isolated local environment:
@@ -302,12 +310,13 @@ met:
 10. no critical or high-severity migration defect remains.
 
 The successor `0023`/`0024` amendment adds mandatory combined correction and
-validation conditions to this gate. Only after both amendments' combined gate
-is fully evidenced may Milestone 7.2 restart from the combined correction
-commit. Neither amendment authorizes migration `0026`, Indexer
-implementation, object storage, quarantine, malware scanning, durable queues,
-deployment, Milestone 8, the governed Librarian, or later product-family
-work.
+validation conditions to this gate. The later UUID-null, trigger-function,
+and `0021` current-role amendments add their separately bounded conditions.
+Only after all five amendments' combined gate is fully evidenced may
+Milestone 7.2 restart from the combined correction commit. No amendment
+authorizes migration `0026`, Indexer implementation, object storage,
+quarantine, malware scanning, durable queues, deployment, Milestone 8, the
+governed Librarian, or later product-family work.
 
 ## Documentation-only confirmation
 
