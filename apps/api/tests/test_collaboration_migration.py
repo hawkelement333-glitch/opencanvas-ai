@@ -9,6 +9,9 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from sqlalchemy import CheckConstraint
+
+from opencanvas_api.db.models import WorkspaceMembershipTransition
 
 COLLABORATION_TABLES = {
     "workspace_memberships",
@@ -21,6 +24,17 @@ COLLABORATION_TABLES = {
     "workspace_authority_versions",
     "collaboration_audit_events",
 }
+COLLABORATION_ROLES = (
+    "owner",
+    "administrator",
+    "editor",
+    "approver",
+    "member",
+    "viewer",
+)
+CURRENT_ROLE_CONSTRAINT = (
+    "\"current_role\" IN ('owner', 'administrator', 'editor', 'approver', 'member', 'viewer')"
+)
 
 
 def _config(database_path: Path) -> Config:
@@ -32,6 +46,159 @@ def _config(database_path: Path) -> Config:
         f"sqlite+aiosqlite:///{database_path.as_posix()}",
     )
     return config
+
+
+def _insert_initial_membership_transition(
+    connection: sqlite3.Connection,
+    *,
+    role: str | None,
+) -> None:
+    owner_id = uuid.uuid4().hex
+    user_id = owner_id if role == "owner" else uuid.uuid4().hex
+    workspace_id = uuid.uuid4().hex
+    membership_id = uuid.uuid4().hex
+    audit_event_id = uuid.uuid4().hex
+    email_scope = uuid.uuid4().hex
+    users = [
+        (
+            owner_id,
+            f"owner-{email_scope}@example.test",
+            f"owner-{email_scope}@example.test",
+            "Owner",
+        )
+    ]
+    if user_id != owner_id:
+        users.append(
+            (
+                user_id,
+                f"member-{email_scope}@example.test",
+                f"member-{email_scope}@example.test",
+                "Member",
+            )
+        )
+    connection.executemany(
+        """INSERT INTO users
+           (id, email, email_normalized, password_hash, display_name, email_verified)
+           VALUES (?, ?, ?, 'test-only', ?, 1)""",
+        users,
+    )
+    connection.execute(
+        "INSERT INTO workspaces (id, owner_id, name) VALUES (?, ?, 'Role workspace')",
+        (workspace_id, owner_id),
+    )
+    connection.execute(
+        """INSERT INTO collaboration_audit_events
+           (audit_event_id, workspace_id, actor_user_id, subject_kind, subject_id,
+            action, outcome, reason_code, metadata_digest, trace_id, recorded_at)
+           VALUES (?, ?, ?, 'workspace_membership', ?, 'membership.seed',
+                   'succeeded', 'constraint_test', ?, ?, CURRENT_TIMESTAMP)""",
+        (
+            audit_event_id,
+            workspace_id,
+            owner_id,
+            membership_id,
+            "0" * 64,
+            uuid.uuid4().hex,
+        ),
+    )
+    connection.execute(
+        """INSERT INTO workspace_memberships
+           (membership_id, user_id, workspace_id, created_by_user_id,
+            collaboration_policy_version, creation_trace_id,
+            creation_audit_event_id, created_at)
+           VALUES (?, ?, ?, ?, 'collaboration-policy-v1', ?, ?, CURRENT_TIMESTAMP)""",
+        (
+            membership_id,
+            user_id,
+            workspace_id,
+            owner_id,
+            uuid.uuid4().hex,
+            audit_event_id,
+        ),
+    )
+    connection.execute(
+        """INSERT INTO workspace_membership_transitions
+           (transition_id, membership_id, user_id, workspace_id, sequence,
+            previous_state, current_state, previous_role, current_role, reason_code,
+            collaboration_policy_version, authority_generation, actor_user_id,
+            trace_id, audit_event_id, recorded_at)
+           VALUES (?, ?, ?, ?, 0, NULL, 'active', NULL, ?, 'constraint_test',
+                   'collaboration-policy-v1', 1, ?, ?, ?, CURRENT_TIMESTAMP)""",
+        (
+            uuid.uuid4().hex,
+            membership_id,
+            user_id,
+            workspace_id,
+            role,
+            owner_id,
+            uuid.uuid4().hex,
+            audit_event_id,
+        ),
+    )
+
+
+def test_collaboration_current_role_constraint_matches_orm_and_registry(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "collaboration-current-role.db"
+    config = _config(database_path)
+    command.upgrade(config, "20260725_0021")
+
+    transition_table = WorkspaceMembershipTransition.__table__
+    current_role_column = transition_table.c.current_role
+    current_role_constraint = next(
+        constraint
+        for constraint in transition_table.constraints
+        if constraint.name == "ck_workspace_membership_transition_role"
+    )
+    assert current_role_column.nullable is False
+    assert current_role_column.type.length == 24
+    assert isinstance(current_role_constraint, CheckConstraint)
+    assert str(current_role_constraint.sqltext) == CURRENT_ROLE_CONSTRAINT
+
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        table_sql = connection.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'workspace_membership_transitions'"
+        ).fetchone()[0]
+        assert CURRENT_ROLE_CONSTRAINT in table_sql
+
+        for role in COLLABORATION_ROLES:
+            _insert_initial_membership_transition(connection, role=role)
+        assert {
+            row[0]
+            for row in connection.execute(
+                "SELECT DISTINCT current_role FROM workspace_membership_transitions"
+            )
+        } == set(COLLABORATION_ROLES)
+
+        for index, invalid_role in enumerate(("", "OWNER", "unknown", None)):
+            tracked_tables = (
+                "users",
+                "workspaces",
+                "collaboration_audit_events",
+                "workspace_memberships",
+                "workspace_membership_transitions",
+            )
+            before = tuple(
+                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in tracked_tables
+            )
+            savepoint = f"invalid_role_{index}"
+            connection.execute(f"SAVEPOINT {savepoint}")
+            with pytest.raises(
+                sqlite3.IntegrityError,
+                match=r"current_role|ck_workspace_membership_transition_role",
+            ):
+                _insert_initial_membership_transition(connection, role=invalid_role)
+            connection.execute(f"ROLLBACK TO {savepoint}")
+            connection.execute(f"RELEASE {savepoint}")
+            after = tuple(
+                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in tracked_tables
+            )
+            assert after == before
 
 
 def test_collaboration_migration_backfills_owner_and_cycles(tmp_path: Path) -> None:

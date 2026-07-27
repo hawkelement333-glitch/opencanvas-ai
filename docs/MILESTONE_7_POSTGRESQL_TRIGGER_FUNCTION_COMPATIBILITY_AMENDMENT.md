@@ -2,8 +2,8 @@
 
 Date: 2026-07-27
 
-Status: documentation amendment complete locally; trigger-function correction
-not implemented; Milestone 7.2 not started
+Status: combined correction implemented and validated locally; implementation
+commit pending; Milestone 7.2 not started
 
 ## Authoritative documentation baseline
 
@@ -25,13 +25,13 @@ is `6bb7e0433fb0982038fe5bc7e7cba5e30f1f3a59`. It was the authoritative
 baseline for the next combined implementation checkpoint at this amendment's
 completion.
 
-This amendment authorizes exactly one additional exceptional historical
-PostgreSQL correction: replace four references to a nonexistent trigger
-function in migrations `20260725_0023` and `20260725_0024` with the existing
-function that implements their required deny-all mutation behavior. It does
-not implement the correction, modify a migration, apply preserved work,
-activate a migration hash, create a later migration, or relax migration
-integrity generally.
+This amendment originally authorized exactly one additional exceptional
+historical PostgreSQL correction: replace four references to a nonexistent
+trigger function in migrations `20260725_0023` and `20260725_0024` with the
+existing function that implements their required deny-all mutation behavior.
+The combined correction is now implemented and validated locally, with its
+implementation commit pending. It does not create a later migration or relax
+migration integrity generally.
 
 Successor note: later combined validation proved a separate PostgreSQL
 `CURRENT_ROLE` identifier collision in migration `0021` and its matching ORM
@@ -49,8 +49,7 @@ the exact four-reference authority recorded here.
 
 ## Preserved implementation and recovery state
 
-The most complete combined implementation attempt remains outside the working
-tree:
+The most complete preserved combined implementation attempt is:
 
 - stash object:
   `d50c7020f9b9ce6add83f10d0b443510ccd33ba3`;
@@ -82,8 +81,10 @@ Earlier recovery evidence remains intact:
   `330c23163a96ba22f16d57710253e4081e93c2b9a9e9bc3f3a5a16ea540c7d11`.
 
 All three stash objects remained present, unchanged, unapplied, and undropped
-during this checkpoint. Neither patch nor either manifest was modified. No
-credential, connection string, or absolute recovery path is recorded here.
+during the original documentation checkpoint. Neither patch nor either
+manifest was modified. They remain recovery evidence while the separately
+reviewed combined implementation is active in the working tree. No credential,
+connection string, or absolute recovery path is recorded here.
 
 Historical note: this section records the most complete recovery state at
 this amendment's own checkpoint. The successor `0021` amendment records the
@@ -271,8 +272,8 @@ SQLite table recreation, and then returns through its SQLite branch.
 
 PostgreSQL already receives `trg_domain_events_mutation_blocked` from
 migration `20260725_0017`. That existing trigger remains bound to its
-table-owned `reject_domain_events_mutation()` function. The future correction
-must not drop, duplicate, or rebind that normal-chain trigger.
+table-owned `reject_domain_events_mutation()` function. The authorized
+correction must not drop, duplicate, or rebind that normal-chain trigger.
 
 The two latent strings are still inside the affected historical helpers and
 must be corrected so no invalid function reference remains. Validation must
@@ -287,7 +288,7 @@ distinguish:
 
 **Resolution A is authorized exclusively.**
 
-The future combined implementation may replace exactly four occurrences of:
+The combined implementation replaces exactly four occurrences of:
 
 `reject_controlled_agent_security_mutation()`
 
@@ -347,9 +348,8 @@ policy.
 
 ## Narrow authorized correction boundary
 
-The future combined implementation may modify only the two affected migration
-files and only the four function-name references listed above under this
-amendment.
+The combined implementation is limited to the two affected migration files
+and the four function-name references listed above under this amendment.
 
 It must preserve:
 
@@ -372,7 +372,7 @@ feature.
 
 ## Explicitly prohibited changes
 
-The future implementation must not:
+The authorized implementation must not:
 
 - define, alias, or retain
   `reject_controlled_agent_security_mutation()`;
@@ -411,10 +411,10 @@ This amendment preserves without broadening:
 - PostgreSQL URL and credential redaction;
 - focused PostgreSQL and SQLite tests required by those corrections.
 
-The next checkpoint restores the most complete stash, reviews every change
-against its own amendment, adds only the four name replacements authorized
-here, and validates all corrections together. This amendment does not approve
-the preserved implementation as complete.
+The combined checkpoint restored the preserved work, reviewed each change
+against its own amendment, and added only the four name replacements
+authorized here. All corrections are now implemented and validated together;
+the preserved stash alone is not completion proof.
 
 ## Migration hash exception policy
 
@@ -423,28 +423,27 @@ The protected pre-correction hashes remain:
 - `0023`: `01c9b28d7b2875a7cfe7041fc846f79d7c672aa5`;
 - `0024`: `fb4e8e264a5a73f2ab543d9cb0fc920ace4fbefb`.
 
-The future combined checkpoint must:
+The preserved pre-trigger combined attempt produced these intermediate,
+non-active hashes:
 
-1. calculate one final active Git blob hash for migration `0023`;
-2. record that its content includes the approved parser, UUID-null, and
-   trigger-reference corrections;
-3. calculate one final active Git blob hash for migration `0024`;
-4. record that its content includes the approved parser and trigger-reference
-   corrections;
-5. preserve both original hashes permanently;
-6. record the exact SHAs of all applicable amendments and the implementation
-   commit;
-7. record the date, reason, exact scope, deployment boundary, and validation
-   evidence;
-8. activate hashes only after every mandatory test passes;
-9. reject parser-only, UUID-only, trigger-only, provisional, or otherwise
-   intermediate active hashes;
-10. keep every unrelated migration hash unchanged; and
-11. make any later unapproved edit fail validation.
+- `0023`: `b1c3b66307805a43386959f511a91dd9fc66d0f8`;
+- `0024`: `1932ac1b9da9e7cc4f6b01badf55fe2c2c308301`.
 
-No hash changes or becomes active in this documentation checkpoint.
+The combined implementation activates:
 
-## Required future PostgreSQL function validation
+- `0005`: `79667acf61794c139b2cc27dcf8f2e0598162a5e`;
+- `0023`: `cb7138d9de806e1546c3853944b1816a98da1d67`;
+- `0024`: `cc29d1280af1a4110ec42b7f0fa782f710dcfeb5`.
+
+The final `0023` content includes the approved parser, UUID-null, and
+trigger-reference corrections. The final `0024` content includes the approved
+parser and trigger-reference corrections. Original and intermediate hashes
+remain permanent evidence but are not active. Validators select only the final
+hashes, keep every unrelated migration hash unchanged, and reject later
+unapproved edits. Final validation evidence is recorded below; the local
+correction commit identity is added by the evidence commit.
+
+## Required final PostgreSQL function validation
 
 Before creating an affected trigger, live PostgreSQL tests must prove:
 
@@ -602,14 +601,37 @@ Migration `0026` and Milestone 7.2 remain prohibited until:
 18. no critical or high-severity migration defect remains; and
 19. migrations `0026`, `0027`, and `0028` remain absent until all gates pass.
 
-Only the final combined correction commit may become the authoritative
-baseline for restarting checkpoint 7.2.
+Only the final clean evidence commit may become the authoritative baseline for
+restarting checkpoint 7.2; its SHA is reported in the final handoff because a
+commit cannot record its own identity.
 
-## Documentation-only confirmation
+## Amendment history and current state
 
-This checkpoint changes documentation only. It does not modify migration
-`0005`, `0023`, or `0024`; production code; tests; dependencies; lockfiles;
-runtime configuration; CI; deployment implementation; or recovery materials.
-No stash was applied, popped, changed, or dropped. No migration hash was
-activated. Migrations `0026`–`0028` remain absent, and Milestone 7.2 remains
+The original amendment checkpoint changed documentation only. The separately
+authorized combined correction is now implemented and validated locally, and
+its final hashes are active. Preserved stashes, patches, manifests, original
+hashes, and intermediate hashes remain evidence rather than active migration
+content. Migrations `0026`–`0028` remain absent, and Milestone 7.2 remains
 unstarted.
+
+## Combined correction validation record
+
+- trigger authorization SHA:
+  `6bb7e0433fb0982038fe5bc7e7cba5e30f1f3a59`;
+- final active `0023` hash:
+  `cb7138d9de806e1546c3853944b1816a98da1d67`;
+- final active `0024` hash:
+  `cc29d1280af1a4110ec42b7f0fa782f710dcfeb5`;
+- implementation SHA: pending exact local commit.
+
+The final migration bytes contain exactly four approved replacements from
+`reject_controlled_agent_security_mutation()` to the existing
+`reject_controlled_agent_mutation()` function: two in `0023` and two in
+`0024`. PostgreSQL catalog checks prove the obsolete function is absent, the
+established function is used, all thirteen protected tables reject update and
+delete, valid insert remains possible, rollback preserves exact rows, and the
+normal domain-events trigger retains its original function. The same database
+catalog and mutation behavior survives a PostgreSQL service restart.
+
+No duplicate function, migration `0007` change, weakened trigger, production
+deployment, or later milestone is authorized.

@@ -2,8 +2,8 @@
 
 Date: 2026-07-26
 
-Status: documentation amendment complete locally; implementation not started;
-Milestone 7.2 not started
+Status: combined correction implemented and validated locally; implementation
+commit pending; Milestone 7.2 not started
 
 ## Authoritative documentation baseline
 
@@ -59,17 +59,17 @@ is preserved outside the working tree:
   `f165bdd10df4cb95112985396c8ea143c609bf883596ffecd04ae9f9cb9c6f46`.
 
 Both stash objects remained present, unchanged, unapplied, and undropped
-during this documentation checkpoint. A later combined attempt added the
-authorized UUID typing and tests, then stopped at the trigger-function defect.
-The most complete recovery source is now stash
+during the original documentation checkpoint. A later combined attempt added
+the authorized UUID typing and tests, then stopped at the trigger-function
+defect. The most complete preserved recovery source is stash
 `d50c7020f9b9ce6add83f10d0b443510ccd33ba3`, with patch SHA-256
 `2e6726045825fa61d0302d2bc5ac59efca3aa1c1143982aea681998e380b2fca`
 and manifest SHA-256
 `a39859f68b50cebf70bd1e35982b29a499d9c7e0e47cfb3c17871a7cc1758ab8`.
 The two earlier stashes, original patch, and original manifest remain
-secondary evidence. The successor trigger-function amendment governs how the
-latest stash may be applied. This amendment does not approve any preserved
-implementation as complete.
+secondary evidence. The active branch now contains the separately reviewed
+combined implementation. The preserved materials remain recovery evidence,
+not active content or completion proof.
 
 Historical note: the statement above records the recovery state at this
 amendment's own checkpoint. The migration `0021` check/ORM amendment records
@@ -200,9 +200,9 @@ The smallest complete exception is therefore explicit UUID typing for the
 twelve identified PostgreSQL source placeholders in the existing historical
 migration.
 
-## Narrowly authorized future correction
+## Narrowly authorized correction
 
-A future combined implementation checkpoint may modify only the PostgreSQL
+The combined implementation is limited to the PostgreSQL
 branch of `_backfill_resources()` in:
 
 `apps/api/alembic/versions/20260725_0023_resource_sharing_ownership_revocation.py`
@@ -236,7 +236,7 @@ The correction must:
 
 ## Explicitly prohibited changes
 
-The future correction must not:
+The authorized correction must not:
 
 - convert a UUID destination to text or alter any destination-column type;
 - invent a UUID, use a zero UUID, or replace an intended null;
@@ -283,8 +283,8 @@ had to:
 5. add only the UUID-null typing and focused tests newly authorized here;
 6. keep the original recovery stash and patch as secondary evidence;
 7. run the complete combined validation matrix;
-8. activate corrected migration hashes only after every mandatory gate
-   passes; and
+8. activate only the final corrected migration hashes, never an intermediate
+   hash, for the mandatory validation matrix; and
 9. commit implementation and final evidence locally without starting
    Milestone 7.2.
 
@@ -298,24 +298,27 @@ The protected pre-correction Git blob hash for migration `0023` remains:
 
 `01c9b28d7b2875a7cfe7041fc846f79d7c672aa5`
 
-The prior parser amendment already authorizes one future corrected active hash
-for `0023`. The final implementation checkpoint must:
+The prior parser amendment authorizes one corrected active hash for `0023`.
+The exception ledger preserves:
 
-1. calculate one final combined Git blob hash for migration `0023`;
-2. preserve the original hash permanently;
-3. record that the final content includes both the approved check-constraint
-   compatibility correction and this approved UUID-null typing correction;
-4. record the exact SHAs of both applicable amendments;
-5. record the implementation SHA, reason, date, authorized scope,
-   production-deployment boundary, and validation evidence;
-6. activate only the final validated combined hash;
-7. avoid competing active hashes for the same final migration;
-8. keep every unrelated migration hash unchanged; and
-9. reject any later unapproved historical edit.
+- original `0023` hash:
+  `01c9b28d7b2875a7cfe7041fc846f79d7c672aa5`;
+- intermediate pre-trigger `0023` hash:
+  `b1c3b66307805a43386959f511a91dd9fc66d0f8`;
+- final active `0023` hash:
+  `cb7138d9de806e1546c3853944b1816a98da1d67`.
 
-No migration hash changes or becomes active in this documentation checkpoint.
+The final content includes the approved check-constraint parser, UUID-null,
+and trigger-reference corrections. The original and intermediate hashes
+remain permanent evidence and are not active. Validators select only the final
+active hash, keep every unrelated migration hash unchanged, and reject later
+unapproved historical edits. The combined ledger also activates `0005`
+`79667acf61794c139b2cc27dcf8f2e0598162a5e` and `0024`
+`cc29d1280af1a4110ec42b7f0fa782f710dcfeb5`. Final validation evidence is
+recorded below; the local correction commit identity is added by the evidence
+commit.
 
-## Required future regression coverage
+## Required final regression coverage
 
 ### PostgreSQL UUID typing
 
@@ -427,10 +430,33 @@ Migration `20260726_0026` and Milestone 7.2 remain prohibited until:
 Only the final combined correction baseline may authorize a later restart of
 checkpoint 7.2.
 
-## Documentation-only confirmation
+## Amendment history and current state
 
-This amendment changes documentation only. It does not modify migration
-`0005`, `0023`, or `0024`; production code; tests; dependencies; lockfiles;
-runtime configuration; CI; deployment implementation; or recovery materials.
-Neither stash was applied. No migration hash was activated. Migrations
+The original amendment checkpoint changed documentation only. The separately
+authorized combined correction is now implemented and validated locally, and
+its final hashes are active. Preserved recovery materials and intermediate
+hashes remain evidence rather than active migration content. Migrations
 `0026`–`0028` remain absent, and Milestone 7.2 remains unstarted.
+
+## Combined correction validation record
+
+- UUID-null authorization SHA:
+  `faa49cad75e7343f0dd7b20aef71ad25c16e318d`;
+- parser authorization SHA:
+  `495664668271214cfd84d905d70b93cb47d6869b`;
+- trigger authorization SHA:
+  `6bb7e0433fb0982038fe5bc7e7cba5e30f1f3a59`;
+- original `0023` hash:
+  `01c9b28d7b2875a7cfe7041fc846f79d7c672aa5`;
+- final active `0023` hash:
+  `cb7138d9de806e1546c3853944b1816a98da1d67`;
+- implementation SHA: pending exact local commit.
+
+Static and live PostgreSQL evidence proves exactly twelve
+`NULL::uuid` placeholders across the approved `4/4/2/2` source-query
+distribution. Real UUIDs remain exact, intended nulls remain null, SQLite
+semantics are unchanged, foreign keys still reject unknown UUIDs, and the
+`0022→0023→0022→0023` cycle preserves the resource and ownership rows.
+
+This record activates no broader UUID or schema rewrite and represents no
+production deployment.

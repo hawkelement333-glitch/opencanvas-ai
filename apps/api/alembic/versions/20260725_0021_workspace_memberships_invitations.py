@@ -400,7 +400,8 @@ def upgrade() -> None:
             name="ck_workspace_membership_transition_previous_state",
         ),
         sa.CheckConstraint(
-            "current_role IN ('owner', 'administrator', 'editor', 'approver', 'member', 'viewer')",
+            '"current_role" IN '
+            "('owner', 'administrator', 'editor', 'approver', 'member', 'viewer')",
             name="ck_workspace_membership_transition_role",
         ),
         sa.CheckConstraint(
@@ -936,7 +937,7 @@ def _backfill_owner_memberships() -> None:
             sa.text(
                 "INSERT INTO workspace_membership_transitions "
                 "(transition_id, membership_id, user_id, workspace_id, sequence, "
-                "previous_state, current_state, previous_role, current_role, reason_code, "
+                'previous_state, current_state, previous_role, "current_role", reason_code, '
                 "collaboration_policy_version, authority_generation, actor_user_id, trace_id, "
                 "audit_event_id, recorded_at) "
                 "VALUES (:transition_id, :membership_id, :owner_id, :workspace_id, 0, NULL, "

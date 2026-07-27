@@ -21,6 +21,11 @@ _FORBIDDEN_DATABASE = re.compile(
 _LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
+class _RedactedPostgresTestUrl(str):
+    def __repr__(self) -> str:
+        return "<redacted PostgreSQL test URL>"
+
+
 def validate_postgres_test_url(raw_url: str, *, ci: bool = False) -> URL:
     try:
         url = make_url(raw_url)
@@ -39,7 +44,7 @@ def validate_postgres_test_url(raw_url: str, *, ci: bool = False) -> URL:
     return url
 
 
-def disposable_postgres_database() -> Iterator[str]:
+def disposable_postgres_database(*, upgrade_to: str | None = "head") -> Iterator[str]:
     raw_url = os.getenv(TEST_URL_ENV)
     if raw_url is None:
         pytest.skip(
@@ -53,18 +58,27 @@ def disposable_postgres_database() -> Iterator[str]:
     database_url = admin_url.set(database=database_name)
     try:
         asyncio.run(_create_database(admin_url, database_name))
-    except Exception as exc:
-        pytest.fail(f"PostgreSQL validation unavailable: {exc}", pytrace=False)
+    except Exception:
+        pytest.fail(
+            "PostgreSQL validation unavailable; inspect protected diagnostics", pytrace=False
+        )
 
     api_directory = Path(__file__).resolve().parents[1]
     config = Config(api_directory / "alembic.ini")
     config.set_main_option("script_location", str(api_directory / "alembic"))
     config.set_main_option("sqlalchemy.url", database_url.render_as_string(hide_password=False))
     try:
-        command.upgrade(config, "head")
-        yield database_url.render_as_string(hide_password=False)
+        if upgrade_to is not None:
+            command.upgrade(config, upgrade_to)
+        yield _RedactedPostgresTestUrl(database_url.render_as_string(hide_password=False))
     finally:
-        asyncio.run(_drop_database(admin_url, database_name))
+        try:
+            asyncio.run(_drop_database(admin_url, database_name))
+        except Exception:
+            pytest.fail(
+                "Disposable PostgreSQL database cleanup failed; inspect protected diagnostics",
+                pytrace=False,
+            )
 
 
 async def _create_database(admin_url: URL, database_name: str) -> None:
@@ -76,16 +90,32 @@ async def _create_database(admin_url: URL, database_name: str) -> None:
 
 
 async def _drop_database(admin_url: URL, database_name: str) -> None:
-    connection = await asyncpg.connect(_asyncpg_dsn(admin_url))
-    try:
-        await connection.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = $1 AND pid <> pg_backend_pid()",
-            database_name,
-        )
-        await connection.execute(f'DROP DATABASE IF EXISTS "{database_name}"')
-    finally:
-        await connection.close()
+    for attempt in range(20):
+        try:
+            connection = await asyncpg.connect(_asyncpg_dsn(admin_url))
+            try:
+                await connection.execute(
+                    "SELECT pg_terminate_backend(activity.pid) "
+                    "FROM pg_stat_activity AS activity "
+                    "LEFT JOIN pg_roles AS role ON role.rolname = activity.usename "
+                    "WHERE activity.datname = $1 "
+                    "AND activity.pid <> pg_backend_pid() "
+                    "AND COALESCE(role.rolsuper, FALSE) = FALSE",
+                    database_name,
+                )
+                await connection.execute(f'DROP DATABASE IF EXISTS "{database_name}"')
+                return
+            finally:
+                await connection.close()
+        except (
+            asyncpg.CannotConnectNowError,
+            asyncpg.ObjectInUseError,
+            asyncpg.PostgresConnectionError,
+            OSError,
+        ):
+            if attempt == 19:
+                raise
+            await asyncio.sleep(0.25)
 
 
 def _asyncpg_dsn(url: URL) -> str:

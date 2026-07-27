@@ -2,8 +2,9 @@
 
 Date: 2026-07-26
 
-Status: complete locally; managed-provider runtime validation not performed;
-checkpoint 7.2 not started
+Status: complete locally; combined historical PostgreSQL correction validated
+locally; managed-provider runtime validation not performed; checkpoint 7.2
+not started
 
 Post-handoff compatibility note: a later isolated local PostgreSQL 17.10 and
 pgvector 0.8.5 run proved that clean migration fails at historical revision
@@ -56,6 +57,28 @@ With that candidate correction present, a still later run reached
 authorizes quoting exactly that one additional identifier and exact
 owner-backfill proof. It does not revise the original 7.1 ledger or start
 checkpoint 7.2.
+
+## Post-handoff correction closure
+
+The later combined compatibility checkpoint completed all six amendments on
+branch `milestone-7-postgresql-historical-migrations-complete-local` without
+creating migration `0026` or starting checkpoint 7.2.
+
+Final active hashes are:
+
+- `0005`: `79667acf61794c139b2cc27dcf8f2e0598162a5e`;
+- `0021`: `43939e1652e052bbeb3b3de8fd20e052443273d3`;
+- `0023`: `cb7138d9de806e1546c3853944b1816a98da1d67`;
+- `0024`: `cc29d1280af1a4110ec42b7f0fa782f710dcfeb5`.
+
+PostgreSQL 17.10 with pgvector 0.8.5 reached sole head
+`20260725_0025` from empty schema. All required downgrade/re-upgrade cycles,
+identifier safety, `0021` owner backfill and session-role independence,
+closed registries, UUID/null typing, thirteen protected triggers, mutation
+rollback, advisory-lock cleanup, full backend regression, and SQLite
+validation passed. The final evidence commit records the implementation SHA;
+its own SHA is necessarily reported in the final handoff. The original 7.1
+validation ledger below remains historical evidence.
 
 ## Implemented boundary
 
@@ -190,10 +213,6 @@ shared rate limits, observability rollout, recovery exercises, or load tests.
 Milestone 7.2 remains unstarted. Its planned migration
 `20260726_0026` remains absent.
 
-Milestone 7.2 must not restart until the migration `0005`, migration `0021`
-plus matching ORM metadata, guarded-runner, `0023`, and `0024` compatibility
-corrections; exact `0021` role/owner/session/parity proof; exact
-quoted raw owner-backfill target identity and backfill value/count/scope/
-atomicity proof; closed-registry and cross-migration proof; exact `0023` UUID/null
-resource-backfill proof; live PostgreSQL and SQLite migration cycles;
-migration hash exception ledger; and required regressions all pass.
+The combined compatibility gate described above has passed locally.
+Milestone 7.2 remains unstarted in this run and may restart only from the
+final evidence SHA after the implementation commit is frozen.

@@ -57,6 +57,8 @@ def _drop_check(table: str, name: str) -> None:
 
 
 def upgrade() -> None:
+    sqlite = op.get_bind().dialect.name == "sqlite"
+
     op.create_table(
         "users",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -138,7 +140,7 @@ def upgrade() -> None:
     op.add_column("workspaces", sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True))
     workspace = sa.table("workspaces", sa.column("owner_id", sa.Uuid()))
     op.execute(sa.update(workspace).values(owner_id=SYSTEM_USER_ID))
-    with op.batch_alter_table("workspaces", recreate="always") as batch:
+    with op.batch_alter_table("workspaces", recreate="always" if sqlite else "auto") as batch:
         batch.alter_column("owner_id", existing_type=sa.Uuid(), nullable=False)
         batch.create_foreign_key(
             "fk_workspaces_owner_id_users", "users", ["owner_id"], ["id"], ondelete="CASCADE"
@@ -151,7 +153,7 @@ def upgrade() -> None:
             "(SELECT workspaces.id FROM workspaces WHERE workspaces.legacy_canvas_id = canvases.id)"
         )
     )
-    with op.batch_alter_table("canvases", recreate="always") as batch:
+    with op.batch_alter_table("canvases", recreate="always" if sqlite else "auto") as batch:
         batch.alter_column("workspace_id", existing_type=sa.Uuid(), nullable=False)
         batch.create_foreign_key(
             "fk_canvases_workspace_id_workspaces",
@@ -202,7 +204,7 @@ def upgrade() -> None:
             "(SELECT canvases.workspace_id FROM canvases WHERE canvases.id = ai_requests.canvas_id)"
         )
     )
-    with op.batch_alter_table("ai_requests", recreate="always") as batch:
+    with op.batch_alter_table("ai_requests", recreate="always" if sqlite else "auto") as batch:
         batch.alter_column("user_id", existing_type=sa.Uuid(), nullable=False)
         batch.alter_column("trace_id", existing_type=sa.Uuid(), nullable=False)
         batch.alter_column("workspace_id", existing_type=sa.Uuid(), nullable=False)
@@ -293,7 +295,7 @@ def upgrade() -> None:
             "JOIN document_files ON document_files.document_id = documents.id"
         )
     )
-    with op.batch_alter_table("document_files", recreate="always") as batch:
+    with op.batch_alter_table("document_files", recreate="always" if sqlite else "auto") as batch:
         batch.alter_column(
             "storage_key", existing_type=sa.String(length=255), type_=sa.String(length=512)
         )
@@ -343,7 +345,9 @@ def upgrade() -> None:
         "'embedding', 'indexing', 'ready', 'retrying', 'retryable_failure', "
         "'permanent_failure', 'cancelled', 'failed')",
     )
-    with op.batch_alter_table("document_processing_jobs", recreate="always") as batch:
+    with op.batch_alter_table(
+        "document_processing_jobs", recreate="always" if sqlite else "auto"
+    ) as batch:
         batch.alter_column("user_id", existing_type=sa.Uuid(), nullable=False)
         batch.alter_column("workspace_id", existing_type=sa.Uuid(), nullable=False)
         batch.alter_column("idempotency_key", existing_type=sa.String(length=160), nullable=False)

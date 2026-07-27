@@ -2,8 +2,9 @@
 
 Date: 2026-07-26
 
-Status: approved architecture plan; checkpoint 7.1 complete locally;
-checkpoint 7.2 not started
+Status: approved architecture plan; checkpoint 7.1 complete locally; combined
+PostgreSQL historical-migration correction implemented and validated locally;
+implementation commit pending; checkpoint 7.2 not started
 
 Compatibility gates:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -12,24 +13,33 @@ Compatibility gates:
 [`MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md).
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md).
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md).
-Before checkpoint 7.2 or migration `0026` may begin, one combined focused
-checkpoint must correct the proved PostgreSQL defects in historical revisions
-`20260718_0005`, `20260725_0021`, `20260725_0023`, and
-`20260725_0024`; correct the matching `WorkspaceMembershipTransition` ORM
-metadata; preserve the original migration error during advisory-lock cleanup;
-update the migration exception hash ledger; and pass the complete combined
-PostgreSQL 17 and SQLite migration matrix. The `0021` correction uses the
-same explicitly quoted `"current_role"` textual check in migration and ORM
-metadata and proves exact roles, initial owner creation, session-role
-independence, and schema parity. Its raw owner-backfill transition `INSERT`
-must also quote exactly the same target-column identifier while preserving all
-source rows, values, counts, scope, and history. The `0023` correction includes both exact
-check-registry recovery and explicit UUID typing for every null placeholder
-in its PostgreSQL `_backfill_resources()` derived table. The `0023` and
-`0024` corrections also replace exactly four undefined trigger-function
-references with the already-existing equivalent deny-all function and prove
-all thirteen reachable update/delete guards. Preserved combined work is not
-active.
+The combined focused checkpoint corrected the proved PostgreSQL defects in
+historical revisions `20260718_0005`, `20260725_0021`,
+`20260725_0023`, and `20260725_0024`; corrected matching
+`WorkspaceMembershipTransition` ORM metadata; preserved the original
+migration error during advisory-lock cleanup; activated the reviewed migration
+hashes; and passed the complete PostgreSQL 17 and SQLite migration matrix.
+The `0021` migration and ORM use the same explicitly quoted
+`"current_role"` check, and the owner-backfill transition `INSERT` quotes the
+same target identifier while preserving values, counts, scope, deterministic
+identities, history, and within-run timestamps. The `0023` correction includes
+closed-registry parsing and all twelve typed UUID-null placeholders. The
+`0023` and `0024` corrections replace exactly four undefined function
+references with the established deny-all function and preserve all thirteen
+update/delete guards.
+
+Final active migration hashes:
+
+- `0005`: `79667acf61794c139b2cc27dcf8f2e0598162a5e`;
+- `0021`: `43939e1652e052bbeb3b3de8fd20e052443273d3`;
+- `0023`: `cb7138d9de806e1546c3853944b1816a98da1d67`;
+- `0024`: `cc29d1280af1a4110ec42b7f0fa782f710dcfeb5`.
+
+Every other migration hash remains unchanged. Migration `0026` is absent and
+checkpoint 7.2 has not started. The evidence commit records the frozen
+implementation SHA. The final clean evidence commit, whose own SHA is reported
+in the final handoff, is the authoritative baseline from which 7.2 may later
+restart.
 
 Architecture:
 [`MILESTONE_7_ARCHITECTURE.md`](MILESTONE_7_ARCHITECTURE.md)

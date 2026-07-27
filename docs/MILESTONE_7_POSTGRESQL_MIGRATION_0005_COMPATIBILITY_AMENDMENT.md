@@ -2,8 +2,8 @@
 
 Date: 2026-07-26
 
-Status: documentation amendment complete locally; focused correction not
-implemented; Milestone 7.2 not started
+Status: combined correction implemented and validated locally; implementation
+commit pending; Milestone 7.2 not started
 
 Authoritative correction baseline:
 
@@ -20,9 +20,26 @@ Authoritative correction baseline:
   `ac5bf41ae5cfefa785006c7eef2a730233e46da9`;
 - planned `20260726_0026`: absent.
 
-This amendment authorizes a focused correction checkpoint. It does not
-implement the correction, change a migration, change production code, or
-relax migration integrity generally.
+This amendment originally authorized a focused correction checkpoint without
+implementing the correction. The separately authorized combined correction is
+now implemented and validated locally. Migration integrity remains
+deny-by-default outside the exact recorded exception.
+
+## Combined implementation state
+
+The combined correction is present in the active working tree. Its final
+active migration hashes are:
+
+- `0005`: `79667acf61794c139b2cc27dcf8f2e0598162a5e`;
+- `0021`: `43939e1652e052bbeb3b3de8fd20e052443273d3`;
+- `0023`: `cb7138d9de806e1546c3853944b1816a98da1d67`;
+- `0024`: `cc29d1280af1a4110ec42b7f0fa782f710dcfeb5`.
+
+The original and provisional hashes remain permanent evidence; activating the
+final hashes does not erase or relabel that history. Functional validation is
+complete; the implementation and evidence commit identities remain to be
+recorded. Migration `20260726_0026` is absent, and Milestone 7.2 remains
+unstarted.
 
 Successor compatibility amendment:
 [`MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md).
@@ -199,22 +216,23 @@ No unrelated runtime refactor is authorized.
 Migration immutability remains the default and this exception does not
 authorize later discretionary edits.
 
-The focused correction must:
+The exception ledger preserves:
 
-1. preserve the pre-correction `0005` blob hash
-   `ac5bf41ae5cfefa785006c7eef2a730233e46da9` in this exception ledger;
-2. record the post-correction Git blob hash after implementation;
-3. record the correction date, approval boundary, baseline commit, correction
-   commit, reason, and validation evidence;
-4. update migration-integrity validators to accept only the new approved
-   `0005` hash;
-5. keep every other migration hash unchanged;
-6. make any subsequent unapproved `0005` change fail validation;
-7. state explicitly in production-readiness handoffs that `0005` received
-   this approved compatibility correction.
+- original `0005` hash:
+  `ac5bf41ae5cfefa785006c7eef2a730233e46da9`;
+- provisional uncommitted `0005` hash:
+  `79667acf61794c139b2cc27dcf8f2e0598162a5e`;
+- final active `0005` hash:
+  `79667acf61794c139b2cc27dcf8f2e0598162a5e`.
 
-The old hash must not be erased or represented as the active hash after the
-correction.
+The provisional and final `0005` hashes match because the selected migration
+bytes did not change after the provisional implementation; their evidence
+status did change. The original hash remains historical evidence and is not
+active. Migration-integrity validation selects only the final active hash and
+must continue to reject any later unapproved edit. The final validation record
+must retain the correction date, approval boundary, reason, scope, and
+validation evidence without inventing a commit identity before the checkpoint
+is committed.
 
 ## Existing-database boundary
 
@@ -324,9 +342,30 @@ authorizes migration `0026`, Indexer implementation, object storage,
 quarantine, malware scanning, durable queues, deployment, Milestone 8, the
 governed Librarian, or later product-family work.
 
-## Documentation-only confirmation
+## Amendment history and current state
 
-This amendment changes documentation only. It does not modify migration
-`0005`, the guarded runner, tests, dependencies, lockfiles, configuration, CI,
-deployment artifacts, or any production feature. Migration `0026` remains
-absent and Milestone 7.2 remains unstarted.
+The original amendment checkpoint changed documentation only. The separately
+authorized combined correction has now modified and validated the bounded
+migration, runner, validator, and focused-test files. Its implementation commit
+identity is recorded by the evidence commit after code is frozen. Migration
+`0026` remains absent, and Milestone 7.2 remains unstarted.
+
+## Combined correction validation record
+
+- authorization SHA: `73033862836c45104173ade30cac2bd70cfe181e`;
+- original hash: `ac5bf41ae5cfefa785006c7eef2a730233e46da9`;
+- final active hash: `79667acf61794c139b2cc27dcf8f2e0598162a5e`;
+- implementation SHA: pending exact local commit;
+- branch: `milestone-7-postgresql-historical-migrations-complete-local`.
+
+The validated correction limits SQLite table recreation to SQLite and uses
+PostgreSQL in-place operations for exactly five `0005` upgrade batch
+operations. The `0004→0005→0004→0005` live PostgreSQL cycle preserves seeded
+workspace identity, data, keys, indexes, and constraints. The guarded runner
+rolls back before cleanup, preserves the original error, treats cleanup errors
+as secondary, releases advisory locks, closes transactions and connections,
+and redacts test URLs. No `CASCADE`, stamp, skip, or new migration is used.
+
+This historical correction is validated only for the repository migration
+chain and disposable local PostgreSQL environment. It does not represent a
+production deployment or authorize Milestone 7.2 implementation.

@@ -2,11 +2,10 @@
 
 Date: 2026-07-27
 
-Overall status: architecture and checkpoint 7.1 complete locally; PostgreSQL
-migration compatibility amendments for `0005`, `0021`, `0023`, and `0024`,
-including the `0021` migration/ORM check and raw owner-backfill current-role,
-`0023` UUID-null, and `0023`/`0024` trigger-function boundaries, recorded;
-combined focused correction pending; checkpoint 7.2 not started
+Overall status: architecture and checkpoint 7.1 complete locally; combined
+PostgreSQL historical-migration correction for `0005`, `0021`, `0023`, and
+`0024` implemented and validated locally; implementation commit pending;
+checkpoint 7.2 not started
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -70,8 +69,9 @@ reject a valid initial owner transition. With that candidate correction
 present, the newest run reached `_backfill_owner_memberships()` and proved a
 second, independent migration `0021` failure: the raw transition `INSERT`
 target list leaves `current_role` bare and PostgreSQL rejects the syntax. The
-most complete combined work remains inactive outside the working tree in stash
-`9196c8d9f68c1af6251530f349fdf72638b57b82`.
+most complete combined work was restored from stash
+`9196c8d9f68c1af6251530f349fdf72638b57b82` with `git stash apply`; the
+stash remains present and undropped.
 
 The six documentation amendments authorize one combined, separately
 implemented, hash-ledgered correction checkpoint for migration `0005`,
@@ -81,12 +81,58 @@ identical explicitly quoted role checks, one quoted raw transition-target
 identifier, and focused role, owner-backfill, session-independence, atomicity,
 SQLite-equivalence, and parity tests. UUID-null authority is limited to `0023`'s PostgreSQL resource
 backfill. Trigger-function authority is limited to four exact references in
-`0023` and `0024`. Migration `0026` and checkpoint 7.2 remain blocked until
-the complete clean and focused PostgreSQL and SQLite migration cycles,
-cross-migration registry, UUID-backfill, trigger identity, mutation-blocking,
-lock cleanup, original-error preservation, and all required regressions pass.
-No implementation, migration, or production-code change is part of these
-amendments.
+`0023` and `0024`. The combined implementation has now passed the complete
+clean and focused PostgreSQL and SQLite migration cycles, cross-migration
+registry, UUID-backfill, trigger identity, mutation-blocking, lock cleanup,
+original-error preservation, and required regressions. Migration `0026`
+remains absent and checkpoint 7.2 remains unstarted.
+
+## Combined PostgreSQL correction closure
+
+The local implementation branch is
+`milestone-7-postgresql-historical-migrations-complete-local`.
+
+Active migration hashes:
+
+- `0005`: `79667acf61794c139b2cc27dcf8f2e0598162a5e`;
+- `0021`: `43939e1652e052bbeb3b3de8fd20e052443273d3`;
+- `0023`: `cb7138d9de806e1546c3853944b1816a98da1d67`;
+- `0024`: `cc29d1280af1a4110ec42b7f0fa782f710dcfeb5`.
+
+The original hashes and inactive candidates remain permanent evidence. The
+validator accepts only the active hashes, preserves all 21 unrelated hashes,
+and enforces PostgreSQL-sensitive identifier safety for migration raw SQL and
+textual ORM constraints.
+
+Validated evidence includes:
+
+- all six required PostgreSQL downgrade/re-upgrade cycles and a clean empty
+  schema through `20260725_0025`;
+- PostgreSQL marker suite: 11 passed, 0 failed, 0 skipped, including the
+  service-restart case;
+- complete backend suite: 623 passed, 0 failed, 0 skipped, 61 known
+  deprecation warnings;
+- identifier guard: 31 passed with no failures, skips, or warnings;
+- focused `0021` and ORM suite: 3 passed with 10 known SQLite datetime
+  warnings;
+- focused parser and UUID suite: 41 passed;
+- focused trigger and mutation suite: 2 passed;
+- focused SQLite migration suites: 9 passed;
+- focused runner and locking suites: 14 passed;
+- integration suite: 22 passed with one known Starlette deprecation warning;
+- security suite: 38 passed with no warnings;
+- frontend unit tests: 74 passed; strict frontend typecheck, lint, Prettier,
+  production build, and browser smoke passed;
+- strict backend typing, Ruff, compilation, imports, SQLAlchemy mapper
+  configuration, migration validation, deterministic demo validation,
+  repository hygiene, and static scope/secret/prohibited checks passed.
+
+Implementation SHA: pending exact local commit.
+
+Evidence SHA: pending exact local commit.
+
+No remote operation, deployment, publication, or Milestone 7.2 implementation
+is part of this correction checkpoint.
 
 ## Baseline
 
@@ -125,6 +171,7 @@ amendments.
 | Test and runbook strategy                          | Complete    |
 | Milestone 8 entry criteria                         | Complete    |
 | 7.1 production runtime implementation              | Complete    |
+| Combined PostgreSQL compatibility correction       | Complete    |
 | 7.2–7.8 implementation                             | Not started |
 | Live infrastructure/provisioning/deployment        | Not started |
 
@@ -235,10 +282,11 @@ Local deterministic substitutes remain available for demo and tests.
 
 The production architecture remains resolved. The proved historical
 PostgreSQL migration compatibility defects are governed by the six focused
-correction amendments and block checkpoint 7.2 until their combined
-validation gate passes. The following operating values remain intentionally
-determined from approved managed staging evidence during the owning
-checkpoint:
+correction amendments, and their combined validation gate has passed locally.
+Checkpoint 7.2 remains unstarted in this run while the implementation and
+evidence commits establish its clean authoritative restart baseline. The
+following operating values remain intentionally determined from approved
+managed staging evidence during the owning checkpoint:
 
 - exact provider/vendor selection;
 - connection, worker, queue, upload, parser, token, concurrency, and cost
@@ -279,11 +327,7 @@ production-readiness defect.
 
 ## Next authorized work
 
-The combined PostgreSQL migration `0005`, migration `0021` plus matching ORM
-metadata, guarded-runner, `0023`, and `0024` correction checkpoint, including
-the narrowly authorized quoted `0021` role check and one quoted raw
-owner-backfill target identifier, `0023` UUID-null typing, and four
-`0023`/`0024` trigger-function reference replacements, is the only next
-authorized implementation work.
 Checkpoint 7.2 — Deterministic Indexer and Ingestion Pipeline — remains
-unstarted and may restart only after the combined compatibility gate passes.
+unstarted. It may restart only from the final evidence SHA recorded after the
+combined correction implementation is frozen. This document does not start
+7.2 or authorize migration `0026` in the current run.

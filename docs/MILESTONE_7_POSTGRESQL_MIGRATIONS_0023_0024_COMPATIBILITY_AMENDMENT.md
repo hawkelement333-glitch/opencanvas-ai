@@ -2,8 +2,8 @@
 
 Date: 2026-07-26
 
-Status: documentation amendment complete locally; implementation not started;
-Milestone 7.2 not started
+Status: combined correction implemented and validated locally; implementation
+commit pending; Milestone 7.2 not started
 
 Authoritative amendment baseline:
 
@@ -18,13 +18,13 @@ Authoritative amendment baseline:
 
 The local commit with message
 `Authorize PostgreSQL compatibility corrections for migrations 0023 and 0024`
-is the authoritative baseline for the future combined implementation
+is the authoritative authorization baseline for the combined implementation
 checkpoint. Its exact SHA is recorded in the amendment handoff.
 
-This amendment authorizes two additional, exceptional historical-migration
-compatibility corrections. It does not implement either correction, apply
-preserved provisional work, activate a corrected migration hash, create a
-later revision, or generally relax migration immutability.
+This amendment originally authorized two additional, exceptional
+historical-migration compatibility corrections without implementing them. The
+combined correction is now implemented and validated locally. It does not
+create a later revision or generally relax migration immutability.
 
 Subsequent live PostgreSQL 17 implementation validation proved a separate
 derived-table UUID-null type-resolution defect in `0023`'s
@@ -33,7 +33,7 @@ authority. The
 [migration 0023 UUID-null compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md)
 authorizes only explicit UUID typing for the identified PostgreSQL null
 placeholders and focused tests. Both amendments remain independently bounded
-and apply to one future combined implementation and final `0023` hash.
+and apply to the one combined implementation and final `0023` hash.
 
 After the UUID-null correction allowed live PostgreSQL validation to reach
 append-only trigger installation, `0023` failed because its `_protect()`
@@ -78,11 +78,12 @@ an external recovery patch and manifest. The authoritative stash object is
 `f165bdd10df4cb95112985396c8ea143c609bf883596ffecd04ae9f9cb9c6f46`.
 No absolute local recovery path belongs in the repository.
 
-The stash remained unapplied, unchanged, and undropped during this
-documentation checkpoint. This amendment does not approve the provisional
-implementation as complete. A later combined implementation checkpoint may
-reapply it and complete the separately bounded `0005`, runner, `0023`, and
-`0024` corrections only after this amendment is committed.
+The stash remained unapplied, unchanged, and undropped during the original
+documentation checkpoint. It remains recovery evidence, not active
+implementation or completion proof. The active branch now contains the
+separately reviewed combined `0005`, runner, `0023`, and `0024` corrections;
+their final local validation has passed, with the implementation commit
+pending.
 
 ## Verified environment and affected set
 
@@ -175,8 +176,8 @@ kinds, 26 request operations, 12 request result kinds, and 11 audit subject
 kinds.
 
 The immutable predecessor registries and the exact deltas above, rather than
-parser output order or counts alone, define the allowed-value contract. A
-future test must compare the complete sets.
+parser output order or counts alone, define the allowed-value contract. Final
+validation must compare the complete sets.
 
 ## Verified dialect representations and parser defect
 
@@ -229,9 +230,9 @@ divergent histories, ambiguous release artifacts, and incompatible downgrade
 semantics. The smallest complete exception is therefore one transparent,
 hash-ledgered compatibility correction in each of the two affected files.
 
-## Narrowly authorized future corrections
+## Narrowly authorized corrections
 
-The future combined implementation checkpoint may modify exactly:
+The combined implementation is limited to exactly:
 
 - `apps/api/alembic/versions/20260725_0023_resource_sharing_ownership_revocation.py`;
 - `apps/api/alembic/versions/20260725_0024_comments_collaboration_activity.py`.
@@ -293,21 +294,29 @@ preserves these pre-correction Git blob hashes:
 - `0024`: `fb4e8e264a5a73f2ab543d9cb0fc920ace4fbefb`.
 
 The provisional uncommitted `0005` hash
-`79667acf61794c139b2cc27dcf8f2e0598162a5e` remains provisional evidence, not
-an active hash.
+`79667acf61794c139b2cc27dcf8f2e0598162a5e` remains provisional evidence. Its
+bytes are also the selected final `0005` content, but the provisional
+designation remains part of the permanent history.
 
-The combined implementation checkpoint must calculate final corrected hashes,
-record old and new hashes separately by revision, record the amendment and
-implementation SHAs, reason, date, scope, production-deployment boundary, and
-validation evidence, and activate only the final validated hashes. Validators
-must then accept only those active hashes. Every unrelated migration hash must
-remain unchanged, and any later unapproved edit must fail validation. No
-handoff may claim that a corrected migration remained historically untouched.
-For `0023`, the final combined hash must also record the separately approved
-UUID-null amendment SHA and trigger-function amendment SHA. For `0024`, it
-must record the trigger-function amendment SHA in addition to this parser
-amendment. Competing active hashes for parser-only, UUID-typing-only, or
-trigger-only intermediate content are prohibited.
+The preserved pre-trigger combined attempt produced these intermediate,
+non-active hashes:
+
+- `0023`: `b1c3b66307805a43386959f511a91dd9fc66d0f8`;
+- `0024`: `1932ac1b9da9e7cc4f6b01badf55fe2c2c308301`.
+
+The combined implementation activates only these final hashes:
+
+- `0005`: `79667acf61794c139b2cc27dcf8f2e0598162a5e`;
+- `0023`: `cb7138d9de806e1546c3853944b1816a98da1d67`;
+- `0024`: `cc29d1280af1a4110ec42b7f0fa782f710dcfeb5`.
+
+The final `0023` content includes the approved parser, UUID-null, and
+trigger-reference corrections. The final `0024` content includes the approved
+parser and trigger-reference corrections. Original and intermediate hashes
+remain evidence but are not active. Validators select only the final hashes;
+every unrelated migration hash must remain unchanged, and any later
+unapproved edit must fail validation. Final test evidence is recorded below;
+the local correction commit identity is added by the evidence commit.
 
 ## Required combined validation
 
@@ -395,22 +404,50 @@ Migration `20260726_0026` and Milestone 7.2 remain prohibited until:
 12. no critical or high-severity migration defect remains; and
 13. migrations `0026`, `0027`, and `0028` remain absent until this gate passes.
 
-The successor UUID-null amendment adds explicit `0023` resource-backfill
-typing and focused regression conditions to this gate. Milestone 7.2 remains
-blocked until the combined implementation satisfies it, the later
-trigger-function and two `0021` current-role amendments, and all six
-amendments' shared gate.
+The successor UUID-null amendment added explicit `0023` resource-backfill
+typing and focused regression conditions to this gate. The later
+trigger-function and two `0021` current-role amendments completed the six
+amendments' shared gate, which has now passed locally.
 
-Only that combined implementation commit may become the authoritative baseline
-for restarting Milestone 7.2. This amendment does not authorize Indexer
-persistence, object storage or quarantine, malware scanning, durable queue
-expansion, deployment, Milestone 8, the governed Librarian, or later
+Only the final clean evidence commit may become the authoritative baseline for
+restarting Milestone 7.2; its SHA is reported in the final handoff because a
+commit cannot record its own identity. This amendment does not authorize
+Indexer persistence, object storage or quarantine, malware scanning, durable
+queue expansion, deployment, Milestone 8, the governed Librarian, or later
 product-family work.
 
-## Documentation-only confirmation
+## Amendment history and current state
 
-This amendment changes documentation only. It does not modify migration
-`0005`, `0023`, or `0024`; production code; tests; dependencies; lockfiles;
-configuration; CI; deployment implementation; or preserved recovery
-materials. The stash remains unapplied. No provisional hash is active.
-Migrations `0026`–`0028` remain absent, and Milestone 7.2 remains unstarted.
+The original amendment checkpoint changed documentation only. The separately
+authorized combined correction is now implemented and validated locally, with
+the final hashes above active. Preserved stashes, patches, manifests, original
+hashes, and intermediate hashes remain recovery or historical evidence rather
+than active migration content. Migrations `0026`–`0028` remain absent, and
+Milestone 7.2 remains unstarted.
+
+## Combined correction validation record
+
+- parser authorization SHA:
+  `495664668271214cfd84d905d70b93cb47d6869b`;
+- trigger authorization SHA:
+  `6bb7e0433fb0982038fe5bc7e7cba5e30f1f3a59`;
+- original `0023` hash:
+  `01c9b28d7b2875a7cfe7041fc846f79d7c672aa5`;
+- final active `0023` hash:
+  `cb7138d9de806e1546c3853944b1816a98da1d67`;
+- original `0024` hash:
+  `fb4e8e264a5a73f2ab543d9cb0fc920ace4fbefb`;
+- final active `0024` hash:
+  `cc29d1280af1a4110ec42b7f0fa782f710dcfeb5`;
+- implementation SHA: pending exact local commit.
+
+The final `0023` bytes include the closed parser, twelve typed UUID-null
+placeholders, and two trigger-function corrections. The final `0024` bytes
+include the closed parser and two trigger-function corrections. Live cycles
+proved exact predecessor/successor registries, `0022→0023→0022→0023`,
+`0023→0024→0023→0024`, all thirteen protected triggers, valid inserts,
+rejected updates and deletes, preserved rows, and the unchanged normal
+domain-events trigger.
+
+Original and intermediate hashes remain non-active evidence. No production
+deployment or later milestone is authorized by this record.

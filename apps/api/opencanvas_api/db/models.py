@@ -897,7 +897,8 @@ class WorkspaceMembershipTransition(Base):
             name="ck_workspace_membership_transition_previous_state",
         ),
         CheckConstraint(
-            "current_role IN ('owner', 'administrator', 'editor', 'approver', 'member', 'viewer')",
+            '"current_role" IN '
+            "('owner', 'administrator', 'editor', 'approver', 'member', 'viewer')",
             name="ck_workspace_membership_transition_role",
         ),
         CheckConstraint(

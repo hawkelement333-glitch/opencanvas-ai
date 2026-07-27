@@ -6,6 +6,8 @@ Revises: 20260725_0023
 
 from __future__ import annotations
 
+import hashlib
+import re
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -54,36 +56,379 @@ NEW_TABLES = (
     "collaboration_comment_transitions",
 )
 
+_CLOSED_CHECK_COLUMNS = {
+    "ck_domain_events_type": "event_type",
+    "ck_domain_events_subject_kind": "subject_kind",
+    "ck_collaboration_request_operation": "operation",
+    "ck_collaboration_request_result_kind": "result_kind",
+    "ck_collaboration_audit_subject_kind": "subject_kind",
+}
+_REGISTRIES_BEFORE = {
+    "ck_domain_events_type": (
+        "graph.relationship.created",
+        "graph.relationship.superseded",
+        "graph.relationship.deactivated",
+        "canonical.resource.created",
+        "canonical.resource.updated",
+        "canonical.resource.historical",
+        "controlled.execution.started",
+        "controlled.execution.completed",
+        "controlled.execution.failed",
+        "controlled.execution.canceled",
+        "controlled.effect.committed",
+        "controlled.rollback.committed",
+        "evidence.bundle.requested",
+        "evidence.bundle.generation_started",
+        "evidence.bundle.completed",
+        "evidence.bundle.failed",
+        "evidence.bundle.accessed",
+        "evidence.bundle.export_denied",
+        "citation.rendering.completed",
+        "citation.rendering.failed",
+        "workflow.definition.created",
+        "workflow.version.created",
+        "workflow.version.validated",
+        "workflow.version.activated",
+        "workflow.version.disabled",
+        "workflow.execution.requested",
+        "workflow.execution.planned",
+        "workflow.execution.started",
+        "workflow.execution.awaiting_approval",
+        "workflow.execution.completed",
+        "workflow.execution.failed",
+        "workflow.execution.canceled",
+        "workflow.compensation.started",
+        "workflow.compensation.completed",
+        "workflow.compensation.failed",
+        "workflow.step.started",
+        "workflow.step.completed",
+        "workflow.step.failed",
+        "workflow.step.retry_scheduled",
+        "workflow.step.awaiting_approval",
+        "workflow.approval.requested",
+        "workflow.approval.accepted",
+        "workflow.approval.denied",
+        "agent.identity.created",
+        "agent.version.created",
+        "agent.version.validated",
+        "agent.version.validation_failed",
+        "agent.version.activated",
+        "agent.activation.requested",
+        "agent.activation.approved",
+        "agent.activation.denied",
+        "agent.invocation.started",
+        "agent.proposal.created",
+        "agent.proposal.accepted",
+        "agent.proposal.rejected",
+        "agent.evaluation.recorded",
+        "agent.communication.revision_proposed",
+        "agent.communication.revision_accepted",
+        "agent.communication.revision_rejected",
+        "agent.suspended",
+        "agent.retired",
+        "invitation.created",
+        "invitation.accepted",
+        "invitation.declined",
+        "invitation.expired",
+        "invitation.revoked",
+        "membership.activated",
+        "membership.role_changed",
+        "membership.suspended",
+        "membership.restored",
+        "membership.removed",
+        "approval_authority.assigned",
+        "approval_authority.replaced",
+        "approval_authority.revoked",
+        "resource.share.created",
+        "resource.share.changed",
+        "resource.share.revoked",
+        "resource.share.expired",
+        "resource.visibility.changed",
+        "resource.ownership_changed",
+        "ownership_transfer.requested",
+        "ownership_transfer.accepted",
+        "ownership_transfer.rejected",
+        "ownership_transfer.canceled",
+        "revocation.bulk_completed",
+    ),
+    "ck_domain_events_subject_kind": (
+        "canonical_resource",
+        "graph_relationship",
+        "controlled_execution",
+        "controlled_effect",
+        "controlled_rollback",
+        "evidence_bundle",
+        "citation",
+        "workflow_definition",
+        "workflow_version",
+        "workflow_execution",
+        "workflow_step",
+        "agent_identity",
+        "agent_version",
+        "agent_activation",
+        "agent_invocation",
+        "agent_proposal",
+        "agent_evaluation",
+        "communication_revision",
+        "workspace_invitation",
+        "workspace_membership",
+        "approval_authority_assignment",
+        "resource_share_request",
+        "collaboration_resource",
+        "ownership_transfer",
+        "authority_fence",
+    ),
+    "ck_collaboration_request_operation": (
+        "invitation.create",
+        "invitation.resend",
+        "invitation.accept",
+        "invitation.decline",
+        "invitation.revoke",
+        "membership.role.change",
+        "membership.suspend",
+        "membership.restore",
+        "membership.remove",
+        "approval_authority.assign",
+        "approval_authority.replace",
+        "approval_authority.revoke",
+        "share.create",
+        "share.revoke",
+        "share.bulk_revoke",
+        "resource.visibility.change",
+        "ownership_transfer.request",
+        "ownership_transfer.accept",
+        "ownership_transfer.reject",
+        "ownership_transfer.cancel",
+    ),
+    "ck_collaboration_request_result_kind": (
+        "workspace_invitation",
+        "workspace_membership",
+        "approval_authority_assignment",
+        "resource_share",
+        "collaboration_resource",
+        "ownership_transfer",
+        "authority_fence",
+    ),
+    "ck_collaboration_audit_subject_kind": (
+        "workspace_membership",
+        "workspace_invitation",
+        "approval_authority_assignment",
+        "resource_share_request",
+        "collaboration_resource",
+        "ownership_transfer",
+        "authority_fence",
+    ),
+}
+_REGISTRIES_AFTER = {
+    "ck_domain_events_type": _REGISTRIES_BEFORE["ck_domain_events_type"] + NEW_EVENT_TYPES,
+    "ck_domain_events_subject_kind": (
+        _REGISTRIES_BEFORE["ck_domain_events_subject_kind"] + NEW_SUBJECT_KINDS
+    ),
+    "ck_collaboration_request_operation": (
+        _REGISTRIES_BEFORE["ck_collaboration_request_operation"] + NEW_REQUEST_OPERATIONS
+    ),
+    "ck_collaboration_request_result_kind": (
+        _REGISTRIES_BEFORE["ck_collaboration_request_result_kind"] + NEW_REQUEST_RESULT_KINDS
+    ),
+    "ck_collaboration_audit_subject_kind": (
+        _REGISTRIES_BEFORE["ck_collaboration_audit_subject_kind"] + NEW_AUDIT_SUBJECTS
+    ),
+}
+
 
 def _in(values: Sequence[str]) -> str:
     return ", ".join(f"'{value}'" for value in values)
 
 
-def _existing_check_values(table: str, constraint: str) -> tuple[str, ...]:
-    if context.is_offline_mode():
-        from opencanvas_api.db.models import (
-            CollaborationAuditEvent,
-            CollaborationRequestIdentity,
-            DomainEventRecord,
-        )
+def _matching_delimiter(text: str, start: int, opening: str, closing: str) -> int:
+    depth = 0
+    quoted = False
+    cursor = start
+    while cursor < len(text):
+        character = text[cursor]
+        if character == "'":
+            if quoted and cursor + 1 < len(text) and text[cursor + 1] == "'":
+                cursor += 2
+                continue
+            quoted = not quoted
+        elif not quoted:
+            if character == opening:
+                depth += 1
+            elif character == closing:
+                depth -= 1
+                if depth == 0:
+                    return cursor
+                if depth < 0:
+                    return -1
+        cursor += 1
+    return -1
 
-        tables = {
-            "domain_events": DomainEventRecord.__table__,
-            "collaboration_request_identities": CollaborationRequestIdentity.__table__,
-            "collaboration_audit_events": CollaborationAuditEvent.__table__,
-        }
-        check = next(
-            item
-            for item in tables[table].constraints
-            if isinstance(item, sa.CheckConstraint) and item.name == constraint
+
+def _strip_outer_parentheses(expression: str) -> str:
+    text = expression.strip()
+    while text.startswith("("):
+        closing = _matching_delimiter(text, 0, "(", ")")
+        if closing != len(text) - 1:
+            break
+        text = text[1:-1].strip()
+    return text
+
+
+def _strip_supported_casts(expression: str, *, array: bool) -> str:
+    text = expression.strip()
+    target = r"(?:text|character\s+varying)"
+    if array:
+        target += r"\s*\[\s*\]"
+    while True:
+        unwrapped = _strip_outer_parentheses(text)
+        if unwrapped != text:
+            text = unwrapped
+            continue
+        cast = re.fullmatch(
+            rf"(?P<value>.+?)\s*::\s*{target}\s*",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
         )
-        text = str(check.sqltext)
-    else:
-        checks = sa.inspect(op.get_bind()).get_check_constraints(table)
-        text = next(item["sqltext"] for item in checks if item.get("name") == constraint)
-    start = text.index("(") + 1
-    end = text.rindex(")")
-    return tuple(value.strip().strip("'").strip('"') for value in text[start:end].split(","))
+        if cast is None:
+            return text
+        text = cast.group("value").strip()
+
+
+def _unsupported_check_expression() -> RuntimeError:
+    return RuntimeError("unsupported check constraint expression")
+
+
+def _parse_sql_literal_list(expression: str) -> tuple[str, ...]:
+    values: list[str] = []
+    cursor = 0
+    while True:
+        while cursor < len(expression) and expression[cursor].isspace():
+            cursor += 1
+        if cursor >= len(expression) or expression[cursor] != "'":
+            raise _unsupported_check_expression()
+        cursor += 1
+        characters: list[str] = []
+        while cursor < len(expression):
+            character = expression[cursor]
+            if character == "'":
+                if cursor + 1 < len(expression) and expression[cursor + 1] == "'":
+                    characters.append("'")
+                    cursor += 2
+                    continue
+                cursor += 1
+                break
+            characters.append(character)
+            cursor += 1
+        else:
+            raise _unsupported_check_expression()
+
+        while cursor < len(expression) and expression[cursor].isspace():
+            cursor += 1
+        if expression[cursor : cursor + 2] == "::":
+            cast = re.match(
+                r"::\s*(?:text|character\s+varying)(?![A-Za-z0-9_])",
+                expression[cursor:],
+                flags=re.IGNORECASE,
+            )
+            if cast is None:
+                raise _unsupported_check_expression()
+            cursor += cast.end()
+        values.append("".join(characters))
+
+        while cursor < len(expression) and expression[cursor].isspace():
+            cursor += 1
+        if cursor == len(expression):
+            break
+        if expression[cursor] != ",":
+            raise _unsupported_check_expression()
+        cursor += 1
+    if not values:
+        raise _unsupported_check_expression()
+    return tuple(values)
+
+
+def _parse_check_values(expression: str, *, column: str) -> tuple[str, ...]:
+    text = _strip_outer_parentheses(expression)
+    operator = re.match(
+        r"^(?P<left>.+?)\s*(?P<operator>IN\b|=\s*ANY\b)(?P<remainder>.*)$",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if (
+        operator is None
+        or re.fullmatch(
+            re.escape(column),
+            _strip_supported_casts(operator.group("left"), array=False),
+            flags=re.IGNORECASE,
+        )
+        is None
+    ):
+        raise _unsupported_check_expression()
+    remainder = operator.group("remainder").strip()
+    if not remainder.startswith("("):
+        raise _unsupported_check_expression()
+    closing = _matching_delimiter(remainder, 0, "(", ")")
+    if closing != len(remainder) - 1:
+        raise _unsupported_check_expression()
+    body = remainder[1:-1]
+    if operator.group("operator").upper() == "IN":
+        return _parse_sql_literal_list(body)
+
+    array = _strip_supported_casts(body, array=True)
+    prefix = re.match(r"^ARRAY\b", array, flags=re.IGNORECASE)
+    if prefix is None:
+        raise _unsupported_check_expression()
+    array = array[prefix.end() :].lstrip()
+    if not array.startswith("["):
+        raise _unsupported_check_expression()
+    array_end = _matching_delimiter(array, 0, "[", "]")
+    if array_end != len(array) - 1:
+        raise _unsupported_check_expression()
+    return _parse_sql_literal_list(array[1:array_end])
+
+
+def _registry_digest(values: Sequence[str]) -> str:
+    return hashlib.sha256("\0".join(sorted(values)).encode()).hexdigest()
+
+
+def _require_expected_registry(
+    values: tuple[str, ...],
+    *,
+    fingerprint: tuple[int, str],
+    constraint: str,
+) -> tuple[str, ...]:
+    if len(values) != len(set(values)) or (len(values), _registry_digest(values)) != fingerprint:
+        raise RuntimeError(f"unexpected closed registry for {constraint}")
+    return values
+
+
+def _existing_check_values(
+    table: str,
+    constraint: str,
+    *,
+    expected: tuple[str, ...],
+) -> tuple[str, ...]:
+    fingerprint = (len(expected), _registry_digest(expected))
+    if context.is_offline_mode():
+        return _require_expected_registry(
+            expected,
+            fingerprint=fingerprint,
+            constraint=constraint,
+        )
+    checks = sa.inspect(op.get_bind()).get_check_constraints(table)
+    text = next(
+        (item["sqltext"] for item in checks if item.get("name") == constraint),
+        None,
+    )
+    column = _CLOSED_CHECK_COLUMNS.get(constraint)
+    if not isinstance(text, str) or column is None:
+        raise RuntimeError(f"missing closed check constraint {constraint}")
+    values = _parse_check_values(text, column=column)
+    return _require_expected_registry(
+        values,
+        fingerprint=fingerprint,
+        constraint=constraint,
+    )
 
 
 def _protect(table: str) -> None:
@@ -100,7 +445,7 @@ def _protect(table: str) -> None:
     op.execute(
         sa.text(
             f"CREATE TRIGGER trg_{table}_mutation_blocked BEFORE UPDATE OR DELETE ON {table} "
-            "FOR EACH ROW EXECUTE FUNCTION reject_controlled_agent_security_mutation()"
+            "FOR EACH ROW EXECUTE FUNCTION reject_controlled_agent_mutation()"
         )
     )
 
@@ -128,45 +473,28 @@ def _protect_domain_events() -> None:
         sa.text(
             "CREATE TRIGGER trg_domain_events_mutation_blocked "
             "BEFORE UPDATE OR DELETE ON domain_events FOR EACH ROW "
-            "EXECUTE FUNCTION reject_controlled_agent_security_mutation()"
+            "EXECUTE FUNCTION reject_controlled_agent_mutation()"
         )
     )
 
 
 def _replace_closed_checks(*, add: bool) -> None:
     sqlite = op.get_bind().dialect.name == "sqlite"
-    event_types = list(_existing_check_values("domain_events", "ck_domain_events_type"))
-    subject_kinds = list(_existing_check_values("domain_events", "ck_domain_events_subject_kind"))
-    request_operations = list(
-        _existing_check_values(
-            "collaboration_request_identities",
-            "ck_collaboration_request_operation",
-        )
-    )
-    result_kinds = list(
-        _existing_check_values(
-            "collaboration_request_identities",
-            "ck_collaboration_request_result_kind",
-        )
-    )
-    audit_subjects = list(
-        _existing_check_values(
-            "collaboration_audit_events",
-            "ck_collaboration_audit_subject_kind",
-        )
-    )
-    groups: tuple[tuple[list[str], Sequence[str]], ...] = (
-        (event_types, NEW_EVENT_TYPES),
-        (subject_kinds, NEW_SUBJECT_KINDS),
-        (request_operations, NEW_REQUEST_OPERATIONS),
-        (result_kinds, NEW_REQUEST_RESULT_KINDS),
-        (audit_subjects, NEW_AUDIT_SUBJECTS),
-    )
-    for values, delta in groups:
-        if add:
-            values.extend(value for value in delta if value not in values)
-        else:
-            values[:] = [value for value in values if value not in delta]
+    source = _REGISTRIES_BEFORE if add else _REGISTRIES_AFTER
+    target = _REGISTRIES_AFTER if add else _REGISTRIES_BEFORE
+    for table, constraint in (
+        ("domain_events", "ck_domain_events_type"),
+        ("domain_events", "ck_domain_events_subject_kind"),
+        ("collaboration_request_identities", "ck_collaboration_request_operation"),
+        ("collaboration_request_identities", "ck_collaboration_request_result_kind"),
+        ("collaboration_audit_events", "ck_collaboration_audit_subject_kind"),
+    ):
+        _existing_check_values(table, constraint, expected=source[constraint])
+    event_types = target["ck_domain_events_type"]
+    subject_kinds = target["ck_domain_events_subject_kind"]
+    request_operations = target["ck_collaboration_request_operation"]
+    result_kinds = target["ck_collaboration_request_result_kind"]
+    audit_subjects = target["ck_collaboration_audit_subject_kind"]
     if sqlite:
         for table in (
             "domain_events",

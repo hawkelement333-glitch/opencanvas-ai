@@ -2,8 +2,8 @@
 
 Date: 2026-07-27
 
-Status: documentation amendment complete locally; correction not implemented;
-Milestone 7.2 not started
+Status: authorized correction implemented and validated locally;
+implementation commit pending; Milestone 7.2 not started
 
 ## Authoritative documentation baseline
 
@@ -34,9 +34,9 @@ a commit cannot contain its own SHA.
 This amendment authorizes one additional exceptional historical correction:
 make the `current_role` check in revision `20260725_0021` and its matching ORM
 metadata resolve the table column rather than PostgreSQL's special
-`CURRENT_ROLE` expression. It does not implement that correction, modify a
-migration or model, apply preserved work, activate a migration hash, create a
-later revision, or relax migration integrity generally.
+`CURRENT_ROLE` expression. The combined checkpoint has now implemented and
+validated that exact correction. It does not create a later revision or relax
+migration integrity generally.
 
 Successor note: with this check/ORM candidate correction present, later live
 validation proved that `_backfill_owner_memberships()` independently leaves
@@ -446,7 +446,7 @@ Migration immutability remains the default. The protected original hashes are:
 - `0025`: `b5c71452728cf5c473a017679ebb6f2903a5f9f6`.
 
 Only `0021` receives new authority here. The combined implementation
-checkpoint must:
+checkpoint completed these requirements:
 
 1. calculate one final corrected `0021` Git blob hash;
 2. preserve the original `0021` hash permanently;
@@ -461,8 +461,12 @@ checkpoint must:
 8. reject later unapproved changes and migration/ORM semantic drift;
 9. avoid claiming that migration `0021` remained historically untouched.
 
-Final `0005`, `0023`, and `0024` hashes remain governed by their separate
-amendments. Their preserved candidate hashes are not activated here.
+The final active `0021` hash is
+`43939e1652e052bbeb3b3de8fd20e052443273d3`. It contains both the
+check-constraint correction authorized here and the raw owner-backfill target
+correction authorized by the successor amendment. Final `0005`, `0023`, and
+`0024` hashes remain governed by their separate amendments. The implementation
+SHA is added by the evidence commit.
 
 ## Required focused regression coverage
 
@@ -673,3 +677,27 @@ The related operating and governance documents are:
 - [Milestone 7 implementation plan](MILESTONE_7_IMPLEMENTATION_PLAN.md);
 - [Milestone 7 progress](MILESTONE_7_PROGRESS.md);
 - [Milestone 7.1 handoff](MILESTONE_7_1_PRODUCTION_RUNTIME_MANAGED_POSTGRESQL_HANDOFF.md).
+
+## Combined correction validation record
+
+- check/ORM authorization SHA:
+  `f762e91c879a1da0b77e4c8f6ebddaccbe0d65e6`;
+- owner-backfill authorization SHA:
+  `7818be64ee826985952dff1274a07fdf7ebe4ac0`;
+- original `0021` hash:
+  `3baeb7d4deeb5dbf13b230de49ea6a787ce3a0c4`;
+- final active `0021` hash:
+  `43939e1652e052bbeb3b3de8fd20e052443273d3`;
+- implementation SHA: pending exact local commit.
+
+Migration and ORM metadata now use the identical textual expression
+`"current_role" IN ('owner', 'administrator', 'editor', 'approver', 'member',
+'viewer')` with constraint name
+`ck_workspace_membership_transition_role`. PostgreSQL proves all six
+application roles pass, invalid roles fail, `CURRENT_ROLE` is not consulted,
+and migration-role and application-role sessions produce the same valid
+initial transition behavior. The successor raw target correction is included
+in the same final `0021` blob but remains governed by its separate amendment.
+
+This identifier-resolution correction changes no role meaning, membership
+authority, production deployment, or later-milestone boundary.

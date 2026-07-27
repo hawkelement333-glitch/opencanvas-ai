@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+from sqlalchemy.engine import URL
 
 from opencanvas_api.db.migrations import run_guarded_postgresql_migration
 from scripts import migrate as migration_script
@@ -29,6 +30,17 @@ def _migration_context(*revisions: str | None) -> Mock:
     return Mock(side_effect=contexts)
 
 
+def _sensitive_database_error() -> RuntimeError:
+    diagnostic = URL.create(
+        drivername="postgresql",
+        username="user",
+        password="secret",
+        host="private-host",
+        database="database",
+    ).render_as_string(hide_password=False)
+    return RuntimeError(diagnostic)
+
+
 def test_guarded_migration_locks_verifies_heads_and_releases() -> None:
     connection = _connection()
     migrate = Mock()
@@ -45,6 +57,8 @@ def test_guarded_migration_locks_verifies_heads_and_releases() -> None:
 
     migrate.assert_called_once_with()
     assert connection.execute.call_count == 2
+    connection.rollback.assert_not_called()
+    connection.commit.assert_called_once_with()
     assert "pg_try_advisory_lock" in str(connection.execute.call_args_list[0].args[0])
     assert "pg_advisory_unlock" in str(connection.execute.call_args_list[1].args[0])
 
@@ -63,6 +77,8 @@ def test_competing_migration_fails_without_running() -> None:
 
     migrate.assert_not_called()
     assert connection.execute.call_count == 1
+    connection.rollback.assert_called_once_with()
+    connection.commit.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -95,6 +111,64 @@ def test_guarded_migration_releases_lock_on_rejection_or_failure(
         )
 
     assert "pg_advisory_unlock" in str(connection.execute.call_args_list[-1].args[0])
+    connection.rollback.assert_called_once_with()
+    connection.commit.assert_called_once_with()
+
+
+def test_guarded_migration_preserves_original_error_when_unlock_fails() -> None:
+    connection = _connection()
+    lock_result = Mock()
+    lock_result.scalar_one.return_value = True
+    connection.execute.side_effect = [
+        lock_result,
+        _sensitive_database_error(),
+    ]
+    migration_error = RuntimeError("original migration dependency failure")
+
+    with (
+        patch(
+            "opencanvas_api.db.migrations.MigrationContext.configure",
+            _migration_context("20260717_0004"),
+        ),
+        pytest.raises(RuntimeError, match="original migration dependency failure") as raised,
+    ):
+        run_guarded_postgresql_migration(
+            connection,
+            expected_current="20260717_0004",
+            expected_target="20260718_0005",
+            migrate=Mock(side_effect=migration_error),
+        )
+
+    assert raised.value is migration_error
+    assert "secret" not in "\n".join(raised.value.__notes__)
+    assert "private-host" not in "\n".join(raised.value.__notes__)
+    assert connection.rollback.call_count == 2
+    connection.commit.assert_not_called()
+
+
+def test_guarded_migration_preserves_original_error_when_rollback_fails() -> None:
+    connection = _connection()
+    connection.rollback.side_effect = _sensitive_database_error()
+    migration_error = RuntimeError("original migration dependency failure")
+
+    with (
+        patch(
+            "opencanvas_api.db.migrations.MigrationContext.configure",
+            _migration_context("20260717_0004"),
+        ),
+        pytest.raises(RuntimeError, match="original migration dependency failure") as raised,
+    ):
+        run_guarded_postgresql_migration(
+            connection,
+            expected_current="20260717_0004",
+            expected_target="20260718_0005",
+            migrate=Mock(side_effect=migration_error),
+        )
+
+    assert raised.value is migration_error
+    assert "secret" not in "\n".join(raised.value.__notes__)
+    assert "private-host" not in "\n".join(raised.value.__notes__)
+    connection.commit.assert_not_called()
 
 
 def test_migration_command_suppresses_raw_connection_errors(
@@ -103,7 +177,7 @@ def test_migration_command_suppresses_raw_connection_errors(
     monkeypatch.setattr(
         migration_script,
         "run",
-        Mock(side_effect=RuntimeError("postgresql://user:secret@private-host/database")),
+        Mock(side_effect=_sensitive_database_error()),
     )
     monkeypatch.setattr("sys.argv", ["migrate"])
 

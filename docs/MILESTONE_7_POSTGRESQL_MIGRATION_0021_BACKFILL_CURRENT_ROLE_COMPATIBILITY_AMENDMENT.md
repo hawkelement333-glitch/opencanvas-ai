@@ -2,8 +2,8 @@
 
 Date: 2026-07-27
 
-Status: documentation-only amendment prepared locally; correction not
-implemented; Milestone 7.2 not started
+Status: authorized correction implemented and validated locally;
+implementation commit pending; Milestone 7.2 not started
 
 ## Authoritative documentation baseline
 
@@ -20,8 +20,8 @@ This amendment was prepared from the required clean local baseline:
 - upstream: none;
 - Alembic sole head: `20260725_0025`;
 - migrations `0026`, `0027`, and `0028`: absent;
-- implementation commit: absent;
-- evidence commit: absent;
+- implementation commit: pending local creation;
+- evidence commit: pending local creation;
 - Milestone 7.2: not started;
 - remote operation: none;
 - PostgreSQL: stopped;
@@ -42,10 +42,10 @@ ledger because a commit cannot contain its own SHA.
 
 This amendment authorizes one additional exceptional correction in historical
 migration `20260725_0021`: delimit the one proved bare `current_role`
-identifier in the raw owner-backfill `INSERT` target-column list. It does not
-implement that correction, alter the prior check-constraint or ORM
-authorization, apply preserved work, activate a migration hash, create a
-later revision, or relax migration integrity generally.
+identifier in the raw owner-backfill `INSERT` target-column list. The combined
+checkpoint has now implemented and validated that exact correction without
+altering the prior check-constraint or ORM authority, creating a later
+revision, or relaxing migration integrity generally.
 
 ## Verified isolated database environment and failure
 
@@ -547,32 +547,35 @@ Migration immutability remains the default. The protected original migration
 
 `3baeb7d4deeb5dbf13b230de49ea6a787ce3a0c4`
 
-No hash changes or becomes active in this documentation checkpoint.
+The original documentation checkpoint changed no hash. The completed combined
+implementation activates exactly this final `0021` hash:
 
-The future combined implementation must create exactly one final active hash
-for migration `0021`. Its final migration content must include:
+`43939e1652e052bbeb3b3de8fd20e052443273d3`
+
+The combined implementation created exactly one final active hash for
+migration `0021`. Its final migration content includes:
 
 - the prior approved quoted
   `ck_workspace_membership_transition_role` column identifier; and
 - the newly approved quoted owner-backfill target identifier.
 
-The same checkpoint must prove and record matching ORM metadata parity even
-though the ORM file is not part of the migration blob.
+The same checkpoint proved matching ORM metadata parity even though the ORM
+file is not part of the migration blob.
 
-The exception ledger must permanently record:
+The exception ledger permanently records:
 
 - the original `0021` hash;
 - the one final active `0021` hash;
 - the SHA of the prior `0021` check/ORM amendment;
 - the SHA of this backfill amendment;
-- the final implementation SHA;
+- the final implementation SHA, added by the evidence commit;
 - the exact two corrected migration occurrences, classified by their separate
   authorities;
 - the matching ORM metadata correction and parity evidence;
 - the reason, date, authorized scope, and production-deployment boundary;
 - the complete PostgreSQL, SQLite, migration-cycle, and regression evidence.
 
-The validator must accept only the one final validated hash. It must reject:
+The validator accepts only the one final validated hash. It rejects:
 
 - the original hash as active after implementation;
 - check-only, backfill-only, provisional, or other intermediate hashes;
@@ -694,8 +697,9 @@ SQLite must prove:
 
 ## Required full combined regression
 
-After the newest stash is restored on the future implementation branch,
-validate all separately authorized corrections together:
+When the newest stash was restored on the later implementation branch, the
+checkpoint was required to validate all separately authorized corrections
+together:
 
 - migration `0005` dialect compatibility;
 - migration `0021` quoted check identifier;
@@ -713,7 +717,7 @@ validate all separately authorized corrections together:
 - transaction and connection closure;
 - PostgreSQL URL and credential redaction.
 
-The combined checkpoint must run all applicable:
+The combined checkpoint was required to run all applicable:
 
 - focused raw SQL, check, ORM parity, role, owner-backfill, migration, parser,
   UUID, trigger, mutation, runner, locking, and redaction tests;
@@ -733,9 +737,10 @@ The combined checkpoint must run all applicable:
   checks;
 - Git object integrity and protected-reference verification.
 
-## Future combined implementation procedure
+## Historical combined implementation procedure
 
-The next combined implementation checkpoint must:
+At this amendment checkpoint, the later combined implementation was required
+to:
 
 1. rotate the exposed disposable PostgreSQL test credential outside the
    repository;
@@ -760,12 +765,14 @@ The next combined implementation checkpoint must:
 14. create local implementation and final evidence commits;
 15. finish with a clean tree, no upstream, and no remote operation.
 
-The newest stash must never be popped. Failure during restoration or
-implementation must preserve it and all secondary recovery evidence.
+The newest stash was not to be popped. Any failure during restoration or
+implementation was required to preserve it and all secondary recovery
+evidence.
 
-## Milestone 7.2 restart gate
+## Historical Milestone 7.2 restart gate
 
-Migration `0026` and Milestone 7.2 remain prohibited until:
+At this amendment checkpoint, migration `0026` and Milestone 7.2 remained
+prohibited until:
 
 1. this amendment is committed locally;
 2. the exposed PostgreSQL test credential is rotated;
@@ -852,9 +859,10 @@ Protected branches, tags, migration identities, original hashes, stash
 objects, recovery artifacts, and the sole Alembic head must remain unchanged
 during this documentation checkpoint.
 
-## Documentation-only confirmation
+## Original documentation-only checkpoint confirmation
 
-This checkpoint creates documentation only. It does not modify migration
+The original amendment checkpoint created documentation only. It did not
+modify migration
 `0005`, `0021`, `0023`, or `0024`; ORM production code; tests; the guarded
 runner; dependencies; lockfiles; runtime configuration; CI; deployment
 implementation; or recovery materials.
@@ -866,10 +874,39 @@ database connection before documentation editing, and no PostgreSQL test was
 run. No disposable database was created. No remote operation occurred.
 Migrations `0026`–`0028` remain absent, and Milestone 7.2 remains unstarted.
 
-The exact baseline for the next combined implementation checkpoint is the
-local commit containing this amendment, with sole head `20260725_0025`,
-newest preserved stash
+At that point, the exact baseline for the next combined implementation
+checkpoint was the local commit containing this amendment, with sole head
+`20260725_0025`, newest preserved stash
 `9196c8d9f68c1af6251530f349fdf72638b57b82`, intact recovery evidence, and
 authority to change exactly the one proved raw
 `workspace_membership_transitions` target identifier from `current_role` to
 `"current_role"`.
+
+## Combined correction validation record
+
+- check/ORM authorization SHA:
+  `f762e91c879a1da0b77e4c8f6ebddaccbe0d65e6`;
+- owner-backfill authorization SHA:
+  `7818be64ee826985952dff1274a07fdf7ebe4ac0`;
+- original `0021` hash:
+  `3baeb7d4deeb5dbf13b230de49ea6a787ce3a0c4`;
+- final active `0021` hash:
+  `43939e1652e052bbeb3b3de8fd20e052443273d3`;
+- implementation SHA: pending exact local commit.
+
+The owner backfill changes only the target list from `current_role` to
+`"current_role"`. Two seeded workspaces prove exact deterministic membership,
+transition, Trace, audit, event, and authority identities; exact scope and
+cardinalities; the application value `owner`; one transition per membership;
+shared timestamps within each run; and fresh timestamps after
+`0021→0020→0021`. A failure injected after the first three backfill writes
+leaves Alembic at `0020` with no partial table, mutation, lifecycle, authority,
+audit, Trace, or row-count change.
+
+The permanent identifier-safety validator rejects bare PostgreSQL-sensitive
+identifiers in textual checks and raw insert target lists, accepts quoted,
+qualified, data-string, comment, bind, and Python-attribute uses, and scans
+both upgrade and downgrade code. Its focused suite passes 18 tests.
+
+This record covers disposable local validation only. It is not evidence of a
+production deployment and does not begin Milestone 7.2.

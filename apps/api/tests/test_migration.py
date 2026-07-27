@@ -36,6 +36,9 @@ def test_standalone_migration_validator_tracks_current_head() -> None:
     validator = _load_migration_validator()
     assert heads[0] == validator.EXPECTED_HEAD
     assert scripts.get_revision(heads[0]).down_revision == validator.PREVIOUS_REVISION
+    assert len(validator.EXPECTED_MIGRATION_BLOB_HASHES) == 25
+    validator.validate_migration_history()
+    validator.validate_migration_blob_hashes()
 
 
 def test_initial_migration_upgrades_sqlite(tmp_path: Path) -> None:
@@ -165,6 +168,95 @@ def test_migration_uses_configured_database_url(
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
     assert revision == ("20260725_0025",)
+
+
+def test_migration_0005_preserves_seeded_workspace_dependencies_sqlite(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "migration-0005.db"
+    api_directory = Path(__file__).resolve().parents[1]
+    config = Config(api_directory / "alembic.ini")
+    config.set_main_option("script_location", str(api_directory / "alembic"))
+    config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{database_path.as_posix()}")
+    workspace_id = uuid.uuid4().hex
+    canvas_id = uuid.uuid4().hex
+    object_id = uuid.uuid4().hex
+
+    command.upgrade(config, "20260717_0004")
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "INSERT INTO canvases (id, name) VALUES (?, 'Migration 0005 canvas')",
+            (canvas_id,),
+        )
+        connection.execute(
+            """INSERT INTO workspaces
+               (id, name, owner_id, lifecycle_state, legacy_canvas_id)
+               VALUES (?, 'Migration 0005 workspace', NULL, 'active', ?)""",
+            (workspace_id, canvas_id),
+        )
+        connection.execute(
+            """INSERT INTO canonical_objects
+               (id, workspace_id, object_type, lifecycle_state)
+               VALUES (?, ?, 'note', 'active')""",
+            (object_id, workspace_id),
+        )
+
+    command.upgrade(config, "20260718_0005")
+    with sqlite3.connect(database_path) as connection:
+        workspace = connection.execute(
+            """SELECT id, owner_id, settings_payload, deleted_at
+               FROM workspaces WHERE id = ?""",
+            (workspace_id,),
+        ).fetchone()
+        assert workspace == (
+            workspace_id,
+            "00000000000040008000000000000001",
+            "{}",
+            None,
+        )
+        assert connection.execute(
+            "SELECT workspace_id FROM canvases WHERE id = ?", (canvas_id,)
+        ).fetchone() == (workspace_id,)
+        assert connection.execute(
+            "SELECT workspace_id FROM canonical_objects WHERE id = ?", (object_id,)
+        ).fetchone() == (workspace_id,)
+        assert {row[1] for row in connection.execute("PRAGMA index_list(workspaces)")} >= {
+            "ix_workspaces_owner_id",
+            "ix_workspaces_lifecycle_state",
+            "sqlite_autoindex_workspaces_1",
+            "sqlite_autoindex_workspaces_2",
+        }
+        canonical_foreign_keys = list(
+            connection.execute("PRAGMA foreign_key_list(canonical_objects)")
+        )
+        assert any(
+            row[2:7] == ("workspaces", "workspace_id", "id", "NO ACTION", "RESTRICT")
+            for row in canonical_foreign_keys
+        )
+
+    command.downgrade(config, "20260717_0004")
+    with sqlite3.connect(database_path) as connection:
+        workspace_columns = {
+            row[1]: row for row in connection.execute("PRAGMA table_info(workspaces)")
+        }
+        assert workspace_columns["owner_id"][3] == 0
+        assert "settings_payload" not in workspace_columns
+        assert "deleted_at" not in workspace_columns
+        assert connection.execute(
+            "SELECT workspace_id FROM canonical_objects WHERE id = ?", (object_id,)
+        ).fetchone() == (workspace_id,)
+
+    command.upgrade(config, "20260718_0005")
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute(
+            "SELECT id, owner_id FROM workspaces WHERE id = ?", (workspace_id,)
+        ).fetchone() == (
+            workspace_id,
+            "00000000000040008000000000000001",
+        )
+        assert connection.execute(
+            "SELECT workspace_id FROM canonical_objects WHERE id = ?", (object_id,)
+        ).fetchone() == (workspace_id,)
 
 
 def test_phase_two_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) -> None:

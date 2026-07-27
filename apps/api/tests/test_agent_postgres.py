@@ -23,6 +23,21 @@ APPEND_ONLY_TABLES = {
     "controlled_agent_approval_consumptions": "consumption_id",
     "controlled_agent_audit_events": "event_id",
 }
+EXPECTED_SECURITY_TRIGGERS = {
+    *{
+        (table, f"trg_{table}_mutation_blocked")
+        for table in APPEND_ONLY_TABLES
+        if table != "controlled_agent_executions"
+    },
+    (
+        "controlled_agent_executions",
+        "trg_controlled_agent_executions_authority_update_blocked",
+    ),
+    (
+        "controlled_agent_executions",
+        "trg_controlled_agent_executions_delete_blocked",
+    ),
+}
 
 
 @pytest.fixture(scope="session")
@@ -43,18 +58,30 @@ async def test_postgres_enforces_all_controlled_agent_append_only_boundaries(
             """SELECT c.relname AS table_name, t.tgname AS trigger_name
                FROM pg_trigger t
                JOIN pg_class c ON c.oid = t.tgrelid
-               WHERE NOT t.tgisinternal AND c.relname = ANY($1::text[])""",
+               WHERE NOT t.tgisinternal
+                 AND c.relname = ANY($1::text[])""",
             list(APPEND_ONLY_TABLES),
         )
-        assert {row["table_name"] for row in triggers} == set(APPEND_ONLY_TABLES)
-        assert len(triggers) == len(APPEND_ONLY_TABLES)
+        assert {
+            (str(row["table_name"]), str(row["trigger_name"])) for row in triggers
+        } == EXPECTED_SECURITY_TRIGGERS
 
         for table, primary_key in APPEND_ONLY_TABLES.items():
             identifier = identities[table]
+            update_statement = (
+                f"UPDATE {table} SET schema_version = 'tampered' WHERE {primary_key} = $1"
+                if table == "controlled_agent_executions"
+                else f"UPDATE {table} SET schema_version = schema_version WHERE {primary_key} = $1"
+            )
             await _assert_append_only_rejection(
                 connection,
-                f"UPDATE {table} SET schema_version = schema_version WHERE {primary_key} = $1",
+                update_statement,
                 identifier,
+                message=(
+                    "controlled-agent execution authority is immutable"
+                    if table == "controlled_agent_executions"
+                    else "controlled-agent records are append-only"
+                ),
             )
             await _assert_append_only_rejection(
                 connection,
@@ -119,9 +146,13 @@ async def test_postgres_enforces_all_controlled_agent_append_only_boundaries(
 
 
 async def _assert_append_only_rejection(
-    connection: asyncpg.Connection, statement: str, identifier: uuid.UUID
+    connection: asyncpg.Connection,
+    statement: str,
+    identifier: uuid.UUID,
+    *,
+    message: str = "controlled-agent records are append-only",
 ) -> None:
-    with pytest.raises(asyncpg.RaiseError, match="controlled-agent records are append-only"):
+    with pytest.raises(asyncpg.RaiseError, match=message):
         async with connection.transaction():
             await connection.execute(statement, identifier)
 
@@ -158,9 +189,10 @@ async def _seed_all_tables(connection: asyncpg.Connection) -> dict[str, uuid.UUI
     await connection.execute(
         """INSERT INTO controlled_agent_executions
            (id, user_id, workspace_id, schema_version, role, context_snapshot_id,
-            context_digest, plan_id, plan_digest, grant_id, created_at, deadline_at)
+             context_digest, plan_id, plan_digest, grant_id, created_at, deadline_at)
            VALUES ($1, $2, $3, 'controlled-agent-v1', 'evidence_verifier',
-                   $4, $5, $6, $7, $8, $9, $9 + INTERVAL '15 minutes')""",
+                   $4, $5, $6, $7, $8,
+                   $9::timestamptz, $9::timestamptz + INTERVAL '15 minutes')""",
         execution_id,
         user_id,
         workspace_id,
