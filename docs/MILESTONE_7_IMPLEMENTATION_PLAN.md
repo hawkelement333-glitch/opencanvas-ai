@@ -3,8 +3,9 @@
 Date: 2026-07-26
 
 Status: approved architecture plan; checkpoint 7.1 complete locally; combined
-PostgreSQL historical-migration correction implemented and validated locally;
-implementation commit pending; checkpoint 7.2 not started
+PostgreSQL historical-migration correction and evidence complete locally at
+implementation SHA `a88c6117f6b58137f1014cc8b389f44966c2918f`;
+checkpoint 7.2 not started
 
 Compatibility gates:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -37,9 +38,9 @@ Final active migration hashes:
 
 Every other migration hash remains unchanged. Migration `0026` is absent and
 checkpoint 7.2 has not started. The evidence commit records the frozen
-implementation SHA. The final clean evidence commit, whose own SHA is reported
-in the final handoff, is the authoritative baseline from which 7.2 may later
-restart.
+implementation SHA `a88c6117f6b58137f1014cc8b389f44966c2918f`. This final
+clean evidence commit, whose own SHA is reported in the final handoff, is the
+authoritative baseline from which 7.2 may later restart.
 
 Architecture:
 [`MILESTONE_7_ARCHITECTURE.md`](MILESTONE_7_ARCHITECTURE.md)

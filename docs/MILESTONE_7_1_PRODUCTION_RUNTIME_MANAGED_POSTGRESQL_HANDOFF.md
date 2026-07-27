@@ -76,9 +76,10 @@ PostgreSQL 17.10 with pgvector 0.8.5 reached sole head
 identifier safety, `0021` owner backfill and session-role independence,
 closed registries, UUID/null typing, thirteen protected triggers, mutation
 rollback, advisory-lock cleanup, full backend regression, and SQLite
-validation passed. The final evidence commit records the implementation SHA;
-its own SHA is necessarily reported in the final handoff. The original 7.1
-validation ledger below remains historical evidence.
+validation passed. The final evidence commit records implementation SHA
+`a88c6117f6b58137f1014cc8b389f44966c2918f`. Its own SHA is necessarily
+reported in the final handoff. The original 7.1 validation ledger below
+remains historical evidence.
 
 ## Implemented boundary
 

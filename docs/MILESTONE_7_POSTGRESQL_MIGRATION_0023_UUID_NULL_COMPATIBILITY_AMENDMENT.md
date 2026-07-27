@@ -2,8 +2,8 @@
 
 Date: 2026-07-26
 
-Status: combined correction implemented and validated locally; implementation
-commit pending; Milestone 7.2 not started
+Status: combined correction and evidence complete locally; implementation SHA
+`a88c6117f6b58137f1014cc8b389f44966c2918f`; Milestone 7.2 not started
 
 ## Authoritative documentation baseline
 
@@ -450,7 +450,9 @@ hashes remain evidence rather than active migration content. Migrations
   `01c9b28d7b2875a7cfe7041fc846f79d7c672aa5`;
 - final active `0023` hash:
   `cb7138d9de806e1546c3853944b1816a98da1d67`;
-- implementation SHA: pending exact local commit.
+- implementation SHA: `a88c6117f6b58137f1014cc8b389f44966c2918f`;
+- evidence commit: this documentation-only commit; exact SHA reported in the
+  final handoff.
 
 Static and live PostgreSQL evidence proves exactly twelve
 `NULL::uuid` placeholders across the approved `4/4/2/2` source-query

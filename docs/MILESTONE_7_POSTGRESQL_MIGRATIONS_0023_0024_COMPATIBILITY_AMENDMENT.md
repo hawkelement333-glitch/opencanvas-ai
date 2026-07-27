@@ -2,8 +2,8 @@
 
 Date: 2026-07-26
 
-Status: combined correction implemented and validated locally; implementation
-commit pending; Milestone 7.2 not started
+Status: combined correction and evidence complete locally; implementation SHA
+`a88c6117f6b58137f1014cc8b389f44966c2918f`; Milestone 7.2 not started
 
 Authoritative amendment baseline:
 
@@ -439,7 +439,9 @@ Milestone 7.2 remains unstarted.
   `fb4e8e264a5a73f2ab543d9cb0fc920ace4fbefb`;
 - final active `0024` hash:
   `cc29d1280af1a4110ec42b7f0fa782f710dcfeb5`;
-- implementation SHA: pending exact local commit.
+- implementation SHA: `a88c6117f6b58137f1014cc8b389f44966c2918f`;
+- evidence commit: this documentation-only commit; exact SHA reported in the
+  final handoff.
 
 The final `0023` bytes include the closed parser, twelve typed UUID-null
 placeholders, and two trigger-function corrections. The final `0024` bytes

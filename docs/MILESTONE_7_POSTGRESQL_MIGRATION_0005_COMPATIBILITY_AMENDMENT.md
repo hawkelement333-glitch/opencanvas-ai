@@ -2,8 +2,8 @@
 
 Date: 2026-07-26
 
-Status: combined correction implemented and validated locally; implementation
-commit pending; Milestone 7.2 not started
+Status: combined correction and evidence complete locally; implementation SHA
+`a88c6117f6b58137f1014cc8b389f44966c2918f`; Milestone 7.2 not started
 
 Authoritative correction baseline:
 
@@ -27,8 +27,8 @@ deny-by-default outside the exact recorded exception.
 
 ## Combined implementation state
 
-The combined correction is present in the active working tree. Its final
-active migration hashes are:
+The combined correction is frozen in the local implementation commit. Its
+final active migration hashes are:
 
 - `0005`: `79667acf61794c139b2cc27dcf8f2e0598162a5e`;
 - `0021`: `43939e1652e052bbeb3b3de8fd20e052443273d3`;
@@ -37,9 +37,10 @@ active migration hashes are:
 
 The original and provisional hashes remain permanent evidence; activating the
 final hashes does not erase or relabel that history. Functional validation is
-complete; the implementation and evidence commit identities remain to be
-recorded. Migration `20260726_0026` is absent, and Milestone 7.2 remains
-unstarted.
+complete, the implementation identity is recorded below, and this
+documentation-only commit records the final evidence. Its own SHA is reported
+in the final handoff. Migration `20260726_0026` is absent, and Milestone 7.2
+remains unstarted.
 
 Successor compatibility amendment:
 [`MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md).
@@ -355,7 +356,9 @@ identity is recorded by the evidence commit after code is frozen. Migration
 - authorization SHA: `73033862836c45104173ade30cac2bd70cfe181e`;
 - original hash: `ac5bf41ae5cfefa785006c7eef2a730233e46da9`;
 - final active hash: `79667acf61794c139b2cc27dcf8f2e0598162a5e`;
-- implementation SHA: pending exact local commit;
+- implementation SHA: `a88c6117f6b58137f1014cc8b389f44966c2918f`;
+- evidence commit: this documentation-only commit; exact SHA reported in the
+  final handoff;
 - branch: `milestone-7-postgresql-historical-migrations-complete-local`.
 
 The validated correction limits SQLite table recreation to SQLite and uses

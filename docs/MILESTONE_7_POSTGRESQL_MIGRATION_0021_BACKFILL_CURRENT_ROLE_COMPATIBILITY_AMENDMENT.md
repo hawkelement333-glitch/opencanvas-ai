@@ -2,8 +2,8 @@
 
 Date: 2026-07-27
 
-Status: authorized correction implemented and validated locally;
-implementation commit pending; Milestone 7.2 not started
+Status: authorized correction and evidence complete locally; implementation
+SHA `a88c6117f6b58137f1014cc8b389f44966c2918f`; Milestone 7.2 not started
 
 ## Authoritative documentation baseline
 
@@ -20,8 +20,8 @@ This amendment was prepared from the required clean local baseline:
 - upstream: none;
 - Alembic sole head: `20260725_0025`;
 - migrations `0026`, `0027`, and `0028`: absent;
-- implementation commit: pending local creation;
-- evidence commit: pending local creation;
+- implementation commit at amendment creation: pending local creation;
+- evidence commit at amendment creation: pending local creation;
 - Milestone 7.2: not started;
 - remote operation: none;
 - PostgreSQL: stopped;
@@ -892,7 +892,9 @@ authority to change exactly the one proved raw
   `3baeb7d4deeb5dbf13b230de49ea6a787ce3a0c4`;
 - final active `0021` hash:
   `43939e1652e052bbeb3b3de8fd20e052443273d3`;
-- implementation SHA: pending exact local commit.
+- implementation SHA: `a88c6117f6b58137f1014cc8b389f44966c2918f`;
+- evidence commit: this documentation-only commit; exact SHA reported in the
+  final handoff.
 
 The owner backfill changes only the target list from `current_role` to
 `"current_role"`. Two seeded workspaces prove exact deterministic membership,

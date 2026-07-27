@@ -2,8 +2,8 @@
 
 Date: 2026-07-27
 
-Status: combined correction implemented and validated locally; implementation
-commit pending; Milestone 7.2 not started
+Status: combined correction and evidence complete locally; implementation SHA
+`a88c6117f6b58137f1014cc8b389f44966c2918f`; Milestone 7.2 not started
 
 ## Authoritative documentation baseline
 
@@ -29,9 +29,8 @@ This amendment originally authorized exactly one additional exceptional
 historical PostgreSQL correction: replace four references to a nonexistent
 trigger function in migrations `20260725_0023` and `20260725_0024` with the
 existing function that implements their required deny-all mutation behavior.
-The combined correction is now implemented and validated locally, with its
-implementation commit pending. It does not create a later migration or relax
-migration integrity generally.
+The combined correction is now implemented, validated, and committed locally.
+It does not create a later migration or relax migration integrity generally.
 
 Successor note: later combined validation proved a separate PostgreSQL
 `CURRENT_ROLE` identifier collision in migration `0021` and its matching ORM
@@ -622,7 +621,9 @@ unstarted.
   `cb7138d9de806e1546c3853944b1816a98da1d67`;
 - final active `0024` hash:
   `cc29d1280af1a4110ec42b7f0fa782f710dcfeb5`;
-- implementation SHA: pending exact local commit.
+- implementation SHA: `a88c6117f6b58137f1014cc8b389f44966c2918f`;
+- evidence commit: this documentation-only commit; exact SHA reported in the
+  final handoff.
 
 The final migration bytes contain exactly four approved replacements from
 `reject_controlled_agent_security_mutation()` to the existing

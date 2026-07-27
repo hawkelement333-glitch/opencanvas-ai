@@ -2,8 +2,8 @@
 
 Date: 2026-07-27
 
-Status: authorized correction implemented and validated locally;
-implementation commit pending; Milestone 7.2 not started
+Status: authorized correction and evidence complete locally; implementation
+SHA `a88c6117f6b58137f1014cc8b389f44966c2918f`; Milestone 7.2 not started
 
 ## Authoritative documentation baseline
 
@@ -688,7 +688,9 @@ The related operating and governance documents are:
   `3baeb7d4deeb5dbf13b230de49ea6a787ce3a0c4`;
 - final active `0021` hash:
   `43939e1652e052bbeb3b3de8fd20e052443273d3`;
-- implementation SHA: pending exact local commit.
+- implementation SHA: `a88c6117f6b58137f1014cc8b389f44966c2918f`;
+- evidence commit: this documentation-only commit; exact SHA reported in the
+  final handoff.
 
 Migration and ORM metadata now use the identical textual expression
 `"current_role" IN ('owner', 'administrator', 'editor', 'approver', 'member',

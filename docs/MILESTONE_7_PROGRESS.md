@@ -4,8 +4,8 @@ Date: 2026-07-27
 
 Overall status: architecture and checkpoint 7.1 complete locally; combined
 PostgreSQL historical-migration correction for `0005`, `0021`, `0023`, and
-`0024` implemented and validated locally; implementation commit pending;
-checkpoint 7.2 not started
+`0024` and its evidence complete locally at implementation SHA
+`a88c6117f6b58137f1014cc8b389f44966c2918f`; checkpoint 7.2 not started
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -127,9 +127,10 @@ Validated evidence includes:
   configuration, migration validation, deterministic demo validation,
   repository hygiene, and static scope/secret/prohibited checks passed.
 
-Implementation SHA: pending exact local commit.
+Implementation SHA: `a88c6117f6b58137f1014cc8b389f44966c2918f`.
 
-Evidence SHA: pending exact local commit.
+Evidence commit: this documentation-only commit; its exact SHA is reported in
+the final handoff after commit creation.
 
 No remote operation, deployment, publication, or Milestone 7.2 implementation
 is part of this correction checkpoint.
