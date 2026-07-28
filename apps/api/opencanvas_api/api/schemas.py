@@ -298,6 +298,92 @@ class UploadDocumentOut(ApiModel):
     node: NodeOut
 
 
+class SecureUploadCreate(ApiModel):
+    file_name: str = Field(min_length=1, max_length=255)
+    media_type: str = Field(min_length=1, max_length=160)
+    size_bytes: int = Field(gt=0)
+    sha256: str = Field(pattern=r"^[0-9A-Fa-f]{64}$")
+    idempotency_key: str = Field(
+        min_length=1,
+        max_length=160,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
+
+
+class SecureObjectDeletionCreate(ApiModel):
+    idempotency_key: str = Field(
+        min_length=1,
+        max_length=160,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
+    reason_code: str = Field(
+        default="user_requested",
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z0-9][a-z0-9._-]*$",
+    )
+
+
+class SecureUploadOut(ApiModel):
+    session_id: uuid.UUID
+    workspace_id: uuid.UUID
+    canvas_id: uuid.UUID
+    document_id: uuid.UUID
+    document_version_id: uuid.UUID
+    object_version_id: uuid.UUID
+    state: Literal["requested", "uploaded", "completed", "canceled", "expired", "error"]
+    object_state: (
+        Literal[
+            "quarantined",
+            "scan_pending",
+            "clean",
+            "rejected",
+            "retained",
+            "deletion_requested",
+            "deleted",
+            "legacy_unscanned",
+            "canceled",
+            "error",
+        ]
+        | None
+    )
+    scan_outcome: (
+        Literal[
+            "clean",
+            "infected",
+            "suspicious",
+            "unsupported",
+            "error",
+            "timeout",
+        ]
+        | None
+    )
+    safe_reason_code: str | None
+    capability: str | None = None
+    upload_path: str | None = None
+    expires_at: datetime
+    duplicate: bool = False
+
+
+class TrustedScanResultIn(ApiModel):
+    scan_request_id: uuid.UUID
+    object_version_id: uuid.UUID
+    workspace_id: uuid.UUID
+    outcome: Literal["clean", "infected", "suspicious", "unsupported", "error", "timeout"]
+    scanner_identity: str = Field(min_length=3, max_length=120)
+    scanner_version: str = Field(min_length=1, max_length=120)
+    engine_version: str = Field(min_length=1, max_length=120)
+    signature_version: str = Field(min_length=1, max_length=120)
+    policy_version: str = Field(min_length=3, max_length=120)
+    provider_result_id: str = Field(min_length=1, max_length=256)
+    provider_record_digest: str = Field(pattern=r"^[0-9A-Fa-f]{64}$")
+    provider_version_id: str = Field(min_length=1, max_length=256)
+    etag: str = Field(min_length=1, max_length=256)
+    content_sha256: str = Field(pattern=r"^[0-9A-Fa-f]{64}$")
+    scanned_at: datetime
+    safe_reason_code: str = Field(min_length=1, max_length=64)
+
+
 class DocumentTextSection(ApiModel):
     page_number: int | None = Field(default=None, ge=1)
     heading: str | None = None

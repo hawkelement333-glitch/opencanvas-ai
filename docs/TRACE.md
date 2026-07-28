@@ -73,6 +73,27 @@ audit, authority, approval, effect, or rollback evidence. Milestone 7 owns
 production multi-service delivery, queue wake-up, monitoring, and recovery
 validation without creating another event or outbox system.
 
+## Secure object-ingestion evidence
+
+Milestone 7.3 adds append-only object-ingestion audit evidence alongside, not
+instead of, Trace and domain events. Evidence correlates the authenticated
+actor or controlled service identity with exact user/workspace/canvas/document
+scope, upload session, logical object, immutable provider object version,
+source document version, size, SHA-256, ETag, scan request/result,
+scanner/version, malware policy, lifecycle decision, promotion source/target,
+and safe reason.
+
+Operational APIs expose only bounded status and opaque product identities.
+They omit physical storage keys, provider tokens, upload capabilities, scanner
+signatures, private endpoints, raw provider diagnostics, object content, and
+private reasoning. A mutable provider tag or object location is not Trace and
+does not prove clean authority.
+
+Cancellation, timeout, expiry, deletion, policy/scanner change, authority
+generation, rescan, promotion, and reconciliation append new evidence. They do
+not rewrite the original upload or scan result. Protected consumers revalidate
+the current exact clean evidence before use.
+
 ## Planned controlled-agent evidence
 
 Milestone 4.0 adds no agent events or schemas. A future controlled-agent execution must extend

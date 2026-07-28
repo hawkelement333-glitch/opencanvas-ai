@@ -23,10 +23,10 @@ def _config(database_path: Path) -> Config:
 def test_graph_retrieval_migration_cycle_and_append_only_guards(tmp_path: Path) -> None:
     database_path = tmp_path / "graph-retrieval.db"
     config = _config(database_path)
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260725_0018")
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "20260726_0026",
+            "20260725_0018",
         )
         tables = {
             row[0]
@@ -86,10 +86,10 @@ def test_graph_retrieval_migration_cycle_and_append_only_guards(tmp_path: Path) 
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
             "20260725_0017",
         )
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260725_0018")
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "20260726_0026",
+            "20260725_0018",
         )
 
 

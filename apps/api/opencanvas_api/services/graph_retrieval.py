@@ -15,6 +15,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from opencanvas_api.core.config import Settings
 from opencanvas_api.db.models import (
     CanonicalCanvasObjectBinding,
     CanonicalDocument,
@@ -207,6 +208,7 @@ class GraphAwareRetrievalService:
         session: AsyncSession,
         *,
         embedding_provider: EmbeddingProvider,
+        settings: Settings | None = None,
         trace_service: TraceService | None = None,
         after_run: Callable[[], Awaitable[None] | None] | None = None,
         after_decisions: Callable[[], Awaitable[None] | None] | None = None,
@@ -214,6 +216,7 @@ class GraphAwareRetrievalService:
     ) -> None:
         self.session = session
         self.embedding_provider = embedding_provider
+        self.settings = settings
         self.trace = trace_service or TraceService(session)
         self.after_run = after_run
         self.after_decisions = after_decisions
@@ -738,6 +741,7 @@ class GraphAwareRetrievalService:
                 provider=self.embedding_provider,
                 top_k=min(MAX_PASSAGES, MAX_CANDIDATES),
                 threshold=command.min_relevance,
+                settings=self.settings,
             )
             versions = {
                 (row.document_id, row.version): row

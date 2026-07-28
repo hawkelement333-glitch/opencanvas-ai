@@ -3,7 +3,8 @@
 Date: 2026-07-27
 
 Status: architecture complete locally; checkpoint 7.1 implemented locally;
-checkpoint 7.2 implemented locally; checkpoint 7.3 unstarted
+checkpoint 7.2 implemented locally; checkpoint 7.3 implemented locally;
+checkpoint 7.4 unstarted
 
 Checkpoint 7.2 implementation record: migration `20260726_0026` is the sole
 head and direct child of `20260725_0025`. The deterministic Indexer, immutable
@@ -11,6 +12,13 @@ revision/publication evidence, active retrieval-head projection, scoped APIs,
 and bounded status/cancel UI now implement this architecture. Production
 publication remains fail-closed until checkpoint 7.3 supplies and proves the
 clean-object gate.
+
+Checkpoint 7.3 implementation record: migration `20260726_0027` is the sole
+head and direct child of `20260726_0026`. Provider-neutral private versioned
+storage, quarantine-only capabilities, hostile-input controls, trusted
+immutable scanner results, checksum-verified promotion, clean-consumer gates,
+and lifecycle/recovery evidence now realize sections 10.1–10.6. See
+[`MILESTONE_7_3_OBJECT_STORAGE_UPLOAD_SECURITY_MALWARE_QUARANTINE_HANDOFF.md`](MILESTONE_7_3_OBJECT_STORAGE_UPLOAD_SECURITY_MALWARE_QUARANTINE_HANDOFF.md).
 
 PostgreSQL compatibility amendments:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -1333,9 +1341,14 @@ This authorizes only Milestone 8 Controlled Public Release and Guided
 Onboarding work. It does not begin Advanced Collaboration, Mobius Society,
 the governed Librarian, Worlds, Spatial, Federation, or Continuity.
 
-## 27. Architecture boundary
+## 27. Current implementation boundary
 
-This pass changes documentation only. It does not create a migration after
-`20260725_0025`, implement any 7.1–7.8 checkpoint, select or provision a live
-provider, deploy, publish, contact a remote, or start Milestone 8 or later
-work.
+Checkpoints 7.1, 7.2, and 7.3 are complete locally. Migration
+`20260726_0027` is the sole head. Managed staging evidence validates the
+private/versioned Azure storage and clean/EICAR scanner prerequisites, with
+direct personal blob-tag inspection unavailable by least-privilege design.
+The application uses a dedicated exact-evidence scanner-result path rather
+than personal authority or a mutable tag.
+
+This does not certify production deployment or start checkpoints 7.4–7.8,
+Milestone 8, or later work.

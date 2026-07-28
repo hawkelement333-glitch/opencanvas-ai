@@ -20,7 +20,11 @@ DEMO_DOCUMENT_STORAGE_ROOT = DEMO_RUNTIME_ROOT / "documents"
 DEMO_DATABASE_URL = f"sqlite+aiosqlite:///{DEMO_DATABASE_PATH.as_posix()}"
 DEVELOPMENT_SESSION_SECRET = "development-only-session-secret-change-before-deploying"
 DEVELOPMENT_INVITATION_SECRET = "development-only-invitation-secret-change-before-deploying"
-EXPECTED_DATABASE_REVISION = "20260726_0026"
+DEVELOPMENT_UPLOAD_CAPABILITY_SECRET = (
+    "development-only-upload-capability-secret-change-before-deploying"
+)
+DEVELOPMENT_SCANNER_RESULT_SECRET = "development-only-scanner-result-secret-change-before-deploying"
+EXPECTED_DATABASE_REVISION = "20260726_0027"
 
 
 class AppMode(StrEnum):
@@ -114,7 +118,7 @@ class Settings(BaseSettings):
     embedding_batch_size: int = Field(default=64, ge=1, le=256)
     embedding_provider_configuration_version: str = "openai-embeddings-v1"
 
-    storage_provider: Literal["demo", "memory", "local", "s3"] = "local"
+    storage_provider: Literal["demo", "memory", "local", "s3", "azure"] = "local"
     document_storage_root: Path = Path("./data/documents")
     object_storage_bucket: str | None = None
     object_storage_region: str = "us-east-1"
@@ -123,6 +127,44 @@ class Settings(BaseSettings):
     object_storage_secret_access_key: str | None = None
     object_storage_prefix: str = "mobius"
     object_storage_force_path_style: bool = False
+    azure_storage_account_url: str | None = None
+    azure_quarantine_container: str = "quarantine"
+    azure_clean_container: str = "clean"
+    azure_rejected_container: str = "rejected"
+    azure_retained_container: str = "retained"
+    azure_managed_identity_endpoint: str | None = None
+    azure_managed_identity_header: str | None = None
+
+    object_ingestion_mode: Literal["disabled", "deterministic", "trusted"] = "disabled"
+    upload_capability_secret: str = Field(
+        default=DEVELOPMENT_UPLOAD_CAPABILITY_SECRET,
+        min_length=32,
+    )
+    scanner_result_secret: str = Field(
+        default=DEVELOPMENT_SCANNER_RESULT_SECRET,
+        min_length=32,
+    )
+    upload_capability_ttl_seconds: int = Field(default=300, ge=60, le=900)
+    upload_max_active_sessions_per_workspace: int = Field(default=10, ge=1, le=100)
+    scanner_result_requests_per_minute: int = Field(default=120, ge=1, le=10_000)
+    malware_scan_timeout_seconds: int = Field(default=300, ge=30, le=3_600)
+    malware_scan_result_max_age_seconds: int = Field(default=86_400, ge=60, le=604_800)
+    malware_scanner_identity: str = Field(
+        default="deterministic-test-scanner",
+        min_length=3,
+        max_length=120,
+    )
+    malware_scanner_version: str = Field(default="v1", min_length=1, max_length=120)
+    malware_policy_version: str = Field(
+        default="mobius-malware-policy-v1",
+        min_length=3,
+        max_length=120,
+    )
+    object_promotion_service_identity: str = Field(
+        default="mobius-object-promotion",
+        min_length=3,
+        max_length=120,
+    )
 
     job_provider: Literal["inline", "database"] = "inline"
     worker_poll_interval_seconds: float = Field(default=1.0, ge=0.1, le=60.0)
@@ -132,7 +174,7 @@ class Settings(BaseSettings):
     processing_retry_base_seconds: int = Field(default=5, ge=1, le=3_600)
     processing_max_concurrent_per_workspace: int = Field(default=3, ge=1, le=20)
 
-    indexer_publication_mode: Literal["disabled", "private_legacy"] = "disabled"
+    indexer_publication_mode: Literal["disabled", "private_legacy", "private_clean"] = "disabled"
     indexer_parser_timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
     indexer_parser_memory_limit_bytes: int = Field(
         default=512 * 1024 * 1024, ge=64 * 1024 * 1024, le=2 * 1024 * 1024 * 1024
@@ -162,6 +204,7 @@ class Settings(BaseSettings):
     document_docx_max_uncompressed_bytes: int = Field(
         default=100 * 1024 * 1024, ge=1_024 * 1024, le=500 * 1024 * 1024
     )
+    document_docx_max_compression_ratio: int = Field(default=100, ge=2, le=1_000)
     document_retrieval_top_k: int = Field(default=8, ge=1, le=50)
     document_relevance_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
 
@@ -188,6 +231,9 @@ class Settings(BaseSettings):
         "object_storage_endpoint",
         "object_storage_access_key_id",
         "object_storage_secret_access_key",
+        "azure_storage_account_url",
+        "azure_managed_identity_endpoint",
+        "azure_managed_identity_header",
         "smtp_host",
         "smtp_username",
         "smtp_password",
@@ -219,6 +265,35 @@ class Settings(BaseSettings):
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("application URL must be an absolute http(s) URL")
         return value.rstrip("/")
+
+    @field_validator("azure_storage_account_url")
+    @classmethod
+    def validate_azure_storage_account_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlparse(value.rstrip("/"))
+        if parsed.scheme != "https" or not parsed.netloc or parsed.path not in {"", "/"}:
+            raise ValueError("Azure storage account URL must be an HTTPS origin")
+        return value.rstrip("/")
+
+    @field_validator(
+        "azure_quarantine_container",
+        "azure_clean_container",
+        "azure_rejected_container",
+        "azure_retained_container",
+    )
+    @classmethod
+    def validate_azure_container(cls, value: str) -> str:
+        if (
+            not 3 <= len(value) <= 63
+            or value != value.lower()
+            or not value[0].isalnum()
+            or not value[-1].isalnum()
+            or any(not (character.isalnum() or character == "-") for character in value)
+            or "--" in value
+        ):
+            raise ValueError("Azure container names must satisfy the Blob naming contract")
+        return value
 
     @model_validator(mode="after")
     def validate_runtime(self) -> Settings:
@@ -259,6 +334,8 @@ class Settings(BaseSettings):
                 raise ValueError("test mode requires deterministic AI and embedding providers")
             if self.storage_provider not in {"memory", "local"}:
                 raise ValueError("test mode requires isolated memory or local storage")
+            if self.object_ingestion_mode == "trusted":
+                raise ValueError("test mode refuses trusted external scanner results")
         elif mode in {AppMode.STAGING, AppMode.PRODUCTION}:
             self._validate_deployed_mode(mode)
         return self
@@ -321,23 +398,42 @@ class Settings(BaseSettings):
             raise ValueError(f"{label} requires a distinct invitation secret of at least 32 bytes")
         if self.ai_provider != "openai" or self.embedding_provider != "openai":
             raise ValueError(f"{label} refuses mock AI and embedding providers")
-        if self.storage_provider != "s3":
-            raise ValueError(f"{label} requires durable S3-compatible object storage")
+        if self.storage_provider != "azure":
+            raise ValueError(f"{label} requires the approved private Azure Blob storage provider")
         required_storage = {
-            "OPENCANVAS_OBJECT_STORAGE_BUCKET": self.object_storage_bucket,
-            "OPENCANVAS_OBJECT_STORAGE_ACCESS_KEY_ID": self.object_storage_access_key_id,
-            "OPENCANVAS_OBJECT_STORAGE_SECRET_ACCESS_KEY": self.object_storage_secret_access_key,
+            "OPENCANVAS_AZURE_STORAGE_ACCOUNT_URL": self.azure_storage_account_url,
+            "OPENCANVAS_AZURE_MANAGED_IDENTITY_ENDPOINT": (self.azure_managed_identity_endpoint),
+            "OPENCANVAS_AZURE_MANAGED_IDENTITY_HEADER": self.azure_managed_identity_header,
         }
         missing = [name for name, value in required_storage.items() if not value]
         if missing:
             raise ValueError(f"{label} object storage is missing: {', '.join(missing)}")
+        containers = {
+            self.azure_quarantine_container,
+            self.azure_clean_container,
+            self.azure_rejected_container,
+            self.azure_retained_container,
+        }
+        if len(containers) != 4:
+            raise ValueError(f"{label} requires distinct storage security-class containers")
+        if self.object_ingestion_mode != "trusted":
+            raise ValueError(f"{label} requires the trusted clean-object ingestion gate")
+        if self.malware_scanner_identity == "deterministic-test-scanner":
+            raise ValueError(f"{label} refuses the deterministic test scanner identity")
+        if (
+            self.upload_capability_secret == DEVELOPMENT_UPLOAD_CAPABILITY_SECRET
+            or self.scanner_result_secret == DEVELOPMENT_SCANNER_RESULT_SECRET
+            or self.upload_capability_secret
+            in {self.session_secret, self.invitation_secret, self.scanner_result_secret}
+            or self.scanner_result_secret in {self.session_secret, self.invitation_secret}
+        ):
+            raise ValueError(
+                f"{label} requires distinct upload-capability and scanner-result secrets"
+            )
         if self.job_provider != "database":
             raise ValueError(f"{label} requires the database-backed worker provider")
-        if self.indexer_publication_mode != "disabled":
-            raise ValueError(
-                f"{label} requires Indexer publication to remain disabled until "
-                "the Milestone 7.3 clean-object gate is available"
-            )
+        if self.indexer_publication_mode not in {"disabled", "private_clean"}:
+            raise ValueError(f"{label} permits only disabled or clean-gated Indexer publication")
 
     @property
     def runtime_mode(self) -> AppMode:

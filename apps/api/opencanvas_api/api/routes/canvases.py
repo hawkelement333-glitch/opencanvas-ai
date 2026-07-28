@@ -1242,6 +1242,7 @@ async def _execute_ai(
                     provider=embedding_provider,
                     top_k=top_k,
                     threshold=threshold,
+                    settings=settings,
                 )
             except DocumentServiceError as exc:
                 completed_at = datetime.now(UTC)

@@ -49,7 +49,7 @@ def test_postgresql_0026_cycle_and_append_only_trigger_catalog(
     postgres_indexer_database_url: str,
 ) -> None:
     config = _config(postgres_indexer_database_url)
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260726_0026")
     asyncio.run(_assert_upgraded(postgres_indexer_database_url))
 
     command.downgrade(config, "20260725_0025")

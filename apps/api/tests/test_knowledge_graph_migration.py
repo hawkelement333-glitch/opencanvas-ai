@@ -24,10 +24,10 @@ def test_knowledge_graph_migration_cycle_and_sqlite_append_only_guards(
 ) -> None:
     database_path = tmp_path / "knowledge-graph-migration.db"
     config = _config(database_path)
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260725_0016")
     with sqlite3.connect(database_path) as connection:
         head = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-        assert head == ("20260726_0026",)
+        assert head == ("20260725_0016",)
         trigger_names = {
             row[0]
             for row in connection.execute(
@@ -90,8 +90,8 @@ def test_knowledge_graph_migration_cycle_and_sqlite_append_only_guards(
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
         assert "canonical_graph_relationships" not in tables
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260725_0016")
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "20260726_0026",
+            "20260725_0016",
         )

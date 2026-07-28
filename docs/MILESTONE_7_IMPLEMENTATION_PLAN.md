@@ -7,7 +7,8 @@ PostgreSQL historical-migration correction and evidence complete locally at
 implementation SHA `a88c6117f6b58137f1014cc8b389f44966c2918f`;
 Mobius Family Architecture Constitution documentation checkpoint complete
 locally; checkpoint 7.2 complete locally on
-`milestone-7-2-implementation-local`; checkpoint 7.3 unstarted
+`milestone-7-2-implementation-local`; checkpoint 7.3 complete locally on
+`milestone-7-3-implementation-local`; checkpoint 7.4 unstarted
 
 Compatibility gates:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -47,7 +48,7 @@ created direct child `20260726_0026`; its immutable Git blob hash is
 Architecture:
 [`MILESTONE_7_ARCHITECTURE.md`](MILESTONE_7_ARCHITECTURE.md)
 
-Current sole Alembic head: `20260726_0026`
+Current sole Alembic head: `20260726_0027`
 
 ## Mobius Family Constitution inheritance
 
@@ -419,6 +420,13 @@ deployment, and Milestone 8.
 
 ## 5. Checkpoint 7.3 — Object Storage, Upload Security, and Malware Quarantine
 
+Implementation status: **complete locally** on 2026-07-28. The implementation
+record is
+[`MILESTONE_7_3_OBJECT_STORAGE_UPLOAD_SECURITY_MALWARE_QUARANTINE_HANDOFF.md`](MILESTONE_7_3_OBJECT_STORAGE_UPLOAD_SECURITY_MALWARE_QUARANTINE_HANDOFF.md).
+Migration `20260726_0027` is the sole head and direct child of `0026`.
+No unscanned or indeterminate object is eligible for parsing, retrieval,
+models, download, or Indexer publication. Checkpoint 7.4 remains unstarted.
+
 ### Purpose
 
 Ensure no uploaded content can reach parsers, retrieval, models, downloads, or
@@ -552,10 +560,18 @@ scanner outage, orphan, and key-compromise runbooks.
 
 ### Commit and exit
 
-Suggested local commit: `Complete Milestone 7.3 secure object ingestion`
+Local completion commit: `Implement Milestone 7.3`
 
 Exit only when no unscanned or indeterminate byte can enter protected
 processing/publication and the migration is immutable.
+
+Completion record (2026-07-28): provider-neutral versioned storage, bounded
+quarantine upload, exact-byte validation, trusted immutable scan results,
+checksum-verified promotion, private clean reads, append-only lifecycle/audit
+evidence, deletion fencing, and reconciliation implement the approved scope.
+Azure staging clean/EICAR evidence is validated through exact matching Log
+Analytics records. Direct personal blob-tag inspection remains unavailable by
+least-privilege design and is not used as an application authorization path.
 
 ### Explicit exclusions
 

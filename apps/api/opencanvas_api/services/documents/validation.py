@@ -50,6 +50,21 @@ _WINDOWS_RESERVED = {
     *(f"COM{index}" for index in range(1, 10)),
     *(f"LPT{index}" for index in range(1, 10)),
 }
+_PDF_ACTIVE_CONTENT_MARKERS = (
+    b"/AA",
+    b"/EmbeddedFiles",
+    b"/JavaScript",
+    b"/JS",
+    b"/Launch",
+    b"/OpenAction",
+    b"/RichMedia",
+)
+_DOCX_FORBIDDEN_MEMBER_PARTS = (
+    "/embeddings/",
+    "vbaproject.bin",
+    "activex",
+    "oleobject",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +76,59 @@ class ValidatedDocument:
     size_bytes: int
     sha256: str
     content: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class UploadContract:
+    file_name: str
+    file_type: str
+    extension: str
+    media_type: str
+    size_bytes: int
+    sha256: str
+
+
+def validate_upload_contract(
+    *,
+    filename: str | None,
+    declared_media_type: str | None,
+    size_bytes: int,
+    sha256: str,
+    settings: Settings,
+) -> UploadContract:
+    file_name = sanitize_filename(filename)
+    extension = PurePosixPath(file_name).suffix.lower()
+    if extension not in SUPPORTED_EXTENSIONS:
+        raise DocumentValidationError(
+            "Supported document formats are PDF, TXT, Markdown, and DOCX.",
+            code="unsupported_file_type",
+            status_code=415,
+        )
+    if not 0 < size_bytes <= settings.document_max_file_size_bytes:
+        raise DocumentValidationError(
+            "The upload size is outside the configured document limit.",
+            code="file_too_large",
+            status_code=413,
+        )
+    normalized_sha256 = sha256.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", normalized_sha256):
+        raise DocumentValidationError("A valid SHA-256 checksum is required.")
+    normalized_declared = (declared_media_type or "").split(";", maxsplit=1)[0].strip().lower()
+    if normalized_declared and normalized_declared not in _DECLARED_MEDIA_TYPES[extension]:
+        raise DocumentValidationError(
+            "The file's declared media type does not match its extension.",
+            code="unsupported_media_type",
+            status_code=415,
+        )
+    file_type, media_type = _EXTENSION_TYPES[extension]
+    return UploadContract(
+        file_name=file_name,
+        file_type=file_type,
+        extension=extension,
+        media_type=media_type,
+        size_bytes=size_bytes,
+        sha256=normalized_sha256,
+    )
 
 
 def sanitize_filename(filename: str | None) -> str:
@@ -154,8 +222,12 @@ def _validate_utf8_text(content: bytes) -> None:
 
 
 def _validate_pdf_structure(content: bytes, settings: Settings) -> None:
+    if any(marker in content for marker in _PDF_ACTIVE_CONTENT_MARKERS):
+        raise DocumentValidationError("PDF active content is not supported.")
     try:
         reader = PdfReader(io.BytesIO(content), strict=False)
+        if reader.is_encrypted:
+            raise DocumentValidationError("Encrypted PDF files are not supported.")
         page_count = len(reader.pages)
     except Exception as exc:
         raise DocumentValidationError("The uploaded PDF is malformed and cannot be read.") from exc
@@ -179,6 +251,19 @@ def _validate_docx_archive(content: bytes, settings: Settings) -> None:
                     raise DocumentValidationError("The DOCX archive contains an unsafe path.")
                 if member.flag_bits & 0x1:
                     raise DocumentValidationError("Encrypted DOCX files are not supported.")
+                normalized_name = f"/{path.as_posix().lower()}"
+                if any(part in normalized_name for part in _DOCX_FORBIDDEN_MEMBER_PARTS):
+                    raise DocumentValidationError(
+                        "DOCX active or embedded content is not supported."
+                    )
+                if (
+                    member.compress_size > 0
+                    and member.file_size
+                    > member.compress_size * settings.document_docx_max_compression_ratio
+                ):
+                    raise DocumentValidationError(
+                        "The DOCX archive contains an unsafe compression ratio."
+                    )
                 total_size += member.file_size
                 if total_size > settings.document_docx_max_uncompressed_bytes:
                     raise DocumentValidationError("The DOCX archive expands beyond the safe limit.")
@@ -186,6 +271,20 @@ def _validate_docx_archive(content: bytes, settings: Settings) -> None:
             required = {"[Content_Types].xml", "word/document.xml"}
             if not required <= names:
                 raise DocumentValidationError("The uploaded archive is not a valid DOCX document.")
+            content_types = archive.read("[Content_Types].xml").lower()
+            if b"macroenabled" in content_types or b"vbaproject" in content_types:
+                raise DocumentValidationError("Macro-enabled Office documents are not supported.")
+            for member_name in names:
+                if member_name.endswith(".rels"):
+                    relationships = archive.read(member_name)
+                    if re.search(
+                        rb"""TargetMode\s*=\s*["']External["']""",
+                        relationships,
+                        re.IGNORECASE,
+                    ):
+                        raise DocumentValidationError(
+                            "DOCX external relationships are not supported."
+                        )
     except (zipfile.BadZipFile, OSError) as exc:
         raise DocumentValidationError("The uploaded DOCX archive is malformed.") from exc
 

@@ -150,6 +150,15 @@ DomainEventType = Literal[
     "index.revision.created",
     "index.published",
     "index.superseded",
+    "upload.requested",
+    "upload.completed",
+    "object.quarantined",
+    "scan.started",
+    "scan.passed",
+    "scan.rejected",
+    "object.promoted",
+    "object.failed",
+    "object.deletion_requested",
 ]
 SubjectKind = Literal[
     "canonical_resource",
@@ -182,6 +191,11 @@ SubjectKind = Literal[
     "ingestion_request",
     "index_revision",
     "index_publication",
+    "upload_session",
+    "storage_object_version",
+    "malware_scan_request",
+    "malware_scan_result",
+    "object_promotion",
 ]
 OriginType = Literal[
     "authenticated_user",
@@ -302,6 +316,20 @@ _INDEXER_PAYLOAD = frozenset(
         "publicationId",
         "generation",
         "manifestVersion",
+    }
+)
+_OBJECT_INGESTION_PAYLOAD = frozenset(
+    {
+        "state",
+        "reasonCode",
+        "documentId",
+        "documentVersion",
+        "objectVersionId",
+        "scanRequestId",
+        "scanResultId",
+        "promotionId",
+        "outcome",
+        "policyVersion",
     }
 )
 
@@ -589,6 +617,33 @@ EVENT_TYPE_REGISTRY: dict[DomainEventType, EventTypeSpec] = {
     ),
     "index.published": EventTypeSpec("index_publication", _INDEXER_PAYLOAD, canvas_required=True),
     "index.superseded": EventTypeSpec("index_publication", _INDEXER_PAYLOAD, canvas_required=True),
+    "upload.requested": EventTypeSpec(
+        "upload_session", _OBJECT_INGESTION_PAYLOAD, canvas_required=True
+    ),
+    "upload.completed": EventTypeSpec(
+        "upload_session", _OBJECT_INGESTION_PAYLOAD, canvas_required=True
+    ),
+    "object.quarantined": EventTypeSpec(
+        "storage_object_version", _OBJECT_INGESTION_PAYLOAD, canvas_required=True
+    ),
+    "scan.started": EventTypeSpec(
+        "malware_scan_request", _OBJECT_INGESTION_PAYLOAD, canvas_required=True
+    ),
+    "scan.passed": EventTypeSpec(
+        "malware_scan_result", _OBJECT_INGESTION_PAYLOAD, canvas_required=True
+    ),
+    "scan.rejected": EventTypeSpec(
+        "malware_scan_result", _OBJECT_INGESTION_PAYLOAD, canvas_required=True
+    ),
+    "object.promoted": EventTypeSpec(
+        "object_promotion", _OBJECT_INGESTION_PAYLOAD, canvas_required=True
+    ),
+    "object.failed": EventTypeSpec(
+        "storage_object_version", _OBJECT_INGESTION_PAYLOAD, canvas_required=True
+    ),
+    "object.deletion_requested": EventTypeSpec(
+        "storage_object_version", _OBJECT_INGESTION_PAYLOAD, canvas_required=True
+    ),
 }
 
 

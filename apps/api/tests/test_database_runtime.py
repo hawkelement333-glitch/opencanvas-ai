@@ -28,10 +28,15 @@ def _deployed_settings(**overrides: object) -> Settings:
         "ai_provider": "openai",
         "embedding_provider": "openai",
         "openai_api_key": "placeholder-not-live",
-        "storage_provider": "s3",
-        "object_storage_bucket": "mobius-production",
-        "object_storage_access_key_id": "placeholder",
-        "object_storage_secret_access_key": "placeholder",
+        "storage_provider": "azure",
+        "azure_storage_account_url": "https://mobius.invalid.blob.core.windows.net",
+        "azure_managed_identity_endpoint": "https://identity.invalid/token",
+        "azure_managed_identity_header": "test-only-managed-identity-header",
+        "object_ingestion_mode": "trusted",
+        "upload_capability_secret": "production-upload-capability-secret-distinct-value",
+        "scanner_result_secret": "production-scanner-result-secret-distinct-value",
+        "malware_scanner_identity": "microsoft-defender-storage-staging",
+        "malware_scanner_version": "defender-storage-v1",
         "job_provider": "database",
     }
     values.update(overrides)
@@ -61,7 +66,7 @@ def test_complete_deployed_database_configuration_is_valid(mode: str) -> None:
 def test_deployed_runtime_refuses_index_publication_before_clean_object_gate(
     mode: str,
 ) -> None:
-    with pytest.raises(ValidationError, match="Indexer publication to remain disabled"):
+    with pytest.raises(ValidationError, match="disabled or clean-gated Indexer publication"):
         _deployed_settings(
             app_mode=mode,
             indexer_publication_mode="private_legacy",

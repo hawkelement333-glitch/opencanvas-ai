@@ -25,6 +25,10 @@ from opencanvas_api.services.auth import (
 )
 from opencanvas_api.services.authorization import AuthorizationError, require_owned_workspace
 from opencanvas_api.services.canonical.service import CanonicalService
+from opencanvas_api.services.documents import (
+    VersionedObjectStorage,
+    build_versioned_object_storage,
+)
 from opencanvas_api.services.domain_events import DomainEventService
 from opencanvas_api.services.knowledge_graph import KnowledgeGraphService
 from opencanvas_api.services.trace import TraceService
@@ -43,6 +47,20 @@ def get_ai_provider(settings: Annotated[Settings, Depends(get_settings)]) -> AIP
 def get_database(request: Request) -> Database:
     database: Database = request.app.state.database
     return database
+
+
+def get_versioned_object_storage(
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> VersionedObjectStorage:
+    storage = cast(
+        VersionedObjectStorage | None,
+        getattr(request.app.state, "versioned_object_storage", None),
+    )
+    if storage is None:
+        storage = build_versioned_object_storage(settings)
+        request.app.state.versioned_object_storage = storage
+    return storage
 
 
 def get_trace_service(session: Annotated[AsyncSession, Depends(get_session)]) -> TraceService:
@@ -234,6 +252,22 @@ async def enforce_document_rate_limit(
             limit=settings.requests_per_workspace_per_minute,
             window_seconds=60.0,
         )
+
+
+async def enforce_scanner_result_rate_limit(
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> None:
+    limiter = getattr(request.app.state, "scanner_result_limiter", None)
+    if not isinstance(limiter, InMemoryRateLimiter):
+        limiter = InMemoryRateLimiter()
+        request.app.state.scanner_result_limiter = limiter
+    source = request.client.host if request.client is not None else "unknown"
+    await limiter.enforce(
+        f"scanner-result:{source}",
+        limit=settings.scanner_result_requests_per_minute,
+        window_seconds=60.0,
+    )
 
 
 async def enforce_auth_rate_limit(

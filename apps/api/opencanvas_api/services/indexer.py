@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import importlib
 import json
 import multiprocessing
@@ -10,7 +11,7 @@ import socket
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, Literal, cast
 
@@ -33,9 +34,13 @@ from opencanvas_api.db.models import (
     IndexRevisionChunk,
     IngestionRequest,
     IngestionRequestTransition,
+    MalwareScanResult,
     NormalizedArtifact,
+    ObjectPromotion,
     PipelineManifest,
     RetrievalHead,
+    StorageObjectLifecycleTransition,
+    StorageObjectVersion,
     VectorMaterialization,
     Workspace,
 )
@@ -263,6 +268,8 @@ class IngestionService:
             document_version=document_version,
             access_level=ShareAccessLevel.CONTRIBUTE,
         )
+        if self.settings.object_ingestion_mode != "disabled":
+            await self._require_clean_source(scope.version, verify_bytes=False)
         manifest = await self.manifests.resolve(
             self.session,
             workspace_id=workspace_id,
@@ -877,9 +884,12 @@ class IngestionService:
     ) -> IndexPublication | None:
         if self.settings.indexer_publication_mode == "disabled":
             return None
-        if self.settings.runtime_mode in {AppMode.STAGING, AppMode.PRODUCTION}:
+        if (
+            self.settings.runtime_mode in {AppMode.STAGING, AppMode.PRODUCTION}
+            and self.settings.indexer_publication_mode != "private_clean"
+        ):
             raise IndexerError(
-                "Indexer publication is disabled until the clean-object gate is available.",
+                "Indexer publication requires the clean-object gate.",
                 code="publication_disabled",
                 status_code=503,
             )
@@ -940,6 +950,8 @@ class IngestionService:
             or scope.document.status in {"deleting", "deleted"}
         ):
             raise IndexerError("The source changed.", code="source_changed")
+        if self.settings.indexer_publication_mode == "private_clean":
+            await self._require_clean_source(scope.version, verify_bytes=True)
         head = await self.session.scalar(
             select(RetrievalHead)
             .where(RetrievalHead.document_id == request.document_id)
@@ -1203,6 +1215,86 @@ class IngestionService:
             )
         )
         await self.session.flush()
+
+    async def _require_clean_source(
+        self,
+        version: DocumentVersion,
+        *,
+        verify_bytes: bool,
+    ) -> StorageObjectVersion:
+        latest_sequence = (
+            select(func.max(StorageObjectLifecycleTransition.sequence))
+            .where(
+                StorageObjectLifecycleTransition.object_version_id
+                == StorageObjectVersion.object_version_id
+            )
+            .correlate(StorageObjectVersion)
+            .scalar_subquery()
+        )
+        cutoff = datetime.now(UTC) - timedelta(
+            seconds=self.settings.malware_scan_result_max_age_seconds
+        )
+        row = (
+            await self.session.execute(
+                select(StorageObjectVersion, MalwareScanResult)
+                .join(
+                    ObjectPromotion,
+                    ObjectPromotion.target_object_version_id
+                    == StorageObjectVersion.object_version_id,
+                )
+                .join(
+                    MalwareScanResult,
+                    MalwareScanResult.scan_result_id == ObjectPromotion.scan_result_id,
+                )
+                .join(
+                    StorageObjectLifecycleTransition,
+                    (
+                        StorageObjectLifecycleTransition.object_version_id
+                        == StorageObjectVersion.object_version_id
+                    )
+                    & (StorageObjectLifecycleTransition.sequence == latest_sequence),
+                )
+                .where(
+                    StorageObjectVersion.document_version_id == version.id,
+                    StorageObjectVersion.security_class == "clean",
+                    StorageObjectVersion.content_sha256 == version.content_sha256,
+                    StorageObjectVersion.physical_key == version.storage_key,
+                    StorageObjectLifecycleTransition.current_state == "clean",
+                    MalwareScanResult.outcome == "clean",
+                    MalwareScanResult.scanner_identity == self.settings.malware_scanner_identity,
+                    MalwareScanResult.scanner_version == self.settings.malware_scanner_version,
+                    MalwareScanResult.policy_version == self.settings.malware_policy_version,
+                    MalwareScanResult.scanned_at >= cutoff,
+                )
+                .order_by(MalwareScanResult.scanned_at.desc())
+                .limit(1)
+            )
+        ).one_or_none()
+        if row is None:
+            raise IndexerError(
+                "The source has no current verified clean-object evidence.",
+                code="source_not_clean",
+                status_code=409,
+            )
+        object_version = cast(StorageObjectVersion, row[0])
+        if verify_bytes:
+            try:
+                content = await self.storage.read(object_version.physical_key)
+            except DocumentServiceError as exc:
+                raise IndexerError(
+                    "The clean source bytes are unavailable.",
+                    code="clean_source_unavailable",
+                    status_code=503,
+                ) from exc
+            if len(content) != object_version.byte_size or not hmac.compare_digest(
+                hashlib.sha256(content).hexdigest(),
+                object_version.content_sha256,
+            ):
+                raise IndexerError(
+                    "The clean source changed before publication.",
+                    code="clean_source_changed",
+                )
+        return object_version
 
     async def _scope(
         self,

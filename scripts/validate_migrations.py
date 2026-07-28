@@ -20,8 +20,8 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 API_ROOT = REPOSITORY_ROOT / "apps" / "api"
 VERSIONS_ROOT = API_ROOT / "alembic" / "versions"
 MODELS_PATH = API_ROOT / "opencanvas_api" / "db" / "models.py"
-EXPECTED_HEAD = "20260726_0026"
-PREVIOUS_REVISION = "20260725_0025"
+EXPECTED_HEAD = "20260726_0027"
+PREVIOUS_REVISION = "20260726_0026"
 POSTGRESQL_SENSITIVE_IDENTIFIER_CANDIDATES = frozenset(
     {
         "authorization",
@@ -81,6 +81,7 @@ EXPECTED_MIGRATION_BLOB_HASHES = {
         "b5c71452728cf5c473a017679ebb6f2903a5f9f6"
     ),
     "20260726_0026_deterministic_indexer.py": ("847a347b3e9f16ccd328c10265060b81937aa6c5"),
+    "20260726_0027_secure_object_ingestion.py": ("5e4fd280d4207a005d0c208e06fb841cc990b3c2"),
 }
 EXPECTED_REVISION_CHAIN = tuple(
     filename.split("_", 2)[0] + "_" + filename.split("_", 2)[1]

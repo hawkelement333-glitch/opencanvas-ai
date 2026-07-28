@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal, cast
 from urllib.parse import quote
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    Header,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,8 +23,10 @@ from opencanvas_api.api.dependencies import (
     MutatingPrincipalDep,
     PrincipalDep,
     enforce_document_rate_limit,
+    enforce_scanner_result_rate_limit,
     get_database,
     get_session,
+    get_versioned_object_storage,
 )
 from opencanvas_api.api.errors import ApiError
 from opencanvas_api.api.schemas import (
@@ -23,7 +36,11 @@ from opencanvas_api.api.schemas import (
     DocumentSearchRequest,
     DocumentTextOut,
     DocumentTextSection,
+    SecureObjectDeletionCreate,
+    SecureUploadCreate,
+    SecureUploadOut,
     SourcePassageOut,
+    TrustedScanResultIn,
     UploadDocumentOut,
 )
 from opencanvas_api.api.serialization import (
@@ -40,6 +57,7 @@ from opencanvas_api.db.models import (
     DocumentChunk,
     DocumentFile,
     DocumentVersion,
+    UploadSession,
     UsageRecord,
 )
 from opencanvas_api.db.session import Database
@@ -53,6 +71,7 @@ from opencanvas_api.services.documents import (
     DocumentProcessor,
     DocumentServiceError,
     RetrievedChunk,
+    VersionedObjectStorage,
     build_document_storage,
     build_embedding_provider,
     delete_document,
@@ -61,16 +80,96 @@ from opencanvas_api.services.documents import (
     validate_and_store_upload,
 )
 from opencanvas_api.services.jobs import JobQueueError, build_job_provider
+from opencanvas_api.services.object_ingestion import (
+    MalwareScanService,
+    ObjectIngestionError,
+    TrustedScanResult,
+    UploadLifecycleService,
+    UploadSessionView,
+)
 
 router = APIRouter()
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 DatabaseDep = Annotated[Database, Depends(get_database)]
+ObjectStorageDep = Annotated[
+    VersionedObjectStorage,
+    Depends(get_versioned_object_storage),
+]
 CanvasCoordinate = Annotated[float, Form(ge=-1_000_000, le=1_000_000)]
 
 
 def _service_error(error: DocumentServiceError) -> ApiError:
     return ApiError(error.status_code, error.code, error.safe_message)
+
+
+def _ingestion_error(error: ObjectIngestionError) -> ApiError:
+    return ApiError(error.status_code, error.code, error.safe_message)
+
+
+def _secure_upload_out(view: UploadSessionView, *, api_prefix: str) -> SecureUploadOut:
+    return SecureUploadOut(
+        session_id=view.session.session_id,
+        workspace_id=view.session.workspace_id,
+        canvas_id=view.session.canvas_id,
+        document_id=view.session.document_id,
+        document_version_id=view.session.document_version_id,
+        object_version_id=view.session.object_version_id,
+        state=cast(
+            Literal["requested", "uploaded", "completed", "canceled", "expired", "error"],
+            view.transition.current_state,
+        ),
+        object_state=(
+            cast(
+                Literal[
+                    "quarantined",
+                    "scan_pending",
+                    "clean",
+                    "rejected",
+                    "retained",
+                    "deletion_requested",
+                    "deleted",
+                    "legacy_unscanned",
+                    "canceled",
+                    "error",
+                ],
+                view.object_transition.current_state,
+            )
+            if view.object_transition is not None
+            else None
+        ),
+        scan_outcome=(
+            cast(
+                Literal["clean", "infected", "suspicious", "unsupported", "error", "timeout"],
+                view.scan_result.outcome,
+            )
+            if view.scan_result is not None
+            else None
+        ),
+        safe_reason_code=(
+            view.scan_result.safe_reason_code if view.scan_result is not None else None
+        ),
+        capability=view.capability,
+        upload_path=(
+            f"{api_prefix}/upload-sessions/{view.session.session_id}/content"
+            if view.capability
+            else None
+        ),
+        expires_at=view.session.expires_at,
+        duplicate=view.duplicate,
+    )
+
+
+def _ingestion_service(
+    session: AsyncSession,
+    settings: Settings,
+    storage: VersionedObjectStorage,
+) -> UploadLifecycleService:
+    return UploadLifecycleService(
+        session,
+        settings=settings,
+        storage=storage,
+    )
 
 
 async def _require_canvas(
@@ -150,6 +249,304 @@ async def _process_document_background(
 
 
 @router.post(
+    "/workspaces/{workspace_id}/canvases/{canvas_id}/upload-sessions",
+    response_model=SecureUploadOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(enforce_document_rate_limit)],
+)
+async def initiate_secure_upload(
+    workspace_id: uuid.UUID,
+    canvas_id: uuid.UUID,
+    payload: SecureUploadCreate,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+    settings: SettingsDep,
+    storage: ObjectStorageDep,
+) -> SecureUploadOut:
+    try:
+        view = await _ingestion_service(session, settings, storage).initiate(
+            principal=principal,
+            workspace_id=workspace_id,
+            canvas_id=canvas_id,
+            file_name=payload.file_name,
+            media_type=payload.media_type,
+            size_bytes=payload.size_bytes,
+            sha256=payload.sha256,
+            idempotency_key=payload.idempotency_key,
+        )
+        await session.commit()
+    except (ObjectIngestionError, DocumentServiceError) as exc:
+        await session.rollback()
+        if isinstance(exc, ObjectIngestionError):
+            raise _ingestion_error(exc) from exc
+        raise _service_error(exc) from exc
+    return _secure_upload_out(view, api_prefix=settings.api_prefix)
+
+
+@router.put(
+    "/upload-sessions/{session_id}/content",
+    response_model=SecureUploadOut,
+    dependencies=[Depends(enforce_document_rate_limit)],
+)
+async def upload_secure_content(
+    session_id: uuid.UUID,
+    request: Request,
+    session: SessionDep,
+    settings: SettingsDep,
+    storage: ObjectStorageDep,
+    capability: Annotated[str, Header(alias="X-Upload-Capability", min_length=32)],
+) -> SecureUploadOut:
+    content = await request.body()
+    if len(content) > settings.document_max_file_size_bytes:
+        raise ApiError(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            "file_too_large",
+            "The upload exceeds the configured file limit.",
+        )
+    try:
+        view = await _ingestion_service(session, settings, storage).upload_bytes(
+            session_id=session_id,
+            capability=capability,
+            content=content,
+        )
+        await session.commit()
+    except (ObjectIngestionError, DocumentServiceError) as exc:
+        await session.rollback()
+        if isinstance(exc, ObjectIngestionError):
+            raise _ingestion_error(exc) from exc
+        raise _service_error(exc) from exc
+    return _secure_upload_out(view, api_prefix=settings.api_prefix)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/canvases/{canvas_id}/upload-sessions/{session_id}/complete",
+    response_model=SecureUploadOut,
+    dependencies=[Depends(enforce_document_rate_limit)],
+)
+async def complete_secure_upload(
+    workspace_id: uuid.UUID,
+    canvas_id: uuid.UUID,
+    session_id: uuid.UUID,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+    settings: SettingsDep,
+    storage: ObjectStorageDep,
+) -> SecureUploadOut:
+    try:
+        view = await _ingestion_service(session, settings, storage).complete(
+            principal=principal,
+            workspace_id=workspace_id,
+            canvas_id=canvas_id,
+            session_id=session_id,
+        )
+        await session.commit()
+    except (ObjectIngestionError, DocumentServiceError) as exc:
+        await session.rollback()
+        if isinstance(exc, ObjectIngestionError):
+            raise _ingestion_error(exc) from exc
+        raise _service_error(exc) from exc
+    return _secure_upload_out(view, api_prefix=settings.api_prefix)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/canvases/{canvas_id}/upload-sessions/{session_id}",
+    response_model=SecureUploadOut,
+)
+async def get_secure_upload(
+    workspace_id: uuid.UUID,
+    canvas_id: uuid.UUID,
+    session_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+    settings: SettingsDep,
+    storage: ObjectStorageDep,
+) -> SecureUploadOut:
+    try:
+        view = await _ingestion_service(session, settings, storage).get(
+            principal=principal,
+            workspace_id=workspace_id,
+            canvas_id=canvas_id,
+            session_id=session_id,
+        )
+    except (ObjectIngestionError, DocumentServiceError) as exc:
+        if isinstance(exc, ObjectIngestionError):
+            raise _ingestion_error(exc) from exc
+        raise _service_error(exc) from exc
+    return _secure_upload_out(view, api_prefix=settings.api_prefix)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/canvases/{canvas_id}/upload-sessions/{session_id}/cancel",
+    response_model=SecureUploadOut,
+    dependencies=[Depends(enforce_document_rate_limit)],
+)
+async def cancel_secure_upload(
+    workspace_id: uuid.UUID,
+    canvas_id: uuid.UUID,
+    session_id: uuid.UUID,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+    settings: SettingsDep,
+    storage: ObjectStorageDep,
+) -> SecureUploadOut:
+    try:
+        view = await _ingestion_service(session, settings, storage).cancel(
+            principal=principal,
+            workspace_id=workspace_id,
+            canvas_id=canvas_id,
+            session_id=session_id,
+        )
+        await session.commit()
+    except (ObjectIngestionError, DocumentServiceError) as exc:
+        await session.rollback()
+        if isinstance(exc, ObjectIngestionError):
+            raise _ingestion_error(exc) from exc
+        raise _service_error(exc) from exc
+    return _secure_upload_out(view, api_prefix=settings.api_prefix)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/canvases/{canvas_id}/upload-sessions/{session_id}/rescan",
+    response_model=SecureUploadOut,
+    dependencies=[Depends(enforce_document_rate_limit)],
+)
+async def rescan_secure_upload(
+    workspace_id: uuid.UUID,
+    canvas_id: uuid.UUID,
+    session_id: uuid.UUID,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+    settings: SettingsDep,
+    storage: ObjectStorageDep,
+) -> SecureUploadOut:
+    try:
+        view = await _ingestion_service(session, settings, storage).request_rescan(
+            principal=principal,
+            workspace_id=workspace_id,
+            canvas_id=canvas_id,
+            session_id=session_id,
+        )
+        await session.commit()
+    except (ObjectIngestionError, DocumentServiceError) as exc:
+        await session.rollback()
+        if isinstance(exc, ObjectIngestionError):
+            raise _ingestion_error(exc) from exc
+        raise _service_error(exc) from exc
+    return _secure_upload_out(view, api_prefix=settings.api_prefix)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/canvases/{canvas_id}/upload-sessions/{session_id}"
+    "/deletion-requests",
+    response_model=SecureUploadOut,
+    dependencies=[Depends(enforce_document_rate_limit)],
+)
+async def request_secure_object_deletion(
+    workspace_id: uuid.UUID,
+    canvas_id: uuid.UUID,
+    session_id: uuid.UUID,
+    payload: SecureObjectDeletionCreate,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+    settings: SettingsDep,
+    storage: ObjectStorageDep,
+) -> SecureUploadOut:
+    try:
+        view = await _ingestion_service(session, settings, storage).request_deletion(
+            principal=principal,
+            workspace_id=workspace_id,
+            canvas_id=canvas_id,
+            session_id=session_id,
+            idempotency_key=payload.idempotency_key,
+            reason_code=payload.reason_code,
+        )
+        await session.commit()
+    except (ObjectIngestionError, DocumentServiceError) as exc:
+        await session.rollback()
+        if isinstance(exc, ObjectIngestionError):
+            raise _ingestion_error(exc) from exc
+        raise _service_error(exc) from exc
+    return _secure_upload_out(view, api_prefix=settings.api_prefix)
+
+
+@router.post(
+    "/internal/object-ingestion/scan-results",
+    response_model=SecureUploadOut,
+    dependencies=[Depends(enforce_scanner_result_rate_limit)],
+)
+async def record_trusted_scan_result(
+    payload: TrustedScanResultIn,
+    session: SessionDep,
+    settings: SettingsDep,
+    storage: ObjectStorageDep,
+    signature: Annotated[str, Header(alias="X-Scanner-Result-Signature", min_length=64)],
+) -> SecureUploadOut:
+    result = TrustedScanResult(
+        scan_request_id=payload.scan_request_id,
+        object_version_id=payload.object_version_id,
+        workspace_id=payload.workspace_id,
+        outcome=payload.outcome,
+        scanner_identity=payload.scanner_identity,
+        scanner_version=payload.scanner_version,
+        engine_version=payload.engine_version,
+        signature_version=payload.signature_version,
+        policy_version=payload.policy_version,
+        provider_result_id=payload.provider_result_id,
+        provider_record_digest=payload.provider_record_digest.lower(),
+        provider_version_id=payload.provider_version_id,
+        etag=payload.etag,
+        content_sha256=payload.content_sha256.lower(),
+        scanned_at=payload.scanned_at,
+        safe_reason_code=payload.safe_reason_code,
+    )
+    try:
+        view = await MalwareScanService(
+            session,
+            settings=settings,
+            storage=storage,
+        ).record_result(result=result, signature=signature)
+        await session.commit()
+    except (ObjectIngestionError, DocumentServiceError) as exc:
+        await session.rollback()
+        if isinstance(exc, ObjectIngestionError):
+            raise _ingestion_error(exc) from exc
+        raise _service_error(exc) from exc
+    return _secure_upload_out(view, api_prefix=settings.api_prefix)
+
+
+@router.get("/workspaces/{workspace_id}/canvases/{canvas_id}/upload-sessions/{session_id}/file")
+async def download_clean_upload(
+    workspace_id: uuid.UUID,
+    canvas_id: uuid.UUID,
+    session_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+    settings: SettingsDep,
+    storage: ObjectStorageDep,
+) -> Response:
+    try:
+        record, version, content = await _ingestion_service(session, settings, storage).clean_bytes(
+            principal=principal,
+            workspace_id=workspace_id,
+            canvas_id=canvas_id,
+            session_id=session_id,
+        )
+    except (ObjectIngestionError, DocumentServiceError) as exc:
+        if isinstance(exc, ObjectIngestionError):
+            raise _ingestion_error(exc) from exc
+        raise _service_error(exc) from exc
+    return Response(
+        content=content,
+        media_type=version.media_type,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(record.file_name)}",
+            "Content-Length": str(len(content)),
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+@router.post(
     "/canvases/{canvas_id}/documents",
     response_model=UploadDocumentOut,
     status_code=status.HTTP_201_CREATED,
@@ -166,6 +563,12 @@ async def upload_document(
     x: CanvasCoordinate = 80.0,
     y: CanvasCoordinate = 80.0,
 ) -> UploadDocumentOut:
+    if settings.object_ingestion_mode != "disabled":
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "secure_upload_required",
+            "This environment requires the secure quarantine upload workflow.",
+        )
     canvas = await _require_canvas(session, canvas_id, principal)
     storage = build_document_storage(settings)
     job_provider = build_job_provider(settings)
@@ -268,8 +671,39 @@ async def get_document_file(
     principal: PrincipalDep,
     session: SessionDep,
     settings: SettingsDep,
+    storage: ObjectStorageDep,
 ) -> Response:
     document = await _require_document(session, document_id, principal)
+    if settings.object_ingestion_mode != "disabled":
+        upload = await session.scalar(
+            select(UploadSession).where(UploadSession.document_id == document_id)
+        )
+        if upload is None:
+            raise ApiError(
+                status.HTTP_404_NOT_FOUND,
+                "file_not_found",
+                "Document file not found.",
+            )
+        try:
+            _, version, content = await _ingestion_service(session, settings, storage).clean_bytes(
+                principal=principal,
+                workspace_id=upload.workspace_id,
+                canvas_id=upload.canvas_id,
+                session_id=upload.session_id,
+            )
+        except (ObjectIngestionError, DocumentServiceError) as exc:
+            if isinstance(exc, ObjectIngestionError):
+                raise _ingestion_error(exc) from exc
+            raise _service_error(exc) from exc
+        return Response(
+            content=content,
+            media_type=version.media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(document.file_name)}",
+                "Content-Length": str(len(content)),
+                "Cache-Control": "private, no-store",
+            },
+        )
     stored_file = await session.scalar(
         select(DocumentFile).where(DocumentFile.document_id == document.id)
     )
@@ -303,6 +737,12 @@ async def replace_document(
     background_tasks: BackgroundTasks,
     file: Annotated[UploadFile, File(description="Replacement document")],
 ) -> DocumentMetadata:
+    if settings.object_ingestion_mode != "disabled":
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "secure_upload_required",
+            "This environment requires the secure quarantine upload workflow.",
+        )
     document = await _require_document(session, document_id, principal)
     canvas = await _require_canvas(session, document.canvas_id, principal)
     storage = build_document_storage(settings)
@@ -346,9 +786,34 @@ async def replace_document(
 
 @router.get("/documents/{document_id}/text", response_model=DocumentTextOut)
 async def get_document_text(
-    document_id: uuid.UUID, principal: PrincipalDep, session: SessionDep
+    document_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+    settings: SettingsDep,
+    storage: ObjectStorageDep,
 ) -> DocumentTextOut:
     document = await _require_document(session, document_id, principal)
+    if settings.object_ingestion_mode != "disabled":
+        upload = await session.scalar(
+            select(UploadSession).where(UploadSession.document_id == document_id)
+        )
+        if upload is None:
+            raise ApiError(
+                status.HTTP_409_CONFLICT,
+                "document_not_clean",
+                "The document has no current clean-object evidence.",
+            )
+        try:
+            await _ingestion_service(session, settings, storage).clean_bytes(
+                principal=principal,
+                workspace_id=upload.workspace_id,
+                canvas_id=upload.canvas_id,
+                session_id=upload.session_id,
+            )
+        except (ObjectIngestionError, DocumentServiceError) as exc:
+            if isinstance(exc, ObjectIngestionError):
+                raise _ingestion_error(exc) from exc
+            raise _service_error(exc) from exc
     if document.extracted_text is None:
         raise ApiError(
             status.HTTP_409_CONFLICT,
@@ -388,8 +853,31 @@ async def get_source_passage(
     chunk_id: uuid.UUID,
     principal: PrincipalDep,
     session: SessionDep,
+    settings: SettingsDep,
+    storage: ObjectStorageDep,
 ) -> SourcePassageOut:
     document = await _require_document(session, document_id, principal)
+    if settings.object_ingestion_mode != "disabled":
+        upload = await session.scalar(
+            select(UploadSession).where(UploadSession.document_id == document_id)
+        )
+        if upload is None:
+            raise ApiError(
+                status.HTTP_404_NOT_FOUND,
+                "chunk_not_found",
+                "Source passage not found.",
+            )
+        try:
+            await _ingestion_service(session, settings, storage).clean_bytes(
+                principal=principal,
+                workspace_id=upload.workspace_id,
+                canvas_id=upload.canvas_id,
+                session_id=upload.session_id,
+            )
+        except (ObjectIngestionError, DocumentServiceError) as exc:
+            if isinstance(exc, ObjectIngestionError):
+                raise _ingestion_error(exc) from exc
+            raise _service_error(exc) from exc
     chunk = await session.scalar(
         select(DocumentChunk).where(
             DocumentChunk.id == chunk_id,
@@ -581,6 +1069,7 @@ async def search_selected_documents(
                 if payload.min_relevance is not None
                 else settings.document_relevance_threshold
             ),
+            settings=settings,
         )
     except DocumentServiceError as exc:
         raise _service_error(exc) from exc

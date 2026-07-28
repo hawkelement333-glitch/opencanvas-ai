@@ -59,6 +59,7 @@ def _service(session: AsyncSession, settings: Settings) -> GraphAwareRetrievalSe
     return GraphAwareRetrievalService(
         session,
         embedding_provider=build_embedding_provider(settings),
+        settings=settings,
     )
 
 

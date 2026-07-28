@@ -10,11 +10,12 @@ object ingestion and malware quarantine, durable work, shared rate limits,
 observability, recovery exercises, capacity/resilience testing, and the final
 production-readiness audit.
 
-Checkpoint 7.1 is complete locally. It implements the provider-neutral runtime
-contract, but no managed service was provisioned or contacted. This guide is
-not evidence that a managed database, hostile-upload controls, failover,
-restore, capacity, or production security have passed. Checkpoint 7.2 remains
-unstarted. Live PostgreSQL 17 validation has proved clean-install failures in
+Checkpoints 7.1, 7.2, and 7.3 are complete locally. This guide is not evidence
+that failover, restore, capacity, or final production security have passed.
+Managed Azure staging prerequisites proved private/versioned storage and
+harmless/EICAR scan outcomes, but no application deployment or production
+certification occurred. Checkpoint 7.4 remains unstarted. Live PostgreSQL 17
+validation previously proved clean-install failures in
 historical migrations `20260718_0005`, `20260725_0021`,
 `20260725_0023`, and `20260725_0024`; no deployment or migration `0026` is
 authorized until the
@@ -30,7 +31,8 @@ and their combined focused correction checkpoint pass.
 SolarPlexus Mobius has five explicit runtime modes: `demo`, `development`, `test`, `staging`, and
 `production`. The API validates the selected mode and all mode-dependent provider configuration at
 startup. Staging and production fail closed if authentication, PostgreSQL, SMTP password reset,
-OpenAI providers, S3-compatible private storage, or the database-backed worker are missing. They
+OpenAI providers, approved private Azure Blob storage, trusted object
+ingestion, or the database-backed worker are missing. They
 never fall back to deterministic providers.
 
 ## Service topology
@@ -42,11 +44,12 @@ never fall back to deterministic providers.
   retries, idempotency keys, and heartbeats.
 - `api-migrate`: one-shot Alembic migration task run before API/worker rollout.
 - PostgreSQL with pgvector: durable relational, vector, session, job, execution, and Trace state.
-- S3-compatible object storage: private original uploads in staging and production.
+- Azure Blob Storage: private, versioned quarantine, clean, rejected, and
+  retained containers accessed by workload identity.
 
 The repository does not require one hosting vendor. Any platform is acceptable if it provides
-these service roles, private networking, TLS, managed secrets, PostgreSQL/pgvector, and private
-S3-compatible object storage.
+these service roles, private networking, TLS, managed secrets,
+PostgreSQL/pgvector, and approved private versioned object storage.
 
 ## Local production-shaped stack
 
@@ -102,13 +105,27 @@ Start from `.env.example`, inject secrets through the deployment platform, and s
 - `OPENCANVAS_AI_PROVIDER=openai`
 - `OPENCANVAS_EMBEDDING_PROVIDER=openai`
 - server-only `OPENAI_API_KEY`
-- `OPENCANVAS_STORAGE_PROVIDER=s3` and private bucket credentials/configuration
+- `OPENCANVAS_STORAGE_PROVIDER=azure`
+- the Azure storage-account URL and four distinct private security-class
+  containers
+- workload-identity endpoint/header settings injected by the platform
+- `OPENCANVAS_OBJECT_INGESTION_MODE=trusted`
+- distinct server-only upload-capability and scanner-result secrets
+- exact scanner identity/version and malware-policy version
+- bounded capability TTL, active sessions, callback rate, scan deadline, and
+  clean-evidence maximum age
 - `OPENCANVAS_JOB_PROVIDER=database`
 - a browser-safe `NEXT_PUBLIC_API_URL=https://.../api/v1` at web build time
 
-Use separate databases, buckets/prefixes, session secrets, SMTP credentials, OpenAI projects, and
+Use separate databases, storage accounts/containers, session secrets, SMTP credentials, OpenAI projects, and
 telemetry destinations for staging and production. Never mount the demo database or demo storage
 into either environment. Never set `APP_MODE=demo` in a deployed user environment.
+
+Before enabling trusted ingestion, verify private networking,
+public/shared-key denial, versioning, encryption, workload identity, scanner
+policy/result authentication, and all four distinct containers. A mutable blob
+tag is not a standalone clean decision. Follow
+[`OBJECT_INGESTION_RUNBOOK.md`](OBJECT_INGESTION_RUNBOOK.md).
 
 Inject exactly one database credential into each process. API, worker, and
 migration tasks use distinct least-privilege database users. API and worker
@@ -129,7 +146,7 @@ authorization, CSRF, SMTP, storage, or OpenAI secrets.
 3. Run the migration image as a one-shot task:
 
    ```sh
-   python -m scripts.migrate --expected-current 20260725_0024
+   python -m scripts.migrate --expected-current 20260726_0026
    ```
 
 4. Deploy worker instances and wait for a fresh worker heartbeat.
@@ -142,7 +159,7 @@ authorization, CSRF, SMTP, storage, or OpenAI secrets.
 Do not run multiple application revisions against an incompatible schema. Migrations must finish
 before new API/worker instances accept traffic.
 
-The guarded runner verifies the repository target `20260725_0025`, verifies
+The guarded runner verifies the repository target `20260726_0027`, verifies
 the operator-declared current revision (`base` for an empty database), obtains
 one PostgreSQL session advisory lock, uses a direct non-pooled connection, and
 verifies the final revision. A competing runner fails safely. API and worker

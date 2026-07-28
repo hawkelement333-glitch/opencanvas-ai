@@ -23,10 +23,10 @@ def _config(database_path: Path) -> Config:
 def test_living_state_migration_cycle_and_append_only_guards(tmp_path: Path) -> None:
     database_path = tmp_path / "living-state.db"
     config = _config(database_path)
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260725_0017")
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "20260726_0026",
+            "20260725_0017",
         )
         tables = {
             row[0]
@@ -129,10 +129,10 @@ def test_living_state_migration_cycle_and_append_only_guards(tmp_path: Path) -> 
         assert "domain_events" not in tables
         assert "canonical_graph_relationships" in tables
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260725_0017")
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "20260726_0026",
+            "20260725_0017",
         )
 
 

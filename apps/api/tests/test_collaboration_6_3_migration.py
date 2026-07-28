@@ -23,7 +23,7 @@ def _config(tmp_path: Path) -> Config:
 def test_milestone_6_3_is_the_only_head_and_0024_is_absent(tmp_path: Path) -> None:
     config = _config(tmp_path)
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["20260726_0026"]
+    assert scripts.get_heads() == ["20260726_0027"]
     assert scripts.get_revision("20260725_0023").down_revision == "20260725_0022"
     assert scripts.get_revision("20260725_0024").down_revision == "20260725_0023"
 
@@ -31,7 +31,7 @@ def test_milestone_6_3_is_the_only_head_and_0024_is_absent(tmp_path: Path) -> No
 def test_milestone_6_3_schema_is_scoped_append_only_and_cycles(tmp_path: Path) -> None:
     config = _config(tmp_path)
     database_path = tmp_path / "collaboration-6-3.db"
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260725_0023")
     expected = {
         "collaboration_resources",
         "collaboration_resource_ownership_transitions",
@@ -52,7 +52,7 @@ def test_milestone_6_3_schema_is_scoped_append_only_and_cycles(tmp_path: Path) -
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'")
         }
-    assert revision == ("20260726_0026",)
+    assert revision == ("20260725_0023",)
     assert expected <= tables
     assert {
         "trg_collaboration_resources_update_blocked",
@@ -76,7 +76,7 @@ def test_milestone_6_3_schema_is_scoped_append_only_and_cycles(tmp_path: Path) -
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
     assert not expected & tables
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260725_0023")
 
 
 def test_milestone_6_3_postgresql_ddl_compiles(tmp_path: Path) -> None:

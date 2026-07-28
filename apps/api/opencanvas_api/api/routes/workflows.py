@@ -87,6 +87,7 @@ def _service(
         session,
         embedding_provider=build_embedding_provider(settings),
         ai_provider=provider,
+        settings=settings,
     )
 
 

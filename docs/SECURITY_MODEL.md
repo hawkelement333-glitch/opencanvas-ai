@@ -25,7 +25,7 @@ flowchart LR
     Browser["Untrusted browser"] --> API["Validation and policy boundary"]
     Upload["Untrusted documents"] --> API
     API --> DB[("PostgreSQL")]
-    API --> Files["Private local or S3-compatible storage"]
+    API --> Files["Private local or versioned Azure storage"]
     Worker["Document worker"] --> DB
     Worker --> Files
     API --> Provider["External AI provider"]
@@ -181,11 +181,34 @@ Trace and execution APIs enforce workspace ownership and redact secrets, authori
 hidden system instructions, internal paths, and unsafe diagnostics. Formal retention, export
 artifact generation, redaction workflows, and audit-administrator policy remain deployment work.
 
+## Secure object ingestion and malware quarantine
+
+Milestone 7.3 makes quarantine the default for every new uploaded object.
+One-time upload capabilities bind one server-owned opaque object, immutable
+version, exact size, SHA-256, media contract, scope, and expiry. They can write
+only quarantine and do not grant read, completion, promotion, or publication
+authority.
+
+A scanner result is accepted only through a rate-limited HMAC-authenticated
+service path and must bind the exact scan request, immutable provider version,
+ETag, byte size, SHA-256, scanner identity/version, malware policy version,
+closed verdict, and completion time. Only a current `clean` result permits a
+server-side copy to a new clean version; the target is rehashed. Every unsafe,
+unknown, stale, cancelled, forged, replayed, mismatched, or cross-scope result
+remains quarantined.
+
+Parsing, retrieval, models, downloads, and Indexer publication recheck the
+current clean promotion and evidence. They do not trust a filename, extension,
+client claim, object location, mutable provider tag, or personal cloud
+identity. Operational procedures are in
+[`OBJECT_INGESTION_RUNBOOK.md`](OBJECT_INGESTION_RUNBOOK.md).
+
 ## Known gaps before internet deployment
 
 - Deployment-specific TLS/reverse-proxy, managed-secret, and key-rotation implementation
 - Distributed rate limiting and centralized abuse controls
-- Malware scanning and content disarm/reconstruction
+- Managed-production scanner integration certification and content
+  disarm/reconstruction
 - Production multi-service outbox delivery validation and complete durable-job
   lease/dead-letter administration
 - Managed encryption/key policy plus executed backup/restore disaster-recovery drills

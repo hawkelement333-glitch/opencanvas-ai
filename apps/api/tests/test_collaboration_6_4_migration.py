@@ -22,7 +22,7 @@ def _config(tmp_path: Path) -> Config:
 
 def test_milestone_6_4_is_the_only_direct_head(tmp_path: Path) -> None:
     scripts = ScriptDirectory.from_config(_config(tmp_path))
-    assert scripts.get_heads() == ["20260726_0026"]
+    assert scripts.get_heads() == ["20260726_0027"]
     assert scripts.get_revision("20260725_0024").down_revision == "20260725_0023"
     assert scripts.get_revision("20260725_0023").down_revision == "20260725_0022"
 
@@ -30,7 +30,7 @@ def test_milestone_6_4_is_the_only_direct_head(tmp_path: Path) -> None:
 def test_milestone_6_4_schema_is_append_only_and_cycles(tmp_path: Path) -> None:
     config = _config(tmp_path)
     database_path = tmp_path / "collaboration-6-4.db"
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260725_0024")
     expected_tables = {
         "collaboration_comment_threads",
         "collaboration_comment_thread_transitions",
@@ -62,7 +62,7 @@ def test_milestone_6_4_schema_is_append_only_and_cycles(tmp_path: Path) -> None:
         domain_event_ddl = connection.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'domain_events'"
         ).fetchone()[0]
-    assert revision == ("20260726_0026",)
+    assert revision == ("20260725_0024",)
     assert expected_tables <= tables
     assert expected_guards <= triggers
     assert "comment.created" in domain_event_ddl
@@ -78,7 +78,7 @@ def test_milestone_6_4_schema_is_append_only_and_cycles(tmp_path: Path) -> None:
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
     assert not expected_tables & tables
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260725_0024")
 
 
 def test_milestone_6_4_postgresql_ddl_compiles(tmp_path: Path) -> None:

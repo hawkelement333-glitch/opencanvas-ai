@@ -501,6 +501,476 @@ class DocumentProcessingJob(TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class UploadSession(Base):
+    """Immutable authority and byte contract for one quarantine upload."""
+
+    __tablename__ = "upload_sessions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["membership_id", "user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_upload_sessions_membership",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["canvas_id", "workspace_id"],
+            ["canvases.id", "canvases.workspace_id"],
+            name="fk_upload_sessions_canvas_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("session_id", "workspace_id", name="uq_upload_sessions_scope"),
+        UniqueConstraint(
+            "object_version_id",
+            name="uq_upload_sessions_object_version_id",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "idempotency_key",
+            name="uq_upload_sessions_idempotency",
+        ),
+        CheckConstraint("expected_size_bytes > 0", name="ck_upload_sessions_expected_size"),
+        CheckConstraint("length(expected_sha256) = 64", name="ck_upload_sessions_expected_sha256"),
+        CheckConstraint("length(request_digest) = 64", name="ck_upload_sessions_request_digest"),
+        CheckConstraint(
+            "length(capability_digest) = 64",
+            name="ck_upload_sessions_capability_digest",
+        ),
+        CheckConstraint(
+            "authority_generation >= 0",
+            name="ck_upload_sessions_authority_generation",
+        ),
+        Index(
+            "ix_upload_sessions_scope_expiry",
+            "workspace_id",
+            "canvas_id",
+            "expires_at",
+        ),
+    )
+
+    session_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    document_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    object_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("storage_objects.object_id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    object_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    expected_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    expected_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(160), nullable=False)
+    extension: Mapped[str] = mapped_column(String(16), nullable=False)
+    capability_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class UploadSessionTransition(Base):
+    __tablename__ = "upload_session_transitions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["session_id", "workspace_id"],
+            ["upload_sessions.session_id", "upload_sessions.workspace_id"],
+            name="fk_upload_session_transitions_session",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("session_id", "sequence", name="uq_upload_session_transitions_sequence"),
+        CheckConstraint("sequence >= 0", name="ck_upload_session_transitions_sequence"),
+        CheckConstraint(
+            "current_state IN "
+            "('requested', 'uploaded', 'completed', 'canceled', 'expired', 'error')",
+            name="ck_upload_session_transitions_state",
+        ),
+        CheckConstraint(
+            "previous_state IS NULL OR previous_state IN "
+            "('requested', 'uploaded', 'completed', 'canceled', 'expired', 'error')",
+            name="ck_upload_session_transitions_previous_state",
+        ),
+        Index(
+            "ix_upload_session_transitions_latest",
+            "session_id",
+            "sequence",
+        ),
+    )
+
+    transition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_state: Mapped[str | None] = mapped_column(String(24))
+    current_state: Mapped[str] = mapped_column(String(24), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class StorageObject(Base):
+    __tablename__ = "storage_objects"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["canvas_id", "workspace_id"],
+            ["canvases.id", "canvases.workspace_id"],
+            name="fk_storage_objects_canvas_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("object_id", "workspace_id", name="uq_storage_objects_scope"),
+        UniqueConstraint(
+            "workspace_id",
+            "document_id",
+            name="uq_storage_objects_document",
+        ),
+        CheckConstraint(
+            "classification IN ('private_source', 'restricted_source')",
+            name="ck_storage_objects_classification",
+        ),
+    )
+
+    object_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    creator_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="RESTRICT"), nullable=False
+    )
+    environment: Mapped[str] = mapped_column(String(24), nullable=False)
+    classification: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class StorageObjectVersion(Base):
+    __tablename__ = "storage_object_versions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["object_id", "workspace_id"],
+            ["storage_objects.object_id", "storage_objects.workspace_id"],
+            name="fk_storage_object_versions_object",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "object_version_id",
+            "workspace_id",
+            name="uq_storage_object_versions_scope",
+        ),
+        UniqueConstraint(
+            "provider_name",
+            "physical_key",
+            "provider_version_id",
+            name="uq_storage_object_versions_provider_identity",
+        ),
+        CheckConstraint(
+            "security_class IN ('quarantine', 'clean', 'rejected', 'retained')",
+            name="ck_storage_object_versions_security_class",
+        ),
+        CheckConstraint("byte_size > 0", name="ck_storage_object_versions_byte_size"),
+        CheckConstraint("length(content_sha256) = 64", name="ck_storage_object_versions_sha256"),
+        Index(
+            "ix_storage_object_versions_document",
+            "workspace_id",
+            "document_version_id",
+            "created_at",
+        ),
+    )
+
+    object_version_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    object_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    document_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    security_class: Mapped[str] = mapped_column(String(24), nullable=False)
+    physical_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    provider_name: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_version_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    etag: Mapped[str] = mapped_column(String(256), nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(160), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class StorageObjectLifecycleTransition(Base):
+    __tablename__ = "storage_object_lifecycle_transitions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["object_version_id", "workspace_id"],
+            ["storage_object_versions.object_version_id", "storage_object_versions.workspace_id"],
+            name="fk_storage_object_lifecycle_version",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "object_version_id",
+            "sequence",
+            name="uq_storage_object_lifecycle_sequence",
+        ),
+        CheckConstraint("sequence >= 0", name="ck_storage_object_lifecycle_sequence"),
+        CheckConstraint(
+            "current_state IN "
+            "('quarantined', 'scan_pending', 'clean', 'rejected', 'retained', "
+            "'deletion_requested', 'deleted', 'legacy_unscanned', 'canceled', 'error')",
+            name="ck_storage_object_lifecycle_state",
+        ),
+        CheckConstraint(
+            "previous_state IS NULL OR previous_state IN "
+            "('quarantined', 'scan_pending', 'clean', 'rejected', 'retained', "
+            "'deletion_requested', 'deleted', 'legacy_unscanned', 'canceled', 'error')",
+            name="ck_storage_object_lifecycle_previous_state",
+        ),
+        Index(
+            "ix_storage_object_lifecycle_latest",
+            "object_version_id",
+            "sequence",
+        ),
+    )
+
+    transition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    object_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_state: Mapped[str | None] = mapped_column(String(24))
+    current_state: Mapped[str] = mapped_column(String(24), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+    service_identity: Mapped[str | None] = mapped_column(String(120))
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class MalwareScanRequest(Base):
+    __tablename__ = "malware_scan_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["object_version_id", "workspace_id"],
+            ["storage_object_versions.object_version_id", "storage_object_versions.workspace_id"],
+            name="fk_malware_scan_requests_version",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "object_version_id",
+            "policy_version",
+            "request_digest",
+            name="uq_malware_scan_requests_identity",
+        ),
+        UniqueConstraint(
+            "scan_request_id",
+            "object_version_id",
+            name="uq_malware_scan_requests_result_scope",
+        ),
+        CheckConstraint("length(request_digest) = 64", name="ck_malware_scan_requests_digest"),
+        CheckConstraint("timeout_seconds > 0", name="ck_malware_scan_requests_timeout"),
+        Index(
+            "ix_malware_scan_requests_pending",
+            "workspace_id",
+            "requested_at",
+            "deadline_at",
+        ),
+    )
+
+    scan_request_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    object_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    requested_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    scanner_identity: Mapped[str] = mapped_column(String(120), nullable=False)
+    scanner_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class MalwareScanResult(Base):
+    __tablename__ = "malware_scan_results"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["scan_request_id", "object_version_id"],
+            ["malware_scan_requests.scan_request_id", "malware_scan_requests.object_version_id"],
+            name="fk_malware_scan_results_request",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("scan_request_id", name="uq_malware_scan_results_request"),
+        UniqueConstraint(
+            "scanner_identity",
+            "provider_result_id",
+            name="uq_malware_scan_results_provider",
+        ),
+        CheckConstraint(
+            "outcome IN ('clean', 'infected', 'suspicious', 'unsupported', 'error', 'timeout')",
+            name="ck_malware_scan_results_outcome",
+        ),
+        CheckConstraint("length(content_sha256) = 64", name="ck_malware_scan_results_sha256"),
+        CheckConstraint("length(result_digest) = 64", name="ck_malware_scan_results_digest"),
+        CheckConstraint(
+            "length(provider_record_digest) = 64",
+            name="ck_malware_scan_results_provider_digest",
+        ),
+        Index(
+            "ix_malware_scan_results_object",
+            "workspace_id",
+            "object_version_id",
+            "scanned_at",
+        ),
+    )
+
+    scan_result_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    scan_request_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    object_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    outcome: Mapped[str] = mapped_column(String(24), nullable=False)
+    scanner_identity: Mapped[str] = mapped_column(String(120), nullable=False)
+    scanner_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    engine_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    signature_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider_result_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    provider_record_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_version_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    etag: Mapped[str] = mapped_column(String(256), nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    safe_reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    scanned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ObjectPromotion(Base):
+    __tablename__ = "object_promotions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["source_object_version_id", "workspace_id"],
+            ["storage_object_versions.object_version_id", "storage_object_versions.workspace_id"],
+            name="fk_object_promotions_source",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["target_object_version_id", "workspace_id"],
+            ["storage_object_versions.object_version_id", "storage_object_versions.workspace_id"],
+            name="fk_object_promotions_target",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("scan_result_id", name="uq_object_promotions_scan_result"),
+        UniqueConstraint(
+            "source_object_version_id",
+            "target_object_version_id",
+            name="uq_object_promotions_pair",
+        ),
+        CheckConstraint("length(source_sha256) = 64", name="ck_object_promotions_source_sha256"),
+        CheckConstraint("length(target_sha256) = 64", name="ck_object_promotions_target_sha256"),
+    )
+
+    promotion_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    scan_result_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("malware_scan_results.scan_result_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    source_object_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    target_object_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    service_identity: Mapped[str] = mapped_column(String(120), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    promoted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ObjectIngestionAuditEvent(Base):
+    __tablename__ = "object_ingestion_audit_events"
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ('allowed', 'denied', 'succeeded', 'failed')",
+            name="ck_object_ingestion_audit_outcome",
+        ),
+        Index(
+            "ix_object_ingestion_audit_scope",
+            "workspace_id",
+            "canvas_id",
+            "recorded_at",
+        ),
+    )
+
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    canvas_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("canvases.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    upload_session_id: Mapped[uuid.UUID | None] = mapped_column(index=True)
+    object_version_id: Mapped[uuid.UUID | None] = mapped_column(index=True)
+    scan_request_id: Mapped[uuid.UUID | None] = mapped_column(index=True)
+    scan_result_id: Mapped[uuid.UUID | None] = mapped_column(index=True)
+    promotion_id: Mapped[uuid.UUID | None] = mapped_column(index=True)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    safe_metadata: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ObjectDeletionRequest(Base):
+    __tablename__ = "object_deletion_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["object_version_id", "workspace_id"],
+            ["storage_object_versions.object_version_id", "storage_object_versions.workspace_id"],
+            name="fk_object_deletion_requests_version",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "object_version_id",
+            "idempotency_key",
+            name="uq_object_deletion_requests_idempotency",
+        ),
+    )
+
+    deletion_request_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    object_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    requester_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class PipelineManifest(Base):
     __tablename__ = "pipeline_manifests"
     __table_args__ = (
@@ -4019,7 +4489,16 @@ class DomainEventRecord(Base):
             "'index.reindex.requested', "
             "'index.revision.created', "
             "'index.published', "
-            "'index.superseded')",
+            "'index.superseded', "
+            "'upload.requested', "
+            "'upload.completed', "
+            "'object.quarantined', "
+            "'scan.started', "
+            "'scan.passed', "
+            "'scan.rejected', "
+            "'object.promoted', "
+            "'object.failed', "
+            "'object.deletion_requested')",
             name="ck_domain_events_type",
         ),
         CheckConstraint(
@@ -4033,7 +4512,9 @@ class DomainEventRecord(Base):
             "'approval_authority_assignment', 'collaboration_resource', "
             "'resource_share', 'ownership_transfer', 'authority_fence', "
             "'comment_thread', 'comment', 'ingestion_request', "
-            "'index_revision', 'index_publication')",
+            "'index_revision', 'index_publication', 'upload_session', "
+            "'storage_object_version', 'malware_scan_request', "
+            "'malware_scan_result', 'object_promotion')",
             name="ck_domain_events_subject_kind",
         ),
         CheckConstraint("sequence > 0", name="ck_domain_events_sequence_positive"),
@@ -7428,6 +7909,19 @@ INDEXER_IMMUTABLE_MODELS = (
     IndexerFailure,
 )
 
+OBJECT_STORAGE_IMMUTABLE_MODELS = (
+    UploadSession,
+    UploadSessionTransition,
+    StorageObject,
+    StorageObjectVersion,
+    StorageObjectLifecycleTransition,
+    MalwareScanRequest,
+    MalwareScanResult,
+    ObjectPromotion,
+    ObjectIngestionAuditEvent,
+    ObjectDeletionRequest,
+)
+
 
 def _reject_controlled_agent_mutation(_mapper: Any, _connection: Any, target: object) -> None:
     raise ValueError(f"{type(target).__name__} records are append-only")
@@ -7565,6 +8059,18 @@ for _collaboration_immutable_model in COLLABORATION_IMMUTABLE_MODELS:
 for _indexer_immutable_model in INDEXER_IMMUTABLE_MODELS:
     event.listen(_indexer_immutable_model, "before_update", _reject_controlled_agent_mutation)
     event.listen(_indexer_immutable_model, "before_delete", _reject_controlled_agent_mutation)
+
+for _object_storage_immutable_model in OBJECT_STORAGE_IMMUTABLE_MODELS:
+    event.listen(
+        _object_storage_immutable_model,
+        "before_update",
+        _reject_controlled_agent_mutation,
+    )
+    event.listen(
+        _object_storage_immutable_model,
+        "before_delete",
+        _reject_controlled_agent_mutation,
+    )
 
 event.listen(
     ControlledWorkflowExecution,

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import UploadFile
 from sqlalchemy import delete, func, select, update
@@ -20,6 +22,10 @@ from opencanvas_api.db.models import (
     DocumentProcessingJob,
     DocumentVersion,
     IndexRevision,
+    MalwareScanResult,
+    ObjectPromotion,
+    StorageObjectLifecycleTransition,
+    StorageObjectVersion,
     Workspace,
 )
 from opencanvas_api.services.documents.chunking import chunk_document
@@ -286,6 +292,68 @@ class DocumentProcessor:
         )
         if canvas is None or workspace is None:
             raise DocumentProcessingError("The document workspace is unavailable.")
+        version = await session.scalar(
+            select(DocumentVersion).where(
+                DocumentVersion.document_id == document_id,
+                DocumentVersion.version == document.current_version,
+            )
+        )
+        clean_version: StorageObjectVersion | None = None
+        if self.settings.object_ingestion_mode != "disabled":
+            if version is None:
+                raise DocumentProcessingError("The document source version is unavailable.")
+            latest_sequence = (
+                select(func.max(StorageObjectLifecycleTransition.sequence))
+                .where(
+                    StorageObjectLifecycleTransition.object_version_id
+                    == StorageObjectVersion.object_version_id
+                )
+                .correlate(StorageObjectVersion)
+                .scalar_subquery()
+            )
+            cutoff = datetime.now(UTC) - timedelta(
+                seconds=self.settings.malware_scan_result_max_age_seconds
+            )
+            clean_version = await session.scalar(
+                select(StorageObjectVersion)
+                .join(
+                    ObjectPromotion,
+                    ObjectPromotion.target_object_version_id
+                    == StorageObjectVersion.object_version_id,
+                )
+                .join(
+                    MalwareScanResult,
+                    MalwareScanResult.scan_result_id == ObjectPromotion.scan_result_id,
+                )
+                .join(
+                    StorageObjectLifecycleTransition,
+                    (
+                        StorageObjectLifecycleTransition.object_version_id
+                        == StorageObjectVersion.object_version_id
+                    )
+                    & (StorageObjectLifecycleTransition.sequence == latest_sequence),
+                )
+                .where(
+                    StorageObjectVersion.document_version_id == version.id,
+                    StorageObjectVersion.security_class == "clean",
+                    StorageObjectVersion.content_sha256 == version.content_sha256,
+                    StorageObjectVersion.physical_key == document_file.storage_key,
+                    StorageObjectLifecycleTransition.current_state == "clean",
+                    MalwareScanResult.outcome == "clean",
+                    MalwareScanResult.scanner_identity == self.settings.malware_scanner_identity,
+                    MalwareScanResult.scanner_version == self.settings.malware_scanner_version,
+                    MalwareScanResult.policy_version == self.settings.malware_policy_version,
+                    MalwareScanResult.scanned_at >= cutoff,
+                )
+                .order_by(MalwareScanResult.scanned_at.desc())
+                .limit(1)
+            )
+            if clean_version is None:
+                raise DocumentProcessingError(
+                    "The document has no current verified clean-object evidence.",
+                    code="source_not_clean",
+                    status_code=409,
+                )
         job = await session.scalar(
             select(DocumentProcessingJob)
             .where(
@@ -326,13 +394,6 @@ class DocumentProcessor:
         document.processing_stage = "extracting"
         document.error_message = None
         await self._persist(session, commit=commit_stages)
-        version = await session.scalar(
-            select(DocumentVersion).where(
-                DocumentVersion.document_id == document_id,
-                DocumentVersion.version == document.current_version,
-            )
-        )
-
         try:
             if self.settings.indexer_publication_mode == "disabled":
                 raise DocumentProcessingError(
@@ -341,6 +402,17 @@ class DocumentProcessor:
                     status_code=503,
                 )
             content = await self.storage.read(document_file.storage_key)
+            if clean_version is not None and (
+                len(content) != clean_version.byte_size
+                or not hmac.compare_digest(
+                    hashlib.sha256(content).hexdigest(),
+                    clean_version.content_sha256,
+                )
+            ):
+                raise DocumentProcessingError(
+                    "The clean source changed before parsing.",
+                    code="clean_source_changed",
+                )
             extracted = await asyncio.to_thread(
                 extract_document,
                 file_type=document.file_type,

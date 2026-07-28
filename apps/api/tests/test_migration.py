@@ -36,7 +36,7 @@ def test_standalone_migration_validator_tracks_current_head() -> None:
     validator = _load_migration_validator()
     assert heads[0] == validator.EXPECTED_HEAD
     assert scripts.get_revision(heads[0]).down_revision == validator.PREVIOUS_REVISION
-    assert len(validator.EXPECTED_MIGRATION_BLOB_HASHES) == 26
+    assert len(validator.EXPECTED_MIGRATION_BLOB_HASHES) == 27
     validator.validate_migration_history()
     validator.validate_migration_blob_hashes()
 
@@ -167,7 +167,7 @@ def test_migration_uses_configured_database_url(
 
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("20260726_0026",)
+    assert revision == ("20260726_0027",)
 
 
 def test_migration_0005_preserves_seeded_workspace_dependencies_sqlite(
@@ -266,7 +266,7 @@ def test_phase_two_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) ->
     config.set_main_option("script_location", str(api_directory / "alembic"))
     config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{database_path.as_posix()}")
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260717_0002")
     command.downgrade(config, "20260716_0001")
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
@@ -285,10 +285,10 @@ def test_phase_two_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) ->
     assert "ai_execution_citations" not in tables
     assert "ai_execution_sources" not in tables
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260717_0002")
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-    assert revision == ("20260726_0026",)
+    assert revision == ("20260717_0002",)
 
 
 def test_trace_foundation_migration_downgrades_and_reupgrades_sqlite(tmp_path: Path) -> None:
@@ -298,7 +298,7 @@ def test_trace_foundation_migration_downgrades_and_reupgrades_sqlite(tmp_path: P
     config.set_main_option("script_location", str(api_directory / "alembic"))
     config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{database_path.as_posix()}")
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260717_0003")
     command.downgrade(config, "20260717_0002")
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
@@ -309,11 +309,11 @@ def test_trace_foundation_migration_downgrades_and_reupgrades_sqlite(tmp_path: P
     assert revision == ("20260717_0002",)
     assert "trace_events" not in tables
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260717_0003")
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
         indexes = {row[1] for row in connection.execute("PRAGMA index_list(trace_events)")}
-    assert revision == ("20260726_0026",)
+    assert revision == ("20260717_0003",)
     assert {
         "ix_trace_events_trace_time",
         "ix_trace_events_workspace_time",
@@ -392,7 +392,7 @@ def test_canonical_migration_backfills_canvases_and_reverses_sqlite(tmp_path: Pa
         workspaces = connection.execute(
             "SELECT id, legacy_canvas_id, lifecycle_state FROM workspaces"
         ).fetchall()
-    assert revision == ("20260726_0026",)
+    assert revision == ("20260726_0027",)
     assert workspaces == [(retained_canvas_id, retained_canvas_id, "active")]
 
 
@@ -405,7 +405,7 @@ def test_controlled_agent_migration_is_append_only_and_reversible_sqlite(
     config.set_main_option("script_location", str(api_directory / "alembic"))
     config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{database_path.as_posix()}")
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260724_0015")
     execution_id = uuid.uuid4().hex
     context_id = uuid.uuid4().hex
     plan_id = uuid.uuid4().hex
@@ -451,14 +451,14 @@ def test_controlled_agent_migration_is_append_only_and_reversible_sqlite(
     assert revision == ("20260721_0006",)
     assert not any(table.startswith("controlled_agent_") for table in tables)
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "20260724_0015")
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
         tables = {
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
-    assert revision == ("20260726_0026",)
+    assert revision == ("20260724_0015",)
     assert "controlled_agent_approval_consumptions" in tables
 
 
@@ -473,7 +473,7 @@ def test_reversible_effect_migration_upgrades_downgrades_and_reupgrades_sqlite(
 
     command.upgrade(config, "20260724_0011")
     command.upgrade(config, "20260724_0012")
-    assert ScriptDirectory.from_config(config).get_heads() == ["20260726_0026"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20260726_0027"]
 
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
@@ -589,7 +589,7 @@ def test_rollback_evidence_migration_upgrades_downgrades_and_reupgrades_sqlite(
 
     command.upgrade(config, "20260724_0012")
     command.upgrade(config, "20260724_0013")
-    assert ScriptDirectory.from_config(config).get_heads() == ["20260726_0026"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20260726_0027"]
 
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
@@ -726,7 +726,7 @@ def test_rollback_evidence_migration_upgrades_downgrades_and_reupgrades_sqlite(
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
     assert revision == ("20260724_0013",)
-    assert ScriptDirectory.from_config(config).get_heads() == ["20260726_0026"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20260726_0027"]
 
 
 def test_rollback_authority_migration_upgrades_downgrades_and_reupgrades_sqlite(
@@ -888,7 +888,7 @@ def test_rollback_authority_migration_upgrades_downgrades_and_reupgrades_sqlite(
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
     assert revision == ("20260724_0014",)
-    assert ScriptDirectory.from_config(config).get_heads() == ["20260726_0026"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20260726_0027"]
 
 
 def test_execution_reliability_migration_backfills_and_cycles_sqlite(tmp_path: Path) -> None:
@@ -964,4 +964,4 @@ def test_execution_reliability_migration_backfills_and_cycles_sqlite(tmp_path: P
     with sqlite3.connect(database_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
     assert revision == ("20260724_0015",)
-    assert ScriptDirectory.from_config(config).get_heads() == ["20260726_0026"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20260726_0027"]

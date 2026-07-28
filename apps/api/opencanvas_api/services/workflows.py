@@ -15,6 +15,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from opencanvas_api.core.config import Settings
 from opencanvas_api.db.models import (
     CanonicalCanvasObjectBinding,
     CanonicalObject,
@@ -493,6 +494,7 @@ class ControlledWorkflowService:
         *,
         embedding_provider: EmbeddingProvider,
         ai_provider: AIProvider,
+        settings: Settings | None = None,
         now: datetime | None = None,
         after_version: Any | None = None,
         after_execution: Any | None = None,
@@ -503,6 +505,7 @@ class ControlledWorkflowService:
         self.session = session
         self.embedding_provider = embedding_provider
         self.ai_provider = ai_provider
+        self.settings = settings
         self.now = _utc(now or datetime.now(UTC))
         self.trace = TraceService(session)
         self.events = DomainEventService(session, after_event=after_event)
@@ -2099,6 +2102,7 @@ class ControlledWorkflowService:
             record = await GraphAwareRetrievalService(
                 self.session,
                 embedding_provider=self.embedding_provider,
+                settings=self.settings,
             ).retrieve(
                 StartGraphRetrieval(
                     user_id=execution.user_id,
@@ -2239,6 +2243,7 @@ class ControlledWorkflowService:
             rendered = await GraphAwareRetrievalService(
                 self.session,
                 embedding_provider=self.embedding_provider,
+                settings=self.settings,
             ).render_apa(retrieval, user_id=execution.user_id)
             return {
                 "rendererVersion": APA_RENDERER_VERSION,
@@ -3496,6 +3501,7 @@ class ControlledWorkflowService:
         return await GraphAwareRetrievalService(
             self.session,
             embedding_provider=self.embedding_provider,
+            settings=self.settings,
         ).get_owned(
             user_id=execution.user_id,
             workspace_id=execution.workspace_id,

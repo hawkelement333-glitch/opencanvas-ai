@@ -35,9 +35,17 @@ This register prevents the competition demo and public materials from implying c
 - PDF extraction depends on embedded text order and quality.
 - Markdown heading preservation covers ATX headings; richer syntax is not a full Markdown AST.
 - DOCX extraction preserves supported paragraph headings and table text, not full visual layout.
-- No OCR, password decryption, macro execution, embedded-object execution, malware scan, or content-disarm pipeline.
-- Staging/production support private S3-compatible object storage; the reference development
-  Compose stack intentionally uses a shared private local volume.
+- No OCR, password decryption, macro execution, embedded-object execution, or
+  content-disarm pipeline. Encrypted, macro-enabled, active, malformed,
+  unsupported, suspicious, infected, timed-out, and indeterminate input fails
+  closed in quarantine.
+- Staging/production require private versioned Azure Blob storage and trusted
+  scanner results. Local development and deterministic tests use isolated
+  substitutes and do not certify a production provider deployment.
+- Direct human reads of Defender blob-index tags are unavailable under the
+  least-privilege staging contributor role. Matching Log Analytics evidence
+  validated the staging clean/EICAR prerequisite; the application does not use
+  a personal identity or mutable tag as its safety decision.
 - File unlink and relational commit cannot be one atomic transaction. A rare commit failure after unlink requires operational repair; staged trash/outbox cleanup is deferred.
 
 ## Reliability and scale
@@ -102,23 +110,7 @@ This register prevents the competition demo and public materials from implying c
 
 ## Recommended next checkpoint
 
-Implement only the combined migration `0005`, guarded-runner, migration `0021`
-plus matching ORM metadata, and migrations `0023` and `0024` corrections
-authorized by the
-[migration 0005 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
-and the
-[migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md).
-[The migration 0023 UUID-null compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md)
-adds only the required explicit PostgreSQL UUID typing and focused backfill
-proof. The
-[trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md)
-adds only four name-reference replacements and exact trigger/mutation proof.
-The
-[migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
-adds only the quoted migration/ORM constraint, role and owner-transition
-coverage, session-role independence, and metadata parity proof. The
-[migration 0021 owner-backfill current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
-adds only the quoted raw `INSERT` target identifier and exact owner-backfill
-identity, value, count, scope, atomicity, and SQLite-equivalence proof.
-Checkpoint 7.2, migration `0026`, deployment, Milestone 8, and later work
-remain unstarted until the combined restart gate passes.
+Checkpoint 7.3 is complete locally. The next authorized checkpoint is
+Milestone 7.4 — Durable Queues, Workers, Retries, and Shared Rate Limits.
+Migration `0028`, deployment, the 7.8 final audit, Milestone 8, and later work
+remain unstarted.
