@@ -294,6 +294,51 @@ async def test_processing_guard_rejects_a_duplicate_in_flight_run(
 
 
 @pytest.mark.asyncio
+async def test_legacy_processing_fails_closed_when_publication_is_disabled(
+    database: Database, tmp_path: Path
+) -> None:
+    settings = _settings(tmp_path).model_copy(update={"indexer_publication_mode": "disabled"})
+    storage = LocalDocumentStorage(settings.document_storage_root)
+    processor = DocumentProcessor(
+        settings=settings, storage=storage, provider=MockEmbeddingProvider()
+    )
+    async with database.sessions() as session:
+        canvas = await _create_canvas(session)
+        document = await _store_document(
+            session,
+            canvas_id=canvas.id,
+            filename="disabled.md",
+            content="# Disabled\n\nNo legacy retrieval output may be published.",
+            settings=settings,
+            storage=storage,
+        )
+        await session.commit()
+
+        with pytest.raises(DocumentProcessingError) as raised:
+            await processor.process_with_session(session, document.id)
+        await session.commit()
+
+        assert raised.value.code == "publication_disabled"
+        assert raised.value.status_code == 503
+        assert document.status == "failed"
+        assert document.safe_error_category == "publication_disabled"
+        assert (
+            await session.scalar(
+                select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == document.id)
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                select(func.count(DocumentEmbedding.id)).where(
+                    DocumentEmbedding.document_id == document.id
+                )
+            )
+            == 0
+        )
+
+
+@pytest.mark.asyncio
 async def test_startup_reconciliation_makes_interrupted_processing_retryable(
     database: Database, tmp_path: Path
 ) -> None:

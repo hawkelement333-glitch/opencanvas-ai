@@ -348,6 +348,36 @@ export const documentSearchResultSchema = z.object({
   insufficientContext: z.boolean(),
 });
 
+export const indexRequestSchema = z.object({
+  requestId: z.string().uuid(),
+  workspaceId: z.string().uuid(),
+  canvasId: z.string().uuid(),
+  documentId: z.string().uuid(),
+  documentVersion: z.number().int().positive(),
+  operation: z.enum(["index", "reindex"]),
+  state: z.enum([
+    "requested",
+    "queued",
+    "parsing",
+    "normalizing",
+    "chunking",
+    "indexing",
+    "completed",
+    "published",
+    "failed",
+    "canceled",
+    "superseded",
+  ]),
+  reasonCode: z.string().min(1),
+  traceId: z.string().uuid(),
+  revisionId: z.string().uuid().nullable(),
+  publicationId: z.string().uuid().nullable(),
+  duplicate: z.boolean(),
+  cancellable: z.boolean(),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+});
+
 export const problemDetailsSchema = z
   .object({
     title: z.string().optional(),
@@ -433,6 +463,7 @@ export type DocumentText = z.infer<typeof documentTextSchema>;
 export type SourcePassage = z.infer<typeof sourcePassageSchema>;
 export type DocumentSearchInput = z.infer<typeof documentSearchInputSchema>;
 export type DocumentSearchResult = z.infer<typeof documentSearchResultSchema>;
+export type IndexRequest = z.infer<typeof indexRequestSchema>;
 export type RuntimeMode = z.infer<typeof runtimeModeSchema>;
 export type User = z.infer<typeof userSchema>;
 export type Workspace = z.infer<typeof workspaceSchema>;

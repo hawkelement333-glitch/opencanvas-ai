@@ -1805,7 +1805,7 @@ async def _assert_clean_head(database_url: str) -> None:
     connection = await asyncpg.connect(_asyncpg_url(database_url))
     try:
         assert await connection.fetchval("SELECT version_num FROM alembic_version") == (
-            "20260725_0025"
+            "20260726_0026"
         )
         assert int(await connection.fetchval("SHOW server_version_num")) // 10_000 == 17
         assert (

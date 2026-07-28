@@ -5,10 +5,17 @@ import uuid
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
-from opencanvas_api.db.models import Document, DocumentChunk, DocumentEmbedding
+from opencanvas_api.db.models import (
+    Document,
+    DocumentChunk,
+    DocumentEmbedding,
+    IngestionRequest,
+    RetrievalHead,
+)
 from opencanvas_api.services.documents.embeddings import EmbeddingProvider
 
 
@@ -98,8 +105,10 @@ async def _search_postgresql(
         select(DocumentChunk, Document.file_name, Document.file_type, distance.label("distance"))
         .join(DocumentEmbedding, DocumentEmbedding.chunk_id == DocumentChunk.id)
         .join(Document, Document.id == DocumentChunk.document_id)
+        .outerjoin(RetrievalHead, RetrievalHead.document_id == Document.id)
         .where(
             DocumentChunk.document_id.in_(document_ids),
+            _published_or_legacy_without_request(),
             Document.status == "ready",
             DocumentEmbedding.model == provider.model,
         )
@@ -125,8 +134,10 @@ async def _search_in_memory(
         select(DocumentChunk, Document.file_name, Document.file_type, DocumentEmbedding.embedding)
         .join(DocumentEmbedding, DocumentEmbedding.chunk_id == DocumentChunk.id)
         .join(Document, Document.id == DocumentChunk.document_id)
+        .outerjoin(RetrievalHead, RetrievalHead.document_id == Document.id)
         .where(
             DocumentChunk.document_id.in_(document_ids),
+            _published_or_legacy_without_request(),
             Document.status == "ready",
             DocumentEmbedding.model == provider.model,
         )
@@ -161,6 +172,15 @@ def _retrieved(
         char_end=chunk.char_end,
         score=max(-1.0, min(1.0, score)),
         document_version=chunk.document_version,
+    )
+
+
+def _published_or_legacy_without_request() -> ColumnElement[bool]:
+    return or_(
+        RetrievalHead.document_id.is_not(None),
+        ~exists(
+            select(IngestionRequest.request_id).where(IngestionRequest.document_id == Document.id)
+        ),
     )
 
 

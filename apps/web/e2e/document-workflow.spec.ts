@@ -10,6 +10,8 @@ const duplicateDocumentNodeId = "e2000000-0000-4000-8000-000000000014";
 const chunkId = "e2000000-0000-4000-8000-000000000015";
 const firstExecutionId = "e2000000-0000-4000-8000-000000000016";
 const secondExecutionId = "e2000000-0000-4000-8000-000000000017";
+const indexRequestId = "e2000000-0000-4000-8000-000000000022";
+const indexTraceId = "e2000000-0000-4000-8000-000000000023";
 const canvas = {
   id: canvasId,
   workspaceId,
@@ -111,6 +113,7 @@ async function installDocumentAPI(page: Page): Promise<void> {
   ];
   let edges: MockEdge[] = [];
   let preparedInstruction = "";
+  let indexState: "queued" | "canceled" = "queued";
 
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -231,6 +234,59 @@ async function installDocumentAPI(page: Page): Promise<void> {
         startOffset: 0,
         endOffset: 62,
         text: "The verified launch date is October 14, 2026.",
+      });
+      return;
+    }
+    if (
+      path === `/workspaces/${workspaceId}/canvases/${canvasId}/documents/${documentId}/reindex` &&
+      method === "POST"
+    ) {
+      indexState = "queued";
+      await json(
+        route,
+        {
+          requestId: indexRequestId,
+          workspaceId,
+          canvasId,
+          documentId,
+          documentVersion: 1,
+          operation: "reindex",
+          state: indexState,
+          reasonCode: "request_queued",
+          traceId: indexTraceId,
+          revisionId: null,
+          publicationId: null,
+          duplicate: false,
+          cancellable: true,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+        202,
+      );
+      return;
+    }
+    if (
+      path ===
+        `/workspaces/${workspaceId}/canvases/${canvasId}/index-requests/${indexRequestId}/cancel` &&
+      method === "POST"
+    ) {
+      indexState = "canceled";
+      await json(route, {
+        requestId: indexRequestId,
+        workspaceId,
+        canvasId,
+        documentId,
+        documentVersion: 1,
+        operation: "reindex",
+        state: indexState,
+        reasonCode: "user_canceled",
+        traceId: indexTraceId,
+        revisionId: null,
+        publicationId: null,
+        duplicate: false,
+        cancellable: false,
+        createdAt: timestamp,
+        updatedAt: timestamp,
       });
       return;
     }
@@ -365,6 +421,14 @@ test("selected context produces a read-only grounded draft with exact citations"
   await page.getByTestId(`preview-document-${documentNodeId}`).click();
   await expect(page.getByTestId("document-preview")).toContainText(
     "The verified launch date is October 14, 2026.",
+  );
+  await page.getByRole("button", { name: "Reindex document" }).click();
+  await expect(page.getByTestId("document-preview").getByRole("status")).toContainText(
+    "Index status: queued",
+  );
+  await page.getByRole("button", { name: "Cancel indexing" }).click();
+  await expect(page.getByTestId("document-preview").getByRole("status")).toContainText(
+    "Index status: canceled",
   );
   await page.getByLabel("Close document preview").click();
 

@@ -19,6 +19,7 @@ from opencanvas_api.db.models import (
     DocumentFile,
     DocumentProcessingJob,
     DocumentVersion,
+    IndexRevision,
     Workspace,
 )
 from opencanvas_api.services.documents.chunking import chunk_document
@@ -333,6 +334,12 @@ class DocumentProcessor:
         )
 
         try:
+            if self.settings.indexer_publication_mode == "disabled":
+                raise DocumentProcessingError(
+                    "Document indexing is disabled until the clean-object gate is available.",
+                    code="publication_disabled",
+                    status_code=503,
+                )
             content = await self.storage.read(document_file.storage_key)
             extracted = await asyncio.to_thread(
                 extract_document,
@@ -460,6 +467,15 @@ async def delete_document(
     if document is None:
         raise DocumentProcessingError(
             "The document does not exist.", code="document_not_found", status_code=404
+        )
+    if await session.scalar(
+        select(IndexRevision.revision_id).where(IndexRevision.document_id == document_id).limit(1)
+    ):
+        raise DocumentProcessingError(
+            "The document has retained immutable index evidence and cannot be deleted "
+            "through the legacy delete path.",
+            code="document_index_history_retained",
+            status_code=409,
         )
     storage_key = await session.scalar(
         select(DocumentFile.storage_key).where(DocumentFile.document_id == document_id)

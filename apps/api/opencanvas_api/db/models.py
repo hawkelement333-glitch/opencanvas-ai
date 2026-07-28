@@ -501,6 +501,535 @@ class DocumentProcessingJob(TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class PipelineManifest(Base):
+    __tablename__ = "pipeline_manifests"
+    __table_args__ = (
+        UniqueConstraint("manifest_id", "workspace_id", name="uq_pipeline_manifest_scope"),
+        UniqueConstraint("workspace_id", "manifest_digest", name="uq_pipeline_manifest_digest"),
+        CheckConstraint("length(manifest_digest) = 64", name="ck_pipeline_manifest_digest"),
+        CheckConstraint("dimensions > 0", name="ck_pipeline_manifest_dimensions"),
+    )
+
+    manifest_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    manifest_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    parser_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    parser_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    parser_build_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    normalizer_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    metadata_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    chunker_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    embedding_provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    embedding_model: Mapped[str] = mapped_column(String(120), nullable=False)
+    embedding_configuration_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    dimensions: Mapped[int] = mapped_column(Integer, nullable=False)
+    indexer_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    index_schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    configuration_payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IngestionRequest(Base):
+    __tablename__ = "ingestion_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["membership_id", "user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_ingestion_request_membership",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["pipeline_manifest_id", "workspace_id"],
+            ["pipeline_manifests.manifest_id", "pipeline_manifests.workspace_id"],
+            name="fk_ingestion_request_manifest",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("request_id", "workspace_id", name="uq_ingestion_request_scope"),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "idempotency_key",
+            name="uq_ingestion_request_idempotency",
+        ),
+        CheckConstraint("length(request_digest) = 64", name="ck_ingestion_request_digest"),
+        CheckConstraint("length(source_sha256) = 64", name="ck_ingestion_request_source_digest"),
+        CheckConstraint(
+            "operation IN ('index', 'reindex')",
+            name="ck_ingestion_request_operation",
+        ),
+        CheckConstraint("authority_generation >= 0", name="ck_ingestion_authority_generation"),
+        CheckConstraint("cancel_generation >= 0", name="ck_ingestion_cancel_generation"),
+        Index(
+            "ix_ingestion_request_document",
+            "workspace_id",
+            "canvas_id",
+            "document_id",
+            "document_version",
+            "created_at",
+        ),
+    )
+
+    request_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("canvases.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    document_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="RESTRICT"), nullable=False
+    )
+    document_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    operation: Mapped[str] = mapped_column(String(16), nullable=False)
+    pipeline_manifest_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    cancel_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IngestionRequestTransition(Base):
+    __tablename__ = "ingestion_request_transitions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["request_id", "workspace_id"],
+            ["ingestion_requests.request_id", "ingestion_requests.workspace_id"],
+            name="fk_ingestion_transition_request",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("request_id", "sequence", name="uq_ingestion_request_transition_sequence"),
+        CheckConstraint("sequence >= 0", name="ck_ingestion_transition_sequence"),
+        CheckConstraint(
+            "current_state IN "
+            "('requested', 'queued', 'parsing', 'normalizing', 'chunking', 'indexing', "
+            "'completed', 'published', 'failed', 'canceled', 'superseded')",
+            name="ck_ingestion_transition_state",
+        ),
+        CheckConstraint(
+            "previous_state IS NULL OR previous_state IN "
+            "('requested', 'queued', 'parsing', 'normalizing', 'chunking', 'indexing', "
+            "'completed', 'published', 'failed', 'canceled', 'superseded')",
+            name="ck_ingestion_transition_previous_state",
+        ),
+    )
+
+    transition_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    request_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_state: Mapped[str | None] = mapped_column(String(24))
+    current_state: Mapped[str] = mapped_column(String(24), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    cancel_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class NormalizedArtifact(Base):
+    __tablename__ = "normalized_artifacts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["request_id", "workspace_id"],
+            ["ingestion_requests.request_id", "ingestion_requests.workspace_id"],
+            name="fk_normalized_artifact_request",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("request_id", name="uq_normalized_artifact_request"),
+        Index(
+            "ix_normalized_artifact_scoped_digest",
+            "workspace_id",
+            "normalized_digest",
+            "pipeline_manifest_id",
+        ),
+        CheckConstraint("length(normalized_digest) = 64", name="ck_normalized_artifact_digest"),
+        CheckConstraint("length(metadata_digest) = 64", name="ck_normalized_metadata_digest"),
+        CheckConstraint(
+            "length(near_duplicate_fingerprint) = 64",
+            name="ck_normalized_near_duplicate_digest",
+        ),
+    )
+
+    artifact_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    request_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    pipeline_manifest_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("pipeline_manifests.manifest_id", ondelete="RESTRICT"), nullable=False
+    )
+    normalized_text: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    metadata_payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    metadata_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    near_duplicate_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IndexCompatibilityProjection(Base):
+    __tablename__ = "index_compatibility_projections"
+    __table_args__ = (
+        UniqueConstraint(
+            "projection_id", "workspace_id", name="uq_index_compatibility_projection_scope"
+        ),
+        UniqueConstraint(
+            "document_id",
+            "document_version",
+            name="uq_index_compatibility_document_version",
+        ),
+        CheckConstraint(
+            "provenance_state = 'unverified_legacy'",
+            name="ck_index_compatibility_provenance_state",
+        ),
+        CheckConstraint("length(source_sha256) = 64", name="ck_index_compatibility_source_digest"),
+        CheckConstraint("chunk_count >= 0", name="ck_index_compatibility_chunk_count"),
+    )
+
+    projection_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="CASCADE"), nullable=False
+    )
+    document_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    provenance_state: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="unverified_legacy"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IndexRevision(Base):
+    __tablename__ = "index_revisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["request_id", "workspace_id"],
+            ["ingestion_requests.request_id", "ingestion_requests.workspace_id"],
+            name="fk_index_revision_request",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("revision_id", "workspace_id", name="uq_index_revision_scope"),
+        UniqueConstraint("request_id", name="uq_index_revision_request"),
+        CheckConstraint("revision_kind = 'native'", name="ck_index_revision_kind"),
+        CheckConstraint("status = 'completed'", name="ck_index_revision_status"),
+        CheckConstraint(
+            "deduplication_kind IN ('none', 'exact_bytes', 'normalized_content')",
+            name="ck_index_revision_deduplication_kind",
+        ),
+        CheckConstraint(
+            "(deduplication_kind = 'none' AND deduplicated_from_revision_id IS NULL) "
+            "OR (deduplication_kind IN ('exact_bytes', 'normalized_content') "
+            "AND deduplicated_from_revision_id IS NOT NULL)",
+            name="ck_index_revision_deduplication_source",
+        ),
+        CheckConstraint("length(source_sha256) = 64", name="ck_index_revision_source_digest"),
+        CheckConstraint(
+            "length(normalized_digest) = 64", name="ck_index_revision_normalized_digest"
+        ),
+        CheckConstraint(
+            "length(chunk_manifest_digest) = 64", name="ck_index_revision_chunk_digest"
+        ),
+        CheckConstraint(
+            "length(vector_manifest_digest) = 64", name="ck_index_revision_vector_digest"
+        ),
+        CheckConstraint("length(output_digest) = 64", name="ck_index_revision_output_digest"),
+        Index(
+            "ix_index_revision_document",
+            "workspace_id",
+            "document_id",
+            "document_version",
+            "created_at",
+        ),
+    )
+
+    revision_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    request_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("canvases.id", ondelete="RESTRICT"), nullable=False
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="RESTRICT"), nullable=False
+    )
+    document_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="RESTRICT"), nullable=False
+    )
+    document_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    pipeline_manifest_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("pipeline_manifests.manifest_id", ondelete="RESTRICT"), nullable=False
+    )
+    revision_kind: Mapped[str] = mapped_column(String(24), nullable=False, default="native")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="completed")
+    deduplication_kind: Mapped[str] = mapped_column(String(24), nullable=False, default="none")
+    deduplicated_from_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("index_revisions.revision_id", ondelete="RESTRICT")
+    )
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    normalized_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    metadata_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    chunk_manifest_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    vector_manifest_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    output_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IndexRevisionChunk(Base):
+    __tablename__ = "index_revision_chunks"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["revision_id", "workspace_id"],
+            ["index_revisions.revision_id", "index_revisions.workspace_id"],
+            name="fk_index_chunk_revision",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("chunk_id", "revision_id", name="uq_index_chunk_revision"),
+        UniqueConstraint("revision_id", "chunk_index", name="uq_index_chunk_order"),
+        UniqueConstraint("revision_id", "stable_chunk_id", name="uq_index_chunk_stable_identity"),
+        CheckConstraint("chunk_index >= 0", name="ck_index_chunk_index"),
+        CheckConstraint("char_start >= 0", name="ck_index_chunk_start"),
+        CheckConstraint("char_end > char_start", name="ck_index_chunk_range"),
+        CheckConstraint("length(content_digest) = 64", name="ck_index_chunk_content_digest"),
+    )
+
+    chunk_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    stable_chunk_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    revision_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="RESTRICT"), nullable=False
+    )
+    document_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    page_number: Mapped[int | None] = mapped_column(Integer)
+    heading: Mapped[str | None] = mapped_column(String(500))
+    char_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    char_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class VectorMaterialization(Base):
+    __tablename__ = "vector_materializations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["revision_id", "workspace_id"],
+            ["index_revisions.revision_id", "index_revisions.workspace_id"],
+            name="fk_vector_materialization_revision",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["chunk_id", "revision_id"],
+            ["index_revision_chunks.chunk_id", "index_revision_chunks.revision_id"],
+            name="fk_vector_materialization_chunk",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("revision_id", "chunk_id", name="uq_vector_materialization_chunk"),
+        CheckConstraint("dimensions = 1536", name="ck_vector_materialization_dimensions"),
+        CheckConstraint("length(artifact_digest) = 64", name="ck_vector_materialization_digest"),
+    )
+
+    materialization_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    revision_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    chunk_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    reused_from_materialization_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("vector_materializations.materialization_id", ondelete="RESTRICT")
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    dimensions: Mapped[int] = mapped_column(Integer, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(
+        Vector(1536).with_variant(JSON(), "sqlite"), nullable=False
+    )
+    artifact_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IndexPublication(Base):
+    __tablename__ = "index_publications"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["revision_id", "workspace_id"],
+            ["index_revisions.revision_id", "index_revisions.workspace_id"],
+            name="fk_index_publication_revision",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["membership_id", "actor_user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_index_publication_membership",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("publication_id", "workspace_id", name="uq_index_publication_scope"),
+        UniqueConstraint(
+            "workspace_id",
+            "document_id",
+            "generation",
+            name="uq_index_publication_generation",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "document_id",
+            "revision_id",
+            name="uq_index_publication_revision",
+        ),
+        CheckConstraint("generation > 0", name="ck_index_publication_generation"),
+        CheckConstraint("authority_generation >= 0", name="ck_index_publication_authority"),
+        CheckConstraint("cancel_generation >= 0", name="ck_index_publication_cancel"),
+    )
+
+    publication_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    revision_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    document_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    cancel_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class RetrievalHead(TimestampMixin, Base):
+    __tablename__ = "retrieval_heads"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["revision_id", "workspace_id"],
+            ["index_revisions.revision_id", "index_revisions.workspace_id"],
+            name="fk_retrieval_head_revision",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["publication_id", "workspace_id"],
+            ["index_publications.publication_id", "index_publications.workspace_id"],
+            name="fk_retrieval_head_publication",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["compatibility_projection_id", "workspace_id"],
+            [
+                "index_compatibility_projections.projection_id",
+                "index_compatibility_projections.workspace_id",
+            ],
+            name="fk_retrieval_head_compatibility",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("generation > 0", name="ck_retrieval_head_generation"),
+        CheckConstraint(
+            "(activation_kind = 'native' AND revision_id IS NOT NULL "
+            "AND publication_id IS NOT NULL AND compatibility_projection_id IS NULL) "
+            "OR (activation_kind = 'compatibility' AND revision_id IS NULL "
+            "AND publication_id IS NULL AND compatibility_projection_id IS NOT NULL)",
+            name="ck_retrieval_head_activation",
+        ),
+    )
+
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    activation_kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    revision_id: Mapped[uuid.UUID | None] = mapped_column()
+    publication_id: Mapped[uuid.UUID | None] = mapped_column(unique=True)
+    compatibility_projection_id: Mapped[uuid.UUID | None] = mapped_column(unique=True)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class IndexerAuditEvent(Base):
+    __tablename__ = "indexer_audit_events"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["request_id", "workspace_id"],
+            ["ingestion_requests.request_id", "ingestion_requests.workspace_id"],
+            name="fk_indexer_audit_request",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "outcome IN ('allowed', 'denied', 'succeeded', 'failed')",
+            name="ck_indexer_audit_outcome",
+        ),
+    )
+
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    request_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(24), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    metadata_payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class IndexerFailure(Base):
+    __tablename__ = "indexer_failures"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["request_id", "workspace_id"],
+            ["ingestion_requests.request_id", "ingestion_requests.workspace_id"],
+            name="fk_indexer_failure_request",
+            ondelete="RESTRICT",
+        ),
+    )
+
+    failure_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    request_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    safe_failure_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    retryable: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    stage: Mapped[str] = mapped_column(String(32), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class Citation(TimestampMixin, Base):
     __tablename__ = "citations"
     __table_args__ = (
@@ -3482,7 +4011,15 @@ class DomainEventRecord(Base):
             "'comment.revised', "
             "'comment.tombstoned', "
             "'comment.thread.resolved', "
-            "'comment.thread.reopened')",
+            "'comment.thread.reopened', "
+            "'ingestion.requested', "
+            "'ingestion.queued', "
+            "'ingestion.failed', "
+            "'ingestion.canceled', "
+            "'index.reindex.requested', "
+            "'index.revision.created', "
+            "'index.published', "
+            "'index.superseded')",
             name="ck_domain_events_type",
         ),
         CheckConstraint(
@@ -3495,7 +4032,8 @@ class DomainEventRecord(Base):
             "'workspace_invitation', 'workspace_membership', "
             "'approval_authority_assignment', 'collaboration_resource', "
             "'resource_share', 'ownership_transfer', 'authority_fence', "
-            "'comment_thread', 'comment')",
+            "'comment_thread', 'comment', 'ingestion_request', "
+            "'index_revision', 'index_publication')",
             name="ck_domain_events_subject_kind",
         ),
         CheckConstraint("sequence > 0", name="ck_domain_events_sequence_positive"),
@@ -6876,6 +7414,20 @@ COLLABORATION_IMMUTABLE_MODELS = (
     CollaborationCommentTransition,
 )
 
+INDEXER_IMMUTABLE_MODELS = (
+    PipelineManifest,
+    IngestionRequest,
+    IngestionRequestTransition,
+    NormalizedArtifact,
+    IndexCompatibilityProjection,
+    IndexRevision,
+    IndexRevisionChunk,
+    VectorMaterialization,
+    IndexPublication,
+    IndexerAuditEvent,
+    IndexerFailure,
+)
+
 
 def _reject_controlled_agent_mutation(_mapper: Any, _connection: Any, target: object) -> None:
     raise ValueError(f"{type(target).__name__} records are append-only")
@@ -7009,6 +7561,10 @@ for _agent_studio_immutable_model in BOUNDED_AGENT_STUDIO_IMMUTABLE_MODELS:
 for _collaboration_immutable_model in COLLABORATION_IMMUTABLE_MODELS:
     event.listen(_collaboration_immutable_model, "before_update", _reject_controlled_agent_mutation)
     event.listen(_collaboration_immutable_model, "before_delete", _reject_controlled_agent_mutation)
+
+for _indexer_immutable_model in INDEXER_IMMUTABLE_MODELS:
+    event.listen(_indexer_immutable_model, "before_update", _reject_controlled_agent_mutation)
+    event.listen(_indexer_immutable_model, "before_delete", _reject_controlled_agent_mutation)
 
 event.listen(
     ControlledWorkflowExecution,

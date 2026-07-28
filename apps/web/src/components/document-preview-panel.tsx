@@ -2,12 +2,13 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, BookOpen, FileText, LoaderCircle, RefreshCw, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { canvasApi, getErrorMessage } from "@/lib/api-client";
-import type { Citation, DocumentMetadata } from "@/lib/contracts";
+import type { Citation, DocumentMetadata, IndexRequest } from "@/lib/contracts";
 
 interface DocumentPreviewPanelProps {
+  workspaceId: string;
   document: DocumentMetadata;
   citation?: Citation;
   onClose: () => void;
@@ -28,8 +29,15 @@ function sourceLocation(
   return "Extracted passage";
 }
 
-export function DocumentPreviewPanel({ document, citation, onClose }: DocumentPreviewPanelProps) {
+export function DocumentPreviewPanel({
+  workspaceId,
+  document,
+  citation,
+  onClose,
+}: DocumentPreviewPanelProps) {
   const passageRef = useRef<HTMLElement>(null);
+  const [indexRequest, setIndexRequest] = useState<IndexRequest | null>(null);
+  const [indexActionError, setIndexActionError] = useState<string | null>(null);
   const textQuery = useQuery({
     queryKey: ["document", document.id, "text"],
     queryFn: ({ signal }) => canvasApi.getDocumentText(document.id, signal),
@@ -53,6 +61,38 @@ export function DocumentPreviewPanel({ document, citation, onClose }: DocumentPr
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [onClose]);
+
+  useEffect(() => {
+    if (!indexRequest?.cancellable) return;
+    const timer = window.setInterval(() => {
+      void canvasApi
+        .getIndexRequest(workspaceId, document.canvasId, indexRequest.requestId)
+        .then(setIndexRequest)
+        .catch((error: unknown) => setIndexActionError(getErrorMessage(error)));
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [document.canvasId, indexRequest?.cancellable, indexRequest?.requestId, workspaceId]);
+
+  const reindex = async () => {
+    setIndexActionError(null);
+    try {
+      setIndexRequest(await canvasApi.reindexDocument(workspaceId, document.canvasId, document.id));
+    } catch (error) {
+      setIndexActionError(getErrorMessage(error));
+    }
+  };
+
+  const cancelIndexing = async () => {
+    if (!indexRequest?.cancellable) return;
+    setIndexActionError(null);
+    try {
+      setIndexRequest(
+        await canvasApi.cancelIndexRequest(workspaceId, document.canvasId, indexRequest.requestId),
+      );
+    } catch (error) {
+      setIndexActionError(getErrorMessage(error));
+    }
+  };
 
   return (
     <aside
@@ -82,6 +122,28 @@ export function DocumentPreviewPanel({ document, citation, onClose }: DocumentPr
         {document.pageCount && <span>{document.pageCount} pages</span>}
         <span>{document.chunkCount} passages</span>
       </div>
+
+      <section className="document-preview__index" aria-label="Document index">
+        <button
+          type="button"
+          onClick={() => void reindex()}
+          disabled={document.status !== "ready" || Boolean(indexRequest?.cancellable)}
+        >
+          <RefreshCw size={13} aria-hidden="true" />
+          Reindex document
+        </button>
+        {indexRequest && (
+          <span role="status" aria-live="polite">
+            Index status: {indexRequest.state.replaceAll("_", " ")}
+          </span>
+        )}
+        {indexRequest?.cancellable && (
+          <button type="button" onClick={() => void cancelIndexing()}>
+            Cancel indexing
+          </button>
+        )}
+        {indexActionError && <span role="alert">{indexActionError}</span>}
+      </section>
 
       {citation && (
         <section className="document-preview__citation" aria-labelledby="selected-source-title">

@@ -32,6 +32,9 @@ from opencanvas_api.db.models import (
     DomainEventOutbox,
     DomainEventProvenance,
     DomainEventRecord,
+    IndexPublication,
+    IndexRevision,
+    IngestionRequest,
     Workspace,
     WorkspaceEventSequence,
     WorkspaceInvitation,
@@ -139,6 +142,14 @@ DomainEventType = Literal[
     "comment.tombstoned",
     "comment.thread.resolved",
     "comment.thread.reopened",
+    "ingestion.requested",
+    "ingestion.queued",
+    "ingestion.failed",
+    "ingestion.canceled",
+    "index.reindex.requested",
+    "index.revision.created",
+    "index.published",
+    "index.superseded",
 ]
 SubjectKind = Literal[
     "canonical_resource",
@@ -168,6 +179,9 @@ SubjectKind = Literal[
     "authority_fence",
     "comment_thread",
     "comment",
+    "ingestion_request",
+    "index_revision",
+    "index_publication",
 ]
 OriginType = Literal[
     "authenticated_user",
@@ -276,6 +290,18 @@ _COMMENT_PAYLOAD = frozenset(
         "revisionSequence",
         "replyDepth",
         "reasonCode",
+    }
+)
+_INDEXER_PAYLOAD = frozenset(
+    {
+        "state",
+        "reasonCode",
+        "documentId",
+        "documentVersion",
+        "revisionId",
+        "publicationId",
+        "generation",
+        "manifestVersion",
     }
 )
 
@@ -547,6 +573,22 @@ EVENT_TYPE_REGISTRY: dict[DomainEventType, EventTypeSpec] = {
     "comment.thread.reopened": EventTypeSpec(
         "comment_thread", _COMMENT_PAYLOAD, canvas_required=False
     ),
+    "ingestion.requested": EventTypeSpec(
+        "ingestion_request", _INDEXER_PAYLOAD, canvas_required=True
+    ),
+    "ingestion.queued": EventTypeSpec("ingestion_request", _INDEXER_PAYLOAD, canvas_required=True),
+    "ingestion.failed": EventTypeSpec("ingestion_request", _INDEXER_PAYLOAD, canvas_required=True),
+    "ingestion.canceled": EventTypeSpec(
+        "ingestion_request", _INDEXER_PAYLOAD, canvas_required=True
+    ),
+    "index.reindex.requested": EventTypeSpec(
+        "ingestion_request", _INDEXER_PAYLOAD, canvas_required=True
+    ),
+    "index.revision.created": EventTypeSpec(
+        "index_revision", _INDEXER_PAYLOAD, canvas_required=True
+    ),
+    "index.published": EventTypeSpec("index_publication", _INDEXER_PAYLOAD, canvas_required=True),
+    "index.superseded": EventTypeSpec("index_publication", _INDEXER_PAYLOAD, canvas_required=True),
 }
 
 
@@ -1040,6 +1082,59 @@ class DomainEventService:
                 )
                 if subject is None:
                     raise DomainEventNotFoundError()
+        elif spec.subject_kind in {
+            "ingestion_request",
+            "index_revision",
+            "index_publication",
+        }:
+            latest_membership_transition = (
+                select(func.max(WorkspaceMembershipTransition.sequence))
+                .where(
+                    WorkspaceMembershipTransition.membership_id == WorkspaceMembership.membership_id
+                )
+                .correlate(WorkspaceMembership)
+                .scalar_subquery()
+            )
+            active_actor = await self.session.scalar(
+                select(WorkspaceMembership.user_id)
+                .join(
+                    WorkspaceMembershipTransition,
+                    WorkspaceMembershipTransition.membership_id
+                    == WorkspaceMembership.membership_id,
+                )
+                .where(
+                    WorkspaceMembership.workspace_id == command.workspace_id,
+                    WorkspaceMembership.user_id == command.actor_user_id,
+                    WorkspaceMembershipTransition.sequence == latest_membership_transition,
+                    WorkspaceMembershipTransition.current_state == "active",
+                )
+                .limit(1)
+            )
+            if active_actor is None:
+                raise DomainEventNotFoundError()
+            if spec.subject_kind == "ingestion_request":
+                subject = await self.session.scalar(
+                    select(IngestionRequest.request_id).where(
+                        IngestionRequest.request_id == command.subject_id,
+                        IngestionRequest.workspace_id == command.workspace_id,
+                    )
+                )
+            elif spec.subject_kind == "index_revision":
+                subject = await self.session.scalar(
+                    select(IndexRevision.revision_id).where(
+                        IndexRevision.revision_id == command.subject_id,
+                        IndexRevision.workspace_id == command.workspace_id,
+                    )
+                )
+            else:
+                subject = await self.session.scalar(
+                    select(IndexPublication.publication_id).where(
+                        IndexPublication.publication_id == command.subject_id,
+                        IndexPublication.workspace_id == command.workspace_id,
+                    )
+                )
+            if subject is None:
+                raise DomainEventNotFoundError()
         elif (
             spec.subject_kind
             in {

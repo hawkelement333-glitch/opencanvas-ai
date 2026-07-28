@@ -1,9 +1,16 @@
 # Milestone 7 Production Hardening Architecture
 
-Date: 2026-07-26
+Date: 2026-07-27
 
 Status: architecture complete locally; checkpoint 7.1 implemented locally;
-checkpoint 7.2 not started
+checkpoint 7.2 implemented locally; checkpoint 7.3 unstarted
+
+Checkpoint 7.2 implementation record: migration `20260726_0026` is the sole
+head and direct child of `20260725_0025`. The deterministic Indexer, immutable
+revision/publication evidence, active retrieval-head projection, scoped APIs,
+and bounded status/cancel UI now implement this architecture. Production
+publication remains fail-closed until checkpoint 7.3 supplies and proves the
+clean-object gate.
 
 PostgreSQL compatibility amendments:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -41,12 +48,12 @@ attempt proved that `_backfill_owner_memberships()` also leaves
 authorizes quoting exactly that one additional SQL identifier with no data,
 scope, row-count, ownership, or history change. This is not a general
 relaxation of migration
-immutability. Migration `0026` and checkpoint 7.2 remain blocked until the
-combined PostgreSQL and SQLite validation gate passes.
+immutability. That combined PostgreSQL and SQLite validation gate subsequently
+passed, permitting checkpoint 7.2 and migration `0026` to proceed.
 
 Implementation-grounded clarification: checkpoint 7.1 uses the established
 `Settings`, SQLAlchemy, Alembic, lifespan, and health boundaries. PostgreSQL
-17, pgvector `0.7.0` or newer, exact schema head `20260725_0025`,
+17, pgvector `0.7.0` or newer, exact configured schema head,
 `READ COMMITTED`, bounded pool acquisition, connection recycling, statement,
 lock, and idle-transaction timeouts, verified TLS in deployed modes, dedicated
 API/worker/migration credential declarations, and one PostgreSQL advisory lock
@@ -328,9 +335,8 @@ the prior version or its published index revision.
 
 ### 7.3 Determinism contract
 
-The pipeline manifest is canonical JSON over:
+The pipeline manifest is canonical JSON over output-affecting pipeline inputs:
 
-- source checksum and immutable source-version identity;
 - parser name, semantic version, build digest, and closed options;
 - normalizer version and Unicode/newline/whitespace rules;
 - metadata-extractor version and allowlisted fields;
@@ -339,6 +345,15 @@ The pipeline manifest is canonical JSON over:
   version;
 - Indexer version and schema version; and
 - every server-owned configuration value that can affect output.
+
+Source checksum and immutable source-version identity are bound separately and
+immutably on the ingestion request and index revision. They are deliberately
+not part of the reusable pipeline-manifest identity: including a
+document-specific version identity would prevent the required workspace-scoped
+exact and normalized-content deduplication. Rejected alternative: one manifest
+per document version. It preserved provenance but made cross-document
+same-workspace reuse impossible and conflated source evidence with component
+configuration. The selected split preserves both provenance and safe reuse.
 
 The same source bytes and the same manifest must produce the same normalized
 text, metadata, chunk boundaries, chunk contents, stable chunk identities, and
@@ -413,7 +428,8 @@ publication; historical index revisions remain reconstructable.
 ### 7.7 Publication
 
 Building an index and publishing it are separate operations. Publication is a
-short database transaction that locks the source retrieval head and rechecks:
+short database transaction that locks the always-present source document and
+the existing retrieval head, if any, then rechecks:
 
 - current user or system authority;
 - active membership, workspace, canvas, document, and source version;

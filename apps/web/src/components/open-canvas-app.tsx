@@ -1557,6 +1557,7 @@ function CanvasWorkspace({
 
       {preview && (
         <DocumentPreviewPanel
+          workspaceId={snapshot.canvas.workspaceId}
           document={preview.document}
           citation={preview.citation}
           onClose={() => setPreview(null)}

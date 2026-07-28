@@ -20,7 +20,7 @@ DEMO_DOCUMENT_STORAGE_ROOT = DEMO_RUNTIME_ROOT / "documents"
 DEMO_DATABASE_URL = f"sqlite+aiosqlite:///{DEMO_DATABASE_PATH.as_posix()}"
 DEVELOPMENT_SESSION_SECRET = "development-only-session-secret-change-before-deploying"
 DEVELOPMENT_INVITATION_SECRET = "development-only-invitation-secret-change-before-deploying"
-EXPECTED_DATABASE_REVISION = "20260725_0025"
+EXPECTED_DATABASE_REVISION = "20260726_0026"
 
 
 class AppMode(StrEnum):
@@ -132,6 +132,24 @@ class Settings(BaseSettings):
     processing_retry_base_seconds: int = Field(default=5, ge=1, le=3_600)
     processing_max_concurrent_per_workspace: int = Field(default=3, ge=1, le=20)
 
+    indexer_publication_mode: Literal["disabled", "private_legacy"] = "disabled"
+    indexer_parser_timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
+    indexer_parser_memory_limit_bytes: int = Field(
+        default=512 * 1024 * 1024, ge=64 * 1024 * 1024, le=2 * 1024 * 1024 * 1024
+    )
+    indexer_parser_cpu_seconds: int = Field(default=30, ge=1, le=300)
+    indexer_max_active_requests_per_workspace: int = Field(default=10, ge=1, le=100)
+    indexer_manifest_schema_version: str = "pipeline-manifest-v1"
+    indexer_parser_version: str = "mobius-parser-v1"
+    indexer_parser_build_digest: str = (
+        "8c3f2d3ec499d52e6156636b25165d20615eebf6c1d61a18675623c33757f61b"
+    )
+    indexer_normalizer_version: str = "mobius-normalizer-v1"
+    indexer_metadata_version: str = "mobius-allowlisted-metadata-v1"
+    indexer_chunker_version: str = "mobius-chunker-v1"
+    indexer_version: str = "mobius-indexer-v1"
+    indexer_schema_version: str = "immutable-index-v1"
+
     document_max_file_size_bytes: int = Field(
         default=25 * 1024 * 1024, ge=1_024, le=100 * 1024 * 1024
     )
@@ -217,6 +235,11 @@ class Settings(BaseSettings):
 
         if mode is AppMode.DEMO and "storage_provider" not in self.model_fields_set:
             self.storage_provider = "demo"
+        if (
+            mode in {AppMode.DEVELOPMENT, AppMode.TEST, AppMode.DEMO}
+            and "indexer_publication_mode" not in self.model_fields_set
+        ):
+            self.indexer_publication_mode = "private_legacy"
 
         if self.document_chunk_overlap_chars >= self.document_chunk_size_chars:
             raise ValueError("document chunk overlap must be smaller than chunk size")
@@ -310,6 +333,11 @@ class Settings(BaseSettings):
             raise ValueError(f"{label} object storage is missing: {', '.join(missing)}")
         if self.job_provider != "database":
             raise ValueError(f"{label} requires the database-backed worker provider")
+        if self.indexer_publication_mode != "disabled":
+            raise ValueError(
+                f"{label} requires Indexer publication to remain disabled until "
+                "the Milestone 7.3 clean-object gate is available"
+            )
 
     @property
     def runtime_mode(self) -> AppMode:

@@ -132,6 +132,9 @@ async def test_closed_existing_registry_persists_event_provenance_and_outbox(
         "authority_fence",
         "comment_thread",
         "comment",
+        "ingestion_request",
+        "index_revision",
+        "index_publication",
     }
     existing_types = [
         name

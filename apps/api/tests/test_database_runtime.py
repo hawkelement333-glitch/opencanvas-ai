@@ -54,6 +54,18 @@ def test_complete_deployed_database_configuration_is_valid(mode: str) -> None:
 
     assert settings.runtime_mode.value == mode
     assert settings.database_tls_mode == "verify-full"
+    assert settings.indexer_publication_mode == "disabled"
+
+
+@pytest.mark.parametrize("mode", ["staging", "production"])
+def test_deployed_runtime_refuses_index_publication_before_clean_object_gate(
+    mode: str,
+) -> None:
+    with pytest.raises(ValidationError, match="Indexer publication to remain disabled"):
+        _deployed_settings(
+            app_mode=mode,
+            indexer_publication_mode="private_legacy",
+        )
 
 
 def test_deployed_api_refuses_a_migration_credential_role() -> None:
@@ -134,20 +146,20 @@ def test_postgresql_17_pgvector_and_exact_schema_are_accepted() -> None:
     validate_postgresql_capabilities(
         server_version=170_005,
         vector_version="0.8.1",
-        schema_revision="20260725_0025",
-        expected_revision="20260725_0025",
+        schema_revision="20260726_0026",
+        expected_revision="20260726_0026",
     )
 
 
 @pytest.mark.parametrize(
     ("server_version", "vector_version", "revision", "code"),
     [
-        (160_010, "0.8.1", "20260725_0025", "postgresql_version_incompatible"),
-        (180_001, "0.8.1", "20260725_0025", "postgresql_version_incompatible"),
-        (170_005, None, "20260725_0025", "pgvector_capability_incompatible"),
-        (170_005, "0.6.2", "20260725_0025", "pgvector_capability_incompatible"),
+        (160_010, "0.8.1", "20260726_0026", "postgresql_version_incompatible"),
+        (180_001, "0.8.1", "20260726_0026", "postgresql_version_incompatible"),
+        (170_005, None, "20260726_0026", "pgvector_capability_incompatible"),
+        (170_005, "0.6.2", "20260726_0026", "pgvector_capability_incompatible"),
         (170_005, "0.8.1", "20260725_0024", "database_schema_incompatible"),
-        (170_005, "0.8.1", "20260726_0026", "database_schema_incompatible"),
+        (170_005, "0.8.1", "20260727_0027", "database_schema_incompatible"),
     ],
 )
 def test_postgresql_capability_mismatch_fails_closed(
@@ -161,5 +173,5 @@ def test_postgresql_capability_mismatch_fails_closed(
             server_version=server_version,
             vector_version=vector_version,
             schema_revision=revision,
-            expected_revision="20260725_0025",
+            expected_revision="20260726_0026",
         )

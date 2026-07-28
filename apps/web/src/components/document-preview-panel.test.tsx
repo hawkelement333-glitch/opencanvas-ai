@@ -10,6 +10,9 @@ import { DocumentPreviewPanel } from "./document-preview-panel";
 const api = vi.hoisted(() => ({
   getDocumentText: vi.fn(),
   getSourcePassage: vi.fn(),
+  getIndexRequest: vi.fn(),
+  reindexDocument: vi.fn(),
+  cancelIndexRequest: vi.fn(),
 }));
 
 vi.mock("@/lib/api-client", () => ({
@@ -61,7 +64,12 @@ function renderPreview(onClose = vi.fn()) {
     onClose,
     ...render(
       <QueryClientProvider client={queryClient}>
-        <DocumentPreviewPanel document={document} citation={citation} onClose={onClose} />
+        <DocumentPreviewPanel
+          workspaceId="00000000-0000-4000-8000-000000000002"
+          document={document}
+          citation={citation}
+          onClose={onClose}
+        />
       </QueryClientProvider>,
     ),
   };
@@ -116,5 +124,49 @@ describe("DocumentPreviewPanel", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Close document preview" }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("shows bounded reindex status and permits cancellation", async () => {
+    api.getDocumentText.mockResolvedValue({
+      documentId: document.id,
+      fileName: document.fileName,
+      text: "Indexed source text.",
+      sections: [],
+    });
+    const queued = {
+      requestId: "00000000-0000-4000-8000-000000000101",
+      workspaceId: "00000000-0000-4000-8000-000000000002",
+      canvasId: document.canvasId,
+      documentId: document.id,
+      documentVersion: 1,
+      operation: "reindex",
+      state: "queued",
+      reasonCode: "request_queued",
+      traceId: "00000000-0000-4000-8000-000000000102",
+      revisionId: null,
+      publicationId: null,
+      duplicate: false,
+      cancellable: true,
+      createdAt: "2026-07-27T12:00:00.000Z",
+      updatedAt: "2026-07-27T12:00:00.000Z",
+    };
+    api.reindexDocument.mockResolvedValue(queued);
+    api.cancelIndexRequest.mockResolvedValue({
+      ...queued,
+      state: "canceled",
+      reasonCode: "user_canceled",
+      cancellable: false,
+    });
+
+    renderPreview();
+    await userEvent.click(screen.getByRole("button", { name: "Reindex document" }));
+    expect(await screen.findByText("Index status: queued")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel indexing" }));
+    expect(await screen.findByText("Index status: canceled")).toBeInTheDocument();
+    expect(api.cancelIndexRequest).toHaveBeenCalledWith(
+      queued.workspaceId,
+      document.canvasId,
+      queued.requestId,
+    );
   });
 });

@@ -11,6 +11,7 @@ from opencanvas_api.api.routes import (
     domain_events,
     graph_retrieval,
     health,
+    indexing,
     knowledge_graph,
     traces,
     workflows,
@@ -22,6 +23,7 @@ api_router.include_router(auth.router, tags=["authentication"])
 api_router.include_router(canvases.router, tags=["canvases"])
 api_router.include_router(collaboration.router, tags=["workspace-collaboration"])
 api_router.include_router(documents.router, tags=["documents"])
+api_router.include_router(indexing.router, tags=["deterministic-indexing"])
 api_router.include_router(traces.router, tags=["traces"])
 api_router.include_router(canonical.router, tags=["canonical"])
 api_router.include_router(knowledge_graph.router, tags=["knowledge-graph"])

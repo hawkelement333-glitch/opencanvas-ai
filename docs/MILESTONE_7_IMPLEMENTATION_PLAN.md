@@ -1,12 +1,13 @@
 # Milestone 7 Production Hardening Implementation Plan
 
-Date: 2026-07-26
+Date: 2026-07-27
 
 Status: approved architecture plan; checkpoint 7.1 complete locally; combined
 PostgreSQL historical-migration correction and evidence complete locally at
 implementation SHA `a88c6117f6b58137f1014cc8b389f44966c2918f`;
 Mobius Family Architecture Constitution documentation checkpoint complete
-locally; checkpoint 7.2 not started
+locally; checkpoint 7.2 complete locally on
+`milestone-7-2-implementation-local`; checkpoint 7.3 unstarted
 
 Compatibility gates:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -37,16 +38,16 @@ Final active migration hashes:
 - `0023`: `cb7138d9de806e1546c3853944b1816a98da1d67`;
 - `0024`: `cc29d1280af1a4110ec42b7f0fa782f710dcfeb5`.
 
-Every other migration hash remains unchanged. Migration `0026` is absent and
-checkpoint 7.2 has not started. The evidence commit records the frozen
-implementation SHA `a88c6117f6b58137f1014cc8b389f44966c2918f`. This final
-clean evidence commit, whose own SHA is reported in the final handoff, is the
-authoritative baseline from which 7.2 may later restart.
+Every other historical migration hash remains unchanged. The historical
+evidence commit records the frozen implementation SHA
+`a88c6117f6b58137f1014cc8b389f44966c2918f`. Checkpoint 7.2 subsequently
+created direct child `20260726_0026`; its immutable Git blob hash is
+`847a347b3e9f16ccd328c10265060b81937aa6c5`.
 
 Architecture:
 [`MILESTONE_7_ARCHITECTURE.md`](MILESTONE_7_ARCHITECTURE.md)
 
-Current sole Alembic head: `20260725_0025`
+Current sole Alembic head: `20260726_0026`
 
 ## Mobius Family Constitution inheritance
 
@@ -400,6 +401,15 @@ Suggested local commit: `Complete Milestone 7.2 deterministic Indexer`
 Exit only when native index revisions are reconstructable and publication is
 atomic. Production upload publication remains disabled until 7.3 proves the
 clean-object gate.
+
+Completion record (2026-07-27): the checkpoint was implemented from parent
+`7bec20e867f8a768a916a001718052fe4ceb3c64` in the local commit named
+`Implement Milestone 7.2`. Native revisions are reconstructable; publication
+is atomic and authority-fenced; `20260726_0026` is the sole head. The exact
+commit SHA is reported after commit creation in
+[`MILESTONE_7_2_DETERMINISTIC_INDEXER_HANDOFF.md`](MILESTONE_7_2_DETERMINISTIC_INDEXER_HANDOFF.md)
+and the final task handoff. Production publication remains disabled pending
+7.3; no 7.3 code or migration was started.
 
 ### Explicit exclusions
 

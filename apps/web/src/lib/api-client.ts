@@ -23,6 +23,7 @@ import {
   documentSearchResultSchema,
   documentTextSchema,
   documentUploadResultSchema,
+  indexRequestSchema,
   problemDetailsSchema,
   runtimeModeSchema,
   authSessionSchema,
@@ -437,6 +438,34 @@ export const canvasApi = {
       `/canvases/${encodeURIComponent(canvasId)}/documents/search`,
       documentSearchResultSchema,
       { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+
+  reindexDocument(workspaceId: string, canvasId: string, documentId: string) {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/documents/${encodeURIComponent(documentId)}/reindex`,
+      indexRequestSchema,
+      {
+        method: "POST",
+        body: JSON.stringify({ idempotencyKey: `reindex-${crypto.randomUUID()}` }),
+      },
+      LONG_OPERATION_TIMEOUT_MS,
+    );
+  },
+
+  getIndexRequest(workspaceId: string, canvasId: string, requestId: string, signal?: AbortSignal) {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/index-requests/${encodeURIComponent(requestId)}`,
+      indexRequestSchema,
+      { signal },
+    );
+  },
+
+  cancelIndexRequest(workspaceId: string, canvasId: string, requestId: string) {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/index-requests/${encodeURIComponent(requestId)}/cancel`,
+      indexRequestSchema,
+      { method: "POST" },
     );
   },
 };

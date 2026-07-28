@@ -360,3 +360,47 @@ class DocumentSearchOut(ApiModel):
     query: str
     matches: list[DocumentSearchMatch]
     insufficient_context: bool
+
+
+class IndexRequestCreate(ApiModel):
+    idempotency_key: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9._:-]+$")
+
+
+class IndexRequestOut(ApiModel):
+    request_id: uuid.UUID
+    workspace_id: uuid.UUID
+    canvas_id: uuid.UUID
+    document_id: uuid.UUID
+    document_version: int = Field(ge=1)
+    operation: Literal["index", "reindex"]
+    state: Literal[
+        "requested",
+        "queued",
+        "parsing",
+        "normalizing",
+        "chunking",
+        "indexing",
+        "completed",
+        "published",
+        "failed",
+        "canceled",
+        "superseded",
+    ]
+    reason_code: str
+    trace_id: uuid.UUID
+    revision_id: uuid.UUID | None
+    publication_id: uuid.UUID | None
+    duplicate: bool = False
+    cancellable: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class IndexRevisionOut(ApiModel):
+    revision_id: uuid.UUID
+    document_id: uuid.UUID
+    document_version: int = Field(ge=1)
+    status: Literal["completed"]
+    active: bool
+    publication_generation: int | None = Field(default=None, ge=1)
+    created_at: datetime

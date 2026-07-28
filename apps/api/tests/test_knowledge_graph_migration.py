@@ -27,7 +27,7 @@ def test_knowledge_graph_migration_cycle_and_sqlite_append_only_guards(
     command.upgrade(config, "head")
     with sqlite3.connect(database_path) as connection:
         head = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-        assert head == ("20260725_0025",)
+        assert head == ("20260726_0026",)
         trigger_names = {
             row[0]
             for row in connection.execute(
@@ -93,5 +93,5 @@ def test_knowledge_graph_migration_cycle_and_sqlite_append_only_guards(
     command.upgrade(config, "head")
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "20260725_0025",
+            "20260726_0026",
         )

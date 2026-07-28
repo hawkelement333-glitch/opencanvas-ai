@@ -6,8 +6,8 @@ Overall status: architecture and checkpoint 7.1 complete locally; combined
 PostgreSQL historical-migration correction for `0005`, `0021`, `0023`, and
 `0024` and its evidence complete locally at implementation SHA
 `a88c6117f6b58137f1014cc8b389f44966c2918f`; Mobius Family Architecture
-Constitution documentation checkpoint complete locally; checkpoint 7.2 not
-started
+Constitution documentation checkpoint complete locally; checkpoint 7.2
+complete locally; checkpoint 7.3 unstarted
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -26,6 +26,9 @@ Architecture handoff:
 
 Checkpoint 7.1 handoff:
 [`MILESTONE_7_1_PRODUCTION_RUNTIME_MANAGED_POSTGRESQL_HANDOFF.md`](MILESTONE_7_1_PRODUCTION_RUNTIME_MANAGED_POSTGRESQL_HANDOFF.md)
+
+Checkpoint 7.2 handoff:
+[`MILESTONE_7_2_DETERMINISTIC_INDEXER_HANDOFF.md`](MILESTONE_7_2_DETERMINISTIC_INDEXER_HANDOFF.md)
 
 PostgreSQL compatibility amendment:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
@@ -208,7 +211,8 @@ is part of this correction checkpoint.
 | 7.1 production runtime implementation              | Complete                     |
 | Combined PostgreSQL compatibility correction       | Complete                     |
 | Mobius Family Architecture Constitution            | Complete; documentation only |
-| 7.2–7.8 implementation                             | Not started                  |
+| 7.2 deterministic Indexer implementation           | Complete locally             |
+| 7.3–7.8 implementation                             | Not started                  |
 | Live infrastructure/provisioning/deployment        | Not started                  |
 
 ## Formal implementation checkpoints
@@ -230,7 +234,7 @@ required, and closed before the next begins.
 | Checkpoint | Planned revision | Direct parent   | Status                                           |
 | ---------- | ---------------- | --------------- | ------------------------------------------------ |
 | 7.1        | None             | N/A             | Complete; runtime/configuration only             |
-| 7.2        | `20260726_0026`  | `20260725_0025` | Planned, not created                             |
+| 7.2        | `20260726_0026`  | `20260725_0025` | Complete locally; sole head                      |
 | 7.3        | `20260726_0027`  | `20260726_0026` | Planned, not created                             |
 | 7.4        | `20260726_0028`  | `20260726_0027` | Planned, not created                             |
 | 7.5        | None             | N/A             | External telemetry + existing evidence           |
@@ -319,10 +323,10 @@ Local deterministic substitutes remain available for demo and tests.
 The production architecture remains resolved. The proved historical
 PostgreSQL migration compatibility defects are governed by the six focused
 correction amendments, and their combined validation gate has passed locally.
-Checkpoint 7.2 remains unstarted in this run while the implementation and
-evidence commits establish its clean authoritative restart baseline. The
-following operating values remain intentionally determined from approved
-managed staging evidence during the owning checkpoint:
+Checkpoint 7.2 subsequently completed locally and established sole head
+`20260726_0026`. The following operating values remain intentionally
+determined from approved managed staging evidence during their owning later
+checkpoint:
 
 - exact provider/vendor selection;
 - connection, worker, queue, upload, parser, token, concurrency, and cost
@@ -363,7 +367,7 @@ production-readiness defect.
 
 ## Next authorized work
 
-Checkpoint 7.2 — Deterministic Indexer and Ingestion Pipeline — remains
-unstarted. It may restart only from the final evidence SHA recorded after the
-combined correction implementation is frozen. This document does not start
-7.2 or authorize migration `0026` in the current run.
+Checkpoint 7.2 — Deterministic Indexer and Ingestion Pipeline — is complete
+locally on `milestone-7-2-implementation-local`. The next authorized work is
+checkpoint 7.3 from the committed 7.2 SHA. This run did not create migration
+`0027`, add clean-object or malware evidence, or start checkpoint 7.3.

@@ -316,9 +316,12 @@ raw `workspace_membership_transitions` `INSERT` target list also leaves
 [migration 0021 owner-backfill current-role compatibility amendment](docs/MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md)
 authorizes quoting exactly that one additional SQL identifier while preserving
 the inserted `owner` value, source rows, row counts, scope, and history.
-Migration `0026` and checkpoint 7.2 remain blocked until all
-historical corrections and the runner correction pass the required
-PostgreSQL and SQLite validation matrix. The
+Those historical corrections and the runner correction passed the required
+PostgreSQL and SQLite validation matrix. Checkpoint 7.2 subsequently completed
+locally with sole head `20260726_0026`; production Indexer publication remains
+disabled until checkpoint 7.3 proves the clean-object gate. See the
+[Milestone 7.2 deterministic Indexer handoff](docs/MILESTONE_7_2_DETERMINISTIC_INDEXER_HANDOFF.md).
+The
 required roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration
