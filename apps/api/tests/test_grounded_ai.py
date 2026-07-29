@@ -6,8 +6,6 @@ from typing import Any
 
 import pytest
 
-from opencanvas_api.api.dependencies import InMemoryRateLimiter
-from opencanvas_api.api.errors import ApiError
 from opencanvas_api.services import ai as ai_service
 from opencanvas_api.services.ai import (
     AIProviderError,
@@ -19,6 +17,11 @@ from opencanvas_api.services.ai import (
     validate_grounded_result,
 )
 from opencanvas_api.services.context import ContextBundle
+from opencanvas_api.services.rate_limits import (
+    InMemoryAtomicRateLimitStore,
+    RateLimitDimension,
+    SharedRateLimitService,
+)
 
 
 def _source(*, text: str = "The launch date is October 4.") -> GroundedSource:
@@ -68,15 +71,21 @@ def test_grounded_result_rejects_nonexistent_and_missing_citations() -> None:
 
 @pytest.mark.security
 async def test_expensive_operation_rate_limiter_returns_retry_after() -> None:
-    limiter = InMemoryRateLimiter()
-    await limiter.enforce("ai:test", limit=1, window_seconds=60)
+    limiter = SharedRateLimitService(
+        store=InMemoryAtomicRateLimitStore(),
+        hmac_secret="test-rate-limit-secret-that-is-long-enough",
+        namespace="mobius",
+        deployment="test",
+        emergency_limit=100,
+        emergency_window_seconds=60,
+    )
+    dimensions = [RateLimitDimension("user", "test-user", 1)]
+    first = await limiter.consume(operation="ai", dimensions=dimensions)
+    denied = await limiter.consume(operation="ai", dimensions=dimensions)
 
-    with pytest.raises(ApiError) as error:
-        await limiter.enforce("ai:test", limit=1, window_seconds=60)
-
-    assert error.value.status_code == 429
-    assert error.value.headers is not None
-    assert int(error.value.headers["Retry-After"]) >= 1
+    assert first.allowed is True
+    assert denied.allowed is False
+    assert denied.retry_after_seconds >= 1
 
 
 async def test_mock_provider_returns_explicit_insufficient_evidence_without_passages() -> None:

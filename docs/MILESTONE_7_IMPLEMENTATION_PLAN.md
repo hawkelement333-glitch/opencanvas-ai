@@ -8,7 +8,8 @@ implementation SHA `a88c6117f6b58137f1014cc8b389f44966c2918f`;
 Mobius Family Architecture Constitution documentation checkpoint complete
 locally; checkpoint 7.2 complete locally on
 `milestone-7-2-implementation-local`; checkpoint 7.3 complete locally on
-`milestone-7-3-implementation-local`; checkpoint 7.4 unstarted
+`milestone-7-3-implementation-local`; checkpoint 7.4 complete locally on
+`milestone-7-4-implementation-local`; checkpoint 7.5 unstarted
 
 Compatibility gates:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -48,7 +49,7 @@ created direct child `20260726_0026`; its immutable Git blob hash is
 Architecture:
 [`MILESTONE_7_ARCHITECTURE.md`](MILESTONE_7_ARCHITECTURE.md)
 
-Current sole Alembic head: `20260726_0027`
+Current sole Alembic head: `20260726_0028`
 
 ## Mobius Family Constitution inheritance
 
@@ -580,6 +581,17 @@ adapter work, generic archives, legal/compliance claims, durable queue
 hardening, shared limits, deployment, and Milestone 8.
 
 ## 6. Checkpoint 7.4 — Durable Queues, Workers, Retries, and Shared Rate Limits
+
+Implementation status: **complete locally**. The implementation extends the
+existing document-job, collaboration-authority, domain-event/outbox, Trace,
+audit, and worker boundaries. It adds direct child migration
+`20260726_0028`, a PostgreSQL `SKIP LOCKED` adapter, generation-fenced leases,
+bounded classified retry/dead-letter/replay, safe status/cancel/operator
+routes, and an atomic multi-dimensional shared limiter. See
+[`MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md`](MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md)
+and
+[`DURABLE_WORK_SHARED_LIMITS_RUNBOOK.md`](DURABLE_WORK_SHARED_LIMITS_RUNBOOK.md).
+No checkpoint 7.5 implementation is included.
 
 ### Purpose
 

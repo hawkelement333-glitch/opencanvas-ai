@@ -234,7 +234,13 @@ class DocumentProcessor:
         force: bool = False,
     ) -> Document:
         async with session_factory() as session:
-            return await self._process(session, document_id, force=force, commit_stages=True)
+            return await self._process(
+                session,
+                document_id,
+                force=force,
+                commit_stages=True,
+                manage_job=True,
+            )
 
     async def process_with_session(
         self,
@@ -242,8 +248,15 @@ class DocumentProcessor:
         document_id: uuid.UUID,
         *,
         force: bool = False,
+        manage_job: bool = True,
     ) -> Document:
-        return await self._process(session, document_id, force=force, commit_stages=False)
+        return await self._process(
+            session,
+            document_id,
+            force=force,
+            commit_stages=False,
+            manage_job=manage_job,
+        )
 
     async def _process(
         self,
@@ -252,6 +265,7 @@ class DocumentProcessor:
         *,
         force: bool,
         commit_stages: bool,
+        manage_job: bool,
     ) -> Document:
         document = await session.scalar(
             select(Document).where(Document.id == document_id).with_for_update()
@@ -354,18 +368,38 @@ class DocumentProcessor:
                     code="source_not_clean",
                     status_code=409,
                 )
-        job = await session.scalar(
+        job_statement = (
             select(DocumentProcessingJob)
             .where(
                 DocumentProcessingJob.document_id == document_id,
-                DocumentProcessingJob.status.in_(("queued", "retrying", "processing")),
+                DocumentProcessingJob.status.in_(
+                    (
+                        "queued",
+                        "retrying",
+                        "retry_waiting",
+                        "claimed",
+                        "processing",
+                        "extracting",
+                        "chunking",
+                        "embedding",
+                        "indexing",
+                    )
+                ),
                 DocumentProcessingJob.completed_at.is_(None),
             )
             .order_by(DocumentProcessingJob.attempt.desc())
             .limit(1)
-            .with_for_update()
         )
+        if manage_job:
+            job_statement = job_statement.with_for_update()
+        job = await session.scalar(job_statement)
         if job is None:
+            if not manage_job:
+                raise DocumentProcessingError(
+                    "The durable processing job is unavailable.",
+                    code="job_unavailable",
+                    status_code=409,
+                )
             attempt = (
                 await session.scalar(
                     select(func.coalesce(func.max(DocumentProcessingJob.attempt), 0)).where(
@@ -388,8 +422,9 @@ class DocumentProcessor:
             session.add(job)
         else:
             attempt = job.attempt
-            job.status = "extracting"
-            job.started_at = job.started_at or datetime.now(UTC)
+            if manage_job:
+                job.status = "extracting"
+                job.started_at = job.started_at or datetime.now(UTC)
         document.status = "processing"
         document.processing_stage = "extracting"
         document.error_message = None
@@ -425,7 +460,8 @@ class DocumentProcessor:
                 version.extracted_text = extracted.text
                 version.status = "processing"
             document.processing_stage = "chunking"
-            job.status = "chunking"
+            if manage_job:
+                job.status = "chunking"
             await self._persist(session, commit=commit_stages)
 
             chunks = chunk_document(
@@ -457,7 +493,8 @@ class DocumentProcessor:
             await session.flush()
             document.chunk_count = len(chunk_records)
             document.processing_stage = "embedding"
-            job.status = "embedding"
+            if manage_job:
+                job.status = "embedding"
             await self._persist(session, commit=commit_stages)
 
             vectors = await self.provider.embed([chunk.content for chunk in chunk_records])
@@ -481,8 +518,9 @@ class DocumentProcessor:
             document.status = "ready"
             document.processing_stage = "ready"
             document.error_message = None
-            job.status = "ready"
-            job.completed_at = datetime.now(UTC)
+            if manage_job:
+                job.status = "ready"
+                job.completed_at = datetime.now(UTC)
             if version is not None:
                 version.status = "ready"
             await self._persist(session, commit=commit_stages)
@@ -500,13 +538,15 @@ class DocumentProcessor:
                 exc.code if isinstance(exc, DocumentServiceError) else "processing_failed"
             )
             document.retry_count = max(0, attempt - 1)
-            job.status = "failed"
-            job.error_message = safe_message[:2_000]
-            job.safe_error_category = document.safe_error_category
-            job.retryable = attempt <= self.settings.processing_retry_limit
+            if manage_job:
+                job.status = "failed"
+                job.error_message = safe_message[:2_000]
+                job.safe_error_category = document.safe_error_category
+                job.retryable = attempt <= self.settings.processing_retry_limit
             if version is not None:
                 version.status = "failed"
-            job.completed_at = datetime.now(UTC)
+            if manage_job:
+                job.completed_at = datetime.now(UTC)
             await self._persist(session, commit=commit_stages)
             if isinstance(exc, DocumentProcessingError):
                 raise

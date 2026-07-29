@@ -7,7 +7,8 @@ PostgreSQL historical-migration correction for `0005`, `0021`, `0023`, and
 `0024` and its evidence complete locally at implementation SHA
 `a88c6117f6b58137f1014cc8b389f44966c2918f`; Mobius Family Architecture
 Constitution documentation checkpoint complete locally; checkpoint 7.2
-complete locally; checkpoint 7.3 complete locally; checkpoint 7.4 unstarted
+complete locally; checkpoint 7.3 complete locally; checkpoint 7.4 complete
+locally; checkpoint 7.5 unstarted
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -32,6 +33,9 @@ Checkpoint 7.2 handoff:
 
 Checkpoint 7.3 handoff:
 [`MILESTONE_7_3_OBJECT_STORAGE_UPLOAD_SECURITY_MALWARE_QUARANTINE_HANDOFF.md`](MILESTONE_7_3_OBJECT_STORAGE_UPLOAD_SECURITY_MALWARE_QUARANTINE_HANDOFF.md)
+
+Checkpoint 7.4 handoff:
+[`MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md`](MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md)
 
 PostgreSQL compatibility amendment:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
@@ -216,7 +220,8 @@ is part of this correction checkpoint.
 | Mobius Family Architecture Constitution            | Complete; documentation only |
 | 7.2 deterministic Indexer implementation           | Complete locally             |
 | 7.3 object-storage/upload/malware implementation   | Complete locally             |
-| 7.4–7.8 implementation                             | Not started                  |
+| 7.4 durable-work/shared-limit implementation       | Complete locally             |
+| 7.5–7.8 implementation                             | Not started                  |
 | Live infrastructure/provisioning/deployment        | Not started                  |
 
 ## Formal implementation checkpoints
@@ -240,7 +245,7 @@ required, and closed before the next begins.
 | 7.1        | None             | N/A             | Complete; runtime/configuration only             |
 | 7.2        | `20260726_0026`  | `20260725_0025` | Complete locally; sole head                      |
 | 7.3        | `20260726_0027`  | `20260726_0026` | Complete locally; sole head                      |
-| 7.4        | `20260726_0028`  | `20260726_0027` | Planned, not created                             |
+| 7.4        | `20260726_0028`  | `20260726_0027` | Complete locally; sole head                      |
 | 7.5        | None             | N/A             | External telemetry + existing evidence           |
 | 7.6        | None             | N/A             | External recovery evidence + existing references |
 | 7.7        | None             | N/A             | Test/evidence artifacts only                     |
@@ -369,10 +374,30 @@ production-readiness defect.
 - No autonomous Indexer judgment, deployment, provider provisioning, or public
   release is authorized by this architecture pass.
 
+## Checkpoint 7.4 closure
+
+Checkpoint 7.4 extends the existing document jobs with durable request,
+delivery, attempt, retry, outcome, dead-letter, replay, audit, Trace, and
+domain-event identities. PostgreSQL `SKIP LOCKED`, workspace/global
+concurrency, lease renewal/recovery, generation fencing, bounded full-jitter
+retry, separately authorized replay, safe status/cancel APIs, and
+fail-closed shared multi-dimensional limits are implemented. Migration
+`20260726_0028` is the sole head and direct child of `20260726_0027`.
+
+The one bounded broad backend campaign recorded 652 passed, 19 failed,
+14 skipped, and 51 warnings. The failures were stale expected-head
+assertions/validator state and deployed-settings fixtures. The affected
+correction groups passed without repeating the broad campaign. Whole-package
+strict mypy continues to expose two unchanged Indexer route annotation errors;
+the affected 7.4 surface passes strict typing. Exact validation, defects,
+skips, prerequisite evidence, dependency, and revalidation boundaries are in
+the
+[`MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md`](MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md).
+
 ## Next authorized work
 
-Checkpoint 7.3 — Object Storage, Upload Security, and Malware Quarantine — is
-complete locally on `milestone-7-3-implementation-local`. Migration
-`20260726_0027` is the sole head. The next authorized work is checkpoint 7.4
-from the committed 7.3 SHA. This run did not create migration `0028` or start
-checkpoint 7.4, 7.8, or Milestone 8.
+Checkpoint 7.4 — Durable Queues, Workers, Retries, and Shared Rate Limits — is
+complete locally on `milestone-7-4-implementation-local`. Migration
+`20260726_0028` is the sole head. The next checkpoint is 7.5 Observability and
+Operational Controls, which remains unstarted. This run did not start
+checkpoint 7.5, 7.8, or Milestone 8.

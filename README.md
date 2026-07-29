@@ -173,16 +173,18 @@ Open <http://localhost:3000>. Leave `OPENAI_API_KEY` empty for deterministic moc
 
 `.env.example` is the authoritative template. Important values are:
 
-| Variable                           | Required                           | Purpose                                                               |
-| ---------------------------------- | ---------------------------------- | --------------------------------------------------------------------- |
-| `OPENCANVAS_DATABASE_URL`          | Yes outside isolated demo defaults | Async PostgreSQL URL for normal operation.                            |
-| `NEXT_PUBLIC_API_URL`              | Yes for the web build              | Browser-visible API base URL; never place secrets in `NEXT_PUBLIC_*`. |
-| `OPENAI_API_KEY`                   | Live providers only                | Server-only key for live AI and embeddings.                           |
-| `OPENCANVAS_AI_PROVIDER`           | Yes                                | Explicitly `mock` or `openai`; failures never fall back to mock.      |
-| `OPENCANVAS_EMBEDDING_PROVIDER`    | Yes                                | Explicitly `mock` or `openai`; failures never fall back to mock.      |
-| `OPENCANVAS_OPENAI_MODEL`          | No                                 | Responses model, currently defaulting to `gpt-5.6-terra`.             |
-| `OPENCANVAS_DOCUMENT_STORAGE_ROOT` | Yes outside Docker defaults        | Non-public upload storage root.                                       |
-| `OPENCANVAS_DEMO_MODE`             | Demo command only                  | Enables strict project-local demo isolation checks.                   |
+| Variable                                | Required                           | Purpose                                                               |
+| --------------------------------------- | ---------------------------------- | --------------------------------------------------------------------- |
+| `OPENCANVAS_DATABASE_URL`               | Yes outside isolated demo defaults | Async PostgreSQL URL for normal operation.                            |
+| `NEXT_PUBLIC_API_URL`                   | Yes for the web build              | Browser-visible API base URL; never place secrets in `NEXT_PUBLIC_*`. |
+| `OPENAI_API_KEY`                        | Live providers only                | Server-only key for live AI and embeddings.                           |
+| `OPENCANVAS_AI_PROVIDER`                | Yes                                | Explicitly `mock` or `openai`; failures never fall back to mock.      |
+| `OPENCANVAS_EMBEDDING_PROVIDER`         | Yes                                | Explicitly `mock` or `openai`; failures never fall back to mock.      |
+| `OPENCANVAS_OPENAI_MODEL`               | No                                 | Responses model, currently defaulting to `gpt-5.6-terra`.             |
+| `OPENCANVAS_DOCUMENT_STORAGE_ROOT`      | Yes outside Docker defaults        | Non-public upload storage root.                                       |
+| `OPENCANVAS_JOB_PROVIDER`               | Deployed modes                     | Selects the durable database worker; deployed modes reject inline.    |
+| `OPENCANVAS_SHARED_RATE_LIMIT_PROVIDER` | Deployed modes                     | Selects Redis; deployed modes reject process-local limits.            |
+| `OPENCANVAS_DEMO_MODE`                  | Demo command only                  | Enables strict project-local demo isolation checks.                   |
 
 Chunk size, overlap, file limits, retrieval top-k, relevance threshold, embedding model, dimensions, and CORS are also configurable in `.env.example`. Demo mode must not be combined with a production environment, OpenAI credentials, live providers, or non-demo storage/database paths.
 
@@ -231,7 +233,9 @@ pnpm validate
 - Accounts use database-backed secure sessions and CSRF protection; every workspace/canvas,
   document/file, execution, citation, and Trace read/write is authorized server-side.
 - Staging and production require PostgreSQL, SMTP reset delivery, explicit OpenAI providers,
-  private S3-compatible storage, and the durable database-backed worker.
+  private Azure storage, the durable database-backed worker, and private
+  Entra-authenticated Managed Redis. Protected operations fail closed when
+  the shared limiter cannot make an atomic decision.
 
 See [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md), [SECURITY.md](SECURITY.md), and [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md).
 
@@ -253,8 +257,8 @@ At runtime, live mode uses the server-side OpenAI Responses API with a configura
 
 ## Known limitations and roadmap
 
-Major limitations include no OCR or malware-scanning service, per-process rate limiting, a
-database-backed rather than broker-backed job queue, non-streaming AI responses, no automatic
+Major limitations include no OCR, a PostgreSQL-backed rather than
+broker-backed durable job adapter, non-streaming AI responses, no automatic
 inference/conflict classification, and no complete end-user Trace explorer. See the complete
 [known-limitations register](docs/KNOWN_LIMITATIONS.md).
 
@@ -321,7 +325,13 @@ PostgreSQL and SQLite validation matrix. Checkpoint 7.2 subsequently completed
 locally with sole head `20260726_0026`; production Indexer publication remains
 disabled until checkpoint 7.3 proves the clean-object gate. See the
 [Milestone 7.2 deterministic Indexer handoff](docs/MILESTONE_7_2_DETERMINISTIC_INDEXER_HANDOFF.md).
-The
+Checkpoint 7.3 then completed private versioned quarantine and trusted malware
+evidence at sole head `20260726_0027`. Checkpoint 7.4 completes locally at
+sole head `20260726_0028` with generation-fenced PostgreSQL workers, bounded
+retry/dead-letter/replay, safe job APIs, and atomic multi-dimensional shared
+limits. See the
+[Milestone 7.4 handoff](docs/MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md).
+Checkpoint 7.5 remains unstarted. The
 required roadmap order is:
 
 1. Milestone 6 — Core Multi-Workspace Collaboration

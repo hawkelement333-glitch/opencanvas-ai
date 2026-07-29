@@ -38,6 +38,12 @@ def _deployed_settings(**overrides: object) -> Settings:
         "malware_scanner_identity": "microsoft-defender-storage-staging",
         "malware_scanner_version": "defender-storage-v1",
         "job_provider": "database",
+        "shared_rate_limit_provider": "redis",
+        "shared_rate_limit_redis_url": "rediss://redis.invalid:10000",
+        "shared_rate_limit_redis_username": "test-restricted-acl",
+        "shared_rate_limit_identity_endpoint": "https://identity.invalid/token",
+        "shared_rate_limit_identity_header": "test-only-rate-limit-identity-header",
+        "shared_rate_limit_hmac_secret": ("production-shared-rate-limit-secret-distinct-value"),
     }
     values.update(overrides)
     return Settings(**values)

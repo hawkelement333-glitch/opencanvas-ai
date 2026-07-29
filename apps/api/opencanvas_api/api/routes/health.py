@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,7 @@ from opencanvas_api.db.runtime import DatabaseRuntimeError, validate_database_ru
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.demo import DEMO_CANVAS_ID, DEMO_TRACE_ID
 from opencanvas_api.services.documents import DocumentServiceError, build_document_storage
+from opencanvas_api.services.rate_limits import SharedRateLimitService
 
 router = APIRouter(prefix="/health")
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -58,7 +59,10 @@ async def liveness(settings: SettingsDep) -> HealthResponse:
 
 @router.get("/ready", response_model=HealthResponse)
 async def readiness(
-    settings: SettingsDep, session: SessionDep, database: DatabaseDep
+    request: Request,
+    settings: SettingsDep,
+    session: SessionDep,
+    database: DatabaseDep,
 ) -> HealthResponse:
     try:
         await validate_database_runtime(database.engine, settings, expected_role=DatabaseRole.API)
@@ -76,6 +80,13 @@ async def readiness(
             "storage_unavailable",
             "The private document store is not ready.",
         ) from exc
+    limiter = getattr(request.app.state, "shared_rate_limiter", None)
+    if not isinstance(limiter, SharedRateLimitService) or not await limiter.health():
+        raise ApiError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "rate_limit_unavailable",
+            "Request protection is not ready.",
+        )
     if settings.job_provider == "database":
         heartbeat = await session.scalar(
             select(WorkerHeartbeat).order_by(WorkerHeartbeat.last_seen_at.desc()).limit(1)

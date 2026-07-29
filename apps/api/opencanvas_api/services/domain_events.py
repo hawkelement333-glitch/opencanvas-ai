@@ -27,6 +27,7 @@ from opencanvas_api.db.models import (
     ControlledAgentExecution,
     ControlledWorkflowExecution,
     ControlledWorkflowStepExecution,
+    DocumentProcessingJob,
     DomainActivityEntry,
     DomainEventDeliveryAttempt,
     DomainEventOutbox,
@@ -159,6 +160,14 @@ DomainEventType = Literal[
     "object.promoted",
     "object.failed",
     "object.deletion_requested",
+    "job.created",
+    "job.claimed",
+    "job.retry_scheduled",
+    "job.completed",
+    "job.failed",
+    "job.canceled",
+    "job.dead_lettered",
+    "job.replayed",
 ]
 SubjectKind = Literal[
     "canonical_resource",
@@ -196,6 +205,7 @@ SubjectKind = Literal[
     "malware_scan_request",
     "malware_scan_result",
     "object_promotion",
+    "durable_job",
 ]
 OriginType = Literal[
     "authenticated_user",
@@ -330,6 +340,18 @@ _OBJECT_INGESTION_PAYLOAD = frozenset(
         "promotionId",
         "outcome",
         "policyVersion",
+    }
+)
+_DURABLE_JOB_PAYLOAD = frozenset(
+    {
+        "status",
+        "reasonCode",
+        "attemptNumber",
+        "leaseGeneration",
+        "cancellationGeneration",
+        "authorityGeneration",
+        "sourceVersion",
+        "jobKind",
     }
 )
 
@@ -644,6 +666,14 @@ EVENT_TYPE_REGISTRY: dict[DomainEventType, EventTypeSpec] = {
     "object.deletion_requested": EventTypeSpec(
         "storage_object_version", _OBJECT_INGESTION_PAYLOAD, canvas_required=True
     ),
+    "job.created": EventTypeSpec("durable_job", _DURABLE_JOB_PAYLOAD, canvas_required=True),
+    "job.claimed": EventTypeSpec("durable_job", _DURABLE_JOB_PAYLOAD, canvas_required=True),
+    "job.retry_scheduled": EventTypeSpec("durable_job", _DURABLE_JOB_PAYLOAD, canvas_required=True),
+    "job.completed": EventTypeSpec("durable_job", _DURABLE_JOB_PAYLOAD, canvas_required=True),
+    "job.failed": EventTypeSpec("durable_job", _DURABLE_JOB_PAYLOAD, canvas_required=True),
+    "job.canceled": EventTypeSpec("durable_job", _DURABLE_JOB_PAYLOAD, canvas_required=True),
+    "job.dead_lettered": EventTypeSpec("durable_job", _DURABLE_JOB_PAYLOAD, canvas_required=True),
+    "job.replayed": EventTypeSpec("durable_job", _DURABLE_JOB_PAYLOAD, canvas_required=True),
 }
 
 
@@ -1188,6 +1218,17 @@ class DomainEventService:
                         IndexPublication.workspace_id == command.workspace_id,
                     )
                 )
+            if subject is None:
+                raise DomainEventNotFoundError()
+        elif spec.subject_kind == "durable_job":
+            subject = await self.session.scalar(
+                select(DocumentProcessingJob.id).where(
+                    DocumentProcessingJob.id == command.subject_id,
+                    DocumentProcessingJob.workspace_id == command.workspace_id,
+                    DocumentProcessingJob.canvas_id == command.canvas_id,
+                    DocumentProcessingJob.user_id == command.actor_user_id,
+                )
+            )
             if subject is None:
                 raise DomainEventNotFoundError()
         elif (

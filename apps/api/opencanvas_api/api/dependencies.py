@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import asyncio
-import time
 import uuid
-from collections import defaultdict, deque
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
 from typing import Annotated, cast
 
 from fastapi import Depends, Request, status
@@ -31,6 +27,11 @@ from opencanvas_api.services.documents import (
 )
 from opencanvas_api.services.domain_events import DomainEventService
 from opencanvas_api.services.knowledge_graph import KnowledgeGraphService
+from opencanvas_api.services.rate_limits import (
+    RateLimitDimension,
+    SharedRateLimitService,
+    SharedRateLimitUnavailable,
+)
 from opencanvas_api.services.trace import TraceService
 
 
@@ -176,58 +177,30 @@ async def require_path_workspace_principal(
     return principal
 
 
-@dataclass(slots=True)
-class InMemoryRateLimiter:
-    """Small per-process limiter for expensive unauthenticated MVP operations."""
-
-    _requests: dict[str, deque[float]] = field(default_factory=lambda: defaultdict(deque))
-    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-
-    async def enforce(self, key: str, *, limit: int, window_seconds: float) -> None:
-        now = time.monotonic()
-        cutoff = now - window_seconds
-        async with self._lock:
-            timestamps = self._requests[key]
-            while timestamps and timestamps[0] <= cutoff:
-                timestamps.popleft()
-            if len(timestamps) >= limit:
-                retry_after = max(1, int(window_seconds - (now - timestamps[0])))
-                raise ApiError(
-                    status.HTTP_429_TOO_MANY_REQUESTS,
-                    "rate_limit_exceeded",
-                    "Too many expensive requests. Wait briefly and try again.",
-                    headers={"Retry-After": str(retry_after)},
-                )
-            timestamps.append(now)
-
-
-def _client_key(request: Request, operation: str) -> str:
-    client_host = request.client.host if request.client is not None else "unknown"
-    return f"{operation}:{client_host}"
-
-
 async def enforce_ai_rate_limit(
     request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
-    limiter = getattr(request.app.state, "expensive_operation_limiter", None)
-    if not isinstance(limiter, InMemoryRateLimiter):
-        limiter = InMemoryRateLimiter()
-        request.app.state.expensive_operation_limiter = limiter
-    await limiter.enforce(
-        f"ai:user:{principal.user_id}",
-        limit=settings.ai_requests_per_user_per_minute,
-        window_seconds=60.0,
-    )
+    dimensions = [
+        RateLimitDimension(
+            "user",
+            str(principal.user_id),
+            settings.ai_requests_per_user_per_minute,
+        ),
+        RateLimitDimension("provider", settings.ai_provider, 1_000),
+    ]
     workspace_id = await _request_workspace_id(request, session)
     if workspace_id is not None:
-        await limiter.enforce(
-            f"ai:workspace:{workspace_id}",
-            limit=settings.requests_per_workspace_per_minute,
-            window_seconds=60.0,
+        dimensions.append(
+            RateLimitDimension(
+                "workspace",
+                str(workspace_id),
+                settings.requests_per_workspace_per_minute,
+            )
         )
+    await _enforce_shared(request, operation="ai", dimensions=dimensions)
 
 
 async def enforce_document_rate_limit(
@@ -236,37 +209,54 @@ async def enforce_document_rate_limit(
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
-    limiter = getattr(request.app.state, "expensive_operation_limiter", None)
-    if not isinstance(limiter, InMemoryRateLimiter):
-        limiter = InMemoryRateLimiter()
-        request.app.state.expensive_operation_limiter = limiter
-    await limiter.enforce(
-        f"documents:user:{principal.user_id}",
-        limit=settings.requests_per_user_per_minute,
-        window_seconds=60.0,
-    )
+    dimensions = [
+        RateLimitDimension(
+            "user",
+            str(principal.user_id),
+            settings.requests_per_user_per_minute,
+        )
+    ]
     workspace_id = await _request_workspace_id(request, session)
     if workspace_id is not None:
-        await limiter.enforce(
-            f"documents:workspace:{workspace_id}",
-            limit=settings.requests_per_workspace_per_minute,
-            window_seconds=60.0,
+        dimensions.append(
+            RateLimitDimension(
+                "workspace",
+                str(workspace_id),
+                settings.requests_per_workspace_per_minute,
+            )
         )
+    resource_id = _request_resource_id(request)
+    if resource_id is not None:
+        dimensions.append(
+            RateLimitDimension(
+                "resource",
+                resource_id,
+                settings.requests_per_user_per_minute,
+            )
+        )
+    await _enforce_shared(request, operation="documents", dimensions=dimensions)
 
 
 async def enforce_scanner_result_rate_limit(
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
-    limiter = getattr(request.app.state, "scanner_result_limiter", None)
-    if not isinstance(limiter, InMemoryRateLimiter):
-        limiter = InMemoryRateLimiter()
-        request.app.state.scanner_result_limiter = limiter
     source = request.client.host if request.client is not None else "unknown"
-    await limiter.enforce(
-        f"scanner-result:{source}",
-        limit=settings.scanner_result_requests_per_minute,
-        window_seconds=60.0,
+    await _enforce_shared(
+        request,
+        operation="scanner-result",
+        dimensions=[
+            RateLimitDimension(
+                "network",
+                source,
+                settings.scanner_result_requests_per_minute,
+            ),
+            RateLimitDimension(
+                "provider",
+                settings.malware_scanner_identity,
+                settings.scanner_result_requests_per_minute,
+            ),
+        ],
     )
 
 
@@ -274,15 +264,65 @@ async def enforce_auth_rate_limit(
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
-    limiter = getattr(request.app.state, "expensive_operation_limiter", None)
-    if not isinstance(limiter, InMemoryRateLimiter):
-        limiter = InMemoryRateLimiter()
-        request.app.state.expensive_operation_limiter = limiter
-    await limiter.enforce(
-        _client_key(request, "auth"),
-        limit=settings.auth_requests_per_ip_per_minute,
-        window_seconds=60.0,
+    source = request.client.host if request.client is not None else "unknown"
+    await _enforce_shared(
+        request,
+        operation="auth",
+        dimensions=[
+            RateLimitDimension(
+                "network",
+                source,
+                settings.auth_requests_per_ip_per_minute,
+            )
+        ],
     )
+
+
+async def _enforce_shared(
+    request: Request,
+    *,
+    operation: str,
+    dimensions: list[RateLimitDimension],
+) -> None:
+    limiter = getattr(request.app.state, "shared_rate_limiter", None)
+    if not isinstance(limiter, SharedRateLimitService):
+        raise ApiError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "rate_limit_unavailable",
+            "Request protection is temporarily unavailable.",
+            headers={"Retry-After": "1"},
+        )
+    try:
+        decision = await limiter.consume(operation=operation, dimensions=dimensions)
+    except SharedRateLimitUnavailable as exc:
+        limiter.metrics.responses_503 += 1
+        raise ApiError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "rate_limit_unavailable",
+            "Request protection is temporarily unavailable.",
+            headers={"Retry-After": "1"},
+        ) from exc
+    if not decision.allowed:
+        limiter.metrics.responses_429 += 1
+        raise ApiError(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "rate_limit_exceeded",
+            "Too many expensive requests. Wait briefly and try again.",
+            headers={"Retry-After": str(decision.retry_after_seconds)},
+        )
+
+
+def _request_resource_id(request: Request) -> str | None:
+    for name in (
+        "document_id",
+        "canvas_id",
+        "workflow_id",
+        "execution_id",
+        "agent_id",
+    ):
+        if value := request.path_params.get(name):
+            return f"{name}:{value}"
+    return None
 
 
 async def _request_workspace_id(request: Request, session: AsyncSession) -> uuid.UUID | None:

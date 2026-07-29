@@ -14,10 +14,11 @@ from starlette.responses import Response
 from opencanvas_api import __version__
 from opencanvas_api.api.errors import ApiError
 from opencanvas_api.api.router import api_router
-from opencanvas_api.core.config import DatabaseRole, get_settings
+from opencanvas_api.core.config import AppMode, DatabaseRole, get_settings
 from opencanvas_api.db.runtime import DatabaseRuntimeError, validate_database_runtime
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.documents import reconcile_interrupted_processing
+from opencanvas_api.services.rate_limits import build_shared_rate_limit_service
 
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 logger = structlog.get_logger("opencanvas_api")
@@ -28,6 +29,10 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     database = Database.from_settings(settings, expected_role=DatabaseRole.API)
     application.state.database = database
+    rate_limiter = getattr(application.state, "shared_rate_limiter", None)
+    if rate_limiter is None:
+        rate_limiter = build_shared_rate_limit_service(settings)
+        application.state.shared_rate_limiter = rate_limiter
     try:
         try:
             await validate_database_runtime(
@@ -42,8 +47,14 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                     await reconcile_interrupted_processing(session)
         except DatabaseRuntimeError as exc:
             logger.warning("database_not_ready_at_startup", error_category=exc.code)
+        if (
+            settings.runtime_mode in {AppMode.STAGING, AppMode.PRODUCTION}
+            and not await rate_limiter.health()
+        ):
+            raise RuntimeError("The managed shared rate limiter is not ready.")
         yield
     finally:
+        await rate_limiter.close()
         await database.dispose()
 
 
@@ -58,6 +69,7 @@ def create_app() -> FastAPI:
         redoc_url=None,
         lifespan=lifespan,
     )
+    application.state.shared_rate_limiter = build_shared_rate_limit_service(settings)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

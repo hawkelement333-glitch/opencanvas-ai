@@ -68,9 +68,11 @@ This register prevents the competition demo and public materials from implying c
   not implemented; preserved combined work is not active, and Milestone 7.2
   remains blocked.
 - Production-shaped processing uses persisted database jobs and an independently scalable worker.
-  The database queue is not a dedicated broker and does not yet provide long-running lease
-  renewal or dead-letter administration UI.
-- Rate limiting is process-local, not distributed.
+  The PostgreSQL queue is not a dedicated broker and has no browser lease
+  control or full dead-letter administration UI.
+- Shared atomic rate limiting is implemented, but the application adapter has
+  not yet been revalidated end to end against the approved isolated Azure
+  Managed Redis topology.
 - Canonical domain events, provenance, transactional outbox delivery attempts,
   and activity projections are durable. Production queue wake-up, operational
   telemetry, and external multi-service delivery still require the Milestone 7
@@ -110,7 +112,6 @@ This register prevents the competition demo and public materials from implying c
 
 ## Recommended next checkpoint
 
-Checkpoint 7.3 is complete locally. The next authorized checkpoint is
-Milestone 7.4 — Durable Queues, Workers, Retries, and Shared Rate Limits.
-Migration `0028`, deployment, the 7.8 final audit, Milestone 8, and later work
-remain unstarted.
+Checkpoint 7.4 is complete locally. The next checkpoint is Milestone 7.5 —
+Observability and Operational Controls. Deployment, the 7.8 final audit,
+Milestone 8, and later work remain unstarted.

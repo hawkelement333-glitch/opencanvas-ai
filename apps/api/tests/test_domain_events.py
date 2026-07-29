@@ -123,7 +123,7 @@ async def test_closed_existing_registry_persists_event_provenance_and_outbox(
     database: Database,
 ) -> None:
     canvas_id, execution_id = await _scope(database)
-    collaboration_subjects = {
+    externally_scoped_subjects = {
         "workspace_invitation",
         "workspace_membership",
         "collaboration_resource",
@@ -135,11 +135,12 @@ async def test_closed_existing_registry_persists_event_provenance_and_outbox(
         "ingestion_request",
         "index_revision",
         "index_publication",
+        "durable_job",
     }
     existing_types = [
         name
         for name, spec in EVENT_TYPE_REGISTRY.items()
-        if not spec.reserved and spec.subject_kind not in collaboration_subjects
+        if not spec.reserved and spec.subject_kind not in externally_scoped_subjects
     ]
     async with database.sessions() as session:
         service = DomainEventService(session)

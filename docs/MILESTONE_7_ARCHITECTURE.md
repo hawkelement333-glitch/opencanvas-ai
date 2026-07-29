@@ -4,7 +4,7 @@ Date: 2026-07-27
 
 Status: architecture complete locally; checkpoint 7.1 implemented locally;
 checkpoint 7.2 implemented locally; checkpoint 7.3 implemented locally;
-checkpoint 7.4 unstarted
+checkpoint 7.4 implemented locally; checkpoint 7.5 unstarted
 
 Checkpoint 7.2 implementation record: migration `20260726_0026` is the sole
 head and direct child of `20260725_0025`. The deterministic Indexer, immutable
@@ -19,6 +19,16 @@ storage, quarantine-only capabilities, hostile-input controls, trusted
 immutable scanner results, checksum-verified promotion, clean-consumer gates,
 and lifecycle/recovery evidence now realize sections 10.1–10.6. See
 [`MILESTONE_7_3_OBJECT_STORAGE_UPLOAD_SECURITY_MALWARE_QUARANTINE_HANDOFF.md`](MILESTONE_7_3_OBJECT_STORAGE_UPLOAD_SECURITY_MALWARE_QUARANTINE_HANDOFF.md).
+
+Checkpoint 7.4 implementation record: migration `20260726_0028` is the sole
+head and direct child of `20260726_0027`. Durable request/job/delivery/attempt/
+retry/outcome/dead-letter/replay identities, generation-fenced PostgreSQL
+workers, atomic existing evidence integration, and the provider-neutral
+shared-limit contract now realize the approved work and rate-limit boundary.
+The Redis adapter requires credential-free private `rediss`, Microsoft Entra
+managed-identity tokens, opaque HMAC keys, and one `{limits}` hash slot for
+atomic multi-key Lua. Deployed modes refuse the local in-memory fake. See
+[`MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md`](MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md).
 
 PostgreSQL compatibility amendments:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -1343,12 +1353,12 @@ the governed Librarian, Worlds, Spatial, Federation, or Continuity.
 
 ## 27. Current implementation boundary
 
-Checkpoints 7.1, 7.2, and 7.3 are complete locally. Migration
-`20260726_0027` is the sole head. Managed staging evidence validates the
+Checkpoints 7.1, 7.2, 7.3, and 7.4 are complete locally. Migration
+`20260726_0028` is the sole head. Managed staging evidence validates the
 private/versioned Azure storage and clean/EICAR scanner prerequisites, with
 direct personal blob-tag inspection unavailable by least-privilege design.
 The application uses a dedicated exact-evidence scanner-result path rather
 than personal authority or a mutable tag.
 
-This does not certify production deployment or start checkpoints 7.4–7.8,
+This does not certify production deployment or start checkpoints 7.5–7.8,
 Milestone 8, or later work.

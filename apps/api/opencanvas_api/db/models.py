@@ -345,6 +345,7 @@ class Document(TimestampMixin, Base):
 class DocumentVersion(TimestampMixin, Base):
     __tablename__ = "document_versions"
     __table_args__ = (
+        UniqueConstraint("id", "document_id", name="uq_document_versions_id_document"),
         UniqueConstraint("document_id", "version", name="uq_document_versions_number"),
         CheckConstraint("version > 0", name="ck_document_versions_number_positive"),
         CheckConstraint("file_size_bytes >= 0", name="ck_document_versions_size_nonnegative"),
@@ -454,18 +455,205 @@ class DocumentEmbedding(TimestampMixin, Base):
     )
 
 
+class DurableJobRequest(Base):
+    """Immutable authenticated intent for one bounded durable job run."""
+
+    __tablename__ = "durable_job_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["membership_id", "user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_durable_job_request_membership_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["canvas_id", "workspace_id"],
+            ["canvases.id", "canvases.workspace_id"],
+            name="fk_durable_job_request_canvas_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["document_id", "canvas_id"],
+            ["documents.id", "documents.canvas_id"],
+            name="fk_durable_job_request_document_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["document_version_id", "document_id"],
+            ["document_versions.id", "document_versions.document_id"],
+            name="fk_durable_job_request_version_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "idempotency_key",
+            name="uq_durable_job_request_idempotency",
+        ),
+        UniqueConstraint(
+            "request_id",
+            "user_id",
+            "workspace_id",
+            name="uq_durable_job_request_scope",
+        ),
+        CheckConstraint("length(request_digest) = 64", name="ck_durable_job_request_digest"),
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_durable_job_request_authority_generation",
+        ),
+        CheckConstraint(
+            "cancellation_generation >= 0",
+            name="ck_durable_job_request_cancellation_generation",
+        ),
+        CheckConstraint(
+            "request_kind IN ('document_processing', 'indexing', 'malware_scan')",
+            name="ck_durable_job_request_kind",
+        ),
+        Index(
+            "ix_durable_job_request_scope_time",
+            "workspace_id",
+            "canvas_id",
+            "created_at",
+        ),
+    )
+
+    request_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    document_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    document_version_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    request_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    cancellation_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class DocumentProcessingJob(TimestampMixin, Base):
     __tablename__ = "document_processing_jobs"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["request_id", "user_id", "workspace_id"],
+            [
+                "durable_job_requests.request_id",
+                "durable_job_requests.user_id",
+                "durable_job_requests.workspace_id",
+            ],
+            name="fk_document_jobs_request_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["membership_id", "user_id", "workspace_id"],
+            [
+                "workspace_memberships.membership_id",
+                "workspace_memberships.user_id",
+                "workspace_memberships.workspace_id",
+            ],
+            name="fk_document_jobs_membership_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["canvas_id", "workspace_id"],
+            ["canvases.id", "canvases.workspace_id"],
+            name="fk_document_jobs_canvas_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["document_id", "canvas_id"],
+            ["documents.id", "documents.canvas_id"],
+            name="fk_document_jobs_document_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["document_version_id", "document_id"],
+            ["document_versions.id", "document_versions.document_id"],
+            name="fk_document_jobs_version_scope",
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint("document_id", "attempt", name="uq_document_processing_jobs_attempt"),
+        UniqueConstraint("request_id", name="uq_document_processing_jobs_request"),
+        UniqueConstraint(
+            "id",
+            "user_id",
+            "workspace_id",
+            name="uq_document_processing_jobs_scope",
+        ),
         CheckConstraint("attempt > 0", name="ck_document_processing_jobs_attempt_positive"),
         CheckConstraint(
             "status IN ('queued', 'uploading', 'processing', 'extracting', 'chunking', "
             "'embedding', 'indexing', 'ready', 'retrying', 'retryable_failure', "
-            "'permanent_failure', 'cancelled', 'failed')",
+            "'permanent_failure', 'cancelled', 'failed', 'claimed', 'retry_waiting', "
+            "'dead_lettered', 'succeeded')",
             name="ck_document_processing_jobs_status",
         ),
-        Index("ix_document_jobs_claim", "status", "available_at", "created_at"),
+        CheckConstraint(
+            "job_kind IN ('document_processing', 'indexing', 'malware_scan')",
+            name="ck_document_jobs_kind",
+        ),
+        CheckConstraint(
+            "priority_class IN ('interactive', 'normal', 'maintenance')",
+            name="ck_document_jobs_priority_class",
+        ),
+        CheckConstraint("priority BETWEEN 0 AND 100", name="ck_document_jobs_priority"),
+        CheckConstraint(
+            "authority_generation IS NULL OR authority_generation > 0",
+            name="ck_document_jobs_authority_generation",
+        ),
+        CheckConstraint(
+            "cancellation_generation >= 0 AND lease_generation >= 0",
+            name="ck_document_jobs_generations",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0 AND max_attempts > 0 AND attempt_count <= max_attempts",
+            name="ck_document_jobs_attempts_bounded",
+        ),
+        CheckConstraint(
+            "deadline_at IS NULL OR deadline_at > created_at",
+            name="ck_document_jobs_deadline",
+        ),
+        CheckConstraint(
+            "(locked_by IS NULL AND lease_expires_at IS NULL) OR "
+            "(locked_by IS NOT NULL AND lease_expires_at IS NOT NULL)",
+            name="ck_document_jobs_lease_shape",
+        ),
+        CheckConstraint(
+            "request_digest IS NULL OR length(request_digest) = 64",
+            name="ck_document_jobs_request_digest",
+        ),
+        Index(
+            "ix_document_jobs_claim",
+            "status",
+            "available_at",
+            "priority_class",
+            "priority",
+            "created_at",
+        ),
+        Index(
+            "ix_document_jobs_fair_claim",
+            "workspace_id",
+            "status",
+            "available_at",
+            "priority",
+            "created_at",
+        ),
+        Index("ix_document_jobs_lease_expiry", "lease_expires_at", "lease_generation"),
+        Index(
+            "ix_document_jobs_reconcile",
+            "status",
+            "deadline_at",
+            "lease_expires_at",
+            "id",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -481,10 +669,26 @@ class DocumentProcessingJob(TimestampMixin, Base):
         index=True,
         default=lambda: SYSTEM_WORKSPACE_ID,
     )
+    request_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
+    membership_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    canvas_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
     document_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    document_version_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
+    job_kind: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="document_processing",
+        server_default="document_processing",
+    )
     attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    max_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=4, server_default="4"
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     idempotency_key: Mapped[str] = mapped_column(
         String(160), nullable=False, unique=True, default=lambda: uuid.uuid4().hex
@@ -492,13 +696,346 @@ class DocumentProcessingJob(TimestampMixin, Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     safe_error_category: Mapped[str | None] = mapped_column(String(64))
     retryable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    request_digest: Mapped[str | None] = mapped_column(String(64))
+    authority_generation: Mapped[int | None] = mapped_column(Integer)
+    cancellation_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    source_version: Mapped[int | None] = mapped_column(Integer)
+    priority_class: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="normal", server_default="normal"
+    )
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=50, server_default="50")
+    eligibility_class: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="ordinary", server_default="ordinary"
+    )
     available_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     locked_by: Mapped[str | None] = mapped_column(String(120))
+    lease_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result_id: Mapped[uuid.UUID | None] = mapped_column()
+    publication_id: Mapped[uuid.UUID | None] = mapped_column()
+    legacy_backfill: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DurableQueueDelivery(Base):
+    """Append-only at-least-once wake-up evidence without provider payloads."""
+
+    __tablename__ = "durable_queue_deliveries"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["job_run_id", "user_id", "workspace_id"],
+            [
+                "document_processing_jobs.id",
+                "document_processing_jobs.user_id",
+                "document_processing_jobs.workspace_id",
+            ],
+            name="fk_durable_queue_delivery_job_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("idempotency_key", name="uq_durable_queue_delivery_idempotency"),
+        UniqueConstraint(
+            "job_run_id",
+            "delivery_sequence",
+            name="uq_durable_queue_delivery_sequence",
+        ),
+        CheckConstraint("delivery_sequence > 0", name="ck_durable_queue_delivery_sequence"),
+        CheckConstraint(
+            "delivery_kind IN ('enqueue', 'retry', 'replay', 'recovery', 'reconcile')",
+            name="ck_durable_queue_delivery_kind",
+        ),
+        Index(
+            "ix_durable_queue_delivery_eligible",
+            "eligible_at",
+            "job_run_id",
+            "delivery_sequence",
+        ),
+    )
+
+    delivery_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    job_run_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    delivery_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    delivery_kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    eligible_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DurableJobAttempt(Base):
+    """Append-only execution evidence for one lease generation."""
+
+    __tablename__ = "durable_job_attempts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["job_run_id", "user_id", "workspace_id"],
+            [
+                "document_processing_jobs.id",
+                "document_processing_jobs.user_id",
+                "document_processing_jobs.workspace_id",
+            ],
+            name="fk_durable_job_attempt_job_scope",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["delivery_id"],
+            ["durable_queue_deliveries.delivery_id"],
+            name="fk_durable_job_attempt_delivery",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("job_run_id", "attempt_number", name="uq_durable_job_attempt_number"),
+        UniqueConstraint(
+            "job_run_id",
+            "lease_generation",
+            name="uq_durable_job_attempt_generation",
+        ),
+        CheckConstraint("attempt_number > 0", name="ck_durable_job_attempt_number"),
+        CheckConstraint("lease_generation >= 0", name="ck_durable_job_attempt_generation"),
+        CheckConstraint(
+            "outcome IN ('running', 'succeeded', 'retry_scheduled', 'terminal_failure', "
+            "'canceled', 'deadline_expired', 'authority_revoked', 'lease_lost', "
+            "'legacy_queued', 'legacy_processing', 'legacy_ready', 'legacy_failed')",
+            name="ck_durable_job_attempt_outcome",
+        ),
+        Index("ix_durable_job_attempt_time", "job_run_id", "attempt_number", "recorded_at"),
+    )
+
+    attempt_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    job_run_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    delivery_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    lease_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    worker_id: Mapped[str | None] = mapped_column(String(120))
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    failure_classification: Mapped[str | None] = mapped_column(String(64))
+    trace_id: Mapped[uuid.UUID | None] = mapped_column(index=True)
+    audit_event_id: Mapped[uuid.UUID | None] = mapped_column(index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DurableRetryDecision(Base):
+    __tablename__ = "durable_retry_decisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["job_run_id", "user_id", "workspace_id"],
+            [
+                "document_processing_jobs.id",
+                "document_processing_jobs.user_id",
+                "document_processing_jobs.workspace_id",
+            ],
+            name="fk_durable_retry_decision_job_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("job_run_id", "attempt_number", name="uq_durable_retry_decision_attempt"),
+        CheckConstraint(
+            "failure_classification IN ('dependency_unavailable', 'connection_interrupted', "
+            "'rate_limited', 'lease_interrupted', 'provider_timeout', 'policy_rejected', "
+            "'malware', 'corrupt_input', 'unsupported_format', 'canceled', 'authority_revoked', "
+            "'source_superseded', 'deterministic_drift', 'deadline_exceeded', "
+            "'attempts_exhausted', "
+            "'unknown_failure')",
+            name="ck_durable_retry_decision_failure",
+        ),
+        CheckConstraint(
+            "disposition IN ('retry', 'terminal', 'dead_letter', 'canceled')",
+            name="ck_durable_retry_decision_disposition",
+        ),
+        CheckConstraint("delay_ms >= 0", name="ck_durable_retry_decision_delay"),
+        CheckConstraint(
+            "length(jitter_digest) = 64",
+            name="ck_durable_retry_decision_jitter_digest",
+        ),
+        Index("ix_durable_retry_decision_eligible", "disposition", "eligible_at"),
+    )
+
+    retry_decision_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    job_run_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    failure_classification: Mapped[str] = mapped_column(String(64), nullable=False)
+    disposition: Mapped[str] = mapped_column(String(24), nullable=False)
+    delay_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    jitter_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    eligible_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DurableJobOutcome(Base):
+    __tablename__ = "durable_job_outcomes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["job_run_id", "user_id", "workspace_id"],
+            [
+                "document_processing_jobs.id",
+                "document_processing_jobs.user_id",
+                "document_processing_jobs.workspace_id",
+            ],
+            name="fk_durable_job_outcome_job_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("job_run_id", name="uq_durable_job_outcome_job"),
+        CheckConstraint(
+            "outcome IN ('succeeded', 'failed', 'canceled', 'deadline_expired', "
+            "'authority_revoked', 'dead_lettered')",
+            name="ck_durable_job_outcome",
+        ),
+        Index("ix_durable_job_outcome_trace", "trace_id"),
+    )
+
+    outcome_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    job_run_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    attempt_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("durable_job_attempts.attempt_id", ondelete="RESTRICT")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    failure_classification: Mapped[str | None] = mapped_column(String(64))
+    result_id: Mapped[uuid.UUID | None] = mapped_column()
+    publication_id: Mapped[uuid.UUID | None] = mapped_column()
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    domain_event_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DurableJobDeadLetter(Base):
+    __tablename__ = "durable_job_dead_letters"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["job_run_id", "user_id", "workspace_id"],
+            [
+                "document_processing_jobs.id",
+                "document_processing_jobs.user_id",
+                "document_processing_jobs.workspace_id",
+            ],
+            name="fk_durable_job_dead_letter_job_scope",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("job_run_id", name="uq_durable_job_dead_letter_job"),
+        UniqueConstraint(
+            "dead_letter_id",
+            "job_run_id",
+            name="uq_durable_job_dead_letter_scope",
+        ),
+        CheckConstraint(
+            "reason_code IN ('poison_job', 'attempts_exhausted', 'deadline_exceeded', "
+            "'terminal_failure', 'authority_revoked', 'source_superseded')",
+            name="ck_durable_job_dead_letter_reason",
+        ),
+        Index(
+            "ix_durable_job_dead_letter_scope",
+            "workspace_id",
+            "created_at",
+            "dead_letter_id",
+        ),
+    )
+
+    dead_letter_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    job_run_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    attempt_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("durable_job_attempts.attempt_id", ondelete="RESTRICT")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    failure_classification: Mapped[str] = mapped_column(String(64), nullable=False)
+    authority_generation: Mapped[int | None] = mapped_column(Integer)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DurableJobReplayRequest(Base):
+    __tablename__ = "durable_job_replay_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["dead_letter_id", "source_job_run_id"],
+            ["durable_job_dead_letters.dead_letter_id", "durable_job_dead_letters.job_run_id"],
+            name="fk_durable_job_replay_dead_letter",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("new_job_run_id", name="uq_durable_job_replay_new_job"),
+        CheckConstraint(
+            "reason_code IN ('operator_retry', 'dependency_recovered', 'policy_corrected')",
+            name="ck_durable_job_replay_reason",
+        ),
+        CheckConstraint(
+            "authority_generation > 0",
+            name="ck_durable_job_replay_authority_generation",
+        ),
+        Index("ix_durable_job_replay_scope", "workspace_id", "created_at"),
+    )
+
+    replay_request_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    dead_letter_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    source_job_run_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    new_job_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("document_processing_jobs.id", ondelete="RESTRICT"), nullable=False
+    )
+    requested_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    membership_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    authority_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DurableJobAuditEvent(Base):
+    __tablename__ = "durable_job_audit_events"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('created', 'claimed', 'renewed', 'completed', 'failed', "
+            "'retry_scheduled', 'canceled', 'dead_lettered', 'replayed', "
+            "'stale_result_suppressed')",
+            name="ck_durable_job_audit_action",
+        ),
+        CheckConstraint(
+            "outcome IN ('succeeded', 'denied', 'failed')",
+            name="ck_durable_job_audit_outcome",
+        ),
+        CheckConstraint("length(metadata_digest) = 64", name="ck_durable_job_audit_digest"),
+        Index("ix_durable_job_audit_scope", "workspace_id", "recorded_at", "audit_event_id"),
+        Index("ix_durable_job_audit_trace", "trace_id"),
+    )
+
+    audit_event_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    job_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("document_processing_jobs.id", ondelete="RESTRICT"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    metadata_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class UploadSession(Base):
@@ -4498,7 +5035,15 @@ class DomainEventRecord(Base):
             "'scan.rejected', "
             "'object.promoted', "
             "'object.failed', "
-            "'object.deletion_requested')",
+            "'object.deletion_requested', "
+            "'job.created', "
+            "'job.claimed', "
+            "'job.retry_scheduled', "
+            "'job.completed', "
+            "'job.failed', "
+            "'job.canceled', "
+            "'job.dead_lettered', "
+            "'job.replayed')",
             name="ck_domain_events_type",
         ),
         CheckConstraint(
@@ -4514,7 +5059,7 @@ class DomainEventRecord(Base):
             "'comment_thread', 'comment', 'ingestion_request', "
             "'index_revision', 'index_publication', 'upload_session', "
             "'storage_object_version', 'malware_scan_request', "
-            "'malware_scan_result', 'object_promotion')",
+            "'malware_scan_result', 'object_promotion', 'durable_job')",
             name="ck_domain_events_subject_kind",
         ),
         CheckConstraint("sequence > 0", name="ck_domain_events_sequence_positive"),

@@ -20,8 +20,8 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 API_ROOT = REPOSITORY_ROOT / "apps" / "api"
 VERSIONS_ROOT = API_ROOT / "alembic" / "versions"
 MODELS_PATH = API_ROOT / "opencanvas_api" / "db" / "models.py"
-EXPECTED_HEAD = "20260726_0027"
-PREVIOUS_REVISION = "20260726_0026"
+EXPECTED_HEAD = "20260726_0028"
+PREVIOUS_REVISION = "20260726_0027"
 POSTGRESQL_SENSITIVE_IDENTIFIER_CANDIDATES = frozenset(
     {
         "authorization",
@@ -80,8 +80,15 @@ EXPECTED_MIGRATION_BLOB_HASHES = {
     "20260725_0025_shared_workflow_agent_governance.py": (
         "b5c71452728cf5c473a017679ebb6f2903a5f9f6"
     ),
-    "20260726_0026_deterministic_indexer.py": ("847a347b3e9f16ccd328c10265060b81937aa6c5"),
-    "20260726_0027_secure_object_ingestion.py": ("5e4fd280d4207a005d0c208e06fb841cc990b3c2"),
+    "20260726_0026_deterministic_indexer.py": (
+        "847a347b3e9f16ccd328c10265060b81937aa6c5"
+    ),
+    "20260726_0027_secure_object_ingestion.py": (
+        "5e4fd280d4207a005d0c208e06fb841cc990b3c2"
+    ),
+    "20260726_0028_durable_jobs_shared_limits.py": (
+        "55c203e669cace5be64fc25cdcf0eb8c05519198"
+    ),
 }
 EXPECTED_REVISION_CHAIN = tuple(
     filename.split("_", 2)[0] + "_" + filename.split("_", 2)[1]
@@ -151,7 +158,11 @@ def _render_sql_expression(
             else:
                 return None
         return "".join(parts)
-    if isinstance(node, ast.Call) and node.args and _call_name(node.func).split(".")[-1] == "text":
+    if (
+        isinstance(node, ast.Call)
+        and node.args
+        and _call_name(node.func).split(".")[-1] == "text"
+    ):
         return _render_sql_expression(node.args[0], bindings)
     return None
 
@@ -183,7 +194,9 @@ class _SqlFragmentCollector(ast.NodeVisitor):
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         value = (
-            _render_sql_expression(node.value, self.bindings) if node.value is not None else None
+            _render_sql_expression(node.value, self.bindings)
+            if node.value is not None
+            else None
         )
         self._bind(node.target, value)
         self.generic_visit(node)
@@ -297,7 +310,9 @@ def _mask_sql_literals_comments_and_binds(sql: str) -> str:
         ):
             masked[index] = " "
             index += 1
-            while index < len(sql) and (sql[index].isalnum() or sql[index] in {"_", "$"}):
+            while index < len(sql) and (
+                sql[index].isalnum() or sql[index] in {"_", "$"}
+            ):
                 masked[index] = " "
                 index += 1
             continue
@@ -397,14 +412,18 @@ def _delete_identifier_regions(
         keywords=frozenset({"using", "where", "returning"}),
     )
     target_end = (
-        _top_level_region_end(masked_sql, start=cursor) if boundary is None else boundary[1]
+        _top_level_region_end(masked_sql, start=cursor)
+        if boundary is None
+        else boundary[1]
     )
     regions.append(("DELETE target", cursor, target_end))
 
     while boundary is not None:
         keyword, _, expression_start = boundary
         remaining_keywords = (
-            frozenset({"where", "returning"}) if keyword == "using" else frozenset({"returning"})
+            frozenset({"where", "returning"})
+            if keyword == "using"
+            else frozenset({"returning"})
         )
         next_boundary = _top_level_keyword(
             masked_sql,
@@ -676,9 +695,13 @@ def find_postgresql_identifier_violations(
 
 def validate_postgresql_identifier_safety() -> None:
     if "current_role" not in POSTGRESQL_UNSAFE_IDENTIFIERS:
-        raise RuntimeError("The PostgreSQL reserved-word registry is unavailable or inconsistent.")
+        raise RuntimeError(
+            "The PostgreSQL reserved-word registry is unavailable or inconsistent."
+        )
     if "role" in POSTGRESQL_UNSAFE_IDENTIFIERS:
-        raise RuntimeError("The PostgreSQL reserved-word registry unexpectedly classifies role.")
+        raise RuntimeError(
+            "The PostgreSQL reserved-word registry unexpectedly classifies role."
+        )
 
     violations: list[IdentifierViolation] = []
     paths = [*sorted(VERSIONS_ROOT.glob("*.py")), MODELS_PATH]
@@ -706,7 +729,9 @@ def _config() -> Config:
 def validate_migration_history() -> None:
     scripts = ScriptDirectory.from_config(_config())
     if scripts.get_heads() != [EXPECTED_HEAD]:
-        raise RuntimeError("The repository must contain exactly the approved Alembic head.")
+        raise RuntimeError(
+            "The repository must contain exactly the approved Alembic head."
+        )
 
     reverse_chain: list[str] = []
     current: str | None = EXPECTED_HEAD
@@ -728,7 +753,9 @@ def validate_migration_blob_hashes() -> None:
     actual_files = {path.name for path in VERSIONS_ROOT.glob("*.py")}
     expected_files = set(EXPECTED_MIGRATION_BLOB_HASHES)
     if actual_files != expected_files:
-        raise RuntimeError("Migration file inventory differs from the approved hash ledger.")
+        raise RuntimeError(
+            "Migration file inventory differs from the approved hash ledger."
+        )
 
     for filename, expected_hash in EXPECTED_MIGRATION_BLOB_HASHES.items():
         path = VERSIONS_ROOT / filename
@@ -778,7 +805,9 @@ def main() -> int:
 
         command.downgrade(config, PREVIOUS_REVISION)
         if revision(database_path) != PREVIOUS_REVISION:
-            raise RuntimeError(f"Migration downgrade did not reach {PREVIOUS_REVISION}.")
+            raise RuntimeError(
+                f"Migration downgrade did not reach {PREVIOUS_REVISION}."
+            )
 
         command.upgrade(config, "head")
         if revision(database_path) != EXPECTED_HEAD:

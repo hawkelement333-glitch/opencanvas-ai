@@ -14,16 +14,35 @@ from opencanvas_api.core.config import Settings
 from opencanvas_api.db.models import (
     Document,
     DocumentProcessingJob,
+    DocumentVersion,
     WorkerHeartbeat,
 )
+from opencanvas_api.services.auth import Principal
 from opencanvas_api.services.documents import (
     DocumentProcessingError,
     DocumentProcessor,
     build_document_storage,
     build_embedding_provider,
 )
+from opencanvas_api.services.durable_jobs import (
+    DurableJobConflictError,
+    DurableJobMetrics,
+    DurableJobService,
+    JobLease,
+    RetryClassification,
+)
 
-ACTIVE_JOB_STATUSES = ("queued", "retrying", "processing", "extracting", "chunking", "embedding")
+ACTIVE_JOB_STATUSES = (
+    "queued",
+    "retrying",
+    "retry_waiting",
+    "claimed",
+    "processing",
+    "extracting",
+    "chunking",
+    "embedding",
+    "indexing",
+)
 
 
 class JobQueueError(RuntimeError):
@@ -63,6 +82,74 @@ class DatabaseJobProvider:
         document: Document,
         force: bool = False,
     ) -> DocumentProcessingJob:
+        if document.deleted_at is not None or document.status in {"deleting", "deleted"}:
+            raise JobQueueError("A deleted document cannot be queued.")
+        active = await session.scalar(
+            select(DocumentProcessingJob)
+            .where(
+                DocumentProcessingJob.document_id == document.id,
+                DocumentProcessingJob.status.in_(ACTIVE_JOB_STATUSES),
+                DocumentProcessingJob.completed_at.is_(None),
+            )
+            .order_by(DocumentProcessingJob.created_at.desc())
+            .limit(1)
+        )
+        if active is not None and not force:
+            return active
+        version = await session.scalar(
+            select(DocumentVersion).where(
+                DocumentVersion.document_id == document.id,
+                DocumentVersion.version == document.current_version,
+                DocumentVersion.deleted_at.is_(None),
+            )
+        )
+        if version is None:
+            raise JobQueueError("The current document version is unavailable.")
+        run_ordinal = (
+            await session.scalar(
+                select(func.count(DocumentProcessingJob.id)).where(
+                    DocumentProcessingJob.document_id == document.id
+                )
+            )
+            or 0
+        ) + 1
+        principal = Principal(
+            user_id=user_id,
+            email="",
+            display_name="",
+            session_id=None,
+            csrf_token_hash=None,
+        )
+        service = _durable_service(session, self.settings)
+        return await service.create_document_job(
+            principal=principal,
+            workspace_id=workspace_id,
+            canvas_id=document.canvas_id,
+            document_id=document.id,
+            document_version_id=version.id,
+            idempotency_key=(
+                f"document:{document.id}:version:{document.current_version}:run:{run_ordinal}"
+            ),
+            deadline_at=datetime.now(UTC)
+            + timedelta(seconds=self.settings.processing_job_deadline_seconds),
+            max_attempts=self.settings.processing_retry_limit + 1,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class InlineJobProvider(DatabaseJobProvider):
+    name: str = "inline"
+    runs_inline: bool = True
+
+    async def enqueue(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        document: Document,
+        force: bool = False,
+    ) -> DocumentProcessingJob:
         return await enqueue_document_job(
             session,
             settings=self.settings,
@@ -71,12 +158,6 @@ class DatabaseJobProvider:
             document=document,
             force=force,
         )
-
-
-@dataclass(frozen=True, slots=True)
-class InlineJobProvider(DatabaseJobProvider):
-    name: str = "inline"
-    runs_inline: bool = True
 
 
 async def enqueue_document_job(
@@ -225,6 +306,7 @@ class DocumentWorker:
         self.settings = settings
         self.sessions = sessions
         self.worker_id = worker_id or f"{socket.gethostname()}-{uuid.uuid4().hex[:12]}"
+        self.metrics = DurableJobMetrics()
         self.processor = DocumentProcessor(
             settings=settings,
             storage=build_document_storage(settings),
@@ -234,37 +316,110 @@ class DocumentWorker:
     async def run_once(self) -> bool:
         async with self.sessions() as session:
             await self._heartbeat(session, "ready")
+            service = _durable_service(session, self.settings, metrics=self.metrics)
+            await service.refresh_backlog_metrics()
+            await service.reconcile_deadlines()
+            await service.recover_expired()
+            lease = await service.claim_one(worker_id=self.worker_id)
             await session.commit()
-            job = await claim_next_job(session, worker_id=self.worker_id)
-            if job is None:
+            if lease is None:
                 return False
-            job_id = job.id
+            job = await session.get(DocumentProcessingJob, lease.job_run_id)
+            if job is None:
+                raise JobQueueError("The claimed durable job is unavailable.")
             document_id = job.document_id
+        lease_lost = asyncio.Event()
+        stop_renewal = asyncio.Event()
+        renewal = asyncio.create_task(self._renew_lease(lease, stop=stop_renewal, lost=lease_lost))
         try:
-            await self.processor.process(self.sessions, document_id, force=True)
-        except DocumentProcessingError as exc:
             async with self.sessions() as session:
-                job = await session.get(DocumentProcessingJob, job_id)
-                document = await session.get(Document, document_id)
-                if job is not None and document is not None:
-                    await schedule_retry_or_exhaust(
+                await self.processor.process_with_session(
+                    session,
+                    document_id,
+                    force=True,
+                    manage_job=False,
+                )
+                stop_renewal.set()
+                await renewal
+                if lease_lost.is_set():
+                    raise DurableJobConflictError("The worker lost its durable lease.")
+                job = await session.get(DocumentProcessingJob, lease.job_run_id)
+                if job is None:
+                    raise DurableJobConflictError("The durable job disappeared.")
+                await _durable_service(
+                    session,
+                    self.settings,
+                    metrics=self.metrics,
+                ).complete(lease)
+                await self._heartbeat(session, "ready")
+                await session.commit()
+        except DocumentProcessingError as exc:
+            stop_renewal.set()
+            if not renewal.done():
+                await renewal
+            async with self.sessions() as session:
+                try:
+                    await _durable_service(
                         session,
-                        job=job,
-                        document=document,
-                        settings=self.settings,
-                        category=exc.code,
+                        self.settings,
+                        metrics=self.metrics,
+                    ).fail(
+                        lease,
+                        classification=_retry_classification(exc.code),
                     )
+                    await session.commit()
+                except DurableJobConflictError:
+                    await session.rollback()
             return True
-        async with self.sessions() as session:
-            await self._heartbeat(session, "ready")
-            await session.commit()
+        except DurableJobConflictError:
+            return True
+        finally:
+            stop_renewal.set()
+            if not renewal.done():
+                await renewal
         return True
 
     async def run_forever(self) -> None:
-        while True:
-            processed = await self.run_once()
-            if not processed:
-                await asyncio.sleep(self.settings.worker_poll_interval_seconds)
+        try:
+            while True:
+                processed = await self.run_once()
+                if not processed:
+                    await asyncio.sleep(self.settings.worker_poll_interval_seconds)
+        except asyncio.CancelledError:
+            async with self.sessions() as session:
+                await self._heartbeat(session, "stopping")
+                await session.commit()
+            raise
+
+    async def _renew_lease(
+        self,
+        lease: JobLease,
+        *,
+        stop: asyncio.Event,
+        lost: asyncio.Event,
+    ) -> None:
+        interval = min(
+            self.settings.worker_heartbeat_seconds,
+            max(1, self.settings.processing_lease_seconds // 3),
+        )
+        while not stop.is_set():
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=interval)
+                return
+            except TimeoutError:
+                pass
+            try:
+                async with self.sessions() as session:
+                    await _durable_service(
+                        session,
+                        self.settings,
+                        metrics=self.metrics,
+                    ).renew(lease)
+                    await self._heartbeat(session, "processing")
+                    await session.commit()
+            except Exception:
+                lost.set()
+                return
 
     async def _heartbeat(self, session: AsyncSession, status: str) -> None:
         heartbeat = await session.get(WorkerHeartbeat, self.worker_id)
@@ -286,6 +441,35 @@ def build_job_provider(settings: Settings) -> JobProvider:
     if settings.job_provider == "inline":
         return InlineJobProvider(settings)
     return DatabaseJobProvider(settings)
+
+
+def _durable_service(
+    session: AsyncSession,
+    settings: Settings,
+    *,
+    metrics: DurableJobMetrics | None = None,
+) -> DurableJobService:
+    return DurableJobService(
+        session,
+        lease_seconds=settings.processing_lease_seconds,
+        max_workspace_concurrency=settings.processing_max_concurrent_per_workspace,
+        max_global_concurrency=settings.processing_max_concurrent_global,
+        retry_base_seconds=settings.processing_retry_base_seconds,
+        retry_max_seconds=settings.processing_retry_max_seconds,
+        metrics=metrics,
+    )
+
+
+def _retry_classification(code: str) -> RetryClassification:
+    mapping = {
+        "storage_unavailable": RetryClassification.DEPENDENCY_UNAVAILABLE,
+        "embedding_failed": RetryClassification.DEPENDENCY_UNAVAILABLE,
+        "provider_timeout": RetryClassification.PROVIDER_TIMEOUT,
+        "source_not_clean": RetryClassification.POLICY_REJECTED,
+        "clean_source_changed": RetryClassification.SOURCE_SUPERSEDED,
+        "unsupported_format": RetryClassification.UNSUPPORTED_FORMAT,
+    }
+    return mapping.get(code, RetryClassification.UNKNOWN_FAILURE)
 
 
 __all__ = [

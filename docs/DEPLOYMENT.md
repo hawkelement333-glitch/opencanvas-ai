@@ -10,11 +10,11 @@ object ingestion and malware quarantine, durable work, shared rate limits,
 observability, recovery exercises, capacity/resilience testing, and the final
 production-readiness audit.
 
-Checkpoints 7.1, 7.2, and 7.3 are complete locally. This guide is not evidence
+Checkpoints 7.1, 7.2, 7.3, and 7.4 are complete locally. This guide is not evidence
 that failover, restore, capacity, or final production security have passed.
 Managed Azure staging prerequisites proved private/versioned storage and
 harmless/EICAR scan outcomes, but no application deployment or production
-certification occurred. Checkpoint 7.4 remains unstarted. Live PostgreSQL 17
+certification occurred. Checkpoint 7.5 remains unstarted. Live PostgreSQL 17
 validation previously proved clean-install failures in
 historical migrations `20260718_0005`, `20260725_0021`,
 `20260725_0023`, and `20260725_0024`; no deployment or migration `0026` is
@@ -46,6 +46,8 @@ never fall back to deterministic providers.
 - PostgreSQL with pgvector: durable relational, vector, session, job, execution, and Trace state.
 - Azure Blob Storage: private, versioned quarantine, clean, rejected, and
   retained containers accessed by workload identity.
+- Managed Redis: private TLS shared rate limits using Microsoft Entra workload
+  identity; counters are ephemeral and never authoritative product evidence.
 
 The repository does not require one hosting vendor. Any platform is acceptable if it provides
 these service roles, private networking, TLS, managed secrets,
@@ -115,6 +117,13 @@ Start from `.env.example`, inject secrets through the deployment platform, and s
 - bounded capability TTL, active sessions, callback rate, scan deadline, and
   clean-evidence maximum age
 - `OPENCANVAS_JOB_PROVIDER=database`
+- `OPENCANVAS_SHARED_RATE_LIMIT_PROVIDER=redis`
+- a private credential-free `OPENCANVAS_SHARED_RATE_LIMIT_REDIS_URL` using
+  `rediss`, the exact restricted Redis ACL username, and managed-identity
+  endpoint/header settings
+- a distinct deployment-specific shared-limit HMAC secret, namespace,
+  deployment identity, bounded connect/operation timeouts, and emergency
+  ceiling
 - a browser-safe `NEXT_PUBLIC_API_URL=https://.../api/v1` at web build time
 
 Use separate databases, storage accounts/containers, session secrets, SMTP credentials, OpenAI projects, and
@@ -146,7 +155,7 @@ authorization, CSRF, SMTP, storage, or OpenAI secrets.
 3. Run the migration image as a one-shot task:
 
    ```sh
-   python -m scripts.migrate --expected-current 20260726_0026
+   python -m scripts.migrate --expected-current 20260726_0027
    ```
 
 4. Deploy worker instances and wait for a fresh worker heartbeat.
@@ -159,7 +168,7 @@ authorization, CSRF, SMTP, storage, or OpenAI secrets.
 Do not run multiple application revisions against an incompatible schema. Migrations must finish
 before new API/worker instances accept traffic.
 
-The guarded runner verifies the repository target `20260726_0027`, verifies
+The guarded runner verifies the repository target `20260726_0028`, verifies
 the operator-declared current revision (`base` for an empty database), obtains
 one PostgreSQL session advisory lock, uses a direct non-pooled connection, and
 verifies the final revision. A competing runner fails safely. API and worker

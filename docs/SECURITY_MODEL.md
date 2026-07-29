@@ -203,10 +203,35 @@ client claim, object location, mutable provider tag, or personal cloud
 identity. Operational procedures are in
 [`OBJECT_INGESTION_RUNBOOK.md`](OBJECT_INGESTION_RUNBOOK.md).
 
+## Durable work and shared-limit boundary
+
+Milestone 7.4 makes PostgreSQL the durable job truth. Queue delivery never
+grants authority. Server-loaded user, membership, workspace, canvas,
+document, immutable version, authority generation, cancellation generation,
+source version, lease generation, worker identity, deadline, and attempt
+limits fence every protected result. A stale, canceled, expired, superseded,
+or revoked worker cannot commit result, publication, audit, Trace, or domain
+event evidence.
+
+Requests, job runs, deliveries, attempts, retry decisions, outcomes, dead
+letters, and replay requests use distinct identities. Material transitions
+extend the existing transaction, Trace, audit, domain-event, and outbox
+boundaries. Dead-letter replay requires current workspace-settings authority
+and creates a new request and job identity.
+
+Protected API paths use one atomic shared decision covering the applicable
+network, user, workspace, resource, operation, provider, and global
+dimensions. Keys contain only HMAC-derived opaque subjects and a versioned
+namespace. Staging and production require private TLS Redis and Microsoft
+Entra managed identity; access-key URLs, public fallback, and process-local
+fallback are rejected. Store outage or indeterminate output returns a safe
+`503`; an authoritative exceeded limit returns `429`.
+
 ## Known gaps before internet deployment
 
 - Deployment-specific TLS/reverse-proxy, managed-secret, and key-rotation implementation
-- Distributed rate limiting and centralized abuse controls
+- Managed shared-limiter application-to-Azure revalidation, dashboards, and
+  centralized abuse operations
 - Managed-production scanner integration certification and content
   disarm/reconstruction
 - Production multi-service outbox delivery validation and complete durable-job

@@ -167,12 +167,12 @@ The reference Compose topology is:
 - `worker`: non-root independent document worker with persisted heartbeat;
 - `web`: non-root Next.js standalone container.
 
-Staging/production require managed secrets, TLS/reverse proxy, PostgreSQL/pgvector, SMTP password
-reset, explicit live providers, private S3-compatible storage, and the durable worker. Remaining
-hardening includes malware quarantine, deterministic immutable indexing,
-complete durable-job lease/dead-letter behavior, distributed rate limiting,
-production outbox delivery validation, managed backup/restore validation,
-centralized monitoring, and a formal retention policy. See
+Staging/production require managed secrets, TLS/reverse proxy,
+PostgreSQL/pgvector, SMTP password reset, explicit live providers, private
+Azure storage, the durable worker, and private Entra-authenticated Managed
+Redis. Remaining hardening includes production outbox delivery validation,
+managed backup/restore validation, centralized monitoring, load and resilience
+proof, and a formal retention policy. See
 `MILESTONE_7_ARCHITECTURE.md`.
 
 ## Architecture decisions

@@ -24,7 +24,8 @@ DEVELOPMENT_UPLOAD_CAPABILITY_SECRET = (
     "development-only-upload-capability-secret-change-before-deploying"
 )
 DEVELOPMENT_SCANNER_RESULT_SECRET = "development-only-scanner-result-secret-change-before-deploying"
-EXPECTED_DATABASE_REVISION = "20260726_0027"
+DEVELOPMENT_RATE_LIMIT_SECRET = "development-only-rate-limit-secret-change-before-deploying"
+EXPECTED_DATABASE_REVISION = "20260726_0028"
 
 
 class AppMode(StrEnum):
@@ -173,6 +174,29 @@ class Settings(BaseSettings):
     processing_retry_limit: int = Field(default=3, ge=0, le=10)
     processing_retry_base_seconds: int = Field(default=5, ge=1, le=3_600)
     processing_max_concurrent_per_workspace: int = Field(default=3, ge=1, le=20)
+    processing_max_concurrent_global: int = Field(default=32, ge=1, le=1_000)
+    processing_lease_seconds: int = Field(default=60, ge=5, le=900)
+    processing_job_deadline_seconds: int = Field(default=3_600, ge=30, le=604_800)
+    processing_retry_max_seconds: int = Field(default=900, ge=1, le=86_400)
+
+    shared_rate_limit_provider: Literal["memory", "redis"] = "memory"
+    shared_rate_limit_redis_url: str | None = None
+    shared_rate_limit_redis_username: str | None = None
+    shared_rate_limit_identity_endpoint: str | None = None
+    shared_rate_limit_identity_header: str | None = None
+    shared_rate_limit_hmac_secret: str = Field(
+        default=DEVELOPMENT_RATE_LIMIT_SECRET,
+        min_length=32,
+    )
+    shared_rate_limit_namespace: str = Field(default="mobius", pattern=r"^[a-z][a-z0-9_.-]{0,63}$")
+    shared_rate_limit_deployment: str = Field(default="local", pattern=r"^[a-z][a-z0-9_.-]{0,63}$")
+    shared_rate_limit_connect_timeout_seconds: float = Field(default=2.0, ge=0.1, le=10.0)
+    shared_rate_limit_operation_timeout_seconds: float = Field(default=1.0, ge=0.05, le=5.0)
+    shared_rate_limit_emergency_requests_per_minute: int = Field(
+        default=10_000,
+        ge=1,
+        le=10_000_000,
+    )
 
     indexer_publication_mode: Literal["disabled", "private_legacy", "private_clean"] = "disabled"
     indexer_parser_timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
@@ -234,6 +258,10 @@ class Settings(BaseSettings):
         "azure_storage_account_url",
         "azure_managed_identity_endpoint",
         "azure_managed_identity_header",
+        "shared_rate_limit_redis_url",
+        "shared_rate_limit_redis_username",
+        "shared_rate_limit_identity_endpoint",
+        "shared_rate_limit_identity_header",
         "smtp_host",
         "smtp_username",
         "smtp_password",
@@ -275,6 +303,25 @@ class Settings(BaseSettings):
         if parsed.scheme != "https" or not parsed.netloc or parsed.path not in {"", "/"}:
             raise ValueError("Azure storage account URL must be an HTTPS origin")
         return value.rstrip("/")
+
+    @field_validator("shared_rate_limit_redis_url")
+    @classmethod
+    def validate_shared_rate_limit_redis_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlparse(value)
+        if (
+            parsed.scheme != "rediss"
+            or not parsed.hostname
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in {"", "/", "/0"}
+        ):
+            raise ValueError(
+                "shared Redis must be a credential-free rediss URL using database zero"
+            )
+        return value
 
     @field_validator(
         "azure_quarantine_container",
@@ -318,6 +365,8 @@ class Settings(BaseSettings):
 
         if self.document_chunk_overlap_chars >= self.document_chunk_size_chars:
             raise ValueError("document chunk overlap must be smaller than chunk size")
+        if self.processing_retry_base_seconds > self.processing_retry_max_seconds:
+            raise ValueError("processing retry base cannot exceed the retry maximum")
         if "*" in self.cors_origins:
             raise ValueError("wildcard CORS origins are not allowed")
         if self.request_max_body_bytes < self.document_max_file_size_bytes:
@@ -432,6 +481,31 @@ class Settings(BaseSettings):
             )
         if self.job_provider != "database":
             raise ValueError(f"{label} requires the database-backed worker provider")
+        if self.shared_rate_limit_provider != "redis":
+            raise ValueError(f"{label} requires the managed shared rate-limit provider")
+        required_rate_limit = {
+            "OPENCANVAS_SHARED_RATE_LIMIT_REDIS_URL": self.shared_rate_limit_redis_url,
+            "OPENCANVAS_SHARED_RATE_LIMIT_REDIS_USERNAME": (self.shared_rate_limit_redis_username),
+            "OPENCANVAS_SHARED_RATE_LIMIT_IDENTITY_ENDPOINT": (
+                self.shared_rate_limit_identity_endpoint
+            ),
+        }
+        missing_rate_limit = [name for name, value in required_rate_limit.items() if not value]
+        if missing_rate_limit:
+            raise ValueError(
+                f"{label} shared rate limiter is missing: {', '.join(missing_rate_limit)}"
+            )
+        if (
+            self.shared_rate_limit_hmac_secret == DEVELOPMENT_RATE_LIMIT_SECRET
+            or self.shared_rate_limit_hmac_secret
+            in {
+                self.session_secret,
+                self.invitation_secret,
+                self.upload_capability_secret,
+                self.scanner_result_secret,
+            }
+        ):
+            raise ValueError(f"{label} requires a distinct shared rate-limit HMAC secret")
         if self.indexer_publication_mode not in {"disabled", "private_clean"}:
             raise ValueError(f"{label} permits only disabled or clean-gated Indexer publication")
 
@@ -482,6 +556,7 @@ __all__ = [
     "DEMO_DOCUMENT_STORAGE_ROOT",
     "DEMO_RUNTIME_ROOT",
     "DEVELOPMENT_INVITATION_SECRET",
+    "DEVELOPMENT_RATE_LIMIT_SECRET",
     "DEVELOPMENT_SESSION_SECRET",
     "EXPECTED_DATABASE_REVISION",
     "PROJECT_ROOT",

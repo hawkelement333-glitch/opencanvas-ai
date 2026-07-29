@@ -79,6 +79,14 @@ def test_production_accepts_complete_explicit_configuration() -> None:
         malware_scanner_identity="microsoft-defender-storage-staging",
         malware_scanner_version="defender-storage-v1",
         job_provider="database",
+        shared_rate_limit_provider="redis",
+        shared_rate_limit_redis_url="rediss://redis.example:10000/0",
+        shared_rate_limit_redis_username="test-managed-identity",
+        shared_rate_limit_identity_endpoint="https://identity.invalid/token",
+        shared_rate_limit_hmac_secret=(
+            "production-rate-limit-secret-distinct-from-every-other-secret"
+        ),
+        shared_rate_limit_deployment="production",
     )
 
     assert settings.runtime_mode.value == "production"
