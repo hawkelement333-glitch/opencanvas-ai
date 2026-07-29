@@ -11,6 +11,7 @@ from opencanvas_api.db.runtime import (
     validate_postgresql_capabilities,
 )
 from opencanvas_api.db.session import Database
+from opencanvas_api.services.observability import build_observability
 
 
 def _deployed_settings(**overrides: object) -> Settings:
@@ -44,6 +45,16 @@ def _deployed_settings(**overrides: object) -> Settings:
         "shared_rate_limit_identity_endpoint": "https://identity.invalid/token",
         "shared_rate_limit_identity_header": "test-only-rate-limit-identity-header",
         "shared_rate_limit_hmac_secret": ("production-shared-rate-limit-secret-distinct-value"),
+        "telemetry_enabled": True,
+        "telemetry_exporter": "http",
+        "telemetry_endpoint": "https://telemetry.invalid/v1/signals",
+        "telemetry_release": "release-test",
+        "telemetry_deployment": "production-test",
+        "telemetry_auth_secret_reference": "env://MOBIUS_TELEMETRY_TOKEN",
+        "telemetry_pseudonymization_secret": (
+            "production-telemetry-pseudonymization-secret-distinct-value"
+        ),
+        "observability_operator_user_ids": ["00000000-0000-4000-8000-000000000001"],
     }
     values.update(overrides)
     return Settings(**values)
@@ -52,6 +63,20 @@ def _deployed_settings(**overrides: object) -> Settings:
 def test_deployed_database_requires_certificate_verification() -> None:
     with pytest.raises(ValidationError, match="verified PostgreSQL TLS"):
         _deployed_settings(database_tls_mode="require")
+
+
+def test_deployed_runtime_refuses_disabled_or_unauthenticated_telemetry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(ValidationError, match="requires explicit bounded HTTP telemetry export"):
+        _deployed_settings(
+            telemetry_enabled=False,
+            telemetry_exporter="disabled",
+        )
+
+    monkeypatch.delenv("MOBIUS_TELEMETRY_TOKEN", raising=False)
+    with pytest.raises(RuntimeError, match="authentication secret is unavailable"):
+        build_observability(_deployed_settings())
 
 
 def test_deployed_database_rejects_placeholder_credentials() -> None:

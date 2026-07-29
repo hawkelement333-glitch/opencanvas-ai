@@ -170,10 +170,12 @@ The reference Compose topology is:
 Staging/production require managed secrets, TLS/reverse proxy,
 PostgreSQL/pgvector, SMTP password reset, explicit live providers, private
 Azure storage, the durable worker, and private Entra-authenticated Managed
-Redis. Remaining hardening includes production outbox delivery validation,
-managed backup/restore validation, centralized monitoring, load and resilience
-proof, and a formal retention policy. See
-`MILESTONE_7_ARCHITECTURE.md`.
+Redis. Milestone 7.5 adds centralized provider-neutral operational telemetry,
+safe public/operator health, versioned dashboards/objectives/alerts, bounded
+export, and privacy/retention controls. Remaining hardening includes live
+isolated telemetry-destination validation, production outbox delivery
+validation, managed backup/restore validation, and load/resilience proof. See
+`MILESTONE_7_ARCHITECTURE.md` and `OBSERVABILITY_ARCHITECTURE.md`.
 
 ## Architecture decisions
 
@@ -193,11 +195,12 @@ complete locally. They preserve selected context, deny-by-default authority,
 human approval, exact scope, revocation fencing, immutable evidence, Trace,
 audit, domain events, transactional outbox, and activity.
 
-Milestone 7 implementation remains deferred behind the completed
-`MILESTONE_7_ARCHITECTURE.md`. It owns managed PostgreSQL proof,
-deterministic production indexing, malware quarantine, production object
-storage validation, complete durable work, shared limits, observability,
-recovery, and resilience. OCR, a complete end-user Trace explorer,
+Milestone 7 checkpoints 7.1 through 7.5 are complete locally: managed
+PostgreSQL proof, deterministic production indexing, malware quarantine,
+production object-storage contracts, durable work, shared limits, and
+provider-neutral observability. Checkpoints 7.6 through 7.8 still own recovery,
+resilience/capacity, infrastructure/release readiness, and final audit. OCR, a
+complete end-user Trace explorer,
 workspace-wide unselected retrieval, Advanced Real-Time Collaboration, and
 later product-family systems remain outside the current implementation. See
 `KNOWN_LIMITATIONS.md`.

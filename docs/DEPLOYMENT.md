@@ -262,3 +262,32 @@ The demo command forces deterministic providers, a project-local demo database a
 and no OpenAI credential. It does not start the production worker or write to deployed services.
 Resetting demo state affects only the isolated demo paths and does not alter development, staging,
 or production data.
+
+## Operational telemetry deployment
+
+Development and test may explicitly enable the bounded memory sink. Staging
+and production require:
+
+- `OPENCANVAS_TELEMETRY_ENABLED=true`;
+- `OPENCANVAS_TELEMETRY_EXPORTER=http`;
+- one isolated verified-HTTPS endpoint;
+- an `env://...` authentication secret reference whose value is available only
+  to the server process;
+- distinct pseudonymization material;
+- explicit service, release, environment, and deployment identities;
+- bounded batch, buffer, timeout, retry, sampling, span, cardinality, and
+  shutdown settings;
+- at least one server-owned operator identity.
+
+The API and worker fail startup when required deployed telemetry
+authentication is unavailable. They never place telemetry credentials in
+client bundles. Public health remains minimal; authorized operator health is
+`GET /api/v1/health/operator`. Operational telemetry destinations need
+environment-isolated export/write and operator/read roles, configured
+retention, audited access, and tested revocation.
+
+No live destination was used during local Milestone 7.5. Before production or
+Milestone 7.8, validate the exact release against an approved isolated
+destination, render every dashboard, fire and recover every alert, prove
+bounded outage/backpressure, verify retention and access revocation, and
+remove all synthetic evidence.

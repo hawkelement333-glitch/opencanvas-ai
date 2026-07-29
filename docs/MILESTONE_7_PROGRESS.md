@@ -394,10 +394,30 @@ skips, prerequisite evidence, dependency, and revalidation boundaries are in
 the
 [`MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md`](MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md).
 
+## Checkpoint 7.5 closure
+
+Checkpoint 7.5 — Observability and Operational Controls — is complete locally
+on `milestone-7-5-implementation-local`. One centralized provider-neutral
+layer supplies closed structured application/security logs,
+OpenTelemetry-compatible bounded metrics and operational spans, scoped
+pseudonymous correlations, cardinality enforcement, bounded export failure,
+public/operator health separation, integrity findings, dashboards,
+provisional objectives, alerts, privacy/retention, escalation, and operational
+runbooks.
+
+Operational telemetry remains distinct from product Trace, audit, activity,
+domain events, and outbox evidence. No migration exists; `20260726_0028`
+remains the sole head and its blob remains immutable. No approved isolated
+live telemetry destination was available, so external exporter, Azure
+Monitor/Log Analytics, dashboard rendering, alert delivery, destination
+retention/access, and application-to-Azure validation remain explicit
+pre-production/Milestone 7.8 revalidation triggers.
+
+Exact implementation and validation evidence is in
+[`MILESTONE_7_5_OBSERVABILITY_HANDOFF.md`](MILESTONE_7_5_OBSERVABILITY_HANDOFF.md).
+
 ## Next authorized work
 
-Checkpoint 7.4 — Durable Queues, Workers, Retries, and Shared Rate Limits — is
-complete locally on `milestone-7-4-implementation-local`. Migration
-`20260726_0028` is the sole head. The next checkpoint is 7.5 Observability and
-Operational Controls, which remains unstarted. This run did not start
-checkpoint 7.5, 7.8, or Milestone 8.
+The next checkpoint is 7.6 Backup, Restore, Rollback, and Disaster Recovery,
+which remains unstarted. This run did not start checkpoint 7.6, 7.7, 7.8, or
+Milestone 8.

@@ -9,7 +9,8 @@ Mobius Family Architecture Constitution documentation checkpoint complete
 locally; checkpoint 7.2 complete locally on
 `milestone-7-2-implementation-local`; checkpoint 7.3 complete locally on
 `milestone-7-3-implementation-local`; checkpoint 7.4 complete locally on
-`milestone-7-4-implementation-local`; checkpoint 7.5 unstarted
+`milestone-7-4-implementation-local`; checkpoint 7.5 complete locally on
+`milestone-7-5-implementation-local`; checkpoint 7.6 unstarted
 
 Compatibility gates:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -591,7 +592,8 @@ routes, and an atomic multi-dimensional shared limiter. See
 [`MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md`](MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md)
 and
 [`DURABLE_WORK_SHARED_LIMITS_RUNBOOK.md`](DURABLE_WORK_SHARED_LIMITS_RUNBOOK.md).
-No checkpoint 7.5 implementation is included.
+The 7.4 commit contains no checkpoint 7.5 implementation; checkpoint 7.5 is
+implemented separately on `milestone-7-5-implementation-local`.
 
 ### Purpose
 
@@ -803,6 +805,15 @@ Suggested local commit: `Complete Milestone 7.5 production observability`
 
 Exit only when required failures are detectable/actionable, private content is
 excluded, no migration exists, and 7.6 is unstarted.
+
+Implementation record: the centralized `OperationalTelemetry` boundary,
+versioned structured logs/metrics/spans, scoped pseudonymous correlations,
+bounded exporter, public/operator health split, integrity findings, dashboard,
+SLI/SLO, alert, privacy/retention, escalation, and runbook artifacts complete
+the local provider-neutral contract. No isolated live telemetry destination
+was available, so external export, dashboard rendering, alert delivery, and
+application-to-Azure behavior remain explicit pre-production revalidation
+requirements rather than passing evidence.
 
 ### Explicit exclusions
 

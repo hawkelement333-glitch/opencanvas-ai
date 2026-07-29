@@ -444,6 +444,16 @@ See
 and the
 [Mobius Core product-family roadmap amendment](docs/MOBIUS_CORE_PRODUCT_FAMILY_ROADMAP_AMENDMENT.md).
 
+Milestone 7.5 adds one privacy-preserving operational telemetry boundary with
+closed structured logs, bounded metrics and W3C-compatible spans, scoped
+pseudonymous correlations, safe public/operator health, and versioned
+dashboard, objective, alert, privacy, escalation, and incident contracts. It
+does not duplicate product Trace, audit, activity, domain events, or outbox
+evidence. See
+[the observability architecture](docs/OBSERVABILITY_ARCHITECTURE.md),
+[the dashboard and signal manifests](docs/observability/), and
+[the operations runbook](docs/OBSERVABILITY_OPERATIONS_RUNBOOK.md).
+
 ## Competition and release status
 
 Submission assets and owner actions are tracked in [BUILD_WEEK_CHECKLIST.md](BUILD_WEEK_CHECKLIST.md).

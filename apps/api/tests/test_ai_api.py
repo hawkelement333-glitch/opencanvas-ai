@@ -138,6 +138,7 @@ async def test_openai_failure_persists_failed_request_without_partial_graph(
         "code": "ai_provider_error",
         "detail": "The AI provider could not complete the request. Try again.",
     }
+    assert len(response.headers["X-Request-ID"]) == 32
     async with database.sessions() as session:
         requests = (await session.scalars(select(AIRequest))).all()
         response_count = await session.scalar(select(func.count()).select_from(AIResponse))

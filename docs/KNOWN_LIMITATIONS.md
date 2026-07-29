@@ -73,6 +73,13 @@ This register prevents the competition demo and public materials from implying c
 - Shared atomic rate limiting is implemented, but the application adapter has
   not yet been revalidated end to end against the approved isolated Azure
   Managed Redis topology.
+- Provider-neutral operational observability, dashboards, provisional
+  objectives, alerts, health controls, redaction, and bounded failure behavior
+  are implemented locally. No approved isolated live telemetry destination was
+  available during Milestone 7.5; live exporter authentication/TLS, Azure
+  Monitor or Log Analytics, dashboard rendering, alert routing/recovery,
+  retention, access revocation, and application-to-Azure behavior remain
+  unvalidated.
 - Canonical domain events, provenance, transactional outbox delivery attempts,
   and activity projections are durable. Production queue wake-up, operational
   telemetry, and external multi-service delivery still require the Milestone 7
@@ -112,6 +119,6 @@ This register prevents the competition demo and public materials from implying c
 
 ## Recommended next checkpoint
 
-Checkpoint 7.4 is complete locally. The next checkpoint is Milestone 7.5 —
-Observability and Operational Controls. Deployment, the 7.8 final audit,
-Milestone 8, and later work remain unstarted.
+Checkpoint 7.5 is complete locally. The next checkpoint is Milestone 7.6 —
+Backup, Restore, Rollback, and Disaster Recovery. Deployment, checkpoints
+7.6–7.8, Milestone 8, and later work remain unstarted.

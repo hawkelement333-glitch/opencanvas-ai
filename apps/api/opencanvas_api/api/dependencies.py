@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated, cast
@@ -27,6 +28,7 @@ from opencanvas_api.services.documents import (
 )
 from opencanvas_api.services.domain_events import DomainEventService
 from opencanvas_api.services.knowledge_graph import KnowledgeGraphService
+from opencanvas_api.services.observability import OperationalTelemetry
 from opencanvas_api.services.rate_limits import (
     RateLimitDimension,
     SharedRateLimitService,
@@ -41,8 +43,15 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
         yield session
 
 
-def get_ai_provider(settings: Annotated[Settings, Depends(get_settings)]) -> AIProvider:
-    return build_ai_provider(settings)
+def get_ai_provider(
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AIProvider:
+    telemetry = getattr(request.app.state, "observability", None)
+    return build_ai_provider(
+        settings,
+        telemetry=telemetry if isinstance(telemetry, OperationalTelemetry) else None,
+    )
 
 
 def get_database(request: Request) -> Database:
@@ -292,10 +301,18 @@ async def _enforce_shared(
             "Request protection is temporarily unavailable.",
             headers={"Retry-After": "1"},
         )
+    telemetry = getattr(request.app.state, "observability", None)
+    started = time.perf_counter()
     try:
         decision = await limiter.consume(operation=operation, dimensions=dimensions)
     except SharedRateLimitUnavailable as exc:
         limiter.metrics.responses_503 += 1
+        if isinstance(telemetry, OperationalTelemetry):
+            _record_limiter_observation(
+                telemetry,
+                duration_ms=(time.perf_counter() - started) * 1_000,
+                outcome="unavailable",
+            )
         raise ApiError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "rate_limit_unavailable",
@@ -304,12 +321,41 @@ async def _enforce_shared(
         ) from exc
     if not decision.allowed:
         limiter.metrics.responses_429 += 1
+        if isinstance(telemetry, OperationalTelemetry):
+            _record_limiter_observation(
+                telemetry,
+                duration_ms=(time.perf_counter() - started) * 1_000,
+                outcome="denied",
+            )
         raise ApiError(
             status.HTTP_429_TOO_MANY_REQUESTS,
             "rate_limit_exceeded",
             "Too many expensive requests. Wait briefly and try again.",
             headers={"Retry-After": str(decision.retry_after_seconds)},
         )
+    if isinstance(telemetry, OperationalTelemetry):
+        _record_limiter_observation(
+            telemetry,
+            duration_ms=(time.perf_counter() - started) * 1_000,
+            outcome="success",
+        )
+
+
+def _record_limiter_observation(
+    telemetry: OperationalTelemetry,
+    *,
+    duration_ms: float,
+    outcome: str,
+) -> None:
+    labels = {"component": "limiter", "outcome": outcome}
+    telemetry.record_metric("mobius.limiter.duration", duration_ms, labels=labels)
+    if outcome == "denied":
+        telemetry.record_metric("mobius.limiter.denials", 1, labels=labels)
+    elif outcome == "unavailable":
+        telemetry.record_metric("mobius.limiter.health", 0, labels=labels)
+    else:
+        telemetry.record_metric("mobius.limiter.health", 1, labels=labels)
+    telemetry.schedule_flush()
 
 
 def _request_resource_id(request: Request) -> str | None:

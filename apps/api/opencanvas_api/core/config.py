@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import re
+import uuid
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
@@ -25,6 +28,7 @@ DEVELOPMENT_UPLOAD_CAPABILITY_SECRET = (
 )
 DEVELOPMENT_SCANNER_RESULT_SECRET = "development-only-scanner-result-secret-change-before-deploying"
 DEVELOPMENT_RATE_LIMIT_SECRET = "development-only-rate-limit-secret-change-before-deploying"
+DEVELOPMENT_TELEMETRY_SECRET = "development-only-telemetry-secret-change-before-deploying"
 EXPECTED_DATABASE_REVISION = "20260726_0028"
 
 
@@ -242,11 +246,54 @@ class Settings(BaseSettings):
     estimated_input_cost_per_million_tokens: float = Field(default=0.0, ge=0.0)
     estimated_output_cost_per_million_tokens: float = Field(default=0.0, ge=0.0)
 
-    log_level: str = "INFO"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     log_json: bool = True
     error_tracking_dsn: str | None = None
     telemetry_enabled: bool = False
+    telemetry_exporter: Literal["disabled", "memory", "http"] = "disabled"
     telemetry_endpoint: str | None = None
+    telemetry_service_name: str = Field(
+        default="opencanvas-api",
+        pattern=r"^[a-z][a-z0-9-]{1,62}$",
+    )
+    telemetry_release: str = Field(default="local-development", min_length=3, max_length=80)
+    telemetry_deployment: str = Field(
+        default="local",
+        pattern=r"^[a-z][a-z0-9_.-]{0,63}$",
+    )
+    telemetry_auth_secret_reference: str | None = None
+    telemetry_tls_verify: bool = True
+    telemetry_export_timeout_seconds: float = Field(default=2.0, ge=0.05, le=10.0)
+    telemetry_shutdown_timeout_seconds: float = Field(default=3.0, ge=0.1, le=10.0)
+    telemetry_batch_size: int = Field(default=64, ge=1, le=512)
+    telemetry_buffer_size: int = Field(default=1_024, ge=16, le=10_000)
+    telemetry_retry_limit: int = Field(default=2, ge=0, le=5)
+    telemetry_sample_ratio: float = Field(default=0.1, ge=0.0, le=1.0)
+    telemetry_max_span_depth: int = Field(default=16, ge=1, le=64)
+    telemetry_max_span_events: int = Field(default=16, ge=0, le=64)
+    telemetry_max_span_attributes: int = Field(default=16, ge=1, le=64)
+    telemetry_pseudonymization_secret: str = Field(
+        default=DEVELOPMENT_TELEMETRY_SECRET,
+        min_length=32,
+    )
+    telemetry_baggage_allowlist: list[str] = Field(
+        default_factory=lambda: ["operation", "component"]
+    )
+    telemetry_cardinality_budget: int = Field(default=128, ge=8, le=2_000)
+    telemetry_health_failure_threshold: int = Field(default=3, ge=1, le=20)
+    telemetry_application_log_retention_days: int = Field(default=30, ge=1, le=90)
+    telemetry_security_log_retention_days: int = Field(default=90, ge=7, le=365)
+    telemetry_metric_retention_days: int = Field(default=30, ge=7, le=90)
+    telemetry_trace_retention_days: int = Field(default=14, ge=1, le=30)
+    telemetry_incident_retention_days: int = Field(default=365, ge=30, le=2_555)
+    telemetry_objective_version: str = Field(
+        default="mobius-internal-slos-v1",
+        pattern=r"^[a-z][a-z0-9_.-]{2,63}$",
+    )
+    telemetry_queue_age_alert_seconds: int = Field(default=300, ge=30, le=86_400)
+    telemetry_error_rate_alert_ratio: float = Field(default=0.05, gt=0.0, le=1.0)
+    telemetry_dropped_signal_alert_count: int = Field(default=1, ge=1, le=1_000_000)
+    observability_operator_user_ids: list[uuid.UUID] = Field(default_factory=list)
     correlation_header_name: str = "X-Request-ID"
 
     @field_validator(
@@ -268,16 +315,17 @@ class Settings(BaseSettings):
         "smtp_from_address",
         "error_tracking_dsn",
         "telemetry_endpoint",
+        "telemetry_auth_secret_reference",
         mode="before",
     )
     @classmethod
     def empty_string_is_none(cls, value: object) -> object:
         return None if value == "" else value
 
-    @field_validator("log_level")
+    @field_validator("log_level", mode="before")
     @classmethod
-    def normalize_log_level(cls, value: str) -> str:
-        return value.upper()
+    def normalize_log_level(cls, value: object) -> object:
+        return value.upper() if isinstance(value, str) else value
 
     @field_validator("api_prefix")
     @classmethod
@@ -367,6 +415,26 @@ class Settings(BaseSettings):
             raise ValueError("document chunk overlap must be smaller than chunk size")
         if self.processing_retry_base_seconds > self.processing_retry_max_seconds:
             raise ValueError("processing retry base cannot exceed the retry maximum")
+        if self.telemetry_batch_size > self.telemetry_buffer_size:
+            raise ValueError("telemetry batch size cannot exceed the bounded buffer")
+        if len(set(self.telemetry_baggage_allowlist)) != len(
+            self.telemetry_baggage_allowlist
+        ) or any(
+            not re.fullmatch(r"[a-z][a-z0-9_.-]{0,31}", value)
+            for value in self.telemetry_baggage_allowlist
+        ):
+            raise ValueError("telemetry baggage allowlist is invalid")
+        if self.telemetry_exporter == "http" and not self.telemetry_endpoint:
+            raise ValueError("HTTP telemetry export requires an endpoint")
+        if self.telemetry_enabled and self.telemetry_exporter == "disabled":
+            raise ValueError("enabled telemetry requires an explicit bounded exporter")
+        if not self.telemetry_enabled and self.telemetry_exporter != "disabled":
+            raise ValueError("a telemetry exporter requires telemetry enablement")
+        if self.telemetry_endpoint is not None and urlparse(self.telemetry_endpoint).scheme not in {
+            "http",
+            "https",
+        }:
+            raise ValueError("telemetry endpoint must be an absolute HTTP(S) URL")
         if "*" in self.cors_origins:
             raise ValueError("wildcard CORS origins are not allowed")
         if self.request_max_body_bytes < self.document_max_file_size_bytes:
@@ -508,6 +576,35 @@ class Settings(BaseSettings):
             raise ValueError(f"{label} requires a distinct shared rate-limit HMAC secret")
         if self.indexer_publication_mode not in {"disabled", "private_clean"}:
             raise ValueError(f"{label} permits only disabled or clean-gated Indexer publication")
+        if not self.telemetry_enabled or self.telemetry_exporter != "http":
+            raise ValueError(f"{label} requires explicit bounded HTTP telemetry export")
+        if (
+            self.telemetry_endpoint is None
+            or urlparse(self.telemetry_endpoint).scheme != "https"
+            or not self.telemetry_tls_verify
+        ):
+            raise ValueError(f"{label} requires verified HTTPS telemetry export")
+        if self.telemetry_auth_secret_reference is None or not re.fullmatch(
+            r"env://[A-Z][A-Z0-9_]{2,63}",
+            self.telemetry_auth_secret_reference,
+        ):
+            raise ValueError(f"{label} requires an environment-backed telemetry secret reference")
+        if (
+            self.telemetry_pseudonymization_secret == DEVELOPMENT_TELEMETRY_SECRET
+            or self.telemetry_pseudonymization_secret
+            in {
+                self.session_secret,
+                self.invitation_secret,
+                self.upload_capability_secret,
+                self.scanner_result_secret,
+                self.shared_rate_limit_hmac_secret,
+            }
+        ):
+            raise ValueError(f"{label} requires a distinct telemetry pseudonymization secret")
+        if self.telemetry_release == "local-development" or self.telemetry_deployment == "local":
+            raise ValueError(f"{label} requires explicit release and deployment identities")
+        if not self.observability_operator_user_ids:
+            raise ValueError(f"{label} requires an operator health allowlist")
 
     @property
     def runtime_mode(self) -> AppMode:
@@ -526,6 +623,14 @@ class Settings(BaseSettings):
     @property
     def openai_configured(self) -> bool:
         return self.ai_provider == "openai" and self.openai_api_key is not None
+
+    @property
+    def telemetry_authentication(self) -> SecretStr | None:
+        reference = self.telemetry_auth_secret_reference
+        if reference is None or not reference.startswith("env://"):
+            return None
+        value = os.getenv(reference.removeprefix("env://"))
+        return SecretStr(value) if value else None
 
     @property
     def effective_ai_provider(self) -> Literal["mock", "openai"]:
@@ -558,6 +663,7 @@ __all__ = [
     "DEVELOPMENT_INVITATION_SECRET",
     "DEVELOPMENT_RATE_LIMIT_SECRET",
     "DEVELOPMENT_SESSION_SECRET",
+    "DEVELOPMENT_TELEMETRY_SECRET",
     "EXPECTED_DATABASE_REVISION",
     "PROJECT_ROOT",
     "RUNTIME_ROOT",

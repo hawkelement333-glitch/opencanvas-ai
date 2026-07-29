@@ -1,0 +1,271 @@
+{
+  "version": "mobius-dashboards-v1",
+  "status": "internal",
+  "queryContract": {
+    "boundedWindows": true,
+    "tenantDimensions": false,
+    "rawContent": false,
+    "healthyZeroDistinctFromMissing": true,
+    "unitsRequired": true,
+    "aggregationRequired": true
+  },
+  "dashboards": [
+    {
+      "id": "service-overview-v1",
+      "title": "Service and API health",
+      "windowMinutes": 60,
+      "missingData": "unavailable",
+      "runbook": "../OBSERVABILITY_OPERATIONS_RUNBOOK.md#api-degradation",
+      "alerts": ["api-latency-v1", "readiness-v1"],
+      "panels": [
+        {
+          "signal": "mobius.api.requests",
+          "aggregation": "rate",
+          "unit": "request/s"
+        },
+        { "signal": "mobius.api.duration", "aggregation": "p95", "unit": "ms" },
+        {
+          "signal": "mobius.api.errors",
+          "aggregation": "rate",
+          "unit": "error/s"
+        }
+      ]
+    },
+    {
+      "id": "database-v1",
+      "title": "Database",
+      "windowMinutes": 60,
+      "missingData": "unavailable",
+      "runbook": "../OBSERVABILITY_OPERATIONS_RUNBOOK.md#database-saturation-or-outage",
+      "alerts": ["database-saturation-v1"],
+      "panels": [
+        {
+          "signal": "mobius.database.pool.acquire",
+          "aggregation": "p95",
+          "unit": "ms"
+        },
+        {
+          "signal": "mobius.database.timeouts",
+          "aggregation": "sum",
+          "unit": "timeout"
+        }
+      ]
+    },
+    {
+      "id": "object-storage-v1",
+      "title": "Object storage",
+      "windowMinutes": 60,
+      "missingData": "unavailable",
+      "runbook": "../OBSERVABILITY_OPERATIONS_RUNBOOK.md#storage-outage",
+      "alerts": ["storage-outage-v1"],
+      "panels": [
+        {
+          "signal": "mobius.storage.operations",
+          "aggregation": "rate",
+          "unit": "operation/s"
+        },
+        {
+          "signal": "mobius.storage.failures",
+          "aggregation": "sum",
+          "unit": "failure"
+        }
+      ]
+    },
+    {
+      "id": "scanner-quarantine-v1",
+      "title": "Scanner and quarantine",
+      "windowMinutes": 60,
+      "missingData": "unavailable",
+      "runbook": "../OBSERVABILITY_OPERATIONS_RUNBOOK.md#scanner-outage",
+      "alerts": ["scanner-outage-v1"],
+      "panels": [
+        {
+          "signal": "mobius.scanner.throughput",
+          "aggregation": "rate",
+          "unit": "object/s"
+        },
+        {
+          "signal": "mobius.scanner.unavailable",
+          "aggregation": "sum",
+          "unit": "failure"
+        }
+      ]
+    },
+    {
+      "id": "durable-work-v1",
+      "title": "Durable queue and workers",
+      "windowMinutes": 60,
+      "missingData": "unavailable",
+      "runbook": "../OBSERVABILITY_OPERATIONS_RUNBOOK.md#queue-backlog-retry-storm-or-dead-letter-growth",
+      "alerts": ["queue-backlog-v1", "worker-stale-v1"],
+      "panels": [
+        { "signal": "mobius.queue.depth", "aggregation": "max", "unit": "job" },
+        {
+          "signal": "mobius.queue.oldest_age",
+          "aggregation": "max",
+          "unit": "s"
+        },
+        {
+          "signal": "mobius.queue.lease_loss",
+          "aggregation": "sum",
+          "unit": "lease"
+        }
+      ]
+    },
+    {
+      "id": "shared-limiter-v1",
+      "title": "Shared limiter",
+      "windowMinutes": 60,
+      "missingData": "unavailable",
+      "runbook": "../OBSERVABILITY_OPERATIONS_RUNBOOK.md#limiter-saturation-or-outage",
+      "alerts": ["limiter-outage-v1"],
+      "panels": [
+        {
+          "signal": "mobius.limiter.health",
+          "aggregation": "min",
+          "unit": "state"
+        },
+        {
+          "signal": "mobius.limiter.denials",
+          "aggregation": "rate",
+          "unit": "decision/s"
+        }
+      ]
+    },
+    {
+      "id": "indexer-v1",
+      "title": "Deterministic Indexer",
+      "windowMinutes": 120,
+      "missingData": "unknown",
+      "runbook": "../OBSERVABILITY_OPERATIONS_RUNBOOK.md#indexer-backlog-drift-or-freshness-failure",
+      "alerts": ["indexer-freshness-v1"],
+      "panels": [
+        {
+          "signal": "mobius.indexer.freshness",
+          "aggregation": "max",
+          "unit": "s"
+        },
+        {
+          "signal": "mobius.indexer.drift",
+          "aggregation": "sum",
+          "unit": "mismatch"
+        }
+      ]
+    },
+    {
+      "id": "providers-v1",
+      "title": "Providers",
+      "windowMinutes": 60,
+      "missingData": "unknown",
+      "runbook": "../OBSERVABILITY_OPERATIONS_RUNBOOK.md#provider-degradation-or-cost-spike",
+      "alerts": ["provider-degradation-v1"],
+      "panels": [
+        {
+          "signal": "mobius.provider.calls",
+          "aggregation": "rate",
+          "unit": "call/s"
+        },
+        {
+          "signal": "mobius.provider.duration",
+          "aggregation": "p95",
+          "unit": "ms"
+        }
+      ]
+    },
+    {
+      "id": "events-outbox-v1",
+      "title": "Domain events and outbox",
+      "windowMinutes": 60,
+      "missingData": "unavailable",
+      "runbook": "../OBSERVABILITY_OPERATIONS_RUNBOOK.md#domain-event-or-outbox-backlog",
+      "alerts": ["outbox-backlog-v1"],
+      "panels": [
+        {
+          "signal": "mobius.outbox.backlog",
+          "aggregation": "max",
+          "unit": "event"
+        },
+        {
+          "signal": "mobius.outbox.oldest_age",
+          "aggregation": "max",
+          "unit": "s"
+        }
+      ]
+    },
+    {
+      "id": "evidence-integrity-v1",
+      "title": "Audit and product Trace continuity",
+      "windowMinutes": 60,
+      "missingData": "breach",
+      "runbook": "../OBSERVABILITY_OPERATIONS_RUNBOOK.md#audit-or-product-trace-integrity-alert",
+      "alerts": ["evidence-integrity-v1"],
+      "panels": [
+        {
+          "signal": "mobius.evidence.integrity",
+          "aggregation": "max",
+          "unit": "finding"
+        }
+      ]
+    },
+    {
+      "id": "backup-prerequisites-v1",
+      "title": "Backup freshness prerequisites",
+      "windowMinutes": 1440,
+      "missingData": "unavailable",
+      "runbook": "../OBSERVABILITY_OPERATIONS_RUNBOOK.md#backup-freshness-alert",
+      "alerts": ["backup-freshness-v1"],
+      "panels": [
+        {
+          "signal": "mobius.backup.freshness",
+          "aggregation": "max",
+          "unit": "s"
+        }
+      ]
+    },
+    {
+      "id": "cost-capacity-v1",
+      "title": "Cost and capacity",
+      "windowMinutes": 1440,
+      "missingData": "unknown",
+      "runbook": "../OBSERVABILITY_OPERATIONS_RUNBOOK.md#capacity-exhaustion",
+      "alerts": ["capacity-v1", "cost-v1"],
+      "panels": [
+        {
+          "signal": "mobius.capacity.utilization",
+          "aggregation": "max",
+          "unit": "ratio"
+        },
+        {
+          "signal": "mobius.cost.estimated",
+          "aggregation": "max",
+          "unit": "usd"
+        }
+      ]
+    },
+    {
+      "id": "telemetry-pipeline-v1",
+      "title": "Telemetry pipeline health",
+      "windowMinutes": 60,
+      "missingData": "unavailable",
+      "runbook": "../OBSERVABILITY_OPERATIONS_RUNBOOK.md#telemetry-exporter-outage-backpressure-or-cardinality-breach",
+      "alerts": ["telemetry-loss-v1"],
+      "panels": [
+        {
+          "signal": "mobius.telemetry.export_health",
+          "aggregation": "min",
+          "unit": "state"
+        },
+        {
+          "signal": "mobius.telemetry.dropped",
+          "aggregation": "sum",
+          "unit": "signal"
+        },
+        {
+          "signal": "mobius.telemetry.buffer",
+          "aggregation": "max",
+          "unit": "signal"
+        }
+      ]
+    }
+  ]
+}

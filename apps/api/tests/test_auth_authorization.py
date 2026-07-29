@@ -93,6 +93,8 @@ async def test_authentication_csrf_generic_failures_and_session_expiration(
                 "detail": "The email address or password is invalid.",
             }
         )
+        assert len(wrong_email.headers["X-Request-ID"]) == 32
+        assert len(wrong_password.headers["X-Request-ID"]) == 32
 
         async with database.sessions() as db_session:
             stored = await db_session.scalar(

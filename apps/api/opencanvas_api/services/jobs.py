@@ -31,6 +31,7 @@ from opencanvas_api.services.durable_jobs import (
     JobLease,
     RetryClassification,
 )
+from opencanvas_api.services.observability import OperationalTelemetry, Severity
 
 ACTIVE_JOB_STATUSES = (
     "queued",
@@ -302,11 +303,13 @@ class DocumentWorker:
         settings: Settings,
         sessions: async_sessionmaker[AsyncSession],
         worker_id: str | None = None,
+        telemetry: OperationalTelemetry | None = None,
     ) -> None:
         self.settings = settings
         self.sessions = sessions
         self.worker_id = worker_id or f"{socket.gethostname()}-{uuid.uuid4().hex[:12]}"
         self.metrics = DurableJobMetrics()
+        self.telemetry = telemetry
         self.processor = DocumentProcessor(
             settings=settings,
             storage=build_document_storage(settings),
@@ -318,6 +321,7 @@ class DocumentWorker:
             await self._heartbeat(session, "ready")
             service = _durable_service(session, self.settings, metrics=self.metrics)
             await service.refresh_backlog_metrics()
+            self._observe_metrics()
             await service.reconcile_deadlines()
             await service.recover_expired()
             lease = await service.claim_one(worker_id=self.worker_id)
@@ -328,6 +332,36 @@ class DocumentWorker:
             if job is None:
                 raise JobQueueError("The claimed durable job is unavailable.")
             document_id = job.document_id
+            workspace_id = job.workspace_id
+        span = (
+            self.telemetry.start_span(
+                "worker.execution",
+                component="worker",
+                links=(
+                    self.telemetry.span_link(
+                        "durable_job",
+                        lease.job_run_id,
+                        scope=(workspace_id, self.settings.runtime_mode.value),
+                    ),
+                ),
+                attributes={
+                    "operation": "document_processing",
+                    "component": "worker",
+                    "correlation": self.telemetry.correlate(
+                        "worker",
+                        self.worker_id,
+                        scope=(self.settings.runtime_mode.value,),
+                    ),
+                    "linked_correlation": self.telemetry.correlate(
+                        "durable_job",
+                        lease.job_run_id,
+                        scope=(workspace_id, self.settings.runtime_mode.value),
+                    ),
+                },
+            )
+            if self.telemetry is not None
+            else None
+        )
         lease_lost = asyncio.Event()
         stop_renewal = asyncio.Event()
         renewal = asyncio.create_task(self._renew_lease(lease, stop=stop_renewal, lost=lease_lost))
@@ -353,6 +387,8 @@ class DocumentWorker:
                 ).complete(lease)
                 await self._heartbeat(session, "ready")
                 await session.commit()
+            if span is not None:
+                span.end(outcome="success")
         except DocumentProcessingError as exc:
             stop_renewal.set()
             if not renewal.done():
@@ -370,8 +406,15 @@ class DocumentWorker:
                     await session.commit()
                 except DurableJobConflictError:
                     await session.rollback()
+            if span is not None:
+                span.end(
+                    outcome="server_error",
+                    failure_class=_retry_classification(exc.code).value,
+                )
             return True
         except DurableJobConflictError:
+            if span is not None:
+                span.end(outcome="denied", failure_class="stale_worker_suppressed")
             return True
         finally:
             stop_renewal.set()
@@ -435,6 +478,38 @@ class DocumentWorker:
             heartbeat.status = status
             heartbeat.last_seen_at = datetime.now(UTC)
         await session.flush()
+
+    def _observe_metrics(self) -> None:
+        if self.telemetry is None:
+            return
+        labels = {"component": "queue", "outcome": "success"}
+        self.telemetry.record_metric(
+            "mobius.queue.depth",
+            self.metrics.queue_depth,
+            labels=labels,
+        )
+        self.telemetry.record_metric(
+            "mobius.queue.oldest_age",
+            self.metrics.oldest_queue_age_seconds,
+            labels=labels,
+        )
+        self.telemetry.emit_log(
+            event_name="worker.state.changed",
+            severity=Severity.INFO,
+            component="worker",
+            fields={
+                "operation": "worker_poll",
+                "state": "healthy",
+                "outcome": "success",
+                "correlation_kind": "worker",
+                "correlation": self.telemetry.correlate(
+                    "worker",
+                    self.worker_id,
+                    scope=(self.settings.runtime_mode.value,),
+                ),
+            },
+        )
+        self.telemetry.schedule_flush()
 
 
 def build_job_provider(settings: Settings) -> JobProvider:

@@ -87,6 +87,16 @@ def test_production_accepts_complete_explicit_configuration() -> None:
             "production-rate-limit-secret-distinct-from-every-other-secret"
         ),
         shared_rate_limit_deployment="production",
+        telemetry_enabled=True,
+        telemetry_exporter="http",
+        telemetry_endpoint="https://telemetry.invalid/v1/signals",
+        telemetry_release="release-test",
+        telemetry_deployment="production-test",
+        telemetry_auth_secret_reference="env://MOBIUS_TELEMETRY_TOKEN",
+        telemetry_pseudonymization_secret=(
+            "production-telemetry-pseudonymization-secret-distinct-value"
+        ),
+        observability_operator_user_ids=["00000000-0000-4000-8000-000000000001"],
     )
 
     assert settings.runtime_mode.value == "production"

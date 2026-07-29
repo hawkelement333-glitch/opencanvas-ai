@@ -1,0 +1,503 @@
+{
+  "version": "mobius-signals-v1",
+  "status": "internal",
+  "defaults": {
+    "owner": "platform-operations",
+    "objective": "mobius-internal-slos-v1",
+    "maxSeries": 128,
+    "prohibitedLabels": [
+      "user",
+      "workspace",
+      "canvas",
+      "document",
+      "resource",
+      "request",
+      "job",
+      "ip",
+      "url",
+      "object",
+      "prompt"
+    ],
+    "runbook": "../OBSERVABILITY_OPERATIONS_RUNBOOK.md"
+  },
+  "signals": [
+    {
+      "name": "mobius.api.requests",
+      "purpose": "Bounded API request volume",
+      "type": "counter",
+      "unit": "request",
+      "aggregation": "sum",
+      "labels": ["method", "outcome"],
+      "dashboard": "service-overview-v1"
+    },
+    {
+      "name": "mobius.api.duration",
+      "purpose": "API server duration",
+      "type": "histogram",
+      "unit": "ms",
+      "aggregation": "histogram",
+      "labels": ["method", "outcome"],
+      "histogramBoundaries": [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+      "dashboard": "service-overview-v1"
+    },
+    {
+      "name": "mobius.api.errors",
+      "purpose": "API failure volume",
+      "type": "counter",
+      "unit": "error",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "service-overview-v1"
+    },
+    {
+      "name": "mobius.api.saturation",
+      "purpose": "API concurrency saturation",
+      "type": "gauge",
+      "unit": "ratio",
+      "aggregation": "last",
+      "labels": ["component", "outcome"],
+      "dashboard": "service-overview-v1"
+    },
+    {
+      "name": "mobius.database.pool.acquire",
+      "purpose": "Database pool acquisition duration",
+      "type": "histogram",
+      "unit": "ms",
+      "aggregation": "histogram",
+      "labels": ["component", "outcome"],
+      "dashboard": "database-v1"
+    },
+    {
+      "name": "mobius.database.timeouts",
+      "purpose": "Database timeout volume",
+      "type": "counter",
+      "unit": "timeout",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "database-v1"
+    },
+    {
+      "name": "mobius.database.transactions",
+      "purpose": "Database transaction outcomes",
+      "type": "counter",
+      "unit": "transaction",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "database-v1"
+    },
+    {
+      "name": "mobius.database.lock_wait",
+      "purpose": "Database lock wait",
+      "type": "histogram",
+      "unit": "ms",
+      "aggregation": "histogram",
+      "labels": ["component", "outcome"],
+      "dashboard": "database-v1"
+    },
+    {
+      "name": "mobius.storage.operations",
+      "purpose": "Private object operations",
+      "type": "counter",
+      "unit": "operation",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "object-storage-v1"
+    },
+    {
+      "name": "mobius.storage.duration",
+      "purpose": "Private object latency",
+      "type": "histogram",
+      "unit": "ms",
+      "aggregation": "histogram",
+      "labels": ["component", "outcome"],
+      "dashboard": "object-storage-v1"
+    },
+    {
+      "name": "mobius.storage.failures",
+      "purpose": "Private object failures",
+      "type": "counter",
+      "unit": "failure",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "object-storage-v1"
+    },
+    {
+      "name": "mobius.scanner.throughput",
+      "purpose": "Scanner verdict throughput",
+      "type": "counter",
+      "unit": "object",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "scanner-quarantine-v1"
+    },
+    {
+      "name": "mobius.scanner.duration",
+      "purpose": "Scanner verdict latency",
+      "type": "histogram",
+      "unit": "ms",
+      "aggregation": "histogram",
+      "labels": ["component", "outcome"],
+      "dashboard": "scanner-quarantine-v1"
+    },
+    {
+      "name": "mobius.scanner.unavailable",
+      "purpose": "Scanner unavailable results",
+      "type": "counter",
+      "unit": "failure",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "scanner-quarantine-v1"
+    },
+    {
+      "name": "mobius.scanner.quarantine",
+      "purpose": "Quarantine outcomes",
+      "type": "counter",
+      "unit": "object",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "scanner-quarantine-v1"
+    },
+    {
+      "name": "mobius.queue.depth",
+      "purpose": "Eligible durable job depth",
+      "type": "gauge",
+      "unit": "job",
+      "aggregation": "last",
+      "labels": ["component", "outcome"],
+      "dashboard": "durable-work-v1"
+    },
+    {
+      "name": "mobius.queue.oldest_age",
+      "purpose": "Oldest eligible durable job age",
+      "type": "gauge",
+      "unit": "s",
+      "aggregation": "max",
+      "labels": ["component", "outcome"],
+      "dashboard": "durable-work-v1"
+    },
+    {
+      "name": "mobius.queue.claim_duration",
+      "purpose": "Durable claim latency",
+      "type": "histogram",
+      "unit": "ms",
+      "aggregation": "histogram",
+      "labels": ["component", "outcome"],
+      "dashboard": "durable-work-v1"
+    },
+    {
+      "name": "mobius.queue.lease_loss",
+      "purpose": "Lease-loss volume",
+      "type": "counter",
+      "unit": "lease",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "durable-work-v1"
+    },
+    {
+      "name": "mobius.queue.retries",
+      "purpose": "Bounded retry volume",
+      "type": "counter",
+      "unit": "retry",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "durable-work-v1"
+    },
+    {
+      "name": "mobius.queue.cancellations",
+      "purpose": "Cancellation volume",
+      "type": "counter",
+      "unit": "job",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "durable-work-v1"
+    },
+    {
+      "name": "mobius.queue.dead_letters",
+      "purpose": "Dead-letter volume",
+      "type": "counter",
+      "unit": "job",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "durable-work-v1"
+    },
+    {
+      "name": "mobius.queue.replays",
+      "purpose": "Authorized replay volume",
+      "type": "counter",
+      "unit": "job",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "durable-work-v1"
+    },
+    {
+      "name": "mobius.queue.stale_suppression",
+      "purpose": "Stale result fences",
+      "type": "counter",
+      "unit": "result",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "durable-work-v1"
+    },
+    {
+      "name": "mobius.limiter.health",
+      "purpose": "Shared limiter health",
+      "type": "gauge",
+      "unit": "state",
+      "aggregation": "last",
+      "labels": ["component", "outcome"],
+      "dashboard": "shared-limiter-v1"
+    },
+    {
+      "name": "mobius.limiter.duration",
+      "purpose": "Shared limiter latency",
+      "type": "histogram",
+      "unit": "ms",
+      "aggregation": "histogram",
+      "labels": ["component", "outcome"],
+      "dashboard": "shared-limiter-v1"
+    },
+    {
+      "name": "mobius.limiter.denials",
+      "purpose": "Shared limiter denials",
+      "type": "counter",
+      "unit": "decision",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "shared-limiter-v1"
+    },
+    {
+      "name": "mobius.limiter.saturation",
+      "purpose": "Shared limiter saturation",
+      "type": "counter",
+      "unit": "decision",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "shared-limiter-v1"
+    },
+    {
+      "name": "mobius.limiter.bypass",
+      "purpose": "Limiter bypass attempts",
+      "type": "counter",
+      "unit": "attempt",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "shared-limiter-v1"
+    },
+    {
+      "name": "mobius.indexer.throughput",
+      "purpose": "Indexer revision throughput",
+      "type": "counter",
+      "unit": "revision",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "indexer-v1"
+    },
+    {
+      "name": "mobius.indexer.stage_duration",
+      "purpose": "Indexer stage latency",
+      "type": "histogram",
+      "unit": "ms",
+      "aggregation": "histogram",
+      "labels": ["component", "outcome"],
+      "dashboard": "indexer-v1"
+    },
+    {
+      "name": "mobius.indexer.freshness",
+      "purpose": "Published index age",
+      "type": "gauge",
+      "unit": "s",
+      "aggregation": "max",
+      "labels": ["component", "outcome"],
+      "dashboard": "indexer-v1"
+    },
+    {
+      "name": "mobius.indexer.coverage",
+      "purpose": "Clean-source index coverage",
+      "type": "gauge",
+      "unit": "ratio",
+      "aggregation": "last",
+      "labels": ["component", "outcome"],
+      "dashboard": "indexer-v1"
+    },
+    {
+      "name": "mobius.indexer.drift",
+      "purpose": "Deterministic index drift",
+      "type": "counter",
+      "unit": "mismatch",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "indexer-v1"
+    },
+    {
+      "name": "mobius.indexer.deduplication",
+      "purpose": "Deduplicated index requests",
+      "type": "counter",
+      "unit": "request",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "indexer-v1"
+    },
+    {
+      "name": "mobius.indexer.publication_conflict",
+      "purpose": "Publication fences",
+      "type": "counter",
+      "unit": "conflict",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "indexer-v1"
+    },
+    {
+      "name": "mobius.indexer.cancellations",
+      "purpose": "Indexer cancellations",
+      "type": "counter",
+      "unit": "revision",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "indexer-v1"
+    },
+    {
+      "name": "mobius.indexer.failures",
+      "purpose": "Indexer failures",
+      "type": "counter",
+      "unit": "failure",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "indexer-v1"
+    },
+    {
+      "name": "mobius.provider.calls",
+      "purpose": "Provider call volume",
+      "type": "counter",
+      "unit": "call",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "providers-v1"
+    },
+    {
+      "name": "mobius.provider.duration",
+      "purpose": "Provider latency",
+      "type": "histogram",
+      "unit": "ms",
+      "aggregation": "histogram",
+      "labels": ["component", "outcome"],
+      "dashboard": "providers-v1"
+    },
+    {
+      "name": "mobius.provider.usage",
+      "purpose": "Bounded provider usage",
+      "type": "counter",
+      "unit": "unit",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "providers-v1"
+    },
+    {
+      "name": "mobius.provider.cost",
+      "purpose": "Estimated provider cost",
+      "type": "counter",
+      "unit": "usd",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "cost-capacity-v1"
+    },
+    {
+      "name": "mobius.outbox.backlog",
+      "purpose": "Pending outbox deliveries",
+      "type": "gauge",
+      "unit": "event",
+      "aggregation": "last",
+      "labels": ["component", "outcome"],
+      "dashboard": "events-outbox-v1"
+    },
+    {
+      "name": "mobius.outbox.oldest_age",
+      "purpose": "Oldest outbox age",
+      "type": "gauge",
+      "unit": "s",
+      "aggregation": "max",
+      "labels": ["component", "outcome"],
+      "dashboard": "events-outbox-v1"
+    },
+    {
+      "name": "mobius.outbox.attempts",
+      "purpose": "Outbox delivery attempts",
+      "type": "counter",
+      "unit": "attempt",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "events-outbox-v1"
+    },
+    {
+      "name": "mobius.outbox.terminal_failure",
+      "purpose": "Terminal outbox failures",
+      "type": "counter",
+      "unit": "event",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "events-outbox-v1"
+    },
+    {
+      "name": "mobius.evidence.integrity",
+      "purpose": "Audit Trace and event integrity findings",
+      "type": "gauge",
+      "unit": "finding",
+      "aggregation": "last",
+      "labels": ["component", "outcome"],
+      "dashboard": "evidence-integrity-v1"
+    },
+    {
+      "name": "mobius.backup.freshness",
+      "purpose": "Backup freshness prerequisite only",
+      "type": "gauge",
+      "unit": "s",
+      "aggregation": "max",
+      "labels": ["component", "outcome"],
+      "dashboard": "backup-prerequisites-v1"
+    },
+    {
+      "name": "mobius.capacity.utilization",
+      "purpose": "Bounded capacity utilization",
+      "type": "gauge",
+      "unit": "ratio",
+      "aggregation": "max",
+      "labels": ["component", "outcome"],
+      "dashboard": "cost-capacity-v1"
+    },
+    {
+      "name": "mobius.cost.estimated",
+      "purpose": "Bounded operational cost estimate",
+      "type": "gauge",
+      "unit": "usd",
+      "aggregation": "max",
+      "labels": ["component", "outcome"],
+      "dashboard": "cost-capacity-v1"
+    },
+    {
+      "name": "mobius.telemetry.export_health",
+      "purpose": "Telemetry exporter health",
+      "type": "gauge",
+      "unit": "state",
+      "aggregation": "last",
+      "labels": ["component", "outcome"],
+      "dashboard": "telemetry-pipeline-v1"
+    },
+    {
+      "name": "mobius.telemetry.dropped",
+      "purpose": "Rejected or dropped signals",
+      "type": "counter",
+      "unit": "signal",
+      "aggregation": "sum",
+      "labels": ["component", "outcome"],
+      "dashboard": "telemetry-pipeline-v1"
+    },
+    {
+      "name": "mobius.telemetry.buffer",
+      "purpose": "Telemetry buffer use",
+      "type": "gauge",
+      "unit": "signal",
+      "aggregation": "max",
+      "labels": ["component", "outcome"],
+      "dashboard": "telemetry-pipeline-v1"
+    }
+  ]
+}

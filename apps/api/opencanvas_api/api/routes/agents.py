@@ -377,7 +377,7 @@ async def prepare_grounded_draft(
     settings: SettingsDep,
 ) -> AgentDraftPreparedOut:
     service = ControlledGroundedDraftService(
-        session, provider=get_ai_provider(settings), settings=settings
+        session, provider=get_ai_provider(request, settings), settings=settings
     )
     correlation_id = str(getattr(request.state, "correlation_id", uuid.uuid4().hex))
     try:

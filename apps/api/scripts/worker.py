@@ -11,6 +11,7 @@ from opencanvas_api.db.models import WorkerHeartbeat
 from opencanvas_api.db.runtime import DatabaseRuntimeError, validate_database_runtime
 from opencanvas_api.db.session import Database
 from opencanvas_api.services.jobs import DocumentWorker
+from opencanvas_api.services.observability import build_observability
 
 
 async def run(*, once: bool, healthcheck: bool) -> int:
@@ -18,7 +19,12 @@ async def run(*, once: bool, healthcheck: bool) -> int:
     if settings.runtime_mode is AppMode.DEMO:
         raise RuntimeError("Demo mode does not start the production document worker.")
     database = Database.from_settings(settings, expected_role=DatabaseRole.WORKER)
-    worker = DocumentWorker(settings=settings, sessions=database.sessions)
+    telemetry = build_observability(settings)
+    worker = DocumentWorker(
+        settings=settings,
+        sessions=database.sessions,
+        telemetry=telemetry,
+    )
     try:
         try:
             await validate_database_runtime(
@@ -45,6 +51,7 @@ async def run(*, once: bool, healthcheck: bool) -> int:
             return 0
         await worker.run_forever()
     finally:
+        await telemetry.close()
         await database.dispose()
     return 0
 

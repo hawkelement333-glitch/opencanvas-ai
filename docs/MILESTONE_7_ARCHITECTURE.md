@@ -4,7 +4,8 @@ Date: 2026-07-27
 
 Status: architecture complete locally; checkpoint 7.1 implemented locally;
 checkpoint 7.2 implemented locally; checkpoint 7.3 implemented locally;
-checkpoint 7.4 implemented locally; checkpoint 7.5 unstarted
+checkpoint 7.4 implemented locally; checkpoint 7.5 implemented locally;
+checkpoint 7.6 unstarted
 
 Checkpoint 7.2 implementation record: migration `20260726_0026` is the sole
 head and direct child of `20260725_0025`. The deterministic Indexer, immutable
@@ -29,6 +30,17 @@ The Redis adapter requires credential-free private `rediss`, Microsoft Entra
 managed-identity tokens, opaque HMAC keys, and one `{limits}` hash slot for
 atomic multi-key Lua. Deployed modes refuse the local in-memory fake. See
 [`MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md`](MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md).
+
+Checkpoint 7.5 implementation record: the provider-neutral operational
+telemetry layer now validates closed structured logs, bounded metrics and
+W3C-compatible spans; uses environment/deployment-scoped pseudonymous
+correlations; enforces redaction, cardinality, buffering, timeout, retry,
+sampling, baggage, and shutdown limits; and separates public readiness from
+allowlisted operator health. Versioned signal, dashboard, provisional
+objective, alert, privacy/retention, escalation, integrity-monitor, and
+runbook artifacts realize section 13 without a migration. Product Trace,
+audit, events, outbox, and activity remain authoritative and independent.
+See [`OBSERVABILITY_ARCHITECTURE.md`](OBSERVABILITY_ARCHITECTURE.md).
 
 PostgreSQL compatibility amendments:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -1353,12 +1365,14 @@ the governed Librarian, Worlds, Spatial, Federation, or Continuity.
 
 ## 27. Current implementation boundary
 
-Checkpoints 7.1, 7.2, 7.3, and 7.4 are complete locally. Migration
-`20260726_0028` is the sole head. Managed staging evidence validates the
-private/versioned Azure storage and clean/EICAR scanner prerequisites, with
-direct personal blob-tag inspection unavailable by least-privilege design.
-The application uses a dedicated exact-evidence scanner-result path rather
-than personal authority or a mutable tag.
+Checkpoints 7.1 through 7.5 are complete locally. Migration `20260726_0028`
+is the sole head. Managed staging evidence validates the private/versioned
+Azure storage and clean/EICAR scanner prerequisites, with direct personal
+blob-tag inspection unavailable by least-privilege design. The application
+uses a dedicated exact-evidence scanner-result path rather than personal
+authority or a mutable tag.
 
-This does not certify production deployment or start checkpoints 7.5–7.8,
-Milestone 8, or later work.
+No approved isolated live telemetry destination was available for checkpoint
+7.5. This does not certify production deployment, live exporter/dashboard/
+alert delivery, application-to-Azure observability, or start checkpoints
+7.6–7.8, Milestone 8, or later work.

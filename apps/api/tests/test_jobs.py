@@ -224,11 +224,21 @@ async def test_worker_health_requires_a_fresh_database_heartbeat(
     async with database.sessions() as session:
         heartbeat = await session.get(WorkerHeartbeat, "test-worker")
         assert heartbeat is not None
+        heartbeat.status = "stopping"
+        await session.commit()
+    stopping = await client.get(f"{api_prefix}/health/worker")
+    assert stopping.status_code == 503
+    assert stopping.json()["code"] == "worker_unavailable"
+
+    async with database.sessions() as session:
+        heartbeat = await session.get(WorkerHeartbeat, "test-worker")
+        assert heartbeat is not None
+        heartbeat.status = "ready"
         heartbeat.last_seen_at = datetime.now(UTC) - timedelta(seconds=31)
         await session.commit()
     stale = await client.get(f"{api_prefix}/health/ready")
     assert stale.status_code == 503
-    assert stale.json()["code"] == "worker_unavailable"
+    assert stale.json()["code"] == "service_not_ready"
 
 
 async def test_idle_worker_commits_its_heartbeat(

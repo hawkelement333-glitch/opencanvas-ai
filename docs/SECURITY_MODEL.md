@@ -257,6 +257,29 @@ pnpm validate
 
 Fresh results belong in the release checklist or CI logs. Historical test counts should not be represented as current unless rerun against the exact release candidate.
 
+## Operational telemetry security
+
+Milestone 7.5 routes operational logs, metrics, and spans through one closed
+schema and bounded exporter. User-controlled field names are rejected.
+Secrets, credentials, tokens, cookies, raw network addresses, private
+identifiers, source/prompt/response content, provider payloads, SQL values, and
+hidden reasoning are excluded or redacted at ingestion and export.
+
+Correlations are HMAC-pseudonymized with environment, deployment, kind, and
+server-derived scope. They do not grant authority and cannot replace product
+Trace, audit, events, outbox, or activity evidence. Public liveness/readiness
+does not disclose topology. Operator health composes existing authentication
+with a server-owned allowlist and returns only closed safe states.
+
+Staging and production reject disabled, memory, unencrypted, unauthenticated,
+unbounded, or placeholder telemetry configuration. Exporter failure cannot
+roll back a valid business transaction, while mandatory product evidence
+continues to fail its protected transaction if it cannot commit. Sustained
+telemetry loss makes production readiness false.
+
+See [OBSERVABILITY_ARCHITECTURE.md](OBSERVABILITY_ARCHITECTURE.md) and
+[OBSERVABILITY_OPERATIONS_RUNBOOK.md](OBSERVABILITY_OPERATIONS_RUNBOOK.md).
+
 ## Reporting vulnerabilities
 
 Follow `SECURITY.md`. Do not open a public issue containing a secret, exploit payload, private document, or personal information.

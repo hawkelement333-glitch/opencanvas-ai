@@ -1,0 +1,101 @@
+{
+  "version": "mobius-slos-v1",
+  "objectives": [
+    {
+      "id": "mobius-internal-slos-v1",
+      "targetStatus": "provisional",
+      "rationale": "Conservative internal engineering targets pending measured staging baselines and Milestone 7.7 capacity evidence.",
+      "owner": "platform-operations",
+      "reviewTrigger": "First approved staging telemetry campaign, any material topology change, or Milestone 7.7 measurements.",
+      "measurementWindowDays": 28,
+      "notPublicSla": true,
+      "indicators": [
+        {
+          "capability": "api",
+          "indicator": "successful ready requests / eligible requests",
+          "target": 0.995,
+          "unit": "ratio"
+        },
+        {
+          "capability": "api-latency",
+          "indicator": "p95 request duration",
+          "target": 1000,
+          "unit": "ms"
+        },
+        {
+          "capability": "readiness",
+          "indicator": "ready probe success",
+          "target": 0.995,
+          "unit": "ratio"
+        },
+        {
+          "capability": "queue",
+          "indicator": "oldest eligible job age",
+          "target": 300,
+          "unit": "s"
+        },
+        {
+          "capability": "processing",
+          "indicator": "non-poison terminal success",
+          "target": 0.99,
+          "unit": "ratio"
+        },
+        {
+          "capability": "indexer",
+          "indicator": "clean-source publication freshness",
+          "target": 900,
+          "unit": "s"
+        },
+        {
+          "capability": "scanner",
+          "indicator": "authoritative verdict availability",
+          "target": 0.995,
+          "unit": "ratio"
+        },
+        {
+          "capability": "limiter",
+          "indicator": "authoritative shared decisions",
+          "target": 0.999,
+          "unit": "ratio"
+        },
+        {
+          "capability": "outbox",
+          "indicator": "delivery within five minutes",
+          "target": 0.995,
+          "unit": "ratio"
+        },
+        {
+          "capability": "provider",
+          "indicator": "bounded call success",
+          "target": 0.99,
+          "unit": "ratio"
+        },
+        {
+          "capability": "telemetry",
+          "indicator": "accepted signals exported without drop",
+          "target": 0.995,
+          "unit": "ratio"
+        },
+        {
+          "capability": "backup-prerequisite",
+          "indicator": "reported backup freshness",
+          "target": 86400,
+          "unit": "s",
+          "limitation": "Prerequisite signal only; Milestone 7.6 owns recovery proof."
+        },
+        {
+          "capability": "capacity",
+          "indicator": "sustained utilization",
+          "target": 0.8,
+          "unit": "ratio"
+        },
+        {
+          "capability": "cost",
+          "indicator": "server-owned budget utilization",
+          "target": 0.8,
+          "unit": "ratio"
+        }
+      ]
+    }
+  ]
+}
