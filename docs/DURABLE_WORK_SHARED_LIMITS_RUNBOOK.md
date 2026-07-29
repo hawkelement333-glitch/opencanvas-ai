@@ -19,6 +19,10 @@ evidence controls.
   a new request/job identity.
 - Staging and production must use the shared Redis adapter. Store uncertainty
   fails protected requests with `503`; there is no process-local fallback.
+- Staging and production use Microsoft Entra authentication only. The sealed
+  `recovery` profile alone may use a loopback-only TLS Valkey ACL with mounted
+  username, password, and CA secret files plus an explicit limiter epoch. ACL
+  credentials never belong in a Redis URL, environment value, log, or evidence.
 - Do not put Redis tokens, raw IP addresses, private identifiers, payloads,
   source text, or HMAC secrets in logs, metrics, tickets, or evidence.
 
@@ -118,8 +122,11 @@ material evidence. Do not revive the same job identity.
 ## Limiter outage, authentication, or private-connectivity failure
 
 1. Expect readiness degradation and `503` for protected operations.
-2. Verify private DNS, TLS validation, managed-identity token acquisition,
-   restricted Redis ACL, and bounded connection/operation timeout.
+2. In staging or production, verify private DNS, TLS validation,
+   managed-identity token acquisition, restricted Redis ACL, and bounded
+   connection/operation timeout. In sealed recovery only, verify loopback TLS,
+   mounted ACL secret files, the explicit limiter epoch, and the same bounded
+   timeouts; do not contact managed identity.
 3. Do not add a password to the URL, enable access keys/public networking, or
    switch deployed modes to memory.
 4. Restore the dependency, then prove health and one bounded synthetic

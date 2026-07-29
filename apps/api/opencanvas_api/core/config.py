@@ -5,6 +5,7 @@ import re
 import uuid
 from enum import StrEnum
 from functools import lru_cache
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
@@ -36,6 +37,7 @@ class AppMode(StrEnum):
     DEMO = "demo"
     DEVELOPMENT = "development"
     TEST = "test"
+    RECOVERY = "recovery"
     STAGING = "staging"
     PRODUCTION = "production"
 
@@ -65,7 +67,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("APP_MODE", "OPENCANVAS_APP_MODE"),
     )
     # Backward-compatible inputs retained for the immutable competition runner.
-    environment: Literal["development", "test", "staging", "production"] = "development"
+    environment: Literal["development", "test", "recovery", "staging", "production"] = "development"
     demo_mode: bool = False
     app_url: str = "http://localhost:3000"
     api_prefix: str = "/api/v1"
@@ -184,10 +186,18 @@ class Settings(BaseSettings):
     processing_retry_max_seconds: int = Field(default=900, ge=1, le=86_400)
 
     shared_rate_limit_provider: Literal["memory", "redis"] = "memory"
+    shared_rate_limit_auth_mode: Literal["entra", "acl"] = "entra"
     shared_rate_limit_redis_url: str | None = None
     shared_rate_limit_redis_username: str | None = None
     shared_rate_limit_identity_endpoint: str | None = None
     shared_rate_limit_identity_header: str | None = None
+    shared_rate_limit_acl_username_file: Path | None = None
+    shared_rate_limit_acl_password_file: Path | None = None
+    shared_rate_limit_tls_ca_file: Path | None = None
+    shared_rate_limit_recovery_epoch: str | None = Field(
+        default=None,
+        pattern=r"^[a-z][a-z0-9_.-]{0,63}$",
+    )
     shared_rate_limit_hmac_secret: str = Field(
         default=DEVELOPMENT_RATE_LIMIT_SECRET,
         min_length=32,
@@ -309,6 +319,10 @@ class Settings(BaseSettings):
         "shared_rate_limit_redis_username",
         "shared_rate_limit_identity_endpoint",
         "shared_rate_limit_identity_header",
+        "shared_rate_limit_acl_username_file",
+        "shared_rate_limit_acl_password_file",
+        "shared_rate_limit_tls_ca_file",
+        "shared_rate_limit_recovery_epoch",
         "smtp_host",
         "smtp_username",
         "smtp_password",
@@ -361,6 +375,7 @@ class Settings(BaseSettings):
         if (
             parsed.scheme != "rediss"
             or not parsed.hostname
+            or parsed.username is not None
             or parsed.password is not None
             or parsed.query
             or parsed.fragment
@@ -439,6 +454,8 @@ class Settings(BaseSettings):
             raise ValueError("wildcard CORS origins are not allowed")
         if self.request_max_body_bytes < self.document_max_file_size_bytes:
             raise ValueError("request body limit must be at least the document file-size limit")
+        if self.shared_rate_limit_auth_mode == "acl" and mode is not AppMode.RECOVERY:
+            raise ValueError("ACL shared Redis authentication is limited to recovery mode")
         if mode is AppMode.DEMO:
             self._validate_demo_isolation()
         else:
@@ -453,9 +470,60 @@ class Settings(BaseSettings):
                 raise ValueError("test mode requires isolated memory or local storage")
             if self.object_ingestion_mode == "trusted":
                 raise ValueError("test mode refuses trusted external scanner results")
+        elif mode is AppMode.RECOVERY:
+            self._validate_recovery_mode()
         elif mode in {AppMode.STAGING, AppMode.PRODUCTION}:
             self._validate_deployed_mode(mode)
         return self
+
+    def _validate_recovery_mode(self) -> None:
+        if self.shared_rate_limit_provider != "redis":
+            raise ValueError("recovery mode requires the shared Redis rate-limit provider")
+        if self.shared_rate_limit_auth_mode != "acl":
+            raise ValueError("recovery mode requires recovery-only ACL authentication")
+        if self.shared_rate_limit_identity_endpoint is not None:
+            raise ValueError("recovery ACL authentication refuses a managed identity endpoint")
+        if self.shared_rate_limit_identity_header is not None:
+            raise ValueError("recovery ACL authentication refuses a managed identity header")
+        if self.shared_rate_limit_redis_username is not None:
+            raise ValueError(
+                "recovery ACL authentication requires a username secret-file reference"
+            )
+        if self.shared_rate_limit_redis_url is None:
+            raise ValueError("recovery ACL authentication requires a Redis URL")
+        parsed = urlparse(self.shared_rate_limit_redis_url)
+        try:
+            loopback = ip_address(parsed.hostname or "").is_loopback
+        except ValueError:
+            loopback = False
+        if not loopback:
+            raise ValueError("recovery ACL authentication requires a loopback Redis endpoint")
+        for label, path in {
+            "ACL username": self.shared_rate_limit_acl_username_file,
+            "ACL password": self.shared_rate_limit_acl_password_file,
+            "TLS trust": self.shared_rate_limit_tls_ca_file,
+        }.items():
+            self._read_required_secret_file(path, label)
+        if self.shared_rate_limit_recovery_epoch is None:
+            raise ValueError("recovery ACL authentication requires an explicit limiter epoch")
+
+    @staticmethod
+    def _read_required_secret_file(path: Path | None, label: str) -> str:
+        if path is None:
+            raise ValueError(
+                f"recovery ACL authentication requires a {label} secret-file reference"
+            )
+        try:
+            value = path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise ValueError(
+                f"recovery ACL authentication could not read the {label} secret file"
+            ) from exc
+        if not value:
+            raise ValueError(
+                f"recovery ACL authentication requires a non-empty {label} secret file"
+            )
+        return value
 
     def _validate_demo_isolation(self) -> None:
         if self.database_url_value != DEMO_DATABASE_URL:
@@ -551,6 +619,18 @@ class Settings(BaseSettings):
             raise ValueError(f"{label} requires the database-backed worker provider")
         if self.shared_rate_limit_provider != "redis":
             raise ValueError(f"{label} requires the managed shared rate-limit provider")
+        if self.shared_rate_limit_auth_mode != "entra":
+            raise ValueError(f"{label} requires Microsoft Entra shared Redis authentication")
+        if any(
+            value is not None
+            for value in (
+                self.shared_rate_limit_acl_username_file,
+                self.shared_rate_limit_acl_password_file,
+                self.shared_rate_limit_tls_ca_file,
+                self.shared_rate_limit_recovery_epoch,
+            )
+        ):
+            raise ValueError(f"{label} refuses recovery-only shared Redis configuration")
         required_rate_limit = {
             "OPENCANVAS_SHARED_RATE_LIMIT_REDIS_URL": self.shared_rate_limit_redis_url,
             "OPENCANVAS_SHARED_RATE_LIMIT_REDIS_USERNAME": (self.shared_rate_limit_redis_username),
@@ -615,6 +695,20 @@ class Settings(BaseSettings):
     @property
     def database_url_value(self) -> str:
         return self.database_url.get_secret_value()
+
+    @property
+    def recovery_rate_limit_acl_username(self) -> str:
+        return self._read_required_secret_file(
+            self.shared_rate_limit_acl_username_file,
+            "ACL username",
+        )
+
+    @property
+    def recovery_rate_limit_acl_password(self) -> str:
+        return self._read_required_secret_file(
+            self.shared_rate_limit_acl_password_file,
+            "ACL password",
+        )
 
     @property
     def secure_cookies(self) -> bool:

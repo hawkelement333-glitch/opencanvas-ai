@@ -143,6 +143,81 @@ class AtomicRateLimitStore(Protocol):
     async def close(self) -> None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class RedisCredentials:
+    username: str
+    password: str
+    expires_at: int | None
+
+
+class RedisAuthentication(Protocol):
+    async def credentials(self) -> RedisCredentials: ...
+
+
+@dataclass(frozen=True, slots=True)
+class EntraRedisAuthentication:
+    """Azure Managed Redis authentication using the existing Entra audience."""
+
+    username: str
+    managed_identity_endpoint: str
+    managed_identity_header: str | None
+    operation_timeout_seconds: float
+
+    async def credentials(self) -> RedisCredentials:
+        headers = {"Metadata": "true"}
+        if self.managed_identity_header:
+            headers["X-IDENTITY-HEADER"] = self.managed_identity_header
+        parameters = {
+            "api-version": "2019-08-01",
+            "resource": _TOKEN_AUDIENCE,
+        }
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(self.operation_timeout_seconds),
+            ) as client:
+                response = await client.get(
+                    self.managed_identity_endpoint,
+                    headers=headers,
+                    params=parameters,
+                )
+                response.raise_for_status()
+                payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise SharedRateLimitUnavailable(
+                "Managed identity could not authenticate the shared limiter."
+            ) from exc
+        token = payload.get("access_token")
+        expires_on = payload.get("expires_on")
+        if not isinstance(token, str) or not token or len(token) > 16_384:
+            raise SharedRateLimitUnavailable("Managed identity returned an invalid token.")
+        try:
+            expires_at = int(expires_on)
+        except (TypeError, ValueError) as exc:
+            raise SharedRateLimitUnavailable(
+                "Managed identity returned an invalid expiry."
+            ) from exc
+        return RedisCredentials(
+            username=self.username,
+            password=token,
+            expires_at=expires_at,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RecoveryAclRedisAuthentication:
+    """Recovery-only local TLS Valkey ACL authentication; never contacts Entra."""
+
+    username: str
+    password: str
+
+    async def credentials(self) -> RedisCredentials:
+        return RedisCredentials(
+            username=self.username,
+            password=self.password,
+            expires_at=None,
+        )
+
+
 @dataclass(slots=True)
 class _MemoryBucket:
     tokens: float
@@ -206,33 +281,34 @@ class InMemoryAtomicRateLimitStore:
 
 
 class RedisAtomicRateLimitStore:
-    """Managed Redis adapter using TLS, Entra tokens, and one cluster-slot script."""
+    """TLS Redis-compatible adapter with an explicit Entra or sealed recovery ACL boundary."""
 
     def __init__(
         self,
         *,
         redis_url: str,
-        username: str,
-        managed_identity_endpoint: str,
-        managed_identity_header: str | None,
+        authentication: RedisAuthentication,
         connect_timeout_seconds: float,
         operation_timeout_seconds: float,
+        tls_ca_file: str | None = None,
     ) -> None:
         parsed = urlparse(redis_url)
-        if parsed.scheme != "rediss" or not parsed.hostname or parsed.password is not None:
+        if (
+            parsed.scheme != "rediss"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
             raise ValueError("Shared Redis requires a credential-free rediss URL.")
         if parsed.path not in {"", "/", "/0"}:
             raise ValueError("Shared Redis must use database zero.")
-        if not username or len(username) > 128:
-            raise ValueError("Shared Redis username is invalid.")
         self.redis_url = redis_url
-        self.username = username
-        self.managed_identity_endpoint = managed_identity_endpoint
-        self.managed_identity_header = managed_identity_header
+        self.authentication = authentication
         self.connect_timeout_seconds = connect_timeout_seconds
         self.operation_timeout_seconds = operation_timeout_seconds
+        self.tls_ca_file = tls_ca_file
         self._client: Redis | None = None
-        self._token_expires_at = 0
+        self._credentials_expires_at: int | None = None
         self._lock = asyncio.Lock()
 
     async def consume(self, limits: Sequence[AtomicLimit], *, cost: int) -> StoreDecision:
@@ -288,70 +364,57 @@ class RedisAtomicRateLimitStore:
 
     async def _get_client(self) -> Redis:
         now = int(time.time())
-        if self._client is not None and now < self._token_expires_at - 300:
+        if self._client is not None and self._credentials_are_current(now):
             return self._client
         async with self._lock:
             now = int(time.time())
-            if self._client is not None and now < self._token_expires_at - 300:
+            if self._client is not None and self._credentials_are_current(now):
                 return self._client
-            token, expires_at = await self._managed_identity_token()
+            credentials = await self.authentication.credentials()
+            if not credentials.username or len(credentials.username) > 128:
+                raise SharedRateLimitUnavailable("Shared Redis authentication is invalid.")
+            if not credentials.password or len(credentials.password) > 16_384:
+                raise SharedRateLimitUnavailable("Shared Redis authentication is invalid.")
             parsed = urlparse(self.redis_url)
-            client = Redis(
-                host=parsed.hostname or "",
-                port=parsed.port or 10000,
-                username=self.username,
-                password=token,
-                ssl=True,
-                ssl_cert_reqs="required",
-                socket_connect_timeout=self.connect_timeout_seconds,
-                socket_timeout=self.operation_timeout_seconds,
-                health_check_interval=15,
-                decode_responses=False,
-            )
+            if self.tls_ca_file is not None:
+                client = Redis(
+                    host=parsed.hostname or "",
+                    port=parsed.port or 10000,
+                    username=credentials.username,
+                    password=credentials.password,
+                    ssl=True,
+                    ssl_cert_reqs="required",
+                    ssl_ca_certs=self.tls_ca_file,
+                    socket_connect_timeout=self.connect_timeout_seconds,
+                    socket_timeout=self.operation_timeout_seconds,
+                    health_check_interval=15,
+                    decode_responses=False,
+                )
+            else:
+                client = Redis(
+                    host=parsed.hostname or "",
+                    port=parsed.port or 10000,
+                    username=credentials.username,
+                    password=credentials.password,
+                    ssl=True,
+                    ssl_cert_reqs="required",
+                    socket_connect_timeout=self.connect_timeout_seconds,
+                    socket_timeout=self.operation_timeout_seconds,
+                    health_check_interval=15,
+                    decode_responses=False,
+                )
             await self._drop_client()
             self._client = client
-            self._token_expires_at = expires_at
+            self._credentials_expires_at = credentials.expires_at
             return client
 
-    async def _managed_identity_token(self) -> tuple[str, int]:
-        headers = {"Metadata": "true"}
-        if self.managed_identity_header:
-            headers["X-IDENTITY-HEADER"] = self.managed_identity_header
-        parameters = {
-            "api-version": "2019-08-01",
-            "resource": _TOKEN_AUDIENCE,
-        }
-        try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(self.operation_timeout_seconds),
-            ) as client:
-                response = await client.get(
-                    self.managed_identity_endpoint,
-                    headers=headers,
-                    params=parameters,
-                )
-                response.raise_for_status()
-                payload = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise SharedRateLimitUnavailable(
-                "Managed identity could not authenticate the shared limiter."
-            ) from exc
-        token = payload.get("access_token")
-        expires_on = payload.get("expires_on")
-        if not isinstance(token, str) or not token or len(token) > 16_384:
-            raise SharedRateLimitUnavailable("Managed identity returned an invalid token.")
-        try:
-            expires_at = int(expires_on)
-        except (TypeError, ValueError) as exc:
-            raise SharedRateLimitUnavailable(
-                "Managed identity returned an invalid expiry."
-            ) from exc
-        return token, expires_at
+    def _credentials_are_current(self, now: int) -> bool:
+        return self._credentials_expires_at is None or now < self._credentials_expires_at - 300
 
     async def _drop_client(self) -> None:
         client = self._client
         self._client = None
-        self._token_expires_at = 0
+        self._credentials_expires_at = None
         if client is not None:
             await client.aclose()
 
@@ -474,26 +537,48 @@ def build_shared_rate_limit_service(settings: Settings) -> SharedRateLimitServic
             raise RuntimeError("Deployed modes refuse process-local rate limits.")
         store: AtomicRateLimitStore = InMemoryAtomicRateLimitStore()
     else:
-        required = {
-            "Redis URL": settings.shared_rate_limit_redis_url,
-            "Redis username": settings.shared_rate_limit_redis_username,
-            "managed identity endpoint": settings.shared_rate_limit_identity_endpoint,
-        }
-        if missing := [name for name, value in required.items() if not value]:
-            raise RuntimeError(f"Shared rate limiter is missing: {', '.join(missing)}")
+        authentication: RedisAuthentication
+        tls_ca_file: str | None = None
+        if settings.shared_rate_limit_auth_mode == "entra":
+            required = {
+                "Redis URL": settings.shared_rate_limit_redis_url,
+                "Redis username": settings.shared_rate_limit_redis_username,
+                "managed identity endpoint": settings.shared_rate_limit_identity_endpoint,
+            }
+            if missing := [name for name, value in required.items() if not value]:
+                raise RuntimeError(f"Shared rate limiter is missing: {', '.join(missing)}")
+            authentication = EntraRedisAuthentication(
+                username=settings.shared_rate_limit_redis_username or "",
+                managed_identity_endpoint=settings.shared_rate_limit_identity_endpoint or "",
+                managed_identity_header=settings.shared_rate_limit_identity_header,
+                operation_timeout_seconds=settings.shared_rate_limit_operation_timeout_seconds,
+            )
+        else:
+            if settings.runtime_mode is not AppMode.RECOVERY:
+                raise RuntimeError("ACL shared Redis authentication is limited to recovery mode.")
+            authentication = RecoveryAclRedisAuthentication(
+                username=settings.recovery_rate_limit_acl_username,
+                password=settings.recovery_rate_limit_acl_password,
+            )
+            if settings.shared_rate_limit_tls_ca_file is None:
+                raise RuntimeError("Recovery ACL shared Redis requires TLS trust configuration.")
+            tls_ca_file = str(settings.shared_rate_limit_tls_ca_file)
         store = RedisAtomicRateLimitStore(
             redis_url=settings.shared_rate_limit_redis_url or "",
-            username=settings.shared_rate_limit_redis_username or "",
-            managed_identity_endpoint=settings.shared_rate_limit_identity_endpoint or "",
-            managed_identity_header=settings.shared_rate_limit_identity_header,
+            authentication=authentication,
             connect_timeout_seconds=settings.shared_rate_limit_connect_timeout_seconds,
             operation_timeout_seconds=settings.shared_rate_limit_operation_timeout_seconds,
+            tls_ca_file=tls_ca_file,
         )
     return SharedRateLimitService(
         store=store,
         hmac_secret=settings.shared_rate_limit_hmac_secret,
         namespace=settings.shared_rate_limit_namespace,
-        deployment=settings.shared_rate_limit_deployment,
+        deployment=(
+            f"{settings.shared_rate_limit_deployment}.{settings.shared_rate_limit_recovery_epoch}"
+            if settings.runtime_mode is AppMode.RECOVERY
+            else settings.shared_rate_limit_deployment
+        ),
         emergency_limit=settings.shared_rate_limit_emergency_requests_per_minute,
         emergency_window_seconds=60,
     )
@@ -502,10 +587,13 @@ def build_shared_rate_limit_service(settings: Settings) -> SharedRateLimitServic
 __all__ = [
     "AtomicLimit",
     "AtomicRateLimitStore",
+    "EntraRedisAuthentication",
     "InMemoryAtomicRateLimitStore",
     "RateLimitDecision",
     "RateLimitDimension",
+    "RecoveryAclRedisAuthentication",
     "RedisAtomicRateLimitStore",
+    "RedisCredentials",
     "SharedRateLimitMetrics",
     "SharedRateLimitService",
     "SharedRateLimitUnavailable",
