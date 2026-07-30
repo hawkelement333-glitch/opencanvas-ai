@@ -1442,3 +1442,13 @@ absent, pending, partial, or unproved as recorded. The validator has no
 network, process, provider, workload, fault, deployment, database, or
 infrastructure-mutation client. It does not authorize Azure topology
 preflight, Checkpoint 6, or any live exercise.
+
+Checkpoint 6 scope definition now binds the approved account fingerprints,
+primary and comparison regions, exact intended future resource groups,
+24-hour sanitized evidence policy, ten infrastructure gates, five unresolved
+runtime gates, and an 18-slot closed default-deny operation inventory. Only
+the current-account context slot has an exact repository-verified read-only
+command template; the remaining 17 slots are explicitly blocked rather than
+filled by assumption. This local contract authorizes no Azure execution and
+does not resolve any gate. Checkpoint 6 remains blocked pending separately
+authorized Azure Topology Preflight execution.

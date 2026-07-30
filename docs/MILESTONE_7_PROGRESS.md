@@ -531,5 +531,13 @@ provider, ran no workload or fault, provisioned nothing, and resolved no
 external gate. Milestone evidence remains partial and execution remains
 blocked.
 
-Milestone 7.7 remains in progress. Checkpoint 6 and Milestone 7.8 remain
-unstarted and require separate authorization.
+Checkpoint 6 scope definition is complete locally. It records only safe
+account fingerprints, the two approved regions, exact intended future
+resource-group names, a 24-hour evidence contract, all 15 unresolved gates,
+and an 18-slot closed operation inventory. Seventeen operation slots remain
+blocked because no exact safe command template is established by repository
+sources. No Azure operation was run and no gate was resolved.
+
+Milestone 7.7 remains in progress. Checkpoint 6 is blocked pending separately
+authorized Azure Topology Preflight execution. Checkpoint 7 and Milestone 7.8
+remain unstarted and require separate authorization.

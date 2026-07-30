@@ -1,0 +1,397 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://solarplexus.invalid/schemas/milestone-7-7-azure-topology-scope-v1.json",
+  "title": "Milestone 7.7 Azure topology preflight scope contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "canonicalizationVersion",
+    "integrityDomain",
+    "scopeId",
+    "sourceCommit",
+    "checkpointStatus",
+    "azureExecutionAuthorized",
+    "provisioningAuthorized",
+    "azureScope",
+    "evidencePolicy",
+    "operationInventory",
+    "gatePolicy",
+    "exitGates",
+    "privacyRules",
+    "failureRules",
+    "deferredWork",
+    "scopeIntegritySha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "2020-12"
+    },
+    "contractVersion": {
+      "const": "mobius.milestone-7.7.azure-topology-preflight.v1"
+    },
+    "canonicalizationVersion": {
+      "const": "mobius.milestone-7.7.canonical-json.v1"
+    },
+    "integrityDomain": {
+      "const": "solarplexus-mobius/milestone-7.7/checkpoint-6/azure-topology-preflight/v1"
+    },
+    "scopeId": {
+      "const": "m7.7-cp6-azure-topology-scope"
+    },
+    "sourceCommit": {
+      "const": "b81a6cada9d3be40aaa8eb3a68eb659a0755e1ac"
+    },
+    "checkpointStatus": {
+      "const": "blocked-pending-separately-authorized-azure-topology-preflight-execution"
+    },
+    "azureExecutionAuthorized": {
+      "const": false
+    },
+    "provisioningAuthorized": {
+      "const": false
+    },
+    "azureScope": {
+      "$ref": "#/$defs/azureScope"
+    },
+    "evidencePolicy": {
+      "$ref": "#/$defs/evidencePolicy"
+    },
+    "operationInventory": {
+      "$ref": "#/$defs/inventoryBinding"
+    },
+    "gatePolicy": {
+      "$ref": "#/$defs/gatePolicy"
+    },
+    "exitGates": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "privacyRules": {
+      "$ref": "#/$defs/privacyRules"
+    },
+    "failureRules": {
+      "$ref": "#/$defs/failureRules"
+    },
+    "deferredWork": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "scopeIntegritySha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "azureScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cloud",
+        "fingerprintAlgorithm",
+        "subscriptionFingerprint",
+        "tenantFingerprint",
+        "primaryRegion",
+        "recoveryComparisonRegion",
+        "targetResourceGroup",
+        "cleanupControlResourceGroup",
+        "resourceGroupsAreIntendedFutureScopesOnly"
+      ],
+      "properties": {
+        "cloud": {
+          "const": "AzureCloud"
+        },
+        "fingerprintAlgorithm": {
+          "const": "domain-separated-sha256-of-lowercase-identifier-v1"
+        },
+        "subscriptionFingerprint": {
+          "const": "f4493115ce6375cf0e5d0616bede57126075fdb27ac78ea0ba7e0085252a7028"
+        },
+        "tenantFingerprint": {
+          "const": "702db9b14ed1014743e30242d59d5c6ef2578efd3213e0b62c5fcb13584ea85e"
+        },
+        "primaryRegion": {
+          "$ref": "#/$defs/primaryRegion"
+        },
+        "recoveryComparisonRegion": {
+          "$ref": "#/$defs/recoveryRegion"
+        },
+        "targetResourceGroup": {
+          "const": "rg-solarplexus-mobius-77-staging"
+        },
+        "cleanupControlResourceGroup": {
+          "const": "rg-solarplexus-mobius-77-cleanup-control"
+        },
+        "resourceGroupsAreIntendedFutureScopesOnly": {
+          "const": true
+        }
+      }
+    },
+    "primaryRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "displayName"],
+      "properties": {
+        "name": {
+          "const": "southcentralus"
+        },
+        "displayName": {
+          "const": "South Central US"
+        }
+      }
+    },
+    "recoveryRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "displayName"],
+      "properties": {
+        "name": {
+          "const": "northcentralus"
+        },
+        "displayName": {
+          "const": "North Central US"
+        }
+      }
+    },
+    "evidencePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "schemaFile",
+        "maximumAgeSeconds",
+        "timestampFormat",
+        "allowedGateStates",
+        "authorityLevels",
+        "checksumIsSignature",
+        "minimumFieldProjectionRequired",
+        "rawAzureOutputRetentionAllowed",
+        "mixedScopeEvidenceAllowed",
+        "runtimeGateResolutionFromMetadataAllowed"
+      ],
+      "properties": {
+        "contractVersion": {
+          "const": "mobius.milestone-7.7.azure-topology-preflight.v1"
+        },
+        "schemaFile": {
+          "const": "evidence.schema.json"
+        },
+        "maximumAgeSeconds": {
+          "const": 86400
+        },
+        "timestampFormat": {
+          "const": "rfc3339-utc-z-seconds"
+        },
+        "allowedGateStates": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["blocked", "failed", "proved", "unproved"]
+          }
+        },
+        "authorityLevels": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "official-azure-management-metadata",
+              "repository-approved-scope",
+              "subscription-scoped-control-plane"
+            ]
+          }
+        },
+        "checksumIsSignature": {
+          "const": false
+        },
+        "minimumFieldProjectionRequired": {
+          "const": true
+        },
+        "rawAzureOutputRetentionAllowed": {
+          "const": false
+        },
+        "mixedScopeEvidenceAllowed": {
+          "const": false
+        },
+        "runtimeGateResolutionFromMetadataAllowed": {
+          "const": false
+        }
+      }
+    },
+    "inventoryBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "file", "sha256", "defaultDecision"],
+      "properties": {
+        "version": {
+          "const": "mobius.milestone-7.7.azure-topology-operation-inventory.v1"
+        },
+        "file": {
+          "const": "operation-inventory.json"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "defaultDecision": {
+          "const": "deny"
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "scopeDefinitionState"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "scopeDefinitionState": {
+          "enum": ["defined-unresolved", "runtime-unresolved"]
+        }
+      }
+    },
+    "gatePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "infrastructureGates",
+        "runtimeGates",
+        "runtimeGatesRemainUnresolved",
+        "topologyMetadataMayResolveRuntimeGates"
+      ],
+      "properties": {
+        "infrastructureGates": {
+          "type": "array",
+          "minItems": 10,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/gate"
+          }
+        },
+        "runtimeGates": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/gate"
+          }
+        },
+        "runtimeGatesRemainUnresolved": {
+          "const": true
+        },
+        "topologyMetadataMayResolveRuntimeGates": {
+          "const": false
+        }
+      }
+    },
+    "privacyRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rawAzureIdentifiersAllowed",
+        "principalEnumerationAllowed",
+        "dataPlaneEvidenceAllowed",
+        "privateEndpointOrHostnameRetentionAllowed",
+        "emailRetentionAllowed",
+        "credentialOrTokenRetentionAllowed",
+        "minimumFieldProjectionRequired",
+        "fingerprintBeforeRetentionRequired"
+      ],
+      "properties": {
+        "rawAzureIdentifiersAllowed": {
+          "const": false
+        },
+        "principalEnumerationAllowed": {
+          "const": false
+        },
+        "dataPlaneEvidenceAllowed": {
+          "const": false
+        },
+        "privateEndpointOrHostnameRetentionAllowed": {
+          "const": false
+        },
+        "emailRetentionAllowed": {
+          "const": false
+        },
+        "credentialOrTokenRetentionAllowed": {
+          "const": false
+        },
+        "minimumFieldProjectionRequired": {
+          "const": true
+        },
+        "fingerprintBeforeRetentionRequired": {
+          "const": true
+        }
+      }
+    },
+    "failureRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unknownOperation",
+        "missingEvidence",
+        "staleEvidence",
+        "malformedEvidence",
+        "conflictingEvidence",
+        "tamperedEvidence",
+        "outOfScopeEvidence",
+        "mutatingOperation",
+        "dataPlaneOperation"
+      ],
+      "properties": {
+        "unknownOperation": {
+          "const": "deny"
+        },
+        "missingEvidence": {
+          "const": "record-and-block"
+        },
+        "staleEvidence": {
+          "const": "reject"
+        },
+        "malformedEvidence": {
+          "const": "reject"
+        },
+        "conflictingEvidence": {
+          "const": "reject"
+        },
+        "tamperedEvidence": {
+          "const": "reject"
+        },
+        "outOfScopeEvidence": {
+          "const": "reject"
+        },
+        "mutatingOperation": {
+          "const": "deny-and-record"
+        },
+        "dataPlaneOperation": {
+          "const": "deny-and-record"
+        }
+      }
+    }
+  }
+}

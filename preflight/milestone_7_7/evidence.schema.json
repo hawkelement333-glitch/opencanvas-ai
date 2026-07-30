@@ -1,0 +1,282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://solarplexus.invalid/schemas/milestone-7-7-azure-topology-evidence-v1.json",
+  "title": "Milestone 7.7 sanitized Azure topology preflight evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "canonicalizationVersion",
+    "evidenceId",
+    "scopeIntegritySha256",
+    "operationInventorySha256",
+    "observedAtUtc",
+    "verifiedAtUtc",
+    "expiresAtUtc",
+    "observations",
+    "infrastructureGates",
+    "runtimeGates",
+    "privacy",
+    "completion",
+    "evidenceIntegritySha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "2020-12"
+    },
+    "contractVersion": {
+      "const": "mobius.milestone-7.7.azure-topology-preflight.v1"
+    },
+    "canonicalizationVersion": {
+      "const": "mobius.milestone-7.7.canonical-json.v1"
+    },
+    "evidenceId": {
+      "$ref": "#/$defs/identifier"
+    },
+    "scopeIntegritySha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "operationInventorySha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "observedAtUtc": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "verifiedAtUtc": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "expiresAtUtc": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "observations": {
+      "type": "array",
+      "minItems": 18,
+      "maxItems": 18,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    },
+    "infrastructureGates": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/gate"
+      }
+    },
+    "runtimeGates": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/runtimeGate"
+      }
+    },
+    "privacy": {
+      "$ref": "#/$defs/privacy"
+    },
+    "completion": {
+      "$ref": "#/$defs/completion"
+    },
+    "evidenceIntegritySha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "gateState": {
+      "enum": ["blocked", "failed", "proved", "unproved"]
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "value"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "value": {
+          "type": ["string", "integer", "boolean", "null"]
+        }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationId",
+        "status",
+        "observedAtUtc",
+        "authorityLevel",
+        "scopeIntegritySha256",
+        "fields",
+        "minimumProjection",
+        "rawIdentifiersRetained",
+        "dataPlane",
+        "mutation",
+        "explanationCode"
+      ],
+      "properties": {
+        "operationId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "status": {
+          "$ref": "#/$defs/gateState"
+        },
+        "observedAtUtc": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "authorityLevel": {
+          "enum": [
+            "official-azure-management-metadata",
+            "repository-approved-scope",
+            "subscription-scoped-control-plane"
+          ]
+        },
+        "scopeIntegritySha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "fields": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        },
+        "minimumProjection": {
+          "const": true
+        },
+        "rawIdentifiersRetained": {
+          "const": false
+        },
+        "dataPlane": {
+          "const": false
+        },
+        "mutation": {
+          "const": false
+        },
+        "explanationCode": {
+          "$ref": "#/$defs/identifier"
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gateId", "status", "operationIds", "explanationCode"],
+      "properties": {
+        "gateId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "status": {
+          "$ref": "#/$defs/gateState"
+        },
+        "operationIds": {
+          "type": "array",
+          "maxItems": 18,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        },
+        "explanationCode": {
+          "$ref": "#/$defs/identifier"
+        }
+      }
+    },
+    "runtimeGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gateId", "status", "operationIds", "explanationCode"],
+      "properties": {
+        "gateId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "status": {
+          "const": "unproved"
+        },
+        "operationIds": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "explanationCode": {
+          "const": "runtime-evidence-required"
+        }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimumFieldProjection",
+        "rawAzureOutputRetained",
+        "rawAzureIdentifiersRetained",
+        "dataPlaneEvidenceRetained",
+        "privateOperationalDataRetained"
+      ],
+      "properties": {
+        "minimumFieldProjection": {
+          "const": true
+        },
+        "rawAzureOutputRetained": {
+          "const": false
+        },
+        "rawAzureIdentifiersRetained": {
+          "const": false
+        },
+        "dataPlaneEvidenceRetained": {
+          "const": false
+        },
+        "privateOperationalDataRetained": {
+          "const": false
+        }
+      }
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scopeDefinitionStatus",
+        "preflightStatus",
+        "runtimeGatesResolved",
+        "provisioningAuthorized"
+      ],
+      "properties": {
+        "scopeDefinitionStatus": {
+          "const": "complete-local"
+        },
+        "preflightStatus": {
+          "enum": [
+            "complete-preflight",
+            "complete-with-provisioning-blocked",
+            "incomplete"
+          ]
+        },
+        "runtimeGatesResolved": {
+          "const": false
+        },
+        "provisioningAuthorized": {
+          "const": false
+        }
+      }
+    }
+  }
+}

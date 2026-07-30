@@ -1,0 +1,165 @@
+{
+  "schemaVersion": "2020-12",
+  "contractVersion": "mobius.milestone-7.7.azure-topology-preflight.v1",
+  "canonicalizationVersion": "mobius.milestone-7.7.canonical-json.v1",
+  "integrityDomain": "solarplexus-mobius/milestone-7.7/checkpoint-6/azure-topology-preflight/v1",
+  "scopeId": "m7.7-cp6-azure-topology-scope",
+  "sourceCommit": "b81a6cada9d3be40aaa8eb3a68eb659a0755e1ac",
+  "checkpointStatus": "blocked-pending-separately-authorized-azure-topology-preflight-execution",
+  "azureExecutionAuthorized": false,
+  "provisioningAuthorized": false,
+  "azureScope": {
+    "cloud": "AzureCloud",
+    "fingerprintAlgorithm": "domain-separated-sha256-of-lowercase-identifier-v1",
+    "subscriptionFingerprint": "f4493115ce6375cf0e5d0616bede57126075fdb27ac78ea0ba7e0085252a7028",
+    "tenantFingerprint": "702db9b14ed1014743e30242d59d5c6ef2578efd3213e0b62c5fcb13584ea85e",
+    "primaryRegion": {
+      "name": "southcentralus",
+      "displayName": "South Central US"
+    },
+    "recoveryComparisonRegion": {
+      "name": "northcentralus",
+      "displayName": "North Central US"
+    },
+    "targetResourceGroup": "rg-solarplexus-mobius-77-staging",
+    "cleanupControlResourceGroup": "rg-solarplexus-mobius-77-cleanup-control",
+    "resourceGroupsAreIntendedFutureScopesOnly": true
+  },
+  "evidencePolicy": {
+    "contractVersion": "mobius.milestone-7.7.azure-topology-preflight.v1",
+    "schemaFile": "evidence.schema.json",
+    "maximumAgeSeconds": 86400,
+    "timestampFormat": "rfc3339-utc-z-seconds",
+    "allowedGateStates": ["blocked", "failed", "proved", "unproved"],
+    "authorityLevels": [
+      "official-azure-management-metadata",
+      "repository-approved-scope",
+      "subscription-scoped-control-plane"
+    ],
+    "checksumIsSignature": false,
+    "minimumFieldProjectionRequired": true,
+    "rawAzureOutputRetentionAllowed": false,
+    "mixedScopeEvidenceAllowed": false,
+    "runtimeGateResolutionFromMetadataAllowed": false
+  },
+  "operationInventory": {
+    "version": "mobius.milestone-7.7.azure-topology-operation-inventory.v1",
+    "file": "operation-inventory.json",
+    "sha256": "6d8047c2a89bdbe96d3962db5dc2f66eda8e753a02be2d85591b4fa6fe061362",
+    "defaultDecision": "deny"
+  },
+  "gatePolicy": {
+    "infrastructureGates": [
+      {
+        "id": "alert-destination",
+        "scopeDefinitionState": "defined-unresolved"
+      },
+      {
+        "id": "evidence-retention",
+        "scopeDefinitionState": "defined-unresolved"
+      },
+      {
+        "id": "exact-provider-api-versions",
+        "scopeDefinitionState": "defined-unresolved"
+      },
+      {
+        "id": "managed-identity-environment-mapping",
+        "scopeDefinitionState": "defined-unresolved"
+      },
+      {
+        "id": "openai-smtp-test-providers",
+        "scopeDefinitionState": "defined-unresolved"
+      },
+      {
+        "id": "private-acr-source-path",
+        "scopeDefinitionState": "defined-unresolved"
+      },
+      {
+        "id": "redis-custom-acl-support",
+        "scopeDefinitionState": "defined-unresolved"
+      },
+      {
+        "id": "region-and-subscription-availability",
+        "scopeDefinitionState": "defined-unresolved"
+      },
+      {
+        "id": "scanner-result-bridge",
+        "scopeDefinitionState": "defined-unresolved"
+      },
+      {
+        "id": "telemetry-gateway",
+        "scopeDefinitionState": "defined-unresolved"
+      }
+    ],
+    "runtimeGates": [
+      {
+        "id": "cleanup-supervisor-runtime-proof",
+        "scopeDefinitionState": "runtime-unresolved"
+      },
+      {
+        "id": "effect-lock-runtime-proof",
+        "scopeDefinitionState": "runtime-unresolved"
+      },
+      {
+        "id": "fault-controller-shape",
+        "scopeDefinitionState": "runtime-unresolved"
+      },
+      {
+        "id": "isolated-environment",
+        "scopeDefinitionState": "runtime-unresolved"
+      },
+      {
+        "id": "live-failure-authorization",
+        "scopeDefinitionState": "runtime-unresolved"
+      }
+    ],
+    "runtimeGatesRemainUnresolved": true,
+    "topologyMetadataMayResolveRuntimeGates": false
+  },
+  "exitGates": [
+    "active-context-matches-approved-scope",
+    "all-operations-come-from-closed-inventory",
+    "all-operations-read-only-verified",
+    "all-observations-share-approved-scope",
+    "all-observations-fresh-utc",
+    "derived-evidence-minimum-field-only",
+    "evidence-schema-canonicalization-integrity-pass",
+    "all-infrastructure-gates-have-evidence-status",
+    "no-required-observation-silently-missing",
+    "negative-evidence-remains-visible",
+    "runtime-gates-remain-unresolved",
+    "no-mutation-data-plane-or-execution"
+  ],
+  "privacyRules": {
+    "rawAzureIdentifiersAllowed": false,
+    "principalEnumerationAllowed": false,
+    "dataPlaneEvidenceAllowed": false,
+    "privateEndpointOrHostnameRetentionAllowed": false,
+    "emailRetentionAllowed": false,
+    "credentialOrTokenRetentionAllowed": false,
+    "minimumFieldProjectionRequired": true,
+    "fingerprintBeforeRetentionRequired": true
+  },
+  "failureRules": {
+    "unknownOperation": "deny",
+    "missingEvidence": "record-and-block",
+    "staleEvidence": "reject",
+    "malformedEvidence": "reject",
+    "conflictingEvidence": "reject",
+    "tamperedEvidence": "reject",
+    "outOfScopeEvidence": "reject",
+    "mutatingOperation": "deny-and-record",
+    "dataPlaneOperation": "deny-and-record"
+  },
+  "deferredWork": [
+    "azure-topology-preflight-execution",
+    "checkpoint-7",
+    "deployment",
+    "failure-injection",
+    "milestone-7.8",
+    "provisioning",
+    "runtime-validation",
+    "workload-execution"
+  ],
+  "scopeIntegritySha256": "cc47f0d150953f1df026a40432573372ba41d4c84fb9a39a96dc0fda8ac20cb5"
+}

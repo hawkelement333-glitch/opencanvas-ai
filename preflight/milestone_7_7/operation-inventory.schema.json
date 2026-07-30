@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://solarplexus.invalid/schemas/milestone-7-7-azure-operation-inventory-v1.json",
+  "title": "Milestone 7.7 closed Azure read-only operation inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "scopeContractVersion",
+    "canonicalizationVersion",
+    "integrityDomain",
+    "defaultDecision",
+    "defaults",
+    "operations",
+    "inventoryIntegritySha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "2020-12"
+    },
+    "contractVersion": {
+      "const": "mobius.milestone-7.7.azure-topology-operation-inventory.v1"
+    },
+    "scopeContractVersion": {
+      "const": "mobius.milestone-7.7.azure-topology-preflight.v1"
+    },
+    "canonicalizationVersion": {
+      "const": "mobius.milestone-7.7.canonical-json.v1"
+    },
+    "integrityDomain": {
+      "const": "solarplexus-mobius/milestone-7.7/checkpoint-6/azure-topology-preflight/v1/operation-inventory"
+    },
+    "defaultDecision": {
+      "const": "deny"
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowedExecutable",
+        "cloud",
+        "controlPlaneOnly",
+        "dataPlaneAllowed",
+        "mutationAllowed",
+        "minimumProjectionOnly",
+        "rawOutputRetentionAllowed",
+        "maximumEvidenceAgeSeconds",
+        "unknownOperationDecision"
+      ],
+      "properties": {
+        "allowedExecutable": {
+          "const": "az"
+        },
+        "cloud": {
+          "const": "AzureCloud"
+        },
+        "controlPlaneOnly": {
+          "const": true
+        },
+        "dataPlaneAllowed": {
+          "const": false
+        },
+        "mutationAllowed": {
+          "const": false
+        },
+        "minimumProjectionOnly": {
+          "const": true
+        },
+        "rawOutputRetentionAllowed": {
+          "const": false
+        },
+        "maximumEvidenceAgeSeconds": {
+          "const": 86400
+        },
+        "unknownOperationDecision": {
+          "const": "deny"
+        }
+      }
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 18,
+      "maxItems": 18,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/operation"
+      }
+    },
+    "inventoryIntegritySha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "stringList": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 160
+      }
+    },
+    "transform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceField", "retainedField", "action", "domain"],
+      "properties": {
+        "sourceField": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "retainedField": {
+          "$ref": "#/$defs/identifier"
+        },
+        "action": {
+          "const": "domain-separated-sha256-lowercase"
+        },
+        "domain": {
+          "enum": [
+            "mobius.azure.subscription-context.v1",
+            "mobius.azure.tenant-context.v1"
+          ]
+        }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "supports",
+        "definitionStatus",
+        "commandTemplate",
+        "managementMethod",
+        "semanticReadOnlyVerified",
+        "controlPlane",
+        "dataPlane",
+        "mutating",
+        "permittedRegions",
+        "permittedScope",
+        "retainedProjection",
+        "transforms",
+        "maximumEvidenceAgeSeconds",
+        "authorityLevel",
+        "failureBehavior",
+        "readOnlyProof",
+        "blockingReason"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "supports": {
+          "$ref": "#/$defs/stringList"
+        },
+        "definitionStatus": {
+          "enum": ["defined", "blocked"]
+        },
+        "commandTemplate": {
+          "type": ["array", "null"],
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 320
+          }
+        },
+        "managementMethod": {
+          "enum": ["local-context", "get", "read-only-query-post", "unresolved"]
+        },
+        "semanticReadOnlyVerified": {
+          "type": "boolean"
+        },
+        "controlPlane": {
+          "type": "boolean"
+        },
+        "dataPlane": {
+          "const": false
+        },
+        "mutating": {
+          "const": false
+        },
+        "permittedRegions": {
+          "$ref": "#/$defs/stringList"
+        },
+        "permittedScope": {
+          "enum": [
+            "approved-account-context",
+            "approved-subscription-metadata",
+            "approved-regions",
+            "approved-target-resource-group",
+            "approved-cleanup-control-resource-group",
+            "approved-future-resource-groups"
+          ]
+        },
+        "retainedProjection": {
+          "$ref": "#/$defs/stringList"
+        },
+        "transforms": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/transform"
+          }
+        },
+        "maximumEvidenceAgeSeconds": {
+          "const": 86400
+        },
+        "authorityLevel": {
+          "enum": [
+            "official-azure-management-metadata",
+            "repository-approved-scope",
+            "subscription-scoped-control-plane"
+          ]
+        },
+        "failureBehavior": {
+          "enum": [
+            "record-failure-and-stop-context-verification",
+            "record-blocked-and-do-not-execute",
+            "record-negative-evidence-and-fail-closed"
+          ]
+        },
+        "readOnlyProof": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "blockingReason": {
+          "type": ["string", "null"],
+          "maxLength": 160
+        }
+      }
+    }
+  }
+}
