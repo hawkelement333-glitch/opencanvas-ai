@@ -534,9 +534,10 @@ blocked.
 Checkpoint 6 scope definition is complete locally. It records only safe
 account fingerprints, the two approved regions, exact intended future
 resource-group names, a 24-hour evidence contract, all 15 unresolved gates,
-and an 18-slot closed operation inventory. Seventeen operation slots remain
-blocked because no exact safe command template is established by repository
-sources.
+and an 18-slot closed operation inventory. The two exact resource-group
+absence templates are now defined locally but have not been executed. Fifteen
+operation slots remain blocked because no exact safe command template is
+established by repository sources.
 
 The separately authorized read-only Azure Topology Preflight proved only
 `current-account-context`. Its sanitized evidence ID is
@@ -545,10 +546,11 @@ The separately authorized read-only Azure Topology Preflight proved only
 and classification `complete-with-provisioning-blocked`. The complete
 canonical evidence object existed only in memory; the repository preserves the
 sanitized report, not that object, and this documentation does not renew its
-recorded expiry. No Azure validation occurred during this documentation-only
-reconciliation.
+recorded expiry. It binds the earlier inventory and is non-authoritative for
+the revised inventory and scope integrity values. No Azure validation occurred
+while defining the two local templates.
 
-Milestone 7.7 remains in progress. The other 17 operation slots and all ten
+Milestone 7.7 remains in progress. The other 15 operation slots and all ten
 infrastructure gates remain blocked; all five runtime gates remain unproved.
 Provisioning remains blocked. Checkpoint 7 and Milestone 7.8 remain unstarted
 and require separate authorization.

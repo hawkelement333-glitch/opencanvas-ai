@@ -7,14 +7,15 @@ authorized Azure Topology Preflight produced a valid sanitized result:
 
 `complete-with-provisioning-blocked`
 
-The result proves only the committed `current-account-context` operation. The
-other 17 committed operation slots remain blocked, all ten infrastructure
-gates remain blocked, and all five runtime gates remain unproved. This result
-does not complete Milestone 7.7 and does not authorize provisioning,
-Checkpoint 7, or Milestone 7.8.
+That historical result proves only the earlier inventory's
+`current-account-context` operation. Two exact resource-group absence
+templates are now defined locally but have not been executed. The other 15
+committed operation slots remain blocked, all ten infrastructure gates remain
+blocked, and all five runtime gates remain unproved. Neither the historical
+result nor these local definitions complete Milestone 7.7 or authorize Azure
+execution, provisioning, Checkpoint 7, or Milestone 7.8.
 
-No Azure command or validation was run during this documentation-only
-reconciliation.
+No Azure command or validation was run while defining the two templates.
 
 ## Approved future scope
 
@@ -82,6 +83,22 @@ package. It is not the hash of this documentation file. The complete canonical
 evidence object existed only in memory; the repository preserves this
 sanitized report, not that complete object.
 
+The record was produced against the earlier operation inventory with integrity
+SHA-256
+`6d8047c2a89bdbe96d3962db5dc2f66eda8e753a02be2d85591b4fa6fe061362`
+and scope integrity SHA-256
+`cc47f0d150953f1df026a40432573372ba41d4c84fb9a39a96dc0fda8ac20cb5`.
+Defining the two resource-group operations changes those values to:
+
+- operation inventory:
+  `923cbf934040405fd1702b49bd79d876ee3e85fe88d68bbb3d94f980fa45b843`;
+- scope:
+  `a98776f4d2ea33f64e28514fc7c13d2e6160a79ea29247f79fc71f4ffe529e3e`.
+
+The historical evidence remains unchanged, is non-authoritative for execution
+under the revised inventory, and does not authorize reusing its result. A new
+Azure preflight requires separate authorization. Provisioning remains blocked.
+
 ## Closed operation inventory
 
 The versioned inventory is default-deny and contains 18 exact operation slots:
@@ -89,8 +106,8 @@ The versioned inventory is default-deny and contains 18 exact operation slots:
 1. `current-account-context` — defined;
 2. `regional-service-availability` — blocked;
 3. `provider-registration-api-versions` — blocked;
-4. `target-group-existence` — blocked;
-5. `cleanup-group-existence` — blocked;
+4. `target-group-existence` — defined locally; not executed;
+5. `cleanup-group-existence` — defined locally; not executed;
 6. `regional-sku-capabilities` — blocked;
 7. `subscription-quota-bounded-usage` — blocked;
 8. `private-endpoint-network-support` — blocked;
@@ -105,13 +122,28 @@ The versioned inventory is default-deny and contains 18 exact operation slots:
 17. `provisioning-dependency-blockers` — blocked;
 18. `private-acr-source-prerequisites` — blocked.
 
-Only the current-account context operation has an exact
-repository-established Azure CLI template. The separately authorized
-preflight executed that operation and it passed at the recorded verification
-time. It was limited to `az account show`, a minimum six-field projection, and
-immediate domain-separated fingerprinting of the two identifiers.
+The current-account context operation retains its exact established Azure CLI
+template. The separately authorized historical preflight executed that
+operation and it passed at the recorded verification time. It was limited to
+`az account show`, a minimum six-field projection, and immediate
+domain-separated fingerprinting of the two identifiers.
 
-The other 17 operations lacked safely committed command templates, were not
+The two resource-group operations use only the official Microsoft Learn
+[`az group exists`](https://learn.microsoft.com/en-us/cli/azure/group?view=azure-cli-lts#az-group-exists)
+Core, GA command contract:
+
+`az group exists --name {exact_resource_group_name} --subscription {verified_subscription_id} --only-show-errors --output tsv`
+
+The operation identity binds each exact group name from the scope contract.
+Before future execution, the raw subscription identifier must match the
+committed fingerprint; it may exist only in process memory and is never
+retained. An exact `false` is the sole proved-absence outcome and retains only
+`exists=false`. An exact `true`, nonzero exit, timeout, blank, malformed,
+mixed, duplicate, or unexpected output fails closed. The contract permits no
+default subscription, group listing, broad discovery, alternate group name,
+REST, SDK, PowerShell, portal, Resource Graph, or generic-resource fallback.
+
+The remaining 15 operations lack safely committed command templates, were not
 executed, and remain blocked. The contract deliberately does not invent
 commands.
 
@@ -172,23 +204,26 @@ applicable.
 
 - Exact validator command transcripts and full command output were not
   retained in the preceding response.
-- No new Azure validation occurred during this documentation step.
+- No new Azure validation occurred while defining the two local templates.
 - Exact cost attribution remains unproved.
 - Independent post-operation Azure inventory proof remains unproved.
 - The account-context evidence passed validation at its recorded verification
   time.
 - Documentation after `2026-07-31T19:55:32Z` does not renew the evidence.
+- The historical evidence was produced against the earlier inventory and
+  cannot prove or authorize execution under the revised integrity bindings.
 - A new preflight requires separate authorization.
 
 ## Local boundary
 
-The scope-definition pass added only the isolated preflight contracts, their
-focused tests, this handoff, and minimum Milestone 7 status text. This
-documentation reconciliation changes only existing documentation. It changes
-no application, test, schema, worker, frontend, provider, migration,
-dependency, lock, runtime configuration, command inventory, or infrastructure
-template.
+The scope-definition continuation changes only the isolated preflight
+inventory, scope binding, local non-executing framework, focused tests, and
+directly affected Checkpoint 6 documentation. It changes no application,
+worker, frontend, provider, migration, dependency, lock, runtime
+configuration, Bicep topology, or infrastructure resource.
 
 Checkpoint 6 now has a valid sanitized preflight result classified
-`complete-with-provisioning-blocked`. Provisioning remains blocked, Milestone
-7.7 remains in progress, and Checkpoint 7 and Milestone 7.8 remain unstarted.
+`complete-with-provisioning-blocked` only as historical evidence for the
+earlier inventory. The revised inventory has not been executed. Provisioning
+remains blocked, Milestone 7.7 remains in progress, and Checkpoint 7 and
+Milestone 7.8 remain unstarted.

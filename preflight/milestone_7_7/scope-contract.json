@@ -45,7 +45,7 @@
   "operationInventory": {
     "version": "mobius.milestone-7.7.azure-topology-operation-inventory.v1",
     "file": "operation-inventory.json",
-    "sha256": "6d8047c2a89bdbe96d3962db5dc2f66eda8e753a02be2d85591b4fa6fe061362",
+    "sha256": "923cbf934040405fd1702b49bd79d876ee3e85fe88d68bbb3d94f980fa45b843",
     "defaultDecision": "deny"
   },
   "gatePolicy": {
@@ -161,5 +161,5 @@
     "runtime-validation",
     "workload-execution"
   ],
-  "scopeIntegritySha256": "cc47f0d150953f1df026a40432573372ba41d4c84fb9a39a96dc0fda8ac20cb5"
+  "scopeIntegritySha256": "a98776f4d2ea33f64e28514fc7c13d2e6160a79ea29247f79fc71f4ffe529e3e"
 }

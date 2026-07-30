@@ -16,11 +16,17 @@ access, provisioning, deployment, workload execution, or Checkpoint 7.
 - `verify.py` emits a bounded deterministic verification report and has no
   process or network client.
 
-The inventory contains 18 required operation slots. Only
-`current-account-context` has an exact repository-verified command template.
-The other 17 slots are intentionally blocked because no exact safe command
-template is established by repository sources. A blocked entry cannot be
-executed or upgraded by assumption.
+The inventory contains 18 required operation slots. Three have exact
+repository-verified command templates: `current-account-context`,
+`target-group-existence`, and `cleanup-group-existence`. The two group
+operations bind exact names from the scope contract and use only Microsoft
+Learn's Core, GA
+[`az group exists`](https://learn.microsoft.com/en-us/cli/azure/group?view=azure-cli-lts#az-group-exists)
+contract. They require an explicit in-memory subscription binding that must
+match the committed fingerprint and retain only the exact boolean absence
+result. They have not been executed. The other 15 slots are intentionally
+blocked because no exact safe command template is established by repository
+sources. A blocked entry cannot be executed or upgraded by assumption.
 
 Checksums provide deterministic integrity only; they are not signatures.
 Future evidence expires 24 hours after its earliest recorded UTC observation.
@@ -35,7 +41,9 @@ The separately authorized preflight later proved only
 
 The complete canonical evidence object existed only in memory. The repository
 preserves the sanitized report in the Checkpoint 6 handoff, not that object,
-and documentation does not renew the recorded evidence expiry. The other 17
-operation slots and all ten infrastructure gates remain blocked; all five
+and documentation does not renew the recorded evidence expiry. That evidence
+binds the earlier inventory and is non-authoritative for the revised
+inventory. A new Azure preflight requires separate authorization. The other
+15 operation slots and all ten infrastructure gates remain blocked; all five
 runtime gates remain unproved. Provisioning, Checkpoint 7, and Milestone 7.8
 remain unstarted and require separate authorization.

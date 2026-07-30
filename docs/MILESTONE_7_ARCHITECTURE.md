@@ -1446,11 +1446,12 @@ preflight, Checkpoint 6, or any live exercise.
 Checkpoint 6 scope definition now binds the approved account fingerprints,
 primary and comparison regions, exact intended future resource groups,
 24-hour sanitized evidence policy, ten infrastructure gates, five unresolved
-runtime gates, and an 18-slot closed default-deny operation inventory. Only
-the current-account context slot has an exact repository-verified read-only
-command template; the remaining 17 slots are explicitly blocked rather than
-filled by assumption. This local contract authorizes no Azure execution and
-does not resolve any gate.
+runtime gates, and an 18-slot closed default-deny operation inventory. The
+current-account context and two exact resource-group absence slots have
+repository-verified read-only command templates; the remaining 15 slots are
+explicitly blocked rather than filled by assumption. The group templates have
+not been executed. This local contract authorizes no Azure execution and does
+not resolve any gate.
 
 The separately authorized read-only Azure Topology Preflight later proved only
 the current-account context and produced sanitized evidence
@@ -1458,7 +1459,9 @@ the current-account context and produced sanitized evidence
 `f2af5b10703f0f0a88237e1e8f154b330b3f5a9c656aa900a3b397ed851f7a4a`,
 classified `complete-with-provisioning-blocked`. The complete canonical
 evidence object existed only in memory; the repository preserves its sanitized
-report, and documentation does not renew the recorded evidence expiry. The
-other 17 operation slots and all ten infrastructure gates remain blocked; all
-five runtime gates remain unproved. Provisioning remains blocked, Milestone
-7.7 remains in progress, and Checkpoint 7 and Milestone 7.8 remain unstarted.
+report, and documentation does not renew the recorded evidence expiry. It
+binds the earlier inventory and is non-authoritative under the revised
+inventory and scope integrity values. The other 15 operation slots and all ten
+infrastructure gates remain blocked; all five runtime gates remain unproved.
+Provisioning remains blocked, Milestone 7.7 remains in progress, and
+Checkpoint 7 and Milestone 7.8 remain unstarted.

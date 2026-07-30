@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -116,7 +117,14 @@ OPERATION_IDS: Final = (
     "provisioning-dependency-blockers",
     "private-acr-source-prerequisites",
 )
-DEFINED_OPERATION_IDS: Final = ("current-account-context",)
+RESOURCE_GROUP_OPERATION_IDS: Final = (
+    "target-group-existence",
+    "cleanup-group-existence",
+)
+DEFINED_OPERATION_IDS: Final = (
+    "current-account-context",
+    *RESOURCE_GROUP_OPERATION_IDS,
+)
 EXPECTED_ACCOUNT_COMMAND: Final = (
     "az",
     "account",
@@ -151,6 +159,44 @@ EXPECTED_ACCOUNT_TRANSFORMS: Final = (
         "action": "domain-separated-sha256-lowercase",
         "domain": "mobius.azure.tenant-context.v1",
     },
+)
+SUBSCRIPTION_FINGERPRINT_DOMAIN: Final = "mobius.azure.subscription-context.v1"
+RESOURCE_GROUP_NAME_PLACEHOLDER: Final = "{exact_resource_group_name}"
+VERIFIED_SUBSCRIPTION_ID_PLACEHOLDER: Final = "{verified_subscription_id}"
+EXPECTED_RESOURCE_GROUP_COMMAND: Final = (
+    "az",
+    "group",
+    "exists",
+    "--name",
+    RESOURCE_GROUP_NAME_PLACEHOLDER,
+    "--subscription",
+    VERIFIED_SUBSCRIPTION_ID_PLACEHOLDER,
+    "--only-show-errors",
+    "--output",
+    "tsv",
+)
+EXPECTED_RESOURCE_GROUP_PROJECTION: Final = ("exists",)
+RESOURCE_GROUP_NAMES_BY_OPERATION: Final = {
+    "target-group-existence": TARGET_RESOURCE_GROUP,
+    "cleanup-group-existence": CLEANUP_RESOURCE_GROUP,
+}
+RESOURCE_GROUP_READ_ONLY_PROOF: Final = (
+    "official-az-group-exists-core-ga-exact-name-control-plane-read-only"
+)
+RESOURCE_GROUP_PROVED_EXPLANATION: Final = "exact-resource-group-absent"
+RESOURCE_GROUP_FAILED_EXPLANATIONS: Final = frozenset(
+    {
+        "exact-resource-group-present",
+        "resource-group-query-error",
+        "resource-group-output-malformed",
+        "resource-group-query-timeout",
+    }
+)
+RESOURCE_GROUP_BLOCKED_EXPLANATIONS: Final = frozenset(
+    {
+        "operation-execution-not-authorized",
+        "subscription-fingerprint-mismatch",
+    }
 )
 EXPECTED_OPERATION_POLICY: Final = {
     "current-account-context": (
@@ -442,6 +488,84 @@ def evidence_integrity_sha256(value: dict[str, JsonValue]) -> str:
     return integrity_sha256(_normalized_evidence(value), EVIDENCE_DOMAIN)
 
 
+def _identifier_fingerprint(identifier: str, *, domain: str) -> str:
+    if not identifier or identifier != identifier.strip():
+        raise ContractError("raw Azure identifier is empty or non-canonical")
+    if any(ord(character) < 32 or ord(character) == 127 for character in identifier):
+        raise ContractError("raw Azure identifier contains a control character")
+    payload = domain.encode("utf-8") + b"\0" + identifier.lower().encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def resource_group_exists_command_template(operation_id: str) -> tuple[str, ...]:
+    """Bind the closed operation identity to one exact committed group name."""
+
+    resource_group_name = RESOURCE_GROUP_NAMES_BY_OPERATION.get(operation_id)
+    if resource_group_name is None:
+        raise ContractError("resource-group operation is outside the closed inventory")
+    command = list(EXPECTED_RESOURCE_GROUP_COMMAND)
+    command[command.index(RESOURCE_GROUP_NAME_PLACEHOLDER)] = resource_group_name
+    return tuple(command)
+
+
+def materialize_resource_group_exists_command(
+    operation_id: str,
+    raw_subscription_id: str,
+) -> tuple[str, ...]:
+    """Bind one exact group after the in-memory subscription fingerprint check."""
+
+    actual_fingerprint = _identifier_fingerprint(
+        raw_subscription_id,
+        domain=SUBSCRIPTION_FINGERPRINT_DOMAIN,
+    )
+    if actual_fingerprint != SUBSCRIPTION_FINGERPRINT:
+        raise ContractError(
+            "subscription fingerprint mismatch; execution is prohibited"
+        )
+    command = list(resource_group_exists_command_template(operation_id))
+    command[command.index(VERIFIED_SUBSCRIPTION_ID_PLACEHOLDER)] = raw_subscription_id
+    return tuple(command)
+
+
+def parse_resource_group_exists_result(
+    *,
+    stdout: str,
+    exit_code: int,
+    timed_out: bool,
+) -> dict[str, JsonValue]:
+    """Project only an exact boolean result into the existing evidence convention."""
+
+    if timed_out:
+        return {
+            "status": "failed",
+            "fields": [],
+            "explanationCode": "resource-group-query-timeout",
+        }
+    if exit_code != 0:
+        return {
+            "status": "failed",
+            "fields": [],
+            "explanationCode": "resource-group-query-error",
+        }
+    if stdout in {"false", "false\n", "false\r\n"}:
+        return {
+            "status": "proved",
+            "fields": [{"id": "exists", "value": False}],
+            "explanationCode": RESOURCE_GROUP_PROVED_EXPLANATION,
+        }
+    if stdout in {"true", "true\n", "true\r\n"}:
+        return {
+            "status": "failed",
+            "fields": [],
+            "explanationCode": "exact-resource-group-present",
+        }
+    return {
+        "status": "failed",
+        "fields": [],
+        "explanationCode": "resource-group-output-malformed",
+    }
+
+
 def _operation_rows(
     inventory: dict[str, JsonValue],
 ) -> list[dict[str, JsonValue]]:
@@ -507,9 +631,14 @@ def validate_operation_inventory(value: JsonValue) -> dict[str, JsonValue]:
                 _as_str(item, "$.commandTemplate[]")
                 for item in _as_list(command_value, "$.commandTemplate")
             )
-            if command != EXPECTED_ACCOUNT_COMMAND:
+            expected_command = (
+                EXPECTED_ACCOUNT_COMMAND
+                if operation_id == "current-account-context"
+                else EXPECTED_RESOURCE_GROUP_COMMAND
+            )
+            if command != expected_command:
                 raise ContractError(
-                    "current-account command differs from the closed template"
+                    f"{operation_id}: command differs from the template"
                 )
             lowered_tokens = {token.lower() for token in command}
             if lowered_tokens & FORBIDDEN_COMMAND_TOKENS:
@@ -520,27 +649,38 @@ def validate_operation_inventory(value: JsonValue) -> dict[str, JsonValue]:
                 raise ContractError(
                     "defined command contains a prohibited data-plane token"
                 )
-            if row["managementMethod"] != "local-context":
-                raise ContractError("current-account management method differs")
             if row["semanticReadOnlyVerified"] is not True:
                 raise ContractError("defined operation is not read-only verified")
             projection = tuple(
                 _as_str(item, "$.retainedProjection[]")
                 for item in _as_list(row["retainedProjection"], "$.retainedProjection")
             )
-            if projection != EXPECTED_ACCOUNT_PROJECTION:
-                raise ContractError("current-account retained projection differs")
             transforms = _as_list(row["transforms"], "$.transforms")
-            if (
-                transforms != list(EXPECTED_ACCOUNT_TRANSFORMS)
-                or row["failureBehavior"]
-                != "record-failure-and-stop-context-verification"
-                or row["readOnlyProof"]
-                != "current-account-show-has-no-control-plane-or-data-plane-mutation"
+            if operation_id == "current-account-context":
+                if (
+                    row["managementMethod"] != "local-context"
+                    or projection != EXPECTED_ACCOUNT_PROJECTION
+                    or transforms != list(EXPECTED_ACCOUNT_TRANSFORMS)
+                    or row["failureBehavior"]
+                    != "record-failure-and-stop-context-verification"
+                    or row["readOnlyProof"]
+                    != "current-account-show-has-no-control-plane-or-data-plane-mutation"
+                    or row["blockingReason"] is not None
+                ):
+                    raise ContractError(
+                        "current-account transform or blocking state differs"
+                    )
+            elif (
+                row["managementMethod"] != "get"
+                or projection != EXPECTED_RESOURCE_GROUP_PROJECTION
+                or transforms
+                or row["failureBehavior"] != "record-negative-evidence-and-fail-closed"
+                or row["readOnlyProof"] != RESOURCE_GROUP_READ_ONLY_PROOF
                 or row["blockingReason"] is not None
+                or operation_id not in RESOURCE_GROUP_NAMES_BY_OPERATION
             ):
                 raise ContractError(
-                    "current-account transform or blocking state differs"
+                    f"{operation_id}: resource-group operation contract differs"
                 )
         elif status == "blocked":
             if command_value is not None:
@@ -830,6 +970,36 @@ def validate_evidence(
             ):
                 raise ContractError(
                     f"{operation_id}: blocked operation cannot claim observation"
+                )
+        elif operation_id in RESOURCE_GROUP_OPERATION_IDS:
+            explanation_code = _as_str(
+                observation["explanationCode"], "$.observations[].explanationCode"
+            )
+            if status == "proved":
+                if (
+                    field_ids != ["exists"]
+                    or fields[0]["value"] is not False
+                    or explanation_code != RESOURCE_GROUP_PROVED_EXPLANATION
+                ):
+                    raise ContractError(
+                        f"{operation_id}: proved result is not exact group absence"
+                    )
+            elif status == "failed":
+                if fields or explanation_code not in RESOURCE_GROUP_FAILED_EXPLANATIONS:
+                    raise ContractError(
+                        f"{operation_id}: failed result is not a closed negative observation"
+                    )
+            elif status == "blocked":
+                if (
+                    fields
+                    or explanation_code not in RESOURCE_GROUP_BLOCKED_EXPLANATIONS
+                ):
+                    raise ContractError(
+                        f"{operation_id}: blocked result lacks an approved reason"
+                    )
+            else:
+                raise ContractError(
+                    f"{operation_id}: existence result must be proved, failed, or blocked"
                 )
         elif status == "proved":
             if set(field_ids) != permitted_fields:

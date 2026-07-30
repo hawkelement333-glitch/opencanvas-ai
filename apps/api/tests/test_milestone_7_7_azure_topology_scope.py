@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -9,16 +10,21 @@ from typing import Any
 
 import pytest
 from performance.milestone_7_7.framework import ContractError, canonical_bytes, load_json
+from preflight.milestone_7_7 import framework as topology_framework
 from preflight.milestone_7_7.framework import (
     ALLOWED_GATE_STATES,
     CLEANUP_RESOURCE_GROUP,
+    DEFINED_OPERATION_IDS,
+    EXPECTED_RESOURCE_GROUP_COMMAND,
     INFRASTRUCTURE_GATES,
     INVENTORY_PATH,
     MAXIMUM_EVIDENCE_AGE_SECONDS,
     OPERATION_IDS,
+    RESOURCE_GROUP_OPERATION_IDS,
     RUNTIME_GATES,
     SCOPE_PATH,
     SUBSCRIPTION_FINGERPRINT,
+    SUBSCRIPTION_FINGERPRINT_DOMAIN,
     TARGET_RESOURCE_GROUP,
     TENANT_FINGERPRINT,
     build_scope_contract,
@@ -26,6 +32,9 @@ from preflight.milestone_7_7.framework import (
     inventory_integrity_sha256,
     load_operation_inventory,
     load_scope_contract,
+    materialize_resource_group_exists_command,
+    parse_resource_group_exists_result,
+    resource_group_exists_command_template,
     scope_integrity_sha256,
     scope_verification_result,
     validate_evidence,
@@ -41,6 +50,8 @@ NOW = datetime(2026, 7, 30, 12, 2, tzinfo=UTC)
 OBSERVED_AT = "2026-07-30T12:00:00Z"
 VERIFIED_AT = "2026-07-30T12:01:00Z"
 EXPIRES_AT = "2026-07-31T12:00:00Z"
+HISTORICAL_INVENTORY_SHA256 = "6d8047c2a89bdbe96d3962db5dc2f66eda8e753a02be2d85591b4fa6fe061362"
+HISTORICAL_SCOPE_SHA256 = "cc47f0d150953f1df026a40432573372ba41d4c84fb9a39a96dc0fda8ac20cb5"
 
 
 def _inventory() -> dict[str, Any]:
@@ -88,6 +99,10 @@ def _evidence() -> dict[str, Any]:
             ]
             status = "proved"
             explanation = "approved-context-matched"
+        elif operation_id in RESOURCE_GROUP_OPERATION_IDS:
+            fields = []
+            status = "blocked"
+            explanation = "operation-execution-not-authorized"
         else:
             fields = []
             status = "blocked"
@@ -210,8 +225,8 @@ def test_scope_verifier_is_deterministic_and_bounded() -> None:
     assert len(canonical_bytes(first)) <= 16_384
     assert first["status"] == "valid"
     assert first["operationCount"] == 18
-    assert first["definedOperationCount"] == 1
-    assert first["blockedOperationCount"] == 17
+    assert first["definedOperationCount"] == 3
+    assert first["blockedOperationCount"] == 15
 
 
 def test_inventory_is_exact_closed_default_deny_and_control_plane_only() -> None:
@@ -224,9 +239,9 @@ def test_inventory_is_exact_closed_default_deny_and_control_plane_only() -> None
     assert all(item["controlPlane"] is True for item in operations)
     assert all(item["dataPlane"] is False for item in operations)
     assert all(item["mutating"] is False for item in operations)
-    assert [item["id"] for item in operations if item["definitionStatus"] == "defined"] == [
-        "current-account-context"
-    ]
+    assert [item["id"] for item in operations if item["definitionStatus"] == "defined"] == list(
+        DEFINED_OPERATION_IDS
+    )
     assert all(
         item["commandTemplate"] is None
         for item in operations
@@ -266,6 +281,15 @@ InventoryMutation = Callable[[dict[str, Any]], None]
         lambda value: _operation(value, "current-account-context")["transforms"][0].update(
             {"domain": "mobius.azure.tenant-context.v1"}
         ),
+        lambda value: _operation(value, "target-group-existence").update(
+            {"commandTemplate": ["az", "group", "list"]}
+        ),
+        lambda value: _operation(value, "target-group-existence").update(
+            {"commandTemplate": ["az", "group", "create"]}
+        ),
+        lambda value: _operation(value, "target-group-existence").update(
+            {"commandTemplate": ["az", "storage", "blob", "list"]}
+        ),
     ],
 )
 def test_inventory_semantic_tampering_fails_closed(mutate: InventoryMutation) -> None:
@@ -303,6 +327,237 @@ def test_synthetic_contract_evidence_is_valid_and_deterministic() -> None:
         observation["fields"].reverse()
     assert evidence_integrity_sha256(evidence) == evidence_integrity_sha256(reordered)
     assert validate_evidence(evidence, now=NOW) == evidence
+
+
+def _synthetic_subscription_fingerprint(raw_subscription_id: str) -> str:
+    payload = (
+        SUBSCRIPTION_FINGERPRINT_DOMAIN.encode("utf-8")
+        + b"\0"
+        + raw_subscription_id.lower().encode("utf-8")
+    )
+    return hashlib.sha256(payload).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("operation_id", "resource_group_name"),
+    [
+        ("target-group-existence", TARGET_RESOURCE_GROUP),
+        ("cleanup-group-existence", CLEANUP_RESOURCE_GROUP),
+    ],
+)
+def test_resource_group_command_is_exact_independent_and_explicitly_scoped(
+    operation_id: str,
+    resource_group_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_subscription_id = "-".join(("synthetic", "subscription", "context"))
+    with monkeypatch.context() as context:
+        context.setattr(
+            topology_framework,
+            "SUBSCRIPTION_FINGERPRINT",
+            _synthetic_subscription_fingerprint(raw_subscription_id),
+        )
+        command = materialize_resource_group_exists_command(
+            operation_id,
+            raw_subscription_id,
+        )
+    assert command == (
+        "az",
+        "group",
+        "exists",
+        "--name",
+        resource_group_name,
+        "--subscription",
+        raw_subscription_id,
+        "--only-show-errors",
+        "--output",
+        "tsv",
+    )
+    assert command.count("--subscription") == 1
+    assert "list" not in command
+    assert "show" not in command
+    assert "resource" not in command
+
+    inventory = load_operation_inventory()
+    operation = _operation(inventory, operation_id)
+    assert tuple(operation["commandTemplate"]) == EXPECTED_RESOURCE_GROUP_COMMAND
+    assert operation["retainedProjection"] == ["exists"]
+    assert operation["controlPlane"] is True
+    assert operation["dataPlane"] is False
+    assert operation["mutating"] is False
+    assert resource_group_exists_command_template(operation_id) == (
+        "az",
+        "group",
+        "exists",
+        "--name",
+        resource_group_name,
+        "--subscription",
+        "{verified_subscription_id}",
+        "--only-show-errors",
+        "--output",
+        "tsv",
+    )
+
+    retained_contracts = canonical_bytes(
+        {
+            "inventory": inventory,
+            "scope": load_scope_contract(),
+            "evidence": _evidence(),
+        }
+    )
+    assert raw_subscription_id.encode("utf-8") not in retained_contracts
+
+
+def test_subscription_fingerprint_mismatch_prevents_command_materialization() -> None:
+    with pytest.raises(ContractError, match="fingerprint mismatch"):
+        materialize_resource_group_exists_command(
+            "target-group-existence",
+            "-".join(("synthetic", "wrong", "subscription")),
+        )
+
+
+def test_unknown_resource_group_operation_cannot_materialize() -> None:
+    with pytest.raises(ContractError, match="closed inventory"):
+        resource_group_exists_command_template("regional-service-availability")
+
+
+@pytest.mark.parametrize("stdout", ["false", "false\n", "false\r\n"])
+def test_exact_false_output_projects_only_proved_absence(stdout: str) -> None:
+    assert parse_resource_group_exists_result(
+        stdout=stdout,
+        exit_code=0,
+        timed_out=False,
+    ) == {
+        "status": "proved",
+        "fields": [{"id": "exists", "value": False}],
+        "explanationCode": "exact-resource-group-absent",
+    }
+
+
+@pytest.mark.parametrize("stdout", ["true", "true\n", "true\r\n"])
+def test_exact_true_output_fails_closed_as_existing_group(stdout: str) -> None:
+    assert parse_resource_group_exists_result(
+        stdout=stdout,
+        exit_code=0,
+        timed_out=False,
+    ) == {
+        "status": "failed",
+        "fields": [],
+        "explanationCode": "exact-resource-group-present",
+    }
+
+
+def test_nonzero_exit_and_timeout_fail_closed_without_retained_output() -> None:
+    assert parse_resource_group_exists_result(
+        stdout="false\n",
+        exit_code=1,
+        timed_out=False,
+    ) == {
+        "status": "failed",
+        "fields": [],
+        "explanationCode": "resource-group-query-error",
+    }
+    assert parse_resource_group_exists_result(
+        stdout="false\n",
+        exit_code=0,
+        timed_out=True,
+    ) == {
+        "status": "failed",
+        "fields": [],
+        "explanationCode": "resource-group-query-timeout",
+    }
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        "",
+        "\n",
+        "False\n",
+        " false\n",
+        "false \n",
+        "false\nfalse\n",
+        "warning\nfalse\n",
+        "false true\n",
+        "null\n",
+        "{}\n",
+    ],
+)
+def test_blank_malformed_mixed_duplicate_or_unexpected_output_fails_closed(
+    stdout: str,
+) -> None:
+    result = parse_resource_group_exists_result(
+        stdout=stdout,
+        exit_code=0,
+        timed_out=False,
+    )
+    assert result == {
+        "status": "failed",
+        "fields": [],
+        "explanationCode": "resource-group-output-malformed",
+    }
+
+
+def test_group_absence_observations_validate_without_resolving_the_gate() -> None:
+    evidence = _evidence()
+    for operation_id in RESOURCE_GROUP_OPERATION_IDS:
+        observation = next(
+            item for item in evidence["observations"] if item["operationId"] == operation_id
+        )
+        observation.update(
+            parse_resource_group_exists_result(
+                stdout="false\n",
+                exit_code=0,
+                timed_out=False,
+            )
+        )
+    _rehash_evidence(evidence)
+    validated = validate_evidence(evidence, now=NOW)
+    assert all(row["status"] == "blocked" for row in validated["infrastructureGates"])
+    assert all(row["status"] == "unproved" for row in validated["runtimeGates"])
+
+
+@pytest.mark.parametrize(
+    ("status", "fields", "explanation_code"),
+    [
+        ("proved", [{"id": "exists", "value": True}], "exact-resource-group-absent"),
+        ("proved", [{"id": "exists", "value": False}], "claimed-result"),
+        ("failed", [{"id": "exists", "value": False}], "resource-group-query-error"),
+        ("failed", [], "claimed-result"),
+        ("blocked", [], "operation-template-blocked"),
+        ("unproved", [], "operation-not-observed"),
+    ],
+)
+def test_group_existence_evidence_semantics_fail_closed(
+    status: str,
+    fields: list[dict[str, object]],
+    explanation_code: str,
+) -> None:
+    evidence = _evidence()
+    observation = next(
+        item for item in evidence["observations"] if item["operationId"] == "target-group-existence"
+    )
+    observation.update(
+        {
+            "status": status,
+            "fields": fields,
+            "explanationCode": explanation_code,
+        }
+    )
+    _rehash_evidence(evidence)
+    with pytest.raises(ContractError):
+        validate_evidence(evidence, now=NOW)
+
+
+def test_historical_inventory_and_scope_hashes_are_not_current_proof() -> None:
+    evidence = _evidence()
+    evidence["operationInventorySha256"] = HISTORICAL_INVENTORY_SHA256
+    evidence["scopeIntegritySha256"] = HISTORICAL_SCOPE_SHA256
+    for observation in evidence["observations"]:
+        observation["scopeIntegritySha256"] = HISTORICAL_SCOPE_SHA256
+    _rehash_evidence(evidence)
+    with pytest.raises(ContractError, match="mixed or unknown scope"):
+        validate_evidence(evidence, now=NOW)
 
 
 @pytest.mark.parametrize(
