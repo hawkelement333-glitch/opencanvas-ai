@@ -1450,5 +1450,15 @@ runtime gates, and an 18-slot closed default-deny operation inventory. Only
 the current-account context slot has an exact repository-verified read-only
 command template; the remaining 17 slots are explicitly blocked rather than
 filled by assumption. This local contract authorizes no Azure execution and
-does not resolve any gate. Checkpoint 6 remains blocked pending separately
-authorized Azure Topology Preflight execution.
+does not resolve any gate.
+
+The separately authorized read-only Azure Topology Preflight later proved only
+the current-account context and produced sanitized evidence
+`m7.7-cp6-20260730-195532z`, integrity SHA-256
+`f2af5b10703f0f0a88237e1e8f154b330b3f5a9c656aa900a3b397ed851f7a4a`,
+classified `complete-with-provisioning-blocked`. The complete canonical
+evidence object existed only in memory; the repository preserves its sanitized
+report, and documentation does not renew the recorded evidence expiry. The
+other 17 operation slots and all ten infrastructure gates remain blocked; all
+five runtime gates remain unproved. Provisioning remains blocked, Milestone
+7.7 remains in progress, and Checkpoint 7 and Milestone 7.8 remain unstarted.

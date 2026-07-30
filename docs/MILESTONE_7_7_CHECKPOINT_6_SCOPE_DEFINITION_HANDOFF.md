@@ -2,13 +2,19 @@
 
 ## Decision
 
-The local scope-definition recovery pass is complete. Checkpoint 6 remains:
+The local scope-definition recovery pass remains complete. The separately
+authorized Azure Topology Preflight produced a valid sanitized result:
 
-`blocked pending separately authorized Azure Topology Preflight execution`
+`complete-with-provisioning-blocked`
 
-No Azure discovery or network operation was authorized or performed. This
-handoff does not authorize the later preflight, provisioning, Checkpoint 7, or
-Milestone 7.8.
+The result proves only the committed `current-account-context` operation. The
+other 17 committed operation slots remain blocked, all ten infrastructure
+gates remain blocked, and all five runtime gates remain unproved. This result
+does not complete Milestone 7.7 and does not authorize provisioning,
+Checkpoint 7, or Milestone 7.8.
+
+No Azure command or validation was run during this documentation-only
+reconciliation.
 
 ## Approved future scope
 
@@ -46,6 +52,36 @@ Allowed infrastructure-gate states are `proved`, `unproved`, `blocked`, and
 explanation. The five runtime gates remain `unproved`; topology metadata
 cannot resolve them.
 
+## Sanitized topology preflight result
+
+| Field                    | Recorded value                                                     |
+| ------------------------ | ------------------------------------------------------------------ |
+| Evidence ID              | `m7.7-cp6-20260730-195532z`                                        |
+| Integrity SHA-256        | `f2af5b10703f0f0a88237e1e8f154b330b3f5a9c656aa900a3b397ed851f7a4a` |
+| Classification           | `complete-with-provisioning-blocked`                               |
+| Proved operation         | `current-account-context`                                          |
+| Cloud                    | `AzureCloud`                                                       |
+| Default context          | `true`                                                             |
+| Account state            | `Enabled`                                                          |
+| Subscription fingerprint | matched                                                            |
+| Tenant fingerprint       | matched                                                            |
+| User type                | `user`                                                             |
+| Azure mutation           | `false`                                                            |
+| Data-plane access        | `false`                                                            |
+| Raw output retained      | `false`                                                            |
+| Raw identifiers retained | `false`                                                            |
+| Observed                 | `2026-07-30T19:55:32Z`                                             |
+| Verified                 | `2026-07-30T19:55:33Z`                                             |
+| Evidence expiry          | `2026-07-31T19:55:32Z`                                             |
+
+Raw subscription and tenant identifiers existed only in process memory. They
+were fingerprinted immediately, discarded, and never displayed or written.
+
+The integrity SHA-256 identifies the validated in-memory canonical evidence
+package. It is not the hash of this documentation file. The complete canonical
+evidence object existed only in memory; the repository preserves this
+sanitized report, not that complete object.
+
 ## Closed operation inventory
 
 The versioned inventory is default-deny and contains 18 exact operation slots:
@@ -70,11 +106,14 @@ The versioned inventory is default-deny and contains 18 exact operation slots:
 18. `private-acr-source-prerequisites` — blocked.
 
 Only the current-account context operation has an exact
-repository-established Azure CLI template. It is limited to `az account
-show`, a minimum six-field projection, and immediate domain-separated
-fingerprinting of the two identifiers. All other entries are blocked because
-repository sources do not establish an exact safe command template. The
-contract deliberately does not invent commands.
+repository-established Azure CLI template. The separately authorized
+preflight executed that operation and it passed at the recorded verification
+time. It was limited to `az account show`, a minimum six-field projection, and
+immediate domain-separated fingerprinting of the two identifiers.
+
+The other 17 operations lacked safely committed command templates, were not
+executed, and remain blocked. The contract deliberately does not invent
+commands.
 
 Every slot is control-plane-only, non-mutating, bound to approved scope, and
 limited to 24-hour sanitized evidence. Unknown operations, mutating commands,
@@ -103,10 +142,53 @@ Authoritative negative evidence may produce a complete preflight package with
 provisioning still blocked. Missing, stale, conflicting, malformed, or
 out-of-scope evidence leaves the preflight incomplete.
 
+## Gate status
+
+The following ten infrastructure gates remain `blocked`:
+
+- alert destination;
+- evidence retention;
+- exact provider API versions;
+- managed-identity environment mapping;
+- OpenAI/SMTP test providers;
+- private ACR source path;
+- Redis custom ACL support;
+- region/subscription availability;
+- scanner-result bridge; and
+- telemetry gateway.
+
+The following five runtime gates remain `unproved`:
+
+- cleanup-supervisor runtime proof;
+- effect-lock runtime proof;
+- fault-controller shape;
+- isolated environment; and
+- live-failure authorization.
+
+No blocked or unproved gate was converted to passed, deferred, or not
+applicable.
+
+## Evidence limitations
+
+- Exact validator command transcripts and full command output were not
+  retained in the preceding response.
+- No new Azure validation occurred during this documentation step.
+- Exact cost attribution remains unproved.
+- Independent post-operation Azure inventory proof remains unproved.
+- The account-context evidence passed validation at its recorded verification
+  time.
+- Documentation after `2026-07-31T19:55:32Z` does not renew the evidence.
+- A new preflight requires separate authorization.
+
 ## Local boundary
 
-This pass adds only the isolated preflight contracts, their focused tests,
-this handoff, and minimum Milestone 7 status text. It changes no application,
-worker, frontend, provider, migration, dependency, lock, or infrastructure
-template. Checkpoints 1–5 remain complete locally and unchanged. Checkpoint 7
-and Milestone 7.8 remain unstarted.
+The scope-definition pass added only the isolated preflight contracts, their
+focused tests, this handoff, and minimum Milestone 7 status text. This
+documentation reconciliation changes only existing documentation. It changes
+no application, test, schema, worker, frontend, provider, migration,
+dependency, lock, runtime configuration, command inventory, or infrastructure
+template.
+
+Checkpoint 6 now has a valid sanitized preflight result classified
+`complete-with-provisioning-blocked`. Provisioning remains blocked, Milestone
+7.7 remains in progress, and Checkpoint 7 and Milestone 7.8 remain unstarted.

@@ -536,8 +536,19 @@ account fingerprints, the two approved regions, exact intended future
 resource-group names, a 24-hour evidence contract, all 15 unresolved gates,
 and an 18-slot closed operation inventory. Seventeen operation slots remain
 blocked because no exact safe command template is established by repository
-sources. No Azure operation was run and no gate was resolved.
+sources.
 
-Milestone 7.7 remains in progress. Checkpoint 6 is blocked pending separately
-authorized Azure Topology Preflight execution. Checkpoint 7 and Milestone 7.8
-remain unstarted and require separate authorization.
+The separately authorized read-only Azure Topology Preflight proved only
+`current-account-context`. Its sanitized evidence ID is
+`m7.7-cp6-20260730-195532z`, with integrity SHA-256
+`f2af5b10703f0f0a88237e1e8f154b330b3f5a9c656aa900a3b397ed851f7a4a`,
+and classification `complete-with-provisioning-blocked`. The complete
+canonical evidence object existed only in memory; the repository preserves the
+sanitized report, not that object, and this documentation does not renew its
+recorded expiry. No Azure validation occurred during this documentation-only
+reconciliation.
+
+Milestone 7.7 remains in progress. The other 17 operation slots and all ten
+infrastructure gates remain blocked; all five runtime gates remain unproved.
+Provisioning remains blocked. Checkpoint 7 and Milestone 7.8 remain unstarted
+and require separate authorization.

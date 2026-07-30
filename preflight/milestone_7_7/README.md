@@ -28,6 +28,14 @@ Raw Azure output, raw Azure identifiers, data-plane evidence, mutation,
 private operational data, and topology-based resolution of runtime gates are
 prohibited.
 
-Checkpoint 6 remains:
+The separately authorized preflight later proved only
+`current-account-context`. Its sanitized result is:
 
-`blocked pending separately authorized Azure Topology Preflight execution`
+`complete-with-provisioning-blocked`
+
+The complete canonical evidence object existed only in memory. The repository
+preserves the sanitized report in the Checkpoint 6 handoff, not that object,
+and documentation does not renew the recorded evidence expiry. The other 17
+operation slots and all ten infrastructure gates remain blocked; all five
+runtime gates remain unproved. Provisioning, Checkpoint 7, and Milestone 7.8
+remain unstarted and require separate authorization.
