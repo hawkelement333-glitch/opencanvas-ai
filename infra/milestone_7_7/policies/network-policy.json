@@ -1,0 +1,68 @@
+{
+  "contractVersion": "m7.7-network-policy-v1",
+  "defaultInboundAction": "deny",
+  "defaultOutboundAction": "deny",
+  "applicationIngress": {
+    "external": false,
+    "privateVpnOnly": true,
+    "transport": "auto"
+  },
+  "dataServices": {
+    "containerRegistry": "privateEndpointOnly",
+    "keyVault": "privateEndpointOnly",
+    "postgresql": "privateEndpointOnly",
+    "redis": "privateEndpointOnly",
+    "storage": "privateEndpointOnly",
+    "telemetry": "privateLinkOnly"
+  },
+  "addressPlan": {
+    "selectionStatus": "checkpoint-1-fixed-pending-region-validation",
+    "vnet": "10.77.0.0/20",
+    "containerApps": "10.77.0.0/23",
+    "privateEndpoints": "10.77.2.0/24",
+    "managementCleanup": "10.77.3.0/28",
+    "gateway": "10.77.3.32/27",
+    "azureFirewall": "10.77.4.0/26",
+    "azureFirewallManagement": "10.77.4.64/26"
+  },
+  "routing": {
+    "defaultRoute": "0.0.0.0/0",
+    "defaultRouteNextHop": "AzureFirewall",
+    "exactCidrRulesRequired": true,
+    "broadVirtualNetworkServiceTagOutboundAllowed": false,
+    "firewallBypassAllowed": false,
+    "dnatAllowed": false
+  },
+  "infrastructurePublicIpExceptions": [
+    {
+      "purpose": "azure-firewall-data",
+      "sku": "Standard",
+      "allocation": "Static",
+      "count": 1
+    },
+    {
+      "purpose": "azure-firewall-management",
+      "sku": "Standard",
+      "allocation": "Static",
+      "count": 1
+    },
+    {
+      "purpose": "point-to-site-vpn-gateway",
+      "sku": "Standard",
+      "allocation": "Static",
+      "count": 1
+    }
+  ],
+  "maximumInfrastructurePublicIpCount": 3,
+  "applicationOrDataPublicIpAllowed": false,
+  "publicVmEndpointAllowed": false,
+  "publicNetworkAccessAllowed": false,
+  "bootstrapEgress": {
+    "boundedMinutes": 30,
+    "enabledByDefault": false,
+    "exactDestinationsRequired": true,
+    "generalInternetAllowed": false
+  },
+  "visualAdjacencyGrantsAuthority": false,
+  "provisioningAuthorized": false
+}

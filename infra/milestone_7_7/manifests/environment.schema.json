@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.7:environment:v1",
+  "title": "Milestone 7.7 isolated environment contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "contractVersion",
+    "resolutionStatus",
+    "provisioningAuthorized",
+    "location",
+    "dataClassification",
+    "compute",
+    "network",
+    "capacity",
+    "lifecycle",
+    "requiredTagKeys"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "environment.schema.json"
+    },
+    "contractVersion": {
+      "const": "m7.7-environment-v1"
+    },
+    "resolutionStatus": {
+      "enum": ["unresolved", "verified"]
+    },
+    "provisioningAuthorized": {
+      "const": false
+    },
+    "location": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+$"
+    },
+    "dataClassification": {
+      "const": "isolated-synthetic"
+    },
+    "compute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "topology",
+        "workloadProfile",
+        "externalIngress",
+        "fixedReplicaLimits",
+        "publicIpAllowed"
+      ],
+      "properties": {
+        "topology": {
+          "const": "internal-azure-container-apps"
+        },
+        "workloadProfile": {
+          "const": "Consumption"
+        },
+        "externalIngress": {
+          "const": false
+        },
+        "fixedReplicaLimits": {
+          "const": true
+        },
+        "publicIpAllowed": {
+          "const": false
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "vnetCidr",
+        "containerAppsCidr",
+        "privateEndpointsCidr",
+        "managementCleanupCidr",
+        "gatewayCidr",
+        "azureFirewallCidr",
+        "azureFirewallManagementCidr",
+        "defaultInbound",
+        "defaultOutbound",
+        "defaultRoute",
+        "defaultRouteNextHop",
+        "exactCidrRules",
+        "applicationAndDataPublicNetworkAccess",
+        "infrastructurePublicIpExceptionCount"
+      ],
+      "properties": {
+        "vnetCidr": {
+          "type": "string",
+          "maxLength": 43
+        },
+        "containerAppsCidr": {
+          "type": "string",
+          "maxLength": 43
+        },
+        "privateEndpointsCidr": {
+          "type": "string",
+          "maxLength": 43
+        },
+        "managementCleanupCidr": {
+          "type": "string",
+          "maxLength": 43
+        },
+        "gatewayCidr": {
+          "type": "string",
+          "maxLength": 43
+        },
+        "azureFirewallCidr": {
+          "type": "string",
+          "maxLength": 43
+        },
+        "azureFirewallManagementCidr": {
+          "type": "string",
+          "maxLength": 43
+        },
+        "defaultInbound": {
+          "const": "deny"
+        },
+        "defaultOutbound": {
+          "const": "deny"
+        },
+        "defaultRoute": {
+          "const": "0.0.0.0/0"
+        },
+        "defaultRouteNextHop": {
+          "const": "AzureFirewall"
+        },
+        "exactCidrRules": {
+          "const": true
+        },
+        "applicationAndDataPublicNetworkAccess": {
+          "const": false
+        },
+        "infrastructurePublicIpExceptionCount": {
+          "const": 3
+        }
+      }
+    },
+    "capacity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mutableSkuSelection",
+        "mutableReplicaSelection",
+        "hardServerLimitsRequired"
+      ],
+      "properties": {
+        "mutableSkuSelection": {
+          "const": false
+        },
+        "mutableReplicaSelection": {
+          "const": false
+        },
+        "hardServerLimitsRequired": {
+          "const": true
+        }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "defaultPlannedHours",
+        "hardLeaseHours",
+        "cleanupReserveMinutes",
+        "provisioningStartedAtUtc",
+        "leaseExpiresAtUtc",
+        "cleanupReserveStartsAtUtc",
+        "cleanupBindingSha256",
+        "cleanupTimerVerifiedAtUtc",
+        "independentCleanupRequired",
+        "manualCleanupRequired",
+        "zeroResidueRequired"
+      ],
+      "properties": {
+        "defaultPlannedHours": {
+          "const": 12
+        },
+        "hardLeaseHours": {
+          "const": 24
+        },
+        "cleanupReserveMinutes": {
+          "const": 90
+        },
+        "provisioningStartedAtUtc": {
+          "type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "leaseExpiresAtUtc": {
+          "type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "cleanupReserveStartsAtUtc": {
+          "type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "cleanupBindingSha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "cleanupTimerVerifiedAtUtc": {
+          "type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "independentCleanupRequired": {
+          "const": true
+        },
+        "manualCleanupRequired": {
+          "const": true
+        },
+        "zeroResidueRequired": {
+          "const": true
+        }
+      }
+    },
+    "requiredTagKeys": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "resolutionStatus": {
+            "const": "unresolved"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "location": {
+            "const": null
+          },
+          "lifecycle": {
+            "properties": {
+              "provisioningStartedAtUtc": {
+                "const": null
+              },
+              "leaseExpiresAtUtc": {
+                "const": null
+              },
+              "cleanupReserveStartsAtUtc": {
+                "const": null
+              },
+              "cleanupBindingSha256": {
+                "const": null
+              },
+              "cleanupTimerVerifiedAtUtc": {
+                "const": null
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "resolutionStatus": {
+            "const": "verified"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "location": {
+            "type": "string",
+            "minLength": 1
+          },
+          "lifecycle": {
+            "properties": {
+              "provisioningStartedAtUtc": {
+                "type": "string"
+              },
+              "leaseExpiresAtUtc": {
+                "type": "string"
+              },
+              "cleanupReserveStartsAtUtc": {
+                "type": "string"
+              },
+              "cleanupBindingSha256": {
+                "type": "string"
+              },
+              "cleanupTimerVerifiedAtUtc": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

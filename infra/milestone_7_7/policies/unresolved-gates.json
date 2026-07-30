@@ -1,0 +1,47 @@
+{
+  "contractVersion": "m7.7-unresolved-gates-v1",
+  "allResolved": false,
+  "gates": [
+    {
+      "id": "region-and-subscription-availability",
+      "status": "unresolved"
+    },
+    {
+      "id": "exact-provider-api-versions",
+      "status": "unresolved"
+    },
+    {
+      "id": "managed-identity-environment-mapping",
+      "status": "unresolved"
+    },
+    {
+      "id": "redis-custom-acl-support",
+      "status": "unresolved"
+    },
+    {
+      "id": "private-acr-source-path",
+      "status": "unresolved"
+    },
+    {
+      "id": "telemetry-gateway",
+      "status": "unresolved"
+    },
+    {
+      "id": "scanner-result-bridge",
+      "status": "unresolved"
+    },
+    {
+      "id": "alert-destination",
+      "status": "unresolved"
+    },
+    {
+      "id": "openai-smtp-test-providers",
+      "status": "unresolved"
+    },
+    {
+      "id": "evidence-retention",
+      "status": "unresolved"
+    }
+  ],
+  "provisioningAuthorized": false
+}

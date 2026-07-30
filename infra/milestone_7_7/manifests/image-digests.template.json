@@ -1,0 +1,44 @@
+{
+  "$schema": "image-digests.schema.json",
+  "contractVersion": "m7.7-image-digests-v1",
+  "resolutionStatus": "unresolved",
+  "provisioningAuthorized": false,
+  "sourceCommit": "1aca65c4a1d131dd420154efbe36e2c2204c3903",
+  "buildManifestSha256": null,
+  "registryBindingSha256": null,
+  "mutableTagsAllowed": false,
+  "images": [
+    {
+      "role": "api",
+      "digest": null
+    },
+    {
+      "role": "web",
+      "digest": null
+    },
+    {
+      "role": "indexer-worker",
+      "digest": null
+    },
+    {
+      "role": "scan-worker",
+      "digest": null
+    },
+    {
+      "role": "workflow-worker",
+      "digest": null
+    },
+    {
+      "role": "agent-worker",
+      "digest": null
+    },
+    {
+      "role": "telemetry-gateway",
+      "digest": null
+    },
+    {
+      "role": "load-generator",
+      "digest": null
+    }
+  ]
+}

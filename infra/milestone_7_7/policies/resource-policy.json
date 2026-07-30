@@ -1,0 +1,197 @@
+{
+  "contractVersion": "m7.7-resource-policy-v1",
+  "defaultEffect": "deny",
+  "resourceTypeResolutionStatus": "proposed-blocked-until-provider-validation",
+  "regionSelection": {
+    "allowAutomaticSelection": false,
+    "allowCurrentContextFallback": false,
+    "requiredResolutionStatus": "verified"
+  },
+  "allowedResourceTypes": [
+    "Microsoft.App/containerApps",
+    "Microsoft.App/jobs",
+    "Microsoft.App/managedEnvironments",
+    "Microsoft.Authorization/policyAssignments",
+    "Microsoft.Authorization/roleAssignments",
+    "Microsoft.Automation/automationAccounts",
+    "Microsoft.Automation/automationAccounts/jobSchedules",
+    "Microsoft.Automation/automationAccounts/runbooks",
+    "Microsoft.Automation/automationAccounts/schedules",
+    "Microsoft.ContainerRegistry/registries",
+    "Microsoft.DBforPostgreSQL/flexibleServers",
+    "Microsoft.Insights/actionGroups",
+    "Microsoft.Insights/dataCollectionEndpoints",
+    "Microsoft.Insights/dataCollectionRules",
+    "Microsoft.Insights/diagnosticSettings",
+    "Microsoft.Insights/metricAlerts",
+    "Microsoft.Insights/privateLinkScopes",
+    "Microsoft.Insights/privateLinkScopes/scopedResources",
+    "Microsoft.Insights/scheduledQueryRules",
+    "Microsoft.KeyVault/vaults",
+    "Microsoft.ManagedIdentity/userAssignedIdentities",
+    "Microsoft.Network/azureFirewalls",
+    "Microsoft.Network/networkSecurityGroups",
+    "Microsoft.Network/privateDnsZones",
+    "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+    "Microsoft.Network/privateEndpoints",
+    "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+    "Microsoft.Network/publicIPAddresses",
+    "Microsoft.Network/routeTables",
+    "Microsoft.Network/virtualNetworkGateways",
+    "Microsoft.Network/virtualNetworks",
+    "Microsoft.Network/virtualNetworks/subnets",
+    "Microsoft.OperationalInsights/workspaces",
+    "Microsoft.Resources/resourceGroups",
+    "Microsoft.Storage/storageAccounts",
+    "Microsoft.Storage/storageAccounts/blobServices",
+    "Microsoft.Storage/storageAccounts/blobServices/containers"
+  ],
+  "blockedCandidateResourceTypes": [
+    {
+      "logicalCapability": "managed-redis",
+      "candidateType": "Microsoft.Cache/redisEnterprise",
+      "resolutionGate": "exact-provider-api-versions"
+    },
+    {
+      "logicalCapability": "managed-redis-database",
+      "candidateType": "Microsoft.Cache/redisEnterprise/databases",
+      "resolutionGate": "redis-custom-acl-support"
+    },
+    {
+      "logicalCapability": "defender-malware-scanning",
+      "candidateType": "Microsoft.Security/defenderForStorageSettings",
+      "resolutionGate": "exact-provider-api-versions"
+    },
+    {
+      "logicalCapability": "scanner-result-system-topic",
+      "candidateType": "Microsoft.EventGrid/systemTopics",
+      "resolutionGate": "scanner-result-bridge"
+    },
+    {
+      "logicalCapability": "scanner-result-subscription",
+      "candidateType": "Microsoft.EventGrid/systemTopics/eventSubscriptions",
+      "resolutionGate": "scanner-result-bridge"
+    }
+  ],
+  "fixedSkus": {
+    "containerApps": {
+      "workloadProfile": "Consumption",
+      "services": {
+        "web": {
+          "cpuMilli": 250,
+          "memoryMiB": 512,
+          "minReplicas": 1,
+          "normalReplicas": 1,
+          "maxReplicas": 2
+        },
+        "api": {
+          "cpuMilli": 500,
+          "memoryMiB": 1024,
+          "minReplicas": 2,
+          "normalReplicas": 2,
+          "maxReplicas": 4
+        },
+        "sharedWorkerPool": {
+          "cpuMilli": 500,
+          "memoryMiB": 1024,
+          "minReplicas": 2,
+          "normalReplicas": 2,
+          "maxReplicas": 4,
+          "workKinds": ["indexer", "scan", "workflow", "agent"]
+        },
+        "telemetryGateway": {
+          "cpuMilli": 250,
+          "memoryMiB": 512,
+          "minReplicas": 1,
+          "normalReplicas": 1,
+          "maxReplicas": 1
+        }
+      },
+      "jobs": {
+        "migration": {
+          "cpuMilli": 500,
+          "memoryMiB": 1024,
+          "idleExecutions": 0,
+          "maxParallelExecutions": 1
+        },
+        "loadGenerator": {
+          "cpuMilli": 1000,
+          "memoryMiB": 2048,
+          "idleExecutions": 0,
+          "maxParallelExecutions": 1
+        },
+        "faultController": {
+          "cpuMilli": null,
+          "memoryMiB": null,
+          "idleExecutions": 0,
+          "maxParallelExecutions": 1,
+          "shapeResolutionStatus": "deferred-to-failure-runner-checkpoint"
+        }
+      }
+    },
+    "containerRegistry": {
+      "name": "Premium",
+      "adminUserEnabled": false,
+      "publicNetworkAccess": false
+    },
+    "firewall": {
+      "name": "Basic",
+      "maximumInstances": 1
+    },
+    "keyVault": {
+      "name": "standard",
+      "publicNetworkAccess": false
+    },
+    "logAnalytics": {
+      "name": "PerGB2018",
+      "absoluteExerciseIngestionCapMiB": 2560,
+      "sanitizedEvidenceCapMiB": 100,
+      "retentionStatus": "unresolved"
+    },
+    "postgresql": {
+      "majorVersion": 17,
+      "name": "Standard_D2ds_v5",
+      "storageGiB": 64,
+      "storageAutogrow": false,
+      "highAvailability": "ZoneRedundant",
+      "backupRetentionDays": 7,
+      "backupRedundancy": "LRS",
+      "publicNetworkAccess": false
+    },
+    "redis": {
+      "name": "Balanced_B0",
+      "nodeCount": 2,
+      "clusteringBehavior": "single-shard-nonclustered",
+      "providerClusteringEnum": null,
+      "evictionPolicy": "NoEviction",
+      "authentication": "MicrosoftEntraOnly",
+      "accessKeysEnabled": false,
+      "publicNetworkAccess": false
+    },
+    "storage": {
+      "name": "Standard_LRS",
+      "kind": "StorageV2",
+      "minimumTlsVersion": "TLS1_2",
+      "allowSharedKeyAccess": false,
+      "allowAnonymousAccess": false,
+      "publicNetworkAccess": false,
+      "versioningEnabled": true,
+      "defenderMonthlyCapGiB": 1,
+      "scannerExerciseObjectCap": 25,
+      "scannerExerciseBytesCap": 26214400,
+      "totalSyntheticUploadBytesCap": 134217728
+    },
+    "vpnGateway": {
+      "name": "VpnGw1",
+      "maximumLifetimeHours": 12,
+      "maximumInstances": 1
+    },
+    "cleanupAutomation": {
+      "name": "Basic",
+      "maximumAccounts": 1
+    }
+  },
+  "mutableSkuSelectionAllowed": false,
+  "mutableReplicaSelectionAllowed": false,
+  "provisioningAuthorized": false
+}

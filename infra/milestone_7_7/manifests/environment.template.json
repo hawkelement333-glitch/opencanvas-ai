@@ -1,0 +1,62 @@
+{
+  "$schema": "environment.schema.json",
+  "contractVersion": "m7.7-environment-v1",
+  "resolutionStatus": "unresolved",
+  "provisioningAuthorized": false,
+  "location": null,
+  "dataClassification": "isolated-synthetic",
+  "compute": {
+    "topology": "internal-azure-container-apps",
+    "workloadProfile": "Consumption",
+    "externalIngress": false,
+    "fixedReplicaLimits": true,
+    "publicIpAllowed": false
+  },
+  "network": {
+    "vnetCidr": "10.77.0.0/20",
+    "containerAppsCidr": "10.77.0.0/23",
+    "privateEndpointsCidr": "10.77.2.0/24",
+    "managementCleanupCidr": "10.77.3.0/28",
+    "gatewayCidr": "10.77.3.32/27",
+    "azureFirewallCidr": "10.77.4.0/26",
+    "azureFirewallManagementCidr": "10.77.4.64/26",
+    "defaultInbound": "deny",
+    "defaultOutbound": "deny",
+    "defaultRoute": "0.0.0.0/0",
+    "defaultRouteNextHop": "AzureFirewall",
+    "exactCidrRules": true,
+    "applicationAndDataPublicNetworkAccess": false,
+    "infrastructurePublicIpExceptionCount": 3
+  },
+  "capacity": {
+    "mutableSkuSelection": false,
+    "mutableReplicaSelection": false,
+    "hardServerLimitsRequired": true
+  },
+  "lifecycle": {
+    "defaultPlannedHours": 12,
+    "hardLeaseHours": 24,
+    "cleanupReserveMinutes": 90,
+    "provisioningStartedAtUtc": null,
+    "leaseExpiresAtUtc": null,
+    "cleanupReserveStartsAtUtc": null,
+    "cleanupBindingSha256": null,
+    "cleanupTimerVerifiedAtUtc": null,
+    "independentCleanupRequired": true,
+    "manualCleanupRequired": true,
+    "zeroResidueRequired": true
+  },
+  "requiredTagKeys": [
+    "mobius-cleanup-binding-sha256",
+    "mobius-contract-version",
+    "mobius-cost-ceiling-usd-cents",
+    "mobius-data-class",
+    "mobius-environment",
+    "mobius-expires-at-utc",
+    "mobius-manifest-sha256",
+    "mobius-public-access",
+    "mobius-run-id",
+    "mobius-source-commit",
+    "mobius-teardown-state"
+  ]
+}

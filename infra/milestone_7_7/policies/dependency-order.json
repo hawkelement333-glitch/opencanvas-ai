@@ -1,0 +1,41 @@
+{
+  "contractVersion": "m7.7-dependency-order-v1",
+  "deployment": [
+    "validate-contracts",
+    "validate-exact-scope",
+    "bind-immutable-inputs",
+    "arm-cost-controls",
+    "create-cleanup-identity",
+    "arm-cleanup-controls",
+    "prove-cleanup-timer",
+    "apply-deny-policies",
+    "create-private-network",
+    "apply-deny-public-controls",
+    "create-private-telemetry",
+    "create-workload-identities",
+    "create-private-key-vault",
+    "create-private-data-services",
+    "publish-digest-pinned-images",
+    "create-internal-compute",
+    "close-bootstrap-egress",
+    "prove-security-controls"
+  ],
+  "teardown": [
+    "stop-load-and-scheduled-work",
+    "stop-workloads",
+    "lock-external-effects",
+    "finalize-sanitized-evidence",
+    "revoke-temporary-authority",
+    "prove-post-revocation-denial",
+    "preserve-approved-evidence",
+    "delete-compute",
+    "delete-data-services",
+    "delete-private-telemetry",
+    "delete-workload-identities",
+    "delete-private-network",
+    "prove-target-zero-residue",
+    "delete-cleanup-controls",
+    "prove-final-zero-residue"
+  ],
+  "provisioningAuthorized": false
+}

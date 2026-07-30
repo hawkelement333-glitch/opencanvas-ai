@@ -1,0 +1,12 @@
+# Generated material must remain local and disposable.
+.azure/
+generated/
+out/
+*.bicepparam
+*.local.parameters.json
+*.deployment.json
+*.what-if.json
+*.outputs.json
+*.evidence.json
+main.json
+modules/*.json

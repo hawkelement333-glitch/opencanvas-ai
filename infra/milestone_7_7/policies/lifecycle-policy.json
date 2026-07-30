@@ -1,0 +1,58 @@
+{
+  "contractVersion": "m7.7-lifecycle-policy-v1",
+  "costControls": {
+    "absoluteCeilingUsdCents": 15000,
+    "budgetAlertsAreEnforcement": false,
+    "provisioningBlockAboveUsdCents": 12000,
+    "targetUsdCents": 10000,
+    "minimumContingencyBasisPoints": 2500
+  },
+  "requiredTags": [
+    "mobius-cleanup-binding-sha256",
+    "mobius-contract-version",
+    "mobius-cost-ceiling-usd-cents",
+    "mobius-data-class",
+    "mobius-environment",
+    "mobius-expires-at-utc",
+    "mobius-manifest-sha256",
+    "mobius-public-access",
+    "mobius-run-id",
+    "mobius-source-commit",
+    "mobius-teardown-state"
+  ],
+  "tagValueContracts": {
+    "mobius-cleanup-binding-sha256": "runtime-lowercase-sha256",
+    "mobius-contract-version": "m7.7-infrastructure-contract-v1",
+    "mobius-cost-ceiling-usd-cents": "15000",
+    "mobius-data-class": "isolated-synthetic",
+    "mobius-environment": "milestone-7.7-isolated",
+    "mobius-expires-at-utc": "runtime-rfc3339-utc",
+    "mobius-manifest-sha256": "runtime-lowercase-sha256",
+    "mobius-public-access": "denied",
+    "mobius-run-id": "runtime-opaque",
+    "mobius-source-commit": "1aca65c4a1d131dd420154efbe36e2c2204c3903",
+    "mobius-teardown-state": "armed"
+  },
+  "lease": {
+    "defaultPlannedHours": 12,
+    "hardMaximumHours": 24,
+    "vpnMaximumHours": 12,
+    "minimumCleanupReserveMinutes": 90,
+    "extensionRequiresSeparateAuthorization": true,
+    "rollingExtensionAllowed": false,
+    "exactUtcBindingsRequired": true
+  },
+  "cleanup": {
+    "service": "AzureAutomation",
+    "separateControlResourceGroupRequired": true,
+    "systemManagedIdentityRequired": true,
+    "exactTargetScopeRequired": true,
+    "independentTimerRequired": true,
+    "timerProofRequiredBeforeBillableResources": true,
+    "manualFallbackRequired": true,
+    "postRevocationDenialRequired": true,
+    "targetZeroResidueBeforeControlDeletion": true,
+    "finalZeroResidueProofRequired": true
+  },
+  "provisioningAuthorized": false
+}

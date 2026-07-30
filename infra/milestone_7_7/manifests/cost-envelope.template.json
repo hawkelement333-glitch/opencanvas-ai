@@ -1,0 +1,18 @@
+{
+  "$schema": "cost-envelope.schema.json",
+  "contractVersion": "m7.7-cost-envelope-v1",
+  "resolutionStatus": "unresolved",
+  "provisioningAuthorized": false,
+  "currency": "USD",
+  "targetUsdCents": 10000,
+  "provisioningBlockAboveUsdCents": 12000,
+  "absoluteCeilingUsdCents": 15000,
+  "expectedUsdCents": null,
+  "baseMaximumUsdCents": null,
+  "uncertaintyContingencyBasisPoints": 2500,
+  "contingencyUsdCents": null,
+  "maximumPlausibleUsdCents": null,
+  "budgetAlertsAreEnforcement": false,
+  "hardLeaseHours": 24,
+  "lineItems": []
+}

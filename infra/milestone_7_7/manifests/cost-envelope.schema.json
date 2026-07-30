@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.7:cost-envelope:v1",
+  "title": "Milestone 7.7 bounded cost contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "contractVersion",
+    "resolutionStatus",
+    "provisioningAuthorized",
+    "currency",
+    "targetUsdCents",
+    "provisioningBlockAboveUsdCents",
+    "absoluteCeilingUsdCents",
+    "expectedUsdCents",
+    "baseMaximumUsdCents",
+    "uncertaintyContingencyBasisPoints",
+    "contingencyUsdCents",
+    "maximumPlausibleUsdCents",
+    "budgetAlertsAreEnforcement",
+    "hardLeaseHours",
+    "lineItems"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "cost-envelope.schema.json"
+    },
+    "contractVersion": {
+      "const": "m7.7-cost-envelope-v1"
+    },
+    "resolutionStatus": {
+      "enum": ["unresolved", "verified"]
+    },
+    "provisioningAuthorized": {
+      "const": false
+    },
+    "currency": {
+      "const": "USD"
+    },
+    "targetUsdCents": {
+      "const": 10000
+    },
+    "provisioningBlockAboveUsdCents": {
+      "const": 12000
+    },
+    "absoluteCeilingUsdCents": {
+      "const": 15000
+    },
+    "expectedUsdCents": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "maximum": 12000
+    },
+    "baseMaximumUsdCents": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "exclusiveMaximum": 15000
+    },
+    "uncertaintyContingencyBasisPoints": {
+      "type": "integer",
+      "minimum": 2500,
+      "maximum": 10000
+    },
+    "contingencyUsdCents": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "exclusiveMaximum": 15000
+    },
+    "maximumPlausibleUsdCents": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "exclusiveMaximum": 15000
+    },
+    "budgetAlertsAreEnforcement": {
+      "const": false
+    },
+    "hardLeaseHours": {
+      "const": 24
+    },
+    "lineItems": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "expectedUsdCents",
+          "baseMaximumUsdCents",
+          "priceEvidenceStatus"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z0-9-]+$"
+          },
+          "expectedUsdCents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "baseMaximumUsdCents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "priceEvidenceStatus": {
+            "enum": [
+              "unresolved",
+              "verified-official-retail",
+              "verified-subscription"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "resolutionStatus": {
+            "const": "unresolved"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "expectedUsdCents": {
+            "const": null
+          },
+          "baseMaximumUsdCents": {
+            "const": null
+          },
+          "contingencyUsdCents": {
+            "const": null
+          },
+          "maximumPlausibleUsdCents": {
+            "const": null
+          },
+          "lineItems": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "resolutionStatus": {
+            "const": "verified"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "expectedUsdCents": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "baseMaximumUsdCents": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "contingencyUsdCents": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maximumPlausibleUsdCents": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "lineItems": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}

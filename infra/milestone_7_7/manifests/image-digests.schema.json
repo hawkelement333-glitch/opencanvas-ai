@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.7:image-digests:v1",
+  "title": "Milestone 7.7 immutable image digest contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "contractVersion",
+    "resolutionStatus",
+    "provisioningAuthorized",
+    "sourceCommit",
+    "buildManifestSha256",
+    "registryBindingSha256",
+    "mutableTagsAllowed",
+    "images"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "image-digests.schema.json"
+    },
+    "contractVersion": {
+      "const": "m7.7-image-digests-v1"
+    },
+    "resolutionStatus": {
+      "enum": ["unresolved", "verified"]
+    },
+    "provisioningAuthorized": {
+      "const": false
+    },
+    "sourceCommit": {
+      "const": "1aca65c4a1d131dd420154efbe36e2c2204c3903"
+    },
+    "buildManifestSha256": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "registryBindingSha256": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "mutableTagsAllowed": {
+      "const": false
+    },
+    "images": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/apiImage"
+        },
+        {
+          "$ref": "#/$defs/webImage"
+        },
+        {
+          "$ref": "#/$defs/indexerWorkerImage"
+        },
+        {
+          "$ref": "#/$defs/scanWorkerImage"
+        },
+        {
+          "$ref": "#/$defs/workflowWorkerImage"
+        },
+        {
+          "$ref": "#/$defs/agentWorkerImage"
+        },
+        {
+          "$ref": "#/$defs/telemetryGatewayImage"
+        },
+        {
+          "$ref": "#/$defs/loadGeneratorImage"
+        }
+      ],
+      "items": false
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": ["string", "null"],
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "apiImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "digest"],
+      "properties": {
+        "role": {
+          "const": "api"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "webImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "digest"],
+      "properties": {
+        "role": {
+          "const": "web"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "indexerWorkerImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "digest"],
+      "properties": {
+        "role": {
+          "const": "indexer-worker"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "scanWorkerImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "digest"],
+      "properties": {
+        "role": {
+          "const": "scan-worker"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "workflowWorkerImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "digest"],
+      "properties": {
+        "role": {
+          "const": "workflow-worker"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "agentWorkerImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "digest"],
+      "properties": {
+        "role": {
+          "const": "agent-worker"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "telemetryGatewayImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "digest"],
+      "properties": {
+        "role": {
+          "const": "telemetry-gateway"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "loadGeneratorImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "digest"],
+      "properties": {
+        "role": {
+          "const": "load-generator"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "resolutionStatus": {
+            "const": "unresolved"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "buildManifestSha256": {
+            "const": null
+          },
+          "registryBindingSha256": {
+            "const": null
+          },
+          "images": {
+            "items": {
+              "properties": {
+                "digest": {
+                  "const": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "resolutionStatus": {
+            "const": "verified"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "buildManifestSha256": {
+            "type": "string"
+          },
+          "registryBindingSha256": {
+            "type": "string"
+          },
+          "images": {
+            "items": {
+              "properties": {
+                "digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
