@@ -9,8 +9,9 @@ PostgreSQL historical-migration correction for `0005`, `0021`, `0023`, and
 Constitution documentation checkpoint complete locally; checkpoint 7.2
 complete locally; checkpoint 7.3 complete locally; checkpoint 7.4 complete
 locally; checkpoint 7.5 complete locally; checkpoint 7.6 complete locally;
-checkpoint 7.7 in progress with local infrastructure-policy and
-workload-measurement checkpoints complete; checkpoint 7.8 unstarted
+checkpoint 7.7 in progress with local infrastructure-policy,
+workload-measurement, and evidence-framework checkpoints complete; checkpoint
+7.8 unstarted
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -50,6 +51,9 @@ Checkpoint 7.7 Checkpoint 1 handoff:
 
 Checkpoint 7.7 Checkpoint 2 handoff:
 [`MILESTONE_7_7_CHECKPOINT_2_WORKLOAD_MEASUREMENT_HANDOFF.md`](MILESTONE_7_7_CHECKPOINT_2_WORKLOAD_MEASUREMENT_HANDOFF.md)
+
+Checkpoint 7.7 Checkpoint 3 handoff:
+[`MILESTONE_7_7_CHECKPOINT_3_LOCAL_EVIDENCE_FRAMEWORK_HANDOFF.md`](MILESTONE_7_7_CHECKPOINT_3_LOCAL_EVIDENCE_FRAMEWORK_HANDOFF.md)
 
 PostgreSQL compatibility amendment:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
@@ -470,10 +474,29 @@ and [`PRODUCTION_RECOVERY_RUNBOOK.md`](PRODUCTION_RECOVERY_RUNBOOK.md).
 
 Checkpoint 1 established the inert, resource-free Bicep and policy manifest at
 commit `6a4bc94744919f28ff0286e543097fb96b8a1e89`. Checkpoint 2 establishes the
-deterministic bounded local workload and measurement contract. Neither
-checkpoint contacted Azure, authorized provisioning, executed a managed
-workload, produced production performance evidence, or began the separate
-Checkpoint 3 evidence framework.
+deterministic bounded local workload and measurement contract. Checkpoint 3
+establishes the strict bounded local evidence-package schema, exact artifact
+inventory and Checkpoint 2 bindings, claim/completeness controls, explicitly
+unsigned and local-only retention metadata, and deterministic
+network-incapable verification. A locally complete package remains only
+synthetic-local contract evidence; it does not complete Milestone 7.7
+evidence.
 
-Milestone 7.7 remains in progress. Checkpoint 3 and Milestone 7.8 remain
+No checkpoint contacted Azure, authorized provisioning, executed a managed
+workload, produced production performance/capacity evidence, signed or
+published evidence, or provided independent retention. The previously
+disclosed Checkpoint 2 migration-validation deviation used disposable SQLite;
+Checkpoint 3 did not repeat the script or execute a migration command.
+
+The Checkpoint 3 completion audit invoked the repository's `pnpm exec`
+formatter wrapper. That wrapper attempted to retrieve pnpm metadata from the
+npm registry and failed before installing or changing dependencies. The
+installed local formatter subsequently passed, but the attempted network
+operation violated that run's Checkpoint 3 commit gate. A separately authorized
+recovery then repeated the applicable commit gates fully offline using
+installed executables directly. The recovery installed nothing, contacted no
+network or remote service, and all available gates passed. Checkpoint 3 is now
+complete locally.
+
+Milestone 7.7 remains in progress. Checkpoint 4 and Milestone 7.8 remain
 unstarted and require separate authorization.

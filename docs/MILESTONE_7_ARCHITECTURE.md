@@ -1394,7 +1394,18 @@ production SLOs, public release, Milestone 7.8, Milestone 8, or later work.
 Milestone 7.7 is now in progress locally. Checkpoint 1 records a
 resource-free, non-deployable infrastructure and policy manifest. Checkpoint 2
 records a deterministic bounded synthetic-workload and exact local
-measurement contract. Neither checkpoint contacted Azure, authorized
-provisioning, executed a managed workload, published a production capacity
-claim, or implemented the separately controlled Checkpoint 3 evidence
-framework.
+measurement contract. A Checkpoint 3 candidate records the strict, bounded,
+deterministic local evidence-package schema, artifact inventory, Checkpoint 2
+bindings, claim controls, completeness states, unsigned/local-retention
+boundary, and network-incapable verifier. Its complete package state proves
+only the local evidence contract; Milestone 7.7 evidence remains partial.
+
+The first completion audit correctly withheld the commit after a formatter
+wrapper attempted a prohibited npm-registry request. The request failed, and
+no dependency or lockfile changed. A separately authorized recovery reran the
+complete commit gate fully offline through installed executables directly.
+Every available gate passed, so Checkpoint 3 is complete locally.
+
+None of the three checkpoints contacted Azure, authorized provisioning,
+executed a managed workload, published a production capacity claim, signed or
+published evidence, provided independent retention, or began Checkpoint 4.

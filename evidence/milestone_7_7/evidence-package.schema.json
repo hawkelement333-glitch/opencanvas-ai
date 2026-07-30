@@ -1,0 +1,641 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.7:evidence-package:v1",
+  "title": "Milestone 7.7 bounded local evidence package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "packageVersion",
+    "packageId",
+    "purpose",
+    "checkpoint",
+    "source",
+    "checkpoint2Bindings",
+    "environmentClass",
+    "executionClass",
+    "claimStrength",
+    "executionWindow",
+    "artifacts",
+    "labels",
+    "evidenceClasses",
+    "validationEvents",
+    "validationState",
+    "completeness",
+    "stopReason",
+    "knownLimitations",
+    "unresolvedGates",
+    "retention",
+    "signature",
+    "replacement",
+    "verifierVersion",
+    "packageIntegritySha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "2020-12"
+    },
+    "packageVersion": {
+      "const": "mobius.m7.7.evidence-package.v1"
+    },
+    "packageId": {
+      "$ref": "#/$defs/identifier"
+    },
+    "purpose": {
+      "const": "milestone-7.7-local-evidence-contract-validation"
+    },
+    "checkpoint": {
+      "const": "milestone-7.7-checkpoint-3"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "checkpoint2Bindings": {
+      "$ref": "#/$defs/checkpoint2Bindings"
+    },
+    "environmentClass": {
+      "const": "synthetic-local"
+    },
+    "executionClass": {
+      "const": "local-deterministic-validation"
+    },
+    "claimStrength": {
+      "const": "local-contract-validation-only"
+    },
+    "executionWindow": {
+      "$ref": "#/$defs/executionWindow"
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/artifact"
+      }
+    },
+    "labels": {
+      "$ref": "#/$defs/labels"
+    },
+    "evidenceClasses": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "items": {
+        "$ref": "#/$defs/evidenceClass"
+      }
+    },
+    "validationEvents": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "$ref": "#/$defs/validationEvent"
+      }
+    },
+    "validationState": {
+      "$ref": "#/$defs/validationState"
+    },
+    "completeness": {
+      "$ref": "#/$defs/completeness"
+    },
+    "stopReason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "[a-z0-9-]+"
+    },
+    "knownLimitations": {
+      "type": "array",
+      "minItems": 9,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/knownLimitation"
+      }
+    },
+    "unresolvedGates": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/unresolvedGate"
+      }
+    },
+    "retention": {
+      "$ref": "#/$defs/retention"
+    },
+    "signature": {
+      "$ref": "#/$defs/signature"
+    },
+    "replacement": {
+      "$ref": "#/$defs/replacement"
+    },
+    "verifierVersion": {
+      "const": "mobius.m7.7.evidence-verifier.v1"
+    },
+    "packageIntegritySha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?"
+    },
+    "sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "[0-9a-f]{64}"
+    },
+    "commitSha": {
+      "type": "string",
+      "minLength": 40,
+      "maxLength": 40,
+      "pattern": "[0-9a-f]{40}"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "commitSha", "dirty"],
+      "properties": {
+        "repositoryId": {
+          "const": "solarplexus-mobius"
+        },
+        "commitSha": {
+          "$ref": "#/$defs/commitSha"
+        },
+        "dirty": {
+          "const": false
+        }
+      }
+    },
+    "checkpoint2Binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "workloadId", "integritySha256"],
+      "properties": {
+        "contractVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "[a-z0-9.-]+"
+        },
+        "workloadId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "integritySha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "assertion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assertionId", "passed"],
+      "properties": {
+        "assertionId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "passed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "measurementConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clockSource",
+        "latencyUnit",
+        "percentileMethod",
+        "percentilesBasisPoints",
+        "excludePhaseKinds",
+        "includeTimeoutLatencies",
+        "includeFailureLatencies",
+        "rateScale",
+        "throughputUnit"
+      ],
+      "properties": {
+        "clockSource": {
+          "const": "logical-monotonic-microseconds"
+        },
+        "latencyUnit": {
+          "const": "microseconds"
+        },
+        "percentileMethod": {
+          "const": "nearest-rank"
+        },
+        "percentilesBasisPoints": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          }
+        },
+        "excludePhaseKinds": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["warmup", "cooldown"]
+          }
+        },
+        "includeTimeoutLatencies": {
+          "type": "boolean"
+        },
+        "includeFailureLatencies": {
+          "type": "boolean"
+        },
+        "rateScale": {
+          "const": "basis-points"
+        },
+        "throughputUnit": {
+          "const": "milli-requests-per-second"
+        }
+      }
+    },
+    "checkpoint2Bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workloadManifest",
+        "requestPlan",
+        "measurementResult",
+        "generatorVersion",
+        "measurementConfiguration",
+        "assertions"
+      ],
+      "properties": {
+        "workloadManifest": {
+          "$ref": "#/$defs/checkpoint2Binding"
+        },
+        "requestPlan": {
+          "$ref": "#/$defs/checkpoint2Binding"
+        },
+        "measurementResult": {
+          "$ref": "#/$defs/checkpoint2Binding"
+        },
+        "generatorVersion": {
+          "const": "mobius.m7.7.generator.v1"
+        },
+        "measurementConfiguration": {
+          "$ref": "#/$defs/measurementConfiguration"
+        },
+        "assertions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/assertion"
+          }
+        }
+      }
+    },
+    "executionWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clock", "startedAtLogicalUs", "endedAtLogicalUs"],
+      "properties": {
+        "clock": {
+          "const": "logical-monotonic-microseconds"
+        },
+        "startedAtLogicalUs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "endedAtLogicalUs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "packageId",
+        "artifactId",
+        "logicalName",
+        "role",
+        "mediaType",
+        "sizeBytes",
+        "contentSha256",
+        "semanticIntegritySha256"
+      ],
+      "properties": {
+        "packageId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "artifactId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "logicalName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240,
+          "pattern": "[a-zA-Z0-9._/-]+"
+        },
+        "role": {
+          "enum": ["workload-manifest", "request-plan", "measurement-result"]
+        },
+        "mediaType": {
+          "const": "application/json"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4194304
+        },
+        "contentSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "semanticIntegritySha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkpoint",
+        "claim",
+        "dataClass",
+        "environment",
+        "execution"
+      ],
+      "properties": {
+        "checkpoint": {
+          "const": "milestone-7.7-checkpoint-3"
+        },
+        "claim": {
+          "const": "local-contract-validation-only"
+        },
+        "dataClass": {
+          "const": "isolated-synthetic"
+        },
+        "environment": {
+          "const": "synthetic-local"
+        },
+        "execution": {
+          "const": "local-deterministic-validation"
+        }
+      }
+    },
+    "evidenceState": {
+      "enum": [
+        "absent",
+        "pending",
+        "partial",
+        "complete",
+        "invalid",
+        "blocked",
+        "unavailable",
+        "skipped",
+        "failed",
+        "unproved"
+      ]
+    },
+    "evidenceClass": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidenceClass",
+        "state",
+        "sourceKind",
+        "requiredForPackage"
+      ],
+      "properties": {
+        "evidenceClass": {
+          "enum": [
+            "local-deterministic-validation",
+            "synthetic-workload-evidence",
+            "infrastructure-definition-evidence",
+            "external-provider-evidence",
+            "azure-execution-evidence",
+            "observability-evidence",
+            "alert-delivery-evidence",
+            "capacity-evidence",
+            "resilience-evidence",
+            "security-evidence",
+            "cleanup-evidence"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/evidenceState"
+        },
+        "sourceKind": {
+          "enum": [
+            "generated-fixture",
+            "local-observation",
+            "repository-definition",
+            "provider-observation",
+            "external-delivery"
+          ]
+        },
+        "requiredForPackage": {
+          "type": "boolean"
+        }
+      }
+    },
+    "validationEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["validationId", "state"],
+      "properties": {
+        "validationId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "state": {
+          "$ref": "#/$defs/evidenceState"
+        }
+      }
+    },
+    "validationState": {
+      "enum": [
+        "pending",
+        "valid",
+        "invalid",
+        "blocked",
+        "unavailable",
+        "skipped",
+        "failed",
+        "unproved"
+      ]
+    },
+    "packageState": {
+      "enum": [
+        "absent",
+        "pending",
+        "partial",
+        "complete",
+        "invalid",
+        "blocked",
+        "unavailable",
+        "skipped",
+        "failed",
+        "unproved"
+      ]
+    },
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["packageState", "milestoneState"],
+      "properties": {
+        "packageState": {
+          "$ref": "#/$defs/packageState"
+        },
+        "milestoneState": {
+          "$ref": "#/$defs/packageState"
+        }
+      }
+    },
+    "knownLimitation": {
+      "enum": [
+        "local-synthetic-only",
+        "no-azure-execution",
+        "no-provider-observation",
+        "no-external-retention",
+        "unsigned",
+        "unresolved-infrastructure-gates",
+        "no-production-capacity-claim",
+        "no-live-failure-injection",
+        "schema-subset-validator-only"
+      ]
+    },
+    "unresolvedGate": {
+      "enum": [
+        "region-and-subscription-availability",
+        "exact-provider-api-versions",
+        "managed-identity-environment-mapping",
+        "redis-custom-acl-support",
+        "private-acr-source-path",
+        "telemetry-gateway",
+        "scanner-result-bridge",
+        "alert-destination",
+        "openai-smtp-test-providers",
+        "evidence-retention"
+      ]
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyVersion",
+        "retentionClass",
+        "status",
+        "independentlyProtected",
+        "immutableProviderStorage",
+        "legalHold",
+        "externalReference",
+        "deletionPolicy",
+        "revalidationTrigger"
+      ],
+      "properties": {
+        "policyVersion": {
+          "const": "mobius.m7.7.retention-metadata.v1"
+        },
+        "retentionClass": {
+          "const": "local-repository-fixture"
+        },
+        "status": {
+          "const": "local-only"
+        },
+        "independentlyProtected": {
+          "const": false
+        },
+        "immutableProviderStorage": {
+          "const": false
+        },
+        "legalHold": {
+          "const": false
+        },
+        "externalReference": {
+          "type": "null"
+        },
+        "deletionPolicy": {
+          "const": "repository-lifecycle-only"
+        },
+        "revalidationTrigger": {
+          "const": "source-or-contract-change"
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "scheme",
+        "signerClass",
+        "keyReference",
+        "signatureValue",
+        "verified"
+      ],
+      "properties": {
+        "status": {
+          "const": "unsigned"
+        },
+        "scheme": {
+          "const": "none"
+        },
+        "signerClass": {
+          "const": "none"
+        },
+        "keyReference": {
+          "type": "null"
+        },
+        "signatureValue": {
+          "type": "null"
+        },
+        "verified": {
+          "const": false
+        }
+      }
+    },
+    "replacement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "supersedesPackageSha256",
+        "reasonCode",
+        "priorStatePreserved"
+      ],
+      "properties": {
+        "kind": {
+          "enum": ["original", "replacement"]
+        },
+        "supersedesPackageSha256": {
+          "type": ["string", "null"],
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "[0-9a-f]{64}"
+        },
+        "reasonCode": {
+          "type": ["string", "null"],
+          "enum": [
+            null,
+            "corrected-failed-validation",
+            "completed-blocked-requirement",
+            "superseded-stale-source"
+          ]
+        },
+        "priorStatePreserved": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

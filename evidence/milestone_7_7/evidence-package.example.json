@@ -1,0 +1,252 @@
+{
+  "artifacts": [
+    {
+      "artifactId": "artifact-workload-manifest",
+      "contentSha256": "48c525de359aaf4c4f64ad9e59983ce453a76fe22bcf1e4edb0e5a60d5104d3d",
+      "logicalName": "performance/milestone_7_7/workload.example.json",
+      "mediaType": "application/json",
+      "packageId": "m7.7-cp3-local-fixture",
+      "role": "workload-manifest",
+      "semanticIntegritySha256": "7d8832aae03e00ec93a6203a2360555ba19b030912a406b775fc7b20630c1c26",
+      "sizeBytes": 2926
+    },
+    {
+      "artifactId": "artifact-request-plan",
+      "contentSha256": "cbcdc4c9776eb884f0f067b9e06ac56221c3d18bf3eb2268b0ec60a56d0ac39e",
+      "logicalName": "evidence/milestone_7_7/fixtures/request-plan.fixture.json",
+      "mediaType": "application/json",
+      "packageId": "m7.7-cp3-local-fixture",
+      "role": "request-plan",
+      "semanticIntegritySha256": "4c13cc8b536cef325a27a0a00b4d008d164ff5d955512e599df309f69c7f32b3",
+      "sizeBytes": 17107
+    },
+    {
+      "artifactId": "artifact-measurement-result",
+      "contentSha256": "e990de239d4a61451e0ffc22ea7b78aebfb14326ffbc91597e11ed97336d3c1d",
+      "logicalName": "evidence/milestone_7_7/fixtures/measurement-result.fixture.json",
+      "mediaType": "application/json",
+      "packageId": "m7.7-cp3-local-fixture",
+      "role": "measurement-result",
+      "semanticIntegritySha256": "a98e8122f5c16a448de69f17cc6b537ea03989843805bbb584dfc620ae5d5c79",
+      "sizeBytes": 6283
+    }
+  ],
+  "checkpoint": "milestone-7.7-checkpoint-3",
+  "checkpoint2Bindings": {
+    "assertions": [
+      {
+        "assertionId": "all-results-schema-valid",
+        "passed": true
+      },
+      {
+        "assertionId": "no-cross-tenant-attribution",
+        "passed": true
+      },
+      {
+        "assertionId": "no-output-limit-breach",
+        "passed": true
+      }
+    ],
+    "generatorVersion": "mobius.m7.7.generator.v1",
+    "measurementConfiguration": {
+      "clockSource": "logical-monotonic-microseconds",
+      "excludePhaseKinds": ["warmup", "cooldown"],
+      "includeFailureLatencies": true,
+      "includeTimeoutLatencies": true,
+      "latencyUnit": "microseconds",
+      "percentileMethod": "nearest-rank",
+      "percentilesBasisPoints": [5000, 9500, 9900],
+      "rateScale": "basis-points",
+      "throughputUnit": "milli-requests-per-second"
+    },
+    "measurementResult": {
+      "contractVersion": "mobius.m7.7.measurement-result.v1",
+      "integritySha256": "a98e8122f5c16a448de69f17cc6b537ea03989843805bbb584dfc620ae5d5c79",
+      "workloadId": "synthetic-mixed-local-v1"
+    },
+    "requestPlan": {
+      "contractVersion": "mobius.m7.7.workload-plan.v1",
+      "integritySha256": "4c13cc8b536cef325a27a0a00b4d008d164ff5d955512e599df309f69c7f32b3",
+      "workloadId": "synthetic-mixed-local-v1"
+    },
+    "workloadManifest": {
+      "contractVersion": "mobius.m7.7.workload.v1",
+      "integritySha256": "7d8832aae03e00ec93a6203a2360555ba19b030912a406b775fc7b20630c1c26",
+      "workloadId": "synthetic-mixed-local-v1"
+    }
+  },
+  "claimStrength": "local-contract-validation-only",
+  "completeness": {
+    "milestoneState": "partial",
+    "packageState": "complete"
+  },
+  "environmentClass": "synthetic-local",
+  "evidenceClasses": [
+    {
+      "evidenceClass": "alert-delivery-evidence",
+      "requiredForPackage": false,
+      "sourceKind": "local-observation",
+      "state": "unavailable"
+    },
+    {
+      "evidenceClass": "azure-execution-evidence",
+      "requiredForPackage": false,
+      "sourceKind": "local-observation",
+      "state": "absent"
+    },
+    {
+      "evidenceClass": "capacity-evidence",
+      "requiredForPackage": false,
+      "sourceKind": "local-observation",
+      "state": "unproved"
+    },
+    {
+      "evidenceClass": "cleanup-evidence",
+      "requiredForPackage": false,
+      "sourceKind": "local-observation",
+      "state": "unproved"
+    },
+    {
+      "evidenceClass": "external-provider-evidence",
+      "requiredForPackage": false,
+      "sourceKind": "local-observation",
+      "state": "unavailable"
+    },
+    {
+      "evidenceClass": "infrastructure-definition-evidence",
+      "requiredForPackage": false,
+      "sourceKind": "repository-definition",
+      "state": "unproved"
+    },
+    {
+      "evidenceClass": "local-deterministic-validation",
+      "requiredForPackage": true,
+      "sourceKind": "local-observation",
+      "state": "complete"
+    },
+    {
+      "evidenceClass": "observability-evidence",
+      "requiredForPackage": false,
+      "sourceKind": "local-observation",
+      "state": "unproved"
+    },
+    {
+      "evidenceClass": "resilience-evidence",
+      "requiredForPackage": false,
+      "sourceKind": "local-observation",
+      "state": "unproved"
+    },
+    {
+      "evidenceClass": "security-evidence",
+      "requiredForPackage": false,
+      "sourceKind": "local-observation",
+      "state": "partial"
+    },
+    {
+      "evidenceClass": "synthetic-workload-evidence",
+      "requiredForPackage": true,
+      "sourceKind": "generated-fixture",
+      "state": "complete"
+    }
+  ],
+  "executionClass": "local-deterministic-validation",
+  "executionWindow": {
+    "clock": "logical-monotonic-microseconds",
+    "endedAtLogicalUs": 5755329,
+    "startedAtLogicalUs": 0
+  },
+  "knownLimitations": [
+    "local-synthetic-only",
+    "no-azure-execution",
+    "no-external-retention",
+    "no-live-failure-injection",
+    "no-production-capacity-claim",
+    "no-provider-observation",
+    "schema-subset-validator-only",
+    "unresolved-infrastructure-gates",
+    "unsigned"
+  ],
+  "labels": {
+    "checkpoint": "milestone-7.7-checkpoint-3",
+    "claim": "local-contract-validation-only",
+    "dataClass": "isolated-synthetic",
+    "environment": "synthetic-local",
+    "execution": "local-deterministic-validation"
+  },
+  "packageId": "m7.7-cp3-local-fixture",
+  "packageIntegritySha256": "e88ab17245804f26d535ee225de1042ebf20d1fb6acf66e4cc755262c8e94ad1",
+  "packageVersion": "mobius.m7.7.evidence-package.v1",
+  "purpose": "milestone-7.7-local-evidence-contract-validation",
+  "replacement": {
+    "kind": "original",
+    "priorStatePreserved": false,
+    "reasonCode": null,
+    "supersedesPackageSha256": null
+  },
+  "retention": {
+    "deletionPolicy": "repository-lifecycle-only",
+    "externalReference": null,
+    "immutableProviderStorage": false,
+    "independentlyProtected": false,
+    "legalHold": false,
+    "policyVersion": "mobius.m7.7.retention-metadata.v1",
+    "retentionClass": "local-repository-fixture",
+    "revalidationTrigger": "source-or-contract-change",
+    "status": "local-only"
+  },
+  "schemaVersion": "2020-12",
+  "signature": {
+    "keyReference": null,
+    "scheme": "none",
+    "signatureValue": null,
+    "signerClass": "none",
+    "status": "unsigned",
+    "verified": false
+  },
+  "source": {
+    "commitSha": "032957cc6bf68dd0cf16b4971cdafb6624f0303a",
+    "dirty": false,
+    "repositoryId": "solarplexus-mobius"
+  },
+  "stopReason": "completed",
+  "unresolvedGates": [
+    "alert-destination",
+    "evidence-retention",
+    "exact-provider-api-versions",
+    "managed-identity-environment-mapping",
+    "openai-smtp-test-providers",
+    "private-acr-source-path",
+    "redis-custom-acl-support",
+    "region-and-subscription-availability",
+    "scanner-result-bridge",
+    "telemetry-gateway"
+  ],
+  "validationEvents": [
+    {
+      "state": "complete",
+      "validationId": "artifact-integrity"
+    },
+    {
+      "state": "complete",
+      "validationId": "checkpoint2-binding"
+    },
+    {
+      "state": "complete",
+      "validationId": "classification-validation"
+    },
+    {
+      "state": "complete",
+      "validationId": "package-integrity"
+    },
+    {
+      "state": "complete",
+      "validationId": "privacy-structure-scan"
+    },
+    {
+      "state": "complete",
+      "validationId": "schema-validation"
+    }
+  ],
+  "validationState": "valid",
+  "verifierVersion": "mobius.m7.7.evidence-verifier.v1"
+}

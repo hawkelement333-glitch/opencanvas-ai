@@ -1,0 +1,236 @@
+{
+  "aggregate": {
+    "errorRateBasisPoints": 0,
+    "failureCount": 0,
+    "latency": {
+      "maximumUs": 49205,
+      "meanUs": 26194,
+      "minimumUs": 1210,
+      "p50Us": 25453,
+      "p95Us": 49205,
+      "p99Us": 49205,
+      "sampleCount": 16
+    },
+    "maximumQueueDepth": null,
+    "maximumSaturationBasisPoints": null,
+    "queueWait": {
+      "maximumUs": null,
+      "meanUs": null,
+      "minimumUs": null,
+      "p50Us": null,
+      "p95Us": null,
+      "p99Us": null,
+      "sampleCount": 0
+    },
+    "requestCount": 16,
+    "retryCount": 0,
+    "successCount": 16,
+    "throughputMilliRequestsPerSecond": 3342,
+    "timeoutCount": 0
+  },
+  "assertions": [
+    {
+      "assertionId": "all-results-schema-valid",
+      "passed": true
+    },
+    {
+      "assertionId": "no-cross-tenant-attribution",
+      "passed": true
+    },
+    {
+      "assertionId": "no-output-limit-breach",
+      "passed": true
+    }
+  ],
+  "contractVersion": "mobius.m7.7.measurement-result.v1",
+  "generatorVersion": "mobius.m7.7.generator.v1",
+  "integritySha256": "a98e8122f5c16a448de69f17cc6b537ea03989843805bbb584dfc620ae5d5c79",
+  "manifestSha256": "7d8832aae03e00ec93a6203a2360555ba19b030912a406b775fc7b20630c1c26",
+  "measurementConfiguration": {
+    "clockSource": "logical-monotonic-microseconds",
+    "excludePhaseKinds": ["warmup", "cooldown"],
+    "includeFailureLatencies": true,
+    "includeTimeoutLatencies": true,
+    "latencyUnit": "microseconds",
+    "percentileMethod": "nearest-rank",
+    "percentilesBasisPoints": [5000, 9500, 9900],
+    "rateScale": "basis-points",
+    "throughputUnit": "milli-requests-per-second"
+  },
+  "operationMeasurements": [
+    {
+      "measurement": {
+        "errorRateBasisPoints": 0,
+        "failureCount": 0,
+        "latency": {
+          "maximumUs": 37812,
+          "meanUs": 26256,
+          "minimumUs": 1210,
+          "p50Us": 30050,
+          "p95Us": 37812,
+          "p99Us": 37812,
+          "sampleCount": 8
+        },
+        "maximumQueueDepth": null,
+        "maximumSaturationBasisPoints": null,
+        "queueWait": {
+          "maximumUs": null,
+          "meanUs": null,
+          "minimumUs": null,
+          "p50Us": null,
+          "p95Us": null,
+          "p99Us": null,
+          "sampleCount": 0
+        },
+        "requestCount": 8,
+        "retryCount": 0,
+        "successCount": 8,
+        "throughputMilliRequestsPerSecond": 1671,
+        "timeoutCount": 0
+      },
+      "operationId": "canvas.snapshot"
+    },
+    {
+      "measurement": {
+        "errorRateBasisPoints": 0,
+        "failureCount": 0,
+        "latency": {
+          "maximumUs": 49205,
+          "meanUs": 33169,
+          "minimumUs": 11519,
+          "p50Us": 28348,
+          "p95Us": 49205,
+          "p99Us": 49205,
+          "sampleCount": 4
+        },
+        "maximumQueueDepth": null,
+        "maximumSaturationBasisPoints": null,
+        "queueWait": {
+          "maximumUs": null,
+          "meanUs": null,
+          "minimumUs": null,
+          "p50Us": null,
+          "p95Us": null,
+          "p99Us": null,
+          "sampleCount": 0
+        },
+        "requestCount": 4,
+        "retryCount": 0,
+        "successCount": 4,
+        "throughputMilliRequestsPerSecond": 835,
+        "timeoutCount": 0
+      },
+      "operationId": "graph_retrieval.create"
+    },
+    {
+      "measurement": {
+        "errorRateBasisPoints": 0,
+        "failureCount": 0,
+        "latency": {
+          "maximumUs": 25453,
+          "meanUs": 19097,
+          "minimumUs": 12498,
+          "p50Us": 15793,
+          "p95Us": 25453,
+          "p99Us": 25453,
+          "sampleCount": 4
+        },
+        "maximumQueueDepth": null,
+        "maximumSaturationBasisPoints": null,
+        "queueWait": {
+          "maximumUs": null,
+          "meanUs": null,
+          "minimumUs": null,
+          "p50Us": null,
+          "p95Us": null,
+          "p99Us": null,
+          "sampleCount": 0
+        },
+        "requestCount": 4,
+        "retryCount": 0,
+        "successCount": 4,
+        "throughputMilliRequestsPerSecond": 835,
+        "timeoutCount": 0
+      },
+      "operationId": "workflow.execute"
+    }
+  ],
+  "outputSchemaVersion": "2020-12",
+  "planSha256": "4c13cc8b536cef325a27a0a00b4d008d164ff5d955512e599df309f69c7f32b3",
+  "runMetadata": {
+    "endedAtLogicalUs": 5755329,
+    "executionBoundary": "synthetic-local-simulator",
+    "startedAtLogicalUs": 0
+  },
+  "seed": 77002,
+  "stopReason": "completed",
+  "tenantMeasurements": [
+    {
+      "measurement": {
+        "errorRateBasisPoints": 0,
+        "failureCount": 0,
+        "latency": {
+          "maximumUs": 43604,
+          "meanUs": 25597,
+          "minimumUs": 11519,
+          "p50Us": 22645,
+          "p95Us": 43604,
+          "p99Us": 43604,
+          "sampleCount": 8
+        },
+        "maximumQueueDepth": null,
+        "maximumSaturationBasisPoints": null,
+        "queueWait": {
+          "maximumUs": null,
+          "meanUs": null,
+          "minimumUs": null,
+          "p50Us": null,
+          "p95Us": null,
+          "p99Us": null,
+          "sampleCount": 0
+        },
+        "requestCount": 8,
+        "retryCount": 0,
+        "successCount": 8,
+        "throughputMilliRequestsPerSecond": 1671,
+        "timeoutCount": 0
+      },
+      "tenantToken": "syn-tenant-65f6eb43e7ab0376"
+    },
+    {
+      "measurement": {
+        "errorRateBasisPoints": 0,
+        "failureCount": 0,
+        "latency": {
+          "maximumUs": 49205,
+          "meanUs": 26792,
+          "minimumUs": 1210,
+          "p50Us": 28348,
+          "p95Us": 49205,
+          "p99Us": 49205,
+          "sampleCount": 8
+        },
+        "maximumQueueDepth": null,
+        "maximumSaturationBasisPoints": null,
+        "queueWait": {
+          "maximumUs": null,
+          "meanUs": null,
+          "minimumUs": null,
+          "p50Us": null,
+          "p95Us": null,
+          "p99Us": null,
+          "sampleCount": 0
+        },
+        "requestCount": 8,
+        "retryCount": 0,
+        "successCount": 8,
+        "throughputMilliRequestsPerSecond": 1671,
+        "timeoutCount": 0
+      },
+      "tenantToken": "syn-tenant-cd105d3e4df293cc"
+    }
+  ],
+  "validationStatus": "valid-synthetic-local",
+  "workloadId": "synthetic-mixed-local-v1",
+  "workloadType": "mixed"
+}
