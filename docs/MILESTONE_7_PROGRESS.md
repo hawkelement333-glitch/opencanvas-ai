@@ -8,7 +8,8 @@ PostgreSQL historical-migration correction for `0005`, `0021`, `0023`, and
 `a88c6117f6b58137f1014cc8b389f44966c2918f`; Mobius Family Architecture
 Constitution documentation checkpoint complete locally; checkpoint 7.2
 complete locally; checkpoint 7.3 complete locally; checkpoint 7.4 complete
-locally; checkpoint 7.5 unstarted
+locally; checkpoint 7.5 complete locally; checkpoint 7.6 complete locally;
+checkpoint 7.7 blocked and unstarted
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -36,6 +37,12 @@ Checkpoint 7.3 handoff:
 
 Checkpoint 7.4 handoff:
 [`MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md`](MILESTONE_7_4_DURABLE_QUEUES_SHARED_LIMITS_HANDOFF.md)
+
+Checkpoint 7.5 handoff:
+[`MILESTONE_7_5_OBSERVABILITY_HANDOFF.md`](MILESTONE_7_5_OBSERVABILITY_HANDOFF.md)
+
+Checkpoint 7.6 handoff:
+[`MILESTONE_7_6_BACKUP_RESTORE_DISASTER_RECOVERY_HANDOFF.md`](MILESTONE_7_6_BACKUP_RESTORE_DISASTER_RECOVERY_HANDOFF.md)
 
 PostgreSQL compatibility amendment:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
@@ -416,8 +423,40 @@ pre-production/Milestone 7.8 revalidation triggers.
 Exact implementation and validation evidence is in
 [`MILESTONE_7_5_OBSERVABILITY_HANDOFF.md`](MILESTONE_7_5_OBSERVABILITY_HANDOFF.md).
 
+## Checkpoint 7.6 closure
+
+Checkpoint 7.6 — Backup, Restore, Rollback, and Disaster Recovery — is
+complete locally on `milestone-7-6-recovery-adapter`. The recovery-only
+Valkey authentication adapter and hardened immutable application image
+supported an isolated managed exercise covering full restore, PITR, encrypted
+portable recovery, failback, cross-resource integrity, private effect locking,
+signed evidence, role revocation, and complete cleanup.
+
+Results 14–24 passed and the final Stage 3 decision is
+`DEPLOYMENT VALIDATED`. The exercise found one Azure-only NSG defect: a
+`VirtualNetwork` service-tag allow rule reached a public destination through
+the firewall route. Narrowing the rule to the exact recovery VNet CIDR made
+Network Watcher and the final public-destination probes deny access. No
+repository code, migration, or infrastructure-as-code changed for that fix.
+
+The PITR, full-restore, portable-recovery, and failback RTO values are measured
+exercise upper bounds, not production SLOs. Exact Stage 3 posted cost remains
+unknown because Azure Cost Management returned `429` and usage posting is
+delayed; the portal's `$0.08` overall subscription cost is not attributed to
+Stage 3. Category-log rows did not arrive before cleanup, although private
+metrics were confirmed. Both unknowns remain explicit revalidation triggers.
+
+The recovery resource group, temporary access, identities, roles, keys,
+evidence destination, restore targets, network, and local temporary files were
+removed with zero recovery-environment residue. The protected Milestone 7.3
+inventory was unchanged. No migration was added; `20260726_0028` remains the
+sole head and migration `0029` remains absent.
+
+Exact evidence and the exercised operating procedure are in
+[`MILESTONE_7_6_BACKUP_RESTORE_DISASTER_RECOVERY_HANDOFF.md`](MILESTONE_7_6_BACKUP_RESTORE_DISASTER_RECOVERY_HANDOFF.md)
+and [`PRODUCTION_RECOVERY_RUNBOOK.md`](PRODUCTION_RECOVERY_RUNBOOK.md).
+
 ## Next authorized work
 
-The next checkpoint is 7.6 Backup, Restore, Rollback, and Disaster Recovery,
-which remains unstarted. This run did not start checkpoint 7.6, 7.7, 7.8, or
-Milestone 8.
+Milestone 7.7 remains blocked and unstarted. This completion record does not
+authorize, plan, scaffold, or implement 7.7, 7.8, Milestone 8, or later work.

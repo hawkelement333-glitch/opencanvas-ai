@@ -5,7 +5,7 @@ Date: 2026-07-27
 Status: architecture complete locally; checkpoint 7.1 implemented locally;
 checkpoint 7.2 implemented locally; checkpoint 7.3 implemented locally;
 checkpoint 7.4 implemented locally; checkpoint 7.5 implemented locally;
-checkpoint 7.6 unstarted
+checkpoint 7.6 complete locally; checkpoint 7.7 blocked and unstarted
 
 Checkpoint 7.2 implementation record: migration `20260726_0026` is the sole
 head and direct child of `20260725_0025`. The deterministic Indexer, immutable
@@ -41,6 +41,18 @@ objective, alert, privacy/retention, escalation, integrity-monitor, and
 runbook artifacts realize section 13 without a migration. Product Trace,
 audit, events, outbox, and activity remain authoritative and independent.
 See [`OBSERVABILITY_ARCHITECTURE.md`](OBSERVABILITY_ARCHITECTURE.md).
+
+Checkpoint 7.6 implementation record: the recovery-only Valkey adapter and
+immutable deployment image support the isolated managed recovery exercise.
+Managed full restore, PITR, encrypted portable recovery, failback, private
+effect-lock validation, evidence signing, role revocation, and zero-residue
+cleanup passed. Results 14–24 passed and the final Stage 3 decision is
+`DEPLOYMENT VALIDATED`. The measured restore durations are exercise upper
+bounds, not production SLOs. Exact Stage 3 posted cost remains unavailable
+because Azure returned `429` and usage posting is delayed; category logs did
+not arrive before cleanup although private metrics were confirmed. See
+[`MILESTONE_7_6_BACKUP_RESTORE_DISASTER_RECOVERY_HANDOFF.md`](MILESTONE_7_6_BACKUP_RESTORE_DISASTER_RECOVERY_HANDOFF.md)
+and [`PRODUCTION_RECOVERY_RUNBOOK.md`](PRODUCTION_RECOVERY_RUNBOOK.md).
 
 PostgreSQL compatibility amendments:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -1365,14 +1377,17 @@ the governed Librarian, Worlds, Spatial, Federation, or Continuity.
 
 ## 27. Current implementation boundary
 
-Checkpoints 7.1 through 7.5 are complete locally. Migration `20260726_0028`
+Checkpoints 7.1 through 7.6 are complete locally. Migration `20260726_0028`
 is the sole head. Managed staging evidence validates the private/versioned
 Azure storage and clean/EICAR scanner prerequisites, with direct personal
 blob-tag inspection unavailable by least-privilege design. The application
 uses a dedicated exact-evidence scanner-result path rather than personal
 authority or a mutable tag.
 
-No approved isolated live telemetry destination was available for checkpoint
-7.5. This does not certify production deployment, live exporter/dashboard/
-alert delivery, application-to-Azure observability, or start checkpoints
-7.6–7.8, Milestone 8, or later work.
+Checkpoint 7.6 subsequently validated private recovery telemetry metrics in
+its isolated Azure environment, but category-log rows had not arrived before
+cleanup. Exact Stage 3 posted cost also remains unavailable because of Azure
+`429` responses and delayed usage posting. These limitations remain explicit
+revalidation gates; the exercise does not certify production deployment,
+production SLOs, public release, or start checkpoints 7.7–7.8, Milestone 8,
+or later work.

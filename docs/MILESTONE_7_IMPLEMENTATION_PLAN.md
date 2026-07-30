@@ -10,7 +10,8 @@ locally; checkpoint 7.2 complete locally on
 `milestone-7-2-implementation-local`; checkpoint 7.3 complete locally on
 `milestone-7-3-implementation-local`; checkpoint 7.4 complete locally on
 `milestone-7-4-implementation-local`; checkpoint 7.5 complete locally on
-`milestone-7-5-implementation-local`; checkpoint 7.6 unstarted
+`milestone-7-5-implementation-local`; checkpoint 7.6 complete locally on
+`milestone-7-6-recovery-adapter`; checkpoint 7.7 blocked and unstarted
 
 Compatibility gates:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -888,6 +889,18 @@ Suggested local commit: `Complete Milestone 7.6 production recovery`
 
 Exit only after the complete restore/rollback/DR exercises pass and no
 application migration was created.
+
+Completion record (2026-07-30): the recovery-only Valkey adapter, hardened
+immutable application image, managed full restore, PITR, encrypted portable
+recovery, failback, private effect lock, signed evidence, role revocation, and
+zero-residue cleanup completed the local checkpoint. Results 14–24 passed and
+the final Stage 3 decision is `DEPLOYMENT VALIDATED`. The measured RTO values
+are exercise upper bounds, not production SLOs. Exact Stage 3 posted cost
+remains unknown because Azure returned `429` and usage posting is delayed;
+category logs did not arrive before cleanup although private metrics were
+confirmed. No application migration was created. Exact evidence is in
+[`MILESTONE_7_6_BACKUP_RESTORE_DISASTER_RECOVERY_HANDOFF.md`](MILESTONE_7_6_BACKUP_RESTORE_DISASTER_RECOVERY_HANDOFF.md)
+and [`PRODUCTION_RECOVERY_RUNBOOK.md`](PRODUCTION_RECOVERY_RUNBOOK.md).
 
 ### Explicit exclusions
 
