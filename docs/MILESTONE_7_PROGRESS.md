@@ -228,8 +228,11 @@ is part of this correction checkpoint.
 | 7.2 deterministic Indexer implementation           | Complete locally             |
 | 7.3 object-storage/upload/malware implementation   | Complete locally             |
 | 7.4 durable-work/shared-limit implementation       | Complete locally             |
-| 7.5–7.8 implementation                             | Not started                  |
-| Live infrastructure/provisioning/deployment        | Not started                  |
+| 7.5 observability implementation                   | Complete locally             |
+| 7.6 recovery implementation                        | Complete locally             |
+| 7.7–7.8 implementation                             | Not started                  |
+| 7.6 isolated infrastructure deployment             | Validated; fully removed     |
+| Current 7.7 infrastructure                         | Absent                       |
 
 ## Formal implementation checkpoints
 
