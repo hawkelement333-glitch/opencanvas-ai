@@ -1426,3 +1426,19 @@ None of the four checkpoints contacted Azure, authorized provisioning,
 executed a managed workload or live fault, published a production capacity
 claim, signed or published evidence, provided independent retention, or began
 Checkpoint 5.
+
+Checkpoint 5 adds aggregate local validation across the public Checkpoint 1–4
+contracts. Its deterministic report binds the infrastructure bundle, workload
+manifest and reproduced plan/result, evidence package, failure plan, scenario
+catalog, and closed validation-requirement catalog. It fails closed on
+incompatible or tampered bindings, incomplete validation, unknown input,
+strengthened claims, execution capability, resolved external gates, secrets,
+private identifiers, absolute paths, traversal, and bounded-output violations.
+
+Local validation completion proves only that the repository contracts
+reproduce, validate, and remain mutually compatible. All ten infrastructure
+and five runtime gates remain unresolved; managed-environment evidence remains
+absent, pending, partial, or unproved as recorded. The validator has no
+network, process, provider, workload, fault, deployment, database, or
+infrastructure-mutation client. It does not authorize Azure topology
+preflight, Checkpoint 6, or any live exercise.

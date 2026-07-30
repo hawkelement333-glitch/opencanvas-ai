@@ -58,6 +58,9 @@ Checkpoint 7.7 Checkpoint 3 handoff:
 Checkpoint 7.7 Checkpoint 4 handoff:
 [`MILESTONE_7_7_CHECKPOINT_4_LOCAL_FAILURE_INJECTION_FRAMEWORK_HANDOFF.md`](MILESTONE_7_7_CHECKPOINT_4_LOCAL_FAILURE_INJECTION_FRAMEWORK_HANDOFF.md)
 
+Checkpoint 7.7 Checkpoint 5 handoff:
+[`MILESTONE_7_7_CHECKPOINT_5_LOCAL_VALIDATION_HANDOFF.md`](MILESTONE_7_7_CHECKPOINT_5_LOCAL_VALIDATION_HANDOFF.md)
+
 PostgreSQL compatibility amendment:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
 
@@ -515,5 +518,18 @@ infrastructure state. All ten Checkpoint 1 gates and five additional runtime
 gates remain unresolved. No production capacity, resilience, security,
 cleanup, signing, publication, or independent-retention claim was created.
 
-Milestone 7.7 remains in progress. Checkpoint 5 and Milestone 7.8 remain
+Checkpoint 5 aggregates the public Checkpoint 1–4 validators into one strict,
+bounded, deterministic report. It revalidates the exact infrastructure,
+workload, evidence, failure-plan, and scenario-catalog bindings; preserves all
+negative evidence and 15 unresolved gates; and requires fail-closed rejection
+coverage for malformed, unknown, tampered, incompatible, incomplete,
+secret-bearing, private, path-unsafe, out-of-bounds, or authority-strengthening
+input.
+
+Checkpoint 5 is local contract validation only. It contacted no network or
+provider, ran no workload or fault, provisioned nothing, and resolved no
+external gate. Milestone evidence remains partial and execution remains
+blocked.
+
+Milestone 7.7 remains in progress. Checkpoint 6 and Milestone 7.8 remain
 unstarted and require separate authorization.

@@ -1,0 +1,348 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://solarplexus.invalid/schemas/milestone-7-7-local-validation-report-v1.json",
+  "title": "Milestone 7.7 aggregate local-validation report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "reportId",
+    "purpose",
+    "source",
+    "bindings",
+    "classification",
+    "capabilities",
+    "validationChecks",
+    "validationRequirements",
+    "gateStates",
+    "evidenceStates",
+    "completion",
+    "limitations",
+    "verifierVersion",
+    "reportIntegritySha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "2020-12"
+    },
+    "contractVersion": {
+      "const": "mobius.m7.7.local-validation-report.v1"
+    },
+    "reportId": {
+      "$ref": "#/$defs/identifier"
+    },
+    "purpose": {
+      "const": "aggregate-local-validation"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "commitSha", "dirty"],
+      "properties": {
+        "repositoryId": {
+          "const": "solarplexus-mobius"
+        },
+        "commitSha": {
+          "$ref": "#/$defs/commit"
+        },
+        "dirty": {
+          "const": false
+        }
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkpoint1BundleSha256",
+        "checkpoint2ManifestSha256",
+        "checkpoint2PlanSha256",
+        "checkpoint2ResultSha256",
+        "checkpoint3PackageSha256",
+        "checkpoint4PlanSha256",
+        "checkpoint4CatalogSha256",
+        "validationRequirementCatalogSha256"
+      ],
+      "properties": {
+        "checkpoint1BundleSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "checkpoint2ManifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "checkpoint2PlanSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "checkpoint2ResultSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "checkpoint3PackageSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "checkpoint4PlanSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "checkpoint4CatalogSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "validationRequirementCatalogSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "execution", "claimStrength"],
+      "properties": {
+        "environment": {
+          "const": "unprovisioned-local"
+        },
+        "execution": {
+          "const": "contract-validation-only"
+        },
+        "claimStrength": {
+          "const": "local-contract-validation-only"
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "network",
+        "process",
+        "faultExecution",
+        "workloadExecution",
+        "provisioning",
+        "destructiveActions",
+        "externalServices",
+        "credentialUse"
+      ],
+      "properties": {
+        "network": {
+          "const": false
+        },
+        "process": {
+          "const": false
+        },
+        "faultExecution": {
+          "const": false
+        },
+        "workloadExecution": {
+          "const": false
+        },
+        "provisioning": {
+          "const": false
+        },
+        "destructiveActions": {
+          "const": false
+        },
+        "externalServices": {
+          "const": false
+        },
+        "credentialUse": {
+          "const": false
+        }
+      }
+    },
+    "validationChecks": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status"],
+        "properties": {
+          "id": {
+            "enum": [
+              "checkpoint-1-bundle-validation",
+              "checkpoint-2-fixture-reproduction",
+              "checkpoint-3-evidence-package-validation",
+              "checkpoint-4-failure-plan-validation",
+              "cross-checkpoint-binding-validation"
+            ]
+          },
+          "status": {
+            "const": "passed"
+          }
+        }
+      }
+    },
+    "validationRequirements": {
+      "type": "array",
+      "minItems": 13,
+      "maxItems": 13,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "absolute-path-rejection",
+          "bounded-output-rejection",
+          "claim-strength-rejection",
+          "compatibility-version-rejection",
+          "completeness-rejection",
+          "execution-authority-rejection",
+          "invalid-input-rejection",
+          "private-identifier-rejection",
+          "schema-closure-rejection",
+          "secret-material-rejection",
+          "tamper-rejection",
+          "traversal-rejection",
+          "unknown-input-rejection"
+        ]
+      }
+    },
+    "gateStates": {
+      "type": "array",
+      "minItems": 15,
+      "maxItems": 15,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status"],
+        "properties": {
+          "id": {
+            "enum": [
+              "alert-destination",
+              "cleanup-supervisor-runtime-proof",
+              "effect-lock-runtime-proof",
+              "evidence-retention",
+              "exact-provider-api-versions",
+              "fault-controller-shape",
+              "isolated-environment",
+              "live-failure-authorization",
+              "managed-identity-environment-mapping",
+              "openai-smtp-test-providers",
+              "private-acr-source-path",
+              "redis-custom-acl-support",
+              "region-and-subscription-availability",
+              "scanner-result-bridge",
+              "telemetry-gateway"
+            ]
+          },
+          "status": {
+            "const": "unresolved"
+          }
+        }
+      }
+    },
+    "evidenceStates": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["evidenceClass", "state"],
+        "properties": {
+          "evidenceClass": {
+            "enum": [
+              "alert-delivery-evidence",
+              "azure-execution-evidence",
+              "capacity-evidence",
+              "cleanup-evidence",
+              "external-provider-evidence",
+              "infrastructure-definition-evidence",
+              "local-deterministic-validation",
+              "observability-evidence",
+              "resilience-evidence",
+              "security-evidence",
+              "synthetic-workload-evidence"
+            ]
+          },
+          "state": {
+            "enum": [
+              "absent",
+              "pending",
+              "partial",
+              "complete",
+              "invalid",
+              "blocked",
+              "unavailable",
+              "skipped",
+              "failed",
+              "unproved"
+            ]
+          }
+        }
+      }
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "localValidationState",
+        "milestoneEvidenceState",
+        "executionReadiness",
+        "nextCheckpoint",
+        "stopReason"
+      ],
+      "properties": {
+        "localValidationState": {
+          "const": "complete"
+        },
+        "milestoneEvidenceState": {
+          "const": "partial"
+        },
+        "executionReadiness": {
+          "const": "blocked"
+        },
+        "nextCheckpoint": {
+          "const": "azure-topology-preflight"
+        },
+        "stopReason": {
+          "const": "local-validation-complete"
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "all-external-gates-unresolved",
+          "local-validation-only",
+          "no-azure-execution",
+          "no-external-retention",
+          "no-live-failure-injection",
+          "no-live-workload",
+          "no-production-capacity-claim",
+          "no-provider-observation",
+          "no-real-cleanup-proof",
+          "no-real-rollback-proof",
+          "no-runtime-gate-resolution",
+          "unsigned"
+        ]
+      }
+    },
+    "verifierVersion": {
+      "const": "mobius.m7.7.local-validation-verifier.v1"
+    },
+    "reportIntegritySha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "[0-9a-f]{40}"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "[0-9a-f]{64}"
+    }
+  }
+}

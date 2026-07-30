@@ -1,0 +1,204 @@
+{
+  "bindings": {
+    "checkpoint1BundleSha256": "b4f5ebbe9158d0264460158a31454e1ebf63ac038e51296c33cdfcb77b088297",
+    "checkpoint2ManifestSha256": "7d8832aae03e00ec93a6203a2360555ba19b030912a406b775fc7b20630c1c26",
+    "checkpoint2PlanSha256": "4c13cc8b536cef325a27a0a00b4d008d164ff5d955512e599df309f69c7f32b3",
+    "checkpoint2ResultSha256": "a98e8122f5c16a448de69f17cc6b537ea03989843805bbb584dfc620ae5d5c79",
+    "checkpoint3PackageSha256": "e88ab17245804f26d535ee225de1042ebf20d1fb6acf66e4cc755262c8e94ad1",
+    "checkpoint4CatalogSha256": "bf38c10982a5ed3e15fe27174f0b472b44fa0e44c23d9c62f1a2e68148fac8be",
+    "checkpoint4PlanSha256": "3a424ef2435853e6974007b6174147bf92ac226a6fb2cf99f502bb88b3baafa9",
+    "validationRequirementCatalogSha256": "069c9e00e984249b45ef8c5de5b28581b4f8fa1818e62d2af7269d584ae84791"
+  },
+  "capabilities": {
+    "credentialUse": false,
+    "destructiveActions": false,
+    "externalServices": false,
+    "faultExecution": false,
+    "network": false,
+    "process": false,
+    "provisioning": false,
+    "workloadExecution": false
+  },
+  "classification": {
+    "claimStrength": "local-contract-validation-only",
+    "environment": "unprovisioned-local",
+    "execution": "contract-validation-only"
+  },
+  "completion": {
+    "executionReadiness": "blocked",
+    "localValidationState": "complete",
+    "milestoneEvidenceState": "partial",
+    "nextCheckpoint": "azure-topology-preflight",
+    "stopReason": "local-validation-complete"
+  },
+  "contractVersion": "mobius.m7.7.local-validation-report.v1",
+  "evidenceStates": [
+    {
+      "evidenceClass": "alert-delivery-evidence",
+      "state": "unproved"
+    },
+    {
+      "evidenceClass": "azure-execution-evidence",
+      "state": "absent"
+    },
+    {
+      "evidenceClass": "capacity-evidence",
+      "state": "unproved"
+    },
+    {
+      "evidenceClass": "cleanup-evidence",
+      "state": "pending"
+    },
+    {
+      "evidenceClass": "external-provider-evidence",
+      "state": "absent"
+    },
+    {
+      "evidenceClass": "infrastructure-definition-evidence",
+      "state": "partial"
+    },
+    {
+      "evidenceClass": "local-deterministic-validation",
+      "state": "complete"
+    },
+    {
+      "evidenceClass": "observability-evidence",
+      "state": "unproved"
+    },
+    {
+      "evidenceClass": "resilience-evidence",
+      "state": "pending"
+    },
+    {
+      "evidenceClass": "security-evidence",
+      "state": "pending"
+    },
+    {
+      "evidenceClass": "synthetic-workload-evidence",
+      "state": "partial"
+    }
+  ],
+  "gateStates": [
+    {
+      "id": "alert-destination",
+      "status": "unresolved"
+    },
+    {
+      "id": "cleanup-supervisor-runtime-proof",
+      "status": "unresolved"
+    },
+    {
+      "id": "effect-lock-runtime-proof",
+      "status": "unresolved"
+    },
+    {
+      "id": "evidence-retention",
+      "status": "unresolved"
+    },
+    {
+      "id": "exact-provider-api-versions",
+      "status": "unresolved"
+    },
+    {
+      "id": "fault-controller-shape",
+      "status": "unresolved"
+    },
+    {
+      "id": "isolated-environment",
+      "status": "unresolved"
+    },
+    {
+      "id": "live-failure-authorization",
+      "status": "unresolved"
+    },
+    {
+      "id": "managed-identity-environment-mapping",
+      "status": "unresolved"
+    },
+    {
+      "id": "openai-smtp-test-providers",
+      "status": "unresolved"
+    },
+    {
+      "id": "private-acr-source-path",
+      "status": "unresolved"
+    },
+    {
+      "id": "redis-custom-acl-support",
+      "status": "unresolved"
+    },
+    {
+      "id": "region-and-subscription-availability",
+      "status": "unresolved"
+    },
+    {
+      "id": "scanner-result-bridge",
+      "status": "unresolved"
+    },
+    {
+      "id": "telemetry-gateway",
+      "status": "unresolved"
+    }
+  ],
+  "limitations": [
+    "all-external-gates-unresolved",
+    "local-validation-only",
+    "no-azure-execution",
+    "no-external-retention",
+    "no-live-failure-injection",
+    "no-live-workload",
+    "no-production-capacity-claim",
+    "no-provider-observation",
+    "no-real-cleanup-proof",
+    "no-real-rollback-proof",
+    "no-runtime-gate-resolution",
+    "unsigned"
+  ],
+  "purpose": "aggregate-local-validation",
+  "reportId": "m7.7-cp5-local-validation",
+  "reportIntegritySha256": "f87452146ffefa210eb92edd6065b02acd6c5a67e5880c5a8103db83c3843580",
+  "schemaVersion": "2020-12",
+  "source": {
+    "commitSha": "c4fdab9ed46ae8d1b8ef380dae9a3812155097c5",
+    "dirty": false,
+    "repositoryId": "solarplexus-mobius"
+  },
+  "validationChecks": [
+    {
+      "id": "checkpoint-1-bundle-validation",
+      "status": "passed"
+    },
+    {
+      "id": "checkpoint-2-fixture-reproduction",
+      "status": "passed"
+    },
+    {
+      "id": "checkpoint-3-evidence-package-validation",
+      "status": "passed"
+    },
+    {
+      "id": "checkpoint-4-failure-plan-validation",
+      "status": "passed"
+    },
+    {
+      "id": "cross-checkpoint-binding-validation",
+      "status": "passed"
+    }
+  ],
+  "validationRequirements": [
+    "absolute-path-rejection",
+    "bounded-output-rejection",
+    "claim-strength-rejection",
+    "compatibility-version-rejection",
+    "completeness-rejection",
+    "execution-authority-rejection",
+    "invalid-input-rejection",
+    "private-identifier-rejection",
+    "schema-closure-rejection",
+    "secret-material-rejection",
+    "tamper-rejection",
+    "traversal-rejection",
+    "unknown-input-rejection"
+  ],
+  "verifierVersion": "mobius.m7.7.local-validation-verifier.v1"
+}
