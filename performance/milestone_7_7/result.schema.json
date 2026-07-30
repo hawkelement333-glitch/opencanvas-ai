@@ -1,0 +1,318 @@
+{
+  "$id": "urn:solarplexus:mobius:milestone-7.7:measurement-result:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "aggregate": {
+      "$ref": "#/$defs/measurement"
+    },
+    "assertions": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "assertionId": {
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9-]{2,63}$",
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          }
+        },
+        "required": ["assertionId", "passed"],
+        "type": "object"
+      },
+      "maxItems": 5,
+      "type": "array"
+    },
+    "contractVersion": {
+      "const": "mobius.m7.7.measurement-result.v1"
+    },
+    "generatorVersion": {
+      "const": "mobius.m7.7.generator.v1"
+    },
+    "integritySha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "manifestSha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "measurementConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "clockSource": {
+          "const": "logical-monotonic-microseconds"
+        },
+        "excludePhaseKinds": {
+          "const": ["warmup", "cooldown"]
+        },
+        "includeFailureLatencies": {
+          "type": "boolean"
+        },
+        "includeTimeoutLatencies": {
+          "type": "boolean"
+        },
+        "latencyUnit": {
+          "const": "microseconds"
+        },
+        "percentileMethod": {
+          "const": "nearest-rank"
+        },
+        "percentilesBasisPoints": {
+          "const": [5000, 9500, 9900]
+        },
+        "rateScale": {
+          "const": "basis-points"
+        },
+        "throughputUnit": {
+          "const": "milli-requests-per-second"
+        }
+      },
+      "required": [
+        "percentilesBasisPoints",
+        "percentileMethod",
+        "latencyUnit",
+        "throughputUnit",
+        "rateScale",
+        "clockSource",
+        "excludePhaseKinds",
+        "includeTimeoutLatencies",
+        "includeFailureLatencies"
+      ],
+      "type": "object"
+    },
+    "operationMeasurements": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "measurement": {
+            "$ref": "#/$defs/measurement"
+          },
+          "operationId": {
+            "pattern": "^[a-z][a-z0-9_.-]{2,63}$",
+            "type": "string"
+          }
+        },
+        "required": ["operationId", "measurement"],
+        "type": "object"
+      },
+      "maxItems": 9,
+      "type": "array"
+    },
+    "outputSchemaVersion": {
+      "const": "2020-12"
+    },
+    "planSha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "runMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "endedAtLogicalUs": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "executionBoundary": {
+          "const": "synthetic-local-simulator"
+        },
+        "startedAtLogicalUs": {
+          "const": 0
+        }
+      },
+      "required": [
+        "executionBoundary",
+        "startedAtLogicalUs",
+        "endedAtLogicalUs"
+      ],
+      "type": "object"
+    },
+    "seed": {
+      "maximum": 2147483647,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stopReason": {
+      "enum": [
+        "completed",
+        "max-failures",
+        "max-timeouts",
+        "max-error-rate",
+        "assertion-failed"
+      ],
+      "type": "string"
+    },
+    "tenantMeasurements": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "measurement": {
+            "$ref": "#/$defs/measurement"
+          },
+          "tenantToken": {
+            "pattern": "^syn-tenant-[0-9a-f]{16}$",
+            "type": "string"
+          }
+        },
+        "required": ["tenantToken", "measurement"],
+        "type": "object"
+      },
+      "maxItems": 16,
+      "type": "array"
+    },
+    "validationStatus": {
+      "enum": ["valid-synthetic-local", "invalid"],
+      "type": "string"
+    },
+    "workloadId": {
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9-]{2,63}$",
+      "type": "string"
+    },
+    "workloadType": {
+      "enum": [
+        "baseline",
+        "sustained",
+        "spike",
+        "bounded-stress",
+        "bounded-soak",
+        "mixed",
+        "noisy-neighbor",
+        "hostile-authorized-concurrency",
+        "horizontal-scaling-preparation"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "contractVersion",
+    "outputSchemaVersion",
+    "workloadId",
+    "workloadType",
+    "manifestSha256",
+    "planSha256",
+    "seed",
+    "generatorVersion",
+    "measurementConfiguration",
+    "runMetadata",
+    "aggregate",
+    "operationMeasurements",
+    "tenantMeasurements",
+    "stopReason",
+    "assertions",
+    "validationStatus",
+    "integritySha256"
+  ],
+  "$defs": {
+    "latency": {
+      "additionalProperties": false,
+      "properties": {
+        "maximumUs": {
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "meanUs": {
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "minimumUs": {
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "p50Us": {
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "p95Us": {
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "p99Us": {
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "sampleCount": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sampleCount",
+        "minimumUs",
+        "maximumUs",
+        "meanUs",
+        "p50Us",
+        "p95Us",
+        "p99Us"
+      ],
+      "type": "object"
+    },
+    "measurement": {
+      "additionalProperties": false,
+      "properties": {
+        "errorRateBasisPoints": {
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "failureCount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "latency": {
+          "$ref": "#/$defs/latency"
+        },
+        "maximumQueueDepth": {
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "maximumSaturationBasisPoints": {
+          "maximum": 10000,
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "queueWait": {
+          "$ref": "#/$defs/latency"
+        },
+        "requestCount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retryCount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "successCount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "throughputMilliRequestsPerSecond": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timeoutCount": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "requestCount",
+        "successCount",
+        "failureCount",
+        "timeoutCount",
+        "retryCount",
+        "throughputMilliRequestsPerSecond",
+        "errorRateBasisPoints",
+        "latency",
+        "queueWait",
+        "maximumQueueDepth",
+        "maximumSaturationBasisPoints"
+      ],
+      "type": "object"
+    }
+  },
+  "title": "SolarPlexus Mobius Milestone 7.7 local measurement result",
+  "type": "object"
+}

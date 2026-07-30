@@ -1,0 +1,68 @@
+{
+  "contractVersion": "mobius.m7.7.operation-registry.v1",
+  "operations": [
+    {
+      "method": "GET",
+      "operationId": "health.live",
+      "route": "/health/live",
+      "source": "apps/api/opencanvas_api/api/routes/health.py",
+      "sourceLine": 61
+    },
+    {
+      "method": "GET",
+      "operationId": "canvas.snapshot",
+      "route": "/canvases/{canvas_id}/snapshot",
+      "source": "apps/api/opencanvas_api/api/routes/canvases.py",
+      "sourceLine": 343
+    },
+    {
+      "method": "POST",
+      "operationId": "secure_upload.initiate",
+      "route": "/workspaces/{workspace_id}/canvases/{canvas_id}/upload-sessions",
+      "source": "apps/api/opencanvas_api/api/routes/documents.py",
+      "sourceLine": 251
+    },
+    {
+      "method": "POST",
+      "operationId": "indexing.request",
+      "route": "/workspaces/{workspace_id}/canvases/{canvas_id}/documents/{document_id}/versions/{document_version}/index-requests",
+      "source": "apps/api/opencanvas_api/api/routes/indexing.py",
+      "sourceLine": 93
+    },
+    {
+      "method": "POST",
+      "operationId": "graph_retrieval.create",
+      "route": "/workspaces/{workspace_id}/canvases/{canvas_id}/graph-retrievals",
+      "source": "apps/api/opencanvas_api/api/routes/graph_retrieval.py",
+      "sourceLine": 66
+    },
+    {
+      "method": "POST",
+      "operationId": "workflow.execute",
+      "route": "/workspaces/{workspace_id}/canvases/{canvas_id}/workflows/executions",
+      "source": "apps/api/opencanvas_api/api/routes/workflows.py",
+      "sourceLine": 285
+    },
+    {
+      "method": "POST",
+      "operationId": "agent.invoke",
+      "route": "/workspaces/{workspace_id}/canvases/{canvas_id}/agent-studio/agents/{agent_id}/invocations",
+      "source": "apps/api/opencanvas_api/api/routes/agent_studio.py",
+      "sourceLine": 442
+    },
+    {
+      "method": "GET",
+      "operationId": "collaboration.list_shares",
+      "route": "/workspaces/{workspace_id}/shares",
+      "source": "apps/api/opencanvas_api/api/routes/collaboration.py",
+      "sourceLine": 701
+    },
+    {
+      "method": "GET",
+      "operationId": "durable_job.status",
+      "route": "/workspaces/{workspace_id}/jobs/{job_run_id}",
+      "source": "apps/api/opencanvas_api/api/routes/durable_jobs.py",
+      "sourceLine": 128
+    }
+  ]
+}

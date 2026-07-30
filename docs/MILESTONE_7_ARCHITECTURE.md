@@ -1389,5 +1389,12 @@ its isolated Azure environment, but category-log rows had not arrived before
 cleanup. Exact Stage 3 posted cost also remains unavailable because of Azure
 `429` responses and delayed usage posting. These limitations remain explicit
 revalidation gates; the exercise does not certify production deployment,
-production SLOs, public release, or start checkpoints 7.7–7.8, Milestone 8,
-or later work.
+production SLOs, public release, Milestone 7.8, Milestone 8, or later work.
+
+Milestone 7.7 is now in progress locally. Checkpoint 1 records a
+resource-free, non-deployable infrastructure and policy manifest. Checkpoint 2
+records a deterministic bounded synthetic-workload and exact local
+measurement contract. Neither checkpoint contacted Azure, authorized
+provisioning, executed a managed workload, published a production capacity
+claim, or implemented the separately controlled Checkpoint 3 evidence
+framework.

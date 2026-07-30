@@ -1,6 +1,6 @@
 # Milestone 7 Production Hardening Progress
 
-Date: 2026-07-27
+Date: 2026-07-30
 
 Overall status: architecture and checkpoint 7.1 complete locally; combined
 PostgreSQL historical-migration correction for `0005`, `0021`, `0023`, and
@@ -9,7 +9,8 @@ PostgreSQL historical-migration correction for `0005`, `0021`, `0023`, and
 Constitution documentation checkpoint complete locally; checkpoint 7.2
 complete locally; checkpoint 7.3 complete locally; checkpoint 7.4 complete
 locally; checkpoint 7.5 complete locally; checkpoint 7.6 complete locally;
-checkpoint 7.7 blocked and unstarted
+checkpoint 7.7 in progress with local infrastructure-policy and
+workload-measurement checkpoints complete; checkpoint 7.8 unstarted
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -43,6 +44,12 @@ Checkpoint 7.5 handoff:
 
 Checkpoint 7.6 handoff:
 [`MILESTONE_7_6_BACKUP_RESTORE_DISASTER_RECOVERY_HANDOFF.md`](MILESTONE_7_6_BACKUP_RESTORE_DISASTER_RECOVERY_HANDOFF.md)
+
+Checkpoint 7.7 Checkpoint 1 handoff:
+[`MILESTONE_7_7_CHECKPOINT_1_INFRASTRUCTURE_POLICY_MANIFEST_HANDOFF.md`](MILESTONE_7_7_CHECKPOINT_1_INFRASTRUCTURE_POLICY_MANIFEST_HANDOFF.md)
+
+Checkpoint 7.7 Checkpoint 2 handoff:
+[`MILESTONE_7_7_CHECKPOINT_2_WORKLOAD_MEASUREMENT_HANDOFF.md`](MILESTONE_7_7_CHECKPOINT_2_WORKLOAD_MEASUREMENT_HANDOFF.md)
 
 PostgreSQL compatibility amendment:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
@@ -459,7 +466,14 @@ Exact evidence and the exercised operating procedure are in
 [`MILESTONE_7_6_BACKUP_RESTORE_DISASTER_RECOVERY_HANDOFF.md`](MILESTONE_7_6_BACKUP_RESTORE_DISASTER_RECOVERY_HANDOFF.md)
 and [`PRODUCTION_RECOVERY_RUNBOOK.md`](PRODUCTION_RECOVERY_RUNBOOK.md).
 
-## Next authorized work
+## Checkpoint 7.7 local progress
 
-Milestone 7.7 remains blocked and unstarted. This completion record does not
-authorize, plan, scaffold, or implement 7.7, 7.8, Milestone 8, or later work.
+Checkpoint 1 established the inert, resource-free Bicep and policy manifest at
+commit `6a4bc94744919f28ff0286e543097fb96b8a1e89`. Checkpoint 2 establishes the
+deterministic bounded local workload and measurement contract. Neither
+checkpoint contacted Azure, authorized provisioning, executed a managed
+workload, produced production performance evidence, or began the separate
+Checkpoint 3 evidence framework.
+
+Milestone 7.7 remains in progress. Checkpoint 3 and Milestone 7.8 remain
+unstarted and require separate authorization.

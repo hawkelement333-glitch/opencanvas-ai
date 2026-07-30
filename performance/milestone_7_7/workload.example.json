@@ -1,0 +1,116 @@
+{
+  "assertions": [
+    "all-results-schema-valid",
+    "no-cross-tenant-attribution",
+    "no-output-limit-breach"
+  ],
+  "contractVersion": "mobius.m7.7.workload.v1",
+  "dataPolicy": {
+    "classification": "isolated-synthetic",
+    "externalTargetsAllowed": false,
+    "productionDataProhibited": true,
+    "secretsProhibited": true
+  },
+  "expectedOutcomeClasses": [
+    "success",
+    "rate-limited",
+    "dependency-unavailable",
+    "timeout",
+    "client-error",
+    "server-error"
+  ],
+  "identities": {
+    "agentsPerWorkspace": 1,
+    "canvasesPerWorkspace": 1,
+    "documentsPerWorkspace": 2,
+    "objectsPerDocument": 2,
+    "tenantCount": 2,
+    "usersPerTenant": 2,
+    "workflowsPerWorkspace": 1,
+    "workspacesPerTenant": 1
+  },
+  "limits": {
+    "maxArrivalRatePerSecond": 8,
+    "maxGeneratedEntities": 64,
+    "maxMeasurementSeries": 64,
+    "maxObjectBytes": 1048576,
+    "maxOutputBytes": 1048576,
+    "maxRequestBytes": 16384,
+    "maxRetries": 0,
+    "maxTenantCount": 2,
+    "maxTotalObjectBytes": 4194304,
+    "maximumConcurrency": 4,
+    "maximumDurationMs": 6000,
+    "maximumRequests": 24,
+    "requestTimeoutMs": 1000
+  },
+  "loadModel": {
+    "arrivalRatePerSecond": 8,
+    "concurrency": 4,
+    "type": "arrival-rate"
+  },
+  "measurement": {
+    "clockSource": "logical-monotonic-microseconds",
+    "excludePhaseKinds": ["warmup", "cooldown"],
+    "includeFailureLatencies": true,
+    "includeTimeoutLatencies": true,
+    "latencyUnit": "microseconds",
+    "percentileMethod": "nearest-rank",
+    "percentilesBasisPoints": [5000, 9500, 9900],
+    "rateScale": "basis-points",
+    "throughputUnit": "milli-requests-per-second"
+  },
+  "operations": [
+    {
+      "expectedOutcomes": ["success"],
+      "operationId": "canvas.snapshot",
+      "weight": 3
+    },
+    {
+      "expectedOutcomes": ["success", "rate-limited", "dependency-unavailable"],
+      "operationId": "graph_retrieval.create",
+      "weight": 2
+    },
+    {
+      "expectedOutcomes": ["success", "rate-limited", "dependency-unavailable"],
+      "operationId": "workflow.execute",
+      "weight": 1
+    }
+  ],
+  "output": {
+    "format": "canonical-json",
+    "includeHeaders": false,
+    "includeRawIdentifiers": false,
+    "includeRequestBodies": false,
+    "maxBytes": 1048576
+  },
+  "phases": [
+    {
+      "durationMs": 1000,
+      "kind": "warmup",
+      "requestCount": 4
+    },
+    {
+      "durationMs": 4000,
+      "kind": "measurement",
+      "requestCount": 16
+    },
+    {
+      "durationMs": 1000,
+      "kind": "cooldown",
+      "requestCount": 4
+    }
+  ],
+  "purpose": "Bounded local contract validation only",
+  "schemaVersion": "2020-12",
+  "seed": 77002,
+  "stopConditions": {
+    "maxErrorRateBasisPoints": 2500,
+    "maxFailures": 4,
+    "maxTimeouts": 2,
+    "stopOnAssertionFailure": true
+  },
+  "tenantDistribution": "round-robin",
+  "workloadId": "synthetic-mixed-local-v1",
+  "workloadType": "mixed"
+}
