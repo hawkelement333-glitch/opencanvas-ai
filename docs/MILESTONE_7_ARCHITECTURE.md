@@ -1394,11 +1394,11 @@ production SLOs, public release, Milestone 7.8, Milestone 8, or later work.
 Milestone 7.7 is now in progress locally. Checkpoint 1 records a
 resource-free, non-deployable infrastructure and policy manifest. Checkpoint 2
 records a deterministic bounded synthetic-workload and exact local
-measurement contract. A Checkpoint 3 candidate records the strict, bounded,
-deterministic local evidence-package schema, artifact inventory, Checkpoint 2
-bindings, claim controls, completeness states, unsigned/local-retention
-boundary, and network-incapable verifier. Its complete package state proves
-only the local evidence contract; Milestone 7.7 evidence remains partial.
+measurement contract. Checkpoint 3 records the strict, bounded, deterministic
+local evidence-package schema, artifact inventory, Checkpoint 2 bindings,
+claim controls, completeness states, unsigned/local-retention boundary, and
+network-incapable verifier. Its complete package state proves only the local
+evidence contract; Milestone 7.7 evidence remains partial.
 
 The first completion audit correctly withheld the commit after a formatter
 wrapper attempted a prohibited npm-registry request. The request failed, and
@@ -1406,6 +1406,23 @@ no dependency or lockfile changed. A separately authorized recovery reran the
 complete commit gate fully offline through installed executables directly.
 Every available gate passed, so Checkpoint 3 is complete locally.
 
-None of the three checkpoints contacted Azure, authorized provisioning,
-executed a managed workload, published a production capacity claim, signed or
-published evidence, provided independent retention, or began Checkpoint 4.
+Checkpoint 4 adds the repository-defined local failure-injection planning
+framework. Its closed catalog binds 22 later resilience exercises to exact
+Checkpoint 1–3 identities, hard workload and cost ceilings, isolated-synthetic
+scope, one-fault concurrency, prerequisites, expected outcomes, assertions,
+evidence classes, rollback, cleanup, and fail-closed abort conditions. The
+framework has no network, process, provider, database, application,
+deployment, or infrastructure-mutation client. Its deterministic verifier
+reports the local plan valid while keeping execution blocked and Milestone 7.7
+evidence partial.
+
+All ten Checkpoint 1 gates remain unresolved. Checkpoint 4 also preserves five
+runtime gates: fault-controller shape, isolated environment, live failure
+authorization, effect-lock runtime proof, and cleanup-supervisor runtime proof.
+No local schema, fixture, or verifier can resolve those gates or upgrade
+pending, absent, or unproved managed-environment evidence.
+
+None of the four checkpoints contacted Azure, authorized provisioning,
+executed a managed workload or live fault, published a production capacity
+claim, signed or published evidence, provided independent retention, or began
+Checkpoint 5.

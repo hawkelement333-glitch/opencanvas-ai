@@ -1,0 +1,143 @@
+{
+  "authorization": {
+    "destructiveActionsAuthorized": false,
+    "executionAuthorized": false,
+    "networkAccessAuthorized": false,
+    "provisioningAuthorized": false
+  },
+  "bindings": {
+    "checkpoint1BundleSha256": "b4f5ebbe9158d0264460158a31454e1ebf63ac038e51296c33cdfcb77b088297",
+    "evidencePackageSha256": "e88ab17245804f26d535ee225de1042ebf20d1fb6acf66e4cc755262c8e94ad1",
+    "measurementResultSha256": "a98e8122f5c16a448de69f17cc6b537ea03989843805bbb584dfc620ae5d5c79",
+    "requestPlanSha256": "4c13cc8b536cef325a27a0a00b4d008d164ff5d955512e599df309f69c7f32b3",
+    "scenarioCatalogSha256": "bf38c10982a5ed3e15fe27174f0b472b44fa0e44c23d9c62f1a2e68148fac8be",
+    "workloadManifestSha256": "7d8832aae03e00ec93a6203a2360555ba19b030912a406b775fc7b20630c1c26"
+  },
+  "classification": {
+    "claimStrength": "local-contract-validation-only",
+    "environment": "unprovisioned-local",
+    "execution": "planning-only"
+  },
+  "completion": {
+    "executionReadiness": "blocked",
+    "localPlanState": "complete",
+    "milestoneEvidenceState": "partial",
+    "stopReason": "not-executed"
+  },
+  "contractVersion": "mobius.m7.7.failure-plan.v1",
+  "evidenceStates": [
+    { "evidenceClass": "alert-delivery-evidence", "state": "unproved" },
+    { "evidenceClass": "azure-execution-evidence", "state": "absent" },
+    { "evidenceClass": "capacity-evidence", "state": "unproved" },
+    { "evidenceClass": "cleanup-evidence", "state": "pending" },
+    { "evidenceClass": "external-provider-evidence", "state": "absent" },
+    {
+      "evidenceClass": "infrastructure-definition-evidence",
+      "state": "partial"
+    },
+    { "evidenceClass": "local-deterministic-validation", "state": "complete" },
+    { "evidenceClass": "observability-evidence", "state": "unproved" },
+    { "evidenceClass": "resilience-evidence", "state": "pending" },
+    { "evidenceClass": "security-evidence", "state": "pending" },
+    { "evidenceClass": "synthetic-workload-evidence", "state": "partial" }
+  ],
+  "gateStates": [
+    { "id": "alert-destination", "status": "unresolved" },
+    { "id": "cleanup-supervisor-runtime-proof", "status": "unresolved" },
+    { "id": "effect-lock-runtime-proof", "status": "unresolved" },
+    { "id": "evidence-retention", "status": "unresolved" },
+    { "id": "exact-provider-api-versions", "status": "unresolved" },
+    { "id": "fault-controller-shape", "status": "unresolved" },
+    { "id": "isolated-environment", "status": "unresolved" },
+    { "id": "live-failure-authorization", "status": "unresolved" },
+    { "id": "managed-identity-environment-mapping", "status": "unresolved" },
+    { "id": "openai-smtp-test-providers", "status": "unresolved" },
+    { "id": "private-acr-source-path", "status": "unresolved" },
+    { "id": "redis-custom-acl-support", "status": "unresolved" },
+    { "id": "region-and-subscription-availability", "status": "unresolved" },
+    { "id": "scanner-result-bridge", "status": "unresolved" },
+    { "id": "telemetry-gateway", "status": "unresolved" }
+  ],
+  "limitations": [
+    "fault-controller-shape-unresolved",
+    "local-plan-only",
+    "no-azure-execution",
+    "no-cleanup-proof",
+    "no-external-retention",
+    "no-live-failure-injection",
+    "no-production-capacity-claim",
+    "no-provider-observation",
+    "no-real-rollback-proof",
+    "unresolved-infrastructure-gates",
+    "unsigned"
+  ],
+  "limits": {
+    "absoluteCostCeilingUsdCents": 15000,
+    "maximumArrivalRatePerSecond": 100,
+    "maximumAttemptsPerScenario": 1,
+    "maximumConcurrency": 128,
+    "maximumConcurrentFaults": 1,
+    "maximumEnvironmentLifetimeSeconds": 86400,
+    "maximumEvidenceBytes": 104857600,
+    "maximumRequests": 10000,
+    "maximumRetriesPerRequest": 2,
+    "maximumScannerBytes": 26214400,
+    "maximumScannerObjects": 25,
+    "maximumScenarioDurationSeconds": 900,
+    "maximumSyntheticUploadBytes": 134217728,
+    "maximumTotalDurationSeconds": 7200,
+    "minimumCleanupReserveSeconds": 5400,
+    "provisioningBlockAboveUsdCents": 12000
+  },
+  "planId": "m7.7-cp4-local-failure-plan",
+  "planIntegritySha256": "3a424ef2435853e6974007b6174147bf92ac226a6fb2cf99f502bb88b3baafa9",
+  "purpose": "local-failure-injection-framework",
+  "safety": {
+    "credentialsAllowed": false,
+    "destructiveActionsAllowed": false,
+    "effectLockRequired": true,
+    "exactScopeRequired": true,
+    "executionFailsClosed": true,
+    "externalTargetsAllowed": false,
+    "independentCleanupTimerRequired": true,
+    "liveExecutionAllowed": false,
+    "manualCleanupFallbackRequired": true,
+    "networkAccessAllowed": false,
+    "postRevocationDenialRequired": true,
+    "productionDataAllowed": false,
+    "rollbackRequired": true,
+    "syntheticOnly": true,
+    "zeroResidueRequired": true
+  },
+  "schemaVersion": "2020-12",
+  "selectedScenarioTypes": [
+    "ambiguous-commit",
+    "cleanup-interruption",
+    "database-failover",
+    "dependency-network-delay",
+    "duplicate-worker",
+    "external-provider-failure",
+    "object-storage-failure",
+    "partial-network-loss",
+    "partial-provider-response",
+    "poison-job",
+    "postgres-connection-pressure",
+    "queue-delay",
+    "queue-outage",
+    "reserved-control-capacity-exhaustion",
+    "retry-storm",
+    "scaling-event",
+    "scanner-delay",
+    "scanner-outage",
+    "service-restart",
+    "shared-limiter-failure",
+    "stale-worker",
+    "worker-loss"
+  ],
+  "source": {
+    "commitSha": "996e969a1e80f70e8ded5668ca80207ecfe414f8",
+    "dirty": false,
+    "repositoryId": "solarplexus-mobius"
+  },
+  "verifierVersion": "mobius.m7.7.failure-plan-verifier.v1"
+}

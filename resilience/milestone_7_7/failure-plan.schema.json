@@ -1,0 +1,437 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mobius:m7.7:failure-plan:v1",
+  "title": "Milestone 7.7 local failure-injection plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "planId",
+    "purpose",
+    "source",
+    "bindings",
+    "classification",
+    "authorization",
+    "limits",
+    "safety",
+    "selectedScenarioTypes",
+    "gateStates",
+    "evidenceStates",
+    "completion",
+    "limitations",
+    "verifierVersion",
+    "planIntegritySha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "2020-12"
+    },
+    "contractVersion": {
+      "const": "mobius.m7.7.failure-plan.v1"
+    },
+    "planId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?"
+    },
+    "purpose": {
+      "const": "local-failure-injection-framework"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "commitSha", "dirty"],
+      "properties": {
+        "repositoryId": {
+          "const": "solarplexus-mobius"
+        },
+        "commitSha": {
+          "const": "996e969a1e80f70e8ded5668ca80207ecfe414f8"
+        },
+        "dirty": {
+          "const": false
+        }
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkpoint1BundleSha256",
+        "workloadManifestSha256",
+        "requestPlanSha256",
+        "measurementResultSha256",
+        "evidencePackageSha256",
+        "scenarioCatalogSha256"
+      ],
+      "properties": {
+        "checkpoint1BundleSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "workloadManifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "requestPlanSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "measurementResultSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "evidencePackageSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "scenarioCatalogSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "execution", "claimStrength"],
+      "properties": {
+        "environment": {
+          "const": "unprovisioned-local"
+        },
+        "execution": {
+          "const": "planning-only"
+        },
+        "claimStrength": {
+          "const": "local-contract-validation-only"
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executionAuthorized",
+        "provisioningAuthorized",
+        "networkAccessAuthorized",
+        "destructiveActionsAuthorized"
+      ],
+      "properties": {
+        "executionAuthorized": {
+          "const": false
+        },
+        "provisioningAuthorized": {
+          "const": false
+        },
+        "networkAccessAuthorized": {
+          "const": false
+        },
+        "destructiveActionsAuthorized": {
+          "const": false
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maximumScenarioDurationSeconds",
+        "maximumTotalDurationSeconds",
+        "maximumConcurrentFaults",
+        "maximumAttemptsPerScenario",
+        "maximumRequests",
+        "maximumConcurrency",
+        "maximumArrivalRatePerSecond",
+        "maximumRetriesPerRequest",
+        "maximumSyntheticUploadBytes",
+        "maximumScannerObjects",
+        "maximumScannerBytes",
+        "maximumEvidenceBytes",
+        "provisioningBlockAboveUsdCents",
+        "absoluteCostCeilingUsdCents",
+        "minimumCleanupReserveSeconds",
+        "maximumEnvironmentLifetimeSeconds"
+      ],
+      "properties": {
+        "maximumScenarioDurationSeconds": {
+          "const": 900
+        },
+        "maximumTotalDurationSeconds": {
+          "const": 7200
+        },
+        "maximumConcurrentFaults": {
+          "const": 1
+        },
+        "maximumAttemptsPerScenario": {
+          "const": 1
+        },
+        "maximumRequests": {
+          "const": 10000
+        },
+        "maximumConcurrency": {
+          "const": 128
+        },
+        "maximumArrivalRatePerSecond": {
+          "const": 100
+        },
+        "maximumRetriesPerRequest": {
+          "const": 2
+        },
+        "maximumSyntheticUploadBytes": {
+          "const": 134217728
+        },
+        "maximumScannerObjects": {
+          "const": 25
+        },
+        "maximumScannerBytes": {
+          "const": 26214400
+        },
+        "maximumEvidenceBytes": {
+          "const": 104857600
+        },
+        "provisioningBlockAboveUsdCents": {
+          "const": 12000
+        },
+        "absoluteCostCeilingUsdCents": {
+          "const": 15000
+        },
+        "minimumCleanupReserveSeconds": {
+          "const": 5400
+        },
+        "maximumEnvironmentLifetimeSeconds": {
+          "const": 86400
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "syntheticOnly",
+        "exactScopeRequired",
+        "effectLockRequired",
+        "independentCleanupTimerRequired",
+        "manualCleanupFallbackRequired",
+        "rollbackRequired",
+        "zeroResidueRequired",
+        "postRevocationDenialRequired",
+        "executionFailsClosed",
+        "externalTargetsAllowed",
+        "productionDataAllowed",
+        "credentialsAllowed",
+        "liveExecutionAllowed",
+        "networkAccessAllowed",
+        "destructiveActionsAllowed"
+      ],
+      "properties": {
+        "syntheticOnly": {
+          "const": true
+        },
+        "exactScopeRequired": {
+          "const": true
+        },
+        "effectLockRequired": {
+          "const": true
+        },
+        "independentCleanupTimerRequired": {
+          "const": true
+        },
+        "manualCleanupFallbackRequired": {
+          "const": true
+        },
+        "rollbackRequired": {
+          "const": true
+        },
+        "zeroResidueRequired": {
+          "const": true
+        },
+        "postRevocationDenialRequired": {
+          "const": true
+        },
+        "executionFailsClosed": {
+          "const": true
+        },
+        "externalTargetsAllowed": {
+          "const": false
+        },
+        "productionDataAllowed": {
+          "const": false
+        },
+        "credentialsAllowed": {
+          "const": false
+        },
+        "liveExecutionAllowed": {
+          "const": false
+        },
+        "networkAccessAllowed": {
+          "const": false
+        },
+        "destructiveActionsAllowed": {
+          "const": false
+        }
+      }
+    },
+    "selectedScenarioTypes": {
+      "type": "array",
+      "minItems": 22,
+      "maxItems": 22,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "ambiguous-commit",
+          "cleanup-interruption",
+          "database-failover",
+          "dependency-network-delay",
+          "duplicate-worker",
+          "external-provider-failure",
+          "object-storage-failure",
+          "partial-network-loss",
+          "partial-provider-response",
+          "poison-job",
+          "postgres-connection-pressure",
+          "queue-delay",
+          "queue-outage",
+          "reserved-control-capacity-exhaustion",
+          "retry-storm",
+          "scaling-event",
+          "scanner-delay",
+          "scanner-outage",
+          "service-restart",
+          "shared-limiter-failure",
+          "stale-worker",
+          "worker-loss"
+        ]
+      }
+    },
+    "gateStates": {
+      "type": "array",
+      "minItems": 15,
+      "maxItems": 15,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status"],
+        "properties": {
+          "id": {
+            "enum": [
+              "alert-destination",
+              "cleanup-supervisor-runtime-proof",
+              "effect-lock-runtime-proof",
+              "evidence-retention",
+              "exact-provider-api-versions",
+              "fault-controller-shape",
+              "isolated-environment",
+              "live-failure-authorization",
+              "managed-identity-environment-mapping",
+              "openai-smtp-test-providers",
+              "private-acr-source-path",
+              "redis-custom-acl-support",
+              "region-and-subscription-availability",
+              "scanner-result-bridge",
+              "telemetry-gateway"
+            ]
+          },
+          "status": {
+            "const": "unresolved"
+          }
+        }
+      }
+    },
+    "evidenceStates": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["evidenceClass", "state"],
+        "properties": {
+          "evidenceClass": {
+            "enum": [
+              "local-deterministic-validation",
+              "synthetic-workload-evidence",
+              "infrastructure-definition-evidence",
+              "external-provider-evidence",
+              "azure-execution-evidence",
+              "observability-evidence",
+              "alert-delivery-evidence",
+              "capacity-evidence",
+              "resilience-evidence",
+              "security-evidence",
+              "cleanup-evidence"
+            ]
+          },
+          "state": {
+            "enum": [
+              "absent",
+              "pending",
+              "partial",
+              "complete",
+              "invalid",
+              "blocked",
+              "unavailable",
+              "skipped",
+              "failed",
+              "unproved"
+            ]
+          }
+        }
+      }
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "localPlanState",
+        "milestoneEvidenceState",
+        "executionReadiness",
+        "stopReason"
+      ],
+      "properties": {
+        "localPlanState": {
+          "const": "complete"
+        },
+        "milestoneEvidenceState": {
+          "const": "partial"
+        },
+        "executionReadiness": {
+          "const": "blocked"
+        },
+        "stopReason": {
+          "const": "not-executed"
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "fault-controller-shape-unresolved",
+          "local-plan-only",
+          "no-azure-execution",
+          "no-cleanup-proof",
+          "no-external-retention",
+          "no-live-failure-injection",
+          "no-production-capacity-claim",
+          "no-provider-observation",
+          "no-real-rollback-proof",
+          "unsigned",
+          "unresolved-infrastructure-gates"
+        ]
+      }
+    },
+    "verifierVersion": {
+      "const": "mobius.m7.7.failure-plan-verifier.v1"
+    },
+    "planIntegritySha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "[0-9a-f]{64}"
+    }
+  }
+}

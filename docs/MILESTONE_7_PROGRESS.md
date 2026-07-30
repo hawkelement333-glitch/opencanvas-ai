@@ -55,6 +55,9 @@ Checkpoint 7.7 Checkpoint 2 handoff:
 Checkpoint 7.7 Checkpoint 3 handoff:
 [`MILESTONE_7_7_CHECKPOINT_3_LOCAL_EVIDENCE_FRAMEWORK_HANDOFF.md`](MILESTONE_7_7_CHECKPOINT_3_LOCAL_EVIDENCE_FRAMEWORK_HANDOFF.md)
 
+Checkpoint 7.7 Checkpoint 4 handoff:
+[`MILESTONE_7_7_CHECKPOINT_4_LOCAL_FAILURE_INJECTION_FRAMEWORK_HANDOFF.md`](MILESTONE_7_7_CHECKPOINT_4_LOCAL_FAILURE_INJECTION_FRAMEWORK_HANDOFF.md)
+
 PostgreSQL compatibility amendment:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
 
@@ -498,5 +501,19 @@ installed executables directly. The recovery installed nothing, contacted no
 network or remote service, and all available gates passed. Checkpoint 3 is now
 complete locally.
 
-Milestone 7.7 remains in progress. Checkpoint 4 and Milestone 7.8 remain
+Checkpoint 4 establishes a strict, deterministic, non-executing local
+failure-injection plan. Its closed 22-scenario catalog binds later isolated
+resilience exercises to the Checkpoint 1–3 identities, one-fault concurrency,
+hard workload and cost ceilings, prerequisites, expected outcomes, assertions,
+evidence, rollback, cleanup, and abort conditions. Its verifier reports the
+plan valid while preserving execution as blocked and Milestone evidence as
+partial.
+
+Checkpoint 4 contacted no network or provider, ran no live load or fault,
+provisioned nothing, and cannot mutate application, database, deployment, or
+infrastructure state. All ten Checkpoint 1 gates and five additional runtime
+gates remain unresolved. No production capacity, resilience, security,
+cleanup, signing, publication, or independent-retention claim was created.
+
+Milestone 7.7 remains in progress. Checkpoint 5 and Milestone 7.8 remain
 unstarted and require separate authorization.
