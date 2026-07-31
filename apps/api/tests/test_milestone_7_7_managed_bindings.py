@@ -319,6 +319,31 @@ class ExactChildMetadataAdapter:
         )
 
 
+class NetworkUsageAdapter:
+    def __init__(self, payload: JsonValue) -> None:
+        self.payload = payload
+
+    def run(
+        self,
+        argv: tuple[str, ...],
+        *,
+        environment: Mapping[str, str],
+        timeout_seconds: float,
+        maximum_output_bytes: int,
+    ) -> _ProcessCapture:
+        del environment, timeout_seconds, maximum_output_bytes
+        assert argv[1:3] == ("network", "list-usages")
+        return _ProcessCapture(
+            exit_code=0,
+            timed_out=False,
+            oversized=False,
+            read_failed=False,
+            stdout=bytearray(
+                json.dumps(self.payload, separators=(",", ":"), sort_keys=True).encode()
+            ),
+        )
+
+
 def _run_exact_child_check(
     monkeypatch: pytest.MonkeyPatch,
     adapter: ExactChildMetadataAdapter,
@@ -337,6 +362,53 @@ def _run_exact_child_check(
         require_registration=True,
         require_region=True,
     )
+
+
+def test_network_usage_accepts_canonical_decimal_strings() -> None:
+    result = managed_binding_execution._network_usage(
+        adapter=NetworkUsageAdapter(
+            [
+                {"name": "dimension-a", "current": "0", "limit": "10"},
+                {"name": "dimension-b", "current": 2, "limit": 3},
+            ]
+        ),
+        raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
+    )
+
+    assert result == (
+        "proved",
+        "network-capacity-bounded",
+        {"dimension-count": 2, "every-current-below-limit": True},
+    )
+
+
+def test_network_usage_decimal_strings_preserve_limit_denial() -> None:
+    result = managed_binding_execution._network_usage(
+        adapter=NetworkUsageAdapter([{"name": "dimension", "current": "10", "limit": "10"}]),
+        raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
+    )
+
+    assert result[0:2] == ("blocked", "network-capacity-not-available")
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "01", "+1", "-1", "1.0", " 1", "1 ", "9" * 21, None, True],
+)
+def test_network_usage_rejects_noncanonical_values(value: JsonValue) -> None:
+    with pytest.raises(ManagedBindingExecutionError, match="network-usage-malformed"):
+        managed_binding_execution._network_usage(
+            adapter=NetworkUsageAdapter([{"name": "dimension", "current": value, "limit": "10"}]),
+            raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
+        )
+
+
+def test_network_usage_rejects_json_floats_before_quota_parsing() -> None:
+    with pytest.raises(ManagedBindingExecutionError, match="azure-method-output-malformed"):
+        managed_binding_execution._network_usage(
+            adapter=NetworkUsageAdapter([{"name": "dimension", "current": 1.0, "limit": "10"}]),
+            raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
+        )
 
 
 def test_exact_automation_job_schedules_parent_fallback_succeeds(

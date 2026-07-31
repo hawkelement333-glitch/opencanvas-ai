@@ -56,6 +56,7 @@ PROVIDER_METHOD = "azure-provider-resource-metadata-v1"
 PROVIDER_TYPE_INVENTORY_METHOD = "azure-provider-resource-type-inventory-v1"
 REGION = "southcentralus"
 METHOD_PLACEHOLDER: Final = re.compile(r"\{[A-Za-z][A-Za-z0-9]*\}")
+USAGE_DECIMAL_INTEGER: Final = re.compile(r"(?:0|[1-9][0-9]{0,19})")
 
 _EXACT_CHILD_METADATA_FALLBACKS: Final = {
     "Microsoft.Automation/automationAccounts/jobSchedules": (
@@ -633,17 +634,8 @@ def _network_usage(
             raise ManagedBindingExecutionError("network-usage-malformed")
         if not isinstance(row["name"], str):
             raise ManagedBindingExecutionError("network-usage-malformed")
-        current = row["current"]
-        limit = row["limit"]
-        if (
-            not isinstance(current, int)
-            or isinstance(current, bool)
-            or not isinstance(limit, int)
-            or isinstance(limit, bool)
-            or current < 0
-            or limit < 0
-        ):
-            raise ManagedBindingExecutionError("network-usage-malformed")
+        current = _network_usage_integer(row["current"])
+        limit = _network_usage_integer(row["limit"])
         below_limit = below_limit and current < limit
     return (
         ("proved" if below_limit else "blocked"),
@@ -722,6 +714,14 @@ def _role_definitions(
         ),
         {"required-role-count": len(role_ids), "matched-built-in-role-count": matched},
     )
+
+
+def _network_usage_integer(value: JsonValue) -> int:
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    if isinstance(value, str) and USAGE_DECIMAL_INTEGER.fullmatch(value) is not None:
+        return int(value)
+    raise ManagedBindingExecutionError("network-usage-malformed")
 
 
 def _workload_profiles(
