@@ -57,13 +57,19 @@ PROVIDER_INVENTORY_METHOD = "azure-provider-resource-inventory-v1"
 REGION = "southcentralus"
 METHOD_PLACEHOLDER: Final = re.compile(r"\{[A-Za-z][A-Za-z0-9]*\}")
 
-_AUTOMATION_JOB_SCHEDULES_KEY: Final = (
-    "Microsoft.Automation/automationAccounts/jobSchedules"
-)
 _AUTOMATION_JOB_SCHEDULES_NAMESPACE: Final = "Microsoft.Automation"
-_AUTOMATION_JOB_SCHEDULES_RESOURCE_TYPE: Final = "automationAccounts/jobSchedules"
-_AUTOMATION_JOB_SCHEDULES_PARENT_TYPE: Final = "automationAccounts"
-_AUTOMATION_JOB_SCHEDULES_API_VERSION: Final = "2024-10-23"
+_AUTOMATION_CHILD_METADATA_FALLBACKS: Final = {
+    "Microsoft.Automation/automationAccounts/jobSchedules": (
+        "automationAccounts/jobSchedules",
+        "automationAccounts",
+        "2024-10-23",
+    ),
+    "Microsoft.Automation/automationAccounts/schedules": (
+        "automationAccounts/schedules",
+        "automationAccounts",
+        "2024-10-23",
+    ),
+}
 
 _PROVIDER_KEYS_BY_OPERATION: Final = {
     "regional-service-availability": (
@@ -278,7 +284,7 @@ def _normalized_provider_resource_type(namespace: str, value: JsonValue) -> str:
     return normalized
 
 
-def _automation_job_schedules_metadata(
+def _automation_child_metadata_fallback(
     *,
     namespace: str,
     resource_type: str,
@@ -286,21 +292,18 @@ def _automation_job_schedules_metadata(
     adapter: _ProcessAdapter,
     raw_subscription_id: str,
 ) -> tuple[dict[str, JsonValue] | None, bool]:
-    if (
-        namespace,
-        resource_type,
-        pinned_version,
-    ) != (
-        _AUTOMATION_JOB_SCHEDULES_NAMESPACE,
-        _AUTOMATION_JOB_SCHEDULES_RESOURCE_TYPE,
-        _AUTOMATION_JOB_SCHEDULES_API_VERSION,
-    ):
+    key = f"{namespace}/{resource_type}"
+    fallback = _AUTOMATION_CHILD_METADATA_FALLBACKS.get(key)
+    if namespace != _AUTOMATION_JOB_SCHEDULES_NAMESPACE or fallback is None:
+        return None, False
+    expected_resource_type, parent_resource_type, expected_version = fallback
+    if (resource_type, pinned_version) != (expected_resource_type, expected_version):
         return None, False
 
-    if _provider_binding(_AUTOMATION_JOB_SCHEDULES_KEY) != (
-        _AUTOMATION_JOB_SCHEDULES_NAMESPACE,
-        _AUTOMATION_JOB_SCHEDULES_RESOURCE_TYPE,
-        _AUTOMATION_JOB_SCHEDULES_API_VERSION,
+    if _provider_binding(key) != (
+        namespace,
+        expected_resource_type,
+        expected_version,
     ):
         raise ManagedBindingExecutionError("automation-child-fallback-binding-invalid")
 
@@ -326,7 +329,7 @@ def _automation_job_schedules_metadata(
         normalized = _normalized_provider_resource_type(namespace, row["resourceType"])
         normalized_rows.append((normalized, row))
 
-    child_name = _AUTOMATION_JOB_SCHEDULES_RESOURCE_TYPE.casefold()
+    child_name = expected_resource_type.casefold()
     child_rows = [
         row for normalized, row in normalized_rows if normalized == child_name
     ]
@@ -344,7 +347,7 @@ def _automation_job_schedules_metadata(
             False,
         )
 
-    parent_name = _AUTOMATION_JOB_SCHEDULES_PARENT_TYPE.casefold()
+    parent_name = parent_resource_type.casefold()
     parent_rows = [
         row for normalized, row in normalized_rows if normalized == parent_name
     ]
@@ -406,7 +409,7 @@ def _provider_checks(
         if not isinstance(registration_state, str):
             raise ManagedBindingExecutionError("provider-metadata-malformed")
         if actual_type != resource_type:
-            fallback_value, parent_fallback_used = _automation_job_schedules_metadata(
+            fallback_value, parent_fallback_used = _automation_child_metadata_fallback(
                 namespace=namespace,
                 resource_type=resource_type,
                 pinned_version=pinned_version,

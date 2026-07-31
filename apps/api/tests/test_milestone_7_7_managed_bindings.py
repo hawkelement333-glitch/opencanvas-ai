@@ -325,6 +325,23 @@ def test_exact_automation_job_schedules_parent_fallback_succeeds(
     assert fields["approved-region-count"] == 1
 
 
+def test_exact_automation_schedules_parent_fallback_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status, explanation, fields = _run_automation_child_check(
+        monkeypatch,
+        AutomationChildMetadataAdapter(
+            inventory_rows=[_automation_metadata_row("automationAccounts")]
+        ),
+        provider_key="Microsoft.Automation/automationAccounts/schedules",
+    )
+
+    assert (status, explanation) == ("proved", "provider-prerequisites-proved")
+    assert fields["parent-fallback-count"] == 1
+    assert fields["pinned-api-version-count"] == 1
+    assert fields["approved-region-count"] == 1
+
+
 @pytest.mark.parametrize(
     ("registration_state", "rows", "explanation"),
     [
@@ -372,7 +389,7 @@ def test_automation_fallback_rejects_every_other_child_type(
         AutomationChildMetadataAdapter(
             inventory_rows=[_automation_metadata_row("automationAccounts")]
         ),
-        provider_key="Microsoft.Automation/automationAccounts/schedules",
+        provider_key="Microsoft.KeyVault/vaults/secrets",
     )
 
     assert result[0:2] == ("blocked", "required-resource-type-unavailable")
