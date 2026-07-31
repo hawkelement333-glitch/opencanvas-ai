@@ -2,20 +2,19 @@
 
 ## Decision
 
-The local scope-definition recovery pass remains complete. The separately
-authorized Azure Topology Preflight produced a valid sanitized result:
+The local scope-definition recovery pass and its separately authorized bounded
+Azure Topology Preflight are complete. The committed classifier returned:
 
 `complete-with-provisioning-blocked`
 
-That historical result proves only the earlier inventory's
-`current-account-context` operation. Two exact resource-group absence
-templates are now defined locally but have not been executed. The other 15
-committed operation slots remain blocked, all ten infrastructure gates remain
-blocked, and all five runtime gates remain unproved. Neither the historical
-result nor these local definitions complete Milestone 7.7 or authorize Azure
-execution, provisioning, Checkpoint 7, or Milestone 7.8.
-
-No Azure command or validation was run while defining the two templates.
+The three defined operations each ran once, in committed order, through the
+bounded production entry point. The approved account context matched and both
+exact resource-group checks returned `false`. The other 15 committed operation
+slots remain blocked, all ten infrastructure gates remain blocked, and all
+five runtime gates remain unproved. Under the committed exit rule, this is a
+complete Checkpoint 6 preflight package with provisioning blocked. It does not
+complete Milestone 7.7 or authorize provisioning, Checkpoint 7, or Milestone
+7.8.
 
 ## Approved future scope
 
@@ -53,7 +52,7 @@ Allowed infrastructure-gate states are `proved`, `unproved`, `blocked`, and
 explanation. The five runtime gates remain `unproved`; topology metadata
 cannot resolve them.
 
-## Sanitized topology preflight result
+## Historical sanitized topology preflight result
 
 | Field                    | Recorded value                                                     |
 | ------------------------ | ------------------------------------------------------------------ |
@@ -99,6 +98,46 @@ The historical evidence remains unchanged, is non-authoritative for execution
 under the revised inventory, and does not authorize reusing its result. A new
 Azure preflight requires separate authorization. Provisioning remains blocked.
 
+## Authorized resource-group preflight evidence
+
+The separately authorized production entry point ran exactly once against the
+revised inventory. It executed only `current-account-context`,
+`target-group-existence`, and `cleanup-group-existence`, in that order, with
+one attempt per operation. Launcher integrity passed before execution: the
+approved `az.cmd` checksum and layout matched, only its adjacent native
+`python.exe` was selected, fixed `-IBm azure.cli` arguments were preserved,
+and shell execution remained disabled.
+
+| Field                    | Recorded value                                                     |
+| ------------------------ | ------------------------------------------------------------------ |
+| Evidence file            | `m7.7-cp6-20260731-023407z.json`                                   |
+| Evidence ID              | `m7.7-cp6-20260731-023407z`                                        |
+| Integrity SHA-256        | `6f3f06cb92538523bd5cd8809ff498a0e6c0724210445e027b81665433ea51b3` |
+| Classification           | `complete-with-provisioning-blocked`                               |
+| Current account context  | proved; committed projection matched                               |
+| Target group exists      | `false`                                                            |
+| Cleanup group exists     | `false`                                                            |
+| Other operation slots    | 15 blocked                                                         |
+| Infrastructure gates     | 10 blocked                                                         |
+| Runtime gates            | 5 unproved                                                         |
+| Azure mutation           | `false`                                                            |
+| Data-plane access        | `false`                                                            |
+| Raw output retained      | `false`                                                            |
+| Raw identifiers retained | `false`                                                            |
+| Earliest observation     | `2026-07-31T02:34:07Z`                                             |
+| Package verification     | `2026-07-31T02:34:14Z`                                             |
+| Evidence expiry          | `2026-08-01T02:34:07Z`                                             |
+
+The package binds operation-inventory SHA-256
+`923cbf934040405fd1702b49bd79d876ee3e85fe88d68bbb3d94f980fa45b843`
+and scope SHA-256
+`a98776f4d2ea33f64e28514fc7c13d2e6160a79ea29247f79fc71f4ffe529e3e`.
+Schema, integrity, canonical-byte, deterministic-reproduction, privacy,
+freshness, completeness, and tamper validation passed. The evidence contains
+only the committed minimum projections. Raw Azure output and raw subscription
+and tenant identifiers were not persisted or displayed. Releasing short-lived
+Python references is not represented as physical memory erasure.
+
 ## Closed operation inventory
 
 The versioned inventory is default-deny and contains 18 exact operation slots:
@@ -106,8 +145,8 @@ The versioned inventory is default-deny and contains 18 exact operation slots:
 1. `current-account-context` — defined;
 2. `regional-service-availability` — blocked;
 3. `provider-registration-api-versions` — blocked;
-4. `target-group-existence` — defined locally; not executed;
-5. `cleanup-group-existence` — defined locally; not executed;
+4. `target-group-existence` — defined; executed once in the recorded preflight;
+5. `cleanup-group-existence` — defined; executed once in the recorded preflight;
 6. `regional-sku-capabilities` — blocked;
 7. `subscription-quota-bounded-usage` — blocked;
 8. `private-endpoint-network-support` — blocked;
@@ -288,6 +327,60 @@ and strict mypy passed for the affected production path. Azure CLI was never
 started during diagnosis, repair, or validation, and the preflight was not
 retried. A new execution requires separate authorization.
 
+The later separately authorized invocation used that repaired path exactly
+once. All three operations passed, evidence was written only after complete
+validation, and no direct or additional Azure command ran. There was no Azure
+mutation, data-plane access, provisioning, retry, blocked-operation
+invocation, account change, token retrieval, or raw-output persistence.
+
+## Evidence-closure validation
+
+Newly run validation produced these results:
+
+- evidence schema, integrity, canonical-byte equality, deterministic
+  reproduction, freshness, privacy, completeness, and tamper checks passed;
+- the focused Checkpoint 6 scope and execution suite passed 131 tests;
+- the complete Checkpoint 1–6 campaign passed 560 tests with the one preserved
+  Windows symlink-permission skip;
+- the separate protected Checkpoint 1–5 campaign passed 429 tests with that
+  same skip;
+- repository-local Prettier passed for the three changed Markdown files;
+- repository hygiene passed for 512 source files;
+- 26 relative documentation links resolved with zero missing links;
+- secret, raw-identifier, private-address, absolute-user-path, traversal,
+  prohibited-scope, dependency, lock-file, atomic-temporary-residue,
+  whitespace, and diff checks passed;
+- non-mutating Alembic source inspection reported sole head
+  `20260726_0028`, its protected blob remained
+  `55c203e669cace5be64fc25cdcf0eb8c05519198`, and migration
+  `20260726_0029` remained absent; and
+- protected references, all five stash identities, the authoritative dangling
+  object count, and all eight recovery-artifact names, sizes, and SHA-256
+  values remained unchanged.
+
+No Python file changed, so affected-file Ruff formatting/lint and strict mypy
+were not applicable and were not rerun. No test was deselected. No package
+manager, dependency installer, migration command, application, worker,
+workload, fault, probe, deployment, or service ran.
+
+Local-only audit irregularities did not affect the production invocation. An
+initial launcher-report helper compared the wrong argument-vector slices; the
+checksum-validating resolver itself passed, and the corrected projection
+confirmed the fixed arguments and preserved Azure arguments before execution.
+An initial private-address heuristic matched two numbered-list prefixes; the
+corrected complete-address pattern returned zero findings. A first migration
+blob check used a guessed filename that did not exist; repository discovery
+then found the sole `0028` file and verified its protected blob. One sandboxed
+read-only inspection could not start until approved read-only elevation was
+used, and one guessed launcher-module path was absent; neither event started
+Azure CLI or changed a file. Git also emitted the repository's existing
+LF-to-CRLF working-copy warnings.
+
+The persisted evidence expires at `2026-08-01T02:34:07Z`; documentation does
+not renew it. Exact Azure cost attribution and independent post-operation
+inventory proof remain unavailable because no additional Azure command was
+authorized or run.
+
 ## Local boundary
 
 The scope-definition continuation changes only the isolated preflight
@@ -296,9 +389,8 @@ tests, and directly affected Checkpoint 6 documentation. It changes no
 application, worker, frontend, provider, migration, dependency, lock, runtime
 configuration, Bicep topology, or infrastructure resource.
 
-Checkpoint 6 now has a valid sanitized preflight result classified
-`complete-with-provisioning-blocked` only as historical evidence for the
-earlier inventory. The revised inventory has not completed execution.
-Checkpoint 6 remains incomplete pending a separately authorized retry.
-Provisioning remains blocked, Milestone 7.7 remains in progress, and
-Checkpoint 7 and Milestone 7.8 remain unstarted.
+Checkpoint 6 now has a valid persisted sanitized evidence package for the
+revised inventory, classified `complete-with-provisioning-blocked`. The
+committed exit rule supports closing Checkpoint 6 as a complete preflight with
+provisioning blocked. Milestone 7.7 remains in progress. Provisioning remains
+blocked, and Checkpoint 7 and Milestone 7.8 remain unstarted.

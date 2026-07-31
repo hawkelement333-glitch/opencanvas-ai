@@ -29,7 +29,8 @@ Learn's Core, GA
 [`az group exists`](https://learn.microsoft.com/en-us/cli/azure/group?view=azure-cli-lts#az-group-exists)
 contract. They require an explicit in-memory subscription binding that must
 match the committed fingerprint and retain only the exact boolean absence
-result. They have not been executed. The other 15 slots are intentionally
+result. They were executed once through the bounded production entry point in
+the recorded Checkpoint 6 preflight. The other 15 slots are intentionally
 blocked because no exact safe command template is established by repository
 sources. A blocked entry cannot be executed or upgraded by assumption.
 
@@ -83,8 +84,7 @@ A later separately authorized Azure pass must use exactly:
 python -m preflight.milestone_7_7.execution --execute-authorized-preflight
 ```
 
-The local hardening pass executed no Azure command. Checkpoint 6 remains
-blocked pending that separate authorization and execution.
+The local hardening pass executed no Azure command.
 
 The first separately authorized invocation failed before Azure CLI started
 because the Windows installation exposed only `az.cmd`, while the original
@@ -92,16 +92,22 @@ shell-disabled adapter attempted to start bare `az` as a native executable.
 The targeted local repair above was validated without retrying Azure. It does
 not authorize another execution.
 
-The separately authorized preflight later proved only
-`current-account-context`. Its sanitized result is:
+The earlier separately authorized preflight proved only
+`current-account-context`; that historical in-memory evidence remains
+non-authoritative for the revised inventory.
 
-`complete-with-provisioning-blocked`
+The later separately authorized production invocation executed the three
+defined operations exactly once and in committed order. The account context
+matched, both exact resource-group checks returned `false`, and the complete
+sanitized evidence was atomically persisted as:
 
-The complete canonical evidence object existed only in memory. The repository
-preserves the sanitized report in the Checkpoint 6 handoff, not that object,
-and documentation does not renew the recorded evidence expiry. That evidence
-binds the earlier inventory and is non-authoritative for the revised
-inventory. A new Azure preflight requires separate authorization. The other
-15 operation slots and all ten infrastructure gates remain blocked; all five
+`evidence/m7.7-cp6-20260731-023407z.json`
+
+Its classifier result is `complete-with-provisioning-blocked`. Schema,
+integrity, deterministic-reproduction, privacy, freshness, completeness, and
+tamper validation passed. No Azure mutation, data-plane access, retry, direct
+additional Azure command, blocked operation, or raw-output persistence
+occurred. Checkpoint 6 is complete under the committed exit rule. The other 15
+operation slots and all ten infrastructure gates remain blocked; all five
 runtime gates remain unproved. Provisioning, Checkpoint 7, and Milestone 7.8
 remain unstarted and require separate authorization.

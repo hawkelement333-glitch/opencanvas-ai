@@ -535,9 +535,8 @@ Checkpoint 6 scope definition is complete locally. It records only safe
 account fingerprints, the two approved regions, exact intended future
 resource-group names, a 24-hour evidence contract, all 15 unresolved gates,
 and an 18-slot closed operation inventory. The two exact resource-group
-absence templates are now defined locally but have not been executed. Fifteen
-operation slots remain blocked because no exact safe command template is
-established by repository sources.
+absence templates are defined locally. Fifteen operation slots remain blocked
+because no exact safe command template is established by repository sources.
 
 The separately authorized read-only Azure Topology Preflight proved only
 `current-account-context`. Its sanitized evidence ID is
@@ -568,7 +567,21 @@ general child-process creation healthy and established this as a repository
 launcher defect. The targeted repair validates the exact wrapper checksum and
 layout, bypasses the command shell, and invokes its adjacent native runtime
 with fixed Azure CLI module arguments. No Azure retry occurred. Checkpoint 6
-remains incomplete and another execution requires separate authorization.
+was then executed once under separate authorization through the repaired
+bounded launcher.
+
+That authorized execution ran only `current-account-context`,
+`target-group-existence`, and `cleanup-group-existence`, once each and in
+committed order. The account projection matched, and both exact group checks
+returned `false`. The atomically persisted evidence is
+`m7.7-cp6-20260731-023407z.json`, with integrity SHA-256
+`6f3f06cb92538523bd5cd8809ff498a0e6c0724210445e027b81665433ea51b3`
+and classification `complete-with-provisioning-blocked`. Schema, integrity,
+canonicalization, deterministic reproduction, privacy, freshness,
+completeness, and tamper validation passed. No Azure mutation, data-plane
+access, retry, blocked operation, direct additional Azure command, or raw
+output persistence occurred. Checkpoint 6 is complete under the committed
+complete-preflight-with-provisioning-blocked exit rule.
 
 Milestone 7.7 remains in progress. The other 15 operation slots and all ten
 infrastructure gates remain blocked; all five runtime gates remain unproved.
