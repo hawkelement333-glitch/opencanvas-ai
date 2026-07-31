@@ -11,7 +11,9 @@ locally; checkpoint 7.2 complete locally on
 `milestone-7-3-implementation-local`; checkpoint 7.4 complete locally on
 `milestone-7-4-implementation-local`; checkpoint 7.5 complete locally on
 `milestone-7-5-implementation-local`; checkpoint 7.6 complete locally on
-`milestone-7-6-recovery-adapter`; checkpoint 7.7 blocked and unstarted
+`milestone-7-6-recovery-adapter`; checkpoint 7.7 in progress; internal
+Checkpoints 1–6 complete locally; internal Checkpoint 7 contract defined
+locally and implementation unstarted
 
 Compatibility gates:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -978,6 +980,43 @@ critical/high unresolved finding, no migration, and 7.8 unstarted.
 
 Production user-data load testing, unlimited cost, public SLA promises,
 deployment/public release, Advanced Collaboration, and Milestone 8.
+
+### Internal Milestone 7.7 implementation sequence
+
+The formal Milestone 7 sequence and Milestone 7.7's internal sequence are
+distinct. Formal checkpoint 7 is Milestone 7.7 itself. The currently defined
+internal Milestone 7.7 sequence is:
+
+1. Infrastructure and Policy Manifest;
+2. Workload and Measurement;
+3. Local Evidence Framework;
+4. Local Failure-Injection Framework;
+5. Local Validation;
+6. Azure Topology Preflight Scope Definition and bounded evidence closure; and
+7. Azure Topology Operation-Contract Completion.
+
+Internal Checkpoints 1–6 are complete locally. Internal Checkpoint 7 is
+defined and unstarted. It is not final. No authoritative total number of
+internal Milestone 7.7 checkpoints is defined; later internal checkpoints
+remain intentionally undefined until internal Checkpoint 7 reports the exact
+remaining gates.
+
+### Internal Checkpoint 7 decision
+
+The binding scope is
+[`MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md`](MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md).
+Internal Checkpoint 7 completes local, versioned, default-deny operation
+contracts for the 15 Checkpoint 6 slots that remain blocked. It may define an
+operation only with complete read-only semantics, exact scope, bounded
+projection, parser, privacy, timeout, retry, failure, and source evidence.
+Otherwise the slot remains explicitly blocked.
+
+Internal Checkpoint 7 executes no Azure operation, spends no Azure budget,
+provisions no resource, resolves no infrastructure or runtime gate, changes
+no application/worker/frontend/infrastructure/migration behavior, and does not
+complete formal checkpoint 7.7. All ten infrastructure gates remain blocked,
+all five runtime gates remain unproved, provisioning remains unauthorized,
+and Milestone 7.8 remains unstarted.
 
 ## 10. Checkpoint 7.8 — Final Production-Readiness Audit
 

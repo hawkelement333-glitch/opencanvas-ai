@@ -381,6 +381,22 @@ not renew it. Exact Azure cost attribution and independent post-operation
 inventory proof remain unavailable because no additional Azure command was
 authorized or run.
 
+## Scope-contract lifecycle semantics
+
+The committed `scope-contract.json` field
+`checkpointStatus=blocked-pending-separately-authorized-azure-topology-preflight-execution`
+is a version-bound design-time statement from the Checkpoint 6 scope-definition
+artifact. It records the authority state when that scope version was created.
+It is not the current Checkpoint 6 lifecycle classifier and must not be
+rewritten after execution because its bytes and integrity binding are
+historical contract evidence.
+
+Current lifecycle status is established by the later persisted sanitized
+evidence, its classifier, this handoff, and the current progress record.
+Those records establish Checkpoint 6 as
+`complete-with-provisioning-blocked`. A later scope version must supersede
+rather than mutate the Checkpoint 6 contract and evidence.
+
 ## Local boundary
 
 The scope-definition continuation changes only the isolated preflight
@@ -393,4 +409,12 @@ Checkpoint 6 now has a valid persisted sanitized evidence package for the
 revised inventory, classified `complete-with-provisioning-blocked`. The
 committed exit rule supports closing Checkpoint 6 as a complete preflight with
 provisioning blocked. Milestone 7.7 remains in progress. Provisioning remains
-blocked, and Checkpoint 7 and Milestone 7.8 remain unstarted.
+blocked. Internal Checkpoint 7 now has a documentation-only contract and its
+implementation remains unstarted. Milestone 7.8 remains unstarted.
+
+The next eligible action, only after separate authorization, is
+**Milestone 7.7 Internal Checkpoint 7 — Azure Topology Operation-Contract
+Completion** as defined in
+[`MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md`](MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md).
+It is local contract implementation only and does not inherit Azure or
+provisioning authority from Checkpoint 6.

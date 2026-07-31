@@ -9,9 +9,9 @@ PostgreSQL historical-migration correction for `0005`, `0021`, `0023`, and
 Constitution documentation checkpoint complete locally; checkpoint 7.2
 complete locally; checkpoint 7.3 complete locally; checkpoint 7.4 complete
 locally; checkpoint 7.5 complete locally; checkpoint 7.6 complete locally;
-checkpoint 7.7 in progress with local infrastructure-policy,
-workload-measurement, and evidence-framework checkpoints complete; checkpoint
-7.8 unstarted
+checkpoint 7.7 in progress with internal Checkpoints 1–6 complete locally;
+internal Checkpoint 7 contract defined locally and implementation unstarted;
+checkpoint 7.8 unstarted
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -60,6 +60,12 @@ Checkpoint 7.7 Checkpoint 4 handoff:
 
 Checkpoint 7.7 Checkpoint 5 handoff:
 [`MILESTONE_7_7_CHECKPOINT_5_LOCAL_VALIDATION_HANDOFF.md`](MILESTONE_7_7_CHECKPOINT_5_LOCAL_VALIDATION_HANDOFF.md)
+
+Checkpoint 7.7 Checkpoint 6 handoff:
+[`MILESTONE_7_7_CHECKPOINT_6_SCOPE_DEFINITION_HANDOFF.md`](MILESTONE_7_7_CHECKPOINT_6_SCOPE_DEFINITION_HANDOFF.md)
+
+Checkpoint 7.7 internal Checkpoint 7 scope decision:
+[`MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md`](MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md)
 
 PostgreSQL compatibility amendment:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
@@ -247,7 +253,8 @@ is part of this correction checkpoint.
 | 7.4 durable-work/shared-limit implementation       | Complete locally             |
 | 7.5 observability implementation                   | Complete locally             |
 | 7.6 recovery implementation                        | Complete locally             |
-| 7.7–7.8 implementation                             | Not started                  |
+| 7.7 implementation                                 | In progress                  |
+| 7.8 implementation                                 | Not started                  |
 | 7.6 isolated infrastructure deployment             | Validated; fully removed     |
 | Current 7.7 infrastructure                         | Absent                       |
 
@@ -585,5 +592,33 @@ complete-preflight-with-provisioning-blocked exit rule.
 
 Milestone 7.7 remains in progress. The other 15 operation slots and all ten
 infrastructure gates remain blocked; all five runtime gates remain unproved.
-Provisioning remains blocked. Checkpoint 7 and Milestone 7.8 remain unstarted
-and require separate authorization.
+Provisioning remains blocked. Internal Checkpoint 7 has a documentation-only
+contract and remains unstarted. Milestone 7.8 remains unstarted and requires
+separate authorization.
+
+## Internal Checkpoint 7 contract decision
+
+Formal checkpoint 7 is Milestone 7.7 itself. The next internal checkpoint is:
+
+**Milestone 7.7 Internal Checkpoint 7 — Azure Topology Operation-Contract
+Completion**
+
+The binding decision is
+[`MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md`](MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md).
+It selects local operation-contract completion rather than direct
+provisioning, live workload/resilience/security execution, repeated
+Checkpoint 6 execution, or final Milestone 7.7 consolidation.
+
+Internal Checkpoint 7 is the seventh currently defined internal checkpoint,
+follows Checkpoint 6, is unstarted, and is not final. No authoritative total
+number of internal Milestone 7.7 checkpoints is defined. Later internal
+checkpoints remain intentionally undefined until Checkpoint 7 reports the
+exact remaining gates.
+
+The checkpoint may version and complete only the local default-deny contracts
+for the 15 currently blocked operation slots. It executes no Azure operation,
+authorizes no provisioning, spends no Azure budget, changes no application,
+worker, frontend, Bicep, dependency, data, or migration behavior, and cannot
+upgrade a gate. All ten infrastructure gates remain blocked, all five runtime
+gates remain unproved, provisioning remains unauthorized, and Milestone 7.8
+remains unstarted.

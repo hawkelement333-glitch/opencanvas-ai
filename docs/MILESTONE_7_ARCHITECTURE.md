@@ -5,7 +5,9 @@ Date: 2026-07-27
 Status: architecture complete locally; checkpoint 7.1 implemented locally;
 checkpoint 7.2 implemented locally; checkpoint 7.3 implemented locally;
 checkpoint 7.4 implemented locally; checkpoint 7.5 implemented locally;
-checkpoint 7.6 complete locally; checkpoint 7.7 blocked and unstarted
+checkpoint 7.6 complete locally; checkpoint 7.7 in progress; internal
+Checkpoints 1–6 complete locally; internal Checkpoint 7 contract defined
+locally and implementation unstarted
 
 Checkpoint 7.2 implementation record: migration `20260726_0026` is the sole
 head and direct child of `20260725_0025`. The deterministic Indexer, immutable
@@ -1450,18 +1452,57 @@ runtime gates, and an 18-slot closed default-deny operation inventory. The
 current-account context and two exact resource-group absence slots have
 repository-verified read-only command templates; the remaining 15 slots are
 explicitly blocked rather than filled by assumption. The group templates have
-not been executed. This local contract authorizes no Azure execution and does
-not resolve any gate.
+not been executed at this local scope-definition point. This local contract
+authorizes no Azure execution and does not resolve any gate.
 
-The separately authorized read-only Azure Topology Preflight later proved only
-the current-account context and produced sanitized evidence
+The first separately authorized read-only Azure Topology Preflight later
+proved only the current-account context and produced sanitized evidence
 `m7.7-cp6-20260730-195532z`, integrity SHA-256
 `f2af5b10703f0f0a88237e1e8f154b330b3f5a9c656aa900a3b397ed851f7a4a`,
 classified `complete-with-provisioning-blocked`. The complete canonical
 evidence object existed only in memory; the repository preserves its sanitized
 report, and documentation does not renew the recorded evidence expiry. It
 binds the earlier inventory and is non-authoritative under the revised
-inventory and scope integrity values. The other 15 operation slots and all ten
-infrastructure gates remain blocked; all five runtime gates remain unproved.
-Provisioning remains blocked, Milestone 7.7 remains in progress, and
-Checkpoint 7 and Milestone 7.8 remain unstarted.
+inventory and scope integrity values.
+
+The later separately authorized bounded execution ran only
+`current-account-context`, `target-group-existence`, and
+`cleanup-group-existence`, once each and in committed order. The account
+projection matched and both exact group checks returned `false`. The
+atomically persisted evidence is `m7.7-cp6-20260731-023407z.json`, integrity
+SHA-256
+`6f3f06cb92538523bd5cd8809ff498a0e6c0724210445e027b81665433ea51b3`,
+classified `complete-with-provisioning-blocked`. It expires at
+`2026-08-01T02:34:07Z`; documentation does not renew it. Checkpoint 6 is
+complete under its committed exit rule. The other 15 operation slots and all
+ten infrastructure gates remain blocked; all five runtime gates remain
+unproved. Provisioning remains blocked and Milestone 7.7 remains in progress.
+
+## 28. Internal Checkpoint 7 architecture decision
+
+Formal checkpoint 7 is Milestone 7.7 itself. Internal Checkpoint 7 is a
+separate implementation checkpoint inside Milestone 7.7:
+
+**Milestone 7.7 Internal Checkpoint 7 — Azure Topology Operation-Contract
+Completion**
+
+The binding decision is
+[`MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md`](MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md).
+It is the seventh currently defined internal checkpoint, follows the completed
+Checkpoint 6 boundary, is unstarted, and is not final. No authoritative total
+number of internal Milestone 7.7 checkpoints is defined; later checkpoints
+remain intentionally undefined until internal Checkpoint 7 reports the exact
+remaining gates.
+
+Internal Checkpoint 7 may complete only the local, versioned, default-deny
+operation contracts for the 15 currently blocked inventory slots. It executes
+no Azure operation, authorizes no provisioning, changes no application,
+worker, frontend, Bicep, data, dependency, or migration behavior, and cannot
+upgrade an infrastructure or runtime gate. All ten infrastructure gates
+remain blocked, all five runtime gates remain unproved, and provisioning
+remains unauthorized.
+
+Internal Checkpoint 7 cannot complete formal checkpoint 7.7 or begin Milestone
+7.8. Its smallest later separately authorizable action is one local
+operation-contract implementation pass with focused fail-closed tests and no
+Azure execution.
