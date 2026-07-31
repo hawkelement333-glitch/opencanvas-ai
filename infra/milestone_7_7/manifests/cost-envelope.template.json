@@ -1,18 +1,85 @@
 {
   "$schema": "cost-envelope.schema.json",
   "contractVersion": "m7.7-cost-envelope-v1",
-  "resolutionStatus": "unresolved",
+  "resolutionStatus": "verified",
   "provisioningAuthorized": false,
   "currency": "USD",
   "targetUsdCents": 10000,
   "provisioningBlockAboveUsdCents": 12000,
   "absoluteCeilingUsdCents": 15000,
-  "expectedUsdCents": null,
-  "baseMaximumUsdCents": null,
+  "expectedUsdCents": 940,
+  "baseMaximumUsdCents": 3355,
   "uncertaintyContingencyBasisPoints": 2500,
-  "contingencyUsdCents": null,
-  "maximumPlausibleUsdCents": null,
+  "contingencyUsdCents": 839,
+  "maximumPlausibleUsdCents": 4194,
   "budgetAlertsAreEnforcement": false,
   "hardLeaseHours": 24,
-  "lineItems": []
+  "lineItems": [
+    {
+      "name": "azure-dns-private-resolver",
+      "expectedUsdCents": 296,
+      "baseMaximumUsdCents": 592,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "vpn-gateway-and-p2s",
+      "expectedUsdCents": 240,
+      "baseMaximumUsdCents": 480,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "container-registry-premium",
+      "expectedUsdCents": 168,
+      "baseMaximumUsdCents": 168,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "container-apps-consumption",
+      "expectedUsdCents": 130,
+      "baseMaximumUsdCents": 519,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "log-analytics-bounded-data",
+      "expectedUsdCents": 55,
+      "baseMaximumUsdCents": 1392,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "private-endpoints-and-data",
+      "expectedUsdCents": 25,
+      "baseMaximumUsdCents": 58,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "standard-public-ip",
+      "expectedUsdCents": 6,
+      "baseMaximumUsdCents": 12,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "private-dns-zones-and-queries",
+      "expectedUsdCents": 8,
+      "baseMaximumUsdCents": 44,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "key-vault-standard-operations",
+      "expectedUsdCents": 3,
+      "baseMaximumUsdCents": 3,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "automation-basic-runtime",
+      "expectedUsdCents": 0,
+      "baseMaximumUsdCents": 0,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "bounded-public-data-transfer",
+      "expectedUsdCents": 9,
+      "baseMaximumUsdCents": 87,
+      "priceEvidenceStatus": "verified-official-retail"
+    }
+  ]
 }

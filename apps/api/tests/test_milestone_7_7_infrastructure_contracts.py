@@ -427,18 +427,23 @@ def test_network_policy_has_exact_private_topology_and_public_ip_exceptions():
     ]
 
 
-def test_cost_thresholds_are_fixed_and_unresolved_values_are_empty():
+def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
     value = _json(MANIFESTS / "cost-envelope.template.json")
     assert value["targetUsdCents"] == 10000
     assert value["provisioningBlockAboveUsdCents"] == 12000
     assert value["absoluteCeilingUsdCents"] == 15000
     assert value["uncertaintyContingencyBasisPoints"] == 2500
     assert value["budgetAlertsAreEnforcement"] is False
-    assert value["expectedUsdCents"] is None
-    assert value["baseMaximumUsdCents"] is None
-    assert value["contingencyUsdCents"] is None
-    assert value["maximumPlausibleUsdCents"] is None
-    assert value["lineItems"] == []
+    assert value["resolutionStatus"] == "verified"
+    assert value["expectedUsdCents"] == 940
+    assert value["baseMaximumUsdCents"] == 3355
+    assert value["contingencyUsdCents"] == 839
+    assert value["maximumPlausibleUsdCents"] == 4194
+    assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 940
+    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 3355
+    assert all(
+        item["priceEvidenceStatus"] == "verified-official-retail" for item in value["lineItems"]
+    )
     contract._validate_cost(value)
 
 
