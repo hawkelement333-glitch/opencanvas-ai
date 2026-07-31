@@ -344,6 +344,25 @@ class NetworkUsageAdapter:
         )
 
 
+def _network_usage_rows(
+    overrides: Mapping[str, tuple[JsonValue, JsonValue]] | None = None,
+) -> list[dict[str, JsonValue]]:
+    values: dict[str, tuple[JsonValue, JsonValue]] = {
+        "VirtualNetworks": ("0", "10"),
+        "PublicIPAddresses": ("0", "10"),
+        "IPv4StandardSkuPublicIpAddresses": ("0", "10"),
+        "NetworkInterfaces": ("0", "20"),
+        "PrivateEndpoints": ("0", "10"),
+        "SubnetsPerVirtualNetwork": ("0", "100"),
+        "IPConfigurationsPerVirtualNetwork": (0, 100),
+    }
+    values.update(overrides or {})
+    return [
+        {"name": name, "current": current, "limit": limit}
+        for name, (current, limit) in values.items()
+    ]
+
+
 def _run_exact_child_check(
     monkeypatch: pytest.MonkeyPatch,
     adapter: ExactChildMetadataAdapter,
@@ -366,25 +385,20 @@ def _run_exact_child_check(
 
 def test_network_usage_accepts_canonical_decimal_strings() -> None:
     result = managed_binding_execution._network_usage(
-        adapter=NetworkUsageAdapter(
-            [
-                {"name": "dimension-a", "current": "0", "limit": "10"},
-                {"name": "dimension-b", "current": 2, "limit": 3},
-            ]
-        ),
+        adapter=NetworkUsageAdapter(_network_usage_rows()),
         raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
     )
 
     assert result == (
         "proved",
         "network-capacity-bounded",
-        {"dimension-count": 2, "every-current-below-limit": True},
+        {"dimension-count": 7, "every-current-below-limit": True},
     )
 
 
 def test_network_usage_decimal_strings_preserve_limit_denial() -> None:
     result = managed_binding_execution._network_usage(
-        adapter=NetworkUsageAdapter([{"name": "dimension", "current": "10", "limit": "10"}]),
+        adapter=NetworkUsageAdapter(_network_usage_rows({"PrivateEndpoints": ("9", "10")})),
         raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
     )
 
@@ -398,7 +412,7 @@ def test_network_usage_decimal_strings_preserve_limit_denial() -> None:
 def test_network_usage_rejects_noncanonical_values(value: JsonValue) -> None:
     with pytest.raises(ManagedBindingExecutionError, match="network-usage-malformed"):
         managed_binding_execution._network_usage(
-            adapter=NetworkUsageAdapter([{"name": "dimension", "current": value, "limit": "10"}]),
+            adapter=NetworkUsageAdapter(_network_usage_rows({"VirtualNetworks": (value, "10")})),
             raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
         )
 
@@ -406,9 +420,62 @@ def test_network_usage_rejects_noncanonical_values(value: JsonValue) -> None:
 def test_network_usage_rejects_json_floats_before_quota_parsing() -> None:
     with pytest.raises(ManagedBindingExecutionError, match="azure-method-output-malformed"):
         managed_binding_execution._network_usage(
-            adapter=NetworkUsageAdapter([{"name": "dimension", "current": 1.0, "limit": "10"}]),
+            adapter=NetworkUsageAdapter(_network_usage_rows({"VirtualNetworks": (1.0, "10")})),
             raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
         )
+
+
+def test_network_usage_enforces_per_resource_minimum() -> None:
+    result = managed_binding_execution._network_usage(
+        adapter=NetworkUsageAdapter(_network_usage_rows({"SubnetsPerVirtualNetwork": ("0", "6")})),
+        raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
+    )
+
+    assert result[0:2] == ("blocked", "network-capacity-not-available")
+
+
+@pytest.mark.parametrize("shape", ["missing", "extra", "duplicate"])
+def test_network_usage_requires_exact_closed_dimensions(shape: str) -> None:
+    rows = _network_usage_rows()
+    if shape == "missing":
+        rows.pop()
+    elif shape == "extra":
+        rows.append({"name": "UnrelatedQuota", "current": "0", "limit": "10"})
+    else:
+        rows.append(dict(rows[0]))
+
+    with pytest.raises(ManagedBindingExecutionError, match="network-usage-malformed"):
+        managed_binding_execution._network_usage(
+            adapter=NetworkUsageAdapter(rows),
+            raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
+        )
+
+
+def test_network_usage_query_is_exactly_closed_to_manifest_dimensions() -> None:
+    contract = load_managed_binding_contract()
+    quota = contract["networkQuotaRequirements"]
+    assert isinstance(quota, dict)
+    required_names = set(quota["additiveHeadroom"]) | set(quota["perResourceMinimum"])
+    assert required_names == {
+        "VirtualNetworks",
+        "PublicIPAddresses",
+        "IPv4StandardSkuPublicIpAddresses",
+        "NetworkInterfaces",
+        "PrivateEndpoints",
+        "SubnetsPerVirtualNetwork",
+        "IPConfigurationsPerVirtualNetwork",
+    }
+
+    overlay = load_operation_overlay()
+    methods = overlay["methodDefinitions"]
+    assert isinstance(methods, dict)
+    method = methods["azure-network-usage-v1"]
+    assert isinstance(method, dict)
+    arguments = method["argumentVector"]
+    assert isinstance(arguments, list)
+    query = arguments[arguments.index("--query") + 1]
+    assert "[].{" not in query
+    assert all(f"name.value=='{name}'" in query for name in required_names)
 
 
 def test_exact_automation_job_schedules_parent_fallback_succeeds(

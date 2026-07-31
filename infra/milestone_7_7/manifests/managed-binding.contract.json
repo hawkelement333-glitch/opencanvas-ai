@@ -82,6 +82,19 @@
     "publicApplicationIngress": false,
     "publicKeyVaultAccess": false
   },
+  "networkQuotaRequirements": {
+    "additiveHeadroom": {
+      "VirtualNetworks": 1,
+      "PublicIPAddresses": 1,
+      "IPv4StandardSkuPublicIpAddresses": 1,
+      "NetworkInterfaces": 2,
+      "PrivateEndpoints": 2
+    },
+    "perResourceMinimum": {
+      "SubnetsPerVirtualNetwork": 7,
+      "IPConfigurationsPerVirtualNetwork": 4
+    }
+  },
   "providerApiVersions": {
     "Microsoft.App/containerApps": "2026-01-01",
     "Microsoft.App/managedEnvironments": "2026-01-01",

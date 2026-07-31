@@ -184,6 +184,16 @@ def _as_array(value: JsonValue, error_code: str) -> list[JsonValue]:
     return value
 
 
+def _positive_integer_map(value: JsonValue, error_code: str) -> dict[str, int]:
+    raw = _as_object(value, error_code)
+    result: dict[str, int] = {}
+    for name, item in raw.items():
+        if not isinstance(item, int) or isinstance(item, bool) or item <= 0:
+            raise ManagedBindingExecutionError(error_code)
+        result[name] = item
+    return result
+
+
 def _normal_location(value: str) -> str:
     return "".join(character for character in value.casefold() if character.isalnum())
 
@@ -627,26 +637,52 @@ def _network_usage(
     rows = _as_array(raw, "network-usage-malformed")
     if not rows:
         return "blocked", "network-usage-unavailable", {"dimension-count": 0}
-    below_limit = True
+    quota_contract = _as_object(
+        load_managed_binding_contract()["networkQuotaRequirements"],
+        "network-quota-contract-malformed",
+    )
+    if set(quota_contract) != {"additiveHeadroom", "perResourceMinimum"}:
+        raise ManagedBindingExecutionError("network-quota-contract-malformed")
+    additive = _positive_integer_map(
+        quota_contract["additiveHeadroom"], "network-quota-contract-malformed"
+    )
+    per_resource = _positive_integer_map(
+        quota_contract["perResourceMinimum"], "network-quota-contract-malformed"
+    )
+    requirements = {**additive, **per_resource}
+    if set(additive) & set(per_resource):
+        raise ManagedBindingExecutionError("network-quota-contract-malformed")
+    if not requirements:
+        raise ManagedBindingExecutionError("network-quota-contract-malformed")
+
+    observed: dict[str, tuple[int, int]] = {}
     for raw_row in rows:
         row = _as_object(raw_row, "network-usage-malformed")
         if set(row) != {"current", "limit", "name"}:
             raise ManagedBindingExecutionError("network-usage-malformed")
-        if not isinstance(row["name"], str):
+        name = row["name"]
+        if not isinstance(name, str) or name not in requirements or name in observed:
             raise ManagedBindingExecutionError("network-usage-malformed")
         current = _network_usage_integer(row["current"])
         limit = _network_usage_integer(row["limit"])
-        below_limit = below_limit and current < limit
+        observed[name] = (current, limit)
+    if set(observed) != set(requirements):
+        raise ManagedBindingExecutionError("network-usage-malformed")
+
+    capacity_available = all(
+        observed[name][0] + required <= observed[name][1]
+        for name, required in additive.items()
+    ) and all(required <= observed[name][1] for name, required in per_resource.items())
     return (
-        ("proved" if below_limit else "blocked"),
+        ("proved" if capacity_available else "blocked"),
         (
             "network-capacity-bounded"
-            if below_limit
+            if capacity_available
             else "network-capacity-not-available"
         ),
         {
-            "dimension-count": len(rows),
-            "every-current-below-limit": below_limit,
+            "dimension-count": len(requirements),
+            "every-current-below-limit": capacity_available,
         },
     )
 

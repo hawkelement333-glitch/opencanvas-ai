@@ -16,6 +16,7 @@
     "resources",
     "fixedSkus",
     "network",
+    "networkQuotaRequirements",
     "providerApiVersions",
     "providerRegistrationRequirements",
     "rbac",
@@ -75,6 +76,43 @@
         "publicApplicationIngress",
         "publicKeyVaultAccess"
       ]
+    },
+    "networkQuotaRequirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["additiveHeadroom", "perResourceMinimum"],
+      "properties": {
+        "additiveHeadroom": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "VirtualNetworks",
+            "PublicIPAddresses",
+            "IPv4StandardSkuPublicIpAddresses",
+            "NetworkInterfaces",
+            "PrivateEndpoints"
+          ],
+          "properties": {
+            "VirtualNetworks": { "const": 1 },
+            "PublicIPAddresses": { "const": 1 },
+            "IPv4StandardSkuPublicIpAddresses": { "const": 1 },
+            "NetworkInterfaces": { "const": 2 },
+            "PrivateEndpoints": { "const": 2 }
+          }
+        },
+        "perResourceMinimum": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "SubnetsPerVirtualNetwork",
+            "IPConfigurationsPerVirtualNetwork"
+          ],
+          "properties": {
+            "SubnetsPerVirtualNetwork": { "const": 7 },
+            "IPConfigurationsPerVirtualNetwork": { "const": 4 }
+          }
+        }
+      }
     },
     "providerApiVersions": { "$ref": "#/$defs/stringMap" },
     "providerRegistrationRequirements": {
