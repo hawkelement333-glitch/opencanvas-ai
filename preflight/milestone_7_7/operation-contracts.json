@@ -1,0 +1,898 @@
+{
+  "schemaVersion": "2020-12",
+  "contractVersion": "mobius.milestone-7.7.azure-topology-operation-contracts.v1",
+  "scopeContractVersion": "mobius.milestone-7.7.azure-topology-preflight.v1",
+  "inventoryContractVersion": "mobius.milestone-7.7.azure-topology-operation-inventory.v1",
+  "canonicalizationVersion": "mobius.milestone-7.7.canonical-json.v1",
+  "integrityDomain": "solarplexus-mobius/milestone-7.7/checkpoint-7/azure-topology-operation-contracts/v1",
+  "matrixId": "m7.7-cp7-azure-topology-operation-contracts",
+  "sourceCommit": "39f6409a44e1e9219e001eda80adb126559c94f2",
+  "checkpointStatus": "complete-local-operation-contracts-with-provisioning-blocked",
+  "defaultDecision": "deny",
+  "operationDefaultsApplyToEveryEntry": true,
+  "scopeBinding": {
+    "scopeFile": "scope-contract.json",
+    "scopeSha256": "a98776f4d2ea33f64e28514fc7c13d2e6160a79ea29247f79fc71f4ffe529e3e",
+    "priorInventoryFile": "operation-inventory.json",
+    "priorInventorySha256": "923cbf934040405fd1702b49bd79d876ee3e85fe88d68bbb3d94f980fa45b843",
+    "priorInventoryOperationCount": 18,
+    "definitionOperationCount": 15
+  },
+  "sourceReview": {
+    "sourceType": "committed-repository-only",
+    "sourceCommit": "39f6409a44e1e9219e001eda80adb126559c94f2",
+    "reviewedAt": "2026-07-31T05:12:43Z",
+    "officialAzureSourceReviewed": false,
+    "sufficientForExecutableDefinition": false
+  },
+  "authorityPolicy": {
+    "azureAccessAuthorized": false,
+    "executionAuthorized": false,
+    "mutationAuthorized": false,
+    "provisioningAuthorized": false,
+    "separateAuthorizationRequired": true,
+    "definitionGrantsAuthority": false
+  },
+  "executionPolicy": {
+    "id": "default-deny-no-execution-v1",
+    "maximumAttempts": 1,
+    "maximumTimeoutSeconds": 30,
+    "maximumOutputBytes": 0,
+    "retryCount": 0,
+    "externalCallsAuthorized": false,
+    "allowedResultGrammar": [],
+    "rawOutputDisposalRule": "no-output-execution-denied",
+    "missingInputDecision": "deny",
+    "missingPrerequisiteDecision": "deny",
+    "missingAuthorityDecision": "deny",
+    "missingEvidenceDecision": "deny",
+    "staleEvidenceDecision": "deny",
+    "scopeMismatchDecision": "deny",
+    "unknownOperationDecision": "deny",
+    "successDecision": "unavailable-no-execution",
+    "negativeDecision": "unavailable-no-execution",
+    "blockedDecision": "preserve-explicit-block",
+    "malformedDecision": "reject-and-remain-blocked",
+    "timeoutDecision": "deny-and-remain-blocked",
+    "failureDecision": "deny-and-remain-blocked",
+    "laterExecutionEligibility": "requires-complete-new-definition-and-separate-authorization",
+    "stopConditions": [
+      "contract-or-schema-mismatch",
+      "missing-or-invalid-required-input",
+      "missing-or-invalid-prerequisite",
+      "missing-or-invalid-authority",
+      "missing-stale-or-invalid-evidence",
+      "scope-or-freshness-mismatch",
+      "unknown-field-operation-state-or-transition",
+      "mutation-provisioning-or-data-plane-request",
+      "raw-private-or-secret-value-detected"
+    ]
+  },
+  "evidencePolicy": {
+    "maximumFutureObservationAgeSeconds": 86400,
+    "definitionIsExecutionEvidence": false,
+    "definitionMayProveOperation": false,
+    "definitionMayUpgradeGate": false,
+    "fabricatedOrIncompleteEvidenceDecision": "reject",
+    "freshSanitizedMinimumProjectionRequired": true,
+    "deterministicIntegrityRequired": true,
+    "checksumIsSignature": false
+  },
+  "privacyPolicy": {
+    "rawAzureOutputAllowed": false,
+    "rawAzureIdentifiersAllowed": false,
+    "credentialsOrTokensAllowed": false,
+    "privateAddressesOrHostnamesAllowed": false,
+    "personalPathsAllowed": false,
+    "minimumProjectionOnly": true,
+    "privacyTransforms": []
+  },
+  "costPolicy": {
+    "azureSpendAuthorizedUsdCents": 0,
+    "billableResourceLifetimeSeconds": 0,
+    "priceOrCostClaimAuthorized": false
+  },
+  "gatePolicy": {
+    "infrastructureGates": [
+      {
+        "id": "alert-destination",
+        "state": "blocked"
+      },
+      {
+        "id": "evidence-retention",
+        "state": "blocked"
+      },
+      {
+        "id": "exact-provider-api-versions",
+        "state": "blocked"
+      },
+      {
+        "id": "managed-identity-environment-mapping",
+        "state": "blocked"
+      },
+      {
+        "id": "openai-smtp-test-providers",
+        "state": "blocked"
+      },
+      {
+        "id": "private-acr-source-path",
+        "state": "blocked"
+      },
+      {
+        "id": "redis-custom-acl-support",
+        "state": "blocked"
+      },
+      {
+        "id": "region-and-subscription-availability",
+        "state": "blocked"
+      },
+      {
+        "id": "scanner-result-bridge",
+        "state": "blocked"
+      },
+      {
+        "id": "telemetry-gateway",
+        "state": "blocked"
+      }
+    ],
+    "runtimeGates": [
+      {
+        "id": "cleanup-supervisor-runtime-proof",
+        "state": "unproved"
+      },
+      {
+        "id": "effect-lock-runtime-proof",
+        "state": "unproved"
+      },
+      {
+        "id": "fault-controller-shape",
+        "state": "unproved"
+      },
+      {
+        "id": "isolated-environment",
+        "state": "unproved"
+      },
+      {
+        "id": "live-failure-authorization",
+        "state": "unproved"
+      }
+    ],
+    "operationDefinitionMayUpgradeGate": false,
+    "topologyContractMayResolveRuntimeGate": false
+  },
+  "supersessionPolicy": {
+    "historicalInventoryImmutable": true,
+    "historicalScopeImmutable": true,
+    "historicalEvidenceImmutable": true,
+    "stableOperationIdentitiesPreserved": true,
+    "definitionsCoverOnlyPriorBlockedSlots": true,
+    "historicalEvidenceReclassificationAllowed": false
+  },
+  "supersessionMap": [
+    {
+      "priorOperationId": "regional-service-availability",
+      "operationContractId": "regional-service-availability",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    },
+    {
+      "priorOperationId": "provider-registration-api-versions",
+      "operationContractId": "provider-registration-api-versions",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    },
+    {
+      "priorOperationId": "regional-sku-capabilities",
+      "operationContractId": "regional-sku-capabilities",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    },
+    {
+      "priorOperationId": "subscription-quota-bounded-usage",
+      "operationContractId": "subscription-quota-bounded-usage",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    },
+    {
+      "priorOperationId": "private-endpoint-network-support",
+      "operationContractId": "private-endpoint-network-support",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    },
+    {
+      "priorOperationId": "private-dns-prerequisites",
+      "operationContractId": "private-dns-prerequisites",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    },
+    {
+      "priorOperationId": "managed-identity-support",
+      "operationContractId": "managed-identity-support",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    },
+    {
+      "priorOperationId": "scoped-rbac-prerequisites",
+      "operationContractId": "scoped-rbac-prerequisites",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    },
+    {
+      "priorOperationId": "telemetry-diagnostic-prerequisites",
+      "operationContractId": "telemetry-diagnostic-prerequisites",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    },
+    {
+      "priorOperationId": "evidence-retention-prerequisites",
+      "operationContractId": "evidence-retention-prerequisites",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    },
+    {
+      "priorOperationId": "scanner-result-bridge-prerequisites",
+      "operationContractId": "scanner-result-bridge-prerequisites",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    },
+    {
+      "priorOperationId": "external-test-provider-prerequisites",
+      "operationContractId": "external-test-provider-prerequisites",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    },
+    {
+      "priorOperationId": "bounded-cost-budget-prerequisites",
+      "operationContractId": "bounded-cost-budget-prerequisites",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    },
+    {
+      "priorOperationId": "provisioning-dependency-blockers",
+      "operationContractId": "provisioning-dependency-blockers",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    },
+    {
+      "priorOperationId": "private-acr-source-prerequisites",
+      "operationContractId": "private-acr-source-prerequisites",
+      "priorDefinitionStatus": "blocked",
+      "disposition": "preserved-blocked"
+    }
+  ],
+  "operations": [
+    {
+      "id": "regional-service-availability",
+      "supports": ["region-and-subscription-availability"],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "approved-subscription-scope",
+        "approved-primary-and-recovery-regions",
+        "official-minimum-service-availability-projection"
+      ],
+      "prerequisites": [
+        "fresh-approved-account-context",
+        "repository-verified-read-only-operation-semantics"
+      ],
+      "targetBoundary": {
+        "regions": ["northcentralus", "southcentralus"],
+        "scope": "approved-regions"
+      },
+      "authorityLevel": "official-azure-management-metadata",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "no-repository-verified-service-availability-method-and-parser",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    },
+    {
+      "id": "provider-registration-api-versions",
+      "supports": ["exact-provider-api-versions"],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "approved-subscription-scope",
+        "closed-provider-namespace-list",
+        "official-minimum-api-version-projection"
+      ],
+      "prerequisites": [
+        "fresh-approved-account-context",
+        "repository-verified-read-only-operation-semantics"
+      ],
+      "targetBoundary": {
+        "regions": ["global", "northcentralus", "southcentralus"],
+        "scope": "approved-subscription-metadata"
+      },
+      "authorityLevel": "official-azure-management-metadata",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "no-repository-verified-provider-version-method-and-parser",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    },
+    {
+      "id": "regional-sku-capabilities",
+      "supports": [
+        "redis-custom-acl-support",
+        "region-and-subscription-availability"
+      ],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "approved-subscription-scope",
+        "approved-primary-and-recovery-regions",
+        "closed-resource-type-and-sku-registry",
+        "official-minimum-capability-projection"
+      ],
+      "prerequisites": [
+        "fresh-approved-account-context",
+        "exact-provider-api-versions-proved",
+        "repository-verified-read-only-operation-semantics"
+      ],
+      "targetBoundary": {
+        "regions": ["northcentralus", "southcentralus"],
+        "scope": "approved-subscription-metadata"
+      },
+      "authorityLevel": "official-azure-management-metadata",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "no-repository-verified-regional-sku-capability-method-and-parser",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    },
+    {
+      "id": "subscription-quota-bounded-usage",
+      "supports": ["region-and-subscription-availability"],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "approved-subscription-scope",
+        "approved-primary-and-recovery-regions",
+        "closed-quota-and-usage-dimension-registry",
+        "official-minimum-quota-projection"
+      ],
+      "prerequisites": [
+        "fresh-approved-account-context",
+        "exact-provider-api-versions-proved",
+        "repository-verified-read-only-operation-semantics"
+      ],
+      "targetBoundary": {
+        "regions": ["northcentralus", "southcentralus"],
+        "scope": "approved-subscription-metadata"
+      },
+      "authorityLevel": "subscription-scoped-control-plane",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "no-repository-verified-quota-usage-method-and-parser",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    },
+    {
+      "id": "private-endpoint-network-support",
+      "supports": ["region-and-subscription-availability"],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "approved-subscription-scope",
+        "approved-primary-and-recovery-regions",
+        "closed-private-endpoint-resource-type-registry",
+        "official-minimum-network-support-projection"
+      ],
+      "prerequisites": [
+        "fresh-approved-account-context",
+        "exact-provider-api-versions-proved",
+        "repository-verified-read-only-operation-semantics"
+      ],
+      "targetBoundary": {
+        "regions": ["northcentralus", "southcentralus"],
+        "scope": "approved-subscription-metadata"
+      },
+      "authorityLevel": "official-azure-management-metadata",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "no-repository-verified-private-endpoint-support-method-and-parser",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    },
+    {
+      "id": "private-dns-prerequisites",
+      "supports": ["region-and-subscription-availability"],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "approved-subscription-scope",
+        "closed-private-dns-requirement-registry",
+        "official-minimum-private-dns-projection"
+      ],
+      "prerequisites": [
+        "fresh-approved-account-context",
+        "private-endpoint-network-support-proved",
+        "repository-verified-read-only-operation-semantics"
+      ],
+      "targetBoundary": {
+        "regions": ["northcentralus", "southcentralus"],
+        "scope": "approved-subscription-metadata"
+      },
+      "authorityLevel": "official-azure-management-metadata",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "no-repository-verified-private-dns-prerequisite-method-and-parser",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    },
+    {
+      "id": "managed-identity-support",
+      "supports": ["managed-identity-environment-mapping"],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "approved-subscription-scope",
+        "approved-primary-and-recovery-regions",
+        "closed-workload-identity-capability-registry",
+        "official-minimum-identity-support-projection"
+      ],
+      "prerequisites": [
+        "fresh-approved-account-context",
+        "exact-provider-api-versions-proved",
+        "repository-verified-read-only-operation-semantics"
+      ],
+      "targetBoundary": {
+        "regions": ["northcentralus", "southcentralus"],
+        "scope": "approved-subscription-metadata"
+      },
+      "authorityLevel": "official-azure-management-metadata",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "no-repository-verified-managed-identity-support-method-and-parser",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    },
+    {
+      "id": "scoped-rbac-prerequisites",
+      "supports": ["managed-identity-environment-mapping"],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "approved-future-resource-group-scopes",
+        "closed-least-privilege-role-matrix",
+        "official-minimum-role-definition-projection"
+      ],
+      "prerequisites": [
+        "fresh-approved-account-context",
+        "managed-identity-support-proved",
+        "repository-verified-read-only-operation-semantics"
+      ],
+      "targetBoundary": {
+        "regions": ["global"],
+        "scope": "approved-future-resource-groups"
+      },
+      "authorityLevel": "subscription-scoped-control-plane",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "no-repository-verified-scoped-rbac-prerequisite-method-and-parser",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    },
+    {
+      "id": "telemetry-diagnostic-prerequisites",
+      "supports": ["alert-destination", "telemetry-gateway"],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "approved-future-resource-group-scopes",
+        "closed-telemetry-resource-type-registry",
+        "closed-diagnostic-category-registry",
+        "official-minimum-telemetry-projection"
+      ],
+      "prerequisites": [
+        "fresh-approved-account-context",
+        "exact-provider-api-versions-proved",
+        "repository-verified-read-only-operation-semantics"
+      ],
+      "targetBoundary": {
+        "regions": ["northcentralus", "southcentralus"],
+        "scope": "approved-future-resource-groups"
+      },
+      "authorityLevel": "official-azure-management-metadata",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "no-repository-verified-telemetry-prerequisite-method-and-parser",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    },
+    {
+      "id": "evidence-retention-prerequisites",
+      "supports": ["evidence-retention"],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "approved-target-resource-group-scope",
+        "closed-evidence-classification-and-retention-policy",
+        "closed-immutability-and-deletion-policy",
+        "official-minimum-retention-capability-projection"
+      ],
+      "prerequisites": [
+        "fresh-approved-account-context",
+        "exact-provider-api-versions-proved",
+        "repository-verified-read-only-operation-semantics"
+      ],
+      "targetBoundary": {
+        "regions": ["southcentralus"],
+        "scope": "approved-target-resource-group"
+      },
+      "authorityLevel": "official-azure-management-metadata",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "no-repository-verified-evidence-retention-method-and-parser",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    },
+    {
+      "id": "scanner-result-bridge-prerequisites",
+      "supports": ["scanner-result-bridge"],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "approved-target-resource-group-scope",
+        "closed-scanner-event-contract",
+        "closed-scanner-result-routing-contract",
+        "official-minimum-scanner-bridge-projection"
+      ],
+      "prerequisites": [
+        "fresh-approved-account-context",
+        "exact-provider-api-versions-proved",
+        "repository-verified-read-only-operation-semantics"
+      ],
+      "targetBoundary": {
+        "regions": ["southcentralus"],
+        "scope": "approved-target-resource-group"
+      },
+      "authorityLevel": "official-azure-management-metadata",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "no-repository-verified-scanner-bridge-method-and-parser",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    },
+    {
+      "id": "external-test-provider-prerequisites",
+      "supports": ["openai-smtp-test-providers"],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "approved-synthetic-provider-test-contract",
+        "closed-provider-identity-and-limit-registry",
+        "closed-secret-reference-policy",
+        "minimum-provider-readiness-projection"
+      ],
+      "prerequisites": [
+        "approved-synthetic-data-only",
+        "approved-provider-cost-and-retention-boundary",
+        "repository-verified-read-only-operation-semantics"
+      ],
+      "targetBoundary": {
+        "regions": ["southcentralus"],
+        "scope": "approved-target-resource-group"
+      },
+      "authorityLevel": "repository-approved-scope",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "no-repository-approved-external-provider-readiness-method-and-parser",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    },
+    {
+      "id": "bounded-cost-budget-prerequisites",
+      "supports": ["region-and-subscription-availability"],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "approved-subscription-scope",
+        "closed-fixed-resource-and-lifetime-manifest",
+        "current-official-price-evidence",
+        "current-bounded-cost-and-credit-evidence"
+      ],
+      "prerequisites": [
+        "fresh-approved-account-context",
+        "regional-sku-capabilities-proved",
+        "repository-verified-read-only-operation-semantics"
+      ],
+      "targetBoundary": {
+        "regions": ["global", "northcentralus", "southcentralus"],
+        "scope": "approved-subscription-metadata"
+      },
+      "authorityLevel": "subscription-scoped-control-plane",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "no-repository-verified-bounded-cost-read-method-and-parser",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    },
+    {
+      "id": "provisioning-dependency-blockers",
+      "supports": [
+        "alert-destination",
+        "evidence-retention",
+        "exact-provider-api-versions",
+        "managed-identity-environment-mapping",
+        "openai-smtp-test-providers",
+        "private-acr-source-path",
+        "redis-custom-acl-support",
+        "region-and-subscription-availability",
+        "scanner-result-bridge",
+        "telemetry-gateway"
+      ],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "all-ten-infrastructure-gate-evidence-records",
+        "all-required-operation-observations",
+        "closed-provisioning-dependency-order",
+        "current-cost-security-cleanup-and-authority-approvals"
+      ],
+      "prerequisites": [
+        "all-dependent-operation-contracts-proved",
+        "all-evidence-fresh-integrity-valid-and-same-scope",
+        "all-runtime-preconditions-explicitly-preserved"
+      ],
+      "targetBoundary": {
+        "regions": ["global", "northcentralus", "southcentralus"],
+        "scope": "approved-subscription-metadata"
+      },
+      "authorityLevel": "repository-approved-scope",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "all-ten-infrastructure-gates-remain-blocked",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    },
+    {
+      "id": "private-acr-source-prerequisites",
+      "supports": ["private-acr-source-path"],
+      "contractDisposition": "complete-explicit-block",
+      "definitionStatus": "blocked",
+      "proofStatus": "unproved",
+      "executionAuthorized": false,
+      "mutationAuthorized": false,
+      "provisioningAuthorized": false,
+      "intendedEffect": "future-read-only-control-plane-discovery",
+      "controlPlaneOnly": true,
+      "dataPlaneAllowed": false,
+      "semanticReadOnlyVerified": false,
+      "methodDefinition": null,
+      "parserDefinition": null,
+      "retainedProjection": [],
+      "requiredInputs": [
+        "approved-target-resource-group-scope",
+        "closed-private-source-ingress-contract",
+        "closed-build-identity-and-image-digest-contract",
+        "official-minimum-private-registry-projection"
+      ],
+      "prerequisites": [
+        "fresh-approved-account-context",
+        "private-endpoint-network-support-proved",
+        "managed-identity-support-proved",
+        "repository-verified-read-only-operation-semantics"
+      ],
+      "targetBoundary": {
+        "regions": ["southcentralus"],
+        "scope": "approved-target-resource-group"
+      },
+      "authorityLevel": "official-azure-management-metadata",
+      "authorityState": "denied-pending-separate-authorization",
+      "evidenceExpectation": "future-fresh-sanitized-minimum-projection-required",
+      "privacyProfile": "no-raw-provider-or-private-data",
+      "costEffect": "none-no-execution-authorized",
+      "failureBehavior": "remain-blocked-do-not-execute",
+      "blockingReason": "no-repository-verified-private-acr-source-method-and-parser",
+      "executionPolicyRef": "default-deny-no-execution-v1",
+      "transitionPolicyRef": "blocked-only-no-gate-upgrade-v1"
+    }
+  ],
+  "deferredWork": [
+    "separately-authorized-read-only-azure-observation",
+    "isolated-infrastructure-provisioning",
+    "runtime-gate-validation",
+    "managed-workload-and-failure-execution",
+    "milestone-7.7-final-consolidation",
+    "milestone-7.8"
+  ],
+  "matrixIntegritySha256": "100293931dcc71bb069e4f6fe06228360e0953b3b756544a555941d81bf8d6bc"
+}

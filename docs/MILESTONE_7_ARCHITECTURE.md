@@ -6,8 +6,8 @@ Status: architecture complete locally; checkpoint 7.1 implemented locally;
 checkpoint 7.2 implemented locally; checkpoint 7.3 implemented locally;
 checkpoint 7.4 implemented locally; checkpoint 7.5 implemented locally;
 checkpoint 7.6 complete locally; checkpoint 7.7 in progress; internal
-Checkpoints 1–6 complete locally; internal Checkpoint 7 contract defined
-locally and implementation unstarted
+Checkpoints 1–7 complete locally; provisioning blocked; no later internal
+checkpoint number defined
 
 Checkpoint 7.2 implementation record: migration `20260726_0026` is the sole
 head and direct child of `20260725_0025`. The deterministic Indexer, immutable
@@ -1063,6 +1063,20 @@ memory, storage, connections, retries, or cost.
 - privileged access approval, expiry, logging, and review;
 - protected backups and recovery environments;
 - no production data in logs, crash dumps, tests, or development.
+
+### 15.4 Current local topology-contract boundary
+
+Internal Checkpoint 7 completes the local versioned operation-definition
+matrix for the 15 Checkpoint 6 slots that remain blocked. The matrix binds the
+immutable Checkpoint 6 inventory and scope by SHA-256 and records a complete
+explicit blocked disposition for every stable operation identity.
+
+No executable method, parser, retained Azure projection, authority, or
+provider result was invented. All 15 operations remain blocked and unproved,
+all ten infrastructure gates remain blocked, all five runtime gates remain
+unproved, and provisioning remains unauthorized. The matrix is preparation
+for separately authorized evidence work; it is not Azure observation or
+Milestone 7.7 completion.
 
 ## 16. Threat model
 

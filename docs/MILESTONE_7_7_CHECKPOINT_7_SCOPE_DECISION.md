@@ -2,8 +2,9 @@
 
 Date: 2026-07-30
 
-Status: architecture contract defined locally; implementation and execution
-unstarted; Azure access and provisioning unauthorized
+Status: architecture contract defined locally; implementation later completed
+with every operation blocked and unproved; Azure access and provisioning
+unauthorized
 
 Decision baseline:
 
@@ -471,3 +472,19 @@ focused fail-closed tests without executing Azure.
 
 That action requires a separate prompt. This decision does not execute or
 authorize it.
+
+## 17. Implementation outcome
+
+The separately authorized local implementation completed after this decision.
+It added the versioned
+`mobius.milestone-7.7.azure-topology-operation-contracts.v1` matrix and
+focused fail-closed validation. Repository sources did not establish any
+complete executable method and parser for the 15 slots, so every slot closed
+through the decision's approved complete explicit blocked disposition.
+
+The matrix does not supersede or rewrite the historical Checkpoint 6
+inventory, scope, or evidence. It binds their current integrity values, keeps
+all 15 operations blocked and unproved, keeps all ten infrastructure gates
+blocked and five runtime gates unproved, and leaves provisioning unauthorized.
+The implementation result is recorded in
+[`MILESTONE_7_7_CHECKPOINT_7_OPERATION_CONTRACTS_HANDOFF.md`](MILESTONE_7_7_CHECKPOINT_7_OPERATION_CONTRACTS_HANDOFF.md).

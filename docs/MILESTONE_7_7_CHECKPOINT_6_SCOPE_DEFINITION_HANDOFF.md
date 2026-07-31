@@ -409,12 +409,10 @@ Checkpoint 6 now has a valid persisted sanitized evidence package for the
 revised inventory, classified `complete-with-provisioning-blocked`. The
 committed exit rule supports closing Checkpoint 6 as a complete preflight with
 provisioning blocked. Milestone 7.7 remains in progress. Provisioning remains
-blocked. Internal Checkpoint 7 now has a documentation-only contract and its
-implementation remains unstarted. Milestone 7.8 remains unstarted.
+blocked. A later separately authorized local pass completed internal
+Checkpoint 7 with all 15 operations still blocked and unproved. Milestone 7.8
+remains unstarted.
 
-The next eligible action, only after separate authorization, is
-**Milestone 7.7 Internal Checkpoint 7 — Azure Topology Operation-Contract
-Completion** as defined in
-[`MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md`](MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md).
-It is local contract implementation only and does not inherit Azure or
-provisioning authority from Checkpoint 6.
+The Checkpoint 7 outcome is recorded in
+[`MILESTONE_7_7_CHECKPOINT_7_OPERATION_CONTRACTS_HANDOFF.md`](MILESTONE_7_7_CHECKPOINT_7_OPERATION_CONTRACTS_HANDOFF.md).
+It does not inherit Azure or provisioning authority from Checkpoint 6.

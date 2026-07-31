@@ -1,9 +1,10 @@
-# Milestone 7.7 Checkpoint 6 scope contracts
+# Milestone 7.7 topology preflight contracts
 
-This directory defines the local contract and closed execution path for a
-later, separately authorized Azure Topology Preflight. The presence of the
-runner does not authorize Azure access, provisioning, deployment, workload
-execution, or Checkpoint 7.
+This directory preserves the Checkpoint 6 scope, inventory, evidence, and
+closed three-operation execution path. It also defines Checkpoint 7's inert
+15-slot operation-contract matrix. No artifact in this directory authorizes
+Azure access, provisioning, deployment, workload execution, or proof that a
+blocked operation ran.
 
 ## Artifacts
 
@@ -20,6 +21,16 @@ execution, or Checkpoint 7.
   evidence write.
 - `verify.py` emits a bounded deterministic verification report and has no
   process or network client.
+- `operation-contracts.json` records complete explicit blocked dispositions
+  for the 15 unresolved operation identities without inventing executable
+  methods, parsers, projections, or Azure results.
+- `operation-contracts.schema.json` closes the matrix shape and authority,
+  gate, evidence, privacy, cost, timeout, retry, and transition states.
+- `operation_contracts.py` validates the matrix against the immutable
+  Checkpoint 6 inventory and scope hashes, produces deterministic integrity,
+  and returns only denied execution decisions.
+- `verify_operation_contracts.py` emits a bounded deterministic Checkpoint 7
+  verification report without a process or network client.
 
 The inventory contains 18 required operation slots. Three have exact
 repository-verified command templates: `current-account-context`,
@@ -39,6 +50,34 @@ Future evidence expires 24 hours after its earliest recorded UTC observation.
 Raw Azure output, raw Azure identifiers, data-plane evidence, mutation,
 private operational data, and topology-based resolution of runtime gates are
 prohibited.
+
+## Checkpoint 7 operation contracts
+
+The Checkpoint 7 matrix is
+`mobius.milestone-7.7.azure-topology-operation-contracts.v1`, with integrity
+SHA-256
+`100293931dcc71bb069e4f6fe06228360e0953b3b756544a555941d81bf8d6bc`.
+It binds, but does not alter, Checkpoint 6 inventory SHA-256
+`923cbf934040405fd1702b49bd79d876ee3e85fe88d68bbb3d94f980fa45b843`
+and scope SHA-256
+`a98776f4d2ea33f64e28514fc7c13d2e6160a79ea29247f79fc71f4ffe529e3e`.
+
+Every one of the 15 entries is a complete explicit blocked disposition. Each
+records its required inputs, prerequisites, target boundary, authority,
+supported gates, future evidence expectation, privacy and cost policy, and
+exact blocker. Every method and parser remains null; every retained projection
+remains empty; execution, mutation, data-plane access, provisioning, external
+calls, retries, and gate upgrades remain denied.
+
+Local validation uses:
+
+```text
+python -m preflight.milestone_7_7.verify_operation_contracts
+```
+
+That verifier validates only committed local bytes. It cannot execute Azure,
+turn a definition into evidence, prove an operation, or upgrade an
+infrastructure or runtime gate.
 
 ## Bounded execution path
 
@@ -109,5 +148,6 @@ tamper validation passed. No Azure mutation, data-plane access, retry, direct
 additional Azure command, blocked operation, or raw-output persistence
 occurred. Checkpoint 6 is complete under the committed exit rule. The other 15
 operation slots and all ten infrastructure gates remain blocked; all five
-runtime gates remain unproved. Provisioning, Checkpoint 7, and Milestone 7.8
-remain unstarted and require separate authorization.
+runtime gates remain unproved. Provisioning remains unauthorized. Checkpoint
+7 later completed locally with all negative states preserved; Milestone 7.8
+remains unstarted and requires separate authorization.

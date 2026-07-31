@@ -9,9 +9,9 @@ PostgreSQL historical-migration correction for `0005`, `0021`, `0023`, and
 Constitution documentation checkpoint complete locally; checkpoint 7.2
 complete locally; checkpoint 7.3 complete locally; checkpoint 7.4 complete
 locally; checkpoint 7.5 complete locally; checkpoint 7.6 complete locally;
-checkpoint 7.7 in progress with internal Checkpoints 1–6 complete locally;
-internal Checkpoint 7 contract defined locally and implementation unstarted;
-checkpoint 7.8 unstarted
+checkpoint 7.7 in progress with internal Checkpoints 1–7 complete locally;
+provisioning blocked; no later internal checkpoint number defined; checkpoint
+7.8 unstarted
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -66,6 +66,9 @@ Checkpoint 7.7 Checkpoint 6 handoff:
 
 Checkpoint 7.7 internal Checkpoint 7 scope decision:
 [`MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md`](MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md)
+
+Checkpoint 7.7 internal Checkpoint 7 implementation handoff:
+[`MILESTONE_7_7_CHECKPOINT_7_OPERATION_CONTRACTS_HANDOFF.md`](MILESTONE_7_7_CHECKPOINT_7_OPERATION_CONTRACTS_HANDOFF.md)
 
 PostgreSQL compatibility amendment:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md)
@@ -592,9 +595,9 @@ complete-preflight-with-provisioning-blocked exit rule.
 
 Milestone 7.7 remains in progress. The other 15 operation slots and all ten
 infrastructure gates remain blocked; all five runtime gates remain unproved.
-Provisioning remains blocked. Internal Checkpoint 7 has a documentation-only
-contract and remains unstarted. Milestone 7.8 remains unstarted and requires
-separate authorization.
+Provisioning remains blocked. Internal Checkpoint 7 is complete locally under
+its operation-contract classifier. Milestone 7.8 remains unstarted and
+requires separate authorization.
 
 ## Internal Checkpoint 7 contract decision
 
@@ -610,10 +613,10 @@ provisioning, live workload/resilience/security execution, repeated
 Checkpoint 6 execution, or final Milestone 7.7 consolidation.
 
 Internal Checkpoint 7 is the seventh currently defined internal checkpoint,
-follows Checkpoint 6, is unstarted, and is not final. No authoritative total
-number of internal Milestone 7.7 checkpoints is defined. Later internal
-checkpoints remain intentionally undefined until Checkpoint 7 reports the
-exact remaining gates.
+follows Checkpoint 6, is complete locally, and is not final. No authoritative
+total number of internal Milestone 7.7 checkpoints is defined, and no later
+internal checkpoint number is introduced. Remaining work is organized by the
+formal Milestone 7.7 exit requirements.
 
 The checkpoint may version and complete only the local default-deny contracts
 for the 15 currently blocked operation slots. It executes no Azure operation,
@@ -622,3 +625,27 @@ worker, frontend, Bicep, dependency, data, or migration behavior, and cannot
 upgrade a gate. All ten infrastructure gates remain blocked, all five runtime
 gates remain unproved, provisioning remains unauthorized, and Milestone 7.8
 remains unstarted.
+
+## Internal Checkpoint 7 implementation
+
+The operation matrix contract is
+`mobius.milestone-7.7.azure-topology-operation-contracts.v1`, with integrity
+SHA-256
+`100293931dcc71bb069e4f6fe06228360e0953b3b756544a555941d81bf8d6bc`.
+It binds the immutable Checkpoint 6 inventory and scope by their existing
+integrity values and defines exactly the same 15 stable blocked operation
+identities.
+
+Every entry records complete required-input, prerequisite, boundary,
+authority, evidence, privacy, cost, timeout, retry, stop, and failure
+requirements. Because repository sources did not prove a complete safe
+executable method and parser for any entry, all methods and parsers remain
+null, every operation remains blocked and unproved, and every execution
+decision remains denied. Definitions cannot prove an Azure observation or
+upgrade a gate.
+
+The focused fail-closed suite passed 37 tests. The deterministic verifier
+reported 15 blocked operations, ten blocked infrastructure gates, five
+unproved runtime gates, and provisioning unauthorized. The complete affected
+local regression and repository-hygiene results are recorded in the
+Checkpoint 7 implementation handoff.

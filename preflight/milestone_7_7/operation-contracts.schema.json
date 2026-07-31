@@ -1,0 +1,693 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://solarplexus.invalid/schemas/milestone-7-7-operation-contracts-v1.json",
+  "title": "Milestone 7.7 Checkpoint 7 blocked Azure topology operation contracts",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "scopeContractVersion",
+    "inventoryContractVersion",
+    "canonicalizationVersion",
+    "integrityDomain",
+    "matrixId",
+    "sourceCommit",
+    "checkpointStatus",
+    "defaultDecision",
+    "operationDefaultsApplyToEveryEntry",
+    "scopeBinding",
+    "sourceReview",
+    "authorityPolicy",
+    "executionPolicy",
+    "evidencePolicy",
+    "privacyPolicy",
+    "costPolicy",
+    "gatePolicy",
+    "supersessionPolicy",
+    "supersessionMap",
+    "operations",
+    "deferredWork",
+    "matrixIntegritySha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "2020-12"
+    },
+    "contractVersion": {
+      "const": "mobius.milestone-7.7.azure-topology-operation-contracts.v1"
+    },
+    "scopeContractVersion": {
+      "const": "mobius.milestone-7.7.azure-topology-preflight.v1"
+    },
+    "inventoryContractVersion": {
+      "const": "mobius.milestone-7.7.azure-topology-operation-inventory.v1"
+    },
+    "canonicalizationVersion": {
+      "const": "mobius.milestone-7.7.canonical-json.v1"
+    },
+    "integrityDomain": {
+      "const": "solarplexus-mobius/milestone-7.7/checkpoint-7/azure-topology-operation-contracts/v1"
+    },
+    "matrixId": {
+      "const": "m7.7-cp7-azure-topology-operation-contracts"
+    },
+    "sourceCommit": {
+      "const": "39f6409a44e1e9219e001eda80adb126559c94f2"
+    },
+    "checkpointStatus": {
+      "const": "complete-local-operation-contracts-with-provisioning-blocked"
+    },
+    "defaultDecision": {
+      "const": "deny"
+    },
+    "operationDefaultsApplyToEveryEntry": {
+      "const": true
+    },
+    "scopeBinding": {
+      "$ref": "#/$defs/scopeBinding"
+    },
+    "sourceReview": {
+      "$ref": "#/$defs/sourceReview"
+    },
+    "authorityPolicy": {
+      "$ref": "#/$defs/authorityPolicy"
+    },
+    "executionPolicy": {
+      "$ref": "#/$defs/executionPolicy"
+    },
+    "evidencePolicy": {
+      "$ref": "#/$defs/evidencePolicy"
+    },
+    "privacyPolicy": {
+      "$ref": "#/$defs/privacyPolicy"
+    },
+    "costPolicy": {
+      "$ref": "#/$defs/costPolicy"
+    },
+    "gatePolicy": {
+      "$ref": "#/$defs/gatePolicy"
+    },
+    "supersessionPolicy": {
+      "$ref": "#/$defs/supersessionPolicy"
+    },
+    "supersessionMap": {
+      "type": "array",
+      "minItems": 15,
+      "maxItems": 15,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/supersession"
+      }
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 15,
+      "maxItems": 15,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/operation"
+      }
+    },
+    "deferredWork": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "matrixIntegritySha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "stringList": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 160
+      }
+    },
+    "scopeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scopeFile",
+        "scopeSha256",
+        "priorInventoryFile",
+        "priorInventorySha256",
+        "priorInventoryOperationCount",
+        "definitionOperationCount"
+      ],
+      "properties": {
+        "scopeFile": {
+          "const": "scope-contract.json"
+        },
+        "scopeSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "priorInventoryFile": {
+          "const": "operation-inventory.json"
+        },
+        "priorInventorySha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "priorInventoryOperationCount": {
+          "const": 18
+        },
+        "definitionOperationCount": {
+          "const": 15
+        }
+      }
+    },
+    "authorityPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "azureAccessAuthorized",
+        "executionAuthorized",
+        "mutationAuthorized",
+        "provisioningAuthorized",
+        "separateAuthorizationRequired",
+        "definitionGrantsAuthority"
+      ],
+      "properties": {
+        "azureAccessAuthorized": {
+          "const": false
+        },
+        "executionAuthorized": {
+          "const": false
+        },
+        "mutationAuthorized": {
+          "const": false
+        },
+        "provisioningAuthorized": {
+          "const": false
+        },
+        "separateAuthorizationRequired": {
+          "const": true
+        },
+        "definitionGrantsAuthority": {
+          "const": false
+        }
+      }
+    },
+    "sourceReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceType",
+        "sourceCommit",
+        "reviewedAt",
+        "officialAzureSourceReviewed",
+        "sufficientForExecutableDefinition"
+      ],
+      "properties": {
+        "sourceType": {
+          "const": "committed-repository-only"
+        },
+        "sourceCommit": {
+          "const": "39f6409a44e1e9219e001eda80adb126559c94f2"
+        },
+        "reviewedAt": {
+          "const": "2026-07-31T05:12:43Z"
+        },
+        "officialAzureSourceReviewed": {
+          "const": false
+        },
+        "sufficientForExecutableDefinition": {
+          "const": false
+        }
+      }
+    },
+    "executionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "maximumAttempts",
+        "maximumTimeoutSeconds",
+        "maximumOutputBytes",
+        "retryCount",
+        "externalCallsAuthorized",
+        "allowedResultGrammar",
+        "rawOutputDisposalRule",
+        "missingInputDecision",
+        "missingPrerequisiteDecision",
+        "missingAuthorityDecision",
+        "missingEvidenceDecision",
+        "staleEvidenceDecision",
+        "scopeMismatchDecision",
+        "unknownOperationDecision",
+        "successDecision",
+        "negativeDecision",
+        "blockedDecision",
+        "malformedDecision",
+        "timeoutDecision",
+        "failureDecision",
+        "laterExecutionEligibility",
+        "stopConditions"
+      ],
+      "properties": {
+        "id": {
+          "const": "default-deny-no-execution-v1"
+        },
+        "maximumAttempts": {
+          "const": 1
+        },
+        "maximumTimeoutSeconds": {
+          "const": 30
+        },
+        "maximumOutputBytes": {
+          "const": 0
+        },
+        "retryCount": {
+          "const": 0
+        },
+        "externalCallsAuthorized": {
+          "const": false
+        },
+        "allowedResultGrammar": {
+          "type": "array",
+          "maxItems": 0,
+          "items": {
+            "type": "string"
+          }
+        },
+        "rawOutputDisposalRule": {
+          "const": "no-output-execution-denied"
+        },
+        "missingInputDecision": {
+          "const": "deny"
+        },
+        "missingPrerequisiteDecision": {
+          "const": "deny"
+        },
+        "missingAuthorityDecision": {
+          "const": "deny"
+        },
+        "missingEvidenceDecision": {
+          "const": "deny"
+        },
+        "staleEvidenceDecision": {
+          "const": "deny"
+        },
+        "scopeMismatchDecision": {
+          "const": "deny"
+        },
+        "unknownOperationDecision": {
+          "const": "deny"
+        },
+        "successDecision": {
+          "const": "unavailable-no-execution"
+        },
+        "negativeDecision": {
+          "const": "unavailable-no-execution"
+        },
+        "blockedDecision": {
+          "const": "preserve-explicit-block"
+        },
+        "malformedDecision": {
+          "const": "reject-and-remain-blocked"
+        },
+        "timeoutDecision": {
+          "const": "deny-and-remain-blocked"
+        },
+        "failureDecision": {
+          "const": "deny-and-remain-blocked"
+        },
+        "laterExecutionEligibility": {
+          "const": "requires-complete-new-definition-and-separate-authorization"
+        },
+        "stopConditions": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "evidencePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maximumFutureObservationAgeSeconds",
+        "definitionIsExecutionEvidence",
+        "definitionMayProveOperation",
+        "definitionMayUpgradeGate",
+        "fabricatedOrIncompleteEvidenceDecision",
+        "freshSanitizedMinimumProjectionRequired",
+        "deterministicIntegrityRequired",
+        "checksumIsSignature"
+      ],
+      "properties": {
+        "maximumFutureObservationAgeSeconds": {
+          "const": 86400
+        },
+        "definitionIsExecutionEvidence": {
+          "const": false
+        },
+        "definitionMayProveOperation": {
+          "const": false
+        },
+        "definitionMayUpgradeGate": {
+          "const": false
+        },
+        "fabricatedOrIncompleteEvidenceDecision": {
+          "const": "reject"
+        },
+        "freshSanitizedMinimumProjectionRequired": {
+          "const": true
+        },
+        "deterministicIntegrityRequired": {
+          "const": true
+        },
+        "checksumIsSignature": {
+          "const": false
+        }
+      }
+    },
+    "privacyPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rawAzureOutputAllowed",
+        "rawAzureIdentifiersAllowed",
+        "credentialsOrTokensAllowed",
+        "privateAddressesOrHostnamesAllowed",
+        "personalPathsAllowed",
+        "minimumProjectionOnly",
+        "privacyTransforms"
+      ],
+      "properties": {
+        "rawAzureOutputAllowed": {
+          "const": false
+        },
+        "rawAzureIdentifiersAllowed": {
+          "const": false
+        },
+        "credentialsOrTokensAllowed": {
+          "const": false
+        },
+        "privateAddressesOrHostnamesAllowed": {
+          "const": false
+        },
+        "personalPathsAllowed": {
+          "const": false
+        },
+        "minimumProjectionOnly": {
+          "const": true
+        },
+        "privacyTransforms": {
+          "type": "array",
+          "maxItems": 0,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "costPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "azureSpendAuthorizedUsdCents",
+        "billableResourceLifetimeSeconds",
+        "priceOrCostClaimAuthorized"
+      ],
+      "properties": {
+        "azureSpendAuthorizedUsdCents": {
+          "const": 0
+        },
+        "billableResourceLifetimeSeconds": {
+          "const": 0
+        },
+        "priceOrCostClaimAuthorized": {
+          "const": false
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "state"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "state": {
+          "enum": ["blocked", "unproved"]
+        }
+      }
+    },
+    "gatePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "infrastructureGates",
+        "runtimeGates",
+        "operationDefinitionMayUpgradeGate",
+        "topologyContractMayResolveRuntimeGate"
+      ],
+      "properties": {
+        "infrastructureGates": {
+          "type": "array",
+          "minItems": 10,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/gate"
+          }
+        },
+        "runtimeGates": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/gate"
+          }
+        },
+        "operationDefinitionMayUpgradeGate": {
+          "const": false
+        },
+        "topologyContractMayResolveRuntimeGate": {
+          "const": false
+        }
+      }
+    },
+    "supersessionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "historicalInventoryImmutable",
+        "historicalScopeImmutable",
+        "historicalEvidenceImmutable",
+        "stableOperationIdentitiesPreserved",
+        "definitionsCoverOnlyPriorBlockedSlots",
+        "historicalEvidenceReclassificationAllowed"
+      ],
+      "properties": {
+        "historicalInventoryImmutable": {
+          "const": true
+        },
+        "historicalScopeImmutable": {
+          "const": true
+        },
+        "historicalEvidenceImmutable": {
+          "const": true
+        },
+        "stableOperationIdentitiesPreserved": {
+          "const": true
+        },
+        "definitionsCoverOnlyPriorBlockedSlots": {
+          "const": true
+        },
+        "historicalEvidenceReclassificationAllowed": {
+          "const": false
+        }
+      }
+    },
+    "targetBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["regions", "scope"],
+      "properties": {
+        "regions": {
+          "$ref": "#/$defs/stringList"
+        },
+        "scope": {
+          "enum": [
+            "approved-subscription-metadata",
+            "approved-regions",
+            "approved-target-resource-group",
+            "approved-future-resource-groups"
+          ]
+        }
+      }
+    },
+    "supersession": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priorOperationId",
+        "operationContractId",
+        "priorDefinitionStatus",
+        "disposition"
+      ],
+      "properties": {
+        "priorOperationId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "operationContractId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "priorDefinitionStatus": {
+          "const": "blocked"
+        },
+        "disposition": {
+          "const": "preserved-blocked"
+        }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "supports",
+        "contractDisposition",
+        "definitionStatus",
+        "proofStatus",
+        "executionAuthorized",
+        "mutationAuthorized",
+        "provisioningAuthorized",
+        "intendedEffect",
+        "controlPlaneOnly",
+        "dataPlaneAllowed",
+        "semanticReadOnlyVerified",
+        "methodDefinition",
+        "parserDefinition",
+        "retainedProjection",
+        "requiredInputs",
+        "prerequisites",
+        "targetBoundary",
+        "authorityLevel",
+        "authorityState",
+        "evidenceExpectation",
+        "privacyProfile",
+        "costEffect",
+        "failureBehavior",
+        "blockingReason",
+        "executionPolicyRef",
+        "transitionPolicyRef"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "supports": {
+          "$ref": "#/$defs/stringList"
+        },
+        "contractDisposition": {
+          "const": "complete-explicit-block"
+        },
+        "definitionStatus": {
+          "const": "blocked"
+        },
+        "proofStatus": {
+          "const": "unproved"
+        },
+        "executionAuthorized": {
+          "const": false
+        },
+        "mutationAuthorized": {
+          "const": false
+        },
+        "provisioningAuthorized": {
+          "const": false
+        },
+        "intendedEffect": {
+          "const": "future-read-only-control-plane-discovery"
+        },
+        "controlPlaneOnly": {
+          "const": true
+        },
+        "dataPlaneAllowed": {
+          "const": false
+        },
+        "semanticReadOnlyVerified": {
+          "const": false
+        },
+        "methodDefinition": {
+          "type": "null"
+        },
+        "parserDefinition": {
+          "type": "null"
+        },
+        "retainedProjection": {
+          "type": "array",
+          "maxItems": 0,
+          "items": {
+            "type": "string"
+          }
+        },
+        "requiredInputs": {
+          "$ref": "#/$defs/stringList"
+        },
+        "prerequisites": {
+          "$ref": "#/$defs/stringList"
+        },
+        "targetBoundary": {
+          "$ref": "#/$defs/targetBoundary"
+        },
+        "authorityLevel": {
+          "enum": [
+            "official-azure-management-metadata",
+            "repository-approved-scope",
+            "subscription-scoped-control-plane"
+          ]
+        },
+        "authorityState": {
+          "const": "denied-pending-separate-authorization"
+        },
+        "evidenceExpectation": {
+          "const": "future-fresh-sanitized-minimum-projection-required"
+        },
+        "privacyProfile": {
+          "const": "no-raw-provider-or-private-data"
+        },
+        "costEffect": {
+          "const": "none-no-execution-authorized"
+        },
+        "failureBehavior": {
+          "const": "remain-blocked-do-not-execute"
+        },
+        "blockingReason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "executionPolicyRef": {
+          "const": "default-deny-no-execution-v1"
+        },
+        "transitionPolicyRef": {
+          "const": "blocked-only-no-gate-upgrade-v1"
+        }
+      }
+    }
+  }
+}

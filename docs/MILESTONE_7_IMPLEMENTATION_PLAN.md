@@ -12,8 +12,8 @@ locally; checkpoint 7.2 complete locally on
 `milestone-7-4-implementation-local`; checkpoint 7.5 complete locally on
 `milestone-7-5-implementation-local`; checkpoint 7.6 complete locally on
 `milestone-7-6-recovery-adapter`; checkpoint 7.7 in progress; internal
-Checkpoints 1–6 complete locally; internal Checkpoint 7 contract defined
-locally and implementation unstarted
+Checkpoints 1–7 complete locally; provisioning blocked; no later internal
+checkpoint number defined
 
 Compatibility gates:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -995,21 +995,21 @@ internal Milestone 7.7 sequence is:
 6. Azure Topology Preflight Scope Definition and bounded evidence closure; and
 7. Azure Topology Operation-Contract Completion.
 
-Internal Checkpoints 1–6 are complete locally. Internal Checkpoint 7 is
-defined and unstarted. It is not final. No authoritative total number of
-internal Milestone 7.7 checkpoints is defined; later internal checkpoints
-remain intentionally undefined until internal Checkpoint 7 reports the exact
-remaining gates.
+Internal Checkpoints 1–7 are complete locally. Internal Checkpoint 7 is not
+final. No authoritative total number of internal Milestone 7.7 checkpoints is
+defined, and no later internal checkpoint number is introduced. Remaining
+work is organized by the governing Milestone 7.7 exit requirements.
 
 ### Internal Checkpoint 7 decision
 
 The binding scope is
 [`MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md`](MILESTONE_7_7_CHECKPOINT_7_SCOPE_DECISION.md).
-Internal Checkpoint 7 completes local, versioned, default-deny operation
-contracts for the 15 Checkpoint 6 slots that remain blocked. It may define an
-operation only with complete read-only semantics, exact scope, bounded
-projection, parser, privacy, timeout, retry, failure, and source evidence.
-Otherwise the slot remains explicitly blocked.
+Internal Checkpoint 7 completes the local, versioned, default-deny
+operation-definition matrix for the 15 Checkpoint 6 slots that remain blocked.
+Repository sources did not establish complete executable methods and parsers,
+so every slot closes with a complete explicit blocked disposition and its
+required inputs, prerequisites, scope, authority, evidence, privacy, cost,
+timeout, retry, stop, and failure contract.
 
 Internal Checkpoint 7 executes no Azure operation, spends no Azure budget,
 provisions no resource, resolves no infrastructure or runtime gate, changes
