@@ -624,6 +624,67 @@ def test_exact_role_assignment_binding_is_region_independent(
     assert result[2]["approved-region-count"] == 1
 
 
+@pytest.mark.parametrize(
+    ("provider_key", "resource_type"),
+    [
+        ("Microsoft.Network/privateDnsZones", "privateDnsZones"),
+        (
+            "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+            "privateDnsZones/virtualNetworkLinks",
+        ),
+    ],
+)
+def test_exact_private_dns_bindings_require_global_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_key: str,
+    resource_type: str,
+) -> None:
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            direct_child=_automation_metadata_row(
+                resource_type,
+                api_versions=("2024-06-01",),
+                locations=("global",),
+            )
+        ),
+        provider_key=provider_key,
+    )
+
+    assert result[0:2] == ("proved", "provider-prerequisites-proved")
+    assert result[2]["approved-region-count"] == 1
+
+
+def test_private_dns_global_exception_rejects_wrong_location_or_neighbor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            direct_child=_automation_metadata_row(
+                "privateDnsZones",
+                api_versions=("2024-06-01",),
+                locations=("West US",),
+            )
+        ),
+        provider_key="Microsoft.Network/privateDnsZones",
+    )
+    assert result[0:2] == ("blocked", "approved-region-unavailable")
+
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            direct_child=_automation_metadata_row(
+                "privateEndpoints",
+                api_versions=("2026-01-01",),
+                locations=("global",),
+            )
+        ),
+        provider_key="Microsoft.Network/privateEndpoints",
+    )
+    assert result[0:2] == ("blocked", "approved-region-unavailable")
+
+
 def test_region_independent_exception_rejects_another_binding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

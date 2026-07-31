@@ -77,11 +77,26 @@ _EXACT_CHILD_METADATA_FALLBACKS: Final = {
         "2025-07-01",
     ),
 }
-_EXACT_REGION_INDEPENDENT_BINDINGS: Final = {
+_EXACT_REGION_INDEPENDENT_BINDINGS: Final[
+    dict[str, tuple[str, str, str, frozenset[str]]]
+] = {
     "Microsoft.Authorization/roleAssignments": (
         "Microsoft.Authorization",
         "roleAssignments",
         "2022-04-01",
+        frozenset(),
+    ),
+    "Microsoft.Network/privateDnsZones": (
+        "Microsoft.Network",
+        "privateDnsZones",
+        "2024-06-01",
+        frozenset({"global"}),
+    ),
+    "Microsoft.Network/privateDnsZones/virtualNetworkLinks": (
+        "Microsoft.Network",
+        "privateDnsZones/virtualNetworkLinks",
+        "2024-06-01",
+        frozenset({"global"}),
     ),
 }
 
@@ -390,13 +405,31 @@ def _exact_child_metadata_fallback(
     )
 
 
-def _requires_regional_metadata(
-    *, key: str, namespace: str, resource_type: str, pinned_version: str
+def _regional_metadata_approved(
+    *,
+    key: str,
+    namespace: str,
+    resource_type: str,
+    pinned_version: str,
+    normalized_locations: set[str],
+    require_region: bool,
 ) -> bool:
+    if not require_region:
+        return True
     expected = _EXACT_REGION_INDEPENDENT_BINDINGS.get(key)
     if expected is None:
-        return True
-    return (namespace, resource_type, pinned_version) != expected
+        return REGION in normalized_locations
+    (
+        expected_namespace,
+        expected_resource_type,
+        expected_version,
+        expected_locations,
+    ) = expected
+    return (namespace, resource_type, pinned_version) == (
+        expected_namespace,
+        expected_resource_type,
+        expected_version,
+    ) and normalized_locations == expected_locations
 
 
 def _provider_checks(
@@ -516,13 +549,14 @@ def _provider_checks(
                 },
             )
         normalized_locations = {_normal_location(item) for item in location_values}
-        resource_requires_region = require_region and _requires_regional_metadata(
+        if _regional_metadata_approved(
             key=key,
             namespace=namespace,
             resource_type=resource_type,
             pinned_version=pinned_version,
-        )
-        if not resource_requires_region or REGION in normalized_locations:
+            normalized_locations=normalized_locations,
+            require_region=require_region,
+        ):
             region_count += 1
         else:
             return (
