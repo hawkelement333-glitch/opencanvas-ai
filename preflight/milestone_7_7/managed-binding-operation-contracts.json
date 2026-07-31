@@ -83,7 +83,7 @@
       ],
       "controlPlaneOnly": true
     },
-    "azure-provider-resource-inventory-v1": {
+    "azure-provider-resource-type-inventory-v1": {
       "executable": "az",
       "argumentVector": [
         "provider",
@@ -91,7 +91,7 @@
         "--namespace",
         "{providerNamespace}",
         "--query",
-        "{registrationState:registrationState,resourceTypes:resourceTypes[].{resourceType:resourceType,apiVersions:apiVersions,locations:locations}}",
+        "{registrationState:registrationState,resourceTypes:resourceTypes[].resourceType}",
         "--output",
         "json",
         "--only-show-errors"
@@ -456,7 +456,7 @@
       "proofStatus": "unproved",
       "methodDefinitions": [
         "azure-provider-resource-metadata-v1",
-        "azure-provider-resource-inventory-v1"
+        "azure-provider-resource-type-inventory-v1"
       ],
       "parserDefinition": "strict-provider-metadata-v1",
       "sanitizedInputs": ["closed-provider-resource-api-version-registry"],
@@ -983,5 +983,5 @@
       "replayDecision": "deny"
     }
   ],
-  "contractIntegritySha256": "cd71764a8ae85d7601794de3af528bd0d2e563379911309774c378520ee942f1"
+  "contractIntegritySha256": "ba98682b075a4260bba669bd981bd79470e8d27eefc066082e364970775ce80d"
 }

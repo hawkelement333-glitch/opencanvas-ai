@@ -177,6 +177,23 @@ def test_local_dry_run_never_authorizes_or_invokes_azure() -> None:
     assert result["secretAccessAuthorized"] is False
 
 
+def test_provider_type_inventory_projection_is_bounded_to_names() -> None:
+    overlay = load_operation_overlay()
+    methods = overlay["methodDefinitions"]
+    assert isinstance(methods, dict)
+    assert "azure-provider-resource-inventory-v1" not in methods
+    method = methods["azure-provider-resource-type-inventory-v1"]
+    assert isinstance(method, dict)
+    arguments = method["argumentVector"]
+    assert isinstance(arguments, list)
+    query = arguments[arguments.index("--query") + 1]
+    assert query == (
+        "{registrationState:registrationState,resourceTypes:resourceTypes[].resourceType}"
+    )
+    assert "apiVersions" not in query
+    assert "locations" not in query
+
+
 class ManagedBindingFakeAdapter:
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
@@ -265,14 +282,28 @@ class ExactChildMetadataAdapter:
         self.calls.append(argv)
         assert argv[1:3] == ("provider", "show")
         query = argv[argv.index("--query") + 1]
-        if "resourceTypes:resourceTypes[]" in query:
+        if "resourceTypes:resourceTypes[].resourceType" in query:
             payload: JsonValue = {
                 "registrationState": self.registration_state,
-                "resourceTypes": self.inventory_rows,
+                "resourceTypes": [row["resourceType"] for row in self.inventory_rows],
             }
         else:
-            assert re.search(r"resourceType=='([^']+)'", query) is not None
-            row = self.direct_child
+            match = re.search(r"resourceType=='([^']+)'", query)
+            assert match is not None
+            requested_resource_type = match.group(1)
+            if (
+                self.direct_child is not None
+                and self.direct_child["resourceType"] == requested_resource_type
+            ):
+                row = self.direct_child
+            else:
+                rows = [
+                    row
+                    for row in self.inventory_rows
+                    if row["resourceType"] == requested_resource_type
+                ]
+                assert len(rows) <= 1
+                row = None if not rows else rows[0]
             payload = {
                 "registrationState": self.registration_state,
                 "resourceType": None if row is None else row["resourceType"],

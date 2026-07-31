@@ -53,7 +53,7 @@ PACKAGE_RESULT_VERSION: Final = (
     "mobius.milestone-7.7.managed-binding-package-one-result.v1"
 )
 PROVIDER_METHOD = "azure-provider-resource-metadata-v1"
-PROVIDER_INVENTORY_METHOD = "azure-provider-resource-inventory-v1"
+PROVIDER_TYPE_INVENTORY_METHOD = "azure-provider-resource-type-inventory-v1"
 REGION = "southcentralus"
 METHOD_PLACEHOLDER: Final = re.compile(r"\{[A-Za-z][A-Za-z0-9]*\}")
 
@@ -347,7 +347,7 @@ def _exact_child_metadata_fallback(
 
     raw = _run_json_method(
         adapter,
-        PROVIDER_INVENTORY_METHOD,
+        PROVIDER_TYPE_INVENTORY_METHOD,
         raw_subscription_id=raw_subscription_id,
         bindings={"providerNamespace": namespace},
     )
@@ -359,22 +359,52 @@ def _exact_child_metadata_fallback(
     if not isinstance(registration_state, str) or not isinstance(resource_types, list):
         raise ManagedBindingExecutionError("provider-metadata-malformed")
 
-    normalized_rows: list[tuple[str, dict[str, JsonValue]]] = []
-    for raw_row in resource_types:
-        row = _as_object(raw_row, "provider-metadata-malformed")
-        if set(row) != {"apiVersions", "locations", "resourceType"}:
+    normalized_rows: list[tuple[str, str]] = []
+    for raw_resource_type in resource_types:
+        if not isinstance(raw_resource_type, str):
             raise ManagedBindingExecutionError("provider-metadata-malformed")
-        normalized = _normalized_provider_resource_type(namespace, row["resourceType"])
-        normalized_rows.append((normalized, row))
+        normalized = _normalized_provider_resource_type(namespace, raw_resource_type)
+        normalized_rows.append((normalized, raw_resource_type))
+
+    def exact_metadata(
+        raw_resource_type: str, expected_normalized: str
+    ) -> dict[str, JsonValue]:
+        value = _as_object(
+            _run_json_method(
+                adapter,
+                PROVIDER_METHOD,
+                raw_subscription_id=raw_subscription_id,
+                bindings={
+                    "providerNamespace": namespace,
+                    "resourceType": raw_resource_type,
+                },
+            ),
+            "provider-metadata-malformed",
+        )
+        if set(value) != {
+            "apiVersions",
+            "locations",
+            "registrationState",
+            "resourceType",
+        }:
+            raise ManagedBindingExecutionError("provider-metadata-malformed")
+        if value["registrationState"] != registration_state:
+            raise ManagedBindingExecutionError("provider-metadata-malformed")
+        if (
+            _normalized_provider_resource_type(namespace, value["resourceType"])
+            != expected_normalized
+        ):
+            raise ManagedBindingExecutionError("provider-metadata-malformed")
+        return value
 
     child_name = expected_resource_type.casefold()
     child_rows = [
-        row for normalized, row in normalized_rows if normalized == child_name
+        raw for normalized, raw in normalized_rows if normalized == child_name
     ]
     if len(child_rows) > 1:
         raise ManagedBindingExecutionError("provider-metadata-malformed")
     if child_rows:
-        child = child_rows[0]
+        child = exact_metadata(child_rows[0], child_name)
         return (
             {
                 "registrationState": registration_state,
@@ -387,13 +417,13 @@ def _exact_child_metadata_fallback(
 
     parent_name = parent_resource_type.casefold()
     parent_rows = [
-        row for normalized, row in normalized_rows if normalized == parent_name
+        raw for normalized, raw in normalized_rows if normalized == parent_name
     ]
     if len(parent_rows) > 1:
         raise ManagedBindingExecutionError("provider-metadata-malformed")
     if not parent_rows:
         return None, False
-    parent = parent_rows[0]
+    parent = exact_metadata(parent_rows[0], parent_name)
     return (
         {
             "registrationState": registration_state,
