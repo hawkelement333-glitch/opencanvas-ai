@@ -83,6 +83,21 @@
       ],
       "controlPlaneOnly": true
     },
+    "azure-provider-resource-inventory-v1": {
+      "executable": "az",
+      "argumentVector": [
+        "provider",
+        "show",
+        "--namespace",
+        "{providerNamespace}",
+        "--query",
+        "{registrationState:registrationState,resourceTypes:resourceTypes[].{resourceType:resourceType,apiVersions:apiVersions,locations:locations}}",
+        "--output",
+        "json",
+        "--only-show-errors"
+      ],
+      "controlPlaneOnly": true
+    },
     "azure-network-usage-v1": {
       "executable": "az",
       "argumentVector": [
@@ -439,7 +454,10 @@
       "package": 1,
       "definitionStatus": "defined",
       "proofStatus": "unproved",
-      "methodDefinitions": ["azure-provider-resource-metadata-v1"],
+      "methodDefinitions": [
+        "azure-provider-resource-metadata-v1",
+        "azure-provider-resource-inventory-v1"
+      ],
       "parserDefinition": "strict-provider-metadata-v1",
       "sanitizedInputs": ["closed-provider-resource-api-version-registry"],
       "expectedScopes": ["matched-subscription-control-plane"],
@@ -452,13 +470,15 @@
       "evidenceProjection": [
         "required-provider-count",
         "registered-provider-count",
-        "pinned-api-version-count"
+        "pinned-api-version-count",
+        "parent-fallback-count"
       ],
       "idempotency": "read-only-repeatable",
       "cleanupOperation": "none-read-only",
       "prohibitedFallbacks": [
         "provider-registration",
-        "preview-api-substitution"
+        "preview-api-substitution",
+        "general-child-parent-inheritance"
       ]
     },
     {
@@ -963,5 +983,5 @@
       "replayDecision": "deny"
     }
   ],
-  "contractIntegritySha256": "96b938bc89d2b6db26cc49e323e5dc190aa229ad7fdbdf3bfc1cdd2ed01704b3"
+  "contractIntegritySha256": "9459ccb3debc6330eae65a0dab608be9bd0b9f0b4736b7ebb20f4da3c51b1558"
 }

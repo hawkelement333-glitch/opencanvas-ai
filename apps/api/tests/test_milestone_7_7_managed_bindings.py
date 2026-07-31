@@ -8,9 +8,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
 from performance.milestone_7_7.framework import ContractError, JsonValue, canonical_bytes
 from preflight.milestone_7_7 import framework as topology_framework
+from preflight.milestone_7_7 import managed_binding_execution
 from preflight.milestone_7_7.execution import _ProcessCapture
 from preflight.milestone_7_7.framework import (
     EXPECTED_ACCOUNT_COMMAND,
@@ -35,6 +35,7 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     validate_operation_overlay,
 )
 from preflight.milestone_7_7.managed_binding_execution import (
+    ManagedBindingExecutionError,
     dry_run,
     execute_package_one,
 )
@@ -224,6 +225,253 @@ class ManagedBindingFakeAdapter:
             read_failed=False,
             stdout=bytearray(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()),
         )
+
+
+def _automation_metadata_row(
+    resource_type: str,
+    *,
+    api_versions: tuple[str, ...] = ("2024-10-23",),
+    locations: tuple[str, ...] = ("South Central US",),
+) -> dict[str, JsonValue]:
+    return {
+        "resourceType": resource_type,
+        "apiVersions": list(api_versions),
+        "locations": list(locations),
+    }
+
+
+class AutomationChildMetadataAdapter:
+    def __init__(
+        self,
+        *,
+        registration_state: str = "Registered",
+        direct_child: dict[str, JsonValue] | None = None,
+        inventory_rows: list[dict[str, JsonValue]] | None = None,
+    ) -> None:
+        self.registration_state = registration_state
+        self.direct_child = direct_child
+        self.inventory_rows = list(inventory_rows or [])
+        self.calls: list[tuple[str, ...]] = []
+
+    def run(
+        self,
+        argv: tuple[str, ...],
+        *,
+        environment: Mapping[str, str],
+        timeout_seconds: float,
+        maximum_output_bytes: int,
+    ) -> _ProcessCapture:
+        del environment, timeout_seconds, maximum_output_bytes
+        self.calls.append(argv)
+        assert argv[1:3] == ("provider", "show")
+        query = argv[argv.index("--query") + 1]
+        if "resourceTypes:resourceTypes[]" in query:
+            payload: JsonValue = {
+                "registrationState": self.registration_state,
+                "resourceTypes": self.inventory_rows,
+            }
+        else:
+            match = re.search(r"resourceType=='([^']+)'", query)
+            assert match is not None
+            resource_type = match.group(1)
+            row = self.direct_child if resource_type == "automationAccounts/jobSchedules" else None
+            payload = {
+                "registrationState": self.registration_state,
+                "resourceType": None if row is None else row["resourceType"],
+                "apiVersions": None if row is None else row["apiVersions"],
+                "locations": None if row is None else row["locations"],
+            }
+        return _ProcessCapture(
+            exit_code=0,
+            timed_out=False,
+            oversized=False,
+            read_failed=False,
+            stdout=bytearray(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()),
+        )
+
+
+def _run_automation_child_check(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter: AutomationChildMetadataAdapter,
+    *,
+    provider_key: str = "Microsoft.Automation/automationAccounts/jobSchedules",
+) -> tuple[str, str, dict[str, JsonValue]]:
+    monkeypatch.setattr(
+        managed_binding_execution,
+        "_provider_keys",
+        lambda operation_id: (provider_key,),
+    )
+    return managed_binding_execution._provider_checks(
+        "provider-registration-api-versions",
+        adapter=adapter,
+        raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
+        require_registration=True,
+        require_region=True,
+    )
+
+
+def test_exact_automation_job_schedules_parent_fallback_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = AutomationChildMetadataAdapter(
+        inventory_rows=[_automation_metadata_row("automationAccounts")]
+    )
+
+    status, explanation, fields = _run_automation_child_check(monkeypatch, adapter)
+
+    assert (status, explanation) == ("proved", "provider-prerequisites-proved")
+    assert fields["parent-fallback-count"] == 1
+    assert fields["pinned-api-version-count"] == 1
+    assert fields["approved-region-count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("registration_state", "rows", "explanation"),
+    [
+        (
+            "NotRegistered",
+            [_automation_metadata_row("automationAccounts")],
+            "required-provider-not-registered",
+        ),
+        ("Registered", [], "required-resource-type-unavailable"),
+        (
+            "Registered",
+            [_automation_metadata_row("automationAccounts", api_versions=("2023-11-01",))],
+            "pinned-api-version-unavailable",
+        ),
+        (
+            "Registered",
+            [_automation_metadata_row("automationAccounts", locations=("West US",))],
+            "approved-region-unavailable",
+        ),
+    ],
+)
+def test_automation_job_schedules_fallback_prerequisites_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    registration_state: str,
+    rows: list[dict[str, JsonValue]],
+    explanation: str,
+) -> None:
+    result = _run_automation_child_check(
+        monkeypatch,
+        AutomationChildMetadataAdapter(
+            registration_state=registration_state,
+            inventory_rows=rows,
+        ),
+    )
+
+    assert result[0] == "blocked"
+    assert result[1] == explanation
+
+
+def test_automation_fallback_rejects_every_other_child_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _run_automation_child_check(
+        monkeypatch,
+        AutomationChildMetadataAdapter(
+            inventory_rows=[_automation_metadata_row("automationAccounts")]
+        ),
+        provider_key="Microsoft.Automation/automationAccounts/schedules",
+    )
+
+    assert result[0:2] == ("blocked", "required-resource-type-unavailable")
+
+
+def test_automation_fallback_rejects_another_api_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = managed_binding_execution._provider_binding
+
+    def altered_binding(key: str) -> tuple[str, str, str]:
+        namespace, resource_type, version = original(key)
+        if key == "Microsoft.Automation/automationAccounts/jobSchedules":
+            version = "2023-11-01"
+        return namespace, resource_type, version
+
+    monkeypatch.setattr(managed_binding_execution, "_provider_binding", altered_binding)
+    result = _run_automation_child_check(
+        monkeypatch,
+        AutomationChildMetadataAdapter(
+            inventory_rows=[_automation_metadata_row("automationAccounts")]
+        ),
+    )
+
+    assert result[0:2] == ("blocked", "required-resource-type-unavailable")
+
+
+def test_automation_fallback_rejects_malformed_or_nearby_metadata_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(ManagedBindingExecutionError, match="provider-metadata-malformed"):
+        _run_automation_child_check(
+            monkeypatch,
+            AutomationChildMetadataAdapter(
+                inventory_rows=[
+                    _automation_metadata_row("automationAccounts//jobSchedules"),
+                    _automation_metadata_row("automationAccounts"),
+                ]
+            ),
+        )
+
+
+def test_automation_fallback_rejects_missing_committed_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = managed_binding_execution._provider_binding
+
+    def missing_binding(key: str) -> tuple[str, str, str]:
+        if key == "Microsoft.Automation/automationAccounts/jobSchedules":
+            raise ManagedBindingExecutionError("provider-api-binding-missing")
+        return original(key)
+
+    monkeypatch.setattr(managed_binding_execution, "_provider_binding", missing_binding)
+    with pytest.raises(ManagedBindingExecutionError, match="provider-api-binding-missing"):
+        _run_automation_child_check(
+            monkeypatch,
+            AutomationChildMetadataAdapter(
+                inventory_rows=[_automation_metadata_row("automationAccounts")]
+            ),
+        )
+
+
+def test_explicit_automation_child_metadata_overrides_parent_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    explicit_child = _automation_metadata_row(
+        "automationAccounts/jobSchedules",
+        api_versions=("2023-11-01",),
+    )
+    result = _run_automation_child_check(
+        monkeypatch,
+        AutomationChildMetadataAdapter(
+            direct_child=explicit_child,
+            inventory_rows=[
+                explicit_child,
+                _automation_metadata_row("automationAccounts"),
+            ],
+        ),
+    )
+
+    assert result[0:2] == ("blocked", "pinned-api-version-unavailable")
+    assert result[2]["parent-fallback-count"] == 0
+
+
+def test_normalized_explicit_child_metadata_is_validated_without_parent_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _run_automation_child_check(
+        monkeypatch,
+        AutomationChildMetadataAdapter(
+            inventory_rows=[
+                _automation_metadata_row("MICROSOFT.AUTOMATION/AUTOMATIONACCOUNTS/JOBSCHEDULES"),
+                _automation_metadata_row("automationAccounts"),
+            ]
+        ),
+    )
+
+    assert result[0:2] == ("proved", "provider-prerequisites-proved")
+    assert result[2]["parent-fallback-count"] == 0
 
 
 def test_closed_package_blocks_on_unregistered_required_provider(
