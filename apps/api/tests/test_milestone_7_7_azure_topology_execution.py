@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import inspect
 import io
 import json
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from performance.milestone_7_7.framework import ContractError, canonical_bytes
 from preflight.milestone_7_7 import execution as preflight_execution
 from preflight.milestone_7_7 import framework as topology_framework
@@ -20,6 +22,7 @@ from preflight.milestone_7_7.execution import (
     _execute_with_adapter,
     _PopenProcessAdapter,
     _ProcessCapture,
+    _resolve_authorized_process_launch,
     dry_run_execution_path,
 )
 from preflight.milestone_7_7.framework import (
@@ -252,9 +255,201 @@ def test_one_attempt_is_enforced() -> None:
     assert len(adapter.calls) == 1
 
 
-def test_real_adapter_timeout_path_terminates_a_controlled_fake_process(
+def _approved_windows_wrapper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path]:
+    installation_root = tmp_path / "synthetic-cli"
+    wrapper_directory = installation_root / "wbin"
+    wrapper_directory.mkdir(parents=True)
+    wrapper = wrapper_directory / "az.cmd"
+    wrapper_payload = b"synthetic fixed Azure command wrapper"
+    wrapper.write_bytes(wrapper_payload)
+    native_runtime = installation_root / "python.exe"
+    native_runtime.write_bytes(b"synthetic native runtime")
+    monkeypatch.setattr(preflight_execution, "PROCESS_PLATFORM", "nt")
+    monkeypatch.setattr(
+        preflight_execution.shutil,
+        "which",
+        lambda executable: str(wrapper) if executable == "az" else None,
+    )
+    monkeypatch.setattr(
+        preflight_execution,
+        "APPROVED_WINDOWS_AZURE_CMD_SHA256",
+        frozenset({hashlib.sha256(wrapper_payload).hexdigest()}),
+    )
+    return wrapper, native_runtime
+
+
+def test_approved_windows_wrapper_resolves_to_adjacent_native_runtime(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    wrapper, native_runtime = _approved_windows_wrapper(tmp_path, monkeypatch)
+    launch = _resolve_authorized_process_launch(EXPECTED_ACCOUNT_COMMAND)
+    assert launch.argv == (
+        str(native_runtime.resolve()),
+        "-IBm",
+        "azure.cli",
+        *EXPECTED_ACCOUNT_COMMAND[1:],
+    )
+    assert launch.azure_installer_msi is True
+    assert str(wrapper.resolve()) not in launch.argv
+    assert "cmd.exe" not in launch.argv
+
+
+def test_approved_windows_wrapper_launch_keeps_shell_disabled_and_fixed_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, native_runtime = _approved_windows_wrapper(tmp_path, monkeypatch)
+    popen_call: dict[str, object] = {}
+
+    class CompletedPopen:
+        def __init__(self) -> None:
+            self.stdout = io.BytesIO(b"false\n")
+            self.stderr = io.BytesIO()
+            self.pid = 123
+
+        @staticmethod
+        def poll() -> int:
+            return 0
+
+        @staticmethod
+        def wait(timeout: float | None = None) -> int:
+            return 0
+
+    def fake_popen(
+        argv: tuple[str, ...],
+        **kwargs: object,
+    ) -> CompletedPopen:
+        popen_call["argv"] = argv
+        popen_call.update(kwargs)
+        return CompletedPopen()
+
+    monkeypatch.setattr(preflight_execution.subprocess, "Popen", fake_popen)
+    capture = _PopenProcessAdapter().run(
+        EXPECTED_ACCOUNT_COMMAND,
+        environment=AZURE_ENVIRONMENT,
+        timeout_seconds=OPERATION_TIMEOUT_SECONDS,
+        maximum_output_bytes=ACCOUNT_OUTPUT_LIMIT_BYTES,
+    )
+    assert popen_call["argv"] == (
+        str(native_runtime.resolve()),
+        "-IBm",
+        "azure.cli",
+        *EXPECTED_ACCOUNT_COMMAND[1:],
+    )
+    assert popen_call["shell"] is False
+    assert popen_call["stdin"] is preflight_execution.subprocess.DEVNULL
+    assert popen_call["cwd"] == preflight_execution.ROOT
+    assert isinstance(popen_call["env"], dict)
+    assert popen_call["env"]["AZ_INSTALLER"] == "MSI"
+    assert capture.exit_code == 0
+
+
+def test_native_windows_azure_executable_is_accepted_without_wrapper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    native_azure = tmp_path / "az.exe"
+    native_azure.write_bytes(b"synthetic native Azure executable")
+    monkeypatch.setattr(preflight_execution, "PROCESS_PLATFORM", "nt")
+    monkeypatch.setattr(
+        preflight_execution.shutil,
+        "which",
+        lambda executable: str(native_azure) if executable == "az" else None,
+    )
+    launch = _resolve_authorized_process_launch(EXPECTED_ACCOUNT_COMMAND)
+    assert launch.argv == (str(native_azure.resolve()), *EXPECTED_ACCOUNT_COMMAND[1:])
+    assert launch.azure_installer_msi is False
+
+
+def test_missing_azure_executable_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(preflight_execution.shutil, "which", lambda _: None)
+    with pytest.raises(
+        PreflightExecutionError,
+        match="azure-executable-not-found",
+    ):
+        _resolve_authorized_process_launch(EXPECTED_ACCOUNT_COMMAND)
+
+
+def test_altered_or_unapproved_windows_launcher_is_rejected_without_private_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wrapper, _ = _approved_windows_wrapper(tmp_path / "private-location", monkeypatch)
+    wrapper.write_bytes(b"altered wrapper")
+    with pytest.raises(
+        PreflightExecutionError,
+        match="azure-launcher-not-approved",
+    ) as raised:
+        _resolve_authorized_process_launch(EXPECTED_ACCOUNT_COMMAND)
+    rendered = repr(raised.value) + str(raised.value)
+    assert "private-location" not in rendered
+    assert str(wrapper) not in rendered
+
+
+def test_windows_batch_launcher_is_never_approved(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launcher = tmp_path / "az.bat"
+    launcher.write_bytes(b"synthetic batch launcher")
+    monkeypatch.setattr(preflight_execution, "PROCESS_PLATFORM", "nt")
+    monkeypatch.setattr(preflight_execution.shutil, "which", lambda _: str(launcher))
+    with pytest.raises(
+        PreflightExecutionError,
+        match="azure-launcher-not-approved",
+    ):
+        _resolve_authorized_process_launch(EXPECTED_ACCOUNT_COMMAND)
+
+
+@pytest.mark.parametrize(
+    "start_error",
+    [
+        PermissionError("private local path"),
+        OSError("private operating-system detail"),
+        ValueError("private process configuration detail"),
+    ],
+)
+def test_process_start_failures_remain_sanitized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    start_error: BaseException,
+) -> None:
+    native_azure = tmp_path / "az.exe"
+    native_azure.write_bytes(b"synthetic native Azure executable")
+    monkeypatch.setattr(preflight_execution, "PROCESS_PLATFORM", "nt")
+    monkeypatch.setattr(preflight_execution.shutil, "which", lambda _: str(native_azure))
+    monkeypatch.setattr(
+        preflight_execution.subprocess,
+        "Popen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(start_error),
+    )
+    with pytest.raises(
+        PreflightExecutionError,
+        match="process-start-failed",
+    ) as raised:
+        _PopenProcessAdapter().run(
+            EXPECTED_ACCOUNT_COMMAND,
+            environment=AZURE_ENVIRONMENT,
+            timeout_seconds=OPERATION_TIMEOUT_SECONDS,
+            maximum_output_bytes=ACCOUNT_OUTPUT_LIMIT_BYTES,
+        )
+    rendered = repr(raised.value) + str(raised.value)
+    assert "private" not in rendered
+    assert str(native_azure) not in rendered
+
+
+def test_real_adapter_timeout_path_terminates_a_controlled_fake_process(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _approved_windows_wrapper(tmp_path, monkeypatch)
+
     class FakePopen:
         def __init__(self) -> None:
             self.stdout = io.BytesIO()

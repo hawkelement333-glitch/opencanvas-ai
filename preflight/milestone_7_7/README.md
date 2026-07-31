@@ -49,6 +49,14 @@ limited to 4,096 combined stdout/stderr bytes; each group result is limited to
 closed process-local Azure CLI telemetry and dynamic-extension settings,
 in-memory output, no interactive input, and sanitized error codes.
 
+On Windows, the adapter still keeps `shell=False`. It accepts only native
+`az.exe` or the checksum-approved Microsoft MSI `az.cmd` wrapper. For the
+approved wrapper, it rejects the command shell and invokes only the wrapper's
+adjacent native `python.exe` with fixed `-IBm azure.cli` arguments followed by
+the already approved Azure argument vector. An absent, altered, differently
+named, oversized, or differently located launcher fails closed without
+retaining its path.
+
 The account parser requires exactly one JSON object with the committed fields,
 an enabled default `AzureCloud` user context, and both approved fingerprints.
 It drops the tenant identifier after fingerprinting and keeps the subscription
@@ -77,6 +85,12 @@ python -m preflight.milestone_7_7.execution --execute-authorized-preflight
 
 The local hardening pass executed no Azure command. Checkpoint 6 remains
 blocked pending that separate authorization and execution.
+
+The first separately authorized invocation failed before Azure CLI started
+because the Windows installation exposed only `az.cmd`, while the original
+shell-disabled adapter attempted to start bare `az` as a native executable.
+The targeted local repair above was validated without retrying Azure. It does
+not authorize another execution.
 
 The separately authorized preflight later proved only
 `current-account-context`. Its sanitized result is:

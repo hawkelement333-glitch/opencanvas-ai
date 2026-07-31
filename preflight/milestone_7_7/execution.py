@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -43,6 +45,12 @@ from preflight.milestone_7_7.framework import (
 ROOT: Final = Path(__file__).resolve().parent
 EVIDENCE_DIRECTORY: Final = ROOT / "evidence"
 AZURE_EXECUTABLE: Final = "az"
+PROCESS_PLATFORM: Final = os.name
+APPROVED_WINDOWS_AZURE_CMD_SHA256: Final = frozenset(
+    {"f24c501b242614afa989acf22719c816be87e7ac1ff8ff84c5fa200751f30fe2"}
+)
+WINDOWS_AZURE_MODULE_ARGUMENTS: Final = ("-IBm", "azure.cli")
+WINDOWS_WRAPPER_MAXIMUM_BYTES: Final = 4_096
 AZURE_ENVIRONMENT: Final = {
     "AZURE_CORE_COLLECT_TELEMETRY": "0",
     "AZURE_CORE_NO_COLOR": "true",
@@ -77,6 +85,12 @@ class _ProcessCapture:
         self.stderr.clear()
 
 
+@dataclass(frozen=True, slots=True)
+class _ResolvedProcessLaunch:
+    argv: tuple[str, ...] = field(repr=False)
+    azure_installer_msi: bool
+
+
 class _ProcessAdapter(Protocol):
     def run(
         self,
@@ -86,6 +100,72 @@ class _ProcessAdapter(Protocol):
         timeout_seconds: float,
         maximum_output_bytes: int,
     ) -> _ProcessCapture: ...
+
+
+def _resolve_authorized_process_launch(
+    argv: tuple[str, ...],
+) -> _ResolvedProcessLaunch:
+    if not argv or argv[0] != AZURE_EXECUTABLE:
+        raise PreflightExecutionError("executable-not-authorized")
+    located = shutil.which(AZURE_EXECUTABLE)
+    if located is None:
+        raise PreflightExecutionError("azure-executable-not-found")
+    candidate = Path(located)
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError:
+        raise PreflightExecutionError("azure-launcher-resolution-failed") from None
+    if not resolved.is_file():
+        raise PreflightExecutionError("azure-launcher-not-approved")
+
+    if PROCESS_PLATFORM != "nt":
+        if candidate.name != AZURE_EXECUTABLE or not os.access(resolved, os.X_OK):
+            raise PreflightExecutionError("azure-launcher-not-approved")
+        return _ResolvedProcessLaunch(
+            argv=(str(resolved), *argv[1:]),
+            azure_installer_msi=False,
+        )
+
+    candidate_name = candidate.name.casefold()
+    candidate_suffix = candidate.suffix.casefold()
+    if candidate_name == "az.exe" and candidate_suffix == ".exe":
+        return _ResolvedProcessLaunch(
+            argv=(str(resolved), *argv[1:]),
+            azure_installer_msi=False,
+        )
+    if candidate_name != "az.cmd" or candidate_suffix != ".cmd":
+        raise PreflightExecutionError("azure-launcher-not-approved")
+
+    try:
+        wrapper_size = resolved.stat().st_size
+        if wrapper_size <= 0 or wrapper_size > WINDOWS_WRAPPER_MAXIMUM_BYTES:
+            raise PreflightExecutionError("azure-launcher-not-approved")
+        wrapper_sha256 = hashlib.sha256(resolved.read_bytes()).hexdigest()
+    except OSError:
+        raise PreflightExecutionError("azure-launcher-resolution-failed") from None
+    if wrapper_sha256 not in APPROVED_WINDOWS_AZURE_CMD_SHA256:
+        raise PreflightExecutionError("azure-launcher-not-approved")
+
+    try:
+        installation_root = resolved.parent.parent.resolve(strict=True)
+        native_runtime = (installation_root / "python.exe").resolve(strict=True)
+    except OSError:
+        raise PreflightExecutionError("azure-native-runtime-not-found") from None
+    if (
+        native_runtime.name.casefold() != "python.exe"
+        or native_runtime.suffix.casefold() != ".exe"
+        or native_runtime.parent != installation_root
+        or not native_runtime.is_file()
+    ):
+        raise PreflightExecutionError("azure-native-runtime-not-found")
+    return _ResolvedProcessLaunch(
+        argv=(
+            str(native_runtime),
+            *WINDOWS_AZURE_MODULE_ARGUMENTS,
+            *argv[1:],
+        ),
+        azure_installer_msi=True,
+    )
 
 
 def _terminate_process(process: subprocess.Popen[bytes]) -> None:
@@ -133,15 +213,19 @@ class _PopenProcessAdapter:
         }:
             raise PreflightExecutionError("operation-output-bound-mismatch")
 
+        launch = _resolve_authorized_process_launch(argv)
+        process_environment = dict(environment)
+        if launch.azure_installer_msi:
+            process_environment["AZ_INSTALLER"] = "MSI"
         creation_flags = 0
         start_new_session = os.name != "nt"
         if os.name == "nt":
             creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
         try:
             process = subprocess.Popen(
-                argv,
+                launch.argv,
                 cwd=ROOT,
-                env=dict(environment),
+                env=process_environment,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -355,9 +439,7 @@ class _BoundedAzureRunner:
             try:
                 stdout = bytes(capture.stdout).decode("utf-8", errors="strict")
             except UnicodeError:
-                raise PreflightExecutionError(
-                    "resource-group-output-malformed"
-                ) from None
+                raise PreflightExecutionError("resource-group-output-malformed") from None
             observation = sanitized_resource_group_observation(
                 operation_id=operation_id,
                 stdout=stdout,
@@ -460,9 +542,7 @@ def dry_run_execution_path() -> dict[str, JsonValue]:
         if not isinstance(value, dict):
             raise ContractError("operation inventory is malformed")
         operations.append(value)
-    defined = tuple(
-        row["id"] for row in operations if row.get("definitionStatus") == "defined"
-    )
+    defined = tuple(row["id"] for row in operations if row.get("definitionStatus") == "defined")
     if defined != DEFINED_OPERATION_IDS:
         raise ContractError("defined operation order differs")
     account_command = operations[0].get("commandTemplate")
@@ -475,9 +555,7 @@ def dry_run_execution_path() -> dict[str, JsonValue]:
     operation_by_id = {str(row["id"]): row for row in operations}
     for operation_id in RESOURCE_GROUP_OPERATION_IDS:
         command = operation_by_id[operation_id].get("commandTemplate")
-        if not isinstance(command, list) or not all(
-            isinstance(value, str) for value in command
-        ):
+        if not isinstance(command, list) or not all(isinstance(value, str) for value in command):
             raise ContractError(f"{operation_id}: command is malformed")
         if tuple(cast(list[str], command)) != EXPECTED_RESOURCE_GROUP_COMMAND:
             raise ContractError(f"{operation_id}: command differs")

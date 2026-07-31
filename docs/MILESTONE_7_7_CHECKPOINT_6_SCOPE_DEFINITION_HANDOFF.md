@@ -249,6 +249,45 @@ historical evidence, application, worker, frontend, provider, migration,
 dependency, lock, Bicep, or infrastructure state. Execution remains subject
 to separate authorization.
 
+## Local process-start diagnosis and repair
+
+The first execution authorized against the revised inventory returned exactly:
+
+`{"errorCode":"process-start-failed","evidenceWritten":false,"provisioningAuthorized":false,"status":"failed"}`
+
+The runner invocation occurred once. Its child process did not start, neither
+resource-group operation ran, no raw Azure output or identifier was obtained,
+no evidence was written, and no retry occurred.
+
+Sanitized local diagnosis then proved:
+
+- harmless child-process creation succeeds with the adapter's Windows process
+  flags and standard-stream configuration;
+- `az` is present but resolves to a `.cmd` command wrapper;
+- the installation exposes no `az.exe`;
+- the wrapper matches the approved Microsoft MSI Azure CLI module-launch
+  pattern and has checksum
+  `f24c501b242614afa989acf22719c816be87e7ac1ff8ff84c5fa200751f30fe2`;
+- its adjacent native `python.exe` exists; and
+- the committed adapter attempted to pass bare `az` directly to Windows
+  process creation with `shell=False`.
+
+The cause was therefore a repository Windows-launcher defect, not a general
+child-process, creation-flag, or permission failure. The repair keeps
+`shell=False`, validates a closed launcher name, type, size, checksum, and
+layout, rejects `.bat` and altered wrappers, and invokes only the adjacent
+native runtime with fixed `-IBm azure.cli` arguments. The committed Azure
+arguments and operation order, one-attempt rule, time and output limits,
+non-interactive input, sanitized errors, and default-deny inventory are
+unchanged.
+
+The repair used only synthetic launchers, fake process adapters, and the
+network-incapable dry run. The focused execution suite passed 51 tests. The
+complete Checkpoint 1–6 suite passed 560 tests with one existing skip. Ruff
+and strict mypy passed for the affected production path. Azure CLI was never
+started during diagnosis, repair, or validation, and the preflight was not
+retried. A new execution requires separate authorization.
+
 ## Local boundary
 
 The scope-definition continuation changes only the isolated preflight
@@ -259,6 +298,7 @@ configuration, Bicep topology, or infrastructure resource.
 
 Checkpoint 6 now has a valid sanitized preflight result classified
 `complete-with-provisioning-blocked` only as historical evidence for the
-earlier inventory. The revised inventory has not been executed. Provisioning
-remains blocked, Milestone 7.7 remains in progress, and Checkpoint 7 and
-Milestone 7.8 remain unstarted.
+earlier inventory. The revised inventory has not completed execution.
+Checkpoint 6 remains incomplete pending a separately authorized retry.
+Provisioning remains blocked, Milestone 7.7 remains in progress, and
+Checkpoint 7 and Milestone 7.8 remain unstarted.

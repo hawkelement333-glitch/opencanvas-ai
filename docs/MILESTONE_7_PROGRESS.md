@@ -560,6 +560,16 @@ atomic no-overwrite write. The dry run and focused tests use no Azure
 executable. This hardening pass ran no Azure command and produced no new Azure
 evidence.
 
+The first separately authorized execution against the revised inventory
+failed before Azure CLI started because the Windows installation exposed only
+the approved Microsoft MSI `az.cmd` wrapper while the shell-disabled adapter
+attempted to start bare `az` as a native executable. Local diagnosis proved
+general child-process creation healthy and established this as a repository
+launcher defect. The targeted repair validates the exact wrapper checksum and
+layout, bypasses the command shell, and invokes its adjacent native runtime
+with fixed Azure CLI module arguments. No Azure retry occurred. Checkpoint 6
+remains incomplete and another execution requires separate authorization.
+
 Milestone 7.7 remains in progress. The other 15 operation slots and all ten
 infrastructure gates remain blocked; all five runtime gates remain unproved.
 Provisioning remains blocked. Checkpoint 7 and Milestone 7.8 remain unstarted
