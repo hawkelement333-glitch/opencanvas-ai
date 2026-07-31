@@ -1,0 +1,967 @@
+{
+  "schemaVersion": "2020-12",
+  "contractVersion": "mobius.milestone-7.7.managed-binding-operation-overlay.v1",
+  "canonicalizationVersion": "mobius.milestone-7.7.canonical-json.v1",
+  "integrityDomain": "solarplexus-mobius/milestone-7.7/managed-binding-operation-overlay/v1",
+  "authorizationSourceHead": "11564669bd5b40a88fdbf434c8137b063305eb4b",
+  "historicalMatrixIntegritySha256": "100293931dcc71bb069e4f6fe06228360e0953b3b756544a555941d81bf8d6bc",
+  "managedBindingIntegritySha256": "5b8ad9927706740d86a617a1d5d24d2f021e445a0abb3b11eb87fad78b59fbd2",
+  "defaultAuthority": {
+    "executionAuthorized": false,
+    "mutationAuthorized": false,
+    "provisioningAuthorized": false,
+    "secretAccessAuthorized": false
+  },
+  "operationDefaultsApplyToEveryEntry": true,
+  "executionPolicy": {
+    "maximumAttempts": 1,
+    "maximumTimeoutSeconds": 30,
+    "maximumOutputBytes": 65536,
+    "retryCount": 0,
+    "rawOutputRetentionAllowed": false,
+    "unknownResultDecision": "deny",
+    "scopeMismatchDecision": "deny",
+    "missingAuthorityDecision": "deny",
+    "expiredAuthorityDecision": "deny",
+    "replayDecision": "deny",
+    "prohibitedFallbacks": [
+      "account-switch",
+      "az-rest",
+      "data-plane-request",
+      "direct-shell-command",
+      "dynamic-extension-install",
+      "raw-output-persistence",
+      "scope-discovery-fallback"
+    ]
+  },
+  "operationExecutor": {
+    "executable": "{python}",
+    "argumentVector": [
+      "-B",
+      "-m",
+      "preflight.milestone_7_7.managed_binding_execution",
+      "--execute-operation",
+      "{operationId}",
+      "--ledger",
+      "{ledgerPath}",
+      "--receipt-directory",
+      "{receiptDirectory}",
+      "--repository-head",
+      "{repositoryHead}"
+    ],
+    "controlPlaneOnly": false
+  },
+  "packageExecutor": {
+    "executable": "{python}",
+    "argumentVector": [
+      "-B",
+      "-m",
+      "preflight.milestone_7_7.managed_binding_execution",
+      "--execute-package-one",
+      "--ledger",
+      "{ledgerPath}",
+      "--receipt-directory",
+      "{receiptDirectory}",
+      "--repository-head",
+      "{repositoryHead}"
+    ],
+    "controlPlaneOnly": false
+  },
+  "methodDefinitions": {
+    "azure-provider-resource-metadata-v1": {
+      "executable": "az",
+      "argumentVector": [
+        "provider",
+        "show",
+        "--namespace",
+        "{providerNamespace}",
+        "--query",
+        "{registrationState:registrationState,resourceType:resourceTypes[?resourceType=='{resourceType}']|[0].resourceType,apiVersions:resourceTypes[?resourceType=='{resourceType}']|[0].apiVersions,locations:resourceTypes[?resourceType=='{resourceType}']|[0].locations}",
+        "--output",
+        "json",
+        "--only-show-errors"
+      ],
+      "controlPlaneOnly": true
+    },
+    "azure-network-usage-v1": {
+      "executable": "az",
+      "argumentVector": [
+        "network",
+        "list-usages",
+        "--location",
+        "southcentralus",
+        "--query",
+        "[].{name:name.value,current:currentValue,limit:limit}",
+        "--output",
+        "json",
+        "--only-show-errors"
+      ],
+      "controlPlaneOnly": true
+    },
+    "azure-container-app-workload-profiles-v1": {
+      "executable": "az",
+      "argumentVector": [
+        "containerapp",
+        "env",
+        "workload-profile",
+        "list-supported",
+        "--location",
+        "southcentralus",
+        "--query",
+        "[].{name:name,minimumCount:minimumCount,maximumCount:maximumCount}",
+        "--output",
+        "json",
+        "--only-show-errors"
+      ],
+      "controlPlaneOnly": true
+    },
+    "azure-vnet-prefixes-v1": {
+      "executable": "az",
+      "argumentVector": [
+        "network",
+        "vnet",
+        "list",
+        "--query",
+        "[].addressSpace.addressPrefixes[]",
+        "--output",
+        "json",
+        "--only-show-errors"
+      ],
+      "controlPlaneOnly": true
+    },
+    "azure-role-definition-v1": {
+      "executable": "az",
+      "argumentVector": [
+        "role",
+        "definition",
+        "list",
+        "--name",
+        "{roleDefinitionId}",
+        "--query",
+        "[0].{name:name,roleName:roleName,roleType:roleType}",
+        "--output",
+        "json",
+        "--only-show-errors"
+      ],
+      "controlPlaneOnly": true
+    },
+    "azure-key-vault-name-v1": {
+      "executable": "az",
+      "argumentVector": [
+        "keyvault",
+        "check-name",
+        "--name",
+        "kv-mobius77-11564669",
+        "--query",
+        "{available:nameAvailable,reason:reason}",
+        "--output",
+        "json",
+        "--only-show-errors"
+      ],
+      "controlPlaneOnly": true
+    },
+    "azure-acr-name-v1": {
+      "executable": "az",
+      "argumentVector": [
+        "acr",
+        "check-name",
+        "--name",
+        "acrmobius7711564669",
+        "--query",
+        "{available:nameAvailable,reason:reason}",
+        "--output",
+        "json",
+        "--only-show-errors"
+      ],
+      "controlPlaneOnly": true
+    },
+    "repository-managed-provider-binding-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "-m",
+        "preflight.milestone_7_7.managed_binding_execution",
+        "--execute-operation",
+        "{operationId}",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
+    "repository-cost-contract-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "-m",
+        "preflight.milestone_7_7.managed_binding_execution",
+        "--execute-operation",
+        "{operationId}",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
+    "repository-prerequisite-aggregate-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "-m",
+        "preflight.milestone_7_7.managed_binding_execution",
+        "--execute-operation",
+        "{operationId}",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
+    "lifecycle-pre-secret-provisioning-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "infra/milestone_7_7/scripts/managed_binding_lifecycle.py",
+        "--operation",
+        "pre-secret-provisioning",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
+    "lifecycle-private-path-verification-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "infra/milestone_7_7/scripts/managed_binding_lifecycle.py",
+        "--operation",
+        "private-path-verification",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
+    "lifecycle-post-secret-provisioning-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "infra/milestone_7_7/scripts/managed_binding_lifecycle.py",
+        "--operation",
+        "post-secret-provisioning",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
+    "lifecycle-temporary-authority-revocation-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "infra/milestone_7_7/scripts/managed_binding_lifecycle.py",
+        "--operation",
+        "temporary-authority-revocation",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
+    "lifecycle-cleanup-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "infra/milestone_7_7/scripts/managed_binding_lifecycle.py",
+        "--operation",
+        "cleanup",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
+    "lifecycle-zero-residue-verification-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "infra/milestone_7_7/scripts/managed_binding_lifecycle.py",
+        "--operation",
+        "zero-residue-verification",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    }
+  },
+  "parserDefinitions": {
+    "strict-provider-metadata-v1": {
+      "implementation": "parse-provider-metadata",
+      "requiredProjection": [
+        "registration-state",
+        "resource-type-present",
+        "pinned-api-version-present",
+        "approved-region-present"
+      ],
+      "acceptableTerminalStates": ["proved", "blocked"],
+      "malformedDecision": "deny"
+    },
+    "strict-network-capacity-v1": {
+      "implementation": "parse-network-capacity",
+      "requiredProjection": ["dimension-count", "every-current-below-limit"],
+      "acceptableTerminalStates": ["proved", "blocked"],
+      "malformedDecision": "deny"
+    },
+    "strict-vnet-isolation-v1": {
+      "implementation": "parse-vnet-isolation",
+      "requiredProjection": ["prefix-count", "overlap-count"],
+      "acceptableTerminalStates": ["proved", "blocked"],
+      "malformedDecision": "deny"
+    },
+    "strict-role-definition-v1": {
+      "implementation": "parse-role-definition",
+      "requiredProjection": ["role-id-matched", "built-in-role"],
+      "acceptableTerminalStates": ["proved", "blocked"],
+      "malformedDecision": "deny"
+    },
+    "strict-name-availability-v1": {
+      "implementation": "parse-name-availability",
+      "requiredProjection": ["available", "reason-code"],
+      "acceptableTerminalStates": ["proved", "blocked"],
+      "malformedDecision": "deny"
+    },
+    "strict-managed-provider-binding-v1": {
+      "implementation": "parse-managed-provider-binding",
+      "requiredProjection": [
+        "required-binding-count",
+        "defined-binding-count",
+        "canonical-openai-alias-only",
+        "secret-value-accessed"
+      ],
+      "acceptableTerminalStates": ["proved", "blocked"],
+      "malformedDecision": "deny"
+    },
+    "strict-cost-envelope-v1": {
+      "implementation": "parse-cost-envelope",
+      "requiredProjection": [
+        "expected-usd-cents",
+        "maximum-usd-cents",
+        "within-ceilings"
+      ],
+      "acceptableTerminalStates": ["proved", "blocked"],
+      "malformedDecision": "deny"
+    },
+    "strict-prerequisite-aggregate-v1": {
+      "implementation": "parse-prerequisite-aggregate",
+      "requiredProjection": ["required-count", "proved-count", "blocked-count"],
+      "acceptableTerminalStates": ["proved", "blocked"],
+      "malformedDecision": "deny"
+    }
+  },
+  "operationOrder": [
+    "regional-service-availability",
+    "provider-registration-api-versions",
+    "regional-sku-capabilities",
+    "subscription-quota-bounded-usage",
+    "private-endpoint-network-support",
+    "private-dns-prerequisites",
+    "managed-identity-support",
+    "scoped-rbac-prerequisites",
+    "telemetry-diagnostic-prerequisites",
+    "evidence-retention-prerequisites",
+    "scanner-result-bridge-prerequisites",
+    "external-test-provider-prerequisites",
+    "bounded-cost-budget-prerequisites",
+    "provisioning-dependency-blockers",
+    "private-acr-source-prerequisites"
+  ],
+  "operations": [
+    {
+      "id": "regional-service-availability",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": ["azure-provider-resource-metadata-v1"],
+      "parserDefinition": "strict-provider-metadata-v1",
+      "sanitizedInputs": [
+        "southcentralus",
+        "closed-provider-resource-registry"
+      ],
+      "expectedScopes": ["matched-subscription-control-plane"],
+      "authorizationPredicates": [
+        "fresh-matched-account",
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt"
+      ],
+      "preconditions": [
+        "target-and-cleanup-groups-absent",
+        "historical-matrix-integrity-matched"
+      ],
+      "evidenceProjection": [
+        "required-resource-count",
+        "southcentralus-supported-count"
+      ],
+      "idempotency": "read-only-repeatable",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": ["alternate-region", "broad-provider-list"]
+    },
+    {
+      "id": "provider-registration-api-versions",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": ["azure-provider-resource-metadata-v1"],
+      "parserDefinition": "strict-provider-metadata-v1",
+      "sanitizedInputs": ["closed-provider-resource-api-version-registry"],
+      "expectedScopes": ["matched-subscription-control-plane"],
+      "authorizationPredicates": [
+        "fresh-matched-account",
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt"
+      ],
+      "preconditions": ["regional-service-availability-proved"],
+      "evidenceProjection": [
+        "required-provider-count",
+        "registered-provider-count",
+        "pinned-api-version-count"
+      ],
+      "idempotency": "read-only-repeatable",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": [
+        "provider-registration",
+        "preview-api-substitution"
+      ]
+    },
+    {
+      "id": "regional-sku-capabilities",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": [
+        "azure-provider-resource-metadata-v1",
+        "azure-container-app-workload-profiles-v1"
+      ],
+      "parserDefinition": "strict-provider-metadata-v1",
+      "sanitizedInputs": ["southcentralus", "fixed-sku-registry"],
+      "expectedScopes": ["matched-subscription-control-plane"],
+      "authorizationPredicates": [
+        "fresh-matched-account",
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt"
+      ],
+      "preconditions": ["provider-registration-api-versions-proved"],
+      "evidenceProjection": ["fixed-sku-count", "supported-fixed-sku-count"],
+      "idempotency": "read-only-repeatable",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": ["mutable-sku-selection", "alternate-region"]
+    },
+    {
+      "id": "subscription-quota-bounded-usage",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": ["azure-network-usage-v1"],
+      "parserDefinition": "strict-network-capacity-v1",
+      "sanitizedInputs": ["southcentralus", "closed-network-quota-dimensions"],
+      "expectedScopes": ["matched-subscription-control-plane"],
+      "authorizationPredicates": [
+        "fresh-matched-account",
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt"
+      ],
+      "preconditions": ["regional-sku-capabilities-proved"],
+      "evidenceProjection": ["dimension-count", "every-current-below-limit"],
+      "idempotency": "read-only-repeatable",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": ["quota-increase", "unbounded-usage-list"]
+    },
+    {
+      "id": "private-endpoint-network-support",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": [
+        "azure-provider-resource-metadata-v1",
+        "azure-vnet-prefixes-v1"
+      ],
+      "parserDefinition": "strict-vnet-isolation-v1",
+      "sanitizedInputs": [
+        "10.77.0.0/20",
+        "closed-private-endpoint-resource-registry"
+      ],
+      "expectedScopes": ["matched-subscription-control-plane"],
+      "authorizationPredicates": [
+        "fresh-matched-account",
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt"
+      ],
+      "preconditions": ["subscription-quota-bounded-usage-proved"],
+      "evidenceProjection": [
+        "private-endpoint-type-count",
+        "vnet-prefix-count",
+        "overlap-count"
+      ],
+      "idempotency": "read-only-repeatable",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": [
+        "vnet-peering",
+        "overlapping-address-plan",
+        "raw-prefix-retention"
+      ]
+    },
+    {
+      "id": "private-dns-prerequisites",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": ["azure-provider-resource-metadata-v1"],
+      "parserDefinition": "strict-provider-metadata-v1",
+      "sanitizedInputs": [
+        "privatelink.vaultcore.azure.net",
+        "vault",
+        "10.77.5.4"
+      ],
+      "expectedScopes": [
+        "matched-subscription-control-plane",
+        "exact-target-resource-group"
+      ],
+      "authorizationPredicates": [
+        "fresh-matched-account",
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt"
+      ],
+      "preconditions": ["private-endpoint-network-support-proved"],
+      "evidenceProjection": [
+        "private-dns-zone-supported",
+        "resolver-inbound-supported"
+      ],
+      "idempotency": "read-only-repeatable",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": ["public-dns-resolution", "hosts-file"]
+    },
+    {
+      "id": "managed-identity-support",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": ["azure-provider-resource-metadata-v1"],
+      "parserDefinition": "strict-provider-metadata-v1",
+      "sanitizedInputs": ["id-mobius77-api", "ca-mobius77-api"],
+      "expectedScopes": ["exact-target-resource-group"],
+      "authorizationPredicates": [
+        "fresh-matched-account",
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt"
+      ],
+      "preconditions": ["provider-registration-api-versions-proved"],
+      "evidenceProjection": [
+        "user-assigned-identity-supported",
+        "container-app-identity-supported"
+      ],
+      "idempotency": "read-only-repeatable",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": [
+        "service-principal-secret",
+        "system-identity-substitution"
+      ]
+    },
+    {
+      "id": "scoped-rbac-prerequisites",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": ["azure-role-definition-v1"],
+      "parserDefinition": "strict-role-definition-v1",
+      "sanitizedInputs": [
+        "4633458b-17de-408a-b874-0445c86b69e6",
+        "b86a8fe4-44ce-4948-aee5-eccb2c155cd7",
+        "b24988ac-6180-42a0-ab88-20f7382dd24c"
+      ],
+      "expectedScopes": [
+        "exact-key-vault-resource",
+        "exact-target-resource-group"
+      ],
+      "authorizationPredicates": [
+        "fresh-matched-account",
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt"
+      ],
+      "preconditions": ["managed-identity-support-proved"],
+      "evidenceProjection": [
+        "required-role-count",
+        "matched-built-in-role-count"
+      ],
+      "idempotency": "read-only-repeatable",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": ["subscription-wide-role", "owner-role-assignment"]
+    },
+    {
+      "id": "telemetry-diagnostic-prerequisites",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": ["azure-provider-resource-metadata-v1"],
+      "parserDefinition": "strict-provider-metadata-v1",
+      "sanitizedInputs": [
+        "law-mobius77-staging",
+        "closed-diagnostic-resource-registry"
+      ],
+      "expectedScopes": ["exact-target-resource-group"],
+      "authorizationPredicates": [
+        "fresh-matched-account",
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt"
+      ],
+      "preconditions": ["provider-registration-api-versions-proved"],
+      "evidenceProjection": [
+        "workspace-supported",
+        "diagnostic-settings-supported"
+      ],
+      "idempotency": "read-only-repeatable",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": ["public-log-sink", "raw-payload-logging"]
+    },
+    {
+      "id": "evidence-retention-prerequisites",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": ["azure-provider-resource-metadata-v1"],
+      "parserDefinition": "strict-provider-metadata-v1",
+      "sanitizedInputs": [
+        "closed-evidence-retention-policy",
+        "law-mobius77-staging"
+      ],
+      "expectedScopes": ["exact-target-resource-group"],
+      "authorizationPredicates": [
+        "fresh-matched-account",
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt"
+      ],
+      "preconditions": ["telemetry-diagnostic-prerequisites-proved"],
+      "evidenceProjection": [
+        "retention-contract-present",
+        "workspace-retention-supported"
+      ],
+      "idempotency": "local-deterministic",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": [
+        "indefinite-retention",
+        "raw-provider-output-retention"
+      ]
+    },
+    {
+      "id": "scanner-result-bridge-prerequisites",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": ["azure-provider-resource-metadata-v1"],
+      "parserDefinition": "strict-provider-metadata-v1",
+      "sanitizedInputs": [
+        "Microsoft.EventGrid/systemTopics",
+        "Microsoft.Security/defenderForStorageSettings"
+      ],
+      "expectedScopes": ["exact-target-resource-group"],
+      "authorizationPredicates": [
+        "fresh-matched-account",
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt"
+      ],
+      "preconditions": ["provider-registration-api-versions-proved"],
+      "evidenceProjection": [
+        "event-grid-supported",
+        "defender-settings-supported"
+      ],
+      "idempotency": "read-only-repeatable",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": [
+        "cross-resource-group-bridge",
+        "polling-data-plane"
+      ]
+    },
+    {
+      "id": "external-test-provider-prerequisites",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": ["repository-managed-provider-binding-v1"],
+      "parserDefinition": "strict-managed-provider-binding-v1",
+      "sanitizedInputs": [
+        "three-exact-key-vault-secret-names",
+        "three-exact-server-environment-mappings"
+      ],
+      "expectedScopes": ["exact-api-container-app-server-environment"],
+      "authorizationPredicates": [
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt",
+        "secret-value-access-denied"
+      ],
+      "preconditions": [
+        "managed-binding-contract-integrity-matched",
+        "canonical-openai-alias-only"
+      ],
+      "evidenceProjection": [
+        "required-binding-count",
+        "defined-binding-count",
+        "canonical-openai-alias-only",
+        "secret-value-accessed"
+      ],
+      "idempotency": "local-deterministic",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": [
+        "secret-value-read",
+        "alternative-openai-alias",
+        "local-env-file"
+      ]
+    },
+    {
+      "id": "bounded-cost-budget-prerequisites",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": ["repository-cost-contract-v1"],
+      "parserDefinition": "strict-cost-envelope-v1",
+      "sanitizedInputs": [
+        "m7.7-cost-envelope-v1",
+        "minimum-25-percent-contingency"
+      ],
+      "expectedScopes": ["exact-two-resource-groups"],
+      "authorizationPredicates": [
+        "fresh-cost-evidence",
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt"
+      ],
+      "preconditions": [
+        "regional-sku-capabilities-proved",
+        "complete-fixed-resource-manifest"
+      ],
+      "evidenceProjection": [
+        "expected-usd-cents",
+        "maximum-usd-cents",
+        "within-ceilings"
+      ],
+      "idempotency": "local-deterministic",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": [
+        "unpriced-resource",
+        "budget-alert-as-enforcement"
+      ]
+    },
+    {
+      "id": "provisioning-dependency-blockers",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": [
+        "repository-prerequisite-aggregate-v1",
+        "lifecycle-pre-secret-provisioning-v1"
+      ],
+      "parserDefinition": "strict-prerequisite-aggregate-v1",
+      "sanitizedInputs": [
+        "all-prior-operation-evidence",
+        "all-ten-infrastructure-gates"
+      ],
+      "expectedScopes": ["same-ledger-same-account-same-two-resource-groups"],
+      "authorizationPredicates": [
+        "all-prior-receipts-valid",
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt"
+      ],
+      "preconditions": ["all-thirteen-prior-prerequisites-proved"],
+      "evidenceProjection": [
+        "required-count",
+        "proved-count",
+        "blocked-count",
+        "bicep-cli-present",
+        "docker-cli-present",
+        "git-cli-present",
+        "automation-extension-present",
+        "lifecycle-script-present",
+        "cleanup-runbook-present"
+      ],
+      "idempotency": "local-deterministic",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": [
+        "partial-gate-upgrade",
+        "missing-evidence-as-pass"
+      ]
+    },
+    {
+      "id": "private-acr-source-prerequisites",
+      "package": 1,
+      "definitionStatus": "defined",
+      "proofStatus": "unproved",
+      "methodDefinitions": [
+        "azure-provider-resource-metadata-v1",
+        "azure-acr-name-v1"
+      ],
+      "parserDefinition": "strict-name-availability-v1",
+      "sanitizedInputs": [
+        "acrmobius7711564669",
+        "private-digest-pinned-source-contract"
+      ],
+      "expectedScopes": ["exact-target-resource-group"],
+      "authorizationPredicates": [
+        "fresh-matched-account",
+        "unexpired-one-run-ledger",
+        "unconsumed-operation-receipt"
+      ],
+      "preconditions": [
+        "private-endpoint-network-support-proved",
+        "managed-identity-support-proved"
+      ],
+      "evidenceProjection": [
+        "acr-provider-supported",
+        "literal-name-available",
+        "source-contract-complete"
+      ],
+      "idempotency": "read-only-repeatable",
+      "cleanupOperation": "none-read-only",
+      "prohibitedFallbacks": [
+        "public-registry",
+        "mutable-image-tag",
+        "git-remote-source"
+      ]
+    }
+  ],
+  "lifecycleOperations": [
+    {
+      "id": "pre-secret-provisioning",
+      "methodDefinition": "lifecycle-pre-secret-provisioning-v1",
+      "mutation": true,
+      "authorizationPredicate": [
+        "all-fifteen-prerequisites-proved",
+        "valid-unconsumed-one-run-ledger",
+        "approved-cost-ceiling"
+      ],
+      "scope": [
+        "exact-target-resource-group",
+        "exact-cleanup-control-resource-group"
+      ],
+      "terminalStates": [
+        "ready-for-secure-manual-entry",
+        "blocked-cleaned",
+        "failed-cleaned"
+      ],
+      "cleanupOnFailure": true,
+      "replayDecision": "deny"
+    },
+    {
+      "id": "private-path-verification",
+      "methodDefinition": "lifecycle-private-path-verification-v1",
+      "mutation": false,
+      "authorizationPredicate": [
+        "pre-secret-provisioning-receipt",
+        "valid-unconsumed-one-run-ledger"
+      ],
+      "scope": ["exact-private-key-vault-path", "exact-private-registry-path"],
+      "terminalStates": [
+        "private-entry-path-proved",
+        "blocked-cleaned",
+        "failed-cleaned"
+      ],
+      "cleanupOnFailure": true,
+      "replayDecision": "deny"
+    },
+    {
+      "id": "post-secret-provisioning",
+      "methodDefinition": "lifecycle-post-secret-provisioning-v1",
+      "mutation": true,
+      "authorizationPredicate": [
+        "manual-binding-confirmed",
+        "secret-presence-only-proved",
+        "valid-unconsumed-one-run-ledger"
+      ],
+      "scope": [
+        "exact-api-container-app",
+        "exact-key-vault-resource",
+        "exact-container-registry-resource"
+      ],
+      "terminalStates": [
+        "private-revision-ready",
+        "blocked-cleaned",
+        "failed-cleaned"
+      ],
+      "cleanupOnFailure": true,
+      "replayDecision": "deny"
+    },
+    {
+      "id": "temporary-authority-revocation",
+      "methodDefinition": "lifecycle-temporary-authority-revocation-v1",
+      "mutation": true,
+      "authorizationPredicate": [
+        "temporary-assignment-receipt-present",
+        "valid-unconsumed-one-run-ledger"
+      ],
+      "scope": ["exact-key-vault-resource"],
+      "terminalStates": ["revoked-and-denied", "failed-cleaned"],
+      "cleanupOnFailure": true,
+      "replayDecision": "deny"
+    },
+    {
+      "id": "cleanup",
+      "methodDefinition": "lifecycle-cleanup-v1",
+      "mutation": true,
+      "authorizationPredicate": [
+        "valid-one-run-ledger-or-emergency-cleanup-receipt"
+      ],
+      "scope": [
+        "exact-target-resource-group",
+        "exact-cleanup-control-resource-group"
+      ],
+      "terminalStates": [
+        "cleanup-completed",
+        "zero-residue",
+        "cleanup-blocked"
+      ],
+      "cleanupOnFailure": true,
+      "replayDecision": "deny"
+    },
+    {
+      "id": "zero-residue-verification",
+      "methodDefinition": "lifecycle-zero-residue-verification-v1",
+      "mutation": false,
+      "authorizationPredicate": [
+        "cleanup-receipt-present",
+        "valid-unconsumed-one-run-ledger"
+      ],
+      "scope": [
+        "exact-two-resource-groups",
+        "exact-soft-deleted-key-vault-name"
+      ],
+      "terminalStates": ["zero-residue", "residue-detected"],
+      "cleanupOnFailure": true,
+      "replayDecision": "deny"
+    }
+  ],
+  "contractIntegritySha256": "96b938bc89d2b6db26cc49e323e5dc190aa229ad7fdbdf3bfc1cdd2ed01704b3"
+}

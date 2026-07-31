@@ -128,6 +128,7 @@ def test_schema_inventory_is_exact_versioned_and_closed():
         "cost-envelope.schema.json",
         "environment.schema.json",
         "image-digests.schema.json",
+        "managed-binding.schema.json",
     ]
     for path in MANIFESTS.glob("*.schema.json"):
         schema = _json(path)
@@ -233,16 +234,25 @@ def test_verified_environment_requires_exact_bounded_lease():
         contract._validate_environment(value)
 
 
-def test_bicep_is_resource_free_contract_only_and_invokes_no_modules():
+def test_bicep_preserves_inert_defaults_and_gates_one_run_resources():
     bicep_files = sorted(ROOT.rglob("*.bicep"))
     assert len(bicep_files) == 12
     combined = "\n".join(path.read_text(encoding="utf-8") for path in bicep_files)
-    assert not re.search(r"(?m)^\s*(?:resource|module)\s+", combined)
     assert not re.search(r"\b(?:utcNow|newGuid|uniqueString)\s*\(", combined)
     assert not re.search(r"\b(?:subscription|resourceGroup)\s*\(\s*\)", combined)
+    declarations = re.findall(r"(?m)^\s*(?:resource|module)\s+[^\n]+", combined)
+    assert declarations
+    assert all("= if (" in declaration for declaration in declarations)
+    for name in ("policy.bicep", "postgres.bicep", "redis.bicep", "storage-scanner.bicep"):
+        text = (ROOT / "modules" / name).read_text(encoding="utf-8")
+        assert not re.search(r"(?m)^\s*(?:resource|module)\s+", text)
     main = (ROOT / "main.bicep").read_text(encoding="utf-8")
     assert "param checkpointMode string = 'contract-only'" in main
     assert "param deploymentEnabled bool = false" in main
+    assert "param managedBindingDeploymentEnabled bool = false" in main
+    assert "var oneRunEnabled = managedBindingMode == 'managed-binding-one-run'" in main
+    assert "output defaultProvisioningAuthorized bool = false" in main
+    assert "output secretValueAccessAuthorized bool = false" in main
     assert "output deploymentEnabled bool = deploymentEnabled" in main
     assert "output moduleCount int = length(moduleBoundaries)" in main
 
@@ -789,6 +799,8 @@ def test_lifecycle_scripts_require_scopes_and_remain_inert(script_name: str, ope
 def test_lifecycle_scripts_have_no_execution_dependencies():
     forbidden_imports = ("azure", "requests", "socket", "subprocess", "urllib")
     for path in SCRIPTS.glob("*.py"):
+        if path.name == "managed_binding_lifecycle.py":
+            continue
         text = path.read_text(encoding="utf-8")
         for name in forbidden_imports:
             assert not re.search(rf"(?m)^\s*(?:from|import)\s+{name}\b", text)
@@ -895,11 +907,27 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
     )
     arm = re.compile(r"(?i)/subscriptions/[0-9a-f-]{36}/")
     user_path = re.compile(r"(?i)(?:[A-Z]:\\U" r"sers\\|/U" r"sers/|/ho" r"me/)")
+    public_guids = {
+        "main.bicep": {"b24988ac-6180-42a0-ab88-20f7382dd24c"},
+        "manifests/managed-binding.contract.json": {
+            "4633458b-17de-408a-b874-0445c86b69e6",
+            "7f951dda-4ed3-4680-a7ca-43fe172d538d",
+            "8311e382-0749-4cb8-b61a-304f252e45ec",
+            "b24988ac-6180-42a0-ab88-20f7382dd24c",
+            "b86a8fe4-44ce-4948-aee5-eccb2c155cd7",
+            "c632b3df-fb67-4d84-bdcf-b95ad541b5c8",
+        },
+        "modules/key-vault.bicep": {"4633458b-17de-408a-b874-0445c86b69e6"},
+        "modules/network.bicep": {"c632b3df-fb67-4d84-bdcf-b95ad541b5c8"},
+        "modules/registry.bicep": {"7f951dda-4ed3-4680-a7ca-43fe172d538d"},
+    }
     for path in ROOT.rglob("*"):
         if not path.is_file():
             continue
         text = path.read_text(encoding="utf-8")
-        assert guid.search(text) is None
+        relative = path.relative_to(ROOT).as_posix()
+        observed = {match.group(0).lower() for match in guid.finditer(text)}
+        assert observed <= public_guids.get(relative, set())
         assert arm.search(text) is None
         assert user_path.search(text) is None
 

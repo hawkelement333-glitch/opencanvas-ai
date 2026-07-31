@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.7:managed-binding:v1",
+  "title": "Milestone 7.7 managed provider binding contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "contractVersion",
+    "authorizationSourceHead",
+    "location",
+    "accountBinding",
+    "defaultAuthority",
+    "resourceGroups",
+    "scopeBinding",
+    "resources",
+    "fixedSkus",
+    "network",
+    "providerApiVersions",
+    "providerRegistrationRequirements",
+    "rbac",
+    "vpn",
+    "providerRuntime",
+    "privateAcrSource",
+    "secrets",
+    "manualSecretEntry",
+    "lifecycle",
+    "oneRunPolicy"
+  ],
+  "properties": {
+    "$schema": { "const": "managed-binding.schema.json" },
+    "contractVersion": { "const": "m7.7-managed-binding-v1" },
+    "authorizationSourceHead": {
+      "const": "11564669bd5b40a88fdbf434c8137b063305eb4b"
+    },
+    "location": { "const": "southcentralus" },
+    "accountBinding": { "$ref": "#/$defs/closedMap" },
+    "defaultAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executionAuthorized",
+        "mutationAuthorized",
+        "provisioningAuthorized",
+        "secretAccessAuthorized"
+      ],
+      "properties": {
+        "executionAuthorized": { "const": false },
+        "mutationAuthorized": { "const": false },
+        "provisioningAuthorized": { "const": false },
+        "secretAccessAuthorized": { "const": false }
+      }
+    },
+    "resourceGroups": { "$ref": "#/$defs/stringMap" },
+    "scopeBinding": { "$ref": "#/$defs/stringMap" },
+    "resources": { "$ref": "#/$defs/stringMap" },
+    "fixedSkus": { "$ref": "#/$defs/stringMap" },
+    "network": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "boolean"]
+      },
+      "required": [
+        "vnetCidr",
+        "containerAppsCidr",
+        "privateEndpointsCidr",
+        "managementCleanupCidr",
+        "gatewayCidr",
+        "azureFirewallCidr",
+        "azureFirewallManagementCidr",
+        "dnsResolverInboundCidr",
+        "dnsResolverInboundAddress",
+        "p2sClientCidr",
+        "privateEndpointGroupId",
+        "publicApplicationIngress",
+        "publicKeyVaultAccess"
+      ]
+    },
+    "providerApiVersions": { "$ref": "#/$defs/stringMap" },
+    "providerRegistrationRequirements": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "rbac": { "$ref": "#/$defs/closedMap" },
+    "vpn": { "$ref": "#/$defs/stringMap" },
+    "providerRuntime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "smtpHost",
+        "smtpPort",
+        "smtpStartTls",
+        "smtpFromAddress",
+        "runtimeMode"
+      ],
+      "properties": {
+        "smtpHost": { "const": "sandbox.smtp.mailtrap.io" },
+        "smtpPort": { "const": 2525 },
+        "smtpStartTls": { "const": true },
+        "smtpFromAddress": {
+          "const": "mobius77-validation@example.invalid"
+        },
+        "runtimeMode": { "const": "isolated-synthetic-private" }
+      }
+    },
+    "privateAcrSource": { "$ref": "#/$defs/closedMap" },
+    "secrets": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "keyVaultName",
+          "containerAppReference",
+          "environmentVariable"
+        ],
+        "properties": {
+          "keyVaultName": { "type": "string", "minLength": 1 },
+          "containerAppReference": { "type": "string", "minLength": 1 },
+          "environmentVariable": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "manualSecretEntry": { "$ref": "#/$defs/closedMap" },
+    "lifecycle": { "$ref": "#/$defs/closedMap" },
+    "oneRunPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorizationId",
+        "maximumLedgerLifetimeSeconds",
+        "maximumAttemptsPerOperation",
+        "retryCount",
+        "receiptRequiredBeforeFirstEffect",
+        "replayDecision",
+        "cleanupRequiredForEveryTerminalState",
+        "postRunProvisioningAuthorized"
+      ],
+      "properties": {
+        "authorizationId": {
+          "const": "m7.7-managed-binding-closeout-20260731"
+        },
+        "maximumLedgerLifetimeSeconds": { "const": 86400 },
+        "maximumAttemptsPerOperation": { "const": 1 },
+        "retryCount": { "const": 0 },
+        "receiptRequiredBeforeFirstEffect": { "const": true },
+        "replayDecision": { "const": "deny" },
+        "cleanupRequiredForEveryTerminalState": { "const": true },
+        "postRunProvisioningAuthorized": { "const": false }
+      }
+    }
+  },
+  "$defs": {
+    "stringMap": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "closedMap": {
+      "type": "object",
+      "minProperties": 1
+    }
+  }
+}

@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.7:managed-binding-operations:v1",
+  "title": "Milestone 7.7 one-run managed-binding operation overlay",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "canonicalizationVersion",
+    "integrityDomain",
+    "authorizationSourceHead",
+    "historicalMatrixIntegritySha256",
+    "managedBindingIntegritySha256",
+    "defaultAuthority",
+    "operationDefaultsApplyToEveryEntry",
+    "executionPolicy",
+    "operationExecutor",
+    "packageExecutor",
+    "methodDefinitions",
+    "parserDefinitions",
+    "operationOrder",
+    "operations",
+    "lifecycleOperations",
+    "contractIntegritySha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "2020-12" },
+    "contractVersion": {
+      "const": "mobius.milestone-7.7.managed-binding-operation-overlay.v1"
+    },
+    "canonicalizationVersion": {
+      "const": "mobius.milestone-7.7.canonical-json.v1"
+    },
+    "integrityDomain": {
+      "const": "solarplexus-mobius/milestone-7.7/managed-binding-operation-overlay/v1"
+    },
+    "authorizationSourceHead": {
+      "const": "11564669bd5b40a88fdbf434c8137b063305eb4b"
+    },
+    "historicalMatrixIntegritySha256": { "$ref": "#/$defs/sha256" },
+    "managedBindingIntegritySha256": { "$ref": "#/$defs/sha256" },
+    "defaultAuthority": { "$ref": "#/$defs/authority" },
+    "operationDefaultsApplyToEveryEntry": { "const": true },
+    "executionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maximumAttempts",
+        "maximumTimeoutSeconds",
+        "maximumOutputBytes",
+        "retryCount",
+        "rawOutputRetentionAllowed",
+        "unknownResultDecision",
+        "scopeMismatchDecision",
+        "missingAuthorityDecision",
+        "expiredAuthorityDecision",
+        "replayDecision",
+        "prohibitedFallbacks"
+      ],
+      "properties": {
+        "maximumAttempts": { "const": 1 },
+        "maximumTimeoutSeconds": { "const": 30 },
+        "maximumOutputBytes": { "const": 65536 },
+        "retryCount": { "const": 0 },
+        "rawOutputRetentionAllowed": { "const": false },
+        "unknownResultDecision": { "const": "deny" },
+        "scopeMismatchDecision": { "const": "deny" },
+        "missingAuthorityDecision": { "const": "deny" },
+        "expiredAuthorityDecision": { "const": "deny" },
+        "replayDecision": { "const": "deny" },
+        "prohibitedFallbacks": { "$ref": "#/$defs/nonEmptyStringArray" }
+      }
+    },
+    "operationExecutor": { "$ref": "#/$defs/method" },
+    "packageExecutor": { "$ref": "#/$defs/method" },
+    "methodDefinitions": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/method" }
+    },
+    "parserDefinitions": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/parser" }
+    },
+    "operationOrder": {
+      "type": "array",
+      "minItems": 15,
+      "maxItems": 15,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/id" }
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 15,
+      "maxItems": 15,
+      "items": { "$ref": "#/$defs/operation" }
+    },
+    "lifecycleOperations": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": { "$ref": "#/$defs/lifecycle" }
+    },
+    "contractIntegritySha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+      "maxLength": 128
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "nonEmptyStringArray": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executionAuthorized",
+        "mutationAuthorized",
+        "provisioningAuthorized",
+        "secretAccessAuthorized"
+      ],
+      "properties": {
+        "executionAuthorized": { "const": false },
+        "mutationAuthorized": { "const": false },
+        "provisioningAuthorized": { "const": false },
+        "secretAccessAuthorized": { "const": false }
+      }
+    },
+    "method": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executable", "argumentVector", "controlPlaneOnly"],
+      "properties": {
+        "executable": { "enum": ["az", "{python}"] },
+        "argumentVector": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "controlPlaneOnly": { "type": "boolean" }
+      }
+    },
+    "parser": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implementation",
+        "requiredProjection",
+        "acceptableTerminalStates",
+        "malformedDecision"
+      ],
+      "properties": {
+        "implementation": { "$ref": "#/$defs/id" },
+        "requiredProjection": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "acceptableTerminalStates": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "malformedDecision": { "const": "deny" }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "package",
+        "definitionStatus",
+        "proofStatus",
+        "methodDefinitions",
+        "parserDefinition",
+        "sanitizedInputs",
+        "expectedScopes",
+        "authorizationPredicates",
+        "preconditions",
+        "evidenceProjection",
+        "idempotency",
+        "cleanupOperation",
+        "prohibitedFallbacks"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "package": { "const": 1 },
+        "definitionStatus": { "const": "defined" },
+        "proofStatus": { "const": "unproved" },
+        "methodDefinitions": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "parserDefinition": { "$ref": "#/$defs/id" },
+        "sanitizedInputs": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "expectedScopes": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "authorizationPredicates": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "preconditions": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "evidenceProjection": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "idempotency": {
+          "enum": ["read-only-repeatable", "local-deterministic"]
+        },
+        "cleanupOperation": { "const": "none-read-only" },
+        "prohibitedFallbacks": { "$ref": "#/$defs/nonEmptyStringArray" }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "methodDefinition",
+        "mutation",
+        "authorizationPredicate",
+        "scope",
+        "terminalStates",
+        "cleanupOnFailure",
+        "replayDecision"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "methodDefinition": { "$ref": "#/$defs/id" },
+        "mutation": { "type": "boolean" },
+        "authorizationPredicate": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "scope": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "terminalStates": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "cleanupOnFailure": { "const": true },
+        "replayDecision": { "const": "deny" }
+      }
+    }
+  }
+}

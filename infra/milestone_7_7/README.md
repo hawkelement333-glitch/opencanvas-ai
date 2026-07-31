@@ -1,11 +1,11 @@
 # Milestone 7.7 Checkpoint 1 Infrastructure Contracts
 
-This directory contains the resource-free, local-only infrastructure and
-policy contract for Milestone 7.7. It does not contain a deployable
-environment. Every Bicep module declares parameters and outputs only; no
-module declares an Azure resource, role assignment, policy assignment, or
-deployment script. `main.bicep` inventories, but does not invoke, the module
-boundaries.
+This directory preserves the resource-free, local-only Checkpoint 1 contract
+and adds a separate managed-binding overlay for the authorized one-run
+Milestone 7.7 closeout. The frozen `checkpointMode` and `deploymentEnabled`
+inputs remain `contract-only` and `false`. Conditional Azure resources can be
+reached only through an unexpired, integrity-bound, replay-resistant
+managed-binding ledger; the committed default remains non-deploying.
 
 ## Fixed checkpoint boundary
 
@@ -33,15 +33,17 @@ public access, mutable SKU/replica selection, or expired lease keeps
 
 ## Contract layout
 
-- `main.bicep` records the policy, platform, data, compute, observability, and
-  lifecycle module inventory without creating nested deployments.
-- `modules/` contains resource-free Bicep contracts.
+- `main.bicep` preserves the original module inventory and conditionally
+  invokes only the managed-binding modules behind the one-run gate.
+- `modules/` preserves the original inert parameters and outputs; the
+  managed-binding subset contains conditional, literal-scope resources.
 - `manifests/` contains closed Draft 2020-12 schemas and intentionally
   unresolved templates.
 - `policies/` contains the resource, network, lifecycle, dependency-order, and
   unresolved-gate allowlists.
-- `scripts/` contains standard-library-only local validation,
-  canonicalization, target-scope guards, and inert lifecycle entry points.
+- `scripts/` contains local validation, canonicalization, target-scope guards,
+  the original inert lifecycle entry points, and one closed managed-binding
+  lifecycle executor.
 - `apps/api/tests/test_milestone_7_7_infrastructure_contracts.py` validates the
   local bundle without Azure, network, application imports, generated state,
   or dependency installation.
@@ -63,12 +65,15 @@ does not write a manifest or inspect an Azure context.
 
 ## Lifecycle entry points
 
-`what_if.py`, `deploy.py`, `teardown.py`, and `verify_zero_residue.py` are
+`what_if.py`, `deploy.py`, `teardown.py`, and `verify_zero_residue.py` remain
 intentionally non-mutating and non-deploying lifecycle contracts. They
 validate the local bundle and emit a redacted denial record with
 `status=checkpoint_1_inert`; they never invoke Azure tooling. Later work must
 replace this boundary only after every unresolved gate has authoritative,
-reviewed evidence and separate authorization.
+reviewed evidence and separate authorization. The versioned
+`managed_binding_lifecycle.py` exception is independently default-deny and
+requires the exact one-run ledger and unconsumed operation receipt before its
+first effect.
 
 Every lifecycle entry point requires both a synthetic or later-approved exact
 target resource-group scope and a separate cleanup-control resource-group

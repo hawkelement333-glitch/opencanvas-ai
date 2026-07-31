@@ -1,17 +1,75 @@
 targetScope = 'subscription'
 
-@description('Checkpoint 1 is permanently contract-only.')
+@description('Checkpoint 1 remains permanently contract-only.')
 @allowed([
   'contract-only'
 ])
 param checkpointMode string = 'contract-only'
 
-@description('Checkpoint 1 cannot enable deployment.')
+@description('The frozen Checkpoint 1 parameter can never enable deployment.')
 @allowed([
   false
 ])
 param deploymentEnabled bool = false
 
+@allowed([
+  'contract-only'
+  'managed-binding-one-run'
+])
+param managedBindingMode string = 'contract-only'
+
+@description('Permanent default is false; only the bound one-run lifecycle may pass true.')
+param managedBindingDeploymentEnabled bool = false
+
+@allowed([
+  'none'
+  'cleanup-control'
+  'pre-secret'
+  'post-secret'
+])
+param deploymentStage string = 'none'
+
+@allowed([
+  'southcentralus'
+])
+param location string = 'southcentralus'
+
+@minLength(0)
+@maxLength(64)
+param authorizationLedgerSha256 string = ''
+
+@description('Immutable private ACR digest reference. Required only for post-secret deployment.')
+param apiImageDigest string = ''
+
+@allowed([
+  'sandbox.smtp.mailtrap.io'
+])
+param smtpHost string = 'sandbox.smtp.mailtrap.io'
+
+@allowed([
+  'mobius77-validation@example.invalid'
+])
+param smtpFromAddress string = 'mobius77-validation@example.invalid'
+
+param lifecycleTags object = {}
+param cleanupAtUtc string = ''
+
+@minValue(1)
+@maxValue(12000)
+param expectedUsdCents int = 1
+
+@minValue(1)
+@maxValue(14999)
+param maximumPlausibleUsdCents int = 1
+
+var oneRunEnabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled && length(authorizationLedgerSha256) == 64
+var cleanupEnabled = oneRunEnabled && deploymentStage == 'cleanup-control'
+var preSecretEnabled = oneRunEnabled && deploymentStage == 'pre-secret'
+var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret'
+var targetEnabled = preSecretEnabled || postSecretEnabled
+
+var targetResourceGroupName = 'rg-solarplexus-mobius-77-staging'
+var cleanupResourceGroupName = 'rg-solarplexus-mobius-77-cleanup-control'
 var moduleBoundaries = [
   'policy'
   'network'
@@ -25,7 +83,6 @@ var moduleBoundaries = [
   'observability'
   'cleanup-supervisor'
 ]
-
 var unresolvedGates = [
   'region-and-subscription-availability'
   'exact-provider-api-versions'
@@ -39,9 +96,156 @@ var unresolvedGates = [
   'evidence-retention'
 ]
 
-// No module is invoked in Checkpoint 1. Direct compilation remains resource-free.
+resource targetResourceGroup 'Microsoft.Resources/resourceGroups@2023-07-01' = if (targetEnabled) {
+  name: targetResourceGroupName
+  location: location
+  tags: lifecycleTags
+}
+
+resource cleanupResourceGroup 'Microsoft.Resources/resourceGroups@2023-07-01' = if (cleanupEnabled) {
+  name: cleanupResourceGroupName
+  location: location
+  tags: lifecycleTags
+}
+
+resource existingCleanupResourceGroup 'Microsoft.Resources/resourceGroups@2023-07-01' existing = if (targetEnabled) {
+  name: cleanupResourceGroupName
+}
+
+resource existingCleanupAutomation 'Microsoft.Automation/automationAccounts@2024-10-23' existing = if (targetEnabled) {
+  name: 'aa-mobius77-cleanup'
+  scope: existingCleanupResourceGroup
+}
+
+resource cleanupTargetContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (targetEnabled) {
+  name: guid(targetResourceGroup.id, existingCleanupAutomation.id, 'b24988ac-6180-42a0-ab88-20f7382dd24c')
+  scope: targetResourceGroup
+  properties: {
+    principalId: existingCleanupAutomation.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')
+  }
+}
+
+module cleanupSupervisor './modules/cleanup-supervisor.bicep' = if (cleanupEnabled) {
+  name: 'mobius77-cleanup-control'
+  scope: cleanupResourceGroup
+  params: {
+    checkpointMode: checkpointMode
+    deploymentEnabled: deploymentEnabled
+    managedBindingMode: managedBindingMode
+    managedBindingDeploymentEnabled: true
+    location: location
+    targetResourceGroupName: targetResourceGroupName
+    lifecycleTags: lifecycleTags
+    cleanupAtUtc: cleanupAtUtc
+    expectedUsdCents: expectedUsdCents
+    maximumPlausibleUsdCents: maximumPlausibleUsdCents
+  }
+}
+
+module network './modules/network.bicep' = if (targetEnabled) {
+  name: 'mobius77-managed-binding-network'
+  scope: targetResourceGroup
+  params: {
+    checkpointMode: checkpointMode
+    deploymentEnabled: deploymentEnabled
+    managedBindingMode: managedBindingMode
+    managedBindingDeploymentEnabled: true
+    location: location
+    lifecycleTags: lifecycleTags
+  }
+}
+
+module identities './modules/identities.bicep' = if (targetEnabled) {
+  name: 'mobius77-managed-binding-identities'
+  scope: targetResourceGroup
+  params: {
+    checkpointMode: checkpointMode
+    deploymentEnabled: deploymentEnabled
+    managedBindingMode: managedBindingMode
+    managedBindingDeploymentEnabled: true
+    location: location
+    lifecycleTags: lifecycleTags
+  }
+}
+
+module observability './modules/observability.bicep' = if (targetEnabled) {
+  name: 'mobius77-managed-binding-observability'
+  scope: targetResourceGroup
+  params: {
+    checkpointMode: checkpointMode
+    deploymentEnabled: deploymentEnabled
+    managedBindingMode: managedBindingMode
+    managedBindingDeploymentEnabled: true
+    location: location
+    lifecycleTags: lifecycleTags
+  }
+}
+
+module registry './modules/registry.bicep' = if (targetEnabled) {
+  name: 'mobius77-managed-binding-registry'
+  scope: targetResourceGroup
+  params: {
+    checkpointMode: checkpointMode
+    deploymentEnabled: deploymentEnabled
+    managedBindingMode: managedBindingMode
+    managedBindingDeploymentEnabled: true
+    location: location
+    privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
+    virtualNetworkId: network.outputs.virtualNetworkId
+    workloadIdentityPrincipalId: identities.outputs.workloadIdentityPrincipalId
+    lifecycleTags: lifecycleTags
+  }
+}
+
+module keyVault './modules/key-vault.bicep' = if (targetEnabled) {
+  name: 'mobius77-managed-binding-key-vault'
+  scope: targetResourceGroup
+  params: {
+    checkpointMode: checkpointMode
+    deploymentEnabled: deploymentEnabled
+    managedBindingMode: managedBindingMode
+    managedBindingDeploymentEnabled: true
+    location: location
+    privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
+    virtualNetworkId: network.outputs.virtualNetworkId
+    workloadIdentityPrincipalId: identities.outputs.workloadIdentityPrincipalId
+    lifecycleTags: lifecycleTags
+  }
+}
+
+module compute './modules/compute.bicep' = if (targetEnabled) {
+  name: 'mobius77-managed-binding-compute'
+  scope: targetResourceGroup
+  params: {
+    checkpointMode: checkpointMode
+    deploymentEnabled: deploymentEnabled
+    managedBindingMode: managedBindingMode
+    managedBindingDeploymentEnabled: true
+    applicationDeploymentEnabled: postSecretEnabled
+    location: location
+    containerAppsSubnetId: network.outputs.containerAppsSubnetId
+    workloadIdentityId: identities.outputs.workloadIdentityId
+    keyVaultName: keyVault.outputs.keyVaultName
+    registryLoginServer: registry.outputs.registryLoginServer
+    apiImageDigest: apiImageDigest
+    smtpHost: smtpHost
+    smtpFromAddress: smtpFromAddress
+    lifecycleTags: lifecycleTags
+  }
+}
+
 output contractVersion string = 'm7.7-infrastructure-contract-v1'
 output checkpointMode string = checkpointMode
 output deploymentEnabled bool = deploymentEnabled
 output moduleCount int = length(moduleBoundaries)
 output unresolvedGateCount int = length(unresolvedGates)
+output managedBindingContractVersion string = 'm7.7-managed-binding-deployment-v1'
+output managedBindingMode string = managedBindingMode
+output managedBindingDeploymentEnabled bool = oneRunEnabled
+output deploymentStage string = deploymentStage
+output targetResourceGroupName string = targetResourceGroupName
+output cleanupResourceGroupName string = cleanupResourceGroupName
+output defaultProvisioningAuthorized bool = false
+output secretValueAccessAuthorized bool = false

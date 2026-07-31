@@ -1,4 +1,4 @@
-targetScope = 'subscription'
+targetScope = 'resourceGroup'
 
 @allowed([
   'contract-only'
@@ -9,6 +9,14 @@ param checkpointMode string = 'contract-only'
   false
 ])
 param deploymentEnabled bool = false
+
+@allowed([
+  'contract-only'
+  'managed-binding-one-run'
+])
+param managedBindingMode string = 'contract-only'
+
+param managedBindingDeploymentEnabled bool = false
 
 @allowed([
   'internal-azure-container-apps'
@@ -29,6 +37,32 @@ param imageBindingCount int = 8
 ])
 param imageDigestContractResolved bool = false
 
+param applicationDeploymentEnabled bool = false
+
+@allowed([
+  'southcentralus'
+])
+param location string = 'southcentralus'
+
+param containerAppsSubnetId string = ''
+param workloadIdentityId string = ''
+param keyVaultName string = ''
+param registryLoginServer string = ''
+param apiImageDigest string = ''
+@allowed([
+  'sandbox.smtp.mailtrap.io'
+])
+param smtpHost string = 'sandbox.smtp.mailtrap.io'
+
+@allowed([
+  'mobius77-validation@example.invalid'
+])
+param smtpFromAddress string = 'mobius77-validation@example.invalid'
+param lifecycleTags object = {}
+
+var enabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled
+var appEnabled = enabled && applicationDeploymentEnabled
+var environmentName = 'cae-mobius77-staging'
 var serviceShapeContract = {
   web: {
     cpuMilli: 250
@@ -65,7 +99,6 @@ var serviceShapeContract = {
     maxReplicas: 1
   }
 }
-
 var jobShapeContract = {
   migration: {
     cpuMilli: 500
@@ -88,6 +121,129 @@ var jobShapeContract = {
   }
 }
 
+resource managedEnvironment 'Microsoft.App/managedEnvironments@2026-01-01' = if (enabled) {
+  name: environmentName
+  location: location
+  tags: lifecycleTags
+  properties: {
+    appLogsConfiguration: {
+      destination: 'azure-monitor'
+    }
+    publicNetworkAccess: 'Disabled'
+    vnetConfiguration: {
+      infrastructureSubnetId: containerAppsSubnetId
+      internal: true
+    }
+    zoneRedundant: false
+  }
+}
+
+resource apiContainerApp 'Microsoft.App/containerApps@2026-01-01' = if (appEnabled) {
+  name: 'ca-mobius77-api'
+  location: location
+  tags: lifecycleTags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${workloadIdentityId}': {}
+    }
+  }
+  properties: {
+    configuration: {
+      activeRevisionsMode: 'Single'
+      ingress: {
+        allowInsecure: false
+        external: false
+        targetPort: 8000
+        transport: 'auto'
+      }
+      registries: [
+        {
+          identity: workloadIdentityId
+          server: registryLoginServer
+        }
+      ]
+      secrets: [
+        {
+          identity: workloadIdentityId
+          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/openai-api-key'
+          name: 'openai-api-key'
+        }
+        {
+          identity: workloadIdentityId
+          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/opencanvas-smtp-username'
+          name: 'opencanvas-smtp-username'
+        }
+        {
+          identity: workloadIdentityId
+          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/opencanvas-smtp-password'
+          name: 'opencanvas-smtp-password'
+        }
+      ]
+    }
+    environmentId: managedEnvironment.id
+    template: {
+      containers: [
+        {
+          env: [
+            {
+              name: 'OPENAI_API_KEY'
+              secretRef: 'openai-api-key'
+            }
+            {
+              name: 'OPENCANVAS_SMTP_USERNAME'
+              secretRef: 'opencanvas-smtp-username'
+            }
+            {
+              name: 'OPENCANVAS_SMTP_PASSWORD'
+              secretRef: 'opencanvas-smtp-password'
+            }
+            {
+              name: 'OPENCANVAS_AI_PROVIDER'
+              value: 'openai'
+            }
+            {
+              name: 'OPENCANVAS_EMBEDDING_PROVIDER'
+              value: 'openai'
+            }
+            {
+              name: 'OPENCANVAS_PASSWORD_RESET_PROVIDER'
+              value: 'smtp'
+            }
+            {
+              name: 'OPENCANVAS_SMTP_HOST'
+              value: smtpHost
+            }
+            {
+              name: 'OPENCANVAS_SMTP_FROM_ADDRESS'
+              value: smtpFromAddress
+            }
+            {
+              name: 'OPENCANVAS_SMTP_PORT'
+              value: '2525'
+            }
+            {
+              name: 'OPENCANVAS_SMTP_STARTTLS'
+              value: 'true'
+            }
+          ]
+          image: apiImageDigest
+          name: 'api'
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+        }
+      ]
+      scale: {
+        maxReplicas: 4
+        minReplicas: 2
+      }
+    }
+    workloadProfileName: 'Consumption'
+  }
+}
+
 output moduleName string = 'compute'
 output checkpointMode string = checkpointMode
 output deploymentEnabled bool = deploymentEnabled
@@ -97,3 +253,11 @@ output imageBindingCount int = imageBindingCount
 output imageDigestContractResolved bool = imageDigestContractResolved
 output serviceShapeContract object = serviceShapeContract
 output jobShapeContract object = jobShapeContract
+output managedBindingMode string = managedBindingMode
+output managedBindingDeploymentEnabled bool = enabled
+output applicationDeploymentEnabled bool = appEnabled
+output managedEnvironmentId string = enabled ? managedEnvironment.id : ''
+output apiContainerAppId string = appEnabled ? apiContainerApp.id : ''
+output publicApplicationIngress bool = false
+output configuredOpenAiAlias string = 'OPENAI_API_KEY'
+output alternativeOpenAiAliasConfigured bool = false

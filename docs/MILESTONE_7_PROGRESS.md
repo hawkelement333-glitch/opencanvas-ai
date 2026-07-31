@@ -671,3 +671,12 @@ All 15 operation definitions remain blocked and unproved, all ten
 infrastructure gates remain blocked, all five runtime gates remain unproved,
 and provisioning remains unauthorized. Milestone 7.7 remains blocked and
 Milestone 7.8 remains unstarted.
+
+The subsequent bounded managed-binding amendment preserves the historical
+matrix while adding a separately integrity-bound, default-deny one-run overlay
+for the same 15 IDs and six cleanup-bound lifecycle operations. It fixes the
+deployment boundary to the two approved Milestone 7.7 resource groups in
+`southcentralus`, uses private Key Vault and ACR paths, deploys the API only by
+an immutable digest, and maps only the canonical `OPENAI_API_KEY` alias plus
+the two approved SMTP bindings. The amendment alone performs no Azure effect,
+spends no budget, and does not start Milestone 7.8.

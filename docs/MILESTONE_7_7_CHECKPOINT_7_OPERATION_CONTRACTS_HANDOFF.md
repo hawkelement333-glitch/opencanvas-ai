@@ -277,9 +277,9 @@ The dedicated non-production OpenAI configuration is:
 
 - `OPENCANVAS_AI_PROVIDER=openai`;
 - `OPENCANVAS_EMBEDDING_PROVIDER=openai`;
-- one server-only API key supplied through exactly one supported alias,
-  canonically `OPENAI_API_KEY` or alternatively
-  `OPENCANVAS_OPENAI_API_KEY`;
+- one server-only API key; the application retains its historical input
+  compatibility, while the managed-binding deployment maps only the canonical
+  `OPENAI_API_KEY` alias;
 - `OPENCANVAS_OPENAI_MODEL`, whose repository default is
   `gpt-5.6-terra`;
 - `OPENCANVAS_OPENAI_EMBEDDING_MODEL`, whose repository default is
@@ -423,7 +423,6 @@ $names = @(
     "OPENCANVAS_AI_PROVIDER",
     "OPENCANVAS_EMBEDDING_PROVIDER",
     "OPENAI_API_KEY",
-    "OPENCANVAS_OPENAI_API_KEY",
     "OPENCANVAS_OPENAI_MODEL",
     "OPENCANVAS_OPENAI_EMBEDDING_MODEL",
     "OPENCANVAS_EMBEDDING_DIMENSIONS",
@@ -460,9 +459,9 @@ $names | ForEach-Object {
       region, authenticated-versus-private-relay profile, STARTTLS policy,
       approved sender, synthetic recipient allowlist, send-rate/quota, and
       hard spend limit.
-- [ ] Put the OpenAI API key supplied through exactly one of
-      `OPENAI_API_KEY` or `OPENCANVAS_OPENAI_API_KEY` and, when authenticated
-      SMTP is selected, `OPENCANVAS_SMTP_USERNAME` and
+- [ ] Put the OpenAI API key under only the canonical `OPENAI_API_KEY` runtime
+      mapping and, when authenticated SMTP is selected,
+      `OPENCANVAS_SMTP_USERNAME` and
       `OPENCANVAS_SMTP_PASSWORD` only in the approved managed secret store.
       Grant only the workload identity that needs each secret; grant no
       provider, billing, mailbox, or administrative authority to the
@@ -479,8 +478,9 @@ $names | ForEach-Object {
       `OPENCANVAS_EMBEDDING_PROVIDER_CONFIGURATION_VERSION`,
       `OPENCANVAS_PASSWORD_RESET_PROVIDER`, `OPENCANVAS_SMTP_HOST`,
       `OPENCANVAS_SMTP_PORT`, `OPENCANVAS_SMTP_FROM_ADDRESS`, and
-      `OPENCANVAS_SMTP_STARTTLS`; inject the OpenAI key through exactly one of
-      `OPENAI_API_KEY` or `OPENCANVAS_OPENAI_API_KEY`.
+      `OPENCANVAS_SMTP_STARTTLS`; inject the OpenAI key only through
+      `OPENAI_API_KEY`.
+
 - [ ] Approve restart-based rotation: install a replacement secret reference,
       validate one isolated replacement instance, shift only after readiness,
       revoke the old credential immediately after drain, prove denial, and
@@ -493,3 +493,34 @@ $names | ForEach-Object {
       resume only after that evidence passes privacy and integrity validation
       and the remaining operation and infrastructure gates receive their own
       authority.
+
+## Authorized managed-binding overlay
+
+The historical 15-operation matrix and its integrity SHA-256
+`100293931dcc71bb069e4f6fe06228360e0953b3b756544a555941d81bf8d6bc`
+remain unchanged. The separately versioned one-run overlay now defines exact
+read-only methods and parsers for the same 15 IDs plus bounded lifecycle
+operations for private pre-secret provisioning, entry-path verification,
+digest-only application deployment, temporary-authority revocation, cleanup,
+and zero-residue verification.
+
+The managed resource contract integrity SHA-256 is
+`5b8ad9927706740d86a617a1d5d24d2f021e445a0abb3b11eb87fad78b59fbd2`;
+the operation-overlay integrity SHA-256 is
+`96b938bc89d2b6db26cc49e323e5dc190aa229ad7fdbdf3bfc1cdd2ed01704b3`.
+Both bind the original authorization source commit
+`11564669bd5b40a88fdbf434c8137b063305eb4b`. Permanent defaults deny
+execution, mutation, provisioning, and secret access. The one-run ledger is
+account-, scope-, operation-, source-, and integrity-bound, expires within 24
+hours, permits one attempt per operation, rejects replay, and requires cleanup
+to restore provisioning to false.
+
+The executable resource boundary is limited to
+`rg-solarplexus-mobius-77-staging` and
+`rg-solarplexus-mobius-77-cleanup-control` in `southcentralus`. Key Vault and
+ACR are private, the Container App has internal ingress only, temporary
+operator roles use resource-level scopes, and the application maps exactly
+`OPENAI_API_KEY`, `OPENCANVAS_SMTP_USERNAME`, and
+`OPENCANVAS_SMTP_PASSWORD`. Secret values remain outside the repository and
+outside Codex. Defining this overlay does not itself authorize or prove an
+Azure effect; execution evidence remains separate.

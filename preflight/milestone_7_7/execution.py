@@ -59,6 +59,7 @@ AZURE_ENVIRONMENT: Final = {
 PROCESS_POLL_INTERVAL_SECONDS: Final = 0.01
 PROCESS_TERMINATION_TIMEOUT_SECONDS: Final = 5.0
 STREAM_CHUNK_BYTES: Final = 256
+MANAGED_BINDING_OUTPUT_LIMIT_BYTES: Final = 65_536
 
 
 class PreflightExecutionError(RuntimeError):
@@ -209,6 +210,7 @@ class _PopenProcessAdapter:
             raise PreflightExecutionError("operation-timeout-contract-mismatch")
         if maximum_output_bytes not in {
             ACCOUNT_OUTPUT_LIMIT_BYTES,
+            MANAGED_BINDING_OUTPUT_LIMIT_BYTES,
             RESOURCE_GROUP_OUTPUT_LIMIT_BYTES,
         }:
             raise PreflightExecutionError("operation-output-bound-mismatch")

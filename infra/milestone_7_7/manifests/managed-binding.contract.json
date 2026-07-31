@@ -1,0 +1,260 @@
+{
+  "$schema": "managed-binding.schema.json",
+  "contractVersion": "m7.7-managed-binding-v1",
+  "authorizationSourceHead": "11564669bd5b40a88fdbf434c8137b063305eb4b",
+  "location": "southcentralus",
+  "accountBinding": {
+    "cloud": "AzureCloud",
+    "subscriptionFingerprint": "f4493115ce6375cf0e5d0616bede57126075fdb27ac78ea0ba7e0085252a7028",
+    "tenantFingerprint": "702db9b14ed1014743e30242d59d5c6ef2578efd3213e0b62c5fcb13584ea85e",
+    "requiredState": "Enabled",
+    "requiredDefault": true,
+    "requiredUserType": "user"
+  },
+  "defaultAuthority": {
+    "executionAuthorized": false,
+    "mutationAuthorized": false,
+    "provisioningAuthorized": false,
+    "secretAccessAuthorized": false
+  },
+  "resourceGroups": {
+    "target": "rg-solarplexus-mobius-77-staging",
+    "cleanupControl": "rg-solarplexus-mobius-77-cleanup-control"
+  },
+  "scopeBinding": {
+    "materialization": "matched-subscription-relative-resource-id",
+    "targetResourceGroup": "/resourceGroups/rg-solarplexus-mobius-77-staging",
+    "cleanupControlResourceGroup": "/resourceGroups/rg-solarplexus-mobius-77-cleanup-control",
+    "workloadIdentity": "/resourceGroups/rg-solarplexus-mobius-77-staging/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-mobius77-api",
+    "keyVault": "/resourceGroups/rg-solarplexus-mobius-77-staging/providers/Microsoft.KeyVault/vaults/kv-mobius77-11564669",
+    "containerAppsEnvironment": "/resourceGroups/rg-solarplexus-mobius-77-staging/providers/Microsoft.App/managedEnvironments/cae-mobius77-staging",
+    "apiContainerApp": "/resourceGroups/rg-solarplexus-mobius-77-staging/providers/Microsoft.App/containerApps/ca-mobius77-api",
+    "containerRegistry": "/resourceGroups/rg-solarplexus-mobius-77-staging/providers/Microsoft.ContainerRegistry/registries/acrmobius7711564669"
+  },
+  "resources": {
+    "workloadIdentity": "id-mobius77-api",
+    "containerAppsEnvironment": "cae-mobius77-staging",
+    "apiContainerApp": "ca-mobius77-api",
+    "containerRegistry": "acrmobius7711564669",
+    "logAnalyticsWorkspace": "law-mobius77-staging",
+    "containerRegistryPrivateEndpoint": "pe-mobius77-acr",
+    "containerRegistryPrivateConnection": "plc-mobius77-acr",
+    "containerRegistryPrivateDnsZone": "privatelink.azurecr.io",
+    "containerRegistryPrivateDnsLink": "link-mobius77-acr",
+    "virtualNetwork": "vnet-mobius77-staging",
+    "containerAppsSubnet": "snet-mobius77-containerapps",
+    "privateEndpointSubnet": "snet-mobius77-private-endpoints",
+    "gatewaySubnet": "GatewaySubnet",
+    "dnsResolverInboundSubnet": "snet-mobius77-dns-inbound",
+    "keyVault": "kv-mobius77-11564669",
+    "keyVaultPrivateEndpoint": "pe-mobius77-keyvault",
+    "keyVaultPrivateConnection": "plc-mobius77-keyvault",
+    "privateDnsZone": "privatelink.vaultcore.azure.net",
+    "privateDnsLink": "link-mobius77-keyvault",
+    "privateDnsResolver": "dnspr-mobius77-staging",
+    "privateDnsInboundEndpoint": "dnsin-mobius77-staging",
+    "vpnGatewayPublicIp": "pip-mobius77-vpn",
+    "vpnGateway": "vpngw-mobius77-staging",
+    "cleanupAutomationAccount": "aa-mobius77-cleanup",
+    "cleanupRunbook": "Remove-Mobius77Staging",
+    "cleanupSchedule": "schedule-mobius77-cleanup"
+  },
+  "fixedSkus": {
+    "keyVault": "standard",
+    "containerAppsWorkloadProfile": "Consumption",
+    "containerRegistry": "Premium",
+    "vpnGateway": "VpnGw1",
+    "logAnalytics": "PerGB2018",
+    "automationAccount": "Basic"
+  },
+  "network": {
+    "vnetCidr": "10.77.0.0/20",
+    "containerAppsCidr": "10.77.0.0/23",
+    "privateEndpointsCidr": "10.77.2.0/24",
+    "managementCleanupCidr": "10.77.3.0/28",
+    "gatewayCidr": "10.77.3.32/27",
+    "azureFirewallCidr": "10.77.4.0/26",
+    "azureFirewallManagementCidr": "10.77.4.64/26",
+    "dnsResolverInboundCidr": "10.77.5.0/28",
+    "dnsResolverInboundAddress": "10.77.5.4",
+    "p2sClientCidr": "10.250.77.0/24",
+    "privateEndpointGroupId": "vault",
+    "publicApplicationIngress": false,
+    "publicKeyVaultAccess": false
+  },
+  "providerApiVersions": {
+    "Microsoft.App/containerApps": "2026-01-01",
+    "Microsoft.App/managedEnvironments": "2026-01-01",
+    "Microsoft.Authorization/roleAssignments": "2022-04-01",
+    "Microsoft.Automation/automationAccounts": "2024-10-23",
+    "Microsoft.Automation/automationAccounts/jobSchedules": "2024-10-23",
+    "Microsoft.Automation/automationAccounts/runbooks": "2024-10-23",
+    "Microsoft.Automation/automationAccounts/schedules": "2024-10-23",
+    "Microsoft.ContainerRegistry/registries": "2025-11-01",
+    "Microsoft.EventGrid/eventSubscriptions": "2025-02-15",
+    "Microsoft.EventGrid/systemTopics": "2025-02-15",
+    "Microsoft.Insights/diagnosticSettings": "2016-09-01",
+    "Microsoft.KeyVault/vaults": "2026-02-01",
+    "Microsoft.KeyVault/vaults/secrets": "2026-02-01",
+    "Microsoft.ManagedIdentity/userAssignedIdentities": "2024-11-30",
+    "Microsoft.OperationalInsights/workspaces": "2026-03-01",
+    "Microsoft.Network/dnsResolvers": "2025-05-01",
+    "Microsoft.Network/dnsResolvers/inboundEndpoints": "2025-05-01",
+    "Microsoft.Network/networkSecurityGroups": "2026-01-01",
+    "Microsoft.Network/privateDnsZones": "2024-06-01",
+    "Microsoft.Network/privateDnsZones/virtualNetworkLinks": "2024-06-01",
+    "Microsoft.Network/privateEndpoints": "2026-01-01",
+    "Microsoft.Network/privateEndpoints/privateDnsZoneGroups": "2026-01-01",
+    "Microsoft.Network/publicIPAddresses": "2026-01-01",
+    "Microsoft.Network/virtualNetworkGateways": "2026-01-01",
+    "Microsoft.Network/virtualNetworks": "2026-01-01",
+    "Microsoft.Resources/resourceGroups": "2023-07-01",
+    "Microsoft.Security/defenderForStorageSettings": "2025-06-01"
+  },
+  "providerRegistrationRequirements": [
+    "Microsoft.App",
+    "Microsoft.Authorization",
+    "Microsoft.Automation",
+    "Microsoft.ContainerRegistry",
+    "Microsoft.EventGrid",
+    "Microsoft.Insights",
+    "Microsoft.KeyVault",
+    "Microsoft.ManagedIdentity",
+    "Microsoft.Network",
+    "Microsoft.OperationalInsights",
+    "Microsoft.Resources",
+    "Microsoft.Security"
+  ],
+  "rbac": {
+    "acrPullRoleDefinitionId": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
+    "acrPushRoleDefinitionId": "8311e382-0749-4cb8-b61a-304f252e45ec",
+    "keyVaultSecretsUserRoleDefinitionId": "4633458b-17de-408a-b874-0445c86b69e6",
+    "keyVaultSecretsOfficerRoleDefinitionId": "b86a8fe4-44ce-4948-aee5-eccb2c155cd7",
+    "cleanupContributorRoleDefinitionId": "b24988ac-6180-42a0-ab88-20f7382dd24c",
+    "workloadRoleScope": "key-vault-resource",
+    "temporaryOperatorRoleScope": "key-vault-resource",
+    "cleanupRoleScope": "target-resource-group",
+    "workloadRegistryRoleScope": "container-registry-resource",
+    "temporaryOperatorAssignmentRequired": true,
+    "temporaryOperatorAssignmentRemovedAfterEntry": true,
+    "temporaryRegistryOperatorRoleScope": "container-registry-resource",
+    "temporaryRegistryOperatorAssignmentRemovedAfterPublish": true
+  },
+  "vpn": {
+    "gatewaySku": "VpnGw1",
+    "gatewayType": "Vpn",
+    "vpnType": "RouteBased",
+    "tunnelType": "OpenVPN",
+    "authenticationType": "AAD",
+    "microsoftRegisteredClientAudience": "c632b3df-fb67-4d84-bdcf-b95ad541b5c8"
+  },
+  "providerRuntime": {
+    "smtpHost": "sandbox.smtp.mailtrap.io",
+    "smtpPort": 2525,
+    "smtpStartTls": true,
+    "smtpFromAddress": "mobius77-validation@example.invalid",
+    "runtimeMode": "isolated-synthetic-private"
+  },
+  "privateAcrSource": {
+    "buildContext": "repository-root",
+    "dockerfile": "apps/api/Dockerfile",
+    "dockerfileIgnore": "apps/api/Dockerfile.dockerignore",
+    "imageRepository": "opencanvas-api",
+    "sourceCommitBinding": "authorization-ledger-repository-head",
+    "buildTool": "docker-buildx",
+    "pushPath": "local-docker-over-p2s-vpn-to-private-acr",
+    "registryAuthentication": "entra-current-user-temporary-acr-push",
+    "workloadPullAuthentication": "user-assigned-managed-identity-acr-pull",
+    "publicRegistryAccess": false,
+    "mutableTagsAllowed": false,
+    "temporarySourceTagPattern": "source-{authorization-ledger-repository-head}",
+    "temporarySourceTagPreexistenceDecision": "deny",
+    "temporarySourceTagRemovedAfterDigestResolution": true,
+    "deploymentReference": "digest-only",
+    "dockerCredentialDirectory": "ephemeral-outside-repository",
+    "dockerLogoutRequired": true,
+    "gitRemoteAccessAllowed": false,
+    "temporaryPushRoleRevocationRequired": true
+  },
+  "secrets": [
+    {
+      "keyVaultName": "openai-api-key",
+      "containerAppReference": "openai-api-key",
+      "environmentVariable": "OPENAI_API_KEY"
+    },
+    {
+      "keyVaultName": "opencanvas-smtp-username",
+      "containerAppReference": "opencanvas-smtp-username",
+      "environmentVariable": "OPENCANVAS_SMTP_USERNAME"
+    },
+    {
+      "keyVaultName": "opencanvas-smtp-password",
+      "containerAppReference": "opencanvas-smtp-password",
+      "environmentVariable": "OPENCANVAS_SMTP_PASSWORD"
+    }
+  ],
+  "manualSecretEntry": {
+    "entrySurface": "azure-portal-key-vault-secrets",
+    "networkPath": "azure-vpn-client-openvpn-to-private-dns-resolver",
+    "valueReadbackAllowed": false,
+    "presenceProjection": [
+      "exists",
+      "enabled",
+      "workload-identity-reference-reachable"
+    ],
+    "operatorRoleRevocationRequired": true,
+    "postRevocationDenialRequired": true
+  },
+  "lifecycle": {
+    "preSecretProvisioning": [
+      "create-resource-groups",
+      "arm-cleanup-supervisor",
+      "create-private-network-and-dns",
+      "create-workload-identity",
+      "create-private-key-vault",
+      "assign-key-vault-secrets-user",
+      "create-private-container-apps-environment",
+      "create-monitoring",
+      "create-vpn-private-entry-path",
+      "assign-temporary-key-vault-secrets-officer"
+    ],
+    "postSecretProvisioning": [
+      "verify-secret-presence-only",
+      "create-api-container-app-secret-references",
+      "start-digest-pinned-api-revision",
+      "verify-private-readiness",
+      "revoke-temporary-key-vault-secrets-officer",
+      "prove-post-revocation-denial"
+    ],
+    "cleanup": [
+      "stop-workloads",
+      "revoke-temporary-authority",
+      "delete-target-resource-group",
+      "purge-soft-deleted-key-vault",
+      "prove-target-zero-residue",
+      "delete-cleanup-control-resource-group",
+      "prove-final-zero-residue",
+      "set-provisioning-authorized-false"
+    ],
+    "rollbackDecision": "cleanup-to-zero-residue",
+    "prohibitedFallbacks": [
+      "public-key-vault",
+      "public-container-app-ingress",
+      "shared-key-secret-access",
+      "process-local-secret-file",
+      "direct-shell-command",
+      "cross-resource-group-target",
+      "retry-after-consumed-receipt"
+    ]
+  },
+  "oneRunPolicy": {
+    "authorizationId": "m7.7-managed-binding-closeout-20260731",
+    "maximumLedgerLifetimeSeconds": 86400,
+    "maximumAttemptsPerOperation": 1,
+    "retryCount": 0,
+    "receiptRequiredBeforeFirstEffect": true,
+    "replayDecision": "deny",
+    "cleanupRequiredForEveryTerminalState": true,
+    "postRunProvisioningAuthorized": false
+  }
+}
