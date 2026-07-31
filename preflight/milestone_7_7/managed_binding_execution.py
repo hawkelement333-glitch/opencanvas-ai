@@ -77,6 +77,13 @@ _EXACT_CHILD_METADATA_FALLBACKS: Final = {
         "2025-07-01",
     ),
 }
+_EXACT_REGION_INDEPENDENT_BINDINGS: Final = {
+    "Microsoft.Authorization/roleAssignments": (
+        "Microsoft.Authorization",
+        "roleAssignments",
+        "2022-04-01",
+    ),
+}
 
 _PROVIDER_KEYS_BY_OPERATION: Final = {
     "regional-service-availability": (
@@ -383,6 +390,15 @@ def _exact_child_metadata_fallback(
     )
 
 
+def _requires_regional_metadata(
+    *, key: str, namespace: str, resource_type: str, pinned_version: str
+) -> bool:
+    expected = _EXACT_REGION_INDEPENDENT_BINDINGS.get(key)
+    if expected is None:
+        return True
+    return (namespace, resource_type, pinned_version) != expected
+
+
 def _provider_checks(
     operation_id: str,
     *,
@@ -500,7 +516,13 @@ def _provider_checks(
                 },
             )
         normalized_locations = {_normal_location(item) for item in location_values}
-        if not require_region or REGION in normalized_locations:
+        resource_requires_region = require_region and _requires_regional_metadata(
+            key=key,
+            namespace=namespace,
+            resource_type=resource_type,
+            pinned_version=pinned_version,
+        )
+        if not resource_requires_region or REGION in normalized_locations:
             region_count += 1
         else:
             return (

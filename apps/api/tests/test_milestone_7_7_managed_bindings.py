@@ -605,6 +605,89 @@ def test_explicit_private_dns_zone_group_metadata_overrides_parent_fallback(
     assert result[2]["parent-fallback-count"] == 0
 
 
+def test_exact_role_assignment_binding_is_region_independent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            direct_child=_automation_metadata_row(
+                "roleAssignments",
+                api_versions=("2022-04-01",),
+                locations=(),
+            )
+        ),
+        provider_key="Microsoft.Authorization/roleAssignments",
+    )
+
+    assert result[0:2] == ("proved", "provider-prerequisites-proved")
+    assert result[2]["approved-region-count"] == 1
+
+
+def test_region_independent_exception_rejects_another_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            direct_child=_automation_metadata_row(
+                "vaults",
+                api_versions=("2026-02-01",),
+                locations=(),
+            )
+        ),
+        provider_key="Microsoft.KeyVault/vaults",
+    )
+
+    assert result[0:2] == ("blocked", "approved-region-unavailable")
+
+
+def test_region_independent_exception_rejects_another_api_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = managed_binding_execution._provider_binding
+
+    def altered_binding(key: str) -> tuple[str, str, str]:
+        namespace, resource_type, version = original(key)
+        if key == "Microsoft.Authorization/roleAssignments":
+            version = "2020-10-01-preview"
+        return namespace, resource_type, version
+
+    monkeypatch.setattr(managed_binding_execution, "_provider_binding", altered_binding)
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            direct_child=_automation_metadata_row(
+                "roleAssignments",
+                api_versions=("2020-10-01-preview",),
+                locations=(),
+            )
+        ),
+        provider_key="Microsoft.Authorization/roleAssignments",
+    )
+
+    assert result[0:2] == ("blocked", "approved-region-unavailable")
+
+
+def test_region_independent_exception_still_requires_registered_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            registration_state="NotRegistered",
+            direct_child=_automation_metadata_row(
+                "roleAssignments",
+                api_versions=("2022-04-01",),
+                locations=(),
+            ),
+        ),
+        provider_key="Microsoft.Authorization/roleAssignments",
+    )
+
+    assert result[0:2] == ("blocked", "required-provider-not-registered")
+
+
 def test_closed_package_blocks_on_unregistered_required_provider(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
