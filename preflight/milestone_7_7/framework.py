@@ -5,9 +5,10 @@ from __future__ import annotations
 import copy
 import hashlib
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Final, cast
+from typing import Final, Literal, cast
 
 from performance.milestone_7_7.framework import (
     ContractError,
@@ -15,6 +16,7 @@ from performance.milestone_7_7.framework import (
     canonical_bytes,
     integrity_sha256,
     load_json,
+    loads_json,
     validate_schema,
 )
 
@@ -47,6 +49,9 @@ CLEANUP_RESOURCE_GROUP: Final = "rg-solarplexus-mobius-77-cleanup-control"
 MAXIMUM_EVIDENCE_AGE_SECONDS: Final = 86_400
 MAX_CANONICAL_BYTES: Final = 262_144
 MAX_VERIFIER_BYTES: Final = 16_384
+OPERATION_TIMEOUT_SECONDS: Final = 30.0
+ACCOUNT_OUTPUT_LIMIT_BYTES: Final = 4_096
+RESOURCE_GROUP_OUTPUT_LIMIT_BYTES: Final = 16
 
 ALLOWED_GATE_STATES: Final = ("blocked", "failed", "proved", "unproved")
 AUTHORITY_LEVELS: Final = (
@@ -161,6 +166,7 @@ EXPECTED_ACCOUNT_TRANSFORMS: Final = (
     },
 )
 SUBSCRIPTION_FINGERPRINT_DOMAIN: Final = "mobius.azure.subscription-context.v1"
+TENANT_FINGERPRINT_DOMAIN: Final = "mobius.azure.tenant-context.v1"
 RESOURCE_GROUP_NAME_PLACEHOLDER: Final = "{exact_resource_group_name}"
 VERIFIED_SUBSCRIPTION_ID_PLACEHOLDER: Final = "{verified_subscription_id}"
 EXPECTED_RESOURCE_GROUP_COMMAND: Final = (
@@ -198,6 +204,9 @@ RESOURCE_GROUP_BLOCKED_EXPLANATIONS: Final = frozenset(
         "subscription-fingerprint-mismatch",
     }
 )
+ACCOUNT_PROVED_EXPLANATION: Final = "approved-context-matched"
+BLOCKED_OPERATION_EXPLANATION: Final = "operation-template-blocked"
+RUNTIME_GATE_EXPLANATION: Final = "runtime-evidence-required"
 EXPECTED_OPERATION_POLICY: Final = {
     "current-account-context": (
         ("region-and-subscription-availability",),
@@ -401,6 +410,15 @@ def _as_str(value: JsonValue, location: str) -> str:
     return value
 
 
+def _as_field_value(
+    value: JsonValue,
+    location: str,
+) -> ObservationFieldValue:
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    raise ContractError(f"{location}: expected a scalar field value")
+
+
 def _copy_json(value: JsonValue) -> JsonValue:
     return copy.deepcopy(value)
 
@@ -495,6 +513,184 @@ def _identifier_fingerprint(identifier: str, *, domain: str) -> str:
         raise ContractError("raw Azure identifier contains a control character")
     payload = domain.encode("utf-8") + b"\0" + identifier.lower().encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+ObservationStatus = Literal["blocked", "failed", "proved", "unproved"]
+ObservationFieldValue = str | int | bool | None
+
+
+@dataclass(frozen=True, slots=True)
+class SanitizedObservation:
+    """Minimum-field operation result that cannot carry raw process output."""
+
+    operation_id: str
+    status: ObservationStatus
+    observed_at_utc: datetime
+    authority_level: str
+    scope_integrity_sha256: str
+    fields: tuple[tuple[str, ObservationFieldValue], ...]
+    explanation_code: str
+
+
+class VerifiedAccountContext:
+    """Approved account projection with a short-lived private subscription binding."""
+
+    __slots__ = ("_raw_subscription_id", "observation")
+
+    def __init__(
+        self,
+        *,
+        raw_subscription_id: str,
+        observation: SanitizedObservation,
+    ) -> None:
+        self._raw_subscription_id: str | None = raw_subscription_id
+        self.observation = observation
+
+    def __repr__(self) -> str:
+        return (
+            "VerifiedAccountContext("
+            f"observation={self.observation!r}, raw_subscription_id=<redacted>)"
+        )
+
+    def subscription_id_for_materialization(self) -> str:
+        value = self._raw_subscription_id
+        if value is None:
+            raise ContractError("verified account context has been released")
+        return value
+
+    def release(self) -> None:
+        """Release the Python reference without claiming physical memory erasure."""
+
+        self._raw_subscription_id = None
+
+
+def _utc_seconds(value: datetime, location: str) -> datetime:
+    if value.tzinfo is None or value.utcoffset() != timedelta(0):
+        raise ContractError(f"{location}: timestamp must be timezone-aware UTC")
+    if value.microsecond:
+        raise ContractError(f"{location}: timestamp must use whole seconds")
+    return value
+
+
+def _format_utc(value: datetime, location: str) -> str:
+    return _utc_seconds(value, location).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_current_account_result(
+    *,
+    stdout: bytes,
+    observed_at_utc: datetime,
+) -> VerifiedAccountContext:
+    """Strictly validate the exact account projection and discard the tenant identifier."""
+
+    try:
+        text = stdout.decode("utf-8", errors="strict")
+        value = loads_json(text)
+        account = _as_dict(value, "$")
+        if set(account) != {
+            "environmentName",
+            "state",
+            "isDefault",
+            "userType",
+            "id",
+            "tenantId",
+        }:
+            raise ContractError("current-account fields differ")
+        environment_name = _as_str(account["environmentName"], "$.environmentName")
+        state = _as_str(account["state"], "$.state")
+        is_default = account["isDefault"]
+        user_type = _as_str(account["userType"], "$.userType")
+        raw_subscription_id = _as_str(account["id"], "$.id")
+        raw_tenant_id = _as_str(account["tenantId"], "$.tenantId")
+        if not isinstance(is_default, bool):
+            raise ContractError("current-account default flag differs")
+        subscription_fingerprint = _identifier_fingerprint(
+            raw_subscription_id,
+            domain=SUBSCRIPTION_FINGERPRINT_DOMAIN,
+        )
+        tenant_fingerprint = _identifier_fingerprint(
+            raw_tenant_id,
+            domain=TENANT_FINGERPRINT_DOMAIN,
+        )
+        if (
+            environment_name != "AzureCloud"
+            or state != "Enabled"
+            or is_default is not True
+            or user_type != "user"
+            or subscription_fingerprint != SUBSCRIPTION_FINGERPRINT
+            or tenant_fingerprint != TENANT_FINGERPRINT
+        ):
+            raise ContractError("current-account context is not approved")
+        observed_at = _utc_seconds(observed_at_utc, "current-account observation")
+    except (ContractError, UnicodeError, ValueError):
+        raise ContractError("current-account-output-invalid") from None
+
+    observation = SanitizedObservation(
+        operation_id="current-account-context",
+        status="proved",
+        observed_at_utc=observed_at,
+        authority_level="subscription-scoped-control-plane",
+        scope_integrity_sha256=_as_str(
+            load_scope_contract()["scopeIntegritySha256"],
+            "$.scopeIntegritySha256",
+        ),
+        fields=(
+            ("cloud", environment_name),
+            ("is-default", True),
+            ("state", state),
+            ("subscription-fingerprint", subscription_fingerprint),
+            ("tenant-fingerprint", tenant_fingerprint),
+            ("user-type", user_type),
+        ),
+        explanation_code=ACCOUNT_PROVED_EXPLANATION,
+    )
+    del raw_tenant_id
+    return VerifiedAccountContext(
+        raw_subscription_id=raw_subscription_id,
+        observation=observation,
+    )
+
+
+def sanitized_resource_group_observation(
+    *,
+    operation_id: str,
+    stdout: str,
+    exit_code: int,
+    timed_out: bool,
+    observed_at_utc: datetime,
+) -> SanitizedObservation:
+    if operation_id not in RESOURCE_GROUP_OPERATION_IDS:
+        raise ContractError("resource-group operation is outside the closed inventory")
+    result = parse_resource_group_exists_result(
+        stdout=stdout,
+        exit_code=exit_code,
+        timed_out=timed_out,
+    )
+    fields = tuple(
+        (
+            _as_str(_as_dict(item, "$.fields[]")["id"], "$.fields[].id"),
+            _as_field_value(
+                _as_dict(item, "$.fields[]")["value"],
+                "$.fields[].value",
+            ),
+        )
+        for item in _as_list(result["fields"], "$.fields")
+    )
+    return SanitizedObservation(
+        operation_id=operation_id,
+        status=cast(ObservationStatus, result["status"]),
+        observed_at_utc=_utc_seconds(
+            observed_at_utc,
+            f"{operation_id} observation",
+        ),
+        authority_level="subscription-scoped-control-plane",
+        scope_integrity_sha256=_as_str(
+            load_scope_contract()["scopeIntegritySha256"],
+            "$.scopeIntegritySha256",
+        ),
+        fields=fields,
+        explanation_code=_as_str(result["explanationCode"], "$.explanationCode"),
+    )
 
 
 def resource_group_exists_command_template(operation_id: str) -> tuple[str, ...]:
@@ -1013,10 +1209,14 @@ def validate_evidence(
                 raise ContractError("current-account selection is not active")
             if field_map.get("state") != "Enabled":
                 raise ContractError("current-account state is not enabled")
+            if field_map.get("user-type") != "user":
+                raise ContractError("current-account user type differs")
             if field_map.get("subscription-fingerprint") != SUBSCRIPTION_FINGERPRINT:
                 raise ContractError("current-account subscription fingerprint differs")
             if field_map.get("tenant-fingerprint") != TENANT_FINGERPRINT:
                 raise ContractError("current-account tenant fingerprint differs")
+            if observation["explanationCode"] != ACCOUNT_PROVED_EXPLANATION:
+                raise ContractError("current-account explanation differs")
         elif fields:
             raise ContractError(
                 f"{operation_id}: negative observation must not retain projected fields"
@@ -1081,11 +1281,16 @@ def validate_evidence(
     all_infrastructure_proved = all(
         row["status"] == "proved" for row in infrastructure_rows
     )
+    failed_observation_exists = any(
+        status == "failed" for status in observation_statuses.values()
+    )
     blocked_inventory_exists = any(
         row["definitionStatus"] == "blocked" for row in operation_rows.values()
     )
     expected_preflight_status = (
-        "complete-preflight"
+        "incomplete"
+        if failed_observation_exists
+        else "complete-preflight"
         if all_infrastructure_proved and not blocked_inventory_exists
         else "complete-with-provisioning-blocked"
     )
@@ -1094,6 +1299,180 @@ def validate_evidence(
     if evidence["evidenceIntegritySha256"] != evidence_integrity_sha256(evidence):
         raise ContractError("evidence package integrity mismatch")
     return evidence
+
+
+def _observation_row(
+    observation: SanitizedObservation,
+) -> dict[str, JsonValue]:
+    return {
+        "operationId": observation.operation_id,
+        "status": observation.status,
+        "observedAtUtc": _format_utc(
+            observation.observed_at_utc,
+            f"{observation.operation_id} observation",
+        ),
+        "authorityLevel": observation.authority_level,
+        "scopeIntegritySha256": observation.scope_integrity_sha256,
+        "fields": [
+            {"id": field_id, "value": value} for field_id, value in observation.fields
+        ],
+        "minimumProjection": True,
+        "rawIdentifiersRetained": False,
+        "dataPlane": False,
+        "mutation": False,
+        "explanationCode": observation.explanation_code,
+    }
+
+
+def build_evidence_package(
+    observations: tuple[SanitizedObservation, ...],
+    *,
+    verified_at_utc: datetime,
+) -> dict[str, JsonValue]:
+    """Build deterministic sanitized evidence from the three validated operations."""
+
+    verified_at = _utc_seconds(verified_at_utc, "evidence verification")
+    if len(observations) != len(DEFINED_OPERATION_IDS):
+        raise ContractError("evidence requires exactly three defined observations")
+    observation_by_id = {item.operation_id: item for item in observations}
+    if len(observation_by_id) != len(observations):
+        raise ContractError("evidence observations must be unique")
+    if set(observation_by_id) != set(DEFINED_OPERATION_IDS):
+        raise ContractError("evidence observations are missing or unknown")
+
+    scope = load_scope_contract()
+    inventory = load_operation_inventory()
+    scope_sha256 = _as_str(
+        scope["scopeIntegritySha256"],
+        "$.scopeIntegritySha256",
+    )
+    inventory_sha256 = _as_str(
+        inventory["inventoryIntegritySha256"],
+        "$.inventoryIntegritySha256",
+    )
+    for observation in observations:
+        if observation.scope_integrity_sha256 != scope_sha256:
+            raise ContractError("evidence observation uses a mixed or unknown scope")
+        if observation.observed_at_utc > verified_at:
+            raise ContractError("evidence verification precedes an observation")
+
+    observed_at = min(item.observed_at_utc for item in observations)
+    evidence_id = f"m7.7-cp6-{observed_at.strftime('%Y%m%d-%H%M%Sz').lower()}"
+    operation_rows = {
+        _as_str(row["id"], "$.operations[].id"): row
+        for row in _operation_rows(inventory)
+    }
+    observation_rows: list[dict[str, JsonValue]] = []
+    for operation_id in OPERATION_IDS:
+        if operation_id in observation_by_id:
+            observation_rows.append(_observation_row(observation_by_id[operation_id]))
+            continue
+        operation = operation_rows[operation_id]
+        if operation["definitionStatus"] != "blocked":
+            raise ContractError("defined operation observation is missing")
+        observation_rows.append(
+            {
+                "operationId": operation_id,
+                "status": "blocked",
+                "observedAtUtc": _format_utc(verified_at, "blocked observation"),
+                "authorityLevel": operation["authorityLevel"],
+                "scopeIntegritySha256": scope_sha256,
+                "fields": [],
+                "minimumProjection": True,
+                "rawIdentifiersRetained": False,
+                "dataPlane": False,
+                "mutation": False,
+                "explanationCode": BLOCKED_OPERATION_EXPLANATION,
+            }
+        )
+
+    statuses = {
+        _as_str(row["operationId"], "$.observations[].operationId"): _as_str(
+            row["status"],
+            "$.observations[].status",
+        )
+        for row in observation_rows
+    }
+    infrastructure_gates: list[dict[str, JsonValue]] = []
+    for gate_id in INFRASTRUCTURE_GATES:
+        operation_ids = [
+            operation_id
+            for operation_id, operation in operation_rows.items()
+            if gate_id
+            in {
+                _as_str(item, "$.supports[]")
+                for item in _as_list(operation["supports"], "$.supports")
+            }
+        ]
+        gate_statuses = {statuses[operation_id] for operation_id in operation_ids}
+        if "failed" in gate_statuses:
+            status = "failed"
+            explanation = "required-operation-failed"
+        elif "blocked" in gate_statuses:
+            status = "blocked"
+            explanation = "required-operation-template-blocked"
+        elif "unproved" in gate_statuses:
+            status = "unproved"
+            explanation = "required-operation-unproved"
+        else:
+            status = "proved"
+            explanation = "required-operations-proved"
+        infrastructure_gates.append(
+            {
+                "gateId": gate_id,
+                "status": status,
+                "operationIds": cast(JsonValue, operation_ids),
+                "explanationCode": explanation,
+            }
+        )
+
+    evidence: dict[str, JsonValue] = {
+        "schemaVersion": "2020-12",
+        "contractVersion": CONTRACT_VERSION,
+        "canonicalizationVersion": CANONICALIZATION_VERSION,
+        "evidenceId": evidence_id,
+        "scopeIntegritySha256": scope_sha256,
+        "operationInventorySha256": inventory_sha256,
+        "observedAtUtc": _format_utc(observed_at, "package observation"),
+        "verifiedAtUtc": _format_utc(verified_at, "package verification"),
+        "expiresAtUtc": _format_utc(
+            observed_at + timedelta(seconds=MAXIMUM_EVIDENCE_AGE_SECONDS),
+            "package expiration",
+        ),
+        "observations": cast(JsonValue, observation_rows),
+        "infrastructureGates": cast(JsonValue, infrastructure_gates),
+        "runtimeGates": cast(
+            JsonValue,
+            [
+                {
+                    "gateId": gate_id,
+                    "status": "unproved",
+                    "operationIds": [],
+                    "explanationCode": RUNTIME_GATE_EXPLANATION,
+                }
+                for gate_id in RUNTIME_GATES
+            ],
+        ),
+        "privacy": {
+            "minimumFieldProjection": True,
+            "rawAzureOutputRetained": False,
+            "rawAzureIdentifiersRetained": False,
+            "dataPlaneEvidenceRetained": False,
+            "privateOperationalDataRetained": False,
+        },
+        "completion": {
+            "scopeDefinitionStatus": "complete-local",
+            "preflightStatus": (
+                "incomplete"
+                if any(item.status == "failed" for item in observations)
+                else "complete-with-provisioning-blocked"
+            ),
+            "runtimeGatesResolved": False,
+            "provisioningAuthorized": False,
+        },
+    }
+    evidence["evidenceIntegritySha256"] = evidence_integrity_sha256(evidence)
+    return validate_evidence(evidence, now=verified_at)
 
 
 def scope_verification_result() -> dict[str, JsonValue]:

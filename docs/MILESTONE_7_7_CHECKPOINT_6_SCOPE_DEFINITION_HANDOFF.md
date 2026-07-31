@@ -214,12 +214,47 @@ applicable.
   cannot prove or authorize execution under the revised integrity bindings.
 - A new preflight requires separate authorization.
 
+## Local execution-path hardening
+
+Checkpoint 6 now has one repository-native bounded execution path for the
+three defined operations. It preserves the committed command templates and
+default-deny inventory, accepts no caller-selected executable or command, uses
+shell-free argument vectors, permits one attempt per operation, and enforces a
+30-second timeout. The account operation has a 4,096-byte combined output
+ceiling; each resource-group operation has a 16-byte combined ceiling.
+Timeout, oversized output, blank or mixed output, nonzero exit, malformed
+projection, collision, fingerprint mismatch, or ordering failure stops the
+sequence without retry or partial evidence.
+
+The strict account parser accepts only the committed six-source-field JSON
+projection, fingerprints both raw identifiers immediately, exposes only the
+six safe retained fields, and keeps the raw subscription identifier only in a
+private short-lived materialization context. Errors, representations,
+evidence, and persistent artifacts contain neither raw process output nor raw
+Azure identifiers. Python-reference release is not claimed as physical memory
+erasure.
+
+The deterministic builder accepts only validated sanitized observations,
+binds the current scope and inventory hashes, retains the other 15 operations
+as blocked, preserves all five runtime gates as unproved, enforces the 24-hour
+evidence window, and uses the existing canonical JSON and domain-separated
+integrity rules. The orchestrator validates the complete package before an
+atomic no-overwrite evidence write. Its dry-run path validates local contracts
+without resolving or invoking Azure CLI.
+
+This hardening pass used only controlled fake process adapters and local
+validation. It ran no Azure command, contacted no network service, produced no
+new Azure evidence, and did not change the scope contract, inventory,
+historical evidence, application, worker, frontend, provider, migration,
+dependency, lock, Bicep, or infrastructure state. Execution remains subject
+to separate authorization.
+
 ## Local boundary
 
 The scope-definition continuation changes only the isolated preflight
-inventory, scope binding, local non-executing framework, focused tests, and
-directly affected Checkpoint 6 documentation. It changes no application,
-worker, frontend, provider, migration, dependency, lock, runtime
+inventory, scope binding, local framework and closed execution path, focused
+tests, and directly affected Checkpoint 6 documentation. It changes no
+application, worker, frontend, provider, migration, dependency, lock, runtime
 configuration, Bicep topology, or infrastructure resource.
 
 Checkpoint 6 now has a valid sanitized preflight result classified

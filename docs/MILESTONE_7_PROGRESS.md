@@ -550,6 +550,16 @@ recorded expiry. It binds the earlier inventory and is non-authoritative for
 the revised inventory and scope integrity values. No Azure validation occurred
 while defining the two local templates.
 
+Checkpoint 6 local execution-path hardening adds the single closed runner,
+strict account privacy parser, ordered three-operation orchestrator, and
+deterministic sanitized evidence builder required for a later separately
+authorized run. Each operation has one attempt and a 30-second timeout; output
+is bounded to the committed minimum projections, raw Azure identifiers and
+process output are never persisted, and evidence is validated before an
+atomic no-overwrite write. The dry run and focused tests use no Azure
+executable. This hardening pass ran no Azure command and produced no new Azure
+evidence.
+
 Milestone 7.7 remains in progress. The other 15 operation slots and all ten
 infrastructure gates remain blocked; all five runtime gates remain unproved.
 Provisioning remains blocked. Checkpoint 7 and Milestone 7.8 remain unstarted
