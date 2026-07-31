@@ -240,7 +240,7 @@ def _automation_metadata_row(
     }
 
 
-class AutomationChildMetadataAdapter:
+class ExactChildMetadataAdapter:
     def __init__(
         self,
         *,
@@ -271,10 +271,8 @@ class AutomationChildMetadataAdapter:
                 "resourceTypes": self.inventory_rows,
             }
         else:
-            match = re.search(r"resourceType=='([^']+)'", query)
-            assert match is not None
-            resource_type = match.group(1)
-            row = self.direct_child if resource_type == "automationAccounts/jobSchedules" else None
+            assert re.search(r"resourceType=='([^']+)'", query) is not None
+            row = self.direct_child
             payload = {
                 "registrationState": self.registration_state,
                 "resourceType": None if row is None else row["resourceType"],
@@ -290,9 +288,9 @@ class AutomationChildMetadataAdapter:
         )
 
 
-def _run_automation_child_check(
+def _run_exact_child_check(
     monkeypatch: pytest.MonkeyPatch,
-    adapter: AutomationChildMetadataAdapter,
+    adapter: ExactChildMetadataAdapter,
     *,
     provider_key: str = "Microsoft.Automation/automationAccounts/jobSchedules",
 ) -> tuple[str, str, dict[str, JsonValue]]:
@@ -313,11 +311,11 @@ def _run_automation_child_check(
 def test_exact_automation_job_schedules_parent_fallback_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    adapter = AutomationChildMetadataAdapter(
+    adapter = ExactChildMetadataAdapter(
         inventory_rows=[_automation_metadata_row("automationAccounts")]
     )
 
-    status, explanation, fields = _run_automation_child_check(monkeypatch, adapter)
+    status, explanation, fields = _run_exact_child_check(monkeypatch, adapter)
 
     assert (status, explanation) == ("proved", "provider-prerequisites-proved")
     assert fields["parent-fallback-count"] == 1
@@ -328,11 +326,9 @@ def test_exact_automation_job_schedules_parent_fallback_succeeds(
 def test_exact_automation_schedules_parent_fallback_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    status, explanation, fields = _run_automation_child_check(
+    status, explanation, fields = _run_exact_child_check(
         monkeypatch,
-        AutomationChildMetadataAdapter(
-            inventory_rows=[_automation_metadata_row("automationAccounts")]
-        ),
+        ExactChildMetadataAdapter(inventory_rows=[_automation_metadata_row("automationAccounts")]),
         provider_key="Microsoft.Automation/automationAccounts/schedules",
     )
 
@@ -369,9 +365,9 @@ def test_automation_job_schedules_fallback_prerequisites_fail_closed(
     rows: list[dict[str, JsonValue]],
     explanation: str,
 ) -> None:
-    result = _run_automation_child_check(
+    result = _run_exact_child_check(
         monkeypatch,
-        AutomationChildMetadataAdapter(
+        ExactChildMetadataAdapter(
             registration_state=registration_state,
             inventory_rows=rows,
         ),
@@ -384,11 +380,9 @@ def test_automation_job_schedules_fallback_prerequisites_fail_closed(
 def test_automation_fallback_rejects_every_other_child_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    result = _run_automation_child_check(
+    result = _run_exact_child_check(
         monkeypatch,
-        AutomationChildMetadataAdapter(
-            inventory_rows=[_automation_metadata_row("automationAccounts")]
-        ),
+        ExactChildMetadataAdapter(inventory_rows=[_automation_metadata_row("automationAccounts")]),
         provider_key="Microsoft.KeyVault/vaults/secrets",
     )
 
@@ -407,11 +401,9 @@ def test_automation_fallback_rejects_another_api_version(
         return namespace, resource_type, version
 
     monkeypatch.setattr(managed_binding_execution, "_provider_binding", altered_binding)
-    result = _run_automation_child_check(
+    result = _run_exact_child_check(
         monkeypatch,
-        AutomationChildMetadataAdapter(
-            inventory_rows=[_automation_metadata_row("automationAccounts")]
-        ),
+        ExactChildMetadataAdapter(inventory_rows=[_automation_metadata_row("automationAccounts")]),
     )
 
     assert result[0:2] == ("blocked", "required-resource-type-unavailable")
@@ -421,9 +413,9 @@ def test_automation_fallback_rejects_malformed_or_nearby_metadata_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with pytest.raises(ManagedBindingExecutionError, match="provider-metadata-malformed"):
-        _run_automation_child_check(
+        _run_exact_child_check(
             monkeypatch,
-            AutomationChildMetadataAdapter(
+            ExactChildMetadataAdapter(
                 inventory_rows=[
                     _automation_metadata_row("automationAccounts//jobSchedules"),
                     _automation_metadata_row("automationAccounts"),
@@ -444,9 +436,9 @@ def test_automation_fallback_rejects_missing_committed_binding(
 
     monkeypatch.setattr(managed_binding_execution, "_provider_binding", missing_binding)
     with pytest.raises(ManagedBindingExecutionError, match="provider-api-binding-missing"):
-        _run_automation_child_check(
+        _run_exact_child_check(
             monkeypatch,
-            AutomationChildMetadataAdapter(
+            ExactChildMetadataAdapter(
                 inventory_rows=[_automation_metadata_row("automationAccounts")]
             ),
         )
@@ -459,9 +451,9 @@ def test_explicit_automation_child_metadata_overrides_parent_fallback(
         "automationAccounts/jobSchedules",
         api_versions=("2023-11-01",),
     )
-    result = _run_automation_child_check(
+    result = _run_exact_child_check(
         monkeypatch,
-        AutomationChildMetadataAdapter(
+        ExactChildMetadataAdapter(
             direct_child=explicit_child,
             inventory_rows=[
                 explicit_child,
@@ -477,9 +469,9 @@ def test_explicit_automation_child_metadata_overrides_parent_fallback(
 def test_normalized_explicit_child_metadata_is_validated_without_parent_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    result = _run_automation_child_check(
+    result = _run_exact_child_check(
         monkeypatch,
-        AutomationChildMetadataAdapter(
+        ExactChildMetadataAdapter(
             inventory_rows=[
                 _automation_metadata_row("MICROSOFT.AUTOMATION/AUTOMATIONACCOUNTS/JOBSCHEDULES"),
                 _automation_metadata_row("automationAccounts"),
@@ -488,6 +480,128 @@ def test_normalized_explicit_child_metadata_is_validated_without_parent_fallback
     )
 
     assert result[0:2] == ("proved", "provider-prerequisites-proved")
+    assert result[2]["parent-fallback-count"] == 0
+
+
+def test_exact_private_dns_zone_group_parent_fallback_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status, explanation, fields = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            inventory_rows=[
+                _automation_metadata_row("privateEndpoints", api_versions=("2025-07-01",))
+            ]
+        ),
+        provider_key="Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+    )
+
+    assert (status, explanation) == ("proved", "provider-prerequisites-proved")
+    assert fields["parent-fallback-count"] == 1
+    assert fields["pinned-api-version-count"] == 1
+    assert fields["approved-region-count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("registration_state", "rows", "explanation"),
+    [
+        (
+            "NotRegistered",
+            [_automation_metadata_row("privateEndpoints", api_versions=("2025-07-01",))],
+            "required-provider-not-registered",
+        ),
+        ("Registered", [], "required-resource-type-unavailable"),
+        (
+            "Registered",
+            [_automation_metadata_row("privateEndpoints", api_versions=("2024-05-01",))],
+            "pinned-api-version-unavailable",
+        ),
+        (
+            "Registered",
+            [
+                _automation_metadata_row(
+                    "privateEndpoints",
+                    api_versions=("2025-07-01",),
+                    locations=("West US",),
+                )
+            ],
+            "approved-region-unavailable",
+        ),
+    ],
+)
+def test_private_dns_zone_group_fallback_prerequisites_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    registration_state: str,
+    rows: list[dict[str, JsonValue]],
+    explanation: str,
+) -> None:
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            registration_state=registration_state,
+            inventory_rows=rows,
+        ),
+        provider_key="Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+    )
+
+    assert result[0:2] == ("blocked", explanation)
+
+
+def test_private_dns_zone_group_fallback_rejects_old_or_other_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = managed_binding_execution._provider_binding
+
+    def altered_binding(key: str) -> tuple[str, str, str]:
+        namespace, resource_type, version = original(key)
+        if key == "Microsoft.Network/privateEndpoints/privateDnsZoneGroups":
+            version = "2026-01-01"
+        return namespace, resource_type, version
+
+    monkeypatch.setattr(managed_binding_execution, "_provider_binding", altered_binding)
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            inventory_rows=[
+                _automation_metadata_row("privateEndpoints", api_versions=("2025-07-01",))
+            ]
+        ),
+        provider_key="Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+    )
+    assert result[0:2] == ("blocked", "required-resource-type-unavailable")
+
+    with pytest.raises(ManagedBindingExecutionError, match="provider-api-binding-missing"):
+        _run_exact_child_check(
+            monkeypatch,
+            ExactChildMetadataAdapter(
+                inventory_rows=[
+                    _automation_metadata_row("privateEndpoints", api_versions=("2025-07-01",))
+                ]
+            ),
+            provider_key="Microsoft.Network/privateEndpoints/privateDnsZoneGroups/other",
+        )
+
+
+def test_explicit_private_dns_zone_group_metadata_overrides_parent_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    explicit_child = _automation_metadata_row(
+        "privateEndpoints/privateDnsZoneGroups",
+        api_versions=("2024-05-01",),
+    )
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            direct_child=explicit_child,
+            inventory_rows=[
+                explicit_child,
+                _automation_metadata_row("privateEndpoints", api_versions=("2025-07-01",)),
+            ],
+        ),
+        provider_key="Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+    )
+
+    assert result[0:2] == ("blocked", "pinned-api-version-unavailable")
     assert result[2]["parent-fallback-count"] == 0
 
 

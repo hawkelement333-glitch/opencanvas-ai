@@ -96,7 +96,7 @@ resource registryPrivateEndpoint 'Microsoft.Network/privateEndpoints@2026-01-01'
   }
 }
 
-resource registryPrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2026-01-01' = if (enabled) {
+resource registryPrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2025-07-01' = if (enabled) {
   parent: registryPrivateEndpoint
   name: 'default'
   properties: {

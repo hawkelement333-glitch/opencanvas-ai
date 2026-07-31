@@ -104,7 +104,7 @@
     "Microsoft.Network/privateDnsZones": "2024-06-01",
     "Microsoft.Network/privateDnsZones/virtualNetworkLinks": "2024-06-01",
     "Microsoft.Network/privateEndpoints": "2026-01-01",
-    "Microsoft.Network/privateEndpoints/privateDnsZoneGroups": "2026-01-01",
+    "Microsoft.Network/privateEndpoints/privateDnsZoneGroups": "2025-07-01",
     "Microsoft.Network/publicIPAddresses": "2026-01-01",
     "Microsoft.Network/virtualNetworkGateways": "2026-01-01",
     "Microsoft.Network/virtualNetworks": "2026-01-01",

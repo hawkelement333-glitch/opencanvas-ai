@@ -57,17 +57,24 @@ PROVIDER_INVENTORY_METHOD = "azure-provider-resource-inventory-v1"
 REGION = "southcentralus"
 METHOD_PLACEHOLDER: Final = re.compile(r"\{[A-Za-z][A-Za-z0-9]*\}")
 
-_AUTOMATION_JOB_SCHEDULES_NAMESPACE: Final = "Microsoft.Automation"
-_AUTOMATION_CHILD_METADATA_FALLBACKS: Final = {
+_EXACT_CHILD_METADATA_FALLBACKS: Final = {
     "Microsoft.Automation/automationAccounts/jobSchedules": (
+        "Microsoft.Automation",
         "automationAccounts/jobSchedules",
         "automationAccounts",
         "2024-10-23",
     ),
     "Microsoft.Automation/automationAccounts/schedules": (
+        "Microsoft.Automation",
         "automationAccounts/schedules",
         "automationAccounts",
         "2024-10-23",
+    ),
+    "Microsoft.Network/privateEndpoints/privateDnsZoneGroups": (
+        "Microsoft.Network",
+        "privateEndpoints/privateDnsZoneGroups",
+        "privateEndpoints",
+        "2025-07-01",
     ),
 }
 
@@ -284,7 +291,7 @@ def _normalized_provider_resource_type(namespace: str, value: JsonValue) -> str:
     return normalized
 
 
-def _automation_child_metadata_fallback(
+def _exact_child_metadata_fallback(
     *,
     namespace: str,
     resource_type: str,
@@ -293,11 +300,20 @@ def _automation_child_metadata_fallback(
     raw_subscription_id: str,
 ) -> tuple[dict[str, JsonValue] | None, bool]:
     key = f"{namespace}/{resource_type}"
-    fallback = _AUTOMATION_CHILD_METADATA_FALLBACKS.get(key)
-    if namespace != _AUTOMATION_JOB_SCHEDULES_NAMESPACE or fallback is None:
+    fallback = _EXACT_CHILD_METADATA_FALLBACKS.get(key)
+    if fallback is None:
         return None, False
-    expected_resource_type, parent_resource_type, expected_version = fallback
-    if (resource_type, pinned_version) != (expected_resource_type, expected_version):
+    (
+        expected_namespace,
+        expected_resource_type,
+        parent_resource_type,
+        expected_version,
+    ) = fallback
+    if (namespace, resource_type, pinned_version) != (
+        expected_namespace,
+        expected_resource_type,
+        expected_version,
+    ):
         return None, False
 
     if _provider_binding(key) != (
@@ -305,7 +321,7 @@ def _automation_child_metadata_fallback(
         expected_resource_type,
         expected_version,
     ):
-        raise ManagedBindingExecutionError("automation-child-fallback-binding-invalid")
+        raise ManagedBindingExecutionError("exact-child-fallback-binding-invalid")
 
     raw = _run_json_method(
         adapter,
@@ -409,7 +425,7 @@ def _provider_checks(
         if not isinstance(registration_state, str):
             raise ManagedBindingExecutionError("provider-metadata-malformed")
         if actual_type != resource_type:
-            fallback_value, parent_fallback_used = _automation_child_metadata_fallback(
+            fallback_value, parent_fallback_used = _exact_child_metadata_fallback(
                 namespace=namespace,
                 resource_type=resource_type,
                 pinned_version=pinned_version,

@@ -109,7 +109,7 @@ resource keyVaultPrivateEndpoint 'Microsoft.Network/privateEndpoints@2026-01-01'
   }
 }
 
-resource keyVaultPrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2026-01-01' = if (enabled) {
+resource keyVaultPrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2025-07-01' = if (enabled) {
   parent: keyVaultPrivateEndpoint
   name: 'default'
   properties: {
