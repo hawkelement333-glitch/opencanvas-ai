@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from performance.milestone_7_7.framework import ContractError, canonical_bytes
 from preflight.milestone_7_7 import execution as preflight_execution
 from preflight.milestone_7_7 import framework as topology_framework

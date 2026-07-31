@@ -649,3 +649,25 @@ reported 15 blocked operations, ten blocked infrastructure gates, five
 unproved runtime gates, and provisioning unauthorized. The complete affected
 local regression and repository-hygiene results are recorded in the
 Checkpoint 7 implementation handoff.
+
+## Milestone 7.7 provider-prerequisite binding
+
+A targeted local-only blocker-resolution pass reproduced and mechanically
+corrected the two disclosed Ruff defects without changing runtime behavior,
+test meaning, operation definitions, authority, or evidence. It also bound the
+actual deployed OpenAI and SMTP configuration, secret, isolation, rotation,
+and sanitized-evidence prerequisites in the existing
+[`MILESTONE_7_7_CHECKPOINT_7_OPERATION_CONTRACTS_HANDOFF.md`](MILESTONE_7_7_CHECKPOINT_7_OPERATION_CONTRACTS_HANDOFF.md).
+
+No Azure, OpenAI, SMTP, or Git remote operation ran; no account, credential,
+resource, non-example environment file, authority, or spending was created or
+accessed. The current run's spending remained USD 0. The external provider
+vendor/account, non-production ownership, model entitlement, SMTP
+authentication profile, provider-side recipient/rate/quota/spending limits,
+managed secret injection, live validation, rotation, revocation, and fresh
+sanitized evidence remain owner-controlled prerequisites.
+
+All 15 operation definitions remain blocked and unproved, all ten
+infrastructure gates remain blocked, all five runtime gates remain unproved,
+and provisioning remains unauthorized. Milestone 7.7 remains blocked and
+Milestone 7.8 remains unstarted.

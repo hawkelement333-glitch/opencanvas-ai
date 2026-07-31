@@ -237,3 +237,259 @@ such authority.
 No Azure access, Azure command, Git remote operation, package-manager action,
 software installation, application, worker, service, browser, migration,
 deployment, workload, fault, or probe occurred during this implementation.
+
+## Local provider-prerequisite binding
+
+Date: 2026-07-31
+
+Status: Milestone 7.7 remains blocked by the dedicated non-production
+OpenAI/SMTP provider prerequisite
+
+This targeted local pass began from branch
+`milestone-7-7-implementation-local` at
+`5325961783b3f9a8a2766d418d437b440186bf4d`, with parent
+`39f6409a44e1e9219e001eda80adb126559c94f2`, a clean tree and index, no
+upstream, sole Alembic head `20260726_0028`, protected `0028` blob
+`55c203e669cace5be64fc25cdcf0eb8c05519198`, and migration
+`20260726_0029` absent. Protected references, five stash identities, eight
+recovery artifacts, dependency and lock files, and historical evidence were
+unchanged.
+
+The pass used no Azure, OpenAI, SMTP, Git remote, package manager, credential,
+provider account, non-example environment file, or secret value. It created
+no resource or authority and incurred USD 0.
+
+### Mechanical local corrections
+
+Ruff reproduced and mechanically corrected two existing local defects:
+
+- the redundant blank line that violated import ordering in
+  `apps/api/tests/test_milestone_7_7_azure_topology_execution.py`; and
+- line wrapping selected by the repository's Ruff formatter in
+  `preflight/milestone_7_7/execution.py`.
+
+The changes alter no runtime expression, test assertion, Azure command,
+operation definition, authority, evidence contract, or security decision.
+
+### Repository-defined OpenAI prerequisite
+
+The dedicated non-production OpenAI configuration is:
+
+- `OPENCANVAS_AI_PROVIDER=openai`;
+- `OPENCANVAS_EMBEDDING_PROVIDER=openai`;
+- one server-only API key supplied through exactly one supported alias,
+  canonically `OPENAI_API_KEY` or alternatively
+  `OPENCANVAS_OPENAI_API_KEY`;
+- `OPENCANVAS_OPENAI_MODEL`, whose repository default is
+  `gpt-5.6-terra`;
+- `OPENCANVAS_OPENAI_EMBEDDING_MODEL`, whose repository default is
+  `text-embedding-3-small`;
+- `OPENCANVAS_EMBEDDING_DIMENSIONS=1536`, which is fixed by validation;
+- bounded `OPENCANVAS_OPENAI_TIMEOUT_SECONDS`,
+  `OPENCANVAS_AI_MAX_OUTPUT_TOKENS`,
+  `OPENCANVAS_AI_CONTEXT_CHARACTER_LIMIT`, and
+  `OPENCANVAS_EMBEDDING_BATCH_SIZE`; and
+- the existing configuration identities
+  `OPENCANVAS_AI_PROVIDER_CONFIGURATION_VERSION=openai-responses-v1` and
+  `OPENCANVAS_EMBEDDING_PROVIDER_CONFIGURATION_VERSION=openai-embeddings-v1`.
+
+The API key is secret. Provider modes, model names, dimensions, limits, and
+configuration-version identifiers are non-secret configuration. Presence of
+the key proves only configuration presence. It does not prove project
+ownership, model entitlement, quota, rate limits, spending controls, request
+success, citation behavior, embedding shape, revocation, or isolation.
+
+The live provider must support the Responses API, structured grounded
+responses, and the embeddings API used by the committed adapters. Mock
+providers remain invalid in staging and production. Provider exceptions are
+converted to generic application errors, and operational telemetry records
+only the operation class, outcome, duration, and bounded usage count, never a
+prompt, context, result, key, or provider credential.
+
+### Repository-defined SMTP prerequisite
+
+The SMTP configuration is:
+
+- `OPENCANVAS_PASSWORD_RESET_PROVIDER=smtp`;
+- non-empty `OPENCANVAS_SMTP_HOST`;
+- `OPENCANVAS_SMTP_PORT`, bounded from 1 through 65535 and defaulting to
+  `587`;
+- non-empty `OPENCANVAS_SMTP_FROM_ADDRESS`;
+- optional `OPENCANVAS_SMTP_USERNAME` and `OPENCANVAS_SMTP_PASSWORD`; and
+- `OPENCANVAS_SMTP_STARTTLS`, defaulting to `true`.
+
+The SMTP password is secret. The username is credential metadata and must be
+handled through the same managed-secret boundary when authentication is
+used. Host, port, sender, and STARTTLS selection are non-secret configuration,
+although evidence must redact private hosts and email addresses.
+
+The committed adapter opens SMTP with a fixed 15-second timeout, starts TLS
+only when configured, authenticates only when a username is present, and then
+sends password-reset or workspace-invitation mail. The deployed settings
+boundary requires the provider mode, host, and sender, but does not require
+STARTTLS or authenticated SMTP and does not validate username/password
+pairing. Those choices therefore remain unresolved provider-contract
+decisions; local settings acceptance cannot promote the infrastructure gate.
+Generic delivery errors retain no host, recipient, password, or provider
+response.
+
+### Secret, isolation, and evidence boundary
+
+The approved production principle remains managed secret references resolved
+by workload identity and injected by the deployment platform into the
+server-only settings boundary. Milestone 7.7 proposes a private standard Key
+Vault, but the exact workload-identity-to-secret mapping remains unproved and
+must be authorized with the later infrastructure work. No secret belongs in a
+tracked file, non-example `.env` file, client bundle, command transcript,
+evidence object, exception, or telemetry field.
+
+OpenAI and SMTP must use dedicated non-production accounts or projects,
+least-privilege send/inference-only credentials, synthetic data, an exact
+synthetic-recipient allowlist, bounded provider-side rate and quota limits,
+and a separately approved hard spending boundary. Production, customer,
+personal, and sensitive data remain prohibited. The SMTP vendor, account
+owner, region, authentication profile, sender, recipient allowlist, OpenAI
+project owner, model entitlement, numeric provider limits, and provider
+budget are owner decisions not established by this local pass.
+
+Later sanitized gate evidence must bind the source commit and configuration
+versions and retain only:
+
+- presence booleans for required configuration, never values;
+- approved non-secret provider/model/configuration identities;
+- provider-side isolation, quota, rate, recipient, and spending-limit states;
+- UTC observation and expiry times;
+- bounded outcomes and usage counts for one synthetic Responses request, one
+  structured grounded request with exact allowed citations, and one
+  1536-dimension embedding request;
+- one synthetic SMTP delivery outcome to an approved test recipient, plus
+  STARTTLS and authentication-mode booleans;
+- sanitized failure outcomes for missing/invalid credentials, unavailable
+  models, quota/rate denial, SMTP TLS/authentication failure, and dependency
+  unavailability; and
+- rotation, replacement-readiness, immediate old-credential revocation, and
+  post-revocation denial results.
+
+Provider receipts, project/account identities, email addresses, hosts, raw
+responses, tokens, and credentials must be omitted or transformed by the
+approved evidence contract. Missing, incomplete, unsafe, mock-only, stale,
+over-broad, conflicting, or unsanitized evidence keeps
+`openai-smtp-test-providers` blocked. Provider evidence alone cannot authorize
+Azure provisioning.
+
+The 15 operation definitions remain blocked and unproved, all ten
+infrastructure gates remain blocked, all five runtime gates remain unproved,
+provisioning remains unauthorized, formal Milestone 7.7 remains blocked, and
+Milestone 7.8 remains unstarted.
+
+### Local validation
+
+Focused Ruff lint and format checks pass for the two mechanically corrected
+files. The deterministic operation-contract verifier remains valid at
+`100293931dcc71bb069e4f6fe06228360e0953b3b756544a555941d81bf8d6bc`
+and reports 15 blocked operations, ten blocked infrastructure gates, five
+unproved runtime gates, and provisioning unauthorized. The focused
+operation-contract suite passes 37 tests. The deployed-settings and
+telemetry-redaction group passes 28 tests.
+
+The complete affected campaign collected 598 tests and finished with 597
+passed and one existing Windows symlink-permission skip. The first broad
+invocation omitted Python's no-bytecode flag, created one disposable
+`infra/milestone_7_7/scripts/__pycache__` directory, and correctly failed 25
+bundle-integrity tests while 572 passed and one skipped. The directory was
+removed, its absence was proved, and the identical campaign passed with
+bytecode and pytest cache generation disabled. A separate initial direct
+`pytest.exe` invocation also stopped during collection because that launcher
+did not place the repository root on the import path; using the virtual
+environment's Python module entry point resolved the invocation without a
+repository change.
+
+Strict mypy passes five source files. Full affected Ruff lint passes and Ruff
+format reports 14 files formatted. Installed Prettier passes both changed
+documents. Repository hygiene passes 519 source files, and all 31 local links
+in the changed documents resolve. Diff, trailing-whitespace, secret-pattern,
+private-identifier, personal-path, prohibited-scope, dependency/lock,
+generated-residue, migration, and protected-state checks pass.
+
+### Presence-only verification procedure
+
+After secret injection, the owner may run this value-free process-environment
+check. It emits exact configuration names and booleans, never values. A
+positive result proves presence only and must be followed by a separately
+authorized bounded live-provider validation.
+
+```powershell
+$names = @(
+    "OPENCANVAS_AI_PROVIDER",
+    "OPENCANVAS_EMBEDDING_PROVIDER",
+    "OPENAI_API_KEY",
+    "OPENCANVAS_OPENAI_API_KEY",
+    "OPENCANVAS_OPENAI_MODEL",
+    "OPENCANVAS_OPENAI_EMBEDDING_MODEL",
+    "OPENCANVAS_EMBEDDING_DIMENSIONS",
+    "OPENCANVAS_OPENAI_TIMEOUT_SECONDS",
+    "OPENCANVAS_AI_MAX_OUTPUT_TOKENS",
+    "OPENCANVAS_AI_CONTEXT_CHARACTER_LIMIT",
+    "OPENCANVAS_EMBEDDING_BATCH_SIZE",
+    "OPENCANVAS_AI_PROVIDER_CONFIGURATION_VERSION",
+    "OPENCANVAS_EMBEDDING_PROVIDER_CONFIGURATION_VERSION",
+    "OPENCANVAS_PASSWORD_RESET_PROVIDER",
+    "OPENCANVAS_SMTP_HOST",
+    "OPENCANVAS_SMTP_PORT",
+    "OPENCANVAS_SMTP_FROM_ADDRESS",
+    "OPENCANVAS_SMTP_STARTTLS",
+    "OPENCANVAS_SMTP_USERNAME",
+    "OPENCANVAS_SMTP_PASSWORD"
+)
+$names | ForEach-Object {
+    [pscustomobject]@{
+        Name = $_
+        Present = -not [string]::IsNullOrWhiteSpace(
+            [Environment]::GetEnvironmentVariable($_, "Process")
+        )
+    }
+} | ConvertTo-Json
+```
+
+## Owner action checklist
+
+- [ ] Select and own one dedicated non-production OpenAI project with access
+      to the approved Responses and embedding models; decide the approved
+      model identifiers, hard spend, rate, and quota limits.
+- [ ] Select and own one dedicated non-production SMTP service; decide its
+      region, authenticated-versus-private-relay profile, STARTTLS policy,
+      approved sender, synthetic recipient allowlist, send-rate/quota, and
+      hard spend limit.
+- [ ] Put the OpenAI API key supplied through exactly one of
+      `OPENAI_API_KEY` or `OPENCANVAS_OPENAI_API_KEY` and, when authenticated
+      SMTP is selected, `OPENCANVAS_SMTP_USERNAME` and
+      `OPENCANVAS_SMTP_PASSWORD` only in the approved managed secret store.
+      Grant only the workload identity that needs each secret; grant no
+      provider, billing, mailbox, or administrative authority to the
+      application credential.
+- [ ] Supply non-secret deployment configuration for
+      `OPENCANVAS_AI_PROVIDER`, `OPENCANVAS_EMBEDDING_PROVIDER`,
+      `OPENCANVAS_OPENAI_MODEL`, `OPENCANVAS_OPENAI_EMBEDDING_MODEL`,
+      `OPENCANVAS_EMBEDDING_DIMENSIONS`,
+      `OPENCANVAS_OPENAI_TIMEOUT_SECONDS`,
+      `OPENCANVAS_AI_MAX_OUTPUT_TOKENS`,
+      `OPENCANVAS_AI_CONTEXT_CHARACTER_LIMIT`,
+      `OPENCANVAS_EMBEDDING_BATCH_SIZE`,
+      `OPENCANVAS_AI_PROVIDER_CONFIGURATION_VERSION`,
+      `OPENCANVAS_EMBEDDING_PROVIDER_CONFIGURATION_VERSION`,
+      `OPENCANVAS_PASSWORD_RESET_PROVIDER`, `OPENCANVAS_SMTP_HOST`,
+      `OPENCANVAS_SMTP_PORT`, `OPENCANVAS_SMTP_FROM_ADDRESS`, and
+      `OPENCANVAS_SMTP_STARTTLS`; inject the OpenAI key through exactly one of
+      `OPENAI_API_KEY` or `OPENCANVAS_OPENAI_API_KEY`.
+- [ ] Approve restart-based rotation: install a replacement secret reference,
+      validate one isolated replacement instance, shift only after readiness,
+      revoke the old credential immediately after drain, prove denial, and
+      restore the prior reference without widening authority if validation
+      fails.
+- [ ] After secret injection, run the documented value-free presence-only
+      procedure, then obtain separate authorization for bounded live-provider
+      validation; presence alone cannot promote a gate.
+- [ ] Provide the sanitized, fresh evidence listed above. Milestone 7.7 may
+      resume only after that evidence passes privacy and integrity validation
+      and the remaining operation and infrastructure gates receive their own
+      authority.

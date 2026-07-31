@@ -439,7 +439,9 @@ class _BoundedAzureRunner:
             try:
                 stdout = bytes(capture.stdout).decode("utf-8", errors="strict")
             except UnicodeError:
-                raise PreflightExecutionError("resource-group-output-malformed") from None
+                raise PreflightExecutionError(
+                    "resource-group-output-malformed"
+                ) from None
             observation = sanitized_resource_group_observation(
                 operation_id=operation_id,
                 stdout=stdout,
@@ -542,7 +544,9 @@ def dry_run_execution_path() -> dict[str, JsonValue]:
         if not isinstance(value, dict):
             raise ContractError("operation inventory is malformed")
         operations.append(value)
-    defined = tuple(row["id"] for row in operations if row.get("definitionStatus") == "defined")
+    defined = tuple(
+        row["id"] for row in operations if row.get("definitionStatus") == "defined"
+    )
     if defined != DEFINED_OPERATION_IDS:
         raise ContractError("defined operation order differs")
     account_command = operations[0].get("commandTemplate")
@@ -555,7 +559,9 @@ def dry_run_execution_path() -> dict[str, JsonValue]:
     operation_by_id = {str(row["id"]): row for row in operations}
     for operation_id in RESOURCE_GROUP_OPERATION_IDS:
         command = operation_by_id[operation_id].get("commandTemplate")
-        if not isinstance(command, list) or not all(isinstance(value, str) for value in command):
+        if not isinstance(command, list) or not all(
+            isinstance(value, str) for value in command
+        ):
             raise ContractError(f"{operation_id}: command is malformed")
         if tuple(cast(list[str], command)) != EXPECTED_RESOURCE_GROUP_COMMAND:
             raise ContractError(f"{operation_id}: command differs")
