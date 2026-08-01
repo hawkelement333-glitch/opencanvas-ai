@@ -1392,6 +1392,17 @@ def test_lifecycle_is_closed_private_digest_bound_and_secret_value_blind() -> No
     assert "keyVaultUrl:" in compute
 
 
+def test_denial_probes_use_windows_safe_empty_projection() -> None:
+    text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
+    publish = text.split("def _publish_api_image", 1)[1].split("def _private_revision_ready", 1)[0]
+    revoke = text.split("def _revoke", 1)[1].split("def _current_resource_ids", 1)[0]
+
+    assert publish.count('"[:0]"') == 1
+    assert revoke.count('"[:0]"') == 2
+    assert '"length(@)"' not in publish
+    assert '"length(@)"' not in revoke
+
+
 def test_lifecycle_uses_supported_cached_azure_cli_bicep_contract() -> None:
     text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
     compile_template = text.split("def _compile_template", 1)[1].split("def _lifecycle_tags", 1)[0]
