@@ -59,6 +59,7 @@ MAXIMUM_OUTPUT_BYTES: Final = 65_536
 DEPLOYMENT_TIMEOUT_SECONDS: Final = 1_800
 OPERATION_TIMEOUT_SECONDS: Final = 120
 HEX_SHA40: Final = re.compile(r"^[0-9a-f]{40}$")
+HEX_SHA256: Final = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_DIGEST: Final = re.compile(
     r"^acrmobius7711564669\.azurecr\.io/opencanvas-api@sha256:[0-9a-f]{64}$"
 )
@@ -74,6 +75,15 @@ LIFECYCLE_OPERATIONS: Final = (
     "temporary-authority-revocation",
     "cleanup",
     "zero-residue-verification",
+)
+DEPLOYMENT_STAGES: Final = frozenset(
+    {
+        "cleanup-control",
+        "cleanup-job-binding",
+        "cleanup-binding",
+        "pre-secret",
+        "post-secret",
+    }
 )
 
 
@@ -338,6 +348,20 @@ def _lifecycle_tags(
     }
 
 
+def _deployment_name(stage: str, ledger: Mapping[str, JsonValue]) -> str:
+    ledger_integrity = ledger.get("ledgerIntegritySha256")
+    if (
+        stage not in DEPLOYMENT_STAGES
+        or not isinstance(ledger_integrity, str)
+        or HEX_SHA256.fullmatch(ledger_integrity) is None
+    ):
+        _fail("deployment-history-binding-invalid")
+    deployment_name = f"mobius77-managed-binding-{stage}-{ledger_integrity[:16]}"
+    if len(deployment_name) > 64:
+        _fail("deployment-history-binding-invalid")
+    return deployment_name
+
+
 def _deploy_stage(
     *,
     template_path: Path,
@@ -349,6 +373,7 @@ def _deploy_stage(
     maximum_cost: int,
     runtime_config: dict[str, JsonValue] | None = None,
 ) -> None:
+    deployment_name = _deployment_name(stage, ledger)
     parameters = [
         "checkpointMode=contract-only",
         "deploymentEnabled=false",
@@ -385,7 +410,7 @@ def _deploy_stage(
             "sub",
             "create",
             "--name",
-            f"mobius77-managed-binding-{stage}",
+            deployment_name,
             "--location",
             STAGING_LOCATION,
             "--subscription",

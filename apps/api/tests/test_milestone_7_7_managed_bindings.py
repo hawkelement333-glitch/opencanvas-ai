@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from infra.milestone_7_7.scripts import managed_binding_lifecycle
 from performance.milestone_7_7.framework import ContractError, JsonValue, canonical_bytes
 from preflight.milestone_7_7 import framework as topology_framework
 from preflight.milestone_7_7 import managed_binding_execution
@@ -1042,6 +1043,32 @@ def test_lifecycle_uses_supported_bicep_positional_input_contract() -> None:
     assert '"bicep",\n            "build",\n            str(MAIN_TEMPLATE),' in compile_template
     assert '"--file",' not in compile_template
     assert '"--outfile",\n            str(output_path),' in compile_template
+
+
+def test_lifecycle_deployment_names_preserve_prior_azure_history() -> None:
+    first = {"ledgerIntegritySha256": "a" * 64}
+    second = {"ledgerIntegritySha256": "b" * 64}
+
+    first_name = managed_binding_lifecycle._deployment_name("cleanup-control", first)
+    second_name = managed_binding_lifecycle._deployment_name("cleanup-control", second)
+
+    assert first_name == "mobius77-managed-binding-cleanup-control-aaaaaaaaaaaaaaaa"
+    assert second_name == "mobius77-managed-binding-cleanup-control-bbbbbbbbbbbbbbbb"
+    assert first_name != second_name
+    assert len(managed_binding_lifecycle._deployment_name("cleanup-job-binding", first)) <= 64
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="deployment-history-binding-invalid",
+    ):
+        managed_binding_lifecycle._deployment_name("unknown-stage", first)
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="deployment-history-binding-invalid",
+    ):
+        managed_binding_lifecycle._deployment_name(
+            "cleanup-control", {"ledgerIntegritySha256": "not-a-sha256"}
+        )
 
 
 def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> None:
