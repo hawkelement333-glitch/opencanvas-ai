@@ -985,7 +985,6 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
         "modules/key-vault.bicep": {"4633458b-17de-408a-b874-0445c86b69e6"},
         "modules/network.bicep": {"c632b3df-fb67-4d84-bdcf-b95ad541b5c8"},
         "modules/registry.bicep": {"7f951dda-4ed3-4680-a7ca-43fe172d538d"},
-        "scripts/managed_binding_lifecycle.py": {"11fb06fb-712d-4ddd-98c7-e71bbd588830"},
     }
     for path in ROOT.rglob("*"):
         if not path.is_file():
