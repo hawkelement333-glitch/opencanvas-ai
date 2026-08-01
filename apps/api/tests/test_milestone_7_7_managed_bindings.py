@@ -1178,7 +1178,6 @@ def _job_schedule_list_response() -> dict[str, JsonValue]:
                     f"jobSchedules/{job_schedule_id}"
                 ),
                 "jobScheduleId": job_schedule_id,
-                "parameters": {"TargetResourceGroupName": "rg-solarplexus-mobius-77-staging"},
                 "runbook": "Remove-Mobius77Staging",
                 "schedule": "schedule-mobius77-cleanup",
                 "type": "Microsoft.Automation/automationAccounts/jobSchedules",
@@ -1187,7 +1186,15 @@ def _job_schedule_list_response() -> dict[str, JsonValue]:
     }
 
 
-def test_cleanup_job_schedule_verification_uses_exact_account_list_api(
+def _job_schedule_get_response() -> dict[str, JsonValue]:
+    row = cast(list[dict[str, JsonValue]], _job_schedule_list_response()["value"])[0]
+    return {
+        **row,
+        "parameters": {"TargetResourceGroupName": "rg-solarplexus-mobius-77-staging"},
+    }
+
+
+def test_cleanup_job_schedule_verification_discovers_then_gets_exact_resource(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     subscription_id = "opaque-subscription"
@@ -1196,14 +1203,17 @@ def test_cleanup_job_schedule_verification_uses_exact_account_list_api(
     def exact_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
         observed.append(argv)
         if argv[1:4] == ("rest", "--method", "get"):
-            return _job_schedule_list_response()
+            endpoint = argv[argv.index("--url") + 1]
+            if endpoint.endswith("jobSchedules?api-version=2024-10-23"):
+                return _job_schedule_list_response()
+            return _job_schedule_get_response()
         raise AssertionError(argv)
 
     monkeypatch.setattr(managed_binding_lifecycle, "_run", exact_run)
 
     managed_binding_lifecycle._verify_cleanup_job_schedule(subscription_id)
 
-    assert len(observed) == 1
+    assert len(observed) == 2
     assert observed[0][1:4] == ("rest", "--method", "get")
     assert observed[0][observed[0].index("--url") + 1] == (
         "https://management.azure.com/subscriptions/opaque-subscription/"
@@ -1212,6 +1222,12 @@ def test_cleanup_job_schedule_verification_uses_exact_account_list_api(
         "jobSchedules?api-version=2024-10-23"
     )
     assert "--subscription" not in observed[0]
+    assert observed[1][observed[1].index("--url") + 1] == (
+        "https://management.azure.com/subscriptions/opaque-subscription/"
+        "resourceGroups/rg-solarplexus-mobius-77-cleanup-control/providers/"
+        "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
+        "jobSchedules/00000000-0000-4000-8000-000000000001?api-version=2024-10-23"
+    )
     source = inspect.getsource(managed_binding_lifecycle._verify_cleanup_job_schedule)
     assert "uuid5" not in source
     assert '"resource",\n                    "show"' not in source
@@ -1240,10 +1256,15 @@ def test_cleanup_job_schedule_verification_fails_closed_on_drift(
 
     def drift_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
         if argv[1:4] == ("rest", "--method", "get"):
-            response = _job_schedule_list_response()
-            rows = cast(list[dict[str, JsonValue]], response["value"])
-            row = rows[0]
-            parameters = cast(dict[str, JsonValue], row["parameters"])
+            endpoint = argv[argv.index("--url") + 1]
+            if endpoint.endswith("jobSchedules?api-version=2024-10-23"):
+                response = _job_schedule_list_response()
+                rows = cast(list[dict[str, JsonValue]], response["value"])
+                row = rows[0]
+            else:
+                row = _job_schedule_get_response()
+                response = row
+            parameters = cast(dict[str, JsonValue], row.get("parameters", {}))
             if drift == "wrong-prefix":
                 row["id"] = str(row["id"]).replace(
                     "rg-solarplexus-mobius-77-cleanup-control", "unexpected-group"
@@ -1265,9 +1286,11 @@ def test_cleanup_job_schedule_verification_fails_closed_on_drift(
             elif drift == "wrong-type":
                 row["type"] = "Microsoft.Automation/automationAccounts/jobs"
             elif drift == "next-link":
-                response["nextLink"] = "https://management.azure.com/next"
+                if "nextLink" in response:
+                    response["nextLink"] = "https://management.azure.com/next"
             else:
-                rows.append(dict(row))
+                if "value" in response:
+                    cast(list[dict[str, JsonValue]], response["value"]).append(dict(row))
             return response
         raise AssertionError(argv)
 
@@ -1309,6 +1332,9 @@ def test_cleanup_job_schedule_verification_retries_not_found_and_empty_list(
     def eventual_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
         nonlocal attempts
         if argv[1:4] == ("rest", "--method", "get"):
+            endpoint = argv[argv.index("--url") + 1]
+            if not endpoint.endswith("jobSchedules?api-version=2024-10-23"):
+                return _job_schedule_get_response()
             attempts += 1
             if attempts == 1:
                 raise managed_binding_lifecycle.AzureCommandError("resource-not-found")
@@ -1325,6 +1351,56 @@ def test_cleanup_job_schedule_verification_retries_not_found_and_empty_list(
 
     assert attempts == 3
     assert sleeps == [5.0, 5.0]
+
+
+def test_cleanup_job_schedule_verification_retries_exact_get_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exact_attempts = 0
+    sleeps: list[float] = []
+
+    def eventual_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        nonlocal exact_attempts
+        endpoint = argv[argv.index("--url") + 1]
+        if endpoint.endswith("jobSchedules?api-version=2024-10-23"):
+            return _job_schedule_list_response()
+        exact_attempts += 1
+        if exact_attempts == 1:
+            raise managed_binding_lifecycle.AzureCommandError("resource-not-found")
+        return _job_schedule_get_response()
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", eventual_run)
+    monkeypatch.setattr(managed_binding_lifecycle.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(managed_binding_lifecycle.time, "sleep", lambda delay: sleeps.append(delay))
+
+    managed_binding_lifecycle._verify_cleanup_job_schedule("opaque-subscription")
+
+    assert exact_attempts == 2
+    assert sleeps == [5.0]
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [None, {}, {"TargetResourceGroupName": "unexpected-group"}],
+)
+def test_cleanup_job_schedule_verification_rejects_unproved_exact_parameters(
+    monkeypatch: pytest.MonkeyPatch, parameters: JsonValue
+) -> None:
+    def unproved_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        endpoint = argv[argv.index("--url") + 1]
+        if endpoint.endswith("jobSchedules?api-version=2024-10-23"):
+            return _job_schedule_list_response()
+        response = _job_schedule_get_response()
+        response["parameters"] = parameters
+        return response
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", unproved_run)
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="cleanup-job-schedule-not-ready",
+    ):
+        managed_binding_lifecycle._verify_cleanup_job_schedule("opaque-subscription")
 
 
 def test_cleanup_job_schedule_verification_times_out_empty_list(

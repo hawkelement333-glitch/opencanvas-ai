@@ -686,7 +686,6 @@ def _verify_cleanup_job_schedule(subscription_id: str) -> None:
                     (
                         "{nextLink:nextLink,value:value[]."
                         "{id:id,jobScheduleId:properties.jobScheduleId,"
-                        "parameters:properties.parameters,"
                         "runbook:properties.runbook.name,"
                         "schedule:properties.schedule.name,type:type}}"
                     ),
@@ -723,7 +722,6 @@ def _verify_cleanup_job_schedule(subscription_id: str) -> None:
         if not isinstance(job_schedule, dict) or set(job_schedule) != {
             "id",
             "jobScheduleId",
-            "parameters",
             "runbook",
             "schedule",
             "type",
@@ -731,7 +729,6 @@ def _verify_cleanup_job_schedule(subscription_id: str) -> None:
             _fail("cleanup-job-schedule-output-malformed")
         resource_id = job_schedule["id"]
         job_schedule_id = job_schedule["jobScheduleId"]
-        parameters = job_schedule["parameters"]
         if (
             not isinstance(resource_id, str)
             or not resource_id.casefold().startswith(job_schedule_prefix.casefold())
@@ -739,12 +736,9 @@ def _verify_cleanup_job_schedule(subscription_id: str) -> None:
             or not isinstance(job_schedule["runbook"], str)
             or not isinstance(job_schedule["schedule"], str)
             or not isinstance(job_schedule["type"], str)
-            or not isinstance(parameters, dict)
-            or len(parameters) != 1
         ):
             _fail("cleanup-job-schedule-not-ready")
         resource_name = resource_id[len(job_schedule_prefix) :]
-        parameter_name, parameter_value = next(iter(parameters.items()))
         if (
             re.fullmatch(
                 r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
@@ -756,6 +750,67 @@ def _verify_cleanup_job_schedule(subscription_id: str) -> None:
             or job_schedule["runbook"] != RUNBOOK
             or job_schedule["schedule"] != SCHEDULE
             or job_schedule["type"].casefold()
+            != "microsoft.automation/automationaccounts/jobschedules"
+        ):
+            _fail("cleanup-job-schedule-not-ready")
+
+        exact_endpoint = (
+            f"https://management.azure.com{job_schedule_prefix}{resource_name}"
+            f"?api-version={AUTOMATION_API_VERSION}"
+        )
+        try:
+            exact_job_schedule = _run(
+                (
+                    "az",
+                    "rest",
+                    "--method",
+                    "get",
+                    "--url",
+                    exact_endpoint,
+                    "--query",
+                    (
+                        "{id:id,jobScheduleId:properties.jobScheduleId,"
+                        "parameters:properties.parameters,"
+                        "runbook:properties.runbook.name,"
+                        "schedule:properties.schedule.name,type:type}"
+                    ),
+                    "--output",
+                    "json",
+                    "--only-show-errors",
+                ),
+                require_json=True,
+            )
+        except AzureCommandError as exc:
+            if exc.sanitized_azure_error_code not in {
+                "notfound",
+                "resource-not-found",
+            }:
+                raise
+            if time.monotonic() >= deadline:
+                _fail("cleanup-job-schedule-propagation-timeout")
+            time.sleep(CLEANUP_JOB_SCHEDULE_RETRY_SECONDS)
+            continue
+
+        if not isinstance(exact_job_schedule, dict) or set(exact_job_schedule) != {
+            "id",
+            "jobScheduleId",
+            "parameters",
+            "runbook",
+            "schedule",
+            "type",
+        }:
+            _fail("cleanup-job-schedule-output-malformed")
+        parameters = exact_job_schedule["parameters"]
+        if not isinstance(parameters, dict) or len(parameters) != 1:
+            _fail("cleanup-job-schedule-not-ready")
+        parameter_name, parameter_value = next(iter(parameters.items()))
+        if (
+            exact_job_schedule["id"] != resource_id
+            or exact_job_schedule["jobScheduleId"] != job_schedule_id
+            or exact_job_schedule["runbook"] != RUNBOOK
+            or exact_job_schedule["schedule"] != SCHEDULE
+            or not isinstance(exact_job_schedule["type"], str)
+            or exact_job_schedule["type"].casefold()
             != "microsoft.automation/automationaccounts/jobschedules"
             or not isinstance(parameter_name, str)
             or parameter_name.casefold() != "targetresourcegroupname"
