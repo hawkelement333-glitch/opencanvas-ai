@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
 from performance.milestone_7_7.framework import ContractError, JsonValue, canonical_bytes
 from preflight.milestone_7_7 import framework as topology_framework
@@ -412,6 +413,51 @@ class NetworkUsageAdapter:
         )
 
 
+class VnetIsolationAdapter:
+    def __init__(self, payload: JsonValue) -> None:
+        self.payload = payload
+
+    def run(
+        self,
+        argv: tuple[str, ...],
+        *,
+        environment: Mapping[str, str],
+        timeout_seconds: float,
+        maximum_output_bytes: int,
+    ) -> _ProcessCapture:
+        del environment, timeout_seconds, maximum_output_bytes
+        assert argv[1:4] == ("network", "vnet", "list")
+        query = argv[argv.index("--query") + 1]
+        assert query == (
+            "[].{name:name,resourceGroup:resourceGroup,location:location,"
+            "prefixes:addressSpace.addressPrefixes}"
+        )
+        return _ProcessCapture(
+            exit_code=0,
+            timed_out=False,
+            oversized=False,
+            read_failed=False,
+            stdout=bytearray(
+                json.dumps(self.payload, separators=(",", ":"), sort_keys=True).encode()
+            ),
+        )
+
+
+def _vnet_row(
+    *,
+    name: str = "vnet-mobius77-staging",
+    resource_group: str = "rg-solarplexus-mobius-77-staging",
+    location: str = "southcentralus",
+    prefixes: JsonValue = None,
+) -> dict[str, JsonValue]:
+    return {
+        "name": name,
+        "resourceGroup": resource_group,
+        "location": location,
+        "prefixes": ["10.77.0.0/20"] if prefixes is None else prefixes,
+    }
+
+
 def _network_usage_rows(
     overrides: Mapping[str, tuple[JsonValue, JsonValue]] | None = None,
 ) -> list[dict[str, JsonValue]]:
@@ -544,6 +590,101 @@ def test_network_usage_query_is_exactly_closed_to_manifest_dimensions() -> None:
     query = arguments[arguments.index("--query") + 1]
     assert "[].{" not in query
     assert all(f"name.value=='{name}'" in query for name in required_names)
+
+
+def test_vnet_isolation_accepts_only_the_exact_current_contract_vnet() -> None:
+    result = managed_binding_execution._vnet_isolation(
+        adapter=VnetIsolationAdapter([_vnet_row()]),
+        raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
+    )
+
+    assert result == (
+        "proved",
+        "vnet-plan-isolated",
+        {"prefix-count": 1, "overlap-count": 0},
+    )
+
+
+def test_vnet_isolation_accepts_an_unused_plan() -> None:
+    result = managed_binding_execution._vnet_isolation(
+        adapter=VnetIsolationAdapter([]),
+        raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
+    )
+
+    assert result == (
+        "proved",
+        "vnet-plan-isolated",
+        {"prefix-count": 0, "overlap-count": 0},
+    )
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        _vnet_row(resource_group="rg-solarplexus-mobius-77-other"),
+        _vnet_row(name="vnet-mobius77-other"),
+        _vnet_row(name="vnet-mobius77-other", prefixes=["10.77.8.0/21"]),
+    ],
+)
+def test_vnet_isolation_rejects_every_other_overlap(
+    row: dict[str, JsonValue],
+) -> None:
+    result = managed_binding_execution._vnet_isolation(
+        adapter=VnetIsolationAdapter([row]),
+        raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
+    )
+
+    assert result[0:2] == ("blocked", "vnet-plan-overlaps")
+    assert result[2]["overlap-count"] == 1
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        _vnet_row(location="westus"),
+        _vnet_row(prefixes=["10.88.0.0/20"]),
+        _vnet_row(prefixes=["10.77.0.0/20", "10.88.0.0/20"]),
+    ],
+)
+def test_vnet_isolation_rejects_expected_resource_drift(
+    row: dict[str, JsonValue],
+) -> None:
+    result = managed_binding_execution._vnet_isolation(
+        adapter=VnetIsolationAdapter([row]),
+        raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
+    )
+
+    assert result[0:2] == ("blocked", "vnet-plan-resource-drift")
+
+
+def test_vnet_isolation_rejects_an_additional_overlap_beside_the_exact_vnet() -> None:
+    result = managed_binding_execution._vnet_isolation(
+        adapter=VnetIsolationAdapter([_vnet_row(), _vnet_row(name="vnet-mobius77-other")]),
+        raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
+    )
+
+    assert result[0:2] == ("blocked", "vnet-plan-overlaps")
+    assert result[2] == {"prefix-count": 2, "overlap-count": 1}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [_vnet_row(), _vnet_row()],
+        [{"name": "vnet-mobius77-staging"}],
+        [_vnet_row(prefixes=[])],
+        [_vnet_row(prefixes=["not-a-cidr"])],
+        [_vnet_row(prefixes=[None])],
+    ],
+)
+def test_vnet_isolation_rejects_malformed_or_duplicate_rows(
+    payload: list[dict[str, JsonValue]],
+) -> None:
+    with pytest.raises(ManagedBindingExecutionError, match="vnet-prefix-output-malformed"):
+        managed_binding_execution._vnet_isolation(
+            adapter=VnetIsolationAdapter(payload),
+            raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
+        )
 
 
 def test_exact_automation_job_schedules_parent_fallback_succeeds(

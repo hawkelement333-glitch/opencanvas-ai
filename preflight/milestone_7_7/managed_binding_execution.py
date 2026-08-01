@@ -708,23 +708,103 @@ def _vnet_isolation(
         raw_subscription_id=raw_subscription_id,
     )
     rows = _as_array(raw, "vnet-prefix-output-malformed")
-    candidate = ipaddress.ip_network("10.77.0.0/20", strict=True)
+    contract = load_managed_binding_contract()
+    resource_groups = _as_object(contract["resourceGroups"], "vnet-contract-malformed")
+    resources = _as_object(contract["resources"], "vnet-contract-malformed")
+    network = _as_object(contract["network"], "vnet-contract-malformed")
+    expected_group = resource_groups.get("target")
+    expected_name = resources.get("virtualNetwork")
+    expected_location = contract.get("location")
+    expected_cidr = network.get("vnetCidr")
+    if not all(
+        isinstance(value, str) and value
+        for value in (
+            expected_group,
+            expected_name,
+            expected_location,
+            expected_cidr,
+        )
+    ):
+        raise ManagedBindingExecutionError("vnet-contract-malformed")
+    assert isinstance(expected_group, str)
+    assert isinstance(expected_name, str)
+    assert isinstance(expected_location, str)
+    assert isinstance(expected_cidr, str)
+    try:
+        candidate = ipaddress.ip_network(expected_cidr, strict=True)
+    except ValueError:
+        raise ManagedBindingExecutionError("vnet-contract-malformed") from None
+
+    prefix_count = 0
     overlaps = 0
-    for raw_prefix in rows:
-        if not isinstance(raw_prefix, str):
+    expected_current_count = 0
+    expected_current_drift = False
+    for raw_row in rows:
+        row = _as_object(raw_row, "vnet-prefix-output-malformed")
+        if set(row) != {"location", "name", "prefixes", "resourceGroup"}:
             raise ManagedBindingExecutionError("vnet-prefix-output-malformed")
-        try:
-            prefix = ipaddress.ip_network(raw_prefix, strict=True)
-        except ValueError:
-            raise ManagedBindingExecutionError("vnet-prefix-output-malformed") from None
-        if prefix.version != 4:
-            continue
-        if candidate.overlaps(prefix):
-            overlaps += 1
+        name = row["name"]
+        resource_group = row["resourceGroup"]
+        location = row["location"]
+        raw_prefixes = row["prefixes"]
+        if (
+            not isinstance(name, str)
+            or not name
+            or not isinstance(resource_group, str)
+            or not resource_group
+            or not isinstance(location, str)
+            or not location
+            or not isinstance(raw_prefixes, list)
+            or not raw_prefixes
+        ):
+            raise ManagedBindingExecutionError("vnet-prefix-output-malformed")
+
+        is_expected_identity = (
+            name == expected_name and resource_group == expected_group
+        )
+        is_exact_expected_current = (
+            is_expected_identity
+            and location == expected_location
+            and raw_prefixes == [expected_cidr]
+        )
+        if is_expected_identity:
+            if is_exact_expected_current:
+                expected_current_count += 1
+            else:
+                expected_current_drift = True
+
+        for raw_prefix in raw_prefixes:
+            if not isinstance(raw_prefix, str):
+                raise ManagedBindingExecutionError("vnet-prefix-output-malformed")
+            try:
+                prefix = ipaddress.ip_network(raw_prefix, strict=True)
+            except ValueError:
+                raise ManagedBindingExecutionError(
+                    "vnet-prefix-output-malformed"
+                ) from None
+            prefix_count += 1
+            if (
+                prefix.version == 4
+                and candidate.overlaps(prefix)
+                and not is_exact_expected_current
+            ):
+                overlaps += 1
+
+    if expected_current_count > 1:
+        raise ManagedBindingExecutionError("vnet-prefix-output-malformed")
+    isolated = overlaps == 0 and not expected_current_drift
     return (
-        ("proved" if overlaps == 0 else "blocked"),
-        ("vnet-plan-isolated" if overlaps == 0 else "vnet-plan-overlaps"),
-        {"prefix-count": len(rows), "overlap-count": overlaps},
+        ("proved" if isolated else "blocked"),
+        (
+            "vnet-plan-isolated"
+            if isolated
+            else (
+                "vnet-plan-resource-drift"
+                if expected_current_drift
+                else "vnet-plan-overlaps"
+            )
+        ),
+        {"prefix-count": prefix_count, "overlap-count": overlaps},
     )
 
 

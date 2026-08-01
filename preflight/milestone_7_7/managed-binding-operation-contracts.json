@@ -137,7 +137,7 @@
         "vnet",
         "list",
         "--query",
-        "[].addressSpace.addressPrefixes[]",
+        "[].{name:name,resourceGroup:resourceGroup,location:location,prefixes:addressSpace.addressPrefixes}",
         "--output",
         "json",
         "--only-show-errors"
@@ -995,5 +995,5 @@
       "replayDecision": "deny"
     }
   ],
-  "contractIntegritySha256": "ce29d989cf6514ea25f48914035523884907033fde5d1cb1e7ebfc85ed5098df"
+  "contractIntegritySha256": "951b4b788446efd2d79fc87a5cee83327a009ae613f0e90b2dfca2181698b550"
 }
