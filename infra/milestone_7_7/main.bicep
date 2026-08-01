@@ -92,6 +92,7 @@ var moduleBoundaries = [
   'redis'
   'storage-scanner'
   'compute'
+  'container-apps-dns'
   'observability'
   'cleanup-supervisor'
 ]
@@ -219,7 +220,6 @@ module registry './modules/registry.bicep' = if (workloadEnabled) {
     managedBindingDeploymentEnabled: true
     location: location
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
-    virtualNetworkId: network.outputs.virtualNetworkId
     workloadIdentityPrincipalId: identities.outputs.workloadIdentityPrincipalId
     lifecycleTags: lifecycleTags
   }
@@ -259,6 +259,21 @@ module compute './modules/compute.bicep' = if (workloadEnabled) {
     apiImageDigest: apiImageDigest
     smtpHost: smtpHost
     smtpFromAddress: smtpFromAddress
+    lifecycleTags: lifecycleTags
+  }
+}
+
+module containerAppsDns './modules/container-apps-dns.bicep' = if (workloadEnabled) {
+  name: 'mobius77-managed-binding-container-apps-dns'
+  scope: targetResourceGroup
+  params: {
+    checkpointMode: checkpointMode
+    deploymentEnabled: deploymentEnabled
+    managedBindingMode: managedBindingMode
+    managedBindingDeploymentEnabled: true
+    defaultDomain: compute.outputs.managedEnvironmentDefaultDomain
+    staticIp: compute.outputs.managedEnvironmentStaticIp
+    virtualNetworkId: network.outputs.virtualNetworkId
     lifecycleTags: lifecycleTags
   }
 }

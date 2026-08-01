@@ -51,6 +51,7 @@ CLEANUP_RUNBOOK: Final = INFRASTRUCTURE_ROOT / "scripts" / "Remove-Mobius77Stagi
 TARGET_GROUP: Final = "rg-solarplexus-mobius-77-staging"
 CLEANUP_GROUP: Final = "rg-solarplexus-mobius-77-cleanup-control"
 INFRASTRUCTURE_GROUP: Final = "rg-solarplexus-mobius-77-containerapps-infrastructure"
+CONTAINER_APPS_DNS_LINK: Final = "link-mobius77-containerapps"
 KEY_VAULT: Final = "kv-mobius77-11564669"
 REGISTRY: Final = "acrmobius7711564669"
 AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup"
@@ -1244,6 +1245,17 @@ def _resource_group_inventory(
     if not isinstance(rows, list):
         _fail("pre-secret-resource-inventory-malformed")
     target_locations = dict(TARGET_RESOURCE_LOCATIONS)
+    if group == TARGET_GROUP:
+        domain, _ = _container_apps_private_dns_projection(subscription_id)
+        target_locations.update(
+            {
+                f"microsoft.network/privatednszones/{domain}": "global",
+                (
+                    f"microsoft.network/privatednszones/{domain}/"
+                    f"virtualnetworklinks/{CONTAINER_APPS_DNS_LINK}"
+                ): "global",
+            }
+        )
     observed: set[str] = set()
     for row in rows:
         if not isinstance(row, dict) or set(row) != {"id", "location", "type"}:
@@ -1636,6 +1648,119 @@ def _verify_resource_projection(
     return value
 
 
+def _container_apps_private_dns_projection(subscription_id: str) -> tuple[str, str]:
+    environment = _verify_resource_projection(
+        subscription_id,
+        resource_type="Microsoft.App/managedEnvironments",
+        name="cae-mobius77-staging",
+        api_version="2026-01-01",
+        projection="{domain:properties.defaultDomain,staticIp:properties.staticIp}",
+    )
+    if set(environment) != {"domain", "staticIp"}:
+        _fail("pre-secret-container-apps-dns-drift")
+    domain = environment.get("domain")
+    static_ip = environment.get("staticIp")
+    if (
+        not isinstance(domain, str)
+        or re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]{1,251}[a-z0-9])?", domain) is None
+        or not domain.casefold().endswith(".azurecontainerapps.io")
+        or not isinstance(static_ip, str)
+    ):
+        _fail("pre-secret-container-apps-dns-drift")
+    try:
+        address = ipaddress.ip_address(static_ip)
+    except ValueError:
+        _fail("pre-secret-container-apps-dns-drift")
+    if address.version != 4 or not address.is_private:
+        _fail("pre-secret-container-apps-dns-drift")
+    return domain.casefold(), str(address)
+
+
+def _verify_container_apps_private_dns(subscription_id: str) -> None:
+    domain, static_ip = _container_apps_private_dns_projection(subscription_id)
+    zone = _run(
+        (
+            "az",
+            "network",
+            "private-dns",
+            "zone",
+            "show",
+            "--resource-group",
+            TARGET_GROUP,
+            "--name",
+            domain,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "{name:name}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    link = _run(
+        (
+            "az",
+            "network",
+            "private-dns",
+            "link",
+            "vnet",
+            "show",
+            "--resource-group",
+            TARGET_GROUP,
+            "--zone-name",
+            domain,
+            "--name",
+            CONTAINER_APPS_DNS_LINK,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "{registration:registrationEnabled,virtualNetwork:virtualNetwork.id}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    record = _run(
+        (
+            "az",
+            "network",
+            "private-dns",
+            "record-set",
+            "a",
+            "show",
+            "--resource-group",
+            TARGET_GROUP,
+            "--zone-name",
+            domain,
+            "--name",
+            "*",
+            "--subscription",
+            subscription_id,
+            "--query",
+            "{records:aRecords,ttl:ttl}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    expected_vnet = _scope(
+        subscription_id,
+        f"/resourceGroups/{TARGET_GROUP}/providers/Microsoft.Network/"
+        "virtualNetworks/vnet-mobius77-staging",
+    )
+    if zone != {"name": domain} or link != {
+        "registration": False,
+        "virtualNetwork": expected_vnet,
+    }:
+        _fail("pre-secret-container-apps-dns-drift")
+    if record != {"records": [{"ipv4Address": static_ip}], "ttl": 60}:
+        _fail("pre-secret-container-apps-dns-drift")
+
+
 def _verify_pre_secret_security(
     subscription_id: str, target_resources: frozenset[str]
 ) -> None:
@@ -1689,6 +1814,7 @@ def _verify_pre_secret_security(
         )
         if environment != {"internal": True, "public": "Disabled"}:
             _fail("pre-secret-compute-security-drift")
+        _verify_container_apps_private_dns(subscription_id)
 
 
 def _verify_no_related_group_drift(subscription_id: str) -> None:

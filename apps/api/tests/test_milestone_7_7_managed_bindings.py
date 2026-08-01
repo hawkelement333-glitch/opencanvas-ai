@@ -1891,12 +1891,19 @@ def test_only_cleanup_automation_module_allows_west_us() -> None:
         "var workloadIdentityEnabled = enabled && workloadIdentityDeploymentEnabled" in identities
     )
     assert "if (workloadIdentityEnabled)" in identities
-    for module_name in ("network", "observability", "registry", "keyVault", "compute"):
+    for module_name in (
+        "network",
+        "observability",
+        "registry",
+        "keyVault",
+        "compute",
+        "containerAppsDns",
+    ):
         assert re.search(
             rf"module {module_name} '\./modules/[^']+' = if \(workloadEnabled\) \{{",
             main,
         )
-    assert main.count("= if (workloadEnabled) {") == 5
+    assert main.count("= if (workloadEnabled) {") == 6
     assert "param cleanupLocation string = 'westus'" in cleanup
     assert "if (cleanupControlEnabled)" in cleanup
     assert "if (jobScheduleEnabled)" in cleanup
@@ -2161,6 +2168,60 @@ def test_container_apps_infrastructure_accepts_ancestor_source_only_without_inpu
         match="container-apps-infrastructure-group-drift",
     ):
         _verify_container_apps_infrastructure_fixture(monkeypatch, group_tags=prior_tags)
+
+
+def test_container_apps_private_dns_requires_exact_private_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subscription_id = "opaque-subscription"
+    domain = "synthetic.southcentralus.azurecontainerapps.io"
+    static_ip = "10.77.8.9"
+    expected_vnet = (
+        f"/subscriptions/{subscription_id}/resourceGroups/"
+        f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.Network/"
+        "virtualNetworks/vnet-mobius77-staging"
+    )
+    projections: dict[str, JsonValue] = {
+        "zone": {"name": domain},
+        "link": {"registration": False, "virtualNetwork": expected_vnet},
+        "record": {"records": [{"ipv4Address": static_ip}], "ttl": 60},
+    }
+
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_resource_projection",
+        lambda *_args, **_kwargs: {"domain": domain, "staticIp": static_ip},
+    )
+
+    def fake_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        if argv[1:5] == ("network", "private-dns", "zone", "show"):
+            return projections["zone"]
+        if argv[1:6] == ("network", "private-dns", "link", "vnet", "show"):
+            return projections["link"]
+        if argv[1:6] == ("network", "private-dns", "record-set", "a", "show"):
+            return projections["record"]
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", fake_run)
+    managed_binding_lifecycle._verify_container_apps_private_dns(subscription_id)
+
+    projections["record"] = {"records": [{"ipv4Address": "10.77.8.10"}], "ttl": 60}
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-container-apps-dns-drift",
+    ):
+        managed_binding_lifecycle._verify_container_apps_private_dns(subscription_id)
+
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_resource_projection",
+        lambda *_args, **_kwargs: {"domain": domain, "staticIp": "203.0.113.10"},
+    )
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-container-apps-dns-drift",
+    ):
+        managed_binding_lifecycle._verify_container_apps_private_dns(subscription_id)
 
 
 def test_lifecycle_compiler_uses_existing_azure_cli_bicep_cache(

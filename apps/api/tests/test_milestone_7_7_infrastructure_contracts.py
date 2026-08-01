@@ -242,7 +242,7 @@ def test_verified_environment_requires_exact_bounded_lease():
 
 def test_bicep_preserves_inert_defaults_and_gates_one_run_resources():
     bicep_files = sorted(ROOT.rglob("*.bicep"))
-    assert len(bicep_files) == 12
+    assert len(bicep_files) == 13
     combined = "\n".join(path.read_text(encoding="utf-8") for path in bicep_files)
     assert not re.search(r"\b(?:utcNow|newGuid|uniqueString)\s*\(", combined)
     assert not re.search(r"\b(?:subscription|resourceGroup)\s*\(\s*\)", combined)
@@ -268,6 +268,7 @@ def test_module_inventory_and_safe_outputs_are_exact():
     assert names == [
         "cleanup-supervisor.bicep",
         "compute.bicep",
+        "container-apps-dns.bicep",
         "identities.bicep",
         "key-vault.bicep",
         "network.bicep",
@@ -307,6 +308,15 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "sharedWorkerPool:",
             "cpuMilli: 500",
             "maxReplicas: 4",
+        ],
+        "container-apps-dns.bicep": [
+            "param defaultDomain string = ''",
+            "param staticIp string = ''",
+            "param virtualNetworkId string = ''",
+            "name: 'link-mobius77-containerapps'",
+            "registrationEnabled: false",
+            "name: '*'",
+            "TTL: 60",
         ],
         "network.bicep": [
             "param vnetCidr string = '10.77.0.0/20'",
