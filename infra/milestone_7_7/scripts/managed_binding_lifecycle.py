@@ -59,7 +59,7 @@ RUNBOOK: Final = "Remove-Mobius77Staging"
 SCHEDULE: Final = "schedule-mobius77-cleanup"
 STAGING_LOCATION: Final = "southcentralus"
 CLEANUP_LOCATION: Final = "westus"
-AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 2, 11, 0, tzinfo=UTC)
+AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 2, 23, 0, tzinfo=UTC)
 MAXIMUM_AUTHORIZED_WINDOW: Final = timedelta(hours=30)
 MINIMUM_CLEANUP_RESERVE: Final = timedelta(minutes=90)
 ABSOLUTE_COST_CEILING_USD_CENTS: Final = 10_000
