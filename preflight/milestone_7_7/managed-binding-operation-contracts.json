@@ -190,6 +190,23 @@
       ],
       "controlPlaneOnly": true
     },
+    "azure-acr-current-v1": {
+      "executable": "az",
+      "argumentVector": [
+        "acr",
+        "show",
+        "--name",
+        "acrmobius7711564669",
+        "--resource-group",
+        "rg-solarplexus-mobius-77-staging",
+        "--query",
+        "{name:name,resourceGroup:resourceGroup,location:location,sku:sku.name,adminUserEnabled:adminUserEnabled,anonymousPullEnabled:anonymousPullEnabled,dataEndpointEnabled:dataEndpointEnabled,networkRuleBypassOptions:networkRuleBypassOptions,publicNetworkAccess:publicNetworkAccess,zoneRedundancy:zoneRedundancy}",
+        "--output",
+        "json",
+        "--only-show-errors"
+      ],
+      "controlPlaneOnly": true
+    },
     "repository-managed-provider-binding-v1": {
       "executable": "{python}",
       "argumentVector": [
@@ -853,7 +870,8 @@
       "proofStatus": "unproved",
       "methodDefinitions": [
         "azure-provider-resource-metadata-v1",
-        "azure-acr-name-v1"
+        "azure-acr-name-v1",
+        "azure-acr-current-v1"
       ],
       "parserDefinition": "strict-name-availability-v1",
       "sanitizedInputs": [
@@ -873,6 +891,7 @@
       "evidenceProjection": [
         "acr-provider-supported",
         "literal-name-available",
+        "exact-current-registry-proved",
         "source-contract-complete"
       ],
       "idempotency": "read-only-repeatable",
@@ -995,5 +1014,5 @@
       "replayDecision": "deny"
     }
   ],
-  "contractIntegritySha256": "951b4b788446efd2d79fc87a5cee83327a009ae613f0e90b2dfca2181698b550"
+  "contractIntegritySha256": "7a292e372d3df43febc482bfac86be65e391c19aefcfc2a23bb289e002cca99c"
 }

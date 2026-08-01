@@ -443,6 +443,68 @@ class VnetIsolationAdapter:
         )
 
 
+class AcrSourceAdapter:
+    def __init__(
+        self,
+        *,
+        available: bool,
+        reason: str | None,
+        current: JsonValue = None,
+    ) -> None:
+        self.available = available
+        self.reason = reason
+        self.current = current
+        self.calls: list[tuple[str, ...]] = []
+
+    def run(
+        self,
+        argv: tuple[str, ...],
+        *,
+        environment: Mapping[str, str],
+        timeout_seconds: float,
+        maximum_output_bytes: int,
+    ) -> _ProcessCapture:
+        del environment, timeout_seconds, maximum_output_bytes
+        self.calls.append(argv)
+        if argv[1:3] == ("acr", "check-name"):
+            payload: JsonValue = {
+                "available": self.available,
+                "reason": self.reason,
+            }
+        else:
+            assert argv[1:3] == ("acr", "show")
+            assert argv[argv.index("--name") + 1] == "acrmobius7711564669"
+            assert argv[argv.index("--resource-group") + 1] == "rg-solarplexus-mobius-77-staging"
+            query = argv[argv.index("--query") + 1]
+            assert "id:" not in query
+            assert "loginServer:" not in query
+            payload = self.current
+        return _ProcessCapture(
+            exit_code=0,
+            timed_out=False,
+            oversized=False,
+            read_failed=False,
+            stdout=bytearray(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()),
+        )
+
+
+def _exact_current_acr(**overrides: JsonValue) -> dict[str, JsonValue]:
+    value: dict[str, JsonValue] = {
+        "name": "acrmobius7711564669",
+        "resourceGroup": "rg-solarplexus-mobius-77-staging",
+        "location": "southcentralus",
+        "sku": "Premium",
+        "adminUserEnabled": False,
+        "anonymousPullEnabled": False,
+        "dataEndpointEnabled": False,
+        "networkRuleBypassOptions": "None",
+        "publicNetworkAccess": "Disabled",
+        "zoneRedundancy": "Disabled",
+    }
+    value.update(overrides)
+    return value
+
+
 def _vnet_row(
     *,
     name: str = "vnet-mobius77-staging",
@@ -685,6 +747,121 @@ def test_vnet_isolation_rejects_malformed_or_duplicate_rows(
             adapter=VnetIsolationAdapter(payload),
             raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
         )
+
+
+def _run_acr_source(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter: AcrSourceAdapter,
+) -> tuple[str, str, dict[str, JsonValue]]:
+    monkeypatch.setattr(
+        managed_binding_execution,
+        "_provider_checks",
+        lambda *args, **kwargs: (
+            "proved",
+            "provider-prerequisites-proved",
+            {"required-resource-count": 1},
+        ),
+    )
+    return managed_binding_execution._acr_source(
+        adapter=adapter,
+        raw_subscription_id=SYNTHETIC_SUBSCRIPTION,
+    )
+
+
+def test_acr_source_accepts_an_available_initial_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = AcrSourceAdapter(available=True, reason=None)
+
+    result = _run_acr_source(monkeypatch, adapter)
+
+    assert result[0:2] == ("proved", "private-acr-source-proved")
+    assert result[2]["literal-name-available"] is True
+    assert result[2]["exact-current-registry-proved"] is False
+    assert len(adapter.calls) == 1
+
+
+def test_acr_source_accepts_only_the_exact_current_private_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = AcrSourceAdapter(
+        available=False,
+        reason="AlreadyExists",
+        current=_exact_current_acr(),
+    )
+
+    result = _run_acr_source(monkeypatch, adapter)
+
+    assert result[0:2] == ("proved", "private-acr-source-proved")
+    assert result[2]["literal-name-available"] is False
+    assert result[2]["exact-current-registry-proved"] is True
+    assert len(adapter.calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("name", "acrmobius77other"),
+        ("resourceGroup", "rg-solarplexus-mobius-77-other"),
+        ("location", "westus"),
+        ("sku", "Basic"),
+        ("adminUserEnabled", True),
+        ("anonymousPullEnabled", True),
+        ("dataEndpointEnabled", True),
+        ("networkRuleBypassOptions", "AzureServices"),
+        ("publicNetworkAccess", "Enabled"),
+        ("zoneRedundancy", "Enabled"),
+    ],
+)
+def test_acr_source_rejects_any_current_registry_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: JsonValue,
+) -> None:
+    adapter = AcrSourceAdapter(
+        available=False,
+        reason="AlreadyExists",
+        current=_exact_current_acr(**{field: value}),
+    )
+
+    result = _run_acr_source(monkeypatch, adapter)
+
+    assert result[0:2] == ("blocked", "private-acr-source-unresolved")
+    assert result[2]["exact-current-registry-proved"] is False
+
+
+def test_acr_source_does_not_reconcile_an_unrelated_unavailable_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = AcrSourceAdapter(
+        available=False,
+        reason="Invalid",
+        current=_exact_current_acr(),
+    )
+
+    result = _run_acr_source(monkeypatch, adapter)
+
+    assert result[0:2] == ("blocked", "private-acr-source-unresolved")
+    assert result[2]["exact-current-registry-proved"] is False
+    assert len(adapter.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "current",
+    [None, {}, {**_exact_current_acr(), "unexpected": True}],
+)
+def test_acr_source_rejects_malformed_current_registry_output(
+    monkeypatch: pytest.MonkeyPatch,
+    current: JsonValue,
+) -> None:
+    adapter = AcrSourceAdapter(
+        available=False,
+        reason="AlreadyExists",
+        current=current,
+    )
+
+    with pytest.raises(ManagedBindingExecutionError, match="acr-current-output-malformed"):
+        _run_acr_source(monkeypatch, adapter)
 
 
 def test_exact_automation_job_schedules_parent_fallback_succeeds(
