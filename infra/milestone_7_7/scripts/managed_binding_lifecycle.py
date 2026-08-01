@@ -3092,7 +3092,40 @@ def _private_revision_ready(subscription_id: str) -> None:
             and latest
             and ready == latest
         ):
-            return
+            revision = _run(
+                (
+                    "az",
+                    "containerapp",
+                    "revision",
+                    "show",
+                    "--resource-group",
+                    TARGET_GROUP,
+                    "--name",
+                    "ca-mobius77-api",
+                    "--revision",
+                    latest,
+                    "--subscription",
+                    subscription_id,
+                    "--query",
+                    "{health:properties.healthState,provisioning:properties.provisioningState,running:properties.runningState}",
+                    "--output",
+                    "json",
+                    "--only-show-errors",
+                ),
+                require_json=True,
+            )
+            if revision == {
+                "health": "Healthy",
+                "provisioning": "Provisioned",
+                "running": "Running",
+            }:
+                return
+            if isinstance(revision, dict) and (
+                revision.get("health") == "Unhealthy"
+                or revision.get("provisioning") in {"Canceled", "Failed"}
+                or revision.get("running") in {"ActivationFailed", "Degraded", "Failed"}
+            ):
+                _fail("container-app-revision-failed")
         if state in {"Canceled", "Failed"}:
             _fail("container-app-revision-failed")
         time.sleep(5.0)

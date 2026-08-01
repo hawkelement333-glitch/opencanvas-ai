@@ -2329,6 +2329,42 @@ def test_container_apps_private_dns_requires_exact_private_mapping(
         managed_binding_lifecycle._verify_container_apps_private_dns(subscription_id)
 
 
+def test_private_revision_ready_requires_healthy_running_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = {
+        "latest": "ca-mobius77-api--synthetic",
+        "ready": "ca-mobius77-api--synthetic",
+        "state": "Succeeded",
+    }
+    revision: JsonValue = {
+        "health": "Healthy",
+        "provisioning": "Provisioned",
+        "running": "Running",
+    }
+
+    def fake_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        if argv[1:3] == ("resource", "show"):
+            return app
+        if argv[1:4] == ("containerapp", "revision", "show"):
+            return revision
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", fake_run)
+    managed_binding_lifecycle._private_revision_ready("opaque-subscription")
+
+    revision = {
+        "health": "Unhealthy",
+        "provisioning": "Provisioned",
+        "running": "ActivationFailed",
+    }
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="container-app-revision-failed",
+    ):
+        managed_binding_lifecycle._private_revision_ready("opaque-subscription")
+
+
 def test_lifecycle_compiler_uses_existing_azure_cli_bicep_cache(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
