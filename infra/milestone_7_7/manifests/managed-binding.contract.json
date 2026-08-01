@@ -3,7 +3,7 @@
   "contractVersion": "m7.7-managed-binding-v1",
   "authorizationSourceHead": "11564669bd5b40a88fdbf434c8137b063305eb4b",
   "location": "southcentralus",
-  "cleanupLocation": "eastus",
+  "cleanupLocation": "westus",
   "accountBinding": {
     "cloud": "AzureCloud",
     "subscriptionFingerprint": "f4493115ce6375cf0e5d0616bede57126075fdb27ac78ea0ba7e0085252a7028",

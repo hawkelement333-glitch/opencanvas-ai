@@ -61,9 +61,9 @@ param leaseBindingResolved bool = false
 param cleanupTimerBindingResolved bool = false
 
 @allowed([
-  'eastus'
+  'westus'
 ])
-param cleanupLocation string = 'eastus'
+param cleanupLocation string = 'westus'
 
 @allowed([
   'rg-solarplexus-mobius-77-staging'

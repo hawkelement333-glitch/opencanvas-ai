@@ -5,7 +5,7 @@
   "integrityDomain": "solarplexus-mobius/milestone-7.7/managed-binding-operation-overlay/v1",
   "authorizationSourceHead": "11564669bd5b40a88fdbf434c8137b063305eb4b",
   "historicalMatrixIntegritySha256": "100293931dcc71bb069e4f6fe06228360e0953b3b756544a555941d81bf8d6bc",
-  "managedBindingIntegritySha256": "3e9e14e57f00345166f2014759f74d27a1cd557d3a38e418a78d9aa1b07ab554",
+  "managedBindingIntegritySha256": "01606c1a83b7e2eebc5e17bb0c5d400cfa017538c5cd63398127cf1eec32c475",
   "defaultAuthority": {
     "executionAuthorized": false,
     "mutationAuthorized": false,
@@ -435,7 +435,7 @@
       "parserDefinition": "strict-provider-metadata-v1",
       "sanitizedInputs": [
         "southcentralus",
-        "eastus-cleanup-automation-only",
+        "westus-cleanup-automation-only",
         "closed-provider-resource-registry"
       ],
       "expectedScopes": ["matched-subscription-control-plane"],
@@ -500,7 +500,7 @@
       "parserDefinition": "strict-provider-metadata-v1",
       "sanitizedInputs": [
         "southcentralus",
-        "eastus-cleanup-automation-only",
+        "westus-cleanup-automation-only",
         "fixed-sku-registry"
       ],
       "expectedScopes": ["matched-subscription-control-plane"],
@@ -994,5 +994,5 @@
       "replayDecision": "deny"
     }
   ],
-  "contractIntegritySha256": "6bdcdb002fdbb85febc889d8dd54346e58e374eb893448e03ef9e92b8cd3a19d"
+  "contractIntegritySha256": "21f45eac1e93eedfba09990c3954f286522f9f6632e886f39af9609884925bea"
 }

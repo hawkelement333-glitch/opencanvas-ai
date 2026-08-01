@@ -72,7 +72,7 @@ def test_managed_binding_contract_is_exact_integrity_bound_and_default_deny() ->
     for operation_id in ("regional-service-availability", "regional-sku-capabilities"):
         assert operations[operation_id]["sanitizedInputs"][:2] == [
             "southcentralus",
-            "eastus-cleanup-automation-only",
+            "westus-cleanup-automation-only",
         ]
     assert operation_authorization_decision(OPERATION_IDS[0]) == {
         "operationId": OPERATION_IDS[0],
@@ -93,7 +93,7 @@ def test_exact_names_scopes_secrets_runtime_and_private_source_are_closed() -> N
         "target": "rg-solarplexus-mobius-77-staging",
     }
     assert contract["location"] == "southcentralus"
-    assert contract["cleanupLocation"] == "eastus"
+    assert contract["cleanupLocation"] == "westus"
     assert contract["resources"]["keyVault"] == "kv-mobius77-11564669"
     assert contract["network"]["vnetCidr"] == "10.77.0.0/20"
     assert contract["network"]["privateEndpointsCidr"] == "10.77.2.0/24"
@@ -134,7 +134,7 @@ def test_contract_tampering_fails_closed() -> None:
         validate_operation_overlay(overlay)
 
 
-@pytest.mark.parametrize("cleanup_location", [None, "", "southcentralus", "westus"])
+@pytest.mark.parametrize("cleanup_location", [None, "", "southcentralus", "eastus"])
 def test_cleanup_location_missing_or_outside_exact_allowlist_fails_closed(
     cleanup_location: str | None,
 ) -> None:
@@ -253,7 +253,7 @@ class ManagedBindingFakeAdapter:
                 "resourceType": resource_type,
                 "apiVersions": [self.versions[key]],
                 "locations": [
-                    "East US" if namespace == "Microsoft.Automation" else "South Central US"
+                    "West US" if namespace == "Microsoft.Automation" else "South Central US"
                 ],
             }
         else:
@@ -275,7 +275,7 @@ def _automation_metadata_row(
 ) -> dict[str, JsonValue]:
     if locations is None:
         locations = (
-            ("East US",)
+            ("West US",)
             if "automationaccounts" in resource_type.casefold()
             else ("South Central US",)
         )
@@ -575,7 +575,7 @@ def test_automation_cleanup_region_is_exact_and_staging_region_is_rejected(
         ),
         (
             "Registered",
-            [_automation_metadata_row("automationAccounts", locations=("West US",))],
+            [_automation_metadata_row("automationAccounts", locations=("East US",))],
             "approved-region-unavailable",
         ),
     ],
@@ -1047,7 +1047,7 @@ def test_lifecycle_uses_supported_bicep_positional_input_contract() -> None:
 def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> None:
     text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
     assert 'STAGING_LOCATION: Final = "southcentralus"' in text
-    assert 'CLEANUP_LOCATION: Final = "eastus"' in text
+    assert 'CLEANUP_LOCATION: Final = "westus"' in text
     assert 'f"location={STAGING_LOCATION}"' in text
     assert 'f"cleanupLocation={CLEANUP_LOCATION}"' in text
     assert '"state": "Ok"' in text
@@ -1070,21 +1070,21 @@ def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> No
     )
 
 
-def test_only_cleanup_automation_module_allows_east_us() -> None:
+def test_only_cleanup_automation_module_allows_west_us() -> None:
     main = (INFRASTRUCTURE_ROOT / "main.bicep").read_text(encoding="utf-8")
     cleanup = (INFRASTRUCTURE_ROOT / "modules" / "cleanup-supervisor.bicep").read_text(
         encoding="utf-8"
     )
     assert "param location string = 'southcentralus'" in main
-    assert "param cleanupLocation string = 'eastus'" in main
+    assert "param cleanupLocation string = 'westus'" in main
     assert "var cleanupBindingEnabled" in main
     assert "var workloadEnabled" in main
     assert "module identities './modules/identities.bicep' = if (targetEnabled)" in main
     assert "workloadIdentityDeploymentEnabled: workloadEnabled" in main
-    identities = (INFRASTRUCTURE_ROOT / "modules" / "identities.bicep").read_text(
-        encoding="utf-8"
+    identities = (INFRASTRUCTURE_ROOT / "modules" / "identities.bicep").read_text(encoding="utf-8")
+    assert (
+        "var workloadIdentityEnabled = enabled && workloadIdentityDeploymentEnabled" in identities
     )
-    assert "var workloadIdentityEnabled = enabled && workloadIdentityDeploymentEnabled" in identities
     assert "if (workloadIdentityEnabled)" in identities
     for module_name in ("network", "observability", "registry", "keyVault", "compute"):
         assert re.search(
@@ -1092,10 +1092,10 @@ def test_only_cleanup_automation_module_allows_east_us() -> None:
             main,
         )
     assert main.count("= if (workloadEnabled) {") == 5
-    assert "param cleanupLocation string = 'eastus'" in cleanup
+    assert "param cleanupLocation string = 'westus'" in cleanup
     for path in (INFRASTRUCTURE_ROOT / "modules").glob("*.bicep"):
         if path.name != "cleanup-supervisor.bicep":
-            assert "eastus" not in path.read_text(encoding="utf-8")
+            assert "westus" not in path.read_text(encoding="utf-8")
 
 
 def test_lifecycle_method_definitions_use_repository_module_import() -> None:

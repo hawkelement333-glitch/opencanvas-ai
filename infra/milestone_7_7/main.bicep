@@ -37,9 +37,9 @@ param location string = 'southcentralus'
 
 @description('The cleanup-control Automation account is the sole split-region exception.')
 @allowed([
-  'eastus'
+  'westus'
 ])
-param cleanupLocation string = 'eastus'
+param cleanupLocation string = 'westus'
 
 @minLength(0)
 @maxLength(64)

@@ -55,7 +55,7 @@ PACKAGE_RESULT_VERSION: Final = (
 PROVIDER_METHOD = "azure-provider-resource-metadata-v1"
 PROVIDER_TYPE_INVENTORY_METHOD = "azure-provider-resource-type-inventory-v1"
 STAGING_REGION = "southcentralus"
-CLEANUP_REGION = "eastus"
+CLEANUP_REGION = "westus"
 METHOD_PLACEHOLDER: Final = re.compile(r"\{[A-Za-z][A-Za-z0-9]*\}")
 USAGE_DECIMAL_INTEGER: Final = re.compile(r"(?:0|[1-9][0-9]{0,19})")
 
