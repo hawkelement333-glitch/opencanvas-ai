@@ -2014,6 +2014,7 @@ def _verify_container_apps_infrastructure_fixture(
     environment: JsonValue = None,
     resources: JsonValue = None,
     assignments: JsonValue = None,
+    changed_inputs: str = "",
 ) -> int:
     subscription = SYNTHETIC_SUBSCRIPTION
     expected_tags = _test_recovered_cleanup_tags()
@@ -2050,6 +2051,8 @@ def _verify_container_apps_infrastructure_fixture(
         assignments = []
 
     def fake_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        if argv[0:3] == ("git", "merge-base", "--is-ancestor"):
+            return None
         if argv[1:3] == ("group", "show"):
             return {
                 "id": group_scope.replace(
@@ -2065,6 +2068,7 @@ def _verify_container_apps_infrastructure_fixture(
         raise AssertionError(argv)
 
     monkeypatch.setattr(managed_binding_lifecycle, "_run", fake_run)
+    monkeypatch.setattr(managed_binding_lifecycle, "_run_text", lambda _argv: changed_inputs)
     monkeypatch.setattr(
         managed_binding_lifecycle,
         "_verify_resource_projection",
@@ -2120,6 +2124,38 @@ def test_container_apps_infrastructure_accepts_only_prior_ledger_hash(
 
     prior_tags["aca-managed-env-id"] = expected_environment_id
     prior_tags["mobius-expires-at-utc"] = "08/03/2026 07:00:00"
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="container-apps-infrastructure-group-drift",
+    ):
+        _verify_container_apps_infrastructure_fixture(monkeypatch, group_tags=prior_tags)
+
+
+def test_container_apps_infrastructure_accepts_ancestor_source_only_without_input_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prior_tags = _test_recovered_cleanup_tags()
+    prior_tags["mobius-source-commit"] = "d" * 40
+    prior_tags["mobius-expires-at-utc"] = "08/02/2026 07:00:00"
+    prior_tags["aca-managed-env-id"] = (
+        f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}/resourceGroups/"
+        f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
+        "managedEnvironments/cae-mobius77-staging"
+    )
+
+    assert _verify_container_apps_infrastructure_fixture(monkeypatch, group_tags=prior_tags) == 1
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="container-apps-infrastructure-group-drift",
+    ):
+        _verify_container_apps_infrastructure_fixture(
+            monkeypatch,
+            group_tags=prior_tags,
+            changed_inputs="infra/milestone_7_7/main.bicep",
+        )
+
+    prior_tags["mobius-source-commit"] = "not-a-commit"
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
         match="container-apps-infrastructure-group-drift",

@@ -92,6 +92,12 @@ API_IMAGE_BUILD_INPUTS: Final = (
     "NOTICE",
     "THIRD_PARTY_NOTICES.md",
 )
+CONTAINER_APPS_INFRASTRUCTURE_INPUTS: Final = (
+    "infra/milestone_7_7/main.bicep",
+    "infra/milestone_7_7/manifests",
+    "infra/milestone_7_7/modules",
+    "infra/milestone_7_7/policies",
+)
 LIFECYCLE_OPERATIONS: Final = (
     "pre-secret-provisioning",
     "private-path-verification",
@@ -631,10 +637,45 @@ def _matches_container_apps_infrastructure_tags(
             return False
         if normalized_expiry != cleanup_at.astimezone(UTC).replace(microsecond=0):
             return False
+    source_key = "mobius-source-commit"
+    observed_source = observed.get(source_key)
+    expected_source = expected.get(source_key)
+    if observed_source != expected_source:
+        if (
+            not isinstance(observed_source, str)
+            or HEX_SHA40.fullmatch(observed_source) is None
+            or not isinstance(expected_source, str)
+            or HEX_SHA40.fullmatch(expected_source) is None
+        ):
+            return False
+        try:
+            _run(
+                (
+                    "git",
+                    "merge-base",
+                    "--is-ancestor",
+                    observed_source,
+                    expected_source,
+                )
+            )
+            changed_inputs = _run_text(
+                (
+                    "git",
+                    "diff",
+                    "--name-only",
+                    f"{observed_source}..{expected_source}",
+                    "--",
+                    *CONTAINER_APPS_INFRASTRUCTURE_INPUTS,
+                )
+            )
+        except LifecycleError:
+            return False
+        if changed_inputs:
+            return False
     return all(
         observed.get(key) == value
         for key, value in expected.items()
-        if key not in {binding_key, expiry_key}
+        if key not in {binding_key, expiry_key, source_key}
     )
 
 
