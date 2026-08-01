@@ -309,7 +309,6 @@ def _compile_template(output_path: Path) -> None:
         (
             "bicep",
             "build",
-            "--file",
             str(MAIN_TEMPLATE),
             "--outfile",
             str(output_path),
@@ -361,7 +360,9 @@ def _deploy_stage(
         f"maximumPlausibleUsdCents={maximum_cost}",
         "lifecycleTags="
         + json.dumps(
-            _lifecycle_tags(ledger=ledger, cleanup_at=cleanup_at, maximum_cost=maximum_cost),
+            _lifecycle_tags(
+                ledger=ledger, cleanup_at=cleanup_at, maximum_cost=maximum_cost
+            ),
             separators=(",", ":"),
             sort_keys=True,
         ),
@@ -444,7 +445,10 @@ def _signed_in_user_object_id() -> str:
     if not isinstance(value, dict) or set(value) != {"objectId"}:
         _fail("signed-in-user-output-malformed")
     object_id = value["objectId"]
-    if not isinstance(object_id, str) or re.fullmatch(r"[0-9a-fA-F-]{36}", object_id) is None:
+    if (
+        not isinstance(object_id, str)
+        or re.fullmatch(r"[0-9a-fA-F-]{36}", object_id) is None
+    ):
         _fail("signed-in-user-output-malformed")
     return object_id
 
@@ -505,7 +509,9 @@ def _temporary_role_assignment(
     if not isinstance(created, dict) or set(created) != {"id"}:
         _fail("temporary-role-assignment-output-malformed")
     assignment_id = created["id"]
-    if not isinstance(assignment_id, str) or not assignment_id.startswith("/subscriptions/"):
+    if not isinstance(assignment_id, str) or not assignment_id.startswith(
+        "/subscriptions/"
+    ):
         _fail("temporary-role-assignment-output-malformed")
     return assignment_id
 
@@ -655,7 +661,9 @@ def _private_tls_endpoint(hostname: str) -> None:
         )
     except socket.gaierror:
         _fail("private-endpoint-dns-unavailable")
-    addresses = {str(item[4][0]) for item in resolved if isinstance(item[4], tuple) and item[4]}
+    addresses = {
+        str(item[4][0]) for item in resolved if isinstance(item[4], tuple) and item[4]
+    }
     if not addresses:
         _fail("private-endpoint-dns-unavailable")
     try:
@@ -845,7 +853,9 @@ def _publish_api_image(
         )
         state["temporaryRegistryAssignmentId"] = assignment_id
         _replace_state(state_path, state)
-        with tempfile.TemporaryDirectory(prefix="mobius77-docker-auth-") as docker_directory:
+        with tempfile.TemporaryDirectory(
+            prefix="mobius77-docker-auth-"
+        ) as docker_directory:
             docker_config = Path(docker_directory).resolve()
             _outside_repository(docker_config, "docker-config")
             os.chmod(docker_config, 0o700)
@@ -910,7 +920,9 @@ def _publish_api_image(
                     require_json=True,
                     environment_overrides=docker_environment,
                 )
-                if not isinstance(digest_projection, dict) or set(digest_projection) != {"digest"}:
+                if not isinstance(digest_projection, dict) or set(
+                    digest_projection
+                ) != {"digest"}:
                     _fail("registry-digest-output-malformed")
                 raw_digest = digest_projection["digest"]
                 if (
@@ -1007,7 +1019,12 @@ def _private_revision_ready(subscription_id: str) -> None:
         latest = value["latest"]
         ready = value["ready"]
         state = value["state"]
-        if state == "Succeeded" and isinstance(latest, str) and latest and ready == latest:
+        if (
+            state == "Succeeded"
+            and isinstance(latest, str)
+            and latest
+            and ready == latest
+        ):
             return
         if state in {"Canceled", "Failed"}:
             _fail("container-app-revision-failed")
@@ -1025,7 +1042,9 @@ def _post_secret(
     cleanup_at_raw = state.get("cleanupAtUtc")
     if not isinstance(cleanup_at_raw, str):
         _fail("cleanup-binding-missing")
-    cleanup_at = datetime.strptime(cleanup_at_raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    cleanup_at = datetime.strptime(cleanup_at_raw, "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=UTC
+    )
     if _utc_now() >= cleanup_at - timedelta(minutes=90):
         _fail("cleanup-reserve-active")
     for secret_name in (
@@ -1308,7 +1327,9 @@ def main() -> int:
     try:
         if HEX_SHA40.fullmatch(args.repository_head) is None:
             _fail("repository-head-invalid")
-        receipt_directory = _outside_repository(args.receipt_directory, "receipt-directory")
+        receipt_directory = _outside_repository(
+            args.receipt_directory, "receipt-directory"
+        )
         receipt_directory.mkdir(parents=True, exist_ok=True)
         ledger = validate_authorization_ledger(
             load_json(_outside_repository(args.ledger, "ledger")),

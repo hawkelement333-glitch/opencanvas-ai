@@ -166,17 +166,17 @@ resource apiContainerApp 'Microsoft.App/containerApps@2026-01-01' = if (appEnabl
       secrets: [
         {
           identity: workloadIdentityId
-          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/openai-api-key'
+          keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/openai-api-key'
           name: 'openai-api-key'
         }
         {
           identity: workloadIdentityId
-          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/opencanvas-smtp-username'
+          keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/opencanvas-smtp-username'
           name: 'opencanvas-smtp-username'
         }
         {
           identity: workloadIdentityId
-          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/opencanvas-smtp-password'
+          keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/opencanvas-smtp-password'
           name: 'opencanvas-smtp-password'
         }
       ]

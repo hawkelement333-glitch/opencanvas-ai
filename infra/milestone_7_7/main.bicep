@@ -117,16 +117,6 @@ resource existingCleanupAutomation 'Microsoft.Automation/automationAccounts@2024
   scope: existingCleanupResourceGroup
 }
 
-resource cleanupTargetContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (targetEnabled) {
-  name: guid(targetResourceGroup.id, existingCleanupAutomation.id, 'b24988ac-6180-42a0-ab88-20f7382dd24c')
-  scope: targetResourceGroup
-  properties: {
-    principalId: existingCleanupAutomation.identity.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')
-  }
-}
-
 module cleanupSupervisor './modules/cleanup-supervisor.bicep' = if (cleanupEnabled) {
   name: 'mobius77-cleanup-control'
   scope: cleanupResourceGroup
@@ -166,6 +156,8 @@ module identities './modules/identities.bicep' = if (targetEnabled) {
     managedBindingMode: managedBindingMode
     managedBindingDeploymentEnabled: true
     location: location
+    targetResourceGroupId: targetResourceGroup.id
+    cleanupAutomationPrincipalId: existingCleanupAutomation.identity.principalId
     lifecycleTags: lifecycleTags
   }
 }

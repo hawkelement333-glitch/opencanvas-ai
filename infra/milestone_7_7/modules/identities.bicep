@@ -35,12 +35,28 @@ param location string = 'southcentralus'
 
 param lifecycleTags object = {}
 
+param targetResourceGroupId string
+
+param cleanupAutomationPrincipalId string
+
 var enabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled
 
 resource workloadIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = if (enabled) {
   name: 'id-mobius77-api'
   location: location
   tags: lifecycleTags
+}
+
+resource cleanupTargetContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enabled) {
+  name: guid(targetResourceGroupId, cleanupAutomationPrincipalId, 'b24988ac-6180-42a0-ab88-20f7382dd24c')
+  properties: {
+    principalId: cleanupAutomationPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      'b24988ac-6180-42a0-ab88-20f7382dd24c'
+    )
+  }
 }
 
 output moduleName string = 'identities'

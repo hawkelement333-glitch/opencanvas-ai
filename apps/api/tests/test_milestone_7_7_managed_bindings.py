@@ -982,3 +982,12 @@ def test_lifecycle_is_closed_private_digest_bound_and_secret_value_blind() -> No
     assert "OPENCANVAS_OPENAI_API_KEY" not in compute
     assert "external: false" in compute
     assert "keyVaultUrl:" in compute
+
+
+def test_lifecycle_uses_supported_bicep_positional_input_contract() -> None:
+    text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
+    compile_template = text.split("def _compile_template", 1)[1].split("def _lifecycle_tags", 1)[0]
+
+    assert '"bicep",\n            "build",\n            str(MAIN_TEMPLATE),' in compile_template
+    assert '"--file",' not in compile_template
+    assert '"--outfile",\n            str(output_path),' in compile_template

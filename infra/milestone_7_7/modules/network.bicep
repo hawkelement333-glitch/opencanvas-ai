@@ -286,7 +286,7 @@ resource vpnGateway 'Microsoft.Network/virtualNetworkGateways@2026-01-01' = if (
     vpnClientConfiguration: {
       aadAudience: 'c632b3df-fb67-4d84-bdcf-b95ad541b5c8'
       aadIssuer: 'https://sts.windows.net/${tenant().tenantId}/'
-      aadTenant: 'https://login.microsoftonline.com/${tenant().tenantId}/'
+      aadTenant: '${environment().authentication.loginEndpoint}${tenant().tenantId}/'
       vpnAuthenticationTypes: [
         'AAD'
       ]
@@ -314,8 +314,12 @@ output generalInternetEgressEnabled bool = generalInternetEgressEnabled
 output managedBindingMode string = managedBindingMode
 output managedBindingDeploymentEnabled bool = enabled
 output virtualNetworkId string = enabled ? virtualNetwork.id : ''
-output containerAppsSubnetId string = enabled ? resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, containerAppsSubnetName) : ''
-output privateEndpointSubnetId string = enabled ? resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, privateEndpointSubnetName) : ''
+output containerAppsSubnetId string = enabled
+  ? resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, containerAppsSubnetName)
+  : ''
+output privateEndpointSubnetId string = enabled
+  ? resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, privateEndpointSubnetName)
+  : ''
 output keyVaultPrivateDnsZoneId string = enabled ? keyVaultPrivateDnsZone.id : ''
 output registryPrivateDnsZoneId string = enabled ? registryPrivateDnsZone.id : ''
 output privateDnsResolverAddress string = enabled ? dnsResolverInboundAddress : ''

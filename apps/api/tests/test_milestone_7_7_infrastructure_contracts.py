@@ -913,7 +913,6 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
     arm = re.compile(r"(?i)/subscriptions/[0-9a-f-]{36}/")
     user_path = re.compile(r"(?i)(?:[A-Z]:\\U" r"sers\\|/U" r"sers/|/ho" r"me/)")
     public_guids = {
-        "main.bicep": {"b24988ac-6180-42a0-ab88-20f7382dd24c"},
         "manifests/managed-binding.contract.json": {
             "4633458b-17de-408a-b874-0445c86b69e6",
             "7f951dda-4ed3-4680-a7ca-43fe172d538d",
@@ -922,6 +921,7 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
             "b86a8fe4-44ce-4948-aee5-eccb2c155cd7",
             "c632b3df-fb67-4d84-bdcf-b95ad541b5c8",
         },
+        "modules/identities.bicep": {"b24988ac-6180-42a0-ab88-20f7382dd24c"},
         "modules/key-vault.bicep": {"4633458b-17de-408a-b874-0445c86b69e6"},
         "modules/network.bicep": {"c632b3df-fb67-4d84-bdcf-b95ad541b5c8"},
         "modules/registry.bicep": {"7f951dda-4ed3-4680-a7ca-43fe172d538d"},
