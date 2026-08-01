@@ -1242,12 +1242,86 @@ def test_cleanup_job_schedule_verification_fails_closed_on_drift(
         raise AssertionError(argv)
 
     monkeypatch.setattr(managed_binding_lifecycle, "_run", drift_run)
+    if drift == "missing":
+        moments = iter((0.0, 121.0))
+        monkeypatch.setattr(managed_binding_lifecycle.time, "monotonic", lambda: next(moments))
+        monkeypatch.setattr(managed_binding_lifecycle.time, "sleep", lambda _delay: None)
 
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
-        match="cleanup-job-schedule-not-ready",
+        match=(
+            "cleanup-job-schedule-propagation-timeout"
+            if drift == "missing"
+            else "cleanup-job-schedule-not-ready"
+        ),
     ):
         managed_binding_lifecycle._verify_cleanup_job_schedule(subscription_id)
+
+
+def test_cleanup_job_schedule_verification_retries_exact_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subscription_id = "opaque-subscription"
+    job_schedule_id = (
+        "/subscriptions/opaque-subscription/resourceGroups/"
+        "rg-solarplexus-mobius-77-cleanup-control/providers/"
+        "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
+        "jobSchedules/00000000-0000-0000-0000-000000000001"
+    )
+    list_attempts = 0
+    show_attempts = 0
+    sleeps: list[float] = []
+
+    def eventual_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        nonlocal list_attempts, show_attempts
+        if argv[1:5] == ("deployment", "operation", "group", "list"):
+            list_attempts += 1
+            if list_attempts == 1:
+                raise managed_binding_lifecycle.AzureCommandError("notfound")
+            return [
+                {
+                    "id": job_schedule_id,
+                    "type": "Microsoft.Automation/automationAccounts/jobSchedules",
+                }
+            ]
+        if argv[1:3] == ("resource", "show"):
+            show_attempts += 1
+            if show_attempts == 1:
+                raise managed_binding_lifecycle.AzureCommandError("resource-not-found")
+            return {
+                "id": job_schedule_id,
+                "runbook": "Remove-Mobius77Staging",
+                "schedule": "schedule-mobius77-cleanup",
+                "target": "rg-solarplexus-mobius-77-staging",
+            }
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", eventual_run)
+    monkeypatch.setattr(managed_binding_lifecycle.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(managed_binding_lifecycle.time, "sleep", lambda delay: sleeps.append(delay))
+
+    managed_binding_lifecycle._verify_cleanup_job_schedule(subscription_id)
+
+    assert list_attempts == 3
+    assert show_attempts == 2
+    assert sleeps == [5.0, 5.0]
+
+
+def test_cleanup_job_schedule_verification_rejects_nontransient_azure_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def denied_run(_argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        raise managed_binding_lifecycle.AzureCommandError("authorizationfailed")
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", denied_run)
+
+    with pytest.raises(
+        managed_binding_lifecycle.AzureCommandError,
+        match="lifecycle-command-nonzero",
+    ) as error:
+        managed_binding_lifecycle._verify_cleanup_job_schedule("opaque-subscription")
+
+    assert error.value.sanitized_azure_error_code == "authorizationfailed"
 
 
 def test_only_cleanup_automation_module_allows_west_us() -> None:

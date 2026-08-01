@@ -64,6 +64,8 @@ ABSOLUTE_COST_CEILING_USD_CENTS: Final = 10_000
 MAXIMUM_OUTPUT_BYTES: Final = 65_536
 DEPLOYMENT_TIMEOUT_SECONDS: Final = 1_800
 OPERATION_TIMEOUT_SECONDS: Final = 120
+CLEANUP_JOB_SCHEDULE_PROPAGATION_SECONDS: Final = 120
+CLEANUP_JOB_SCHEDULE_RETRY_SECONDS: Final = 5.0
 HEX_SHA40: Final = re.compile(r"^[0-9a-f]{40}$")
 HEX_SHA256: Final = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_DIGEST: Final = re.compile(
@@ -659,91 +661,123 @@ def _configure_cleanup_runbook(subscription_id: str) -> None:
 
 
 def _verify_cleanup_job_schedule(subscription_id: str) -> None:
-    rows = _run(
-        (
-            "az",
-            "deployment",
-            "operation",
-            "group",
-            "list",
-            "--resource-group",
-            CLEANUP_GROUP,
-            "--name",
-            CLEANUP_JOB_BINDING_DEPLOYMENT,
-            "--subscription",
+    deadline = time.monotonic() + CLEANUP_JOB_SCHEDULE_PROPAGATION_SECONDS
+    while True:
+        try:
+            rows = _run(
+                (
+                    "az",
+                    "deployment",
+                    "operation",
+                    "group",
+                    "list",
+                    "--resource-group",
+                    CLEANUP_GROUP,
+                    "--name",
+                    CLEANUP_JOB_BINDING_DEPLOYMENT,
+                    "--subscription",
+                    subscription_id,
+                    "--query",
+                    (
+                        "[?properties.targetResource.resourceType != null]."
+                        "{id:properties.targetResource.id,"
+                        "type:properties.targetResource.resourceType}"
+                    ),
+                    "--output",
+                    "json",
+                    "--only-show-errors",
+                ),
+                require_json=True,
+            )
+        except AzureCommandError as exc:
+            if exc.sanitized_azure_error_code not in {
+                "notfound",
+                "resource-not-found",
+            }:
+                raise
+            if time.monotonic() >= deadline:
+                _fail("cleanup-job-schedule-propagation-timeout")
+            time.sleep(CLEANUP_JOB_SCHEDULE_RETRY_SECONDS)
+            continue
+        if not isinstance(rows, list):
+            _fail("cleanup-job-schedule-output-malformed")
+        job_schedule_ids: list[str] = []
+        for row in rows:
+            if not isinstance(row, dict) or set(row) != {"id", "type"}:
+                _fail("cleanup-job-schedule-output-malformed")
+            resource_id = row["id"]
+            resource_type = row["type"]
+            if not isinstance(resource_id, str) or not isinstance(resource_type, str):
+                _fail("cleanup-job-schedule-output-malformed")
+            if (
+                resource_type.casefold()
+                == "microsoft.automation/automationaccounts/jobschedules"
+            ):
+                job_schedule_ids.append(resource_id)
+        if not job_schedule_ids:
+            if time.monotonic() >= deadline:
+                _fail("cleanup-job-schedule-propagation-timeout")
+            time.sleep(CLEANUP_JOB_SCHEDULE_RETRY_SECONDS)
+            continue
+        if len(job_schedule_ids) != 1:
+            _fail("cleanup-job-schedule-not-ready")
+        job_schedule_id = job_schedule_ids[0]
+        expected_prefix = _scope(
             subscription_id,
-            "--query",
-            (
-                "[?properties.targetResource.resourceType != null]."
-                "{id:properties.targetResource.id,"
-                "type:properties.targetResource.resourceType}"
-            ),
-            "--output",
-            "json",
-            "--only-show-errors",
-        ),
-        require_json=True,
-    )
-    if not isinstance(rows, list):
-        _fail("cleanup-job-schedule-output-malformed")
-    job_schedule_ids: list[str] = []
-    for row in rows:
-        if not isinstance(row, dict) or set(row) != {"id", "type"}:
-            _fail("cleanup-job-schedule-output-malformed")
-        resource_id = row["id"]
-        resource_type = row["type"]
-        if not isinstance(resource_id, str) or not isinstance(resource_type, str):
-            _fail("cleanup-job-schedule-output-malformed")
+            f"/resourceGroups/{CLEANUP_GROUP}/providers/"
+            f"Microsoft.Automation/automationAccounts/{AUTOMATION_ACCOUNT}/"
+            "jobSchedules/",
+        )
         if (
-            resource_type.casefold()
-            == "microsoft.automation/automationaccounts/jobschedules"
+            not job_schedule_id.casefold().startswith(expected_prefix.casefold())
+            or re.fullmatch(
+                r"[0-9a-fA-F-]{36}", job_schedule_id[len(expected_prefix) :]
+            )
+            is None
         ):
-            job_schedule_ids.append(resource_id)
-    if len(job_schedule_ids) != 1:
-        _fail("cleanup-job-schedule-not-ready")
-    job_schedule_id = job_schedule_ids[0]
-    expected_prefix = _scope(
-        subscription_id,
-        f"/resourceGroups/{CLEANUP_GROUP}/providers/"
-        f"Microsoft.Automation/automationAccounts/{AUTOMATION_ACCOUNT}/"
-        "jobSchedules/",
-    )
-    if (
-        not job_schedule_id.casefold().startswith(expected_prefix.casefold())
-        or re.fullmatch(r"[0-9a-fA-F-]{36}", job_schedule_id[len(expected_prefix) :])
-        is None
-    ):
-        _fail("cleanup-job-schedule-not-ready")
-    job_schedule = _run(
-        (
-            "az",
-            "resource",
-            "show",
-            "--ids",
-            job_schedule_id,
-            "--api-version",
-            "2024-10-23",
-            "--subscription",
-            subscription_id,
-            "--query",
-            (
-                "{id:id,runbook:properties.runbook.name,"
-                "schedule:properties.schedule.name,"
-                "target:properties.parameters.TargetResourceGroupName}"
-            ),
-            "--output",
-            "json",
-            "--only-show-errors",
-        ),
-        require_json=True,
-    )
-    if job_schedule != {
-        "id": job_schedule_id,
-        "runbook": RUNBOOK,
-        "schedule": SCHEDULE,
-        "target": TARGET_GROUP,
-    }:
-        _fail("cleanup-job-schedule-not-ready")
+            _fail("cleanup-job-schedule-not-ready")
+        try:
+            job_schedule = _run(
+                (
+                    "az",
+                    "resource",
+                    "show",
+                    "--ids",
+                    job_schedule_id,
+                    "--api-version",
+                    "2024-10-23",
+                    "--subscription",
+                    subscription_id,
+                    "--query",
+                    (
+                        "{id:id,runbook:properties.runbook.name,"
+                        "schedule:properties.schedule.name,"
+                        "target:properties.parameters.TargetResourceGroupName}"
+                    ),
+                    "--output",
+                    "json",
+                    "--only-show-errors",
+                ),
+                require_json=True,
+            )
+        except AzureCommandError as exc:
+            if exc.sanitized_azure_error_code not in {
+                "notfound",
+                "resource-not-found",
+            }:
+                raise
+            if time.monotonic() >= deadline:
+                _fail("cleanup-job-schedule-propagation-timeout")
+            time.sleep(CLEANUP_JOB_SCHEDULE_RETRY_SECONDS)
+            continue
+        if job_schedule != {
+            "id": job_schedule_id,
+            "runbook": RUNBOOK,
+            "schedule": SCHEDULE,
+            "target": TARGET_GROUP,
+        }:
+            _fail("cleanup-job-schedule-not-ready")
+        return
 
 
 def _verify_cleanup_control(subscription_id: str, cleanup_at: datetime) -> str:
