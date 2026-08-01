@@ -219,7 +219,7 @@
         "scope": { "$ref": "#/$defs/nonEmptyStringArray" },
         "terminalStates": { "$ref": "#/$defs/nonEmptyStringArray" },
         "failureDispositionPolicy": {
-          "enum": ["reconcile-pre-secret-safe-state", "cleanup-required"]
+          "enum": ["reconcile-and-pause-preserved", "pause-preserved"]
         },
         "replayDecision": { "const": "deny" }
       }

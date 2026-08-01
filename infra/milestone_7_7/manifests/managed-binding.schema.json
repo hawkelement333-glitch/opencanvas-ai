@@ -180,7 +180,7 @@
         "receiptRequiredBeforeFirstEffect",
         "replayDecision",
         "safePreSecretPreservationAllowed",
-        "cleanupRequiredForUnsafeTerminalState",
+        "cleanupAuthorizedOnlyAfterCompletionOrExplicitUserApproval",
         "preservedResumeRequiresFreshLedger",
         "postRunProvisioningAuthorized"
       ],
@@ -194,7 +194,9 @@
         "receiptRequiredBeforeFirstEffect": { "const": true },
         "replayDecision": { "const": "deny" },
         "safePreSecretPreservationAllowed": { "const": true },
-        "cleanupRequiredForUnsafeTerminalState": { "const": true },
+        "cleanupAuthorizedOnlyAfterCompletionOrExplicitUserApproval": {
+          "const": true
+        },
         "preservedResumeRequiresFreshLedger": { "const": true },
         "postRunProvisioningAuthorized": { "const": false }
       }

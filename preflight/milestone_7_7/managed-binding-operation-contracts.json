@@ -5,7 +5,7 @@
   "integrityDomain": "solarplexus-mobius/milestone-7.7/managed-binding-operation-overlay/v1",
   "authorizationSourceHead": "11564669bd5b40a88fdbf434c8137b063305eb4b",
   "historicalMatrixIntegritySha256": "100293931dcc71bb069e4f6fe06228360e0953b3b756544a555941d81bf8d6bc",
-  "managedBindingIntegritySha256": "b8d4fe4505830671d9ff8082d5fdaa2dc268545f7fcd644d45456187af167c83",
+  "managedBindingIntegritySha256": "8eaff24a0e0bc0601a2322fdf891a19acca52a6cab7d2d159f6e22af7b9d19dc",
   "defaultAuthority": {
     "executionAuthorized": false,
     "mutationAuthorized": false,
@@ -919,11 +919,10 @@
       ],
       "terminalStates": [
         "ready-for-secure-manual-entry",
-        "blocked-preserved",
-        "blocked-cleaned",
-        "failed-cleaned"
+        "paused-preserved",
+        "contained-preserved"
       ],
-      "failureDispositionPolicy": "reconcile-pre-secret-safe-state",
+      "failureDispositionPolicy": "reconcile-and-pause-preserved",
       "replayDecision": "deny"
     },
     {
@@ -937,10 +936,10 @@
       "scope": ["exact-private-key-vault-path", "exact-private-registry-path"],
       "terminalStates": [
         "private-entry-path-proved",
-        "blocked-cleaned",
-        "failed-cleaned"
+        "paused-preserved",
+        "contained-preserved"
       ],
-      "failureDispositionPolicy": "cleanup-required",
+      "failureDispositionPolicy": "pause-preserved",
       "replayDecision": "deny"
     },
     {
@@ -959,10 +958,10 @@
       ],
       "terminalStates": [
         "private-revision-ready",
-        "blocked-cleaned",
-        "failed-cleaned"
+        "paused-preserved",
+        "contained-preserved"
       ],
-      "failureDispositionPolicy": "cleanup-required",
+      "failureDispositionPolicy": "pause-preserved",
       "replayDecision": "deny"
     },
     {
@@ -974,8 +973,8 @@
         "valid-unconsumed-one-run-ledger"
       ],
       "scope": ["exact-key-vault-resource"],
-      "terminalStates": ["revoked-and-denied", "failed-cleaned"],
-      "failureDispositionPolicy": "cleanup-required",
+      "terminalStates": ["revoked-and-denied", "paused-preserved"],
+      "failureDispositionPolicy": "pause-preserved",
       "replayDecision": "deny"
     },
     {
@@ -983,7 +982,8 @@
       "methodDefinition": "lifecycle-cleanup-v1",
       "mutation": true,
       "authorizationPredicate": [
-        "valid-one-run-ledger-or-emergency-cleanup-receipt"
+        "valid-unconsumed-one-run-ledger",
+        "ready-for-final-cleanup-evidence-or-explicit-user-authorization"
       ],
       "scope": [
         "exact-target-resource-group",
@@ -994,7 +994,7 @@
         "zero-residue",
         "cleanup-blocked"
       ],
-      "failureDispositionPolicy": "cleanup-required",
+      "failureDispositionPolicy": "pause-preserved",
       "replayDecision": "deny"
     },
     {
@@ -1010,9 +1010,9 @@
         "exact-soft-deleted-key-vault-name"
       ],
       "terminalStates": ["zero-residue", "residue-detected"],
-      "failureDispositionPolicy": "cleanup-required",
+      "failureDispositionPolicy": "pause-preserved",
       "replayDecision": "deny"
     }
   ],
-  "contractIntegritySha256": "7a292e372d3df43febc482bfac86be65e391c19aefcfc2a23bb289e002cca99c"
+  "contractIntegritySha256": "3704dfe4cdcf45ca89ac8219448a3c4848ed6a3a28bbe38c1265ec7971f57b64"
 }

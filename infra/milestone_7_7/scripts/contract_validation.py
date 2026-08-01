@@ -124,7 +124,7 @@ EXPECTED_POLICY_DIGESTS = {
         "0ca48feb6e0bee369e209d865fa6fff2a9b759e2be9f9284e97b098a2f69cdce"
     ),
     "lifecycle-policy.json": (
-        "c4287fda9534f74b60ea249f48eb07e32f918ae601a0ec6e86b395d96cc71379"
+        "77d34f1ac1d23b51d662208ac136a1b27120c5f7baec74d532ac298b99a97b8d"
     ),
     "network-policy.json": (
         "67fe0f29d7a69c78a08a213764da7498a6a83293c3e8838c7d3f971da15a851b"

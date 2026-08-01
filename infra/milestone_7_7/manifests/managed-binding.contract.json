@@ -246,6 +246,8 @@
       "prove-post-revocation-denial"
     ],
     "cleanup": [
+      "validate-cleanup-authorization-integrity",
+      "require-ready-for-final-cleanup-or-explicit-user-authorization",
       "stop-workloads",
       "revoke-temporary-authority",
       "delete-target-resource-group",
@@ -257,12 +259,13 @@
     ],
     "failureDispositionModel": [
       "RUNNING",
-      "BLOCKED_PRESERVED",
-      "CLEANUP_REQUIRED",
+      "PAUSED_PRESERVED",
+      "CONTAINED_PRESERVED",
+      "READY_FOR_FINAL_CLEANUP",
       "COMPLETED"
     ],
-    "preSecretFailureDecision": "reconcile-resulting-state-before-cleanup",
-    "rollbackDecision": "cleanup-unsafe-state-to-zero-residue",
+    "preSecretFailureDecision": "reconcile-resulting-state-and-pause-preserved",
+    "rollbackDecision": "preserve-unless-final-cleanup-authorized",
     "prohibitedFallbacks": [
       "public-key-vault",
       "public-container-app-ingress",
@@ -281,7 +284,7 @@
     "receiptRequiredBeforeFirstEffect": true,
     "replayDecision": "deny",
     "safePreSecretPreservationAllowed": true,
-    "cleanupRequiredForUnsafeTerminalState": true,
+    "cleanupAuthorizedOnlyAfterCompletionOrExplicitUserApproval": true,
     "preservedResumeRequiresFreshLedger": true,
     "postRunProvisioningAuthorized": false
   }

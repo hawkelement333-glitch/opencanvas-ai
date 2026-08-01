@@ -407,7 +407,7 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "receiptRequiredBeforeFirstEffect": True,
         "replayDecision": "deny",
         "safePreSecretPreservationAllowed": True,
-        "cleanupRequiredForUnsafeTerminalState": True,
+        "cleanupAuthorizedOnlyAfterCompletionOrExplicitUserApproval": True,
         "preservedResumeRequiresFreshLedger": True,
         "postRunProvisioningAuthorized": False,
     }:
@@ -415,15 +415,17 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
     lifecycle = _as_object(contract["lifecycle"], "$.lifecycle")
     if lifecycle.get("failureDispositionModel") != [
         "RUNNING",
-        "BLOCKED_PRESERVED",
-        "CLEANUP_REQUIRED",
+        "PAUSED_PRESERVED",
+        "CONTAINED_PRESERVED",
+        "READY_FOR_FINAL_CLEANUP",
         "COMPLETED",
     ]:
         raise ContractError("managed-binding failure dispositions differ")
     if (
         lifecycle.get("preSecretFailureDecision")
-        != "reconcile-resulting-state-before-cleanup"
-        or lifecycle.get("rollbackDecision") != "cleanup-unsafe-state-to-zero-residue"
+        != "reconcile-resulting-state-and-pause-preserved"
+        or lifecycle.get("rollbackDecision")
+        != "preserve-unless-final-cleanup-authorized"
     ):
         raise ContractError("managed-binding failure decision differs")
     return contract
@@ -514,9 +516,9 @@ def validate_operation_overlay(value: JsonValue) -> dict[str, JsonValue]:
         if str(item["methodDefinition"]) not in methods:
             raise ContractError("managed-binding lifecycle method is unknown")
         expected_disposition_policy = (
-            "reconcile-pre-secret-safe-state"
+            "reconcile-and-pause-preserved"
             if item["id"] == "pre-secret-provisioning"
-            else "cleanup-required"
+            else "pause-preserved"
         )
         if item.get("failureDispositionPolicy") != expected_disposition_policy:
             raise ContractError("managed-binding failure disposition differs")
@@ -527,7 +529,7 @@ def validate_operation_overlay(value: JsonValue) -> dict[str, JsonValue]:
             raise ContractError("managed-binding terminal states are malformed")
         if (
             item["id"] == "pre-secret-provisioning"
-            and "blocked-preserved" not in terminal_states
+            and "paused-preserved" not in terminal_states
         ):
             raise ContractError("managed-binding preserved terminal state is missing")
         if item.get("replayDecision") != "deny":

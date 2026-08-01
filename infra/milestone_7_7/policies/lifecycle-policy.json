@@ -31,7 +31,7 @@
     "mobius-public-access": "denied",
     "mobius-run-id": "runtime-opaque",
     "mobius-source-commit": "1aca65c4a1d131dd420154efbe36e2c2204c3903",
-    "mobius-teardown-state": "armed"
+    "mobius-teardown-state": "preservation-only"
   },
   "lease": {
     "defaultPlannedHours": 12,
@@ -49,7 +49,12 @@
     "systemManagedIdentityRequired": true,
     "exactTargetScopeRequired": true,
     "independentTimerRequired": true,
+    "timerAction": "pause-preserve-notify",
+    "timerDeletionAuthorized": false,
     "timerProofRequiredBeforeBillableResources": true,
+    "finalCleanupGuardRequired": true,
+    "successfulCloseoutEvidenceRequired": true,
+    "explicitUserApprovalAlternativeAllowed": true,
     "manualFallbackRequired": true,
     "postRevocationDenialRequired": true,
     "targetZeroResidueBeforeControlDeletion": true,

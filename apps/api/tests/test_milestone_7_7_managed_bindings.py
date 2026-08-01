@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
 from performance.milestone_7_7.framework import ContractError, JsonValue, canonical_bytes
 from preflight.milestone_7_7 import framework as topology_framework
@@ -1831,9 +1830,48 @@ def test_lifecycle_method_definitions_use_repository_module_import() -> None:
 
 def _test_lifecycle_ledger(marker: str = "a") -> dict[str, JsonValue]:
     return {
+        "authorizationId": "m7.7-managed-binding-closeout-20260731",
         "ledgerIntegritySha256": marker * 64,
         "repositoryHead": marker * 40,
     }
+
+
+def _write_cleanup_authorization(
+    directory: Path,
+    ledger: Mapping[str, JsonValue],
+    *,
+    successful: bool = True,
+) -> Path:
+    issued = managed_binding_lifecycle._utc_now()
+    stage_names = (
+        "deployment",
+        "evidenceCapture",
+        "providerValidation",
+        "secureKeyEntry",
+        "soak90Minutes",
+        "temporaryAccessRevocation",
+    )
+    value: dict[str, JsonValue] = {
+        "authorizationEvidenceSha256": "e" * 64,
+        "authorizationId": ledger["authorizationId"],
+        "authorizationMode": "successful-closeout" if successful else "explicit-user",
+        "expiresAtUtc": managed_binding_lifecycle._format_utc(issued + timedelta(minutes=30)),
+        "issuedAtUtc": managed_binding_lifecycle._format_utc(issued),
+        "lifecycleState": ("READY_FOR_FINAL_CLEANUP" if successful else "PAUSED_PRESERVED"),
+        "repositoryHead": ledger["repositoryHead"],
+        "requiredStages": {name: successful for name in stage_names},
+        "resourceGroups": [
+            managed_binding_lifecycle.TARGET_GROUP,
+            managed_binding_lifecycle.CLEANUP_GROUP,
+        ],
+        "schemaVersion": "mobius.milestone-7.7.cleanup-authorization.v1",
+    }
+    value["authorizationIntegritySha256"] = hashlib.sha256(
+        managed_binding_lifecycle.CLEANUP_AUTHORIZATION_DOMAIN + canonical_bytes(value)
+    ).hexdigest()
+    path = managed_binding_lifecycle._cleanup_authorization_path(directory)
+    path.write_text(json.dumps(value), encoding="utf-8")
+    return path
 
 
 def _test_preservation_state(
@@ -1927,7 +1965,7 @@ def test_safe_pre_secret_failures_are_preserved_from_resulting_state(
 
     assert result == {
         "cleanup-status": "preserved-safe-pre-secret-state",
-        "disposition": "BLOCKED_PRESERVED",
+        "disposition": "PAUSED_PRESERVED",
         "error": expected_code,
         "provisioning-authorized": False,
         "resumable-checkpoint": "pre-secret",
@@ -1937,7 +1975,7 @@ def test_safe_pre_secret_failures_are_preserved_from_resulting_state(
     }
     assert cleanup_calls == []
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    assert state["disposition"] == "BLOCKED_PRESERVED"
+    assert state["disposition"] == "PAUSED_PRESERVED"
     assert state["failedStage"] == "pre-secret"
     record_path = managed_binding_lifecycle._disposition_path(tmp_path)
     record = json.loads(record_path.read_text(encoding="utf-8"))
@@ -1964,7 +2002,7 @@ def test_safe_pre_secret_failures_are_preserved_from_resulting_state(
         ("cleanupAtUtc", "2026-08-01T02:30:00Z"),
     ],
 )
-def test_unsafe_pre_secret_state_requires_cleanup(
+def test_unsafe_pre_secret_state_pauses_without_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     field: str,
@@ -1994,13 +2032,13 @@ def test_unsafe_pre_secret_state_requires_cleanup(
         receipt_directory=tmp_path,
     )
 
-    assert result["disposition"] == "CLEANUP_REQUIRED"
-    assert result["cleanup-status"] == "completed"
-    assert cleanup_calls == ["cleanup"]
+    assert result["disposition"] == "PAUSED_PRESERVED"
+    assert result["cleanup-status"] == "not-authorized-preserved"
+    assert cleanup_calls == []
 
 
 @pytest.mark.parametrize("terminal_state", ["Canceled", "Running"])
-def test_nonterminal_or_canceled_deployment_requires_cleanup(
+def test_nonterminal_or_canceled_deployment_pauses_without_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     terminal_state: str,
@@ -2044,11 +2082,11 @@ def test_nonterminal_or_canceled_deployment_requires_cleanup(
         receipt_directory=tmp_path,
     )
 
-    assert result["disposition"] == "CLEANUP_REQUIRED"
-    assert cleanup_calls == ["cleanup"]
+    assert result["disposition"] == "PAUSED_PRESERVED"
+    assert cleanup_calls == []
 
 
-def test_incomplete_preservation_proof_and_interrupt_require_cleanup(
+def test_incomplete_preservation_proof_and_interrupt_pause_without_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ledger = _test_lifecycle_ledger()
@@ -2087,8 +2125,8 @@ def test_incomplete_preservation_proof_and_interrupt_require_cleanup(
         subscription_id="opaque-subscription",
         receipt_directory=tmp_path,
     )
-    assert first["disposition"] == "CLEANUP_REQUIRED"
-    assert cleanup_calls == ["cleanup"]
+    assert first["disposition"] == "PAUSED_PRESERVED"
+    assert cleanup_calls == []
 
     second_directory = tmp_path / "interrupt"
     second_directory.mkdir()
@@ -2103,8 +2141,8 @@ def test_incomplete_preservation_proof_and_interrupt_require_cleanup(
         subscription_id="opaque-subscription",
         receipt_directory=second_directory,
     )
-    assert second["disposition"] == "CLEANUP_REQUIRED"
-    assert cleanup_calls == ["cleanup", "cleanup"]
+    assert second["disposition"] == "PAUSED_PRESERVED"
+    assert cleanup_calls == []
 
 
 def test_fresh_pre_secret_resume_is_idempotent_and_skips_cleanup_recreation(
@@ -2175,7 +2213,7 @@ def _test_recovered_cleanup_tags() -> dict[str, JsonValue]:
         "mobius-public-access": "denied",
         "mobius-run-id": "run-recovered-cleanup-seed",
         "mobius-source-commit": "c" * 40,
-        "mobius-teardown-state": "armed",
+        "mobius-teardown-state": "preservation-only",
     }
 
 
@@ -2427,12 +2465,170 @@ def test_cleanup_is_idempotent_without_residue(
     monkeypatch.setattr(managed_binding_lifecycle, "_group_exists", lambda *_args: False)
     monkeypatch.setattr(managed_binding_lifecycle, "_deleted_vault_present", lambda *_args: False)
 
-    first = managed_binding_lifecycle._cleanup("opaque-subscription", tmp_path)
-    second = managed_binding_lifecycle._cleanup("opaque-subscription", tmp_path)
+    ledger = _test_lifecycle_ledger()
+    _write_cleanup_authorization(tmp_path, ledger)
+    first = managed_binding_lifecycle._cleanup("opaque-subscription", tmp_path, ledger=ledger)
+    second = managed_binding_lifecycle._cleanup("opaque-subscription", tmp_path, ledger=ledger)
 
     assert first == second
     assert first["status"] == "cleanup-completed"
     assert first["temporary-authority-cleanup-path"] == "no-transient-state"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing",
+        "stale-evidence",
+        "wrong-execution",
+        "wrong-head",
+        "wrong-state",
+        "incomplete-stages",
+        "altered-integrity",
+    ],
+)
+def test_cleanup_guard_rejects_missing_stale_or_altered_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    ledger = _test_lifecycle_ledger()
+    if mutation != "missing":
+        path = _write_cleanup_authorization(tmp_path, ledger)
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if mutation == "stale-evidence":
+            value["issuedAtUtc"] = "2020-01-01T00:00:00Z"
+            value["expiresAtUtc"] = "2020-01-01T00:30:00Z"
+        elif mutation == "wrong-execution":
+            value["authorizationId"] = "another-execution"
+        elif mutation == "wrong-head":
+            value["repositoryHead"] = "b" * 40
+        elif mutation == "wrong-state":
+            value["lifecycleState"] = "RUNNING"
+        elif mutation == "incomplete-stages":
+            value["requiredStages"]["soak90Minutes"] = False
+        elif mutation == "altered-integrity":
+            value["authorizationIntegritySha256"] = "0" * 64
+        if mutation != "altered-integrity":
+            value["authorizationIntegritySha256"] = hashlib.sha256(
+                managed_binding_lifecycle.CLEANUP_AUTHORIZATION_DOMAIN
+                + canonical_bytes(
+                    {
+                        key: item
+                        for key, item in value.items()
+                        if key != "authorizationIntegritySha256"
+                    }
+                )
+            ).hexdigest()
+        path.write_text(json.dumps(value), encoding="utf-8")
+    delete_calls: list[str] = []
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_group_exists",
+        lambda *_args: delete_calls.append("group-check") or False,
+    )
+
+    with pytest.raises(managed_binding_lifecycle.LifecycleError):
+        managed_binding_lifecycle._cleanup("opaque-subscription", tmp_path, ledger=ledger)
+
+    assert delete_calls == []
+
+
+def test_timer_runbook_can_only_pause_and_preserve() -> None:
+    text = managed_binding_lifecycle.CLEANUP_RUNBOOK.read_text(encoding="utf-8")
+
+    assert "PAUSED_PRESERVED" in text
+    assert "cleanupAuthorized = $false" in text
+    assert "Remove-AzResourceGroup" not in text
+    assert "Remove-AzKeyVault" not in text
+    assert "Remove-AzRoleAssignment" not in text
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "private-path-verification",
+        "post-secret-provisioning",
+        "temporary-authority-revocation",
+        "cleanup",
+        "zero-residue-verification",
+    ],
+)
+@pytest.mark.parametrize(
+    "error",
+    [
+        managed_binding_lifecycle.AzureCommandError("timeout"),
+        TimeoutError("timeout"),
+        RuntimeError("unknown provider failure"),
+        KeyboardInterrupt(),
+    ],
+)
+def test_every_non_pre_secret_failure_pauses_without_deletion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    error: BaseException,
+) -> None:
+    cleanup_calls: list[str] = []
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_cleanup",
+        lambda *_args, **_kwargs: cleanup_calls.append("cleanup") or {},
+    )
+
+    result = managed_binding_lifecycle._handle_failure(
+        error=error,
+        operation=operation,
+        ledger=_test_lifecycle_ledger(),
+        subscription_id="opaque-subscription",
+        receipt_directory=tmp_path,
+    )
+
+    assert result["disposition"] == "PAUSED_PRESERVED"
+    assert result["cleanup-status"] == "not-authorized-preserved"
+    assert cleanup_calls == []
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    sorted(managed_binding_lifecycle.SECURITY_CONTAINMENT_ERROR_CODES),
+)
+def test_verified_security_failures_contain_without_deletion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error_code: str,
+) -> None:
+    cleanup_calls: list[str] = []
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_cleanup",
+        lambda *_args, **_kwargs: cleanup_calls.append("cleanup") or {},
+    )
+
+    result = managed_binding_lifecycle._handle_failure(
+        error=managed_binding_lifecycle.LifecycleError(error_code),
+        operation="post-secret-provisioning",
+        ledger=_test_lifecycle_ledger(),
+        subscription_id="opaque-subscription",
+        receipt_directory=tmp_path,
+    )
+
+    assert result["disposition"] == "CONTAINED_PRESERVED"
+    assert cleanup_calls == []
+
+
+def test_no_failure_timer_or_runner_exit_path_can_bypass_cleanup_guard() -> None:
+    lifecycle_text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
+    handler = lifecycle_text.split("def _handle_failure", 1)[1].split("def _parser", 1)[0]
+    cleanup = lifecycle_text.split("def _cleanup(", 1)[1].split("def _zero_residue", 1)[0]
+    deploy = lifecycle_text.split("def _deploy_stage", 1)[1].split(
+        "def _signed_in_user_object_id", 1
+    )[0]
+
+    assert "_cleanup(" not in handler
+    assert "_validate_cleanup_authorization(" in cleanup
+    assert '"--mode"' not in deploy
+    assert "deployment stack" not in lifecycle_text.casefold()
 
 
 def test_main_delegates_terminal_handling_and_finally_paths_remain_strict() -> None:

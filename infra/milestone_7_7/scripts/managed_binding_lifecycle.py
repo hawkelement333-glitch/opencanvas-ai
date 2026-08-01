@@ -97,6 +97,20 @@ PRE_SECRET_PRESERVABLE_STAGE: Final = "pre-secret"
 DISPOSITION_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/lifecycle-disposition/v1\x00"
 )
+CLEANUP_AUTHORIZATION_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/cleanup-authorization/v1\x00"
+)
+CLEANUP_AUTHORIZATION_FILE: Final = "cleanup-authorization.json"
+CLEANUP_AUTHORIZATION_MAXIMUM_AGE: Final = timedelta(hours=1)
+SECURITY_CONTAINMENT_ERROR_CODES: Final = frozenset(
+    {
+        "cleanup-role-scope-not-exact",
+        "managed-secret-presence-or-state-unproved",
+        "pre-secret-related-group-drift",
+        "pre-secret-role-inventory-drift",
+        "private-endpoint-resolved-publicly",
+    }
+)
 TARGET_RESOURCE_LOCATIONS: Final = (
     ("microsoft.network/virtualnetworks/vnet-mobius77-staging", "southcentralus"),
     ("microsoft.network/privatednszones/privatelink.vaultcore.azure.net", "global"),
@@ -182,8 +196,9 @@ class LifecycleDisposition(str, Enum):
     """Explicit terminal handling for one-run lifecycle execution."""
 
     RUNNING = "RUNNING"
-    BLOCKED_PRESERVED = "BLOCKED_PRESERVED"
-    CLEANUP_REQUIRED = "CLEANUP_REQUIRED"
+    PAUSED_PRESERVED = "PAUSED_PRESERVED"
+    CONTAINED_PRESERVED = "CONTAINED_PRESERVED"
+    READY_FOR_FINAL_CLEANUP = "READY_FOR_FINAL_CLEANUP"
     COMPLETED = "COMPLETED"
 
 
@@ -549,7 +564,7 @@ def _lifecycle_tags(
         "mobius-public-access": "denied",
         "mobius-run-id": str(ledger["authorizationId"]),
         "mobius-source-commit": str(ledger["repositoryHead"]),
-        "mobius-teardown-state": "armed",
+        "mobius-teardown-state": "preservation-only",
     }
 
 
@@ -1240,7 +1255,7 @@ def _verify_recovered_cleanup_tags(tags: JsonValue) -> None:
         "mobius-data-class": "isolated-synthetic",
         "mobius-environment": "milestone-7.7-staging",
         "mobius-public-access": "denied",
-        "mobius-teardown-state": "armed",
+        "mobius-teardown-state": "preservation-only",
     }
     if any(tags.get(key) != value for key, value in fixed_values.items()):
         _fail("recovered-cleanup-tags-drift")
@@ -2547,7 +2562,114 @@ def _deleted_vault_present(subscription_id: str) -> bool:
     return bool(value)
 
 
-def _cleanup(subscription_id: str, receipt_directory: Path) -> dict[str, JsonValue]:
+def _cleanup_authorization_path(receipt_directory: Path) -> Path:
+    return receipt_directory / CLEANUP_AUTHORIZATION_FILE
+
+
+def _validate_cleanup_authorization(
+    *,
+    receipt_directory: Path,
+    ledger: Mapping[str, JsonValue],
+) -> dict[str, JsonValue]:
+    path = _cleanup_authorization_path(receipt_directory)
+    if not path.is_file():
+        _fail("cleanup-authorization-missing")
+    value = load_json(path)
+    if not isinstance(value, dict):
+        _fail("cleanup-authorization-malformed")
+    expected_keys = {
+        "authorizationEvidenceSha256",
+        "authorizationId",
+        "authorizationIntegritySha256",
+        "authorizationMode",
+        "expiresAtUtc",
+        "issuedAtUtc",
+        "lifecycleState",
+        "repositoryHead",
+        "requiredStages",
+        "resourceGroups",
+        "schemaVersion",
+    }
+    if set(value) != expected_keys:
+        _fail("cleanup-authorization-malformed")
+    integrity = value.get("authorizationIntegritySha256")
+    if not isinstance(integrity, str) or HEX_SHA256.fullmatch(integrity) is None:
+        _fail("cleanup-authorization-malformed")
+    unsigned = {
+        key: item
+        for key, item in value.items()
+        if key != "authorizationIntegritySha256"
+    }
+    expected_integrity = hashlib.sha256(
+        CLEANUP_AUTHORIZATION_DOMAIN + canonical_bytes(unsigned)
+    ).hexdigest()
+    if integrity != expected_integrity:
+        _fail("cleanup-authorization-integrity-mismatch")
+    issued_raw = value.get("issuedAtUtc")
+    expires_raw = value.get("expiresAtUtc")
+    if not isinstance(issued_raw, str) or not isinstance(expires_raw, str):
+        _fail("cleanup-authorization-time-malformed")
+    try:
+        issued = datetime.strptime(issued_raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        expires = datetime.strptime(expires_raw, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=UTC
+        )
+    except ValueError:
+        _fail("cleanup-authorization-time-malformed")
+    now = _utc_now()
+    if (
+        issued > now
+        or expires < now
+        or expires <= issued
+        or expires - issued > CLEANUP_AUTHORIZATION_MAXIMUM_AGE
+    ):
+        _fail("cleanup-authorization-stale")
+    if (
+        value.get("schemaVersion") != "mobius.milestone-7.7.cleanup-authorization.v1"
+        or value.get("authorizationId") != ledger.get("authorizationId")
+        or value.get("repositoryHead") != ledger.get("repositoryHead")
+        or value.get("resourceGroups") != [TARGET_GROUP, CLEANUP_GROUP]
+    ):
+        _fail("cleanup-authorization-scope-mismatch")
+    evidence_sha = value.get("authorizationEvidenceSha256")
+    if not isinstance(evidence_sha, str) or HEX_SHA256.fullmatch(evidence_sha) is None:
+        _fail("cleanup-authorization-evidence-invalid")
+    mode = value.get("authorizationMode")
+    lifecycle_state = value.get("lifecycleState")
+    stages = value.get("requiredStages")
+    required_stage_names = {
+        "deployment",
+        "evidenceCapture",
+        "providerValidation",
+        "secureKeyEntry",
+        "soak90Minutes",
+        "temporaryAccessRevocation",
+    }
+    if not isinstance(stages, dict) or set(stages) != required_stage_names:
+        _fail("cleanup-authorization-stages-malformed")
+    if mode == "successful-closeout":
+        if lifecycle_state != LifecycleDisposition.READY_FOR_FINAL_CLEANUP.value or any(
+            stages[name] is not True for name in required_stage_names
+        ):
+            _fail("cleanup-success-evidence-incomplete")
+    elif mode == "explicit-user":
+        if lifecycle_state not in {
+            LifecycleDisposition.PAUSED_PRESERVED.value,
+            LifecycleDisposition.CONTAINED_PRESERVED.value,
+        } or any(stages[name] is not False for name in required_stage_names):
+            _fail("cleanup-explicit-authorization-malformed")
+    else:
+        _fail("cleanup-authorization-mode-invalid")
+    return value
+
+
+def _cleanup(
+    subscription_id: str,
+    receipt_directory: Path,
+    *,
+    ledger: Mapping[str, JsonValue],
+) -> dict[str, JsonValue]:
+    _validate_cleanup_authorization(receipt_directory=receipt_directory, ledger=ledger)
     state_path = _state_path(receipt_directory)
     revocation_path = "no-transient-state"
     if state_path.is_file():
@@ -2799,6 +2921,11 @@ def _handle_failure(
     receipt_directory: Path | None,
 ) -> dict[str, JsonValue]:
     error_code, azure_error_code = _sanitized_failure(error)
+    failure_disposition = (
+        LifecycleDisposition.CONTAINED_PRESERVED
+        if error_code in SECURITY_CONTAINMENT_ERROR_CODES
+        else LifecycleDisposition.PAUSED_PRESERVED
+    )
     failed_stage = _safe_failed_stage(receipt_directory)
     cancellation_codes = {
         "canceled",
@@ -2832,11 +2959,11 @@ def _handle_failure(
             _validate_preservation_proof(proof)
             proof = {**proof, "deployment-terminal-state": terminal_state}
             state["activeStage"] = None
-            state["disposition"] = LifecycleDisposition.BLOCKED_PRESERVED.value
+            state["disposition"] = failure_disposition.value
             state["failedStage"] = PRE_SECRET_PRESERVABLE_STAGE
             _replace_state(state_path, state)
             record = _failure_record(
-                disposition=LifecycleDisposition.BLOCKED_PRESERVED,
+                disposition=failure_disposition,
                 operation=operation,
                 failed_stage=PRE_SECRET_PRESERVABLE_STAGE,
                 error_code=error_code,
@@ -2849,7 +2976,7 @@ def _handle_failure(
             _write_disposition(receipt_directory, record)
             return {
                 "cleanup-status": "preserved-safe-pre-secret-state",
-                "disposition": LifecycleDisposition.BLOCKED_PRESERVED.value,
+                "disposition": failure_disposition.value,
                 "error": error_code,
                 "provisioning-authorized": False,
                 "resumable-checkpoint": PRE_SECRET_PRESERVABLE_STAGE,
@@ -2860,18 +2987,21 @@ def _handle_failure(
         except (Exception, KeyboardInterrupt):
             pass
 
-    cleanup_status = "not-required-before-effect"
-    if subscription_id is not None and receipt_directory is not None:
-        if operation == "cleanup":
-            cleanup_status = "failed-closed-manual-cleanup-required"
-        else:
+    cleanup_status = "not-authorized-preserved"
+    if receipt_directory is not None:
+        state_path = _state_path(receipt_directory)
+        if state_path.is_file():
             try:
-                _cleanup(subscription_id, receipt_directory)
-                cleanup_status = "completed"
-            except (Exception, KeyboardInterrupt):
-                cleanup_status = "failed-closed-manual-cleanup-required"
+                state = _read_state(state_path)
+                state["activeStage"] = None
+                state["disposition"] = failure_disposition.value
+                state["failedStage"] = failed_stage
+                state["resumableCheckpoint"] = failed_stage
+                _replace_state(state_path, state)
+            except (ContractError, LifecycleError, OSError, ValueError):
+                pass
     record = _failure_record(
-        disposition=LifecycleDisposition.CLEANUP_REQUIRED,
+        disposition=failure_disposition,
         operation=operation,
         failed_stage=failed_stage,
         error_code=error_code,
@@ -2890,7 +3020,7 @@ def _handle_failure(
             disposition_evidence = "failed-closed"
     return {
         "cleanup-status": cleanup_status,
-        "disposition": LifecycleDisposition.CLEANUP_REQUIRED.value,
+        "disposition": failure_disposition.value,
         "disposition-evidence": disposition_evidence,
         "error": error_code,
         "provisioning-authorized": False,
@@ -2953,7 +3083,11 @@ def main() -> int:
         elif args.operation == "temporary-authority-revocation":
             result = _revoke(subscription_id, receipt_directory)
         elif args.operation == "cleanup":
-            result = _cleanup(subscription_id, receipt_directory)
+            result = _cleanup(
+                subscription_id,
+                receipt_directory,
+                ledger=ledger,
+            )
         else:
             result = _zero_residue(subscription_id)
         result.setdefault("disposition", LifecycleDisposition.COMPLETED.value)
