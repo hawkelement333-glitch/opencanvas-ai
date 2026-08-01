@@ -81,6 +81,7 @@ var targetEnabled = cleanupBindingEnabled || workloadEnabled
 
 var targetResourceGroupName = 'rg-solarplexus-mobius-77-staging'
 var cleanupResourceGroupName = 'rg-solarplexus-mobius-77-cleanup-control'
+var containerAppsInfrastructureResourceGroupName = 'rg-solarplexus-mobius-77-containerapps-infrastructure'
 var moduleBoundaries = [
   'policy'
   'network'
@@ -251,6 +252,7 @@ module compute './modules/compute.bicep' = if (workloadEnabled) {
     applicationDeploymentEnabled: postSecretEnabled
     location: location
     containerAppsSubnetId: network.outputs.containerAppsSubnetId
+    infrastructureResourceGroupName: containerAppsInfrastructureResourceGroupName
     workloadIdentityId: identities.outputs.workloadIdentityId
     keyVaultName: keyVault.outputs.keyVaultName
     registryLoginServer: registry.outputs.registryLoginServer
@@ -272,6 +274,7 @@ output managedBindingDeploymentEnabled bool = oneRunEnabled
 output deploymentStage string = deploymentStage
 output targetResourceGroupName string = targetResourceGroupName
 output cleanupResourceGroupName string = cleanupResourceGroupName
+output containerAppsInfrastructureResourceGroupName string = containerAppsInfrastructureResourceGroupName
 output stagingLocation string = location
 output cleanupLocation string = cleanupLocation
 output defaultProvisioningAuthorized bool = false

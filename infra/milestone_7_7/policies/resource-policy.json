@@ -30,6 +30,7 @@
     "Microsoft.KeyVault/vaults",
     "Microsoft.ManagedIdentity/userAssignedIdentities",
     "Microsoft.Network/azureFirewalls",
+    "Microsoft.Network/loadBalancers",
     "Microsoft.Network/networkSecurityGroups",
     "Microsoft.Network/privateDnsZones",
     "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
@@ -191,6 +192,16 @@
     "cleanupAutomation": {
       "name": "Basic",
       "maximumAccounts": 1
+    },
+    "containerAppsInfrastructure": {
+      "resourceGroupName": "rg-solarplexus-mobius-77-containerapps-infrastructure",
+      "environmentType": "internal",
+      "maximumGroups": 1,
+      "publicIpAllowed": false,
+      "allowedResourceTypes": ["Microsoft.Network/loadBalancers"],
+      "allowedRoleDefinition": "Network Contributor",
+      "allowedRoleScope": "exact-infrastructure-group-or-delegated-subnet",
+      "allowedRolePrincipalType": "ServicePrincipal"
     }
   },
   "mutableSkuSelectionAllowed": false,

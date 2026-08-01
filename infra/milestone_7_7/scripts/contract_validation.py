@@ -89,6 +89,8 @@ EXPECTED_TEARDOWN_ORDER = (
     "prove-post-revocation-denial",
     "preserve-approved-evidence",
     "delete-compute",
+    "delete-container-apps-environment",
+    "delete-container-apps-infrastructure-group",
     "delete-data-services",
     "delete-private-telemetry",
     "delete-workload-identities",
@@ -121,7 +123,7 @@ FORBIDDEN_BUNDLE_PARTS = {
 }
 EXPECTED_POLICY_DIGESTS = {
     "dependency-order.json": (
-        "0ca48feb6e0bee369e209d865fa6fff2a9b759e2be9f9284e97b098a2f69cdce"
+        "036a369242182e52018f98e0b27d2944492c977e82475edd8a9209fecd1afce2"
     ),
     "lifecycle-policy.json": (
         "77d34f1ac1d23b51d662208ac136a1b27120c5f7baec74d532ac298b99a97b8d"
@@ -130,7 +132,7 @@ EXPECTED_POLICY_DIGESTS = {
         "67fe0f29d7a69c78a08a213764da7498a6a83293c3e8838c7d3f971da15a851b"
     ),
     "resource-policy.json": (
-        "6243bf98475195b6ad5541e7f5031f496f3b21a33fb97b01f1dee8f332169684"
+        "2a723257566085dfc87848b89f2b233e6bd4d3f8769c7f564a10305f253089c2"
     ),
     "unresolved-gates.json": (
         "c6b039152023b53b339b42dd88f6622ca369d7d912476a8f656355b847c6256c"
@@ -141,7 +143,7 @@ EXPECTED_SCHEMA_DIGESTS = {
         "3f3d451efcd3b92786fc613f18ba6ed7ac57a04bf99ce6c825f256bc37bae39c"
     ),
     "environment.schema.json": (
-        "cd7d4a48ae616f6ea2c023decd6eeb18ac717f46dfb8bf14442345283742f924"
+        "27e038b925ccd66b1172942dd7bf1963bd681fd1e92769f6d46a34d720187076"
     ),
     "image-digests.schema.json": (
         "96cd11b19f621e726075943b3bcf03790255930d6d15ba19b67ac21865eb5d80"

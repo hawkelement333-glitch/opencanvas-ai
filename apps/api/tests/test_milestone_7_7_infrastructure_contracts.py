@@ -180,6 +180,12 @@ def test_environment_is_unresolved_private_and_fixed():
         "workloadProfile": "Consumption",
         "externalIngress": False,
         "fixedReplicaLimits": True,
+        "infrastructureResourceGroupIntegritySha256": (
+            "491ca1d28b3f8ce1f822f276f534a7b5a26a0215632d0e4324968d955e5a9d47"
+        ),
+        "infrastructureResourceGroupName": (
+            "rg-solarplexus-mobius-77-containerapps-infrastructure"
+        ),
         "publicIpAllowed": False,
     }
     assert value["network"]["defaultInbound"] == "deny"
@@ -506,12 +512,12 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
     assert value["uncertaintyContingencyBasisPoints"] == 2500
     assert value["budgetAlertsAreEnforcement"] is False
     assert value["resolutionStatus"] == "verified"
-    assert value["expectedUsdCents"] == 1928
-    assert value["baseMaximumUsdCents"] == 6806
-    assert value["contingencyUsdCents"] == 1702
-    assert value["maximumPlausibleUsdCents"] == 8508
-    assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 1928
-    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 6806
+    assert value["expectedUsdCents"] == 1958
+    assert value["baseMaximumUsdCents"] == 6881
+    assert value["contingencyUsdCents"] == 1721
+    assert value["maximumPlausibleUsdCents"] == 8602
+    assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 1958
+    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 6881
     assert all(
         item["priceEvidenceStatus"] == "verified-official-retail" for item in value["lineItems"]
     )
@@ -987,6 +993,7 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
     user_path = re.compile(r"(?i)(?:[A-Z]:\\U" r"sers\\|/U" r"sers/|/ho" r"me/)")
     public_guids = {
         "manifests/managed-binding.contract.json": {
+            "4d97b98b-1d4f-4787-a291-c67834d212e7",
             "4633458b-17de-408a-b874-0445c86b69e6",
             "7f951dda-4ed3-4680-a7ca-43fe172d538d",
             "8311e382-0749-4cb8-b61a-304f252e45ec",
@@ -998,6 +1005,7 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
         "modules/key-vault.bicep": {"4633458b-17de-408a-b874-0445c86b69e6"},
         "modules/network.bicep": {"c632b3df-fb67-4d84-bdcf-b95ad541b5c8"},
         "modules/registry.bicep": {"7f951dda-4ed3-4680-a7ca-43fe172d538d"},
+        "scripts/managed_binding_lifecycle.py": {"4d97b98b-1d4f-4787-a291-c67834d212e7"},
     }
     for path in ROOT.rglob("*"):
         if not path.is_file():

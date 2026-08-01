@@ -29,6 +29,8 @@
     "prove-post-revocation-denial",
     "preserve-approved-evidence",
     "delete-compute",
+    "delete-container-apps-environment",
+    "delete-container-apps-infrastructure-group",
     "delete-data-services",
     "delete-private-telemetry",
     "delete-workload-identities",

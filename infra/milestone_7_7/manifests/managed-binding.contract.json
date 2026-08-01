@@ -20,12 +20,14 @@
   },
   "resourceGroups": {
     "target": "rg-solarplexus-mobius-77-staging",
-    "cleanupControl": "rg-solarplexus-mobius-77-cleanup-control"
+    "cleanupControl": "rg-solarplexus-mobius-77-cleanup-control",
+    "containerAppsInfrastructure": "rg-solarplexus-mobius-77-containerapps-infrastructure"
   },
   "scopeBinding": {
     "materialization": "matched-subscription-relative-resource-id",
     "targetResourceGroup": "/resourceGroups/rg-solarplexus-mobius-77-staging",
     "cleanupControlResourceGroup": "/resourceGroups/rg-solarplexus-mobius-77-cleanup-control",
+    "containerAppsInfrastructureResourceGroup": "/resourceGroups/rg-solarplexus-mobius-77-containerapps-infrastructure",
     "workloadIdentity": "/resourceGroups/rg-solarplexus-mobius-77-staging/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-mobius77-api",
     "keyVault": "/resourceGroups/rg-solarplexus-mobius-77-staging/providers/Microsoft.KeyVault/vaults/kv-mobius77-11564669",
     "containerAppsEnvironment": "/resourceGroups/rg-solarplexus-mobius-77-staging/providers/Microsoft.App/managedEnvironments/cae-mobius77-staging",
@@ -58,7 +60,8 @@
     "vpnGateway": "vpngw-mobius77-staging",
     "cleanupAutomationAccount": "aa-mobius77-cleanup",
     "cleanupRunbook": "Remove-Mobius77Staging",
-    "cleanupSchedule": "schedule-mobius77-cleanup"
+    "cleanupSchedule": "schedule-mobius77-cleanup",
+    "containerAppsInfrastructureResourceGroup": "rg-solarplexus-mobius-77-containerapps-infrastructure"
   },
   "fixedSkus": {
     "keyVault": "standard",
@@ -145,9 +148,12 @@
     "keyVaultSecretsUserRoleDefinitionId": "4633458b-17de-408a-b874-0445c86b69e6",
     "keyVaultSecretsOfficerRoleDefinitionId": "b86a8fe4-44ce-4948-aee5-eccb2c155cd7",
     "cleanupContributorRoleDefinitionId": "b24988ac-6180-42a0-ab88-20f7382dd24c",
+    "containerAppsNetworkContributorRoleDefinitionId": "4d97b98b-1d4f-4787-a291-c67834d212e7",
     "workloadRoleScope": "key-vault-resource",
     "temporaryOperatorRoleScope": "key-vault-resource",
     "cleanupRoleScope": "target-resource-group",
+    "containerAppsInfrastructureRoleScope": "exact-infrastructure-group-or-delegated-subnet",
+    "containerAppsInfrastructureRolePrincipalType": "ServicePrincipal",
     "workloadRegistryRoleScope": "container-registry-resource",
     "temporaryOperatorAssignmentRequired": true,
     "temporaryOperatorAssignmentRemovedAfterEntry": true,

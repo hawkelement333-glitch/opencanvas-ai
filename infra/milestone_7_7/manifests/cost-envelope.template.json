@@ -7,11 +7,11 @@
   "targetUsdCents": 10000,
   "provisioningBlockAboveUsdCents": 10000,
   "absoluteCeilingUsdCents": 10000,
-  "expectedUsdCents": 1928,
-  "baseMaximumUsdCents": 6806,
+  "expectedUsdCents": 1958,
+  "baseMaximumUsdCents": 6881,
   "uncertaintyContingencyBasisPoints": 2500,
-  "contingencyUsdCents": 1702,
-  "maximumPlausibleUsdCents": 8508,
+  "contingencyUsdCents": 1721,
+  "maximumPlausibleUsdCents": 8602,
   "budgetAlertsAreEnforcement": false,
   "hardLeaseHours": 30,
   "lineItems": [
@@ -37,6 +37,12 @@
       "name": "container-apps-consumption",
       "expectedUsdCents": 260,
       "baseMaximumUsdCents": 1038,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "container-apps-internal-standard-load-balancer",
+      "expectedUsdCents": 30,
+      "baseMaximumUsdCents": 75,
       "priceEvidenceStatus": "verified-official-retail"
     },
     {

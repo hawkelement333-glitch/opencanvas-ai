@@ -10,7 +10,9 @@
     "workloadProfile": "Consumption",
     "externalIngress": false,
     "fixedReplicaLimits": true,
-    "publicIpAllowed": false
+    "publicIpAllowed": false,
+    "infrastructureResourceGroupName": "rg-solarplexus-mobius-77-containerapps-infrastructure",
+    "infrastructureResourceGroupIntegritySha256": "491ca1d28b3f8ce1f822f276f534a7b5a26a0215632d0e4324968d955e5a9d47"
   },
   "network": {
     "vnetCidr": "10.77.0.0/20",

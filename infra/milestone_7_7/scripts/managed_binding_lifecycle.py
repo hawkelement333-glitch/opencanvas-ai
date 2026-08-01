@@ -50,6 +50,7 @@ MAIN_TEMPLATE: Final = INFRASTRUCTURE_ROOT / "main.bicep"
 CLEANUP_RUNBOOK: Final = INFRASTRUCTURE_ROOT / "scripts" / "Remove-Mobius77Staging.ps1"
 TARGET_GROUP: Final = "rg-solarplexus-mobius-77-staging"
 CLEANUP_GROUP: Final = "rg-solarplexus-mobius-77-cleanup-control"
+INFRASTRUCTURE_GROUP: Final = "rg-solarplexus-mobius-77-containerapps-infrastructure"
 KEY_VAULT: Final = "kv-mobius77-11564669"
 REGISTRY: Final = "acrmobius7711564669"
 AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup"
@@ -1597,15 +1598,148 @@ def _verify_no_related_group_drift(subscription_id: str) -> None:
         ):
             _fail("pre-secret-related-group-inventory-malformed")
         observed.add(row["name"])
-    if not observed.issubset({TARGET_GROUP, CLEANUP_GROUP}):
+    if not observed.issubset({TARGET_GROUP, CLEANUP_GROUP, INFRASTRUCTURE_GROUP}):
         _fail("pre-secret-related-group-drift")
 
 
+def _verify_container_apps_infrastructure(
+    *,
+    subscription_id: str,
+    ledger: dict[str, JsonValue],
+    cleanup_at: datetime,
+) -> int:
+    group_scope = _scope(subscription_id, f"/resourceGroups/{INFRASTRUCTURE_GROUP}")
+    group = _run(
+        (
+            "az",
+            "group",
+            "show",
+            "--name",
+            INFRASTRUCTURE_GROUP,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "{id:id,location:location,tags:tags}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    expected_tags = _lifecycle_tags(
+        ledger=ledger,
+        cleanup_at=cleanup_at,
+        maximum_cost=_verified_cost()[1],
+    )
+    if (
+        not isinstance(group, dict)
+        or set(group) != {"id", "location", "tags"}
+        or group.get("id") != group_scope
+        or group.get("location") != STAGING_LOCATION
+        or group.get("tags") != expected_tags
+    ):
+        _fail("container-apps-infrastructure-group-drift")
+
+    environment = _verify_resource_projection(
+        subscription_id,
+        resource_type="Microsoft.App/managedEnvironments",
+        name="cae-mobius77-staging",
+        api_version="2026-01-01",
+        projection=(
+            "{infrastructureResourceGroup:properties.infrastructureResourceGroup,"
+            "internal:properties.vnetConfiguration.internal,"
+            "public:properties.publicNetworkAccess}"
+        ),
+    )
+    if environment != {
+        "infrastructureResourceGroup": INFRASTRUCTURE_GROUP,
+        "internal": True,
+        "public": "Disabled",
+    }:
+        _fail("container-apps-infrastructure-binding-drift")
+
+    resources = _run(
+        (
+            "az",
+            "resource",
+            "list",
+            "--resource-group",
+            INFRASTRUCTURE_GROUP,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "[].{id:id,location:location,type:type}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(resources, list) or len(resources) != 1:
+        _fail("container-apps-infrastructure-resource-drift")
+    resource = resources[0]
+    resource_id = resource.get("id") if isinstance(resource, dict) else None
+    if (
+        not isinstance(resource, dict)
+        or set(resource) != {"id", "location", "type"}
+        or not isinstance(resource_id, str)
+        or not resource_id.casefold().startswith(
+            f"{group_scope}/providers/microsoft.network/loadbalancers/".casefold()
+        )
+        or resource.get("location") != STAGING_LOCATION
+        or str(resource.get("type", "")).casefold() != "microsoft.network/loadbalancers"
+    ):
+        _fail("container-apps-infrastructure-resource-drift")
+
+    delegated_subnet = _scope(
+        subscription_id,
+        f"/resourceGroups/{TARGET_GROUP}/providers/Microsoft.Network/"
+        "virtualNetworks/vnet-mobius77-staging/subnets/snet-mobius77-container-apps",
+    ).casefold()
+    network_contributor = (
+        f"/subscriptions/{subscription_id}/providers/Microsoft.Authorization/"
+        "roleDefinitions/4d97b98b-1d4f-4787-a291-c67834d212e7"
+    ).casefold()
+    assignments = _run(
+        (
+            "az",
+            "role",
+            "assignment",
+            "list",
+            "--scope",
+            group_scope,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "[].{principalType:principalType,roleDefinitionId:roleDefinitionId,scope:scope}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(assignments, list):
+        _fail("container-apps-infrastructure-role-drift")
+    allowed_scopes = {group_scope.casefold(), delegated_subnet}
+    for assignment in assignments:
+        if (
+            not isinstance(assignment, dict)
+            or set(assignment) != {"principalType", "roleDefinitionId", "scope"}
+            or assignment.get("principalType") != "ServicePrincipal"
+            or str(assignment.get("roleDefinitionId", "")).casefold()
+            != network_contributor
+            or str(assignment.get("scope", "")).casefold() not in allowed_scopes
+        ):
+            _fail("container-apps-infrastructure-role-drift")
+    return len(resources)
+
+
 def _verify_preservable_pre_secret_state(
-    *, subscription_id: str, cleanup_at: datetime
+    *, subscription_id: str, cleanup_at: datetime, ledger: dict[str, JsonValue]
 ) -> dict[str, JsonValue]:
-    if not _group_exists(subscription_id, TARGET_GROUP) or not _group_exists(
-        subscription_id, CLEANUP_GROUP
+    if any(
+        not _group_exists(subscription_id, group)
+        for group in (TARGET_GROUP, CLEANUP_GROUP, INFRASTRUCTURE_GROUP)
     ):
         _fail("pre-secret-authorized-scope-missing")
     _verify_no_related_group_drift(subscription_id)
@@ -1635,6 +1769,11 @@ def _verify_preservable_pre_secret_state(
         target_resources=target_resources,
     )
     _verify_pre_secret_security(subscription_id, target_resources)
+    infrastructure_resource_count = _verify_container_apps_infrastructure(
+        subscription_id=subscription_id,
+        ledger=ledger,
+        cleanup_at=cleanup_at,
+    )
     return {
         "cleanup-backstop-armed": True,
         "cleanup-deadline-active": _utc_now() < cleanup_at,
@@ -1645,6 +1784,7 @@ def _verify_preservable_pre_secret_state(
         "private-boundaries-preserved": True,
         "scope-inventory-exact": True,
         "cleanup-resource-count": len(cleanup_resources),
+        "infrastructure-resource-count": infrastructure_resource_count,
         "private-endpoint-count": len(network_interfaces),
         "target-resource-count": len(target_resources),
     }
@@ -1868,8 +2008,11 @@ def _pre_secret(
 
     target_exists = _group_exists(subscription_id, TARGET_GROUP)
     cleanup_exists = _group_exists(subscription_id, CLEANUP_GROUP)
-    if target_exists and not cleanup_exists:
+    infrastructure_exists = _group_exists(subscription_id, INFRASTRUCTURE_GROUP)
+    if target_exists and (not cleanup_exists or not infrastructure_exists):
         _fail("pre-secret-authorized-scope-incomplete")
+    if not target_exists and infrastructure_exists:
+        _fail("container-apps-infrastructure-group-collision")
 
     with tempfile.TemporaryDirectory(prefix="mobius77-binding-") as directory:
         template = Path(directory) / "main.json"
@@ -1880,7 +2023,7 @@ def _pre_secret(
         if target_exists:
             _mark_stage(state_path, state, "pre-secret-reconciliation")
             _verify_preservable_pre_secret_state(
-                subscription_id=subscription_id, cleanup_at=cleanup_at
+                subscription_id=subscription_id, cleanup_at=cleanup_at, ledger=ledger
             )
             _mark_stage(state_path, state, "pre-secret-reconciliation", completed=True)
         else:
@@ -1961,7 +2104,7 @@ def _pre_secret(
 
     _mark_stage(state_path, state, "pre-secret-verification")
     _verify_preservable_pre_secret_state(
-        subscription_id=subscription_id, cleanup_at=cleanup_at
+        subscription_id=subscription_id, cleanup_at=cleanup_at, ledger=ledger
     )
     _mark_stage(state_path, state, "pre-secret-verification", completed=True)
 
@@ -2628,7 +2771,8 @@ def _validate_cleanup_authorization(
         value.get("schemaVersion") != "mobius.milestone-7.7.cleanup-authorization.v1"
         or value.get("authorizationId") != ledger.get("authorizationId")
         or value.get("repositoryHead") != ledger.get("repositoryHead")
-        or value.get("resourceGroups") != [TARGET_GROUP, CLEANUP_GROUP]
+        or value.get("resourceGroups")
+        != [TARGET_GROUP, CLEANUP_GROUP, INFRASTRUCTURE_GROUP]
     ):
         _fail("cleanup-authorization-scope-mismatch")
     evidence_sha = value.get("authorizationEvidenceSha256")
@@ -2695,6 +2839,23 @@ def _cleanup(
             ),
             timeout_seconds=DEPLOYMENT_TIMEOUT_SECONDS,
         )
+    if _group_exists(subscription_id, INFRASTRUCTURE_GROUP):
+        _run(
+            (
+                "az",
+                "group",
+                "delete",
+                "--name",
+                INFRASTRUCTURE_GROUP,
+                "--subscription",
+                subscription_id,
+                "--yes",
+                "--only-show-errors",
+                "--output",
+                "none",
+            ),
+            timeout_seconds=DEPLOYMENT_TIMEOUT_SECONDS,
+        )
     if _deleted_vault_present(subscription_id):
         _run(
             (
@@ -2741,7 +2902,7 @@ def _cleanup(
 
 def _zero_residue(subscription_id: str) -> dict[str, JsonValue]:
     absent = 0
-    for group in (TARGET_GROUP, CLEANUP_GROUP):
+    for group in (TARGET_GROUP, INFRASTRUCTURE_GROUP, CLEANUP_GROUP):
         if _group_exists(subscription_id, group):
             _fail("resource-group-residue-detected")
         absent += 1
@@ -2831,6 +2992,7 @@ def _validate_preservation_proof(proof: dict[str, JsonValue]) -> None:
     }
     count_fields = {
         "cleanup-resource-count",
+        "infrastructure-resource-count",
         "private-endpoint-count",
         "target-resource-count",
     }
@@ -2902,6 +3064,7 @@ def _failure_record(
         "resumableCheckpoint": resumable_checkpoint,
         "safeIdentifiers": {
             "cleanupResourceGroup": CLEANUP_GROUP,
+            "containerAppsInfrastructureResourceGroup": INFRASTRUCTURE_GROUP,
             "preSecretDeploymentName": deployment_name,
             "targetResourceGroup": TARGET_GROUP,
         },
@@ -2954,7 +3117,7 @@ def _handle_failure(
             if terminal_state == "Canceled":
                 _fail("pre-secret-deployment-canceled")
             proof = _verify_preservable_pre_secret_state(
-                subscription_id=subscription_id, cleanup_at=cleanup_at
+                subscription_id=subscription_id, cleanup_at=cleanup_at, ledger=ledger
             )
             _validate_preservation_proof(proof)
             proof = {**proof, "deployment-terminal-state": terminal_state}

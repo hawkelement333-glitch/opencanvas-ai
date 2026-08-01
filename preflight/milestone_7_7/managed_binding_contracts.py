@@ -71,6 +71,9 @@ RFC3339_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 EXPECTED_RESOURCE_GROUPS: Final = {
     "cleanupControl": "rg-solarplexus-mobius-77-cleanup-control",
+    "containerAppsInfrastructure": (
+        "rg-solarplexus-mobius-77-containerapps-infrastructure"
+    ),
     "target": "rg-solarplexus-mobius-77-staging",
 }
 EXPECTED_SECRET_BINDINGS: Final = (
@@ -341,6 +344,9 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "acrPullRoleDefinitionId": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
         "acrPushRoleDefinitionId": "8311e382-0749-4cb8-b61a-304f252e45ec",
         "cleanupContributorRoleDefinitionId": ("b24988ac-6180-42a0-ab88-20f7382dd24c"),
+        "containerAppsNetworkContributorRoleDefinitionId": (
+            "4d97b98b-1d4f-4787-a291-c67834d212e7"
+        ),
         "keyVaultSecretsOfficerRoleDefinitionId": (
             "b86a8fe4-44ce-4948-aee5-eccb2c155cd7"
         ),
@@ -355,6 +361,13 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         raise ContractError("temporary operator role is not scoped to the Key Vault")
     if rbac.get("cleanupRoleScope") != "target-resource-group":
         raise ContractError("cleanup role is not scoped to the target resource group")
+    if (
+        rbac.get("containerAppsInfrastructureRoleScope")
+        != "exact-infrastructure-group-or-delegated-subnet"
+        or rbac.get("containerAppsInfrastructureRolePrincipalType")
+        != "ServicePrincipal"
+    ):
+        raise ContractError("Container Apps platform role boundary differs")
     if rbac.get("workloadRegistryRoleScope") != "container-registry-resource":
         raise ContractError("workload registry role is not scoped to the registry")
     if rbac.get("temporaryRegistryOperatorRoleScope") != "container-registry-resource":

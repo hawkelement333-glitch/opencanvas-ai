@@ -45,6 +45,10 @@ param applicationDeploymentEnabled bool = false
 param location string = 'southcentralus'
 
 param containerAppsSubnetId string = ''
+@allowed([
+  'rg-solarplexus-mobius-77-containerapps-infrastructure'
+])
+param infrastructureResourceGroupName string = 'rg-solarplexus-mobius-77-containerapps-infrastructure'
 param workloadIdentityId string = ''
 param keyVaultName string = ''
 param registryLoginServer string = ''
@@ -130,6 +134,7 @@ resource managedEnvironment 'Microsoft.App/managedEnvironments@2026-01-01' = if 
       destination: 'azure-monitor'
     }
     publicNetworkAccess: 'Disabled'
+    infrastructureResourceGroup: infrastructureResourceGroupName
     vnetConfiguration: {
       infrastructureSubnetId: containerAppsSubnetId
       internal: true
@@ -257,6 +262,7 @@ output managedBindingMode string = managedBindingMode
 output managedBindingDeploymentEnabled bool = enabled
 output applicationDeploymentEnabled bool = appEnabled
 output managedEnvironmentId string = enabled ? managedEnvironment.id : ''
+output infrastructureResourceGroupName string = infrastructureResourceGroupName
 output apiContainerAppId string = appEnabled ? apiContainerApp.id : ''
 output publicApplicationIngress bool = false
 output configuredOpenAiAlias string = 'OPENAI_API_KEY'

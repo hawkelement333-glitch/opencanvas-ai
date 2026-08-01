@@ -94,6 +94,7 @@ def test_exact_names_scopes_secrets_runtime_and_private_source_are_closed() -> N
 
     assert contract["resourceGroups"] == {
         "cleanupControl": "rg-solarplexus-mobius-77-cleanup-control",
+        "containerAppsInfrastructure": ("rg-solarplexus-mobius-77-containerapps-infrastructure"),
         "target": "rg-solarplexus-mobius-77-staging",
     }
     assert contract["location"] == "southcentralus"
@@ -1863,6 +1864,7 @@ def _write_cleanup_authorization(
         "resourceGroups": [
             managed_binding_lifecycle.TARGET_GROUP,
             managed_binding_lifecycle.CLEANUP_GROUP,
+            managed_binding_lifecycle.INFRASTRUCTURE_GROUP,
         ],
         "schemaVersion": "mobius.milestone-7.7.cleanup-authorization.v1",
     }
@@ -1903,9 +1905,155 @@ def _test_preservation_proof() -> dict[str, JsonValue]:
         "private-boundaries-preserved": True,
         "scope-inventory-exact": True,
         "cleanup-resource-count": 4,
+        "infrastructure-resource-count": 1,
         "private-endpoint-count": 2,
         "target-resource-count": 18,
     }
+
+
+def _verify_container_apps_infrastructure_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    group_name: str = managed_binding_lifecycle.INFRASTRUCTURE_GROUP,
+    group_tags: JsonValue = None,
+    environment: JsonValue = None,
+    resources: JsonValue = None,
+    assignments: JsonValue = None,
+) -> int:
+    subscription = SYNTHETIC_SUBSCRIPTION
+    expected_tags = {"mobius-run-id": "synthetic-run"}
+    if group_tags is None:
+        group_tags = expected_tags
+    if environment is None:
+        environment = {
+            "infrastructureResourceGroup": managed_binding_lifecycle.INFRASTRUCTURE_GROUP,
+            "internal": True,
+            "public": "Disabled",
+        }
+    group_scope = (
+        f"/subscriptions/{subscription}/resourceGroups/"
+        f"{managed_binding_lifecycle.INFRASTRUCTURE_GROUP}"
+    )
+    if resources is None:
+        resources = [
+            {
+                "id": f"{group_scope}/providers/Microsoft.Network/loadBalancers/lb-managed",
+                "location": managed_binding_lifecycle.STAGING_LOCATION,
+                "type": "Microsoft.Network/loadBalancers",
+            }
+        ]
+    if assignments is None:
+        assignments = []
+
+    def fake_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        if argv[1:3] == ("group", "show"):
+            return {
+                "id": group_scope.replace(
+                    managed_binding_lifecycle.INFRASTRUCTURE_GROUP, group_name
+                ),
+                "location": managed_binding_lifecycle.STAGING_LOCATION,
+                "tags": group_tags,
+            }
+        if argv[1:3] == ("resource", "list"):
+            return resources
+        if argv[1:4] == ("role", "assignment", "list"):
+            return assignments
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", fake_run)
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_resource_projection",
+        lambda *_args, **_kwargs: environment,
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_lifecycle_tags",
+        lambda **_kwargs: expected_tags,
+    )
+    monkeypatch.setattr(managed_binding_lifecycle, "_verified_cost", lambda: (1, 2))
+    return managed_binding_lifecycle._verify_container_apps_infrastructure(
+        subscription_id=subscription,
+        ledger=_test_lifecycle_ledger(),
+        cleanup_at=datetime(2026, 8, 2, 7, 0, tzinfo=UTC),
+    )
+
+
+def test_exact_container_apps_infrastructure_group_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _verify_container_apps_infrastructure_fixture(monkeypatch) == 1
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["group-name", "group-tags", "environment-binding", "public-resource", "extra-resource"],
+)
+def test_container_apps_infrastructure_drift_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    kwargs: dict[str, JsonValue] = {}
+    if field == "group-name":
+        kwargs["group_name"] = "rg-solarplexus-mobius-77-containerapps-infrastructure-nearby"
+    elif field == "group-tags":
+        kwargs["group_tags"] = {"mobius-run-id": "altered"}
+    elif field == "environment-binding":
+        kwargs["environment"] = {
+            "infrastructureResourceGroup": "rg-solarplexus-mobius-77-other",
+            "internal": True,
+            "public": "Disabled",
+        }
+    else:
+        group_scope = (
+            f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}/resourceGroups/"
+            f"{managed_binding_lifecycle.INFRASTRUCTURE_GROUP}"
+        )
+        rows: list[JsonValue] = [
+            {
+                "id": f"{group_scope}/providers/Microsoft.Network/loadBalancers/lb-managed",
+                "location": managed_binding_lifecycle.STAGING_LOCATION,
+                "type": "Microsoft.Network/loadBalancers",
+            },
+            {
+                "id": f"{group_scope}/providers/Microsoft.Network/publicIPAddresses/pip-forbidden",
+                "location": managed_binding_lifecycle.STAGING_LOCATION,
+                "type": "Microsoft.Network/publicIPAddresses",
+            },
+        ]
+        kwargs["resources"] = rows if field == "extra-resource" else rows[1:]
+    with pytest.raises(managed_binding_lifecycle.LifecycleError):
+        _verify_container_apps_infrastructure_fixture(monkeypatch, **kwargs)
+
+
+@pytest.mark.parametrize("field", ["principal", "role", "scope"])
+def test_container_apps_infrastructure_role_drift_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    assignment = {
+        "principalType": "ServicePrincipal",
+        "roleDefinitionId": (
+            f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}/providers/"
+            "Microsoft.Authorization/roleDefinitions/4d97b98b-1d4f-4787-a291-c67834d212e7"
+        ),
+        "scope": (
+            f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}/resourceGroups/"
+            f"{managed_binding_lifecycle.INFRASTRUCTURE_GROUP}"
+        ),
+    }
+    if field == "principal":
+        assignment["principalType"] = "User"
+    elif field == "role":
+        assignment["roleDefinitionId"] = assignment["roleDefinitionId"].replace(
+            "4d97b98b-1d4f-4787-a291-c67834d212e7",
+            "b24988ac-6180-42a0-ab88-20f7382dd24c",
+        )
+    else:
+        assignment["scope"] = f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}"
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="container-apps-infrastructure-role-drift",
+    ):
+        _verify_container_apps_infrastructure_fixture(monkeypatch, assignments=[assignment])
 
 
 @pytest.mark.parametrize(

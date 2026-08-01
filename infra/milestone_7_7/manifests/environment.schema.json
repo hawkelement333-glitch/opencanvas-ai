@@ -47,7 +47,9 @@
         "workloadProfile",
         "externalIngress",
         "fixedReplicaLimits",
-        "publicIpAllowed"
+        "publicIpAllowed",
+        "infrastructureResourceGroupName",
+        "infrastructureResourceGroupIntegritySha256"
       ],
       "properties": {
         "topology": {
@@ -64,6 +66,12 @@
         },
         "publicIpAllowed": {
           "const": false
+        },
+        "infrastructureResourceGroupName": {
+          "const": "rg-solarplexus-mobius-77-containerapps-infrastructure"
+        },
+        "infrastructureResourceGroupIntegritySha256": {
+          "const": "491ca1d28b3f8ce1f822f276f534a7b5a26a0215632d0e4324968d955e5a9d47"
         }
       }
     },

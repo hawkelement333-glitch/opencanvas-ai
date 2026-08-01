@@ -5,7 +5,7 @@
   "integrityDomain": "solarplexus-mobius/milestone-7.7/managed-binding-operation-overlay/v1",
   "authorizationSourceHead": "11564669bd5b40a88fdbf434c8137b063305eb4b",
   "historicalMatrixIntegritySha256": "100293931dcc71bb069e4f6fe06228360e0953b3b756544a555941d81bf8d6bc",
-  "managedBindingIntegritySha256": "8eaff24a0e0bc0601a2322fdf891a19acca52a6cab7d2d159f6e22af7b9d19dc",
+  "managedBindingIntegritySha256": "b14728f8bb47f93108f5226bc3a1483bf1282b0ba74f85c8d245b62d421c1309",
   "defaultAuthority": {
     "executionAuthorized": false,
     "mutationAuthorized": false,
@@ -802,7 +802,7 @@
         "m7.7-cost-envelope-v1",
         "minimum-25-percent-contingency"
       ],
-      "expectedScopes": ["exact-two-resource-groups"],
+      "expectedScopes": ["exact-three-resource-groups"],
       "authorizationPredicates": [
         "fresh-cost-evidence",
         "unexpired-one-run-ledger",
@@ -915,7 +915,8 @@
       ],
       "scope": [
         "exact-target-resource-group",
-        "exact-cleanup-control-resource-group"
+        "exact-cleanup-control-resource-group",
+        "exact-container-apps-infrastructure-resource-group"
       ],
       "terminalStates": [
         "ready-for-secure-manual-entry",
@@ -987,7 +988,8 @@
       ],
       "scope": [
         "exact-target-resource-group",
-        "exact-cleanup-control-resource-group"
+        "exact-cleanup-control-resource-group",
+        "exact-container-apps-infrastructure-resource-group"
       ],
       "terminalStates": [
         "cleanup-completed",
@@ -1006,7 +1008,7 @@
         "valid-unconsumed-one-run-ledger"
       ],
       "scope": [
-        "exact-two-resource-groups",
+        "exact-three-resource-groups",
         "exact-soft-deleted-key-vault-name"
       ],
       "terminalStates": ["zero-residue", "residue-detected"],
@@ -1014,5 +1016,5 @@
       "replayDecision": "deny"
     }
   ],
-  "contractIntegritySha256": "3704dfe4cdcf45ca89ac8219448a3c4848ed6a3a28bbe38c1265ec7971f57b64"
+  "contractIntegritySha256": "450f611947b08343cf1821529f058af1010c007854a2e74cf81ae9200075ff3a"
 }
