@@ -112,6 +112,14 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2026-01-01' = if (ena
         name: containerAppsSubnetName
         properties: {
           addressPrefix: containerAppsCidr
+          delegations: [
+            {
+              name: 'container-apps-environment'
+              properties: {
+                serviceName: 'Microsoft.App/environments'
+              }
+            }
+          ]
           privateEndpointNetworkPolicies: 'Enabled'
           privateLinkServiceNetworkPolicies: 'Enabled'
         }

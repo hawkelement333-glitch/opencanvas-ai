@@ -307,6 +307,7 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "param managementCleanupCidr string = '10.77.3.0/28'",
             "param infrastructurePublicIpCount int = 3",
             "param generalInternetEgressEnabled bool = false",
+            "serviceName: 'Microsoft.App/environments'",
             "name: 'VpnGw1AZ'",
             "tier: 'VpnGw1AZ'",
             "vpnGatewayGeneration: 'Generation2'",
@@ -352,6 +353,18 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
     assert "enablePurgeProtection:" not in key_vault_text
     assert "enableSoftDelete: true" in key_vault_text
     assert "softDeleteRetentionInDays: 7" in key_vault_text
+
+
+def test_container_apps_subnet_has_exact_exclusive_delegation() -> None:
+    text = (ROOT / "modules" / "network.bicep").read_text(encoding="utf-8")
+    container_subnet = text.split("name: containerAppsSubnetName", 1)[1].split(
+        "name: privateEndpointSubnetName", 1
+    )[0]
+
+    assert container_subnet.count("delegations:") == 1
+    assert container_subnet.count("name: 'container-apps-environment'") == 1
+    assert container_subnet.count("serviceName: 'Microsoft.App/environments'") == 1
+    assert text.count("serviceName: 'Microsoft.App/environments'") == 1
 
 
 def test_compiled_key_vault_omits_irreversible_purge_protection(
