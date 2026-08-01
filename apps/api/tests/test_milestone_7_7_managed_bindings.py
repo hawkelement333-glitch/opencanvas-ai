@@ -4,7 +4,7 @@ import hashlib
 import inspect
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1935,6 +1935,7 @@ def _test_lifecycle_ledger(marker: str = "a") -> dict[str, JsonValue]:
     return {
         "authorizationId": "m7.7-managed-binding-closeout-20260731",
         "ledgerIntegritySha256": marker * 64,
+        "managedBindingIntegritySha256": marker * 64,
         "repositoryHead": marker * 40,
     }
 
@@ -2168,6 +2169,110 @@ def test_container_apps_infrastructure_accepts_ancestor_source_only_without_inpu
         match="container-apps-infrastructure-group-drift",
     ):
         _verify_container_apps_infrastructure_fixture(monkeypatch, group_tags=prior_tags)
+
+
+def _reconcile_container_apps_infrastructure_tags_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    mutate: Callable[[dict[str, str]], None] | None = None,
+    update_matches: bool = True,
+) -> list[tuple[str, ...]]:
+    subscription = SYNTHETIC_SUBSCRIPTION
+    group_scope = (
+        f"/subscriptions/{subscription}/resourceGroups/"
+        f"{managed_binding_lifecycle.INFRASTRUCTURE_GROUP}"
+    )
+    environment_id = (
+        f"/subscriptions/{subscription}/resourceGroups/"
+        f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
+        "managedEnvironments/cae-mobius77-staging"
+    )
+    expected = _test_recovered_cleanup_tags()
+    expected["mobius-cleanup-binding-sha256"] = "e" * 64
+    expected["mobius-expires-at-utc"] = "2026-08-02T07:00:00Z"
+    expected["mobius-manifest-sha256"] = "f" * 64
+    expected["mobius-run-id"] = "run-current-ledger"
+    expected["mobius-source-commit"] = "c" * 40
+    observed = {
+        **expected,
+        "aca-managed-env-id": environment_id,
+        "mobius-cleanup-binding-sha256": "a" * 64,
+        "mobius-expires-at-utc": "08/01/2026 07:00:00",
+        "mobius-manifest-sha256": "b" * 64,
+        "mobius-run-id": "run-prior-ledger",
+        "mobius-source-commit": "d" * 40,
+    }
+    if mutate is not None:
+        mutate(observed)
+    desired = {**expected, "aca-managed-env-id": environment_id}
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        calls.append(argv)
+        if argv[0:3] == ("git", "merge-base", "--is-ancestor"):
+            return None
+        if argv[1:3] == ("group", "show"):
+            return {
+                "id": group_scope,
+                "location": managed_binding_lifecycle.STAGING_LOCATION,
+                "tags": observed,
+            }
+        if argv[1:3] == ("group", "update"):
+            return {
+                "id": group_scope,
+                "location": managed_binding_lifecycle.STAGING_LOCATION,
+                "tags": desired if update_matches else observed,
+            }
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", fake_run)
+    monkeypatch.setattr(managed_binding_lifecycle, "_lifecycle_tags", lambda **_kwargs: expected)
+    monkeypatch.setattr(managed_binding_lifecycle, "_verified_cost", lambda: (1, 2))
+    managed_binding_lifecycle._reconcile_container_apps_infrastructure_tags(
+        subscription_id=subscription,
+        ledger=_test_lifecycle_ledger(),
+        cleanup_at=datetime(2026, 8, 2, 7, 0, tzinfo=UTC),
+    )
+    return calls
+
+
+def test_container_apps_infrastructure_tags_reconcile_exact_prior_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _reconcile_container_apps_infrastructure_tags_fixture(monkeypatch)
+    assert sum(argv[1:3] == ("group", "update") for argv in calls) == 1
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda tags: tags.update({"mobius-run-id": "bad"}),
+        lambda tags: tags.update({"mobius-source-commit": "not-a-commit"}),
+        lambda tags: tags.update({"mobius-expires-at-utc": "08/03/2026 07:00:00"}),
+        lambda tags: tags.update({"mobius-public-access": "allowed"}),
+        lambda tags: tags.update({"aca-managed-env-id": "nearby"}),
+        lambda tags: tags.update({"unexpected": "tag"}),
+    ),
+)
+def test_container_apps_infrastructure_tag_reconciliation_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    mutate: Callable[[dict[str, str]], None],
+) -> None:
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="container-apps-infrastructure-tag-reconciliation-denied",
+    ):
+        _reconcile_container_apps_infrastructure_tags_fixture(monkeypatch, mutate=mutate)
+
+
+def test_container_apps_infrastructure_tag_reconciliation_requires_exact_readback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="container-apps-infrastructure-tag-reconciliation-unproved",
+    ):
+        _reconcile_container_apps_infrastructure_tags_fixture(monkeypatch, update_matches=False)
 
 
 def test_container_apps_private_dns_requires_exact_private_mapping(
@@ -2630,6 +2735,11 @@ def test_fresh_pre_secret_resume_is_idempotent_and_skips_cleanup_recreation(
         lambda **kwargs: deployed.append(str(kwargs["stage"])),
     )
     monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_reconcile_container_apps_infrastructure_tags",
+        lambda **_kwargs: reconciled.append("tags-reconciled"),
+    )
+    monkeypatch.setattr(
         managed_binding_lifecycle, "_signed_in_user_object_id", lambda: "opaque-user"
     )
     monkeypatch.setattr(
@@ -2655,7 +2765,14 @@ def test_fresh_pre_secret_resume_is_idempotent_and_skips_cleanup_recreation(
         assert state["disposition"] == "COMPLETED"
 
     assert deployed == ["pre-secret", "pre-secret"]
-    assert reconciled == ["proved", "proved", "proved", "proved"]
+    assert reconciled == [
+        "proved",
+        "tags-reconciled",
+        "proved",
+        "proved",
+        "tags-reconciled",
+        "proved",
+    ]
 
 
 def _test_recovered_cleanup_tags() -> dict[str, JsonValue]:
@@ -2707,6 +2824,11 @@ def test_exact_cleanup_only_recovery_seed_is_reconciled_before_staging(
     )
     monkeypatch.setattr(
         managed_binding_lifecycle,
+        "_reconcile_container_apps_infrastructure_tags",
+        lambda **_kwargs: ordered.append("tags-reconciled"),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
         "_configure_cleanup_runbook",
         lambda _subscription: ordered.append("runbook"),
     )
@@ -2747,7 +2869,7 @@ def test_exact_cleanup_only_recovery_seed_is_reconciled_before_staging(
         "cleanup-binding",
         "pre-secret",
     ]
-    assert ordered == ["seed-proved", "runbook", "role-proved"]
+    assert ordered == ["seed-proved", "runbook", "role-proved", "tags-reconciled"]
 
 
 def test_staging_only_recovery_state_fails_before_any_deployment(

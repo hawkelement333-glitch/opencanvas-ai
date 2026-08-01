@@ -680,6 +680,135 @@ def _matches_container_apps_infrastructure_tags(
     )
 
 
+def _reconcile_container_apps_infrastructure_tags(
+    *,
+    subscription_id: str,
+    ledger: dict[str, JsonValue],
+    cleanup_at: datetime,
+) -> None:
+    expected = _lifecycle_tags(
+        ledger=ledger,
+        cleanup_at=cleanup_at,
+        maximum_cost=_verified_cost()[1],
+    )
+    environment_id = _scope(
+        subscription_id,
+        f"/resourceGroups/{TARGET_GROUP}/providers/Microsoft.App/"
+        "managedEnvironments/cae-mobius77-staging",
+    )
+    managed_environment_key = "aca-managed-env-id"
+    desired = {**expected, managed_environment_key: environment_id}
+    group = _run(
+        (
+            "az",
+            "group",
+            "show",
+            "--name",
+            INFRASTRUCTURE_GROUP,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "{id:id,location:location,tags:tags}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    group_scope = _scope(subscription_id, f"/resourceGroups/{INFRASTRUCTURE_GROUP}")
+    observed = group.get("tags") if isinstance(group, dict) else None
+    if (
+        not isinstance(group, dict)
+        or set(group) != {"id", "location", "tags"}
+        or group.get("id") != group_scope
+        or group.get("location") != STAGING_LOCATION
+        or not isinstance(observed, dict)
+        or set(observed) != set(desired)
+        or str(observed.get(managed_environment_key, "")).casefold()
+        != environment_id.casefold()
+    ):
+        _fail("container-apps-infrastructure-tag-reconciliation-denied")
+    if observed == desired:
+        return
+
+    variable_keys = {
+        "mobius-cleanup-binding-sha256",
+        "mobius-expires-at-utc",
+        "mobius-manifest-sha256",
+        "mobius-run-id",
+        "mobius-source-commit",
+    }
+    if any(
+        observed.get(key) != value
+        for key, value in expected.items()
+        if key not in variable_keys
+    ):
+        _fail("container-apps-infrastructure-tag-reconciliation-denied")
+    if any(
+        not isinstance(observed.get(key), str)
+        or HEX_SHA256.fullmatch(str(observed[key])) is None
+        for key in ("mobius-cleanup-binding-sha256", "mobius-manifest-sha256")
+    ):
+        _fail("container-apps-infrastructure-tag-reconciliation-denied")
+    observed_run_id = observed.get("mobius-run-id")
+    if (
+        not isinstance(observed_run_id, str)
+        or re.fullmatch(r"[a-z0-9][a-z0-9-]{7,127}", observed_run_id) is None
+    ):
+        _fail("container-apps-infrastructure-tag-reconciliation-denied")
+    observed_source = observed.get("mobius-source-commit")
+    expected_source = expected.get("mobius-source-commit")
+    if (
+        not isinstance(observed_source, str)
+        or HEX_SHA40.fullmatch(observed_source) is None
+        or not isinstance(expected_source, str)
+        or HEX_SHA40.fullmatch(expected_source) is None
+    ):
+        _fail("container-apps-infrastructure-tag-reconciliation-denied")
+    try:
+        _run(("git", "merge-base", "--is-ancestor", observed_source, expected_source))
+    except LifecycleError:
+        _fail("container-apps-infrastructure-tag-reconciliation-denied")
+    observed_expiry = observed.get("mobius-expires-at-utc")
+    if not isinstance(observed_expiry, str):
+        _fail("container-apps-infrastructure-tag-reconciliation-denied")
+    try:
+        parsed_expiry = datetime.strptime(observed_expiry, "%m/%d/%Y %H:%M:%S").replace(
+            tzinfo=UTC
+        )
+    except ValueError:
+        try:
+            parsed_expiry = datetime.strptime(
+                observed_expiry, "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=UTC)
+        except ValueError:
+            _fail("container-apps-infrastructure-tag-reconciliation-denied")
+    if parsed_expiry > cleanup_at.astimezone(UTC).replace(microsecond=0):
+        _fail("container-apps-infrastructure-tag-reconciliation-denied")
+
+    updated = _run(
+        (
+            "az",
+            "group",
+            "update",
+            "--name",
+            INFRASTRUCTURE_GROUP,
+            "--subscription",
+            subscription_id,
+            "--set",
+            "tags=" + json.dumps(desired, separators=(",", ":"), sort_keys=True),
+            "--query",
+            "{id:id,location:location,tags:tags}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if updated != {"id": group_scope, "location": STAGING_LOCATION, "tags": desired}:
+        _fail("container-apps-infrastructure-tag-reconciliation-unproved")
+
+
 def _deployment_name(stage: str, ledger: Mapping[str, JsonValue]) -> str:
     ledger_integrity = ledger.get("ledgerIntegritySha256")
     if (
@@ -2361,6 +2490,19 @@ def _pre_secret(
             maximum_cost=maximum_cost,
         )
         _mark_stage(state_path, state, PRE_SECRET_PRESERVABLE_STAGE, completed=True)
+
+    _mark_stage(state_path, state, "container-apps-infrastructure-tag-reconciliation")
+    _reconcile_container_apps_infrastructure_tags(
+        subscription_id=subscription_id,
+        ledger=ledger,
+        cleanup_at=cleanup_at,
+    )
+    _mark_stage(
+        state_path,
+        state,
+        "container-apps-infrastructure-tag-reconciliation",
+        completed=True,
+    )
 
     _mark_stage(state_path, state, "pre-secret-verification")
     _verify_preservable_pre_secret_state(
