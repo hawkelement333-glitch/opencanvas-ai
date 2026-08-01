@@ -1071,6 +1071,19 @@ def test_lifecycle_deployment_names_preserve_prior_azure_history() -> None:
         )
 
 
+def test_lifecycle_cleanup_deadline_matches_azure_minute_precision() -> None:
+    observed = datetime(2026, 8, 1, 3, 5, 33, 987654, tzinfo=UTC)
+
+    deadline = managed_binding_lifecycle._cleanup_deadline(observed)
+
+    assert deadline == datetime(2026, 8, 2, 3, 5, tzinfo=UTC)
+    assert observed + timedelta(hours=23, minutes=59) < deadline
+    assert deadline <= observed + timedelta(hours=24)
+
+    with pytest.raises(managed_binding_lifecycle.LifecycleError, match="cleanup-time-invalid"):
+        managed_binding_lifecycle._cleanup_deadline(observed.replace(tzinfo=None))
+
+
 def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> None:
     text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
     assert 'STAGING_LOCATION: Final = "southcentralus"' in text

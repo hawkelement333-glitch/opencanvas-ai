@@ -99,6 +99,12 @@ def _format_utc(value: datetime) -> str:
     return value.astimezone(UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _cleanup_deadline(now: datetime) -> datetime:
+    if now.tzinfo is None or now.utcoffset() != timedelta(0):
+        _fail("cleanup-time-invalid")
+    return (now + timedelta(hours=24)).replace(second=0, microsecond=0)
+
+
 def _fail(code: str) -> NoReturn:
     raise LifecycleError(code)
 
@@ -798,7 +804,7 @@ def _pre_secret(
     receipt_directory: Path,
 ) -> dict[str, JsonValue]:
     expected_cost, maximum_cost = _verified_cost()
-    cleanup_at = _utc_now() + timedelta(hours=24)
+    cleanup_at = _cleanup_deadline(_utc_now())
     contract = load_managed_binding_contract()
     rbac = contract["rbac"]
     scopes = contract["scopeBinding"]
