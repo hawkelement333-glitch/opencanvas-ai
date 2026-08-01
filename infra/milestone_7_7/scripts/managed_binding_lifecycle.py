@@ -158,6 +158,7 @@ TARGET_DEPLOYMENT_NAMES: Final = frozenset(
 CLEANUP_DEPLOYMENT_NAMES: Final = frozenset(
     {"mobius77-cleanup-control", "mobius77-cleanup-job-binding"}
 )
+CLEANUP_JOB_BINDING_DEPLOYMENT: Final = "mobius77-cleanup-job-binding"
 RECOVERED_CLEANUP_TAG_KEYS: Final = frozenset(
     {
         "mobius-cleanup-binding-sha256",
@@ -661,14 +662,22 @@ def _verify_cleanup_job_schedule(subscription_id: str) -> None:
     rows = _run(
         (
             "az",
-            "resource",
+            "deployment",
+            "operation",
+            "group",
             "list",
             "--resource-group",
             CLEANUP_GROUP,
+            "--name",
+            CLEANUP_JOB_BINDING_DEPLOYMENT,
             "--subscription",
             subscription_id,
             "--query",
-            "[].{id:id,type:type}",
+            (
+                "[?properties.targetResource.resourceType != null]."
+                "{id:properties.targetResource.id,"
+                "type:properties.targetResource.resourceType}"
+            ),
             "--output",
             "json",
             "--only-show-errors",

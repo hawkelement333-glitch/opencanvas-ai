@@ -1164,7 +1164,7 @@ def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> No
     )
 
 
-def test_cleanup_job_schedule_verification_uses_exact_generic_arm_resource(
+def test_cleanup_job_schedule_verification_uses_exact_deployment_operation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     subscription_id = "opaque-subscription"
@@ -1178,7 +1178,7 @@ def test_cleanup_job_schedule_verification_uses_exact_generic_arm_resource(
 
     def exact_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
         observed.append(argv)
-        if argv[1:3] == ("resource", "list"):
+        if argv[1:5] == ("deployment", "operation", "group", "list"):
             return [
                 {
                     "id": job_schedule_id,
@@ -1198,10 +1198,12 @@ def test_cleanup_job_schedule_verification_uses_exact_generic_arm_resource(
 
     managed_binding_lifecycle._verify_cleanup_job_schedule(subscription_id)
 
-    assert [argv[1:3] for argv in observed] == [
-        ("resource", "list"),
-        ("resource", "show"),
-    ]
+    assert observed[0][1:5] == ("deployment", "operation", "group", "list")
+    assert observed[1][1:3] == ("resource", "show")
+    assert observed[0][observed[0].index("--name") + 1] == "mobius77-cleanup-job-binding"
+    assert observed[0][observed[0].index("--resource-group") + 1] == (
+        "rg-solarplexus-mobius-77-cleanup-control"
+    )
     assert "2024-10-23" in observed[1]
     source = inspect.getsource(managed_binding_lifecycle._verify_cleanup_job_schedule)
     assert '"job-schedule"' not in source
@@ -1220,7 +1222,7 @@ def test_cleanup_job_schedule_verification_fails_closed_on_drift(
     )
 
     def drift_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
-        if argv[1:3] == ("resource", "list"):
+        if argv[1:5] == ("deployment", "operation", "group", "list"):
             row = {
                 "id": job_schedule_id,
                 "type": "Microsoft.Automation/automationAccounts/jobSchedules",
