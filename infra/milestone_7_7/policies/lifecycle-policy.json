@@ -41,7 +41,7 @@
     "extensionRequiresSeparateAuthorization": true,
     "rollingExtensionAllowed": false,
     "exactUtcBindingsRequired": true,
-    "authorizedCleanupAtUtc": "2026-08-02T07:00:00Z"
+    "authorizedCleanupAtUtc": "2026-08-02T11:00:00Z"
   },
   "cleanup": {
     "service": "AzureAutomation",
