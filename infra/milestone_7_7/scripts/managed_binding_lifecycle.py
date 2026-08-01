@@ -1252,7 +1252,11 @@ def _exact_scope_role_rows(subscription_id: str, scope: str) -> list[dict[str, s
     return normalized
 
 
-def _verify_recovered_cleanup_tags(tags: JsonValue) -> None:
+def _verify_recovered_cleanup_tags(
+    tags: JsonValue,
+    *,
+    allowed_teardown_states: frozenset[str] = frozenset({"preservation-only"}),
+) -> None:
     if not isinstance(tags, dict) or set(tags) != RECOVERED_CLEANUP_TAG_KEYS:
         _fail("recovered-cleanup-tags-drift")
     fixed_values = {
@@ -1260,9 +1264,10 @@ def _verify_recovered_cleanup_tags(tags: JsonValue) -> None:
         "mobius-data-class": "isolated-synthetic",
         "mobius-environment": "milestone-7.7-staging",
         "mobius-public-access": "denied",
-        "mobius-teardown-state": "preservation-only",
     }
     if any(tags.get(key) != value for key, value in fixed_values.items()):
+        _fail("recovered-cleanup-tags-drift")
+    if tags.get("mobius-teardown-state") not in allowed_teardown_states:
         _fail("recovered-cleanup-tags-drift")
     for key in ("mobius-cleanup-binding-sha256", "mobius-manifest-sha256"):
         value = tags.get(key)
@@ -1312,14 +1317,16 @@ def _verify_recovered_cleanup_seed_state(subscription_id: str) -> None:
         ),
         require_json=True,
     )
+    group_tags = group.get("tags") if isinstance(group, dict) else None
     if (
         not isinstance(group, dict)
         or set(group) != {"id", "location", "tags"}
         or group.get("id") != group_scope
         or group.get("location") != STAGING_LOCATION
-        or group.get("tags") not in (None, {})
     ):
         _fail("recovered-cleanup-group-drift")
+    if group_tags not in (None, {}):
+        _verify_recovered_cleanup_tags(group_tags)
 
     account_scope = _scope(
         subscription_id,
@@ -1375,7 +1382,10 @@ def _verify_recovered_cleanup_seed_state(subscription_id: str) -> None:
         or account.get("state") != "Ok"
     ):
         _fail("recovered-cleanup-account-drift")
-    _verify_recovered_cleanup_tags(account["tags"])
+    _verify_recovered_cleanup_tags(
+        account["tags"],
+        allowed_teardown_states=frozenset({"armed", "preservation-only"}),
+    )
 
     resources = _resource_group_inventory(
         subscription_id=subscription_id,

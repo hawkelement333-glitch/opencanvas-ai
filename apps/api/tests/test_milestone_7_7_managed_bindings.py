@@ -2545,7 +2545,7 @@ def test_staging_only_recovery_state_fails_before_any_deployment(
         )
 
 
-def test_recovered_cleanup_seed_requires_exact_empty_private_state(
+def test_recovered_cleanup_seed_requires_exact_reconcilable_private_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     subscription_id = "opaque-subscription"
@@ -2556,11 +2556,18 @@ def test_recovered_cleanup_seed_requires_exact_empty_private_state(
         f"{group_scope}/providers/Microsoft.Automation/automationAccounts/aa-mobius77-cleanup"
     )
     tags = _test_recovered_cleanup_tags()
+    account_teardown_state = "armed"
 
     def exact_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
         if argv[1:3] == ("group", "show"):
-            return {"id": group_scope, "location": "southcentralus", "tags": None}
+            return {
+                "id": group_scope,
+                "location": "southcentralus",
+                "tags": _test_recovered_cleanup_tags(),
+            }
         if argv[1:4] == ("automation", "account", "show"):
+            account_tags = tags.copy()
+            account_tags["mobius-teardown-state"] = account_teardown_state
             return {
                 "id": account_scope,
                 "identityType": None,
@@ -2570,7 +2577,7 @@ def test_recovered_cleanup_seed_requires_exact_empty_private_state(
                 "principalId": None,
                 "publicNetworkAccess": False,
                 "state": "Ok",
-                "tags": tags,
+                "tags": account_tags,
             }
         if argv[1:3] == ("resource", "list"):
             return [
@@ -2590,6 +2597,14 @@ def test_recovered_cleanup_seed_requires_exact_empty_private_state(
     managed_binding_lifecycle._verify_recovered_cleanup_seed_state(subscription_id)
 
     tags["mobius-public-access"] = "allowed"
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="recovered-cleanup-tags-drift",
+    ):
+        managed_binding_lifecycle._verify_recovered_cleanup_seed_state(subscription_id)
+
+    tags["mobius-public-access"] = "denied"
+    account_teardown_state = "unexpected"
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
         match="recovered-cleanup-tags-drift",
