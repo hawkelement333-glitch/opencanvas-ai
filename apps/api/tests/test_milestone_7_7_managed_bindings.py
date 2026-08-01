@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import re
 from collections.abc import Mapping
@@ -1548,6 +1549,264 @@ def test_fresh_pre_secret_resume_is_idempotent_and_skips_cleanup_recreation(
 
     assert deployed == ["pre-secret", "pre-secret"]
     assert reconciled == ["proved", "proved", "proved", "proved"]
+
+
+def _test_recovered_cleanup_tags() -> dict[str, JsonValue]:
+    return {
+        "mobius-cleanup-binding-sha256": "a" * 64,
+        "mobius-contract-version": "m7.7-managed-binding-v1",
+        "mobius-cost-ceiling-usd-cents": "4254",
+        "mobius-data-class": "isolated-synthetic",
+        "mobius-environment": "milestone-7.7-staging",
+        "mobius-expires-at-utc": "08/02/2026 05:33:00",
+        "mobius-manifest-sha256": "b" * 64,
+        "mobius-public-access": "denied",
+        "mobius-run-id": "run-recovered-cleanup-seed",
+        "mobius-source-commit": "c" * 40,
+        "mobius-teardown-state": "armed",
+    }
+
+
+def test_exact_cleanup_only_recovery_seed_is_reconciled_before_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deployed: list[str] = []
+    ordered: list[str] = []
+    monkeypatch.setattr(managed_binding_lifecycle, "_verified_cost", lambda: (1928, 8508))
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_cleanup_deadline",
+        lambda _now: managed_binding_lifecycle.AUTHORIZED_CLEANUP_AT_UTC,
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_group_exists",
+        lambda _subscription, group: group == managed_binding_lifecycle.CLEANUP_GROUP,
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_recovered_cleanup_seed_state",
+        lambda _subscription: ordered.append("seed-proved"),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_compile_template",
+        lambda path: path.write_text("{}", encoding="utf-8"),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_deploy_stage",
+        lambda **kwargs: deployed.append(str(kwargs["stage"])),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_configure_cleanup_runbook",
+        lambda _subscription: ordered.append("runbook"),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_cleanup_control",
+        lambda _subscription, _deadline: "00000000-0000-0000-0000-000000000001",
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_cleanup_target_role",
+        lambda *_args: ordered.append("role-proved"),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_preservable_pre_secret_state",
+        lambda **_kwargs: _test_preservation_proof(),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle, "_signed_in_user_object_id", lambda: "opaque-user"
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_temporary_role_assignment",
+        lambda **_kwargs: "opaque-assignment",
+    )
+
+    result = managed_binding_lifecycle._pre_secret(
+        ledger=_test_lifecycle_ledger(),
+        subscription_id="opaque-subscription",
+        receipt_directory=tmp_path,
+    )
+
+    assert result["status"] == "ready-for-secure-manual-entry"
+    assert deployed == [
+        "cleanup-control",
+        "cleanup-job-binding",
+        "cleanup-binding",
+        "pre-secret",
+    ]
+    assert ordered == ["seed-proved", "runbook", "role-proved"]
+
+
+def test_staging_only_recovery_state_fails_before_any_deployment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(managed_binding_lifecycle, "_verified_cost", lambda: (1928, 8508))
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_cleanup_deadline",
+        lambda _now: managed_binding_lifecycle.AUTHORIZED_CLEANUP_AT_UTC,
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_group_exists",
+        lambda _subscription, group: group == managed_binding_lifecycle.TARGET_GROUP,
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_deploy_stage",
+        lambda **_kwargs: pytest.fail("deployment must remain blocked"),
+    )
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-authorized-scope-incomplete",
+    ):
+        managed_binding_lifecycle._pre_secret(
+            ledger=_test_lifecycle_ledger(),
+            subscription_id="opaque-subscription",
+            receipt_directory=tmp_path,
+        )
+
+
+def test_recovered_cleanup_seed_requires_exact_empty_private_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subscription_id = "opaque-subscription"
+    group_scope = (
+        "/subscriptions/opaque-subscription/resourceGroups/rg-solarplexus-mobius-77-cleanup-control"
+    )
+    account_scope = (
+        f"{group_scope}/providers/Microsoft.Automation/automationAccounts/aa-mobius77-cleanup"
+    )
+    tags = _test_recovered_cleanup_tags()
+
+    def exact_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        if argv[1:3] == ("group", "show"):
+            return {"id": group_scope, "location": "southcentralus", "tags": None}
+        if argv[1:4] == ("automation", "account", "show"):
+            return {
+                "id": account_scope,
+                "identityType": None,
+                "linkedWorkspaceId": None,
+                "localAuthDisabled": True,
+                "location": "westus",
+                "principalId": None,
+                "publicNetworkAccess": False,
+                "state": "Ok",
+                "tags": tags,
+            }
+        if argv[1:3] == ("resource", "list"):
+            return [
+                {
+                    "id": account_scope,
+                    "location": "westus",
+                    "type": "Microsoft.Automation/automationAccounts",
+                }
+            ]
+        if argv[1:4] == ("role", "assignment", "list"):
+            return []
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", exact_run)
+    monkeypatch.setattr(managed_binding_lifecycle, "_run_text", lambda _argv: "")
+
+    managed_binding_lifecycle._verify_recovered_cleanup_seed_state(subscription_id)
+
+    tags["mobius-public-access"] = "allowed"
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="recovered-cleanup-tags-drift",
+    ):
+        managed_binding_lifecycle._verify_recovered_cleanup_seed_state(subscription_id)
+
+    exact_scope_role_source = inspect.getsource(managed_binding_lifecycle._exact_scope_role_rows)
+    assert '"--scope"' in exact_scope_role_source
+    assert '"--all"' not in exact_scope_role_source
+
+
+def test_recovered_cleanup_seed_rejects_resource_or_role_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subscription_id = "opaque-subscription"
+    group_scope = (
+        "/subscriptions/opaque-subscription/resourceGroups/rg-solarplexus-mobius-77-cleanup-control"
+    )
+    account_scope = (
+        f"{group_scope}/providers/Microsoft.Automation/automationAccounts/aa-mobius77-cleanup"
+    )
+    resource_drift = False
+    role_drift = False
+
+    def drift_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        nonlocal resource_drift, role_drift
+        if argv[1:3] == ("group", "show"):
+            return {"id": group_scope, "location": "southcentralus", "tags": None}
+        if argv[1:4] == ("automation", "account", "show"):
+            return {
+                "id": account_scope,
+                "identityType": None,
+                "linkedWorkspaceId": None,
+                "localAuthDisabled": True,
+                "location": "westus",
+                "principalId": None,
+                "publicNetworkAccess": False,
+                "state": "Ok",
+                "tags": _test_recovered_cleanup_tags(),
+            }
+        if argv[1:3] == ("resource", "list"):
+            rows: list[JsonValue] = [
+                {
+                    "id": account_scope,
+                    "location": "westus",
+                    "type": "Microsoft.Automation/automationAccounts",
+                }
+            ]
+            if resource_drift:
+                rows.append(
+                    {
+                        "id": f"{group_scope}/providers/Microsoft.Storage/storageAccounts/drift",
+                        "location": "westus",
+                        "type": "Microsoft.Storage/storageAccounts",
+                    }
+                )
+            return rows
+        if argv[1:4] == ("role", "assignment", "list"):
+            if not role_drift:
+                return []
+            scope_index = argv.index("--scope") + 1
+            observed_scope = argv[scope_index]
+            return [
+                {
+                    "principalId": "00000000-0000-0000-0000-000000000001",
+                    "roleDefinitionId": "00000000-0000-0000-0000-000000000002",
+                    "scope": observed_scope,
+                }
+            ]
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", drift_run)
+    monkeypatch.setattr(managed_binding_lifecycle, "_run_text", lambda _argv: "")
+
+    resource_drift = True
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-resource-inventory-drift",
+    ):
+        managed_binding_lifecycle._verify_recovered_cleanup_seed_state(subscription_id)
+
+    resource_drift = False
+    role_drift = True
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="recovered-cleanup-role-drift",
+    ):
+        managed_binding_lifecycle._verify_recovered_cleanup_seed_state(subscription_id)
 
 
 def test_cleanup_is_idempotent_without_residue(

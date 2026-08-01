@@ -158,6 +158,21 @@ TARGET_DEPLOYMENT_NAMES: Final = frozenset(
 CLEANUP_DEPLOYMENT_NAMES: Final = frozenset(
     {"mobius77-cleanup-control", "mobius77-cleanup-job-binding"}
 )
+RECOVERED_CLEANUP_TAG_KEYS: Final = frozenset(
+    {
+        "mobius-cleanup-binding-sha256",
+        "mobius-contract-version",
+        "mobius-cost-ceiling-usd-cents",
+        "mobius-data-class",
+        "mobius-environment",
+        "mobius-expires-at-utc",
+        "mobius-manifest-sha256",
+        "mobius-public-access",
+        "mobius-run-id",
+        "mobius-source-commit",
+        "mobius-teardown-state",
+    }
+)
 
 
 class LifecycleDisposition(str, Enum):
@@ -1050,7 +1065,6 @@ def _exact_scope_role_rows(subscription_id: str, scope: str) -> list[dict[str, s
             "list",
             "--scope",
             scope,
-            "--all",
             "--fill-principal-name",
             "false",
             "--subscription",
@@ -1094,6 +1108,145 @@ def _exact_scope_role_rows(subscription_id: str, scope: str) -> list[dict[str, s
             }
         )
     return normalized
+
+
+def _verify_recovered_cleanup_tags(tags: JsonValue) -> None:
+    if not isinstance(tags, dict) or set(tags) != RECOVERED_CLEANUP_TAG_KEYS:
+        _fail("recovered-cleanup-tags-drift")
+    fixed_values = {
+        "mobius-contract-version": "m7.7-managed-binding-v1",
+        "mobius-data-class": "isolated-synthetic",
+        "mobius-environment": "milestone-7.7-staging",
+        "mobius-public-access": "denied",
+        "mobius-teardown-state": "armed",
+    }
+    if any(tags.get(key) != value for key, value in fixed_values.items()):
+        _fail("recovered-cleanup-tags-drift")
+    for key in ("mobius-cleanup-binding-sha256", "mobius-manifest-sha256"):
+        value = tags.get(key)
+        if not isinstance(value, str) or HEX_SHA256.fullmatch(value) is None:
+            _fail("recovered-cleanup-tags-drift")
+    source_commit = tags.get("mobius-source-commit")
+    if not isinstance(source_commit, str) or HEX_SHA40.fullmatch(source_commit) is None:
+        _fail("recovered-cleanup-tags-drift")
+    _run_text(("git", "cat-file", "-e", f"{source_commit}^{{commit}}"))
+    run_id = tags.get("mobius-run-id")
+    if (
+        not isinstance(run_id, str)
+        or re.fullmatch(r"[A-Za-z0-9._-]{1,128}", run_id) is None
+    ):
+        _fail("recovered-cleanup-tags-drift")
+    cleanup_at = tags.get("mobius-expires-at-utc")
+    if (
+        not isinstance(cleanup_at, str)
+        or re.fullmatch(r"[0-9T:Z+./ -]{1,64}", cleanup_at) is None
+    ):
+        _fail("recovered-cleanup-tags-drift")
+    cost_ceiling = tags.get("mobius-cost-ceiling-usd-cents")
+    if (
+        not isinstance(cost_ceiling, str)
+        or not cost_ceiling.isdigit()
+        or not 1 <= int(cost_ceiling) <= ABSOLUTE_COST_CEILING_USD_CENTS
+    ):
+        _fail("recovered-cleanup-tags-drift")
+
+
+def _verify_recovered_cleanup_seed_state(subscription_id: str) -> None:
+    group_scope = _scope(subscription_id, f"/resourceGroups/{CLEANUP_GROUP}")
+    group = _run(
+        (
+            "az",
+            "group",
+            "show",
+            "--name",
+            CLEANUP_GROUP,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "{id:id,location:location,tags:tags}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if (
+        not isinstance(group, dict)
+        or set(group) != {"id", "location", "tags"}
+        or group.get("id") != group_scope
+        or group.get("location") != STAGING_LOCATION
+        or group.get("tags") not in (None, {})
+    ):
+        _fail("recovered-cleanup-group-drift")
+
+    account_scope = _scope(
+        subscription_id,
+        f"/resourceGroups/{CLEANUP_GROUP}/providers/"
+        f"Microsoft.Automation/automationAccounts/{AUTOMATION_ACCOUNT}",
+    )
+    account = _run(
+        (
+            "az",
+            "automation",
+            "account",
+            "show",
+            "--resource-group",
+            CLEANUP_GROUP,
+            "--automation-account-name",
+            AUTOMATION_ACCOUNT,
+            "--subscription",
+            subscription_id,
+            "--query",
+            (
+                "{id:id,identityType:identity.type,"
+                "linkedWorkspaceId:linkedWorkspaceId,"
+                "localAuthDisabled:disableLocalAuth,location:location,"
+                "principalId:identity.principalId,"
+                "publicNetworkAccess:publicNetworkAccess,state:state,tags:tags}"
+            ),
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(account, dict) or set(account) != {
+        "id",
+        "identityType",
+        "linkedWorkspaceId",
+        "localAuthDisabled",
+        "location",
+        "principalId",
+        "publicNetworkAccess",
+        "state",
+        "tags",
+    }:
+        _fail("recovered-cleanup-account-output-malformed")
+    if (
+        account.get("id") != account_scope
+        or account.get("identityType") not in (None, "")
+        or account.get("linkedWorkspaceId") not in (None, "")
+        or account.get("localAuthDisabled") is not True
+        or account.get("location") != CLEANUP_LOCATION
+        or account.get("principalId") not in (None, "")
+        or account.get("publicNetworkAccess") is not False
+        or account.get("state") != "Ok"
+    ):
+        _fail("recovered-cleanup-account-drift")
+    _verify_recovered_cleanup_tags(account["tags"])
+
+    resources = _resource_group_inventory(
+        subscription_id=subscription_id,
+        group=CLEANUP_GROUP,
+    )
+    if resources != frozenset(
+        {f"microsoft.automation/automationaccounts/{AUTOMATION_ACCOUNT.casefold()}"}
+    ):
+        _fail("recovered-cleanup-resource-drift")
+    if _exact_scope_role_rows(subscription_id, group_scope) or _exact_scope_role_rows(
+        subscription_id, account_scope
+    ):
+        _fail("recovered-cleanup-role-drift")
 
 
 def _workload_identity_principal(subscription_id: str) -> str:
@@ -1578,7 +1731,7 @@ def _pre_secret(
 
     target_exists = _group_exists(subscription_id, TARGET_GROUP)
     cleanup_exists = _group_exists(subscription_id, CLEANUP_GROUP)
-    if target_exists != cleanup_exists:
+    if target_exists and not cleanup_exists:
         _fail("pre-secret-authorized-scope-incomplete")
 
     with tempfile.TemporaryDirectory(prefix="mobius77-binding-") as directory:
@@ -1594,6 +1747,15 @@ def _pre_secret(
             )
             _mark_stage(state_path, state, "pre-secret-reconciliation", completed=True)
         else:
+            if cleanup_exists:
+                _mark_stage(state_path, state, "cleanup-recovery-seed-verification")
+                _verify_recovered_cleanup_seed_state(subscription_id)
+                _mark_stage(
+                    state_path,
+                    state,
+                    "cleanup-recovery-seed-verification",
+                    completed=True,
+                )
             _mark_stage(state_path, state, "cleanup-control")
             _deploy_stage(
                 template_path=template,
