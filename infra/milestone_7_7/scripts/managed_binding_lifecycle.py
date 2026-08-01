@@ -183,6 +183,7 @@ TARGET_RESOURCE_LOCATIONS: Final = (
         "southcentralus",
     ),
     ("microsoft.app/managedenvironments/cae-mobius77-staging", "southcentralus"),
+    ("microsoft.app/containerapps/ca-mobius77-api", "southcentralus"),
 )
 TARGET_DEPLOYMENT_NAMES: Final = frozenset(
     {
@@ -678,6 +679,76 @@ def _matches_container_apps_infrastructure_tags(
         for key, value in expected.items()
         if key not in {binding_key, expiry_key, source_key}
     )
+
+
+def _container_apps_infrastructure_tags_reconcilable(
+    observed: JsonValue,
+    expected: Mapping[str, str],
+    *,
+    cleanup_at: datetime,
+    environment_id: str,
+) -> bool:
+    managed_environment_key = "aca-managed-env-id"
+    if (
+        not isinstance(observed, dict)
+        or set(observed) != {*expected, managed_environment_key}
+        or str(observed.get(managed_environment_key, "")).casefold()
+        != environment_id.casefold()
+    ):
+        return False
+    variable_keys = {
+        "mobius-cleanup-binding-sha256",
+        "mobius-expires-at-utc",
+        "mobius-manifest-sha256",
+        "mobius-run-id",
+        "mobius-source-commit",
+    }
+    if any(
+        observed.get(key) != value
+        for key, value in expected.items()
+        if key not in variable_keys
+    ):
+        return False
+    if any(
+        not isinstance(observed.get(key), str)
+        or HEX_SHA256.fullmatch(str(observed[key])) is None
+        for key in ("mobius-cleanup-binding-sha256", "mobius-manifest-sha256")
+    ):
+        return False
+    observed_run_id = observed.get("mobius-run-id")
+    if (
+        not isinstance(observed_run_id, str)
+        or re.fullmatch(r"[a-z0-9][a-z0-9-]{7,127}", observed_run_id) is None
+    ):
+        return False
+    observed_source = observed.get("mobius-source-commit")
+    expected_source = expected.get("mobius-source-commit")
+    if (
+        not isinstance(observed_source, str)
+        or HEX_SHA40.fullmatch(observed_source) is None
+        or not isinstance(expected_source, str)
+        or HEX_SHA40.fullmatch(expected_source) is None
+    ):
+        return False
+    try:
+        _run(("git", "merge-base", "--is-ancestor", observed_source, expected_source))
+    except LifecycleError:
+        return False
+    observed_expiry = observed.get("mobius-expires-at-utc")
+    if not isinstance(observed_expiry, str):
+        return False
+    try:
+        parsed_expiry = datetime.strptime(observed_expiry, "%m/%d/%Y %H:%M:%S").replace(
+            tzinfo=UTC
+        )
+    except ValueError:
+        try:
+            parsed_expiry = datetime.strptime(
+                observed_expiry, "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=UTC)
+        except ValueError:
+            return False
+    return parsed_expiry <= cleanup_at.astimezone(UTC).replace(microsecond=0)
 
 
 def _reconcile_container_apps_infrastructure_tags(
@@ -1891,7 +1962,10 @@ def _verify_container_apps_private_dns(subscription_id: str) -> None:
 
 
 def _verify_pre_secret_security(
-    subscription_id: str, target_resources: frozenset[str]
+    subscription_id: str,
+    target_resources: frozenset[str],
+    *,
+    require_container_apps_dns: bool = True,
 ) -> None:
     if "microsoft.keyvault/vaults/kv-mobius77-11564669" in target_resources:
         vault = _verify_resource_projection(
@@ -1943,7 +2017,8 @@ def _verify_pre_secret_security(
         )
         if environment != {"internal": True, "public": "Disabled"}:
             _fail("pre-secret-compute-security-drift")
-        _verify_container_apps_private_dns(subscription_id)
+        if require_container_apps_dns:
+            _verify_container_apps_private_dns(subscription_id)
 
 
 def _verify_no_related_group_drift(subscription_id: str) -> None:
@@ -1982,6 +2057,7 @@ def _verify_container_apps_infrastructure(
     subscription_id: str,
     ledger: dict[str, JsonValue],
     cleanup_at: datetime,
+    allow_prior_binding_with_changed_inputs: bool = False,
 ) -> int:
     group_scope = _scope(subscription_id, f"/resourceGroups/{INFRASTRUCTURE_GROUP}")
     group = _run(
@@ -2019,6 +2095,15 @@ def _verify_container_apps_infrastructure(
         or group.get("location") != STAGING_LOCATION
         or (
             group_tags != expected_tags
+            and not (
+                allow_prior_binding_with_changed_inputs
+                and _container_apps_infrastructure_tags_reconcilable(
+                    group_tags,
+                    expected_tags,
+                    cleanup_at=cleanup_at,
+                    environment_id=environment_id,
+                )
+            )
             and not _matches_container_apps_infrastructure_tags(
                 group_tags,
                 expected_tags,
@@ -2124,7 +2209,11 @@ def _verify_container_apps_infrastructure(
 
 
 def _verify_preservable_pre_secret_state(
-    *, subscription_id: str, cleanup_at: datetime, ledger: dict[str, JsonValue]
+    *,
+    subscription_id: str,
+    cleanup_at: datetime,
+    ledger: dict[str, JsonValue],
+    allow_pending_dns_update: bool = False,
 ) -> dict[str, JsonValue]:
     if any(
         not _group_exists(subscription_id, group)
@@ -2157,11 +2246,16 @@ def _verify_preservable_pre_secret_state(
         cleanup_principal_id=cleanup_principal,
         target_resources=target_resources,
     )
-    _verify_pre_secret_security(subscription_id, target_resources)
+    _verify_pre_secret_security(
+        subscription_id,
+        target_resources,
+        require_container_apps_dns=not allow_pending_dns_update,
+    )
     infrastructure_resource_count = _verify_container_apps_infrastructure(
         subscription_id=subscription_id,
         ledger=ledger,
         cleanup_at=cleanup_at,
+        allow_prior_binding_with_changed_inputs=allow_pending_dns_update,
     )
     return {
         "cleanup-backstop-armed": True,
@@ -2412,7 +2506,10 @@ def _pre_secret(
         if target_exists:
             _mark_stage(state_path, state, "pre-secret-reconciliation")
             _verify_preservable_pre_secret_state(
-                subscription_id=subscription_id, cleanup_at=cleanup_at, ledger=ledger
+                subscription_id=subscription_id,
+                cleanup_at=cleanup_at,
+                ledger=ledger,
+                allow_pending_dns_update=True,
             )
             _mark_stage(state_path, state, "pre-secret-reconciliation", completed=True)
         else:
