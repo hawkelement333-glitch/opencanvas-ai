@@ -573,6 +573,28 @@ def _lifecycle_tags(
     }
 
 
+def _matches_preserved_lifecycle_tags(
+    observed: JsonValue, expected: Mapping[str, str]
+) -> bool:
+    if not isinstance(observed, dict) or set(observed) != set(expected):
+        return False
+    binding_key = "mobius-cleanup-binding-sha256"
+    observed_binding = observed.get(binding_key)
+    expected_binding = expected.get(binding_key)
+    if (
+        not isinstance(observed_binding, str)
+        or HEX_SHA256.fullmatch(observed_binding) is None
+        or not isinstance(expected_binding, str)
+        or HEX_SHA256.fullmatch(expected_binding) is None
+    ):
+        return False
+    return all(
+        observed.get(key) == value
+        for key, value in expected.items()
+        if key != binding_key
+    )
+
+
 def _deployment_name(stage: str, ledger: Mapping[str, JsonValue]) -> str:
     ledger_integrity = ledger.get("ledgerIntegritySha256")
     if (
@@ -1645,12 +1667,16 @@ def _verify_container_apps_infrastructure(
         cleanup_at=cleanup_at,
         maximum_cost=_verified_cost()[1],
     )
+    group_tags = group.get("tags") if isinstance(group, dict) else None
     if (
         not isinstance(group, dict)
         or set(group) != {"id", "location", "tags"}
         or group.get("id") != group_scope
         or group.get("location") != STAGING_LOCATION
-        or group.get("tags") != expected_tags
+        or (
+            group_tags != expected_tags
+            and not _matches_preserved_lifecycle_tags(group_tags, expected_tags)
+        )
     ):
         _fail("container-apps-infrastructure-group-drift")
 

@@ -1924,7 +1924,7 @@ def _verify_container_apps_infrastructure_fixture(
     assignments: JsonValue = None,
 ) -> int:
     subscription = SYNTHETIC_SUBSCRIPTION
-    expected_tags = {"mobius-run-id": "synthetic-run"}
+    expected_tags = _test_recovered_cleanup_tags()
     if group_tags is None:
         group_tags = expected_tags
     if environment is None:
@@ -1986,6 +1986,21 @@ def test_exact_container_apps_infrastructure_group_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert _verify_container_apps_infrastructure_fixture(monkeypatch) == 1
+
+
+def test_container_apps_infrastructure_accepts_only_prior_ledger_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prior_tags = _test_recovered_cleanup_tags()
+    prior_tags["mobius-cleanup-binding-sha256"] = "d" * 64
+    assert _verify_container_apps_infrastructure_fixture(monkeypatch, group_tags=prior_tags) == 1
+
+    prior_tags["mobius-run-id"] = "altered"
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="container-apps-infrastructure-group-drift",
+    ):
+        _verify_container_apps_infrastructure_fixture(monkeypatch, group_tags=prior_tags)
 
 
 def test_lifecycle_compiler_uses_existing_azure_cli_bicep_cache(
