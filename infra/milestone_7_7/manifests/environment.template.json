@@ -35,7 +35,7 @@
   },
   "lifecycle": {
     "defaultPlannedHours": 12,
-    "hardLeaseHours": 24,
+    "hardLeaseHours": 30,
     "cleanupReserveMinutes": 90,
     "provisioningStartedAtUtc": null,
     "leaseExpiresAtUtc": null,

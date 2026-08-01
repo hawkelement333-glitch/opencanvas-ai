@@ -865,7 +865,7 @@ def _cost_contract() -> tuple[str, str, dict[str, JsonValue]]:
         or isinstance(maximum, bool)
     ):
         raise ManagedBindingExecutionError("cost-envelope-malformed")
-    within = expected <= 12_000 and maximum < 15_000
+    within = expected <= 10_000 and maximum <= 10_000
     return (
         ("proved" if within else "blocked"),
         ("cost-envelope-bounded" if within else "cost-envelope-exceeds-ceiling"),

@@ -47,7 +47,7 @@ def _write_json(path: Path, value) -> None:
     )
 
 
-def _resolved_cost(expected: int = 11999, base_maximum: int = 11999):
+def _resolved_cost(expected: int = 8000, base_maximum: int = 8000):
     value = _json(MANIFESTS / "cost-envelope.template.json")
     contingency = (base_maximum * 2500 + 9999) // 10000
     value.update(
@@ -77,8 +77,8 @@ def _resolved_environment():
     value["lifecycle"].update(
         {
             "provisioningStartedAtUtc": "2026-07-30T00:00:00Z",
-            "leaseExpiresAtUtc": "2026-07-31T00:00:00Z",
-            "cleanupReserveStartsAtUtc": "2026-07-30T22:30:00Z",
+            "leaseExpiresAtUtc": "2026-07-31T06:00:00Z",
+            "cleanupReserveStartsAtUtc": "2026-07-31T04:30:00Z",
             "cleanupBindingSha256": "a" * 64,
             "cleanupTimerVerifiedAtUtc": "2026-07-29T23:59:00Z",
         }
@@ -221,11 +221,11 @@ def test_environment_rejects_non_rfc1918_or_drifting_address_plan():
 def test_verified_environment_requires_exact_bounded_lease():
     contract._validate_environment(_resolved_environment())
     value = _resolved_environment()
-    value["lifecycle"]["leaseExpiresAtUtc"] = "2026-07-31T00:00:01Z"
-    with pytest.raises(contract.ContractError, match="24-hour"):
+    value["lifecycle"]["leaseExpiresAtUtc"] = "2026-07-31T06:00:01Z"
+    with pytest.raises(contract.ContractError, match="30-hour"):
         contract._validate_environment(value)
     value = _resolved_environment()
-    value["lifecycle"]["cleanupReserveStartsAtUtc"] = "2026-07-30T23:00:01Z"
+    value["lifecycle"]["cleanupReserveStartsAtUtc"] = "2026-07-31T04:30:01Z"
     with pytest.raises(contract.ContractError, match="90-minute"):
         contract._validate_environment(value)
     value = _resolved_environment()
@@ -289,7 +289,7 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "param expectedUsdCents int",
             "param maximumPlausibleUsdCents int",
             "param uncertaintyContingencyBasisPoints int = 2500",
-            "param hardMaximumHours int = 24",
+            "param hardMaximumHours int = 30",
             "param minimumCleanupReserveMinutes int = 90",
             "param cleanupLocation string = 'westus'",
             "param cleanupControlDeploymentEnabled bool = false",
@@ -488,17 +488,17 @@ def test_network_policy_has_exact_private_topology_and_public_ip_exceptions():
 def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
     value = _json(MANIFESTS / "cost-envelope.template.json")
     assert value["targetUsdCents"] == 10000
-    assert value["provisioningBlockAboveUsdCents"] == 12000
-    assert value["absoluteCeilingUsdCents"] == 15000
+    assert value["provisioningBlockAboveUsdCents"] == 10000
+    assert value["absoluteCeilingUsdCents"] == 10000
     assert value["uncertaintyContingencyBasisPoints"] == 2500
     assert value["budgetAlertsAreEnforcement"] is False
     assert value["resolutionStatus"] == "verified"
-    assert value["expectedUsdCents"] == 964
-    assert value["baseMaximumUsdCents"] == 3403
-    assert value["contingencyUsdCents"] == 851
-    assert value["maximumPlausibleUsdCents"] == 4254
-    assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 964
-    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 3403
+    assert value["expectedUsdCents"] == 1928
+    assert value["baseMaximumUsdCents"] == 6806
+    assert value["contingencyUsdCents"] == 1702
+    assert value["maximumPlausibleUsdCents"] == 8508
+    assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 1928
+    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 6806
     assert all(
         item["priceEvidenceStatus"] == "verified-official-retail" for item in value["lineItems"]
     )
@@ -508,8 +508,8 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
 def test_verified_cost_reconciles_base_contingency_and_maximum():
     value = _resolved_cost()
     contract._validate_cost(value)
-    assert value["contingencyUsdCents"] == 3000
-    assert value["maximumPlausibleUsdCents"] == 14999
+    assert value["contingencyUsdCents"] == 2000
+    assert value["maximumPlausibleUsdCents"] == 10000
 
 
 def test_cost_rejects_zero_empty_over_block_at_ceiling_and_bad_contingency():
@@ -529,12 +529,14 @@ def test_cost_rejects_zero_empty_over_block_at_ceiling_and_bad_contingency():
     boolean_total["expectedUsdCents"] = True
     with pytest.raises(contract.ContractError, match="integer totals"):
         contract._validate_cost(boolean_total)
-    over_block = _resolved_cost(expected=12001, base_maximum=12001)
+    over_block = _resolved_cost(expected=10001, base_maximum=10001)
     with pytest.raises(contract.ContractError, match="provisioning block"):
         contract._validate_cost(over_block)
-    at_ceiling = _resolved_cost(expected=12000, base_maximum=12000)
+    at_ceiling = _resolved_cost()
+    contract._validate_cost(at_ceiling)
+    over_ceiling = _resolved_cost(expected=8001, base_maximum=8001)
     with pytest.raises(contract.ContractError, match="absolute ceiling"):
-        contract._validate_cost(at_ceiling)
+        contract._validate_cost(over_ceiling)
     bad_contingency = _resolved_cost()
     bad_contingency["contingencyUsdCents"] -= 1
     with pytest.raises(contract.ContractError, match="exact bounded calculation"):
@@ -809,7 +811,7 @@ def test_policies_are_deny_public_fixed_and_non_authorizing():
     lifecycle = _json(POLICIES / "lifecycle-policy.json")
     assert network["bootstrapEgress"]["enabledByDefault"] is False
     assert network["bootstrapEgress"]["generalInternetAllowed"] is False
-    assert lifecycle["lease"]["hardMaximumHours"] == 24
+    assert lifecycle["lease"]["hardMaximumHours"] == 30
     assert lifecycle["cleanup"]["targetZeroResidueBeforeControlDeletion"] is True
 
 

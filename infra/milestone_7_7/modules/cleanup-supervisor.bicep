@@ -23,11 +23,11 @@ param cleanupControlDeploymentEnabled bool = false
 param cleanupJobScheduleDeploymentEnabled bool = false
 
 @minValue(1)
-@maxValue(12000)
+@maxValue(10000)
 param expectedUsdCents int
 
 @minValue(1)
-@maxValue(14999)
+@maxValue(10000)
 param maximumPlausibleUsdCents int
 
 @minValue(2500)
@@ -38,13 +38,13 @@ param uncertaintyContingencyBasisPoints int = 2500
 @maxValue(12)
 param defaultPlannedHours int = 12
 
-@minValue(24)
-@maxValue(24)
-param hardMaximumHours int = 24
+@minValue(30)
+@maxValue(30)
+param hardMaximumHours int = 30
 
-@minValue(12)
-@maxValue(12)
-param vpnMaximumHours int = 12
+@minValue(30)
+@maxValue(30)
+param vpnMaximumHours int = 30
 
 @minValue(90)
 @maxValue(90)
@@ -155,8 +155,8 @@ resource cleanupJobSchedule 'Microsoft.Automation/automationAccounts/jobSchedule
 output moduleName string = 'cleanup-supervisor'
 output checkpointMode string = checkpointMode
 output deploymentEnabled bool = deploymentEnabled
-output expectedWithinBlock bool = expectedUsdCents <= 12000
-output maximumBelowCeiling bool = maximumPlausibleUsdCents < 15000
+output expectedWithinBlock bool = expectedUsdCents <= 10000
+output maximumBelowCeiling bool = maximumPlausibleUsdCents <= 10000
 output uncertaintyContingencyBasisPoints int = uncertaintyContingencyBasisPoints
 output defaultPlannedHours int = defaultPlannedHours
 output hardMaximumHours int = hardMaximumHours

@@ -179,7 +179,9 @@
         "retryCount",
         "receiptRequiredBeforeFirstEffect",
         "replayDecision",
-        "cleanupRequiredForEveryTerminalState",
+        "safePreSecretPreservationAllowed",
+        "cleanupRequiredForUnsafeTerminalState",
+        "preservedResumeRequiresFreshLedger",
         "postRunProvisioningAuthorized"
       ],
       "properties": {
@@ -191,7 +193,9 @@
         "retryCount": { "const": 0 },
         "receiptRequiredBeforeFirstEffect": { "const": true },
         "replayDecision": { "const": "deny" },
-        "cleanupRequiredForEveryTerminalState": { "const": true },
+        "safePreSecretPreservationAllowed": { "const": true },
+        "cleanupRequiredForUnsafeTerminalState": { "const": true },
+        "preservedResumeRequiresFreshLedger": { "const": true },
         "postRunProvisioningAuthorized": { "const": false }
       }
     }

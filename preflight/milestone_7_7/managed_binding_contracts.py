@@ -406,10 +406,26 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "retryCount": 0,
         "receiptRequiredBeforeFirstEffect": True,
         "replayDecision": "deny",
-        "cleanupRequiredForEveryTerminalState": True,
+        "safePreSecretPreservationAllowed": True,
+        "cleanupRequiredForUnsafeTerminalState": True,
+        "preservedResumeRequiresFreshLedger": True,
         "postRunProvisioningAuthorized": False,
     }:
         raise ContractError("managed-binding one-run policy differs")
+    lifecycle = _as_object(contract["lifecycle"], "$.lifecycle")
+    if lifecycle.get("failureDispositionModel") != [
+        "RUNNING",
+        "BLOCKED_PRESERVED",
+        "CLEANUP_REQUIRED",
+        "COMPLETED",
+    ]:
+        raise ContractError("managed-binding failure dispositions differ")
+    if (
+        lifecycle.get("preSecretFailureDecision")
+        != "reconcile-resulting-state-before-cleanup"
+        or lifecycle.get("rollbackDecision") != "cleanup-unsafe-state-to-zero-residue"
+    ):
+        raise ContractError("managed-binding failure decision differs")
     return contract
 
 
@@ -497,8 +513,23 @@ def validate_operation_overlay(value: JsonValue) -> dict[str, JsonValue]:
         item = _as_object(raw_lifecycle, "$.lifecycleOperations[]")
         if str(item["methodDefinition"]) not in methods:
             raise ContractError("managed-binding lifecycle method is unknown")
-        if item.get("cleanupOnFailure") is not True:
-            raise ContractError("managed-binding cleanup is not mandatory")
+        expected_disposition_policy = (
+            "reconcile-pre-secret-safe-state"
+            if item["id"] == "pre-secret-provisioning"
+            else "cleanup-required"
+        )
+        if item.get("failureDispositionPolicy") != expected_disposition_policy:
+            raise ContractError("managed-binding failure disposition differs")
+        terminal_states = item.get("terminalStates")
+        if not isinstance(terminal_states, list) or any(
+            not isinstance(state, str) for state in terminal_states
+        ):
+            raise ContractError("managed-binding terminal states are malformed")
+        if (
+            item["id"] == "pre-secret-provisioning"
+            and "blocked-preserved" not in terminal_states
+        ):
+            raise ContractError("managed-binding preserved terminal state is missing")
         if item.get("replayDecision") != "deny":
             raise ContractError("managed-binding lifecycle permits replay")
 
@@ -557,7 +588,9 @@ def build_authorization_ledger(
             "replayDecision": "deny",
         },
         "cleanupPolicy": {
-            "requiredForEveryTerminalState": True,
+            "safePreSecretPreservationAllowed": True,
+            "unsafeTerminalCleanupRequired": True,
+            "preservedResumeRequiresFreshLedger": True,
             "postRunProvisioningAuthorized": False,
             "zeroResidueRequired": True,
         },
@@ -646,7 +679,9 @@ def validate_authorization_ledger(
         raise ContractError("authorization ledger transition differs")
     cleanup = _as_object(ledger["cleanupPolicy"], "$.cleanupPolicy")
     if cleanup != {
-        "requiredForEveryTerminalState": True,
+        "safePreSecretPreservationAllowed": True,
+        "unsafeTerminalCleanupRequired": True,
+        "preservedResumeRequiresFreshLedger": True,
         "postRunProvisioningAuthorized": False,
         "zeroResidueRequired": True,
     }:

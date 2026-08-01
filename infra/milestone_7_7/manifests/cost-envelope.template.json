@@ -5,68 +5,68 @@
   "provisioningAuthorized": false,
   "currency": "USD",
   "targetUsdCents": 10000,
-  "provisioningBlockAboveUsdCents": 12000,
-  "absoluteCeilingUsdCents": 15000,
-  "expectedUsdCents": 964,
-  "baseMaximumUsdCents": 3403,
+  "provisioningBlockAboveUsdCents": 10000,
+  "absoluteCeilingUsdCents": 10000,
+  "expectedUsdCents": 1928,
+  "baseMaximumUsdCents": 6806,
   "uncertaintyContingencyBasisPoints": 2500,
-  "contingencyUsdCents": 851,
-  "maximumPlausibleUsdCents": 4254,
+  "contingencyUsdCents": 1702,
+  "maximumPlausibleUsdCents": 8508,
   "budgetAlertsAreEnforcement": false,
-  "hardLeaseHours": 24,
+  "hardLeaseHours": 30,
   "lineItems": [
     {
       "name": "azure-dns-private-resolver",
-      "expectedUsdCents": 296,
-      "baseMaximumUsdCents": 592,
+      "expectedUsdCents": 592,
+      "baseMaximumUsdCents": 1184,
       "priceEvidenceStatus": "verified-official-retail"
     },
     {
       "name": "vpn-gateway-and-p2s",
-      "expectedUsdCents": 264,
-      "baseMaximumUsdCents": 528,
+      "expectedUsdCents": 528,
+      "baseMaximumUsdCents": 1056,
       "priceEvidenceStatus": "verified-official-retail"
     },
     {
       "name": "container-registry-premium",
-      "expectedUsdCents": 168,
-      "baseMaximumUsdCents": 168,
+      "expectedUsdCents": 336,
+      "baseMaximumUsdCents": 336,
       "priceEvidenceStatus": "verified-official-retail"
     },
     {
       "name": "container-apps-consumption",
-      "expectedUsdCents": 130,
-      "baseMaximumUsdCents": 519,
+      "expectedUsdCents": 260,
+      "baseMaximumUsdCents": 1038,
       "priceEvidenceStatus": "verified-official-retail"
     },
     {
       "name": "log-analytics-bounded-data",
-      "expectedUsdCents": 55,
-      "baseMaximumUsdCents": 1392,
+      "expectedUsdCents": 110,
+      "baseMaximumUsdCents": 2784,
       "priceEvidenceStatus": "verified-official-retail"
     },
     {
       "name": "private-endpoints-and-data",
-      "expectedUsdCents": 25,
-      "baseMaximumUsdCents": 58,
+      "expectedUsdCents": 50,
+      "baseMaximumUsdCents": 116,
       "priceEvidenceStatus": "verified-official-retail"
     },
     {
       "name": "standard-public-ip",
-      "expectedUsdCents": 6,
-      "baseMaximumUsdCents": 12,
+      "expectedUsdCents": 12,
+      "baseMaximumUsdCents": 24,
       "priceEvidenceStatus": "verified-official-retail"
     },
     {
       "name": "private-dns-zones-and-queries",
-      "expectedUsdCents": 8,
-      "baseMaximumUsdCents": 44,
+      "expectedUsdCents": 16,
+      "baseMaximumUsdCents": 88,
       "priceEvidenceStatus": "verified-official-retail"
     },
     {
       "name": "key-vault-standard-operations",
-      "expectedUsdCents": 3,
-      "baseMaximumUsdCents": 3,
+      "expectedUsdCents": 6,
+      "baseMaximumUsdCents": 6,
       "priceEvidenceStatus": "verified-official-retail"
     },
     {
@@ -77,8 +77,8 @@
     },
     {
       "name": "bounded-public-data-transfer",
-      "expectedUsdCents": 9,
-      "baseMaximumUsdCents": 87,
+      "expectedUsdCents": 18,
+      "baseMaximumUsdCents": 174,
       "priceEvidenceStatus": "verified-official-retail"
     }
   ]

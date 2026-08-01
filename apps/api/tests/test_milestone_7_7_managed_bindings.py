@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Mapping
@@ -8,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
 from performance.milestone_7_7.framework import ContractError, JsonValue, canonical_bytes
 from preflight.milestone_7_7 import framework as topology_framework
@@ -1112,12 +1112,22 @@ def test_lifecycle_cleanup_deadline_matches_azure_minute_precision() -> None:
 
     deadline = managed_binding_lifecycle._cleanup_deadline(observed)
 
-    assert deadline == datetime(2026, 8, 2, 3, 5, tzinfo=UTC)
-    assert observed + timedelta(hours=23, minutes=59) < deadline
-    assert deadline <= observed + timedelta(hours=24)
+    assert deadline == datetime(2026, 8, 2, 7, 0, tzinfo=UTC)
+    assert deadline == managed_binding_lifecycle.AUTHORIZED_CLEANUP_AT_UTC
+    assert deadline <= observed + timedelta(hours=30)
 
     with pytest.raises(managed_binding_lifecycle.LifecycleError, match="cleanup-time-invalid"):
         managed_binding_lifecycle._cleanup_deadline(observed.replace(tzinfo=None))
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="cleanup-deadline-expired-or-reserve-active",
+    ):
+        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 2, 5, 30, tzinfo=UTC))
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="cleanup-deadline-outside-authorized-window",
+    ):
+        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 7, 31, 0, 59, tzinfo=UTC))
 
 
 def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> None:
@@ -1138,10 +1148,10 @@ def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> No
     cleanup_deploy = pre_secret.index('stage="cleanup-control"')
     configure = pre_secret.index("_configure_cleanup_runbook(subscription_id)")
     job_binding = pre_secret.index('stage="cleanup-job-binding"')
-    verify_control = pre_secret.index("_verify_cleanup_control(subscription_id, cleanup_at)")
+    verify_control = pre_secret.index("_verify_cleanup_control(")
     cleanup_binding = pre_secret.index('stage="cleanup-binding"')
     verify_role = pre_secret.index("_verify_cleanup_target_role(")
-    staging_deploy = pre_secret.index('stage="pre-secret"')
+    staging_deploy = pre_secret.index("stage=PRE_SECRET_PRESERVABLE_STAGE")
     assert (
         cleanup_deploy
         < configure
@@ -1204,3 +1214,365 @@ def test_lifecycle_method_definitions_use_repository_module_import() -> None:
             "infra/milestone_7_7/scripts/managed_binding_lifecycle.py"
             not in definition["argumentVector"]
         )
+
+
+def _test_lifecycle_ledger(marker: str = "a") -> dict[str, JsonValue]:
+    return {
+        "ledgerIntegritySha256": marker * 64,
+        "repositoryHead": marker * 40,
+    }
+
+
+def _test_preservation_state(
+    ledger: dict[str, JsonValue],
+) -> dict[str, JsonValue]:
+    return {
+        "activeStage": "pre-secret",
+        "cleanupAtUtc": "2026-08-02T07:00:00Z",
+        "disposition": "RUNNING",
+        "failedStage": None,
+        "lastCompletedStage": "cleanup-role-verification",
+        "preSecretDeploymentName": managed_binding_lifecycle._deployment_name("pre-secret", ledger),
+        "repositoryHead": ledger["repositoryHead"],
+        "resumableCheckpoint": "pre-secret",
+        "secretValueAccessed": False,
+        "temporaryKeyVaultAssignmentId": None,
+        "temporaryRegistryAssignmentId": None,
+    }
+
+
+def _test_preservation_proof() -> dict[str, JsonValue]:
+    return {
+        "cleanup-backstop-armed": True,
+        "cleanup-deadline-active": True,
+        "cost-within-ceiling": True,
+        "known-state": True,
+        "least-privilege-exact": True,
+        "no-protected-data-exposure": True,
+        "private-boundaries-preserved": True,
+        "scope-inventory-exact": True,
+        "cleanup-resource-count": 4,
+        "private-endpoint-count": 2,
+        "target-resource-count": 18,
+    }
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_code", "expected_azure_code"),
+    [
+        (
+            managed_binding_lifecycle.AzureCommandError("bad-request"),
+            "lifecycle-command-nonzero",
+            "bad-request",
+        ),
+        (
+            RuntimeError("private provider response must never be retained"),
+            "managed-binding-lifecycle-failed-closed",
+            None,
+        ),
+    ],
+)
+def test_safe_pre_secret_failures_are_preserved_from_resulting_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error: BaseException,
+    expected_code: str,
+    expected_azure_code: str | None,
+) -> None:
+    ledger = _test_lifecycle_ledger()
+    state_path = managed_binding_lifecycle._state_path(tmp_path)
+    managed_binding_lifecycle._write_state(state_path, _test_preservation_state(ledger))
+    cleanup_calls: list[str] = []
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_utc_now",
+        lambda: datetime(2026, 8, 1, 2, 0, tzinfo=UTC),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_terminal_pre_secret_deployment",
+        lambda **_kwargs: "Failed",
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_preservable_pre_secret_state",
+        lambda **_kwargs: _test_preservation_proof(),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_cleanup",
+        lambda *_args: cleanup_calls.append("cleanup") or {},
+    )
+
+    result = managed_binding_lifecycle._handle_failure(
+        error=error,
+        operation="pre-secret-provisioning",
+        ledger=ledger,
+        subscription_id="opaque-subscription",
+        receipt_directory=tmp_path,
+    )
+
+    assert result == {
+        "cleanup-status": "preserved-safe-pre-secret-state",
+        "disposition": "BLOCKED_PRESERVED",
+        "error": expected_code,
+        "provisioning-authorized": False,
+        "resumable-checkpoint": "pre-secret",
+        "sanitized-azure-error-code": expected_azure_code,
+        "secret-value-accessed": False,
+        "status": "blocked",
+    }
+    assert cleanup_calls == []
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["disposition"] == "BLOCKED_PRESERVED"
+    assert state["failedStage"] == "pre-secret"
+    record_path = managed_binding_lifecycle._disposition_path(tmp_path)
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    integrity = record.pop("dispositionIntegritySha256")
+    assert (
+        integrity
+        == hashlib.sha256(
+            managed_binding_lifecycle.DISPOSITION_DOMAIN + canonical_bytes(record)
+        ).hexdigest()
+    )
+    serialized = json.dumps(record, separators=(",", ":"), sort_keys=True)
+    assert "/subscriptions/" not in serialized.casefold()
+    assert "opaque-subscription" not in serialized
+    assert "private provider response" not in serialized
+    assert record["preservationProof"]["deployment-terminal-state"] == "Failed"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("activeStage", "cleanup-control"),
+        ("secretValueAccessed", True),
+        ("temporaryKeyVaultAssignmentId", "unexpected-assignment"),
+        ("cleanupAtUtc", "2026-08-01T02:30:00Z"),
+    ],
+)
+def test_unsafe_pre_secret_state_requires_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: JsonValue,
+) -> None:
+    ledger = _test_lifecycle_ledger()
+    state = _test_preservation_state(ledger)
+    state[field] = value
+    managed_binding_lifecycle._write_state(managed_binding_lifecycle._state_path(tmp_path), state)
+    cleanup_calls: list[str] = []
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_utc_now",
+        lambda: datetime(2026, 8, 1, 2, 0, tzinfo=UTC),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_cleanup",
+        lambda *_args: cleanup_calls.append("cleanup") or {},
+    )
+
+    result = managed_binding_lifecycle._handle_failure(
+        error=RuntimeError("unknown failure"),
+        operation="pre-secret-provisioning",
+        ledger=ledger,
+        subscription_id="opaque-subscription",
+        receipt_directory=tmp_path,
+    )
+
+    assert result["disposition"] == "CLEANUP_REQUIRED"
+    assert result["cleanup-status"] == "completed"
+    assert cleanup_calls == ["cleanup"]
+
+
+@pytest.mark.parametrize("terminal_state", ["Canceled", "Running"])
+def test_nonterminal_or_canceled_deployment_requires_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_state: str,
+) -> None:
+    ledger = _test_lifecycle_ledger()
+    managed_binding_lifecycle._write_state(
+        managed_binding_lifecycle._state_path(tmp_path),
+        _test_preservation_state(ledger),
+    )
+    cleanup_calls: list[str] = []
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_utc_now",
+        lambda: datetime(2026, 8, 1, 2, 0, tzinfo=UTC),
+    )
+    if terminal_state == "Running":
+        monkeypatch.setattr(
+            managed_binding_lifecycle,
+            "_verify_terminal_pre_secret_deployment",
+            lambda **_kwargs: (_ for _ in ()).throw(
+                managed_binding_lifecycle.LifecycleError("pre-secret-deployment-not-terminal")
+            ),
+        )
+    else:
+        monkeypatch.setattr(
+            managed_binding_lifecycle,
+            "_verify_terminal_pre_secret_deployment",
+            lambda **_kwargs: terminal_state,
+        )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_cleanup",
+        lambda *_args: cleanup_calls.append("cleanup") or {},
+    )
+
+    result = managed_binding_lifecycle._handle_failure(
+        error=RuntimeError("unknown failure"),
+        operation="pre-secret-provisioning",
+        ledger=ledger,
+        subscription_id="opaque-subscription",
+        receipt_directory=tmp_path,
+    )
+
+    assert result["disposition"] == "CLEANUP_REQUIRED"
+    assert cleanup_calls == ["cleanup"]
+
+
+def test_incomplete_preservation_proof_and_interrupt_require_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = _test_lifecycle_ledger()
+    managed_binding_lifecycle._write_state(
+        managed_binding_lifecycle._state_path(tmp_path),
+        _test_preservation_state(ledger),
+    )
+    proof = _test_preservation_proof()
+    proof["least-privilege-exact"] = False
+    cleanup_calls: list[str] = []
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_utc_now",
+        lambda: datetime(2026, 8, 1, 2, 0, tzinfo=UTC),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_terminal_pre_secret_deployment",
+        lambda **_kwargs: "Failed",
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_preservable_pre_secret_state",
+        lambda **_kwargs: proof,
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_cleanup",
+        lambda *_args: cleanup_calls.append("cleanup") or {},
+    )
+
+    first = managed_binding_lifecycle._handle_failure(
+        error=RuntimeError("unknown failure"),
+        operation="pre-secret-provisioning",
+        ledger=ledger,
+        subscription_id="opaque-subscription",
+        receipt_directory=tmp_path,
+    )
+    assert first["disposition"] == "CLEANUP_REQUIRED"
+    assert cleanup_calls == ["cleanup"]
+
+    second_directory = tmp_path / "interrupt"
+    second_directory.mkdir()
+    managed_binding_lifecycle._write_state(
+        managed_binding_lifecycle._state_path(second_directory),
+        _test_preservation_state(ledger),
+    )
+    second = managed_binding_lifecycle._handle_failure(
+        error=KeyboardInterrupt(),
+        operation="pre-secret-provisioning",
+        ledger=ledger,
+        subscription_id="opaque-subscription",
+        receipt_directory=second_directory,
+    )
+    assert second["disposition"] == "CLEANUP_REQUIRED"
+    assert cleanup_calls == ["cleanup", "cleanup"]
+
+
+def test_fresh_pre_secret_resume_is_idempotent_and_skips_cleanup_recreation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deployed: list[str] = []
+    reconciled: list[str] = []
+    monkeypatch.setattr(managed_binding_lifecycle, "_verified_cost", lambda: (1928, 8508))
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_cleanup_deadline",
+        lambda _now: managed_binding_lifecycle.AUTHORIZED_CLEANUP_AT_UTC,
+    )
+    monkeypatch.setattr(managed_binding_lifecycle, "_group_exists", lambda *_args: True)
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_compile_template",
+        lambda path: path.write_text("{}", encoding="utf-8"),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_preservable_pre_secret_state",
+        lambda **_kwargs: reconciled.append("proved") or _test_preservation_proof(),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_deploy_stage",
+        lambda **kwargs: deployed.append(str(kwargs["stage"])),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle, "_signed_in_user_object_id", lambda: "opaque-user"
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_temporary_role_assignment",
+        lambda **_kwargs: "opaque-assignment",
+    )
+
+    for index, marker in enumerate(("a", "b")):
+        receipt_directory = tmp_path / str(index)
+        receipt_directory.mkdir()
+        result = managed_binding_lifecycle._pre_secret(
+            ledger=_test_lifecycle_ledger(marker),
+            subscription_id="opaque-subscription",
+            receipt_directory=receipt_directory,
+        )
+        assert result["status"] == "ready-for-secure-manual-entry"
+        assert result["disposition"] == "COMPLETED"
+        state = json.loads(
+            managed_binding_lifecycle._state_path(receipt_directory).read_text(encoding="utf-8")
+        )
+        assert state["resumableCheckpoint"] == "secure-manual-entry"
+        assert state["disposition"] == "COMPLETED"
+
+    assert deployed == ["pre-secret", "pre-secret"]
+    assert reconciled == ["proved", "proved", "proved", "proved"]
+
+
+def test_cleanup_is_idempotent_without_residue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(managed_binding_lifecycle, "_group_exists", lambda *_args: False)
+    monkeypatch.setattr(managed_binding_lifecycle, "_deleted_vault_present", lambda *_args: False)
+
+    first = managed_binding_lifecycle._cleanup("opaque-subscription", tmp_path)
+    second = managed_binding_lifecycle._cleanup("opaque-subscription", tmp_path)
+
+    assert first == second
+    assert first["status"] == "cleanup-completed"
+    assert first["temporary-authority-cleanup-path"] == "no-transient-state"
+
+
+def test_main_delegates_terminal_handling_and_finally_paths_remain_strict() -> None:
+    text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
+    main = text.split("def main()", 1)[1]
+    failure_boundary = main.split("except (Exception, KeyboardInterrupt) as exc:", 1)[1]
+    publish = text.split("def _publish_api_image", 1)[1].split("def _private_revision_ready", 1)[0]
+
+    assert "except (Exception, KeyboardInterrupt) as exc:" in main
+    assert "_handle_failure(" in main
+    assert "_cleanup(subscription_id, receipt_directory)" not in failure_boundary
+    assert "finally:" in publish
+    assert "_delete_assignment(subscription_id, assignment_id)" in publish
+    assert "_wait_for_denial(" in publish

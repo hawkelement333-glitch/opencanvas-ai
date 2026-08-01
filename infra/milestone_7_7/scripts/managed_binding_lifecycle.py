@@ -9,6 +9,7 @@ values.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import ipaddress
 import json
 import os
@@ -21,6 +22,7 @@ import tempfile
 import time
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from enum import Enum
 from pathlib import Path
 from typing import Final, NoReturn, cast
 
@@ -55,6 +57,10 @@ RUNBOOK: Final = "Remove-Mobius77Staging"
 SCHEDULE: Final = "schedule-mobius77-cleanup"
 STAGING_LOCATION: Final = "southcentralus"
 CLEANUP_LOCATION: Final = "westus"
+AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 2, 7, 0, tzinfo=UTC)
+MAXIMUM_AUTHORIZED_WINDOW: Final = timedelta(hours=30)
+MINIMUM_CLEANUP_RESERVE: Final = timedelta(minutes=90)
+ABSOLUTE_COST_CEILING_USD_CENTS: Final = 10_000
 MAXIMUM_OUTPUT_BYTES: Final = 65_536
 DEPLOYMENT_TIMEOUT_SECONDS: Final = 1_800
 OPERATION_TIMEOUT_SECONDS: Final = 120
@@ -85,10 +91,94 @@ DEPLOYMENT_STAGES: Final = frozenset(
         "post-secret",
     }
 )
+PRE_SECRET_PRESERVABLE_STAGE: Final = "pre-secret"
+DISPOSITION_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/lifecycle-disposition/v1\x00"
+)
+TARGET_RESOURCE_LOCATIONS: Final = (
+    ("microsoft.network/virtualnetworks/vnet-mobius77-staging", "southcentralus"),
+    ("microsoft.network/privatednszones/privatelink.vaultcore.azure.net", "global"),
+    (
+        "microsoft.network/privatednszones/privatelink.vaultcore.azure.net/virtualnetworklinks/link-mobius77-keyvault",
+        "global",
+    ),
+    ("microsoft.network/privatednszones/privatelink.azurecr.io", "global"),
+    (
+        "microsoft.network/privatednszones/privatelink.azurecr.io/virtualnetworklinks/link-mobius77-acr",
+        "global",
+    ),
+    ("microsoft.network/dnsresolvers/dnspr-mobius77-staging", "southcentralus"),
+    (
+        "microsoft.network/dnsresolvers/dnspr-mobius77-staging/inboundendpoints/dnsin-mobius77-staging",
+        "southcentralus",
+    ),
+    ("microsoft.network/publicipaddresses/pip-mobius77-vpn", "southcentralus"),
+    (
+        "microsoft.network/virtualnetworkgateways/vpngw-mobius77-staging",
+        "southcentralus",
+    ),
+    (
+        "microsoft.managedidentity/userassignedidentities/id-mobius77-api",
+        "southcentralus",
+    ),
+    (
+        "microsoft.operationalinsights/workspaces/law-mobius77-staging",
+        "southcentralus",
+    ),
+    (
+        "microsoft.containerregistry/registries/acrmobius7711564669",
+        "southcentralus",
+    ),
+    ("microsoft.network/privateendpoints/pe-mobius77-acr", "southcentralus"),
+    (
+        "microsoft.network/privateendpoints/pe-mobius77-acr/privatednszonegroups/default",
+        "southcentralus",
+    ),
+    ("microsoft.keyvault/vaults/kv-mobius77-11564669", "southcentralus"),
+    (
+        "microsoft.network/privateendpoints/pe-mobius77-keyvault",
+        "southcentralus",
+    ),
+    (
+        "microsoft.network/privateendpoints/pe-mobius77-keyvault/privatednszonegroups/default",
+        "southcentralus",
+    ),
+    ("microsoft.app/managedenvironments/cae-mobius77-staging", "southcentralus"),
+)
+TARGET_DEPLOYMENT_NAMES: Final = frozenset(
+    {
+        "mobius77-managed-binding-network",
+        "mobius77-managed-binding-identities",
+        "mobius77-managed-binding-observability",
+        "mobius77-managed-binding-registry",
+        "mobius77-managed-binding-key-vault",
+        "mobius77-managed-binding-compute",
+    }
+)
+CLEANUP_DEPLOYMENT_NAMES: Final = frozenset(
+    {"mobius77-cleanup-control", "mobius77-cleanup-job-binding"}
+)
+
+
+class LifecycleDisposition(str, Enum):
+    """Explicit terminal handling for one-run lifecycle execution."""
+
+    RUNNING = "RUNNING"
+    BLOCKED_PRESERVED = "BLOCKED_PRESERVED"
+    CLEANUP_REQUIRED = "CLEANUP_REQUIRED"
+    COMPLETED = "COMPLETED"
 
 
 class LifecycleError(RuntimeError):
     """Sanitized fail-closed lifecycle error."""
+
+
+class AzureCommandError(LifecycleError):
+    """A failed Azure command with only a bounded sanitized error code."""
+
+    def __init__(self, sanitized_azure_error_code: str) -> None:
+        super().__init__("lifecycle-command-nonzero")
+        self.sanitized_azure_error_code = sanitized_azure_error_code
 
 
 def _utc_now() -> datetime:
@@ -102,7 +192,22 @@ def _format_utc(value: datetime) -> str:
 def _cleanup_deadline(now: datetime) -> datetime:
     if now.tzinfo is None or now.utcoffset() != timedelta(0):
         _fail("cleanup-time-invalid")
-    return (now + timedelta(hours=24)).replace(second=0, microsecond=0)
+    policy = load_json(INFRASTRUCTURE_ROOT / "policies" / "lifecycle-policy.json")
+    if not isinstance(policy, dict):
+        _fail("cleanup-policy-malformed")
+    lease = policy.get("lease")
+    if (
+        not isinstance(lease, dict)
+        or lease.get("authorizedCleanupAtUtc") != _format_utc(AUTHORIZED_CLEANUP_AT_UTC)
+        or lease.get("hardMaximumHours") != 30
+    ):
+        _fail("cleanup-policy-deadline-mismatch")
+    remaining = AUTHORIZED_CLEANUP_AT_UTC - now
+    if remaining <= MINIMUM_CLEANUP_RESERVE:
+        _fail("cleanup-deadline-expired-or-reserve-active")
+    if remaining > MAXIMUM_AUTHORIZED_WINDOW:
+        _fail("cleanup-deadline-outside-authorized-window")
+    return AUTHORIZED_CLEANUP_AT_UTC
 
 
 def _fail(code: str) -> NoReturn:
@@ -145,6 +250,47 @@ def _resolved_executable(name: str) -> str:
     return str(candidate)
 
 
+def _normalize_azure_error_code(value: str) -> str | None:
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", value) is None:
+        return None
+    normalized = re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")
+    return normalized if re.fullmatch(r"[a-z0-9-]{1,64}", normalized) else None
+
+
+def _sanitized_azure_error_code(stdout: bytearray, stderr: bytearray) -> str:
+    observed: list[str] = []
+
+    def visit(value: JsonValue) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key.casefold() == "code" and isinstance(child, str):
+                    normalized = _normalize_azure_error_code(child)
+                    if normalized is not None:
+                        observed.append(normalized)
+                else:
+                    visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    for buffer in (stderr, stdout):
+        try:
+            decoded = bytes(buffer).decode("utf-8", errors="strict")
+        except UnicodeError:
+            continue
+        try:
+            visit(cast(JsonValue, json.loads(decoded)))
+        except json.JSONDecodeError:
+            for match in re.finditer(
+                r"(?i)\bcode\b\s*[:=]\s*['\"]?([A-Za-z][A-Za-z0-9._-]{0,63})",
+                decoded,
+            ):
+                normalized = _normalize_azure_error_code(match.group(1))
+                if normalized is not None:
+                    observed.append(normalized)
+    return observed[-1] if observed else "azure-command-nonzero"
+
+
 def _run(
     argv: tuple[str, ...],
     *,
@@ -185,6 +331,8 @@ def _run(
         if len(stdout) + len(stderr) > MAXIMUM_OUTPUT_BYTES:
             _fail("lifecycle-output-oversized")
         if completed.returncode != 0:
+            if argv[0] == "az":
+                raise AzureCommandError(_sanitized_azure_error_code(stdout, stderr))
             _fail("lifecycle-command-nonzero")
         if not require_json:
             return None
@@ -257,6 +405,10 @@ def _state_path(receipt_directory: Path) -> Path:
     return receipt_directory / "managed-binding-transient-state.json"
 
 
+def _disposition_path(receipt_directory: Path) -> Path:
+    return receipt_directory / "managed-binding-lifecycle-disposition.json"
+
+
 def _write_state(path: Path, value: dict[str, JsonValue]) -> None:
     temporary = path.with_suffix(".tmp")
     if path.exists() or temporary.exists():
@@ -299,6 +451,35 @@ def _replace_state(path: Path, value: dict[str, JsonValue]) -> None:
         _fail("transient-state-replace-failed")
 
 
+def _mark_stage(
+    state_path: Path,
+    state: dict[str, JsonValue],
+    stage: str,
+    *,
+    completed: bool = False,
+) -> None:
+    if re.fullmatch(r"[a-z0-9-]+", stage) is None:
+        _fail("lifecycle-stage-invalid")
+    state["disposition"] = LifecycleDisposition.RUNNING.value
+    if completed:
+        state["activeStage"] = None
+        state["lastCompletedStage"] = stage
+    else:
+        state["activeStage"] = stage
+    _replace_state(state_path, state)
+
+
+def _write_disposition(
+    receipt_directory: Path, record: dict[str, JsonValue]
+) -> dict[str, JsonValue]:
+    if "dispositionIntegritySha256" in record:
+        _fail("disposition-integrity-prepopulated")
+    integrity = hashlib.sha256(DISPOSITION_DOMAIN + canonical_bytes(record)).hexdigest()
+    complete = {**record, "dispositionIntegritySha256": integrity}
+    _write_state(_disposition_path(receipt_directory), complete)
+    return complete
+
+
 def _verified_cost() -> tuple[int, int]:
     value = load_json(INFRASTRUCTURE_ROOT / "manifests" / "cost-envelope.template.json")
     if not isinstance(value, dict) or value.get("resolutionStatus") != "verified":
@@ -311,9 +492,9 @@ def _verified_cost() -> tuple[int, int]:
         or not isinstance(maximum, int)
         or isinstance(maximum, bool)
         or expected < 1
-        or expected > 12_000
+        or expected > ABSOLUTE_COST_CEILING_USD_CENTS
         or maximum < expected
-        or maximum >= 15_000
+        or maximum > ABSOLUTE_COST_CEILING_USD_CENTS
     ):
         _fail("cost-envelope-outside-approved-bound")
     return expected, maximum
@@ -576,6 +757,48 @@ def _verify_cleanup_control(subscription_id: str, cleanup_at: datetime) -> str:
         or observed_start.astimezone(UTC).replace(microsecond=0) != cleanup_at
     ):
         _fail("cleanup-schedule-not-armed")
+    job_schedules = _run(
+        (
+            "az",
+            "automation",
+            "job-schedule",
+            "list",
+            "--resource-group",
+            CLEANUP_GROUP,
+            "--automation-account-name",
+            AUTOMATION_ACCOUNT,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "[].{id:jobScheduleId,runbook:runbook.name,schedule:schedule.name,target:parameters.TargetResourceGroupName}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(job_schedules, list) or len(job_schedules) != 1:
+        _fail("cleanup-job-schedule-not-ready")
+    job_schedule = job_schedules[0]
+    if not isinstance(job_schedule, dict) or set(job_schedule) != {
+        "id",
+        "runbook",
+        "schedule",
+        "target",
+    }:
+        _fail("cleanup-job-schedule-output-malformed")
+    job_schedule_id = job_schedule["id"]
+    if (
+        not isinstance(job_schedule_id, str)
+        or re.fullmatch(r"[0-9a-fA-F-]{36}", job_schedule_id) is None
+        or {key: value for key, value in job_schedule.items() if key != "id"}
+        != {
+            "runbook": RUNBOOK,
+            "schedule": SCHEDULE,
+            "target": TARGET_GROUP,
+        }
+    ):
+        _fail("cleanup-job-schedule-not-ready")
     return principal_id
 
 
@@ -639,6 +862,531 @@ def _verify_cleanup_target_role(
             _fail("cleanup-role-scope-not-exact")
         time.sleep(5.0)
     _fail("cleanup-role-assignment-unproved")
+
+
+def _private_endpoint_network_interfaces(subscription_id: str) -> frozenset[str]:
+    target_scope = _scope(subscription_id, f"/resourceGroups/{TARGET_GROUP}")
+    private_subnet = (
+        f"{target_scope}/providers/Microsoft.Network/virtualNetworks/"
+        "vnet-mobius77-staging/subnets/snet-mobius77-private-endpoints"
+    ).casefold()
+    expected = {
+        "pe-mobius77-acr": (
+            f"{target_scope}/providers/Microsoft.ContainerRegistry/registries/{REGISTRY}".casefold(),
+            ("registry",),
+        ),
+        "pe-mobius77-keyvault": (
+            f"{target_scope}/providers/Microsoft.KeyVault/vaults/{KEY_VAULT}".casefold(),
+            ("vault",),
+        ),
+    }
+    rows = _run(
+        (
+            "az",
+            "network",
+            "private-endpoint",
+            "list",
+            "--resource-group",
+            TARGET_GROUP,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "[].{connections:privateLinkServiceConnections[].{groups:groupIds,service:privateLinkServiceId,state:privateLinkServiceConnectionState.status},name:name,nics:networkInterfaces[].id,subnet:subnet.id}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(rows, list):
+        _fail("pre-secret-private-endpoint-output-malformed")
+    observed_names: set[str] = set()
+    network_interfaces: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {
+            "connections",
+            "name",
+            "nics",
+            "subnet",
+        }:
+            _fail("pre-secret-private-endpoint-output-malformed")
+        name = row["name"]
+        subnet = row["subnet"]
+        connections = row["connections"]
+        nics = row["nics"]
+        if (
+            not isinstance(name, str)
+            or name not in expected
+            or name in observed_names
+            or not isinstance(subnet, str)
+            or subnet.casefold() != private_subnet
+            or not isinstance(connections, list)
+            or len(connections) != 1
+            or not isinstance(nics, list)
+        ):
+            _fail("pre-secret-private-endpoint-drift")
+        connection = connections[0]
+        if not isinstance(connection, dict) or set(connection) != {
+            "groups",
+            "service",
+            "state",
+        }:
+            _fail("pre-secret-private-endpoint-output-malformed")
+        groups = connection["groups"]
+        service = connection["service"]
+        state = connection["state"]
+        expected_service, expected_groups = expected[name]
+        if (
+            not isinstance(groups, list)
+            or tuple(groups) != expected_groups
+            or not isinstance(service, str)
+            or service.casefold() != expected_service
+            or state not in {"Approved", "Pending", "Rejected", "Disconnected"}
+        ):
+            _fail("pre-secret-private-endpoint-drift")
+        for nic in nics:
+            if not isinstance(nic, str) or not nic.casefold().startswith(
+                f"{target_scope.casefold()}/providers/microsoft.network/networkinterfaces/"
+            ):
+                _fail("pre-secret-private-endpoint-drift")
+            network_interfaces.add(nic.casefold())
+        observed_names.add(name)
+    return frozenset(network_interfaces)
+
+
+def _resource_group_inventory(
+    *,
+    subscription_id: str,
+    group: str,
+    allowed_network_interfaces: frozenset[str] = frozenset(),
+) -> frozenset[str]:
+    scope = _scope(subscription_id, f"/resourceGroups/{group}").casefold()
+    rows = _run(
+        (
+            "az",
+            "resource",
+            "list",
+            "--resource-group",
+            group,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "[].{id:id,location:location,type:type}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(rows, list):
+        _fail("pre-secret-resource-inventory-malformed")
+    target_locations = dict(TARGET_RESOURCE_LOCATIONS)
+    observed: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {"id", "location", "type"}:
+            _fail("pre-secret-resource-inventory-malformed")
+        resource_id = row["id"]
+        location = row["location"]
+        resource_type = row["type"]
+        if (
+            not isinstance(resource_id, str)
+            or not isinstance(resource_type, str)
+            or (location is not None and not isinstance(location, str))
+        ):
+            _fail("pre-secret-resource-inventory-malformed")
+        normalized_id = resource_id.casefold()
+        prefix = f"{scope}/providers/"
+        if not normalized_id.startswith(prefix):
+            _fail("pre-secret-resource-scope-drift")
+        relative = normalized_id[len(prefix) :]
+        normalized_location = location.casefold() if isinstance(location, str) else ""
+        normalized_type = resource_type.casefold()
+        if normalized_type == "microsoft.authorization/roleassignments":
+            continue
+        if normalized_type == "microsoft.network/networkinterfaces":
+            if normalized_id not in allowed_network_interfaces:
+                _fail("pre-secret-resource-inventory-drift")
+        elif normalized_type == "microsoft.resources/deployments":
+            name = relative.rsplit("/", 1)[-1]
+            allowed_deployments = (
+                TARGET_DEPLOYMENT_NAMES
+                if group == TARGET_GROUP
+                else CLEANUP_DEPLOYMENT_NAMES
+            )
+            if name not in allowed_deployments:
+                _fail("pre-secret-resource-inventory-drift")
+        elif group == TARGET_GROUP:
+            expected_location = target_locations.get(relative)
+            if expected_location is None or normalized_location != expected_location:
+                _fail("pre-secret-resource-inventory-drift")
+        else:
+            exact_cleanup = {
+                f"microsoft.automation/automationaccounts/{AUTOMATION_ACCOUNT.casefold()}",
+                f"microsoft.automation/automationaccounts/{AUTOMATION_ACCOUNT.casefold()}/runbooks/{RUNBOOK.casefold()}",
+                f"microsoft.automation/automationaccounts/{AUTOMATION_ACCOUNT.casefold()}/schedules/{SCHEDULE.casefold()}",
+            }
+            job_prefix = (
+                f"microsoft.automation/automationaccounts/{AUTOMATION_ACCOUNT.casefold()}"
+                "/jobschedules/"
+            )
+            if relative in exact_cleanup:
+                if normalized_location not in {"", CLEANUP_LOCATION}:
+                    _fail("pre-secret-resource-inventory-drift")
+            elif relative.startswith(job_prefix):
+                if re.fullmatch(r"[0-9a-f-]{36}", relative[len(job_prefix) :]) is None:
+                    _fail("pre-secret-resource-inventory-drift")
+            else:
+                _fail("pre-secret-resource-inventory-drift")
+        observed.add(relative)
+    return frozenset(observed)
+
+
+def _exact_scope_role_rows(subscription_id: str, scope: str) -> list[dict[str, str]]:
+    rows = _run(
+        (
+            "az",
+            "role",
+            "assignment",
+            "list",
+            "--scope",
+            scope,
+            "--all",
+            "--fill-principal-name",
+            "false",
+            "--subscription",
+            subscription_id,
+            "--query",
+            "[].{principalId:principalId,roleDefinitionId:roleDefinitionId,scope:scope}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(rows, list):
+        _fail("pre-secret-role-inventory-malformed")
+    normalized: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {
+            "principalId",
+            "roleDefinitionId",
+            "scope",
+        }:
+            _fail("pre-secret-role-inventory-malformed")
+        principal_id = row["principalId"]
+        role_definition_id = row["roleDefinitionId"]
+        observed_scope = row["scope"]
+        if not all(
+            isinstance(value, str)
+            for value in (principal_id, role_definition_id, observed_scope)
+        ):
+            _fail("pre-secret-role-inventory-malformed")
+        assert isinstance(principal_id, str)
+        assert isinstance(role_definition_id, str)
+        assert isinstance(observed_scope, str)
+        if observed_scope.casefold() != scope.casefold():
+            continue
+        normalized.append(
+            {
+                "principalId": principal_id.casefold(),
+                "roleDefinitionId": role_definition_id.casefold(),
+                "scope": observed_scope.casefold(),
+            }
+        )
+    return normalized
+
+
+def _workload_identity_principal(subscription_id: str) -> str:
+    value = _run(
+        (
+            "az",
+            "identity",
+            "show",
+            "--resource-group",
+            TARGET_GROUP,
+            "--name",
+            "id-mobius77-api",
+            "--subscription",
+            subscription_id,
+            "--query",
+            "{principalId:principalId}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(value, dict) or set(value) != {"principalId"}:
+        _fail("pre-secret-workload-identity-malformed")
+    principal_id = value["principalId"]
+    if (
+        not isinstance(principal_id, str)
+        or re.fullmatch(r"[0-9a-fA-F-]{36}", principal_id) is None
+    ):
+        _fail("pre-secret-workload-identity-malformed")
+    return principal_id
+
+
+def _verify_pre_secret_role_inventory(
+    *,
+    subscription_id: str,
+    cleanup_principal_id: str,
+    target_resources: frozenset[str],
+) -> None:
+    contract = load_managed_binding_contract()
+    rbac = contract.get("rbac")
+    if not isinstance(rbac, dict):
+        _fail("managed-binding-contract-malformed")
+    target_scope = _scope(subscription_id, f"/resourceGroups/{TARGET_GROUP}")
+    role_prefix = f"/subscriptions/{subscription_id}/providers/Microsoft.Authorization/roleDefinitions/"
+    target_expected = {
+        "principalId": cleanup_principal_id.casefold(),
+        "roleDefinitionId": (
+            role_prefix + str(rbac["cleanupContributorRoleDefinitionId"])
+        ).casefold(),
+        "scope": target_scope.casefold(),
+    }
+    if _exact_scope_role_rows(subscription_id, target_scope) != [target_expected]:
+        _fail("pre-secret-role-inventory-drift")
+
+    cleanup_scope = _scope(subscription_id, f"/resourceGroups/{CLEANUP_GROUP}")
+    account_scope = (
+        f"{cleanup_scope}/providers/Microsoft.Automation/automationAccounts/"
+        f"{AUTOMATION_ACCOUNT}"
+    )
+    if _exact_scope_role_rows(subscription_id, cleanup_scope) or _exact_scope_role_rows(
+        subscription_id, account_scope
+    ):
+        _fail("pre-secret-role-inventory-drift")
+
+    identity_relative = (
+        "microsoft.managedidentity/userassignedidentities/id-mobius77-api"
+    )
+    protected_resources = {
+        "microsoft.keyvault/vaults/kv-mobius77-11564669": (
+            f"{target_scope}/providers/Microsoft.KeyVault/vaults/{KEY_VAULT}",
+            str(rbac["keyVaultSecretsUserRoleDefinitionId"]),
+        ),
+        "microsoft.containerregistry/registries/acrmobius7711564669": (
+            f"{target_scope}/providers/Microsoft.ContainerRegistry/registries/{REGISTRY}",
+            str(rbac["acrPullRoleDefinitionId"]),
+        ),
+    }
+    if any(relative in target_resources for relative in protected_resources):
+        if identity_relative not in target_resources:
+            _fail("pre-secret-role-inventory-drift")
+        workload_principal = _workload_identity_principal(subscription_id).casefold()
+        for relative, (scope, role_id) in protected_resources.items():
+            if relative not in target_resources:
+                continue
+            expected = {
+                "principalId": workload_principal,
+                "roleDefinitionId": (role_prefix + role_id).casefold(),
+                "scope": scope.casefold(),
+            }
+            rows = _exact_scope_role_rows(subscription_id, scope)
+            if rows not in ([], [expected]):
+                _fail("pre-secret-role-inventory-drift")
+
+
+def _verify_resource_projection(
+    subscription_id: str,
+    *,
+    resource_type: str,
+    name: str,
+    api_version: str,
+    projection: str,
+) -> dict[str, JsonValue]:
+    value = _run(
+        (
+            "az",
+            "resource",
+            "show",
+            "--resource-group",
+            TARGET_GROUP,
+            "--resource-type",
+            resource_type,
+            "--name",
+            name,
+            "--api-version",
+            api_version,
+            "--subscription",
+            subscription_id,
+            "--query",
+            projection,
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(value, dict):
+        _fail("pre-secret-security-projection-malformed")
+    return value
+
+
+def _verify_pre_secret_security(
+    subscription_id: str, target_resources: frozenset[str]
+) -> None:
+    if "microsoft.keyvault/vaults/kv-mobius77-11564669" in target_resources:
+        vault = _verify_resource_projection(
+            subscription_id,
+            resource_type="Microsoft.KeyVault/vaults",
+            name=KEY_VAULT,
+            api_version="2026-02-01",
+            projection="{defaultAction:properties.networkAcls.defaultAction,purge:properties.enablePurgeProtection,public:properties.publicNetworkAccess,rbac:properties.enableRbacAuthorization,softDelete:properties.enableSoftDelete}",
+        )
+        if (
+            set(vault) != {"defaultAction", "purge", "public", "rbac", "softDelete"}
+            or vault["defaultAction"] != "Deny"
+            or vault["purge"] not in {None, False}
+            or vault["public"] != "Disabled"
+            or vault["rbac"] is not True
+            or vault["softDelete"] is not True
+        ):
+            _fail("pre-secret-key-vault-security-drift")
+    if "microsoft.containerregistry/registries/acrmobius7711564669" in target_resources:
+        registry = _verify_resource_projection(
+            subscription_id,
+            resource_type="Microsoft.ContainerRegistry/registries",
+            name=REGISTRY,
+            api_version="2025-11-01",
+            projection="{admin:properties.adminUserEnabled,anonymous:properties.anonymousPullEnabled,public:properties.publicNetworkAccess}",
+        )
+        if registry != {"admin": False, "anonymous": False, "public": "Disabled"}:
+            _fail("pre-secret-registry-security-drift")
+    if (
+        "microsoft.operationalinsights/workspaces/law-mobius77-staging"
+        in target_resources
+    ):
+        workspace = _verify_resource_projection(
+            subscription_id,
+            resource_type="Microsoft.OperationalInsights/workspaces",
+            name="law-mobius77-staging",
+            api_version="2026-03-01",
+            projection="{ingestion:properties.publicNetworkAccessForIngestion,query:properties.publicNetworkAccessForQuery}",
+        )
+        if workspace != {"ingestion": "Disabled", "query": "Disabled"}:
+            _fail("pre-secret-observability-security-drift")
+    if "microsoft.app/managedenvironments/cae-mobius77-staging" in target_resources:
+        environment = _verify_resource_projection(
+            subscription_id,
+            resource_type="Microsoft.App/managedEnvironments",
+            name="cae-mobius77-staging",
+            api_version="2026-01-01",
+            projection="{internal:properties.vnetConfiguration.internal,public:properties.publicNetworkAccess}",
+        )
+        if environment != {"internal": True, "public": "Disabled"}:
+            _fail("pre-secret-compute-security-drift")
+
+
+def _verify_no_related_group_drift(subscription_id: str) -> None:
+    rows = _run(
+        (
+            "az",
+            "group",
+            "list",
+            "--subscription",
+            subscription_id,
+            "--query",
+            "[?contains(to_string(name), 'mobius77')].{name:name}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(rows, list):
+        _fail("pre-secret-related-group-inventory-malformed")
+    observed: set[str] = set()
+    for row in rows:
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"name"}
+            or not isinstance(row["name"], str)
+        ):
+            _fail("pre-secret-related-group-inventory-malformed")
+        observed.add(row["name"])
+    if not observed.issubset({TARGET_GROUP, CLEANUP_GROUP}):
+        _fail("pre-secret-related-group-drift")
+
+
+def _verify_preservable_pre_secret_state(
+    *, subscription_id: str, cleanup_at: datetime
+) -> dict[str, JsonValue]:
+    if not _group_exists(subscription_id, TARGET_GROUP) or not _group_exists(
+        subscription_id, CLEANUP_GROUP
+    ):
+        _fail("pre-secret-authorized-scope-missing")
+    _verify_no_related_group_drift(subscription_id)
+    cleanup_principal = _verify_cleanup_control(subscription_id, cleanup_at)
+    contract = load_managed_binding_contract()
+    rbac = contract.get("rbac")
+    if not isinstance(rbac, dict):
+        _fail("managed-binding-contract-malformed")
+    _verify_cleanup_target_role(
+        subscription_id,
+        cleanup_principal,
+        str(rbac["cleanupContributorRoleDefinitionId"]),
+    )
+    network_interfaces = _private_endpoint_network_interfaces(subscription_id)
+    target_resources = _resource_group_inventory(
+        subscription_id=subscription_id,
+        group=TARGET_GROUP,
+        allowed_network_interfaces=network_interfaces,
+    )
+    cleanup_resources = _resource_group_inventory(
+        subscription_id=subscription_id,
+        group=CLEANUP_GROUP,
+    )
+    _verify_pre_secret_role_inventory(
+        subscription_id=subscription_id,
+        cleanup_principal_id=cleanup_principal,
+        target_resources=target_resources,
+    )
+    _verify_pre_secret_security(subscription_id, target_resources)
+    return {
+        "cleanup-backstop-armed": True,
+        "cleanup-deadline-active": _utc_now() < cleanup_at,
+        "cost-within-ceiling": _verified_cost()[1] <= ABSOLUTE_COST_CEILING_USD_CENTS,
+        "known-state": True,
+        "least-privilege-exact": True,
+        "no-protected-data-exposure": True,
+        "private-boundaries-preserved": True,
+        "scope-inventory-exact": True,
+        "cleanup-resource-count": len(cleanup_resources),
+        "private-endpoint-count": len(network_interfaces),
+        "target-resource-count": len(target_resources),
+    }
+
+
+def _verify_terminal_pre_secret_deployment(
+    *, subscription_id: str, ledger: dict[str, JsonValue]
+) -> str:
+    value = _run(
+        (
+            "az",
+            "deployment",
+            "sub",
+            "show",
+            "--name",
+            _deployment_name(PRE_SECRET_PRESERVABLE_STAGE, ledger),
+            "--subscription",
+            subscription_id,
+            "--query",
+            "{state:properties.provisioningState}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(value, dict) or set(value) != {"state"}:
+        _fail("pre-secret-deployment-state-malformed")
+    state = value["state"]
+    if state not in {"Canceled", "Failed", "Succeeded"}:
+        _fail("pre-secret-deployment-not-terminal")
+    return str(state)
 
 
 def _signed_in_user_object_id() -> str:
@@ -810,77 +1558,131 @@ def _pre_secret(
     scopes = contract["scopeBinding"]
     if not isinstance(rbac, dict) or not isinstance(scopes, dict):
         _fail("managed-binding-contract-malformed")
-    with tempfile.TemporaryDirectory(prefix="mobius77-binding-") as directory:
-        template = Path(directory) / "main.json"
-        _compile_template(template)
-        _deploy_stage(
-            template_path=template,
-            subscription_id=subscription_id,
-            ledger=ledger,
-            stage="cleanup-control",
-            cleanup_at=cleanup_at,
-            expected_cost=expected_cost,
-            maximum_cost=maximum_cost,
-        )
-        _configure_cleanup_runbook(subscription_id)
-        _deploy_stage(
-            template_path=template,
-            subscription_id=subscription_id,
-            ledger=ledger,
-            stage="cleanup-job-binding",
-            cleanup_at=cleanup_at,
-            expected_cost=expected_cost,
-            maximum_cost=maximum_cost,
-        )
-        cleanup_principal_id = _verify_cleanup_control(subscription_id, cleanup_at)
-        _deploy_stage(
-            template_path=template,
-            subscription_id=subscription_id,
-            ledger=ledger,
-            stage="cleanup-binding",
-            cleanup_at=cleanup_at,
-            expected_cost=expected_cost,
-            maximum_cost=maximum_cost,
-        )
-        _verify_cleanup_target_role(
-            subscription_id,
-            cleanup_principal_id,
-            str(rbac["cleanupContributorRoleDefinitionId"]),
-        )
-        _deploy_stage(
-            template_path=template,
-            subscription_id=subscription_id,
-            ledger=ledger,
-            stage="pre-secret",
-            cleanup_at=cleanup_at,
-            expected_cost=expected_cost,
-            maximum_cost=maximum_cost,
-        )
-    object_id = _signed_in_user_object_id()
-    vault_scope = _scope(subscription_id, str(scopes["keyVault"]))
     state_path = _state_path(receipt_directory)
     state: dict[str, JsonValue] = {
+        "activeStage": "initialization",
         "cleanupAtUtc": _format_utc(cleanup_at),
+        "disposition": LifecycleDisposition.RUNNING.value,
+        "failedStage": None,
+        "lastCompletedStage": None,
+        "preSecretDeploymentName": _deployment_name(
+            PRE_SECRET_PRESERVABLE_STAGE, ledger
+        ),
+        "repositoryHead": str(ledger["repositoryHead"]),
+        "resumableCheckpoint": PRE_SECRET_PRESERVABLE_STAGE,
+        "secretValueAccessed": False,
         "temporaryKeyVaultAssignmentId": None,
         "temporaryRegistryAssignmentId": None,
     }
     _write_state(state_path, state)
-    assignment_id: str | None = None
-    try:
-        assignment_id = _temporary_role_assignment(
+
+    target_exists = _group_exists(subscription_id, TARGET_GROUP)
+    cleanup_exists = _group_exists(subscription_id, CLEANUP_GROUP)
+    if target_exists != cleanup_exists:
+        _fail("pre-secret-authorized-scope-incomplete")
+
+    with tempfile.TemporaryDirectory(prefix="mobius77-binding-") as directory:
+        template = Path(directory) / "main.json"
+        _mark_stage(state_path, state, "compile-template")
+        _compile_template(template)
+        _mark_stage(state_path, state, "compile-template", completed=True)
+
+        if target_exists:
+            _mark_stage(state_path, state, "pre-secret-reconciliation")
+            _verify_preservable_pre_secret_state(
+                subscription_id=subscription_id, cleanup_at=cleanup_at
+            )
+            _mark_stage(state_path, state, "pre-secret-reconciliation", completed=True)
+        else:
+            _mark_stage(state_path, state, "cleanup-control")
+            _deploy_stage(
+                template_path=template,
+                subscription_id=subscription_id,
+                ledger=ledger,
+                stage="cleanup-control",
+                cleanup_at=cleanup_at,
+                expected_cost=expected_cost,
+                maximum_cost=maximum_cost,
+            )
+            _mark_stage(state_path, state, "cleanup-control", completed=True)
+
+            _mark_stage(state_path, state, "cleanup-runbook")
+            _configure_cleanup_runbook(subscription_id)
+            _mark_stage(state_path, state, "cleanup-runbook", completed=True)
+
+            _mark_stage(state_path, state, "cleanup-job-binding")
+            _deploy_stage(
+                template_path=template,
+                subscription_id=subscription_id,
+                ledger=ledger,
+                stage="cleanup-job-binding",
+                cleanup_at=cleanup_at,
+                expected_cost=expected_cost,
+                maximum_cost=maximum_cost,
+            )
+            _mark_stage(state_path, state, "cleanup-job-binding", completed=True)
+
+            _mark_stage(state_path, state, "cleanup-control-verification")
+            cleanup_principal_id = _verify_cleanup_control(subscription_id, cleanup_at)
+            _mark_stage(
+                state_path, state, "cleanup-control-verification", completed=True
+            )
+
+            _mark_stage(state_path, state, "cleanup-binding")
+            _deploy_stage(
+                template_path=template,
+                subscription_id=subscription_id,
+                ledger=ledger,
+                stage="cleanup-binding",
+                cleanup_at=cleanup_at,
+                expected_cost=expected_cost,
+                maximum_cost=maximum_cost,
+            )
+            _mark_stage(state_path, state, "cleanup-binding", completed=True)
+
+            _mark_stage(state_path, state, "cleanup-role-verification")
+            _verify_cleanup_target_role(
+                subscription_id,
+                cleanup_principal_id,
+                str(rbac["cleanupContributorRoleDefinitionId"]),
+            )
+            _mark_stage(state_path, state, "cleanup-role-verification", completed=True)
+
+        _mark_stage(state_path, state, PRE_SECRET_PRESERVABLE_STAGE)
+        _deploy_stage(
+            template_path=template,
             subscription_id=subscription_id,
-            object_id=object_id,
-            role_id=str(rbac["keyVaultSecretsOfficerRoleDefinitionId"]),
-            scope=vault_scope,
+            ledger=ledger,
+            stage=PRE_SECRET_PRESERVABLE_STAGE,
+            cleanup_at=cleanup_at,
+            expected_cost=expected_cost,
+            maximum_cost=maximum_cost,
         )
-        state["temporaryKeyVaultAssignmentId"] = assignment_id
-        _replace_state(state_path, state)
-    except (ContractError, LifecycleError, OSError, ValueError):
-        if assignment_id is not None:
-            _delete_assignment(subscription_id, assignment_id)
-        state_path.unlink(missing_ok=True)
-        raise
+        _mark_stage(state_path, state, PRE_SECRET_PRESERVABLE_STAGE, completed=True)
+
+    _mark_stage(state_path, state, "pre-secret-verification")
+    _verify_preservable_pre_secret_state(
+        subscription_id=subscription_id, cleanup_at=cleanup_at
+    )
+    _mark_stage(state_path, state, "pre-secret-verification", completed=True)
+
+    object_id = _signed_in_user_object_id()
+    vault_scope = _scope(subscription_id, str(scopes["keyVault"]))
+    _mark_stage(state_path, state, "temporary-key-vault-authority")
+    assignment_id = _temporary_role_assignment(
+        subscription_id=subscription_id,
+        object_id=object_id,
+        role_id=str(rbac["keyVaultSecretsOfficerRoleDefinitionId"]),
+        scope=vault_scope,
+    )
+    state["temporaryKeyVaultAssignmentId"] = assignment_id
+    state["activeStage"] = None
+    state["disposition"] = LifecycleDisposition.COMPLETED.value
+    state["lastCompletedStage"] = "temporary-key-vault-authority"
+    state["resumableCheckpoint"] = "secure-manual-entry"
+    _replace_state(state_path, state)
     return {
+        "disposition": LifecycleDisposition.COMPLETED.value,
         "status": "ready-for-secure-manual-entry",
         "cleanup-timer-armed": True,
         "target-scope-matched": True,
@@ -1548,6 +2350,272 @@ def _zero_residue(subscription_id: str) -> dict[str, JsonValue]:
     }
 
 
+def _sanitized_failure(error: BaseException) -> tuple[str, str | None]:
+    azure_code = (
+        error.sanitized_azure_error_code
+        if isinstance(error, AzureCommandError)
+        else None
+    )
+    candidate = str(error)
+    if re.fullmatch(r"[a-z0-9-]+", candidate) is None:
+        candidate = "managed-binding-lifecycle-failed-closed"
+    return candidate, azure_code
+
+
+def _state_for_pre_secret_preservation(
+    *,
+    state_path: Path,
+    ledger: dict[str, JsonValue],
+    now: datetime,
+) -> tuple[dict[str, JsonValue], datetime]:
+    state = _read_state(state_path)
+    if set(state) != {
+        "activeStage",
+        "cleanupAtUtc",
+        "disposition",
+        "failedStage",
+        "lastCompletedStage",
+        "preSecretDeploymentName",
+        "repositoryHead",
+        "resumableCheckpoint",
+        "secretValueAccessed",
+        "temporaryKeyVaultAssignmentId",
+        "temporaryRegistryAssignmentId",
+    }:
+        _fail("pre-secret-state-malformed")
+    cleanup_at_raw = state["cleanupAtUtc"]
+    if not isinstance(cleanup_at_raw, str):
+        _fail("pre-secret-state-malformed")
+    try:
+        cleanup_at = datetime.strptime(cleanup_at_raw, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=UTC
+        )
+    except ValueError:
+        _fail("pre-secret-state-malformed")
+    if (
+        state["activeStage"] != PRE_SECRET_PRESERVABLE_STAGE
+        or state["disposition"] != LifecycleDisposition.RUNNING.value
+        or state["failedStage"] is not None
+        or state["lastCompletedStage"]
+        not in {"cleanup-role-verification", "pre-secret-reconciliation"}
+        or state["preSecretDeploymentName"]
+        != _deployment_name(PRE_SECRET_PRESERVABLE_STAGE, ledger)
+        or state["repositoryHead"] != ledger.get("repositoryHead")
+        or state["resumableCheckpoint"] != PRE_SECRET_PRESERVABLE_STAGE
+        or state["secretValueAccessed"] is not False
+        or state["temporaryKeyVaultAssignmentId"] is not None
+        or state["temporaryRegistryAssignmentId"] is not None
+        or cleanup_at != AUTHORIZED_CLEANUP_AT_UTC
+        or now >= cleanup_at - MINIMUM_CLEANUP_RESERVE
+    ):
+        _fail("pre-secret-state-not-preservable")
+    return state, cleanup_at
+
+
+def _validate_preservation_proof(proof: dict[str, JsonValue]) -> None:
+    required_true = {
+        "cleanup-backstop-armed",
+        "cleanup-deadline-active",
+        "cost-within-ceiling",
+        "known-state",
+        "least-privilege-exact",
+        "no-protected-data-exposure",
+        "private-boundaries-preserved",
+        "scope-inventory-exact",
+    }
+    count_fields = {
+        "cleanup-resource-count",
+        "private-endpoint-count",
+        "target-resource-count",
+    }
+    if set(proof) != required_true | count_fields:
+        _fail("pre-secret-preservation-proof-malformed")
+    if any(proof[key] is not True for key in required_true):
+        _fail("pre-secret-preservation-proof-incomplete")
+    for key in count_fields:
+        value = proof[key]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            _fail("pre-secret-preservation-proof-malformed")
+    cleanup_resource_count = proof["cleanup-resource-count"]
+    if (
+        not isinstance(cleanup_resource_count, int)
+        or isinstance(cleanup_resource_count, bool)
+        or cleanup_resource_count < 1
+    ):
+        _fail("pre-secret-preservation-proof-incomplete")
+
+
+def _safe_failed_stage(receipt_directory: Path | None) -> str:
+    if receipt_directory is None:
+        return "unknown"
+    path = _state_path(receipt_directory)
+    if not path.is_file():
+        return "unknown"
+    try:
+        state = _read_state(path)
+    except (ContractError, LifecycleError, OSError, ValueError):
+        return "unknown"
+    stage = state.get("activeStage")
+    if isinstance(stage, str) and re.fullmatch(r"[a-z0-9-]+", stage) is not None:
+        return stage
+    return "unknown"
+
+
+def _failure_record(
+    *,
+    disposition: LifecycleDisposition,
+    operation: str,
+    failed_stage: str,
+    error_code: str,
+    azure_error_code: str | None,
+    proof: dict[str, JsonValue],
+    resumable_checkpoint: str | None,
+    cleanup_status: str,
+    ledger: dict[str, JsonValue] | None,
+) -> dict[str, JsonValue]:
+    deployment_name: str | None = None
+    repository_head: str | None = None
+    if ledger is not None:
+        repository_head_value = ledger.get("repositoryHead")
+        if (
+            isinstance(repository_head_value, str)
+            and HEX_SHA40.fullmatch(repository_head_value) is not None
+        ):
+            repository_head = repository_head_value
+        if operation == "pre-secret-provisioning":
+            deployment_name = _deployment_name(PRE_SECRET_PRESERVABLE_STAGE, ledger)
+    return {
+        "cleanupAtUtc": _format_utc(AUTHORIZED_CLEANUP_AT_UTC),
+        "cleanupStatus": cleanup_status,
+        "disposition": disposition.value,
+        "failedStage": failed_stage,
+        "operation": operation,
+        "preservationProof": proof,
+        "recordedAtUtc": _format_utc(_utc_now()),
+        "repositoryHead": repository_head,
+        "resumableCheckpoint": resumable_checkpoint,
+        "safeIdentifiers": {
+            "cleanupResourceGroup": CLEANUP_GROUP,
+            "preSecretDeploymentName": deployment_name,
+            "targetResourceGroup": TARGET_GROUP,
+        },
+        "sanitizedAzureErrorCode": azure_error_code,
+        "sanitizedErrorCode": error_code,
+        "schemaVersion": "mobius.milestone-7.7.lifecycle-disposition.v1",
+        "secretValueAccessed": False,
+    }
+
+
+def _handle_failure(
+    *,
+    error: BaseException,
+    operation: str,
+    ledger: dict[str, JsonValue] | None,
+    subscription_id: str | None,
+    receipt_directory: Path | None,
+) -> dict[str, JsonValue]:
+    error_code, azure_error_code = _sanitized_failure(error)
+    failed_stage = _safe_failed_stage(receipt_directory)
+    cancellation_codes = {
+        "canceled",
+        "cancelled",
+        "operation-canceled",
+        "operation-cancelled",
+    }
+    if (
+        operation == "pre-secret-provisioning"
+        and ledger is not None
+        and subscription_id is not None
+        and receipt_directory is not None
+        and not isinstance(error, KeyboardInterrupt)
+        and azure_error_code not in cancellation_codes
+    ):
+        try:
+            state_path = _state_path(receipt_directory)
+            state, cleanup_at = _state_for_pre_secret_preservation(
+                state_path=state_path,
+                ledger=ledger,
+                now=_utc_now(),
+            )
+            terminal_state = _verify_terminal_pre_secret_deployment(
+                subscription_id=subscription_id, ledger=ledger
+            )
+            if terminal_state == "Canceled":
+                _fail("pre-secret-deployment-canceled")
+            proof = _verify_preservable_pre_secret_state(
+                subscription_id=subscription_id, cleanup_at=cleanup_at
+            )
+            _validate_preservation_proof(proof)
+            proof = {**proof, "deployment-terminal-state": terminal_state}
+            state["activeStage"] = None
+            state["disposition"] = LifecycleDisposition.BLOCKED_PRESERVED.value
+            state["failedStage"] = PRE_SECRET_PRESERVABLE_STAGE
+            _replace_state(state_path, state)
+            record = _failure_record(
+                disposition=LifecycleDisposition.BLOCKED_PRESERVED,
+                operation=operation,
+                failed_stage=PRE_SECRET_PRESERVABLE_STAGE,
+                error_code=error_code,
+                azure_error_code=azure_error_code,
+                proof=proof,
+                resumable_checkpoint=PRE_SECRET_PRESERVABLE_STAGE,
+                cleanup_status="preserved-safe-pre-secret-state",
+                ledger=ledger,
+            )
+            _write_disposition(receipt_directory, record)
+            return {
+                "cleanup-status": "preserved-safe-pre-secret-state",
+                "disposition": LifecycleDisposition.BLOCKED_PRESERVED.value,
+                "error": error_code,
+                "provisioning-authorized": False,
+                "resumable-checkpoint": PRE_SECRET_PRESERVABLE_STAGE,
+                "sanitized-azure-error-code": azure_error_code,
+                "secret-value-accessed": False,
+                "status": "blocked",
+            }
+        except (Exception, KeyboardInterrupt):
+            pass
+
+    cleanup_status = "not-required-before-effect"
+    if subscription_id is not None and receipt_directory is not None:
+        if operation == "cleanup":
+            cleanup_status = "failed-closed-manual-cleanup-required"
+        else:
+            try:
+                _cleanup(subscription_id, receipt_directory)
+                cleanup_status = "completed"
+            except (Exception, KeyboardInterrupt):
+                cleanup_status = "failed-closed-manual-cleanup-required"
+    record = _failure_record(
+        disposition=LifecycleDisposition.CLEANUP_REQUIRED,
+        operation=operation,
+        failed_stage=failed_stage,
+        error_code=error_code,
+        azure_error_code=azure_error_code,
+        proof={"proved": False},
+        resumable_checkpoint=None,
+        cleanup_status=cleanup_status,
+        ledger=ledger,
+    )
+    disposition_evidence = "not-written-before-receipt-directory"
+    if receipt_directory is not None:
+        try:
+            _write_disposition(receipt_directory, record)
+            disposition_evidence = "recorded"
+        except (ContractError, LifecycleError, OSError, ValueError):
+            disposition_evidence = "failed-closed"
+    return {
+        "cleanup-status": cleanup_status,
+        "disposition": LifecycleDisposition.CLEANUP_REQUIRED.value,
+        "disposition-evidence": disposition_evidence,
+        "error": error_code,
+        "provisioning-authorized": False,
+        "sanitized-azure-error-code": azure_error_code,
+        "secret-value-accessed": False,
+        "status": "blocked",
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--operation", choices=LIFECYCLE_OPERATIONS, required=True)
@@ -1560,6 +2628,7 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = _parser().parse_args()
     now = _utc_now()
+    ledger: dict[str, JsonValue] | None = None
     subscription_id: str | None = None
     receipt_directory: Path | None = None
     try:
@@ -1603,32 +2672,19 @@ def main() -> int:
             result = _cleanup(subscription_id, receipt_directory)
         else:
             result = _zero_residue(subscription_id)
+        result.setdefault("disposition", LifecycleDisposition.COMPLETED.value)
         print(json.dumps(result, separators=(",", ":"), sort_keys=True))
         return 0
-    except (ContractError, LifecycleError, OSError, ValueError) as exc:
-        code = str(exc)
-        if not re.fullmatch(r"[a-z0-9-]+", code):
-            code = "managed-binding-lifecycle-failed-closed"
-        cleanup_status = "not-required-before-effect"
-        if (
-            subscription_id is not None
-            and receipt_directory is not None
-            and args.operation != "cleanup"
-        ):
-            try:
-                _cleanup(subscription_id, receipt_directory)
-                cleanup_status = "completed"
-            except (ContractError, LifecycleError, OSError, ValueError):
-                cleanup_status = "failed-closed-manual-cleanup-required"
+    except (Exception, KeyboardInterrupt) as exc:
         print(
             json.dumps(
-                {
-                    "cleanup-status": cleanup_status,
-                    "status": "blocked",
-                    "error": code,
-                    "provisioning-authorized": False,
-                    "secret-value-accessed": False,
-                },
+                _handle_failure(
+                    error=exc,
+                    operation=args.operation,
+                    ledger=ledger,
+                    subscription_id=subscription_id,
+                    receipt_directory=receipt_directory,
+                ),
                 separators=(",", ":"),
                 sort_keys=True,
             )

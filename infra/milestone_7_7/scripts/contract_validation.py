@@ -124,7 +124,7 @@ EXPECTED_POLICY_DIGESTS = {
         "0ca48feb6e0bee369e209d865fa6fff2a9b759e2be9f9284e97b098a2f69cdce"
     ),
     "lifecycle-policy.json": (
-        "cb85efcf2aedc1b54f9385b18c83daca8858983f975b0eaa936036c828182c0f"
+        "c4287fda9534f74b60ea249f48eb07e32f918ae601a0ec6e86b395d96cc71379"
     ),
     "network-policy.json": (
         "67fe0f29d7a69c78a08a213764da7498a6a83293c3e8838c7d3f971da15a851b"
@@ -138,10 +138,10 @@ EXPECTED_POLICY_DIGESTS = {
 }
 EXPECTED_SCHEMA_DIGESTS = {
     "cost-envelope.schema.json": (
-        "34d75972d6a3ec653a820d3967e71455201cdd05bec9e0786c00dc89f79ebc88"
+        "3f3d451efcd3b92786fc613f18ba6ed7ac57a04bf99ce6c825f256bc37bae39c"
     ),
     "environment.schema.json": (
-        "810c672f5d5dc0cff2414bbf3dcbcc9ac8c6bbdbb8d9fcaaa6f96b2f327c3185"
+        "cd7d4a48ae616f6ea2c023decd6eeb18ac717f46dfb8bf14442345283742f924"
     ),
     "image-digests.schema.json": (
         "96cd11b19f621e726075943b3bcf03790255930d6d15ba19b67ac21865eb5d80"
@@ -552,8 +552,8 @@ def _validate_environment(value: Mapping[str, Any]) -> None:
     timer_verified = _parse_utc(
         lifecycle["cleanupTimerVerifiedAtUtc"], "cleanup timer verification"
     )
-    if expiry <= start or expiry - start > timedelta(hours=24):
-        raise ContractError("verified lease exceeds the 24-hour hard maximum")
+    if expiry <= start or expiry - start > timedelta(hours=30):
+        raise ContractError("verified lease exceeds the 30-hour hard maximum")
     if reserve < start or expiry - reserve < timedelta(minutes=90):
         raise ContractError("verified lease lacks the 90-minute cleanup reserve")
     if timer_verified >= start:
@@ -627,10 +627,10 @@ def _validate_cost(value: Mapping[str, Any]) -> None:
     names = [item["name"] for item in lines]
     if len(names) != len(set(names)):
         raise ContractError("cost line-item names are not unique")
-    if expected > 12000:
+    if expected > 10000:
         raise ContractError("expected cost exceeds the provisioning block")
-    if maximum >= 15000:
-        raise ContractError("maximum cost reaches the absolute ceiling")
+    if maximum > 10000:
+        raise ContractError("maximum cost exceeds the absolute ceiling")
     if expected > base_maximum:
         raise ContractError("expected cost exceeds the base maximum")
     if sum(item["expectedUsdCents"] for item in lines) != expected:
@@ -759,13 +759,15 @@ def _validate_policies(root: Path, environment: Mapping[str, Any]) -> None:
     if network_address_plan != environment_address_plan:
         raise ContractError("environment and network policy address plans differ")
     if lifecycle["costControls"] != {
-        "absoluteCeilingUsdCents": 15000,
+        "absoluteCeilingUsdCents": 10000,
         "budgetAlertsAreEnforcement": False,
         "minimumContingencyBasisPoints": 2500,
-        "provisioningBlockAboveUsdCents": 12000,
+        "provisioningBlockAboveUsdCents": 10000,
         "targetUsdCents": 10000,
     }:
         raise ContractError("fixed cost controls differ")
+    if lifecycle["lease"].get("authorizedCleanupAtUtc") != "2026-08-02T07:00:00Z":
+        raise ContractError("authorized cleanup deadline differs")
     if tuple(lifecycle["requiredTags"]) != EXPECTED_TAG_KEYS:
         raise ContractError("lifecycle policy tags differ")
     if tuple(environment["requiredTagKeys"]) != tuple(lifecycle["requiredTags"]):

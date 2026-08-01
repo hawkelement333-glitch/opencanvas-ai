@@ -63,11 +63,11 @@ param lifecycleTags object = {}
 param cleanupAtUtc string = ''
 
 @minValue(1)
-@maxValue(12000)
+@maxValue(10000)
 param expectedUsdCents int = 1
 
 @minValue(1)
-@maxValue(14999)
+@maxValue(10000)
 param maximumPlausibleUsdCents int = 1
 
 var oneRunEnabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled && length(authorizationLedgerSha256) == 64

@@ -72,7 +72,7 @@
     "unsigned"
   ],
   "limits": {
-    "absoluteCostCeilingUsdCents": 15000,
+    "absoluteCostCeilingUsdCents": 10000,
     "maximumArrivalRatePerSecond": 100,
     "maximumAttemptsPerScenario": 1,
     "maximumConcurrency": 128,
@@ -87,10 +87,10 @@
     "maximumSyntheticUploadBytes": 134217728,
     "maximumTotalDurationSeconds": 7200,
     "minimumCleanupReserveSeconds": 5400,
-    "provisioningBlockAboveUsdCents": 12000
+    "provisioningBlockAboveUsdCents": 10000
   },
   "planId": "m7.7-cp4-local-failure-plan",
-  "planIntegritySha256": "3a424ef2435853e6974007b6174147bf92ac226a6fb2cf99f502bb88b3baafa9",
+  "planIntegritySha256": "faffedbfbd933254e01474599010ff0dc8d5cc46c01d67f34774dafc4790f985",
   "purpose": "local-failure-injection-framework",
   "safety": {
     "credentialsAllowed": false,

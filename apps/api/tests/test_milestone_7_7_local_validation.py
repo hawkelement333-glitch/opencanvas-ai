@@ -72,7 +72,7 @@ def test_example_is_valid_and_bound_to_checkpoint_4() -> None:
     }
     assert report["bindings"] == EXPECTED_BINDINGS
     assert report["reportIntegritySha256"] == (
-        "f87452146ffefa210eb92edd6065b02acd6c5a67e5880c5a8103db83c3843580"
+        "ebca8bb8d1f27e43df5de77775b966d9fd4082b96066277828d4dd7833e446a8"
     )
 
 

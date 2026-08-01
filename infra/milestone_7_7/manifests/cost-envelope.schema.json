@@ -42,20 +42,20 @@
       "const": 10000
     },
     "provisioningBlockAboveUsdCents": {
-      "const": 12000
+      "const": 10000
     },
     "absoluteCeilingUsdCents": {
-      "const": 15000
+      "const": 10000
     },
     "expectedUsdCents": {
       "type": ["integer", "null"],
       "minimum": 1,
-      "maximum": 12000
+      "maximum": 10000
     },
     "baseMaximumUsdCents": {
       "type": ["integer", "null"],
       "minimum": 1,
-      "exclusiveMaximum": 15000
+      "maximum": 10000
     },
     "uncertaintyContingencyBasisPoints": {
       "type": "integer",
@@ -65,18 +65,18 @@
     "contingencyUsdCents": {
       "type": ["integer", "null"],
       "minimum": 1,
-      "exclusiveMaximum": 15000
+      "maximum": 10000
     },
     "maximumPlausibleUsdCents": {
       "type": ["integer", "null"],
       "minimum": 1,
-      "exclusiveMaximum": 15000
+      "maximum": 10000
     },
     "budgetAlertsAreEnforcement": {
       "const": false
     },
     "hardLeaseHours": {
-      "const": 24
+      "const": 30
     },
     "lineItems": {
       "type": "array",

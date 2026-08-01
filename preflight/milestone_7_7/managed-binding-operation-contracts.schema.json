@@ -208,7 +208,7 @@
         "authorizationPredicate",
         "scope",
         "terminalStates",
-        "cleanupOnFailure",
+        "failureDispositionPolicy",
         "replayDecision"
       ],
       "properties": {
@@ -218,7 +218,9 @@
         "authorizationPredicate": { "$ref": "#/$defs/nonEmptyStringArray" },
         "scope": { "$ref": "#/$defs/nonEmptyStringArray" },
         "terminalStates": { "$ref": "#/$defs/nonEmptyStringArray" },
-        "cleanupOnFailure": { "const": true },
+        "failureDispositionPolicy": {
+          "enum": ["reconcile-pre-secret-safe-state", "cleanup-required"]
+        },
         "replayDecision": { "const": "deny" }
       }
     }

@@ -255,7 +255,14 @@
       "prove-final-zero-residue",
       "set-provisioning-authorized-false"
     ],
-    "rollbackDecision": "cleanup-to-zero-residue",
+    "failureDispositionModel": [
+      "RUNNING",
+      "BLOCKED_PRESERVED",
+      "CLEANUP_REQUIRED",
+      "COMPLETED"
+    ],
+    "preSecretFailureDecision": "reconcile-resulting-state-before-cleanup",
+    "rollbackDecision": "cleanup-unsafe-state-to-zero-residue",
     "prohibitedFallbacks": [
       "public-key-vault",
       "public-container-app-ingress",
@@ -273,7 +280,9 @@
     "retryCount": 0,
     "receiptRequiredBeforeFirstEffect": true,
     "replayDecision": "deny",
-    "cleanupRequiredForEveryTerminalState": true,
+    "safePreSecretPreservationAllowed": true,
+    "cleanupRequiredForUnsafeTerminalState": true,
+    "preservedResumeRequiresFreshLedger": true,
     "postRunProvisioningAuthorized": false
   }
 }
