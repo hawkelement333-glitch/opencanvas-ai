@@ -537,10 +537,14 @@ def _verified_cost() -> tuple[int, int]:
 def _compile_template(output_path: Path) -> None:
     if not (Path.home() / ".azure" / "cliextensions" / "automation").is_dir():
         _fail("automation-extension-missing")
+    if not (Path.home() / ".azure" / "bin" / "bicep.exe").is_file():
+        _fail("azure-cli-bicep-cache-missing")
     _run(
         (
+            "az",
             "bicep",
             "build",
+            "--file",
             str(MAIN_TEMPLATE),
             "--outfile",
             str(output_path),

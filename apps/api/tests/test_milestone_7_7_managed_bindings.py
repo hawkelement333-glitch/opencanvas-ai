@@ -1392,12 +1392,15 @@ def test_lifecycle_is_closed_private_digest_bound_and_secret_value_blind() -> No
     assert "keyVaultUrl:" in compute
 
 
-def test_lifecycle_uses_supported_bicep_positional_input_contract() -> None:
+def test_lifecycle_uses_supported_cached_azure_cli_bicep_contract() -> None:
     text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
     compile_template = text.split("def _compile_template", 1)[1].split("def _lifecycle_tags", 1)[0]
 
-    assert '"bicep",\n            "build",\n            str(MAIN_TEMPLATE),' in compile_template
-    assert '"--file",' not in compile_template
+    assert (
+        '"az",\n            "bicep",\n            "build",\n            "--file",'
+        in compile_template
+    )
+    assert "str(MAIN_TEMPLATE)," in compile_template
     assert '"--outfile",\n            str(output_path),' in compile_template
 
 
@@ -1983,6 +1986,76 @@ def test_exact_container_apps_infrastructure_group_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert _verify_container_apps_infrastructure_fixture(monkeypatch) == 1
+
+
+def test_lifecycle_compiler_uses_existing_azure_cli_bicep_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    (home / ".azure" / "bin").mkdir(parents=True)
+    (home / ".azure" / "bin" / "bicep.exe").write_bytes(b"synthetic-cache")
+    (home / ".azure" / "cliextensions" / "automation").mkdir(parents=True)
+    calls: list[tuple[str, ...]] = []
+    output = tmp_path / "main.json"
+
+    def fake_run(argv: tuple[str, ...], **_kwargs: object) -> None:
+        calls.append(argv)
+        output.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(managed_binding_lifecycle.Path, "home", lambda: home)
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", fake_run)
+    managed_binding_lifecycle._compile_template(output)
+
+    assert calls == [
+        (
+            "az",
+            "bicep",
+            "build",
+            "--file",
+            str(managed_binding_lifecycle.MAIN_TEMPLATE),
+            "--outfile",
+            str(output),
+        )
+    ]
+
+
+def test_lifecycle_compiler_fails_when_azure_cli_bicep_cache_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    (home / ".azure" / "cliextensions" / "automation").mkdir(parents=True)
+    monkeypatch.setattr(managed_binding_lifecycle.Path, "home", lambda: home)
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="azure-cli-bicep-cache-missing",
+    ):
+        managed_binding_lifecycle._compile_template(tmp_path / "main.json")
+
+
+def test_dependency_gate_accepts_only_cached_azure_cli_bicep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    (home / ".azure" / "bin").mkdir(parents=True)
+    (home / ".azure" / "bin" / "bicep.exe").write_bytes(b"synthetic-cache")
+    (home / ".azure" / "cliextensions" / "automation").mkdir(parents=True)
+    monkeypatch.setattr(managed_binding_execution.Path, "home", lambda: home)
+    monkeypatch.setattr(
+        managed_binding_execution.shutil,
+        "which",
+        lambda name: f"synthetic-{name}" if name in {"az", "docker", "git"} else None,
+    )
+
+    status, code, fields = managed_binding_execution._local_lifecycle_dependencies()
+    assert status == "proved"
+    assert code == "managed-lifecycle-dependencies-present"
+    assert fields["bicep-cli-present"] is True
+
+    (home / ".azure" / "bin" / "bicep.exe").unlink()
+    status, code, fields = managed_binding_execution._local_lifecycle_dependencies()
+    assert status == "blocked"
+    assert code == "managed-lifecycle-dependency-missing"
+    assert fields["bicep-cli-present"] is False
 
 
 @pytest.mark.parametrize(

@@ -42,12 +42,16 @@ from preflight.milestone_7_7.managed_binding_contracts import (
 )
 from preflight.milestone_7_7.operation_contracts import OPERATION_IDS
 
-RESULT_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/managed-binding-operation-result/v1\0"
+RESULT_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/managed-binding-operation-result/v1\0"
+)
 PACKAGE_RESULT_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/managed-binding-package-one-result/v1\0"
 )
 RESULT_VERSION: Final = "mobius.milestone-7.7.managed-binding-operation-result.v1"
-PACKAGE_RESULT_VERSION: Final = "mobius.milestone-7.7.managed-binding-package-one-result.v1"
+PACKAGE_RESULT_VERSION: Final = (
+    "mobius.milestone-7.7.managed-binding-package-one-result.v1"
+)
 PROVIDER_METHOD = "azure-provider-resource-metadata-v1"
 PROVIDER_TYPE_INVENTORY_METHOD = "azure-provider-resource-type-inventory-v1"
 STAGING_REGION = "southcentralus"
@@ -75,7 +79,9 @@ _EXACT_CHILD_METADATA_FALLBACKS: Final = {
         "2025-07-01",
     ),
 }
-_EXACT_REGION_INDEPENDENT_BINDINGS: Final[dict[str, tuple[str, str, str, frozenset[str]]]] = {
+_EXACT_REGION_INDEPENDENT_BINDINGS: Final[
+    dict[str, tuple[str, str, str, frozenset[str]]]
+] = {
     "Microsoft.Authorization/roleAssignments": (
         "Microsoft.Authorization",
         "roleAssignments",
@@ -224,7 +230,9 @@ def _materialize_azure_method(
             raise ManagedBindingExecutionError("method-arguments-invalid")
         argument = raw_argument
         for name, replacement in values.items():
-            if not replacement or any(char in replacement for char in ("\x00", "\r", "\n")):
+            if not replacement or any(
+                char in replacement for char in ("\x00", "\r", "\n")
+            ):
                 raise ManagedBindingExecutionError("method-binding-invalid")
             argument = argument.replace("{" + name + "}", replacement)
         if METHOD_PLACEHOLDER.search(argument) is not None:
@@ -266,20 +274,26 @@ def _run_json_method(
         try:
             text = bytes(capture.stdout).decode("utf-8", errors="strict")
         except UnicodeError:
-            raise ManagedBindingExecutionError("azure-method-output-malformed") from None
+            raise ManagedBindingExecutionError(
+                "azure-method-output-malformed"
+            ) from None
         if not text.strip():
             raise ManagedBindingExecutionError("azure-method-output-blank")
         try:
             return loads_json(text)
         except ContractError:
-            raise ManagedBindingExecutionError("azure-method-output-malformed") from None
+            raise ManagedBindingExecutionError(
+                "azure-method-output-malformed"
+            ) from None
     finally:
         capture.release()
 
 
 def _provider_binding(key: str) -> tuple[str, str, str]:
     contract = load_managed_binding_contract()
-    versions = _as_object(contract["providerApiVersions"], "provider-api-registry-invalid")
+    versions = _as_object(
+        contract["providerApiVersions"], "provider-api-registry-invalid"
+    )
     version = versions.get(key)
     if not isinstance(version, str):
         raise ManagedBindingExecutionError("provider-api-binding-missing")
@@ -292,7 +306,9 @@ def _provider_binding(key: str) -> tuple[str, str, str]:
 def _provider_keys(operation_id: str) -> tuple[str, ...]:
     if operation_id == "provider-registration-api-versions":
         contract = load_managed_binding_contract()
-        versions = _as_object(contract["providerApiVersions"], "provider-api-registry-invalid")
+        versions = _as_object(
+            contract["providerApiVersions"], "provider-api-registry-invalid"
+        )
         return tuple(str(key) for key in versions)
     return _PROVIDER_KEYS_BY_OPERATION.get(operation_id, ())
 
@@ -370,7 +386,9 @@ def _exact_child_metadata_fallback(
         normalized = _normalized_provider_resource_type(namespace, raw_resource_type)
         normalized_rows.append((normalized, raw_resource_type))
 
-    def exact_metadata(raw_resource_type: str, expected_normalized: str) -> dict[str, JsonValue]:
+    def exact_metadata(
+        raw_resource_type: str, expected_normalized: str
+    ) -> dict[str, JsonValue]:
         value = _as_object(
             _run_json_method(
                 adapter,
@@ -400,7 +418,9 @@ def _exact_child_metadata_fallback(
         return value
 
     child_name = expected_resource_type.casefold()
-    child_rows = [raw for normalized, raw in normalized_rows if normalized == child_name]
+    child_rows = [
+        raw for normalized, raw in normalized_rows if normalized == child_name
+    ]
     if len(child_rows) > 1:
         raise ManagedBindingExecutionError("provider-metadata-malformed")
     if child_rows:
@@ -416,7 +436,9 @@ def _exact_child_metadata_fallback(
         )
 
     parent_name = parent_resource_type.casefold()
-    parent_rows = [raw for normalized, raw in normalized_rows if normalized == parent_name]
+    parent_rows = [
+        raw for normalized, raw in normalized_rows if normalized == parent_name
+    ]
     if len(parent_rows) > 1:
         raise ManagedBindingExecutionError("provider-metadata-malformed")
     if not parent_rows:
@@ -538,7 +560,9 @@ def _provider_checks(
             isinstance(item, str) for item in api_versions
         ):
             raise ManagedBindingExecutionError("provider-metadata-malformed")
-        if not isinstance(locations, list) or not all(isinstance(item, str) for item in locations):
+        if not isinstance(locations, list) or not all(
+            isinstance(item, str) for item in locations
+        ):
             raise ManagedBindingExecutionError("provider-metadata-malformed")
         location_values = [item for item in locations if isinstance(item, str)]
         observed_count += 1
@@ -563,7 +587,9 @@ def _provider_checks(
                 {
                     "required-provider-count": len(
                         _as_array(
-                            load_managed_binding_contract()["providerRegistrationRequirements"],
+                            load_managed_binding_contract()[
+                                "providerRegistrationRequirements"
+                            ],
                             "providerRegistrationRequirements",
                         )
                     ),
@@ -656,11 +682,16 @@ def _network_usage(
         raise ManagedBindingExecutionError("network-usage-malformed")
 
     capacity_available = all(
-        observed[name][0] + required <= observed[name][1] for name, required in additive.items()
+        observed[name][0] + required <= observed[name][1]
+        for name, required in additive.items()
     ) and all(required <= observed[name][1] for name, required in per_resource.items())
     return (
         ("proved" if capacity_available else "blocked"),
-        ("network-capacity-bounded" if capacity_available else "network-capacity-not-available"),
+        (
+            "network-capacity-bounded"
+            if capacity_available
+            else "network-capacity-not-available"
+        ),
         {
             "dimension-count": len(requirements),
             "every-current-below-limit": capacity_available,
@@ -728,7 +759,9 @@ def _vnet_isolation(
         ):
             raise ManagedBindingExecutionError("vnet-prefix-output-malformed")
 
-        is_expected_identity = name == expected_name and resource_group == expected_group
+        is_expected_identity = (
+            name == expected_name and resource_group == expected_group
+        )
         is_exact_expected_current = (
             is_expected_identity
             and location == expected_location
@@ -746,9 +779,15 @@ def _vnet_isolation(
             try:
                 prefix = ipaddress.ip_network(raw_prefix, strict=True)
             except ValueError:
-                raise ManagedBindingExecutionError("vnet-prefix-output-malformed") from None
+                raise ManagedBindingExecutionError(
+                    "vnet-prefix-output-malformed"
+                ) from None
             prefix_count += 1
-            if prefix.version == 4 and candidate.overlaps(prefix) and not is_exact_expected_current:
+            if (
+                prefix.version == 4
+                and candidate.overlaps(prefix)
+                and not is_exact_expected_current
+            ):
                 overlaps += 1
 
     if expected_current_count > 1:
@@ -759,7 +798,11 @@ def _vnet_isolation(
         (
             "vnet-plan-isolated"
             if isolated
-            else ("vnet-plan-resource-drift" if expected_current_drift else "vnet-plan-overlaps")
+            else (
+                "vnet-plan-resource-drift"
+                if expected_current_drift
+                else "vnet-plan-overlaps"
+            )
         ),
         {"prefix-count": prefix_count, "overlap-count": overlaps},
     )
@@ -830,7 +873,11 @@ def _workload_profiles(
     supported = any(name.casefold() == "consumption" for name in names)
     return (
         ("proved" if supported else "blocked"),
-        ("fixed-workload-profile-supported" if supported else "fixed-workload-profile-unavailable"),
+        (
+            "fixed-workload-profile-supported"
+            if supported
+            else "fixed-workload-profile-unavailable"
+        ),
         {"supported-profile-count": len(names), "consumption-supported": supported},
     )
 
@@ -838,7 +885,9 @@ def _workload_profiles(
 def _managed_provider_binding_contract() -> tuple[str, str, dict[str, JsonValue]]:
     contract = load_managed_binding_contract()
     secrets = _as_array(contract["secrets"], "secret-binding-contract-malformed")
-    compute_text = (INFRASTRUCTURE_ROOT / "modules" / "compute.bicep").read_text(encoding="utf-8")
+    compute_text = (INFRASTRUCTURE_ROOT / "modules" / "compute.bicep").read_text(
+        encoding="utf-8"
+    )
     required = (
         ("openai-api-key", "OPENAI_API_KEY"),
         ("opencanvas-smtp-username", "OPENCANVAS_SMTP_USERNAME"),
@@ -847,7 +896,9 @@ def _managed_provider_binding_contract() -> tuple[str, str, dict[str, JsonValue]
     exact_bindings = []
     for raw_binding in secrets:
         binding = _as_object(raw_binding, "secret-binding-contract-malformed")
-        exact_bindings.append((str(binding["keyVaultName"]), str(binding["environmentVariable"])))
+        exact_bindings.append(
+            (str(binding["keyVaultName"]), str(binding["environmentVariable"]))
+        )
     canonical_only = (
         "OPENCANVAS_OPENAI_API_KEY" not in compute_text
         and all(secret_name in compute_text for secret_name, _ in required)
@@ -924,7 +975,9 @@ def _acr_source(
         raw_subscription_id=raw_subscription_id,
     )
     value = _as_object(raw, "acr-name-output-malformed")
-    if set(value) != {"available", "reason"} or not isinstance(value["available"], bool):
+    if set(value) != {"available", "reason"} or not isinstance(
+        value["available"], bool
+    ):
         raise ManagedBindingExecutionError("acr-name-output-malformed")
     reason = value["reason"]
     if reason is not None and not isinstance(reason, str):
@@ -933,8 +986,12 @@ def _acr_source(
     resource_groups = _as_object(
         managed_binding["resourceGroups"], "private-acr-source-contract-malformed"
     )
-    resources = _as_object(managed_binding["resources"], "private-acr-source-contract-malformed")
-    fixed_skus = _as_object(managed_binding["fixedSkus"], "private-acr-source-contract-malformed")
+    resources = _as_object(
+        managed_binding["resources"], "private-acr-source-contract-malformed"
+    )
+    fixed_skus = _as_object(
+        managed_binding["fixedSkus"], "private-acr-source-contract-malformed"
+    )
     source = _as_object(
         managed_binding["privateAcrSource"], "private-acr-source-contract-malformed"
     )
@@ -1017,7 +1074,10 @@ def _aggregate(
 
 
 def _local_lifecycle_dependencies() -> tuple[str, str, dict[str, JsonValue]]:
-    bicep_present = shutil.which("bicep") is not None
+    bicep_present = (
+        shutil.which("az") is not None
+        and (Path.home() / ".azure" / "bin" / "bicep.exe").is_file()
+    )
     docker_present = shutil.which("docker") is not None
     git_present = shutil.which("git") is not None
     automation_extension_present = (
@@ -1102,7 +1162,9 @@ def _evaluate_operation(
             return provider
         return _combine(
             provider,
-            _workload_profiles(adapter=adapter, raw_subscription_id=raw_subscription_id),
+            _workload_profiles(
+                adapter=adapter, raw_subscription_id=raw_subscription_id
+            ),
         )
     if operation_id == "subscription-quota-bounded-usage":
         return _network_usage(adapter=adapter, raw_subscription_id=raw_subscription_id)
@@ -1135,7 +1197,9 @@ def _evaluate_operation(
             require_region=operation_id != "private-dns-prerequisites",
         )
     if operation_id == "scoped-rbac-prerequisites":
-        return _role_definitions(adapter=adapter, raw_subscription_id=raw_subscription_id)
+        return _role_definitions(
+            adapter=adapter, raw_subscription_id=raw_subscription_id
+        )
     if operation_id == "external-test-provider-prerequisites":
         return _managed_provider_binding_contract()
     if operation_id == "bounded-cost-budget-prerequisites":
@@ -1210,7 +1274,9 @@ def _write_exclusive(path: Path, value: JsonValue) -> None:
         raise ManagedBindingExecutionError("operation-result-write-failed") from None
 
 
-def _load_prior_results(receipt_directory: Path, operation_id: str) -> list[dict[str, JsonValue]]:
+def _load_prior_results(
+    receipt_directory: Path, operation_id: str
+) -> list[dict[str, JsonValue]]:
     index = OPERATION_IDS.index(operation_id)
     results: list[dict[str, JsonValue]] = []
     for prior_id in OPERATION_IDS[:index]:
@@ -1221,7 +1287,9 @@ def _load_prior_results(receipt_directory: Path, operation_id: str) -> list[dict
         if value.get("operationId") != prior_id:
             raise ManagedBindingExecutionError("prior-operation-result-malformed")
         if value.get("resultIntegritySha256") != _result_integrity(value):
-            raise ManagedBindingExecutionError("prior-operation-result-integrity-mismatch")
+            raise ManagedBindingExecutionError(
+                "prior-operation-result-integrity-mismatch"
+            )
         results.append(value)
     return results
 
@@ -1294,7 +1362,9 @@ def execute_operation(
         expected_repository_head=repository_head,
     )
     process_adapter = _PopenProcessAdapter() if adapter is None else adapter
-    account = _BoundedAzureRunner(adapter=process_adapter, clock=lambda: now).run_account()
+    account = _BoundedAzureRunner(
+        adapter=process_adapter, clock=lambda: now
+    ).run_account()
     try:
         return _execute_operation_with_context(
             operation_id,
@@ -1324,7 +1394,9 @@ def execute_package_one(
         expected_repository_head=repository_head,
     )
     process_adapter = _PopenProcessAdapter() if adapter is None else adapter
-    account = _BoundedAzureRunner(adapter=process_adapter, clock=lambda: now).run_account()
+    account = _BoundedAzureRunner(
+        adapter=process_adapter, clock=lambda: now
+    ).run_account()
     results: list[dict[str, JsonValue]] = []
     try:
         raw_subscription_id = account.subscription_id_for_materialization()
@@ -1345,7 +1417,8 @@ def execute_package_one(
         account.release()
     status = (
         "proved"
-        if len(results) == 15 and all(result["status"] == "proved" for result in results)
+        if len(results) == 15
+        and all(result["status"] == "proved" for result in results)
         else "blocked"
     )
     body: dict[str, JsonValue] = {
@@ -1354,7 +1427,9 @@ def execute_package_one(
         "accountMatched": True,
         "operationCount": len(results),
         "provedCount": sum(result["status"] == "proved" for result in results),
-        "blockedOperationId": (None if status == "proved" else str(results[-1]["operationId"])),
+        "blockedOperationId": (
+            None if status == "proved" else str(results[-1]["operationId"])
+        ),
         "blockedExplanationCode": (
             None if status == "proved" else str(results[-1]["explanationCode"])
         ),
@@ -1376,7 +1451,10 @@ def materialize_ledger(
 ) -> dict[str, JsonValue]:
     resolved_path = ledger_path.resolve()
     resolved_repository = REPOSITORY_ROOT.resolve()
-    if resolved_path == resolved_repository or resolved_repository in resolved_path.parents:
+    if (
+        resolved_path == resolved_repository
+        or resolved_repository in resolved_path.parents
+    ):
         raise ManagedBindingExecutionError("ledger-path-inside-repository")
     ledger = build_authorization_ledger(
         issued_at_utc=_utc_now() if now_utc is None else now_utc,
@@ -1414,7 +1492,9 @@ def dry_run() -> dict[str, JsonValue]:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the closed managed-binding executor.")
+    parser = argparse.ArgumentParser(
+        description="Run the closed managed-binding executor."
+    )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--materialize-ledger", action="store_true")
@@ -1441,7 +1521,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             else:
                 if args.receipt_directory is None:
-                    raise ManagedBindingExecutionError("required-execution-binding-missing")
+                    raise ManagedBindingExecutionError(
+                        "required-execution-binding-missing"
+                    )
                 if args.execute_package_one:
                     result = execute_package_one(
                         ledger_path=args.ledger,
