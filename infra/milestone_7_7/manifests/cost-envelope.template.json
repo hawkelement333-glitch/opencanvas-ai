@@ -7,11 +7,11 @@
   "targetUsdCents": 10000,
   "provisioningBlockAboveUsdCents": 12000,
   "absoluteCeilingUsdCents": 15000,
-  "expectedUsdCents": 940,
-  "baseMaximumUsdCents": 3355,
+  "expectedUsdCents": 964,
+  "baseMaximumUsdCents": 3403,
   "uncertaintyContingencyBasisPoints": 2500,
-  "contingencyUsdCents": 839,
-  "maximumPlausibleUsdCents": 4194,
+  "contingencyUsdCents": 851,
+  "maximumPlausibleUsdCents": 4254,
   "budgetAlertsAreEnforcement": false,
   "hardLeaseHours": 24,
   "lineItems": [
@@ -23,8 +23,8 @@
     },
     {
       "name": "vpn-gateway-and-p2s",
-      "expectedUsdCents": 240,
-      "baseMaximumUsdCents": 480,
+      "expectedUsdCents": 264,
+      "baseMaximumUsdCents": 528,
       "priceEvidenceStatus": "verified-official-retail"
     },
     {

@@ -253,6 +253,10 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
     if provider_registrations != EXPECTED_PROVIDER_REGISTRATIONS:
         raise ContractError("managed-binding provider registry differs")
 
+    fixed_skus = _as_object(contract["fixedSkus"], "$.fixedSkus")
+    if fixed_skus.get("vpnGateway") != "VpnGw1AZ":
+        raise ContractError("managed-binding VPN gateway SKU differs")
+
     network = _as_object(contract["network"], "$.network")
     vnet = ipaddress.ip_network(str(network["vnetCidr"]), strict=True)
     if not isinstance(vnet, ipaddress.IPv4Network):
@@ -293,6 +297,21 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         raise ContractError("managed-binding public application ingress is forbidden")
     if network.get("publicKeyVaultAccess") is not False:
         raise ContractError("managed-binding public Key Vault access is forbidden")
+
+    vpn = _as_object(contract["vpn"], "$.vpn")
+    if vpn != {
+        "authenticationType": "AAD",
+        "gatewayGeneration": "Generation2",
+        "gatewaySku": "VpnGw1AZ",
+        "gatewayType": "Vpn",
+        "microsoftRegisteredClientAudience": ("c632b3df-fb67-4d84-bdcf-b95ad541b5c8"),
+        "publicIpAllocation": "Static",
+        "publicIpAvailabilityZoneMode": "zone-redundant-no-explicit-zone",
+        "publicIpSku": "Standard",
+        "tunnelType": "OpenVPN",
+        "vpnType": "RouteBased",
+    }:
+        raise ContractError("managed-binding VPN compatibility contract differs")
 
     secrets = _as_array(contract["secrets"], "$.secrets")
     actual_secrets = tuple(

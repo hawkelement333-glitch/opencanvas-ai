@@ -100,6 +100,19 @@ def test_exact_names_scopes_secrets_runtime_and_private_source_are_closed() -> N
     assert contract["network"]["privateEndpointsCidr"] == "10.77.2.0/24"
     assert contract["network"]["publicApplicationIngress"] is False
     assert contract["network"]["publicKeyVaultAccess"] is False
+    assert contract["fixedSkus"]["vpnGateway"] == "VpnGw1AZ"
+    assert contract["vpn"] == {
+        "gatewaySku": "VpnGw1AZ",
+        "gatewayGeneration": "Generation2",
+        "publicIpSku": "Standard",
+        "publicIpAllocation": "Static",
+        "publicIpAvailabilityZoneMode": "zone-redundant-no-explicit-zone",
+        "gatewayType": "Vpn",
+        "vpnType": "RouteBased",
+        "tunnelType": "OpenVPN",
+        "authenticationType": "AAD",
+        "microsoftRegisteredClientAudience": "c632b3df-fb67-4d84-bdcf-b95ad541b5c8",
+    }
     assert [
         (item["keyVaultName"], item["environmentVariable"]) for item in contract["secrets"]
     ] == [
@@ -133,6 +146,26 @@ def test_contract_tampering_fails_closed() -> None:
     overlay["operationOrder"][0] = "altered-operation"
     with pytest.raises(ContractError, match=r"operation order|integrity"):
         validate_operation_overlay(overlay)
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("fixedSkus", "vpnGateway", "VpnGw1"),
+        ("vpn", "gatewaySku", "VpnGw1"),
+        ("vpn", "gatewayGeneration", "Generation1"),
+        ("vpn", "publicIpSku", "Basic"),
+        ("vpn", "publicIpAllocation", "Dynamic"),
+        ("vpn", "publicIpAvailabilityZoneMode", "zonal-1"),
+    ],
+)
+def test_vpn_gateway_compatibility_contract_fails_closed(
+    section: str, field: str, value: str
+) -> None:
+    contract = deepcopy(load_managed_binding_contract())
+    contract[section][field] = value
+    with pytest.raises(ContractError, match="VPN"):
+        validate_managed_binding_contract(contract)
 
 
 @pytest.mark.parametrize("cleanup_location", [None, "", "southcentralus", "eastus"])

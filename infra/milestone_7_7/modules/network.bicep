@@ -280,9 +280,10 @@ resource vpnGateway 'Microsoft.Network/virtualNetworkGateways@2026-01-01' = if (
       }
     ]
     sku: {
-      name: 'VpnGw1'
-      tier: 'VpnGw1'
+      name: 'VpnGw1AZ'
+      tier: 'VpnGw1AZ'
     }
+    vpnGatewayGeneration: 'Generation2'
     vpnClientConfiguration: {
       aadAudience: 'c632b3df-fb67-4d84-bdcf-b95ad541b5c8'
       aadIssuer: 'https://sts.windows.net/${tenant().tenantId}/'

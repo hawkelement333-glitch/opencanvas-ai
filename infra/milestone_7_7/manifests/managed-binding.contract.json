@@ -64,7 +64,7 @@
     "keyVault": "standard",
     "containerAppsWorkloadProfile": "Consumption",
     "containerRegistry": "Premium",
-    "vpnGateway": "VpnGw1",
+    "vpnGateway": "VpnGw1AZ",
     "logAnalytics": "PerGB2018",
     "automationAccount": "Basic"
   },
@@ -155,7 +155,11 @@
     "temporaryRegistryOperatorAssignmentRemovedAfterPublish": true
   },
   "vpn": {
-    "gatewaySku": "VpnGw1",
+    "gatewaySku": "VpnGw1AZ",
+    "gatewayGeneration": "Generation2",
+    "publicIpSku": "Standard",
+    "publicIpAllocation": "Static",
+    "publicIpAvailabilityZoneMode": "zone-redundant-no-explicit-zone",
     "gatewayType": "Vpn",
     "vpnType": "RouteBased",
     "tunnelType": "OpenVPN",

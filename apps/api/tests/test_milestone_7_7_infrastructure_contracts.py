@@ -307,6 +307,9 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "param managementCleanupCidr string = '10.77.3.0/28'",
             "param infrastructurePublicIpCount int = 3",
             "param generalInternetEgressEnabled bool = false",
+            "name: 'VpnGw1AZ'",
+            "tier: 'VpnGw1AZ'",
+            "vpnGatewayGeneration: 'Generation2'",
         ],
         "policy.bicep": [
             "param deploymentRegion string",
@@ -398,6 +401,11 @@ def test_resource_policy_has_fixed_topology_and_provider_blocks():
     assert resource["fixedSkus"]["postgresql"]["name"] == "Standard_D2ds_v5"
     assert resource["fixedSkus"]["containerRegistry"]["name"] == "Premium"
     assert resource["fixedSkus"]["redis"]["providerClusteringEnum"] is None
+    assert resource["fixedSkus"]["vpnGateway"] == {
+        "name": "VpnGw1AZ",
+        "maximumLifetimeHours": 12,
+        "maximumInstances": 1,
+    }
     assert "Microsoft.Authorization/policyAssignments" in resource["allowedResourceTypes"]
     assert "Microsoft.Authorization/roleAssignments" in resource["allowedResourceTypes"]
     assert "Microsoft.Authorization/policyDefinitions" not in resource["allowedResourceTypes"]
@@ -438,12 +446,12 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
     assert value["uncertaintyContingencyBasisPoints"] == 2500
     assert value["budgetAlertsAreEnforcement"] is False
     assert value["resolutionStatus"] == "verified"
-    assert value["expectedUsdCents"] == 940
-    assert value["baseMaximumUsdCents"] == 3355
-    assert value["contingencyUsdCents"] == 839
-    assert value["maximumPlausibleUsdCents"] == 4194
-    assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 940
-    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 3355
+    assert value["expectedUsdCents"] == 964
+    assert value["baseMaximumUsdCents"] == 3403
+    assert value["contingencyUsdCents"] == 851
+    assert value["maximumPlausibleUsdCents"] == 4254
+    assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 964
+    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 3403
     assert all(
         item["priceEvidenceStatus"] == "verified-official-retail" for item in value["lineItems"]
     )

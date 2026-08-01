@@ -182,7 +182,7 @@
       "totalSyntheticUploadBytesCap": 134217728
     },
     "vpnGateway": {
-      "name": "VpnGw1",
+      "name": "VpnGw1AZ",
       "maximumLifetimeHours": 12,
       "maximumInstances": 1
     },
