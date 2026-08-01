@@ -310,6 +310,7 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "name: 'VpnGw1AZ'",
             "tier: 'VpnGw1AZ'",
             "vpnGatewayGeneration: 'Generation2'",
+            "zones: [\n    '1'\n    '2'\n    '3'\n  ]",
         ],
         "policy.bicep": [
             "param deploymentRegion string",
@@ -405,6 +406,8 @@ def test_resource_policy_has_fixed_topology_and_provider_blocks():
         "name": "VpnGw1AZ",
         "maximumLifetimeHours": 12,
         "maximumInstances": 1,
+        "publicIpAvailabilityZoneMode": "explicit-zone-redundant",
+        "publicIpZones": ["1", "2", "3"],
     }
     assert "Microsoft.Authorization/policyAssignments" in resource["allowedResourceTypes"]
     assert "Microsoft.Authorization/roleAssignments" in resource["allowedResourceTypes"]

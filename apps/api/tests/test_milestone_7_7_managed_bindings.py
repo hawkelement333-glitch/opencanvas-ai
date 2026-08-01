@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
 from performance.milestone_7_7.framework import ContractError, JsonValue, canonical_bytes
 from preflight.milestone_7_7 import framework as topology_framework
@@ -106,7 +107,8 @@ def test_exact_names_scopes_secrets_runtime_and_private_source_are_closed() -> N
         "gatewayGeneration": "Generation2",
         "publicIpSku": "Standard",
         "publicIpAllocation": "Static",
-        "publicIpAvailabilityZoneMode": "zone-redundant-no-explicit-zone",
+        "publicIpAvailabilityZoneMode": "explicit-zone-redundant",
+        "publicIpZones": ["1", "2", "3"],
         "gatewayType": "Vpn",
         "vpnType": "RouteBased",
         "tunnelType": "OpenVPN",
@@ -157,6 +159,7 @@ def test_contract_tampering_fails_closed() -> None:
         ("vpn", "publicIpSku", "Basic"),
         ("vpn", "publicIpAllocation", "Dynamic"),
         ("vpn", "publicIpAvailabilityZoneMode", "zonal-1"),
+        ("vpn", "publicIpZones", ["1"]),
     ],
 )
 def test_vpn_gateway_compatibility_contract_fails_closed(

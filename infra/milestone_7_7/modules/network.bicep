@@ -246,6 +246,11 @@ resource privateDnsInboundEndpoint 'Microsoft.Network/dnsResolvers/inboundEndpoi
 resource vpnGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2026-01-01' = if (enabled) {
   name: 'pip-mobius77-vpn'
   location: location
+  zones: [
+    '1'
+    '2'
+    '3'
+  ]
   tags: lifecycleTags
   sku: {
     name: 'Standard'

@@ -130,7 +130,7 @@ EXPECTED_POLICY_DIGESTS = {
         "67fe0f29d7a69c78a08a213764da7498a6a83293c3e8838c7d3f971da15a851b"
     ),
     "resource-policy.json": (
-        "af44d0a193d50f85ee0fccbd6a934dc1e848af6b8b1db93c0be6caf956964d00"
+        "6243bf98475195b6ad5541e7f5031f496f3b21a33fb97b01f1dee8f332169684"
     ),
     "unresolved-gates.json": (
         "c6b039152023b53b339b42dd88f6622ca369d7d912476a8f656355b847c6256c"

@@ -184,7 +184,9 @@
     "vpnGateway": {
       "name": "VpnGw1AZ",
       "maximumLifetimeHours": 12,
-      "maximumInstances": 1
+      "maximumInstances": 1,
+      "publicIpAvailabilityZoneMode": "explicit-zone-redundant",
+      "publicIpZones": ["1", "2", "3"]
     },
     "cleanupAutomation": {
       "name": "Basic",

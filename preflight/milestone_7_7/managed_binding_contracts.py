@@ -306,8 +306,9 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "gatewayType": "Vpn",
         "microsoftRegisteredClientAudience": ("c632b3df-fb67-4d84-bdcf-b95ad541b5c8"),
         "publicIpAllocation": "Static",
-        "publicIpAvailabilityZoneMode": "zone-redundant-no-explicit-zone",
+        "publicIpAvailabilityZoneMode": "explicit-zone-redundant",
         "publicIpSku": "Standard",
+        "publicIpZones": ["1", "2", "3"],
         "tunnelType": "OpenVPN",
         "vpnType": "RouteBased",
     }:
