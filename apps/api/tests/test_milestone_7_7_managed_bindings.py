@@ -1403,6 +1403,87 @@ def test_denial_probes_use_windows_safe_empty_projection() -> None:
     assert '"length(@)"' not in revoke
 
 
+def test_recovered_api_image_requires_exact_unchanged_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    digest = "sha256:" + "a" * 64
+    source_tag = "source-" + managed_binding_lifecycle.RECOVERABLE_API_IMAGE_SOURCE_COMMIT
+    calls: list[tuple[str, ...]] = []
+
+    def run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue | None:
+        calls.append(argv)
+        if "show-tags" in argv:
+            return [source_tag]
+        if "show" in argv:
+            return {"digest": digest}
+        return None
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
+    monkeypatch.setattr(managed_binding_lifecycle, "_run_text", lambda _argv: "")
+
+    result = managed_binding_lifecycle._reconcile_published_api_image(
+        ledger={"repositoryHead": AUTHORIZATION_SOURCE_HEAD},
+        subscription_id="opaque-subscription",
+    )
+
+    assert result == f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api@{digest}"
+    assert calls[0][0:3] == ("git", "merge-base", "--is-ancestor")
+
+
+def test_recovered_api_image_fails_closed_on_build_input_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_run_text",
+        lambda _argv: "apps/api/opencanvas_api/main.py",
+    )
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="recovered-image-build-input-drift",
+    ):
+        managed_binding_lifecycle._reconcile_published_api_image(
+            ledger={"repositoryHead": AUTHORIZATION_SOURCE_HEAD},
+            subscription_id="opaque-subscription",
+        )
+
+
+def test_recovered_api_image_fails_closed_on_tag_or_digest_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(managed_binding_lifecycle, "_run_text", lambda _argv: "")
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_run",
+        lambda argv, **_kwargs: [] if "show-tags" in argv else None,
+    )
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="recovered-image-source-tag-mismatch",
+    ):
+        managed_binding_lifecycle._reconcile_published_api_image(
+            ledger={"repositoryHead": AUTHORIZATION_SOURCE_HEAD},
+            subscription_id="opaque-subscription",
+        )
+
+    source_tag = "source-" + managed_binding_lifecycle.RECOVERABLE_API_IMAGE_SOURCE_COMMIT
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_run",
+        lambda argv, **_kwargs: [source_tag] if "show-tags" in argv else {"digest": "mutable"},
+    )
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="recovered-image-digest-output-malformed",
+    ):
+        managed_binding_lifecycle._reconcile_published_api_image(
+            ledger={"repositoryHead": AUTHORIZATION_SOURCE_HEAD},
+            subscription_id="opaque-subscription",
+        )
+
+
 def test_lifecycle_uses_supported_cached_azure_cli_bicep_contract() -> None:
     text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
     compile_template = text.split("def _compile_template", 1)[1].split("def _lifecycle_tags", 1)[0]

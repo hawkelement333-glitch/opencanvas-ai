@@ -77,6 +77,21 @@ SMTP_HOST: Final = "sandbox.smtp.mailtrap.io"
 SMTP_FROM_ADDRESS: Final = "mobius77-validation@example.invalid"
 KEY_VAULT_HOST: Final = f"{KEY_VAULT}.vault.azure.net"
 REGISTRY_HOST: Final = f"{REGISTRY}.azurecr.io"
+RECOVERABLE_API_IMAGE_SOURCE_COMMIT: Final = "24dbad86c44baef53120d75ed993ac8165549f72"
+API_IMAGE_BUILD_INPUTS: Final = (
+    "apps/api/Dockerfile",
+    "apps/api/pyproject.toml",
+    "apps/api/build-requirements.lock",
+    "apps/api/requirements.lock",
+    "apps/api/opencanvas_api",
+    "apps/api/alembic.ini",
+    "apps/api/alembic",
+    "apps/api/scripts",
+    "LICENSE",
+    "COPYRIGHT",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES.md",
+)
 LIFECYCLE_OPERATIONS: Final = (
     "pre-secret-provisioning",
     "private-path-verification",
@@ -2548,6 +2563,90 @@ def _publish_api_image(
             )
 
 
+def _reconcile_published_api_image(
+    *, ledger: dict[str, JsonValue], subscription_id: str
+) -> str:
+    repository_head = str(ledger["repositoryHead"])
+    if HEX_SHA40.fullmatch(repository_head) is None:
+        _fail("repository-head-invalid")
+    _run(
+        (
+            "git",
+            "merge-base",
+            "--is-ancestor",
+            RECOVERABLE_API_IMAGE_SOURCE_COMMIT,
+            repository_head,
+        )
+    )
+    changed_inputs = _run_text(
+        (
+            "git",
+            "diff",
+            "--name-only",
+            f"{RECOVERABLE_API_IMAGE_SOURCE_COMMIT}..{repository_head}",
+            "--",
+            *API_IMAGE_BUILD_INPUTS,
+        )
+    )
+    if changed_inputs:
+        _fail("recovered-image-build-input-drift")
+    source_tag = f"source-{RECOVERABLE_API_IMAGE_SOURCE_COMMIT}"
+    tags = _run(
+        (
+            "az",
+            "acr",
+            "repository",
+            "show-tags",
+            "--name",
+            REGISTRY,
+            "--repository",
+            "opencanvas-api",
+            "--subscription",
+            subscription_id,
+            "--query",
+            "[]",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if tags != [source_tag]:
+        _fail("recovered-image-source-tag-mismatch")
+    digest_projection = _run(
+        (
+            "az",
+            "acr",
+            "repository",
+            "show",
+            "--name",
+            REGISTRY,
+            "--image",
+            f"opencanvas-api:{source_tag}",
+            "--subscription",
+            subscription_id,
+            "--query",
+            "{digest:digest}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(digest_projection, dict) or set(digest_projection) != {"digest"}:
+        _fail("recovered-image-digest-output-malformed")
+    raw_digest = digest_projection["digest"]
+    if (
+        not isinstance(raw_digest, str)
+        or RAW_IMAGE_DIGEST.fullmatch(raw_digest) is None
+    ):
+        _fail("recovered-image-digest-output-malformed")
+    immutable_reference = f"{REGISTRY_HOST}/opencanvas-api@{raw_digest}"
+    if IMAGE_DIGEST.fullmatch(immutable_reference) is None:
+        _fail("recovered-image-digest-output-malformed")
+    return immutable_reference
+
+
 def _private_revision_ready(subscription_id: str) -> None:
     deadline = time.monotonic() + 600.0
     while time.monotonic() < deadline:
@@ -2636,10 +2735,9 @@ def _post_secret(
         if value != {"enabled": True}:
             _fail("managed-secret-presence-or-state-unproved")
     expected_cost, maximum_cost = _verified_cost()
-    api_image_digest = _publish_api_image(
+    api_image_digest = _reconcile_published_api_image(
         ledger=ledger,
         subscription_id=subscription_id,
-        receipt_directory=receipt_directory,
     )
     with tempfile.TemporaryDirectory(prefix="mobius77-binding-") as directory:
         template = Path(directory) / "main.json"
