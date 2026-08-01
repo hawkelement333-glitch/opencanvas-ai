@@ -110,6 +110,14 @@ def test_bundle_contract_is_valid_and_deterministic():
     assert first["files"] == sorted(first["files"], key=lambda item: item["path"])
 
 
+def test_container_apps_private_dns_uses_exact_arm_record_property_casing():
+    module = (ROOT / "modules" / "container-apps-dns.bicep").read_text(encoding="utf-8")
+    assert "    ttl: 60" in module
+    assert "    aRecords: [" in module
+    assert "    TTL:" not in module
+    assert "    ARecords:" not in module
+
+
 def test_dynamic_contract_loader_never_writes_inside_the_bundle(tmp_path: Path):
     source = SCRIPTS / "contract_validation.py"
     copied = tmp_path / source.name
@@ -316,7 +324,8 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "name: 'link-mobius77-containerapps'",
             "registrationEnabled: false",
             "name: '*'",
-            "TTL: 60",
+            "ttl: 60",
+            "aRecords: [",
         ],
         "network.bicep": [
             "param vnetCidr string = '10.77.0.0/20'",

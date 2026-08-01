@@ -47,8 +47,8 @@ resource containerAppsWildcardRecord 'Microsoft.Network/privateDnsZones/A@2024-0
   parent: containerAppsPrivateDnsZone
   name: '*'
   properties: {
-    TTL: 60
-    ARecords: [
+    ttl: 60
+    aRecords: [
       {
         ipv4Address: staticIp
       }
