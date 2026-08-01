@@ -54,7 +54,6 @@ resource keyVault 'Microsoft.KeyVault/vaults@2026-02-01' = if (enabled) {
   tags: lifecycleTags
   properties: {
     accessPolicies: []
-    enablePurgeProtection: false
     enableRbacAuthorization: true
     enableSoftDelete: true
     enabledForDeployment: false

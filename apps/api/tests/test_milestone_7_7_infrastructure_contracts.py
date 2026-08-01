@@ -348,6 +348,50 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
         text = (ROOT / "modules" / name).read_text(encoding="utf-8")
         assert all(token in text for token in tokens)
 
+    key_vault_text = (ROOT / "modules" / "key-vault.bicep").read_text(encoding="utf-8")
+    assert "enablePurgeProtection:" not in key_vault_text
+    assert "enableSoftDelete: true" in key_vault_text
+    assert "softDeleteRetentionInDays: 7" in key_vault_text
+
+
+def test_compiled_key_vault_omits_irreversible_purge_protection(
+    tmp_path: Path,
+) -> None:
+    bicep = shutil.which("bicep")
+    if bicep is None:
+        bundled = Path.home() / ".azure" / "bin" / "bicep.exe"
+        assert bundled.is_file(), "the existing approved Bicep compiler is required"
+        bicep = str(bundled)
+    compiled = tmp_path / "main.json"
+    result = subprocess.run(
+        [bicep, "build", str(ROOT / "main.bicep"), "--outfile", str(compiled)],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+
+    vaults: list[dict] = []
+
+    def collect(value) -> None:
+        if isinstance(value, dict):
+            if value.get("type") == "Microsoft.KeyVault/vaults":
+                vaults.append(value)
+            for child in value.values():
+                collect(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child)
+
+    deployment = json.loads(compiled.read_text(encoding="utf-8"))
+    collect(deployment)
+    assert len(vaults) == 1
+    properties = vaults[0]["properties"]
+    assert "enablePurgeProtection" not in properties
+    assert properties["enableSoftDelete"] is True
+    assert properties["softDeleteRetentionInDays"] == 7
+
 
 @pytest.mark.parametrize(
     "policy_name",
