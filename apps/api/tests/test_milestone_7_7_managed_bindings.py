@@ -1164,6 +1164,90 @@ def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> No
     )
 
 
+def test_cleanup_job_schedule_verification_uses_exact_generic_arm_resource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subscription_id = "opaque-subscription"
+    job_schedule_id = (
+        "/subscriptions/opaque-subscription/resourceGroups/"
+        "rg-solarplexus-mobius-77-cleanup-control/providers/"
+        "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
+        "jobSchedules/00000000-0000-0000-0000-000000000001"
+    )
+    observed: list[tuple[str, ...]] = []
+
+    def exact_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        observed.append(argv)
+        if argv[1:3] == ("resource", "list"):
+            return [
+                {
+                    "id": job_schedule_id,
+                    "type": "Microsoft.Automation/automationAccounts/jobSchedules",
+                }
+            ]
+        if argv[1:3] == ("resource", "show"):
+            return {
+                "id": job_schedule_id,
+                "runbook": "Remove-Mobius77Staging",
+                "schedule": "schedule-mobius77-cleanup",
+                "target": "rg-solarplexus-mobius-77-staging",
+            }
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", exact_run)
+
+    managed_binding_lifecycle._verify_cleanup_job_schedule(subscription_id)
+
+    assert [argv[1:3] for argv in observed] == [
+        ("resource", "list"),
+        ("resource", "show"),
+    ]
+    assert "2024-10-23" in observed[1]
+    source = inspect.getsource(managed_binding_lifecycle._verify_cleanup_job_schedule)
+    assert '"job-schedule"' not in source
+
+
+@pytest.mark.parametrize("drift", ["missing", "duplicate", "wrong-target"])
+def test_cleanup_job_schedule_verification_fails_closed_on_drift(
+    monkeypatch: pytest.MonkeyPatch, drift: str
+) -> None:
+    subscription_id = "opaque-subscription"
+    job_schedule_id = (
+        "/subscriptions/opaque-subscription/resourceGroups/"
+        "rg-solarplexus-mobius-77-cleanup-control/providers/"
+        "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
+        "jobSchedules/00000000-0000-0000-0000-000000000001"
+    )
+
+    def drift_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        if argv[1:3] == ("resource", "list"):
+            row = {
+                "id": job_schedule_id,
+                "type": "Microsoft.Automation/automationAccounts/jobSchedules",
+            }
+            if drift == "missing":
+                return []
+            if drift == "duplicate":
+                return [row, row]
+            return [row]
+        if argv[1:3] == ("resource", "show"):
+            return {
+                "id": job_schedule_id,
+                "runbook": "Remove-Mobius77Staging",
+                "schedule": "schedule-mobius77-cleanup",
+                "target": "unexpected-group",
+            }
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", drift_run)
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="cleanup-job-schedule-not-ready",
+    ):
+        managed_binding_lifecycle._verify_cleanup_job_schedule(subscription_id)
+
+
 def test_only_cleanup_automation_module_allows_west_us() -> None:
     main = (INFRASTRUCTURE_ROOT / "main.bicep").read_text(encoding="utf-8")
     cleanup = (INFRASTRUCTURE_ROOT / "modules" / "cleanup-supervisor.bicep").read_text(

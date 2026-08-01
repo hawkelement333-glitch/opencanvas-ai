@@ -657,6 +657,86 @@ def _configure_cleanup_runbook(subscription_id: str) -> None:
     _run(("az", "automation", "runbook", "publish", *common))
 
 
+def _verify_cleanup_job_schedule(subscription_id: str) -> None:
+    rows = _run(
+        (
+            "az",
+            "resource",
+            "list",
+            "--resource-group",
+            CLEANUP_GROUP,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "[].{id:id,type:type}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(rows, list):
+        _fail("cleanup-job-schedule-output-malformed")
+    job_schedule_ids: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {"id", "type"}:
+            _fail("cleanup-job-schedule-output-malformed")
+        resource_id = row["id"]
+        resource_type = row["type"]
+        if not isinstance(resource_id, str) or not isinstance(resource_type, str):
+            _fail("cleanup-job-schedule-output-malformed")
+        if (
+            resource_type.casefold()
+            == "microsoft.automation/automationaccounts/jobschedules"
+        ):
+            job_schedule_ids.append(resource_id)
+    if len(job_schedule_ids) != 1:
+        _fail("cleanup-job-schedule-not-ready")
+    job_schedule_id = job_schedule_ids[0]
+    expected_prefix = _scope(
+        subscription_id,
+        f"/resourceGroups/{CLEANUP_GROUP}/providers/"
+        f"Microsoft.Automation/automationAccounts/{AUTOMATION_ACCOUNT}/"
+        "jobSchedules/",
+    )
+    if (
+        not job_schedule_id.casefold().startswith(expected_prefix.casefold())
+        or re.fullmatch(r"[0-9a-fA-F-]{36}", job_schedule_id[len(expected_prefix) :])
+        is None
+    ):
+        _fail("cleanup-job-schedule-not-ready")
+    job_schedule = _run(
+        (
+            "az",
+            "resource",
+            "show",
+            "--ids",
+            job_schedule_id,
+            "--api-version",
+            "2024-10-23",
+            "--subscription",
+            subscription_id,
+            "--query",
+            (
+                "{id:id,runbook:properties.runbook.name,"
+                "schedule:properties.schedule.name,"
+                "target:properties.parameters.TargetResourceGroupName}"
+            ),
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if job_schedule != {
+        "id": job_schedule_id,
+        "runbook": RUNBOOK,
+        "schedule": SCHEDULE,
+        "target": TARGET_GROUP,
+    }:
+        _fail("cleanup-job-schedule-not-ready")
+
+
 def _verify_cleanup_control(subscription_id: str, cleanup_at: datetime) -> str:
     account = _run(
         (
@@ -772,48 +852,7 @@ def _verify_cleanup_control(subscription_id: str, cleanup_at: datetime) -> str:
         or observed_start.astimezone(UTC).replace(microsecond=0) != cleanup_at
     ):
         _fail("cleanup-schedule-not-armed")
-    job_schedules = _run(
-        (
-            "az",
-            "automation",
-            "job-schedule",
-            "list",
-            "--resource-group",
-            CLEANUP_GROUP,
-            "--automation-account-name",
-            AUTOMATION_ACCOUNT,
-            "--subscription",
-            subscription_id,
-            "--query",
-            "[].{id:jobScheduleId,runbook:runbook.name,schedule:schedule.name,target:parameters.TargetResourceGroupName}",
-            "--output",
-            "json",
-            "--only-show-errors",
-        ),
-        require_json=True,
-    )
-    if not isinstance(job_schedules, list) or len(job_schedules) != 1:
-        _fail("cleanup-job-schedule-not-ready")
-    job_schedule = job_schedules[0]
-    if not isinstance(job_schedule, dict) or set(job_schedule) != {
-        "id",
-        "runbook",
-        "schedule",
-        "target",
-    }:
-        _fail("cleanup-job-schedule-output-malformed")
-    job_schedule_id = job_schedule["id"]
-    if (
-        not isinstance(job_schedule_id, str)
-        or re.fullmatch(r"[0-9a-fA-F-]{36}", job_schedule_id) is None
-        or {key: value for key, value in job_schedule.items() if key != "id"}
-        != {
-            "runbook": RUNBOOK,
-            "schedule": SCHEDULE,
-            "target": TARGET_GROUP,
-        }
-    ):
-        _fail("cleanup-job-schedule-not-ready")
+    _verify_cleanup_job_schedule(subscription_id)
     return principal_id
 
 
