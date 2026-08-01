@@ -718,7 +718,8 @@ def _container_apps_infrastructure_tags_reconcilable(
     observed_run_id = observed.get("mobius-run-id")
     if (
         not isinstance(observed_run_id, str)
-        or re.fullmatch(r"[a-z0-9][a-z0-9-]{7,127}", observed_run_id) is None
+        or observed_run_id != expected.get("mobius-run-id")
+        or re.fullmatch(r"[A-Za-z0-9._-]{1,128}", observed_run_id) is None
     ):
         return False
     observed_source = observed.get("mobius-source-commit")
@@ -824,7 +825,8 @@ def _reconcile_container_apps_infrastructure_tags(
     observed_run_id = observed.get("mobius-run-id")
     if (
         not isinstance(observed_run_id, str)
-        or re.fullmatch(r"[a-z0-9][a-z0-9-]{7,127}", observed_run_id) is None
+        or observed_run_id != expected.get("mobius-run-id")
+        or re.fullmatch(r"[A-Za-z0-9._-]{1,128}", observed_run_id) is None
     ):
         _fail("container-apps-infrastructure-tag-reconciliation-denied")
     observed_source = observed.get("mobius-source-commit")

@@ -2191,7 +2191,7 @@ def _reconcile_container_apps_infrastructure_tags_fixture(
     expected["mobius-cleanup-binding-sha256"] = "e" * 64
     expected["mobius-expires-at-utc"] = "2026-08-02T07:00:00Z"
     expected["mobius-manifest-sha256"] = "f" * 64
-    expected["mobius-run-id"] = "run-current-ledger"
+    expected["mobius-run-id"] = "m7.7-managed-binding-closeout-20260731"
     expected["mobius-source-commit"] = "c" * 40
     observed = {
         **expected,
@@ -2199,7 +2199,7 @@ def _reconcile_container_apps_infrastructure_tags_fixture(
         "mobius-cleanup-binding-sha256": "a" * 64,
         "mobius-expires-at-utc": "08/01/2026 07:00:00",
         "mobius-manifest-sha256": "b" * 64,
-        "mobius-run-id": "run-prior-ledger",
+        "mobius-run-id": "m7.7-managed-binding-closeout-20260731",
         "mobius-source-commit": "d" * 40,
     }
     if mutate is not None:
