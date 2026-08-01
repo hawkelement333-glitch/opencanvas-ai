@@ -573,10 +573,24 @@ def _lifecycle_tags(
     }
 
 
-def _matches_preserved_lifecycle_tags(
-    observed: JsonValue, expected: Mapping[str, str]
+def _matches_container_apps_infrastructure_tags(
+    observed: JsonValue,
+    expected: Mapping[str, str],
+    *,
+    cleanup_at: datetime,
+    environment_id: str,
 ) -> bool:
-    if not isinstance(observed, dict) or set(observed) != set(expected):
+    managed_environment_key = "aca-managed-env-id"
+    if not isinstance(observed, dict) or set(observed) != {
+        *expected,
+        managed_environment_key,
+    }:
+        return False
+    managed_environment_id = observed.get(managed_environment_key)
+    if (
+        not isinstance(managed_environment_id, str)
+        or managed_environment_id.casefold() != environment_id.casefold()
+    ):
         return False
     binding_key = "mobius-cleanup-binding-sha256"
     observed_binding = observed.get(binding_key)
@@ -588,10 +602,24 @@ def _matches_preserved_lifecycle_tags(
         or HEX_SHA256.fullmatch(expected_binding) is None
     ):
         return False
+    expiry_key = "mobius-expires-at-utc"
+    observed_expiry = observed.get(expiry_key)
+    expected_expiry = expected.get(expiry_key)
+    if observed_expiry != expected_expiry:
+        if not isinstance(observed_expiry, str):
+            return False
+        try:
+            normalized_expiry = datetime.strptime(
+                observed_expiry, "%m/%d/%Y %H:%M:%S"
+            ).replace(tzinfo=UTC)
+        except ValueError:
+            return False
+        if normalized_expiry != cleanup_at.astimezone(UTC).replace(microsecond=0):
+            return False
     return all(
         observed.get(key) == value
         for key, value in expected.items()
-        if key != binding_key
+        if key not in {binding_key, expiry_key}
     )
 
 
@@ -1667,6 +1695,11 @@ def _verify_container_apps_infrastructure(
         cleanup_at=cleanup_at,
         maximum_cost=_verified_cost()[1],
     )
+    environment_id = _scope(
+        subscription_id,
+        f"/resourceGroups/{TARGET_GROUP}/providers/Microsoft.App/"
+        "managedEnvironments/cae-mobius77-staging",
+    )
     group_tags = group.get("tags") if isinstance(group, dict) else None
     if (
         not isinstance(group, dict)
@@ -1675,7 +1708,12 @@ def _verify_container_apps_infrastructure(
         or group.get("location") != STAGING_LOCATION
         or (
             group_tags != expected_tags
-            and not _matches_preserved_lifecycle_tags(group_tags, expected_tags)
+            and not _matches_container_apps_infrastructure_tags(
+                group_tags,
+                expected_tags,
+                cleanup_at=cleanup_at,
+                environment_id=environment_id,
+            )
         )
     ):
         _fail("container-apps-infrastructure-group-drift")

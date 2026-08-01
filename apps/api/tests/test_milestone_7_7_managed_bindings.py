@@ -1925,8 +1925,17 @@ def _verify_container_apps_infrastructure_fixture(
 ) -> int:
     subscription = SYNTHETIC_SUBSCRIPTION
     expected_tags = _test_recovered_cleanup_tags()
+    expected_tags["mobius-expires-at-utc"] = "2026-08-02T07:00:00Z"
+    expected_environment_id = (
+        f"/subscriptions/{subscription}/resourceGroups/"
+        f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
+        "managedEnvironments/cae-mobius77-staging"
+    )
     if group_tags is None:
-        group_tags = expected_tags
+        group_tags = {
+            **expected_tags,
+            "aca-managed-env-id": expected_environment_id,
+        }
     if environment is None:
         environment = {
             "infrastructureResourceGroup": managed_binding_lifecycle.INFRASTRUCTURE_GROUP,
@@ -1993,9 +2002,32 @@ def test_container_apps_infrastructure_accepts_only_prior_ledger_hash(
 ) -> None:
     prior_tags = _test_recovered_cleanup_tags()
     prior_tags["mobius-cleanup-binding-sha256"] = "d" * 64
+    prior_tags["mobius-expires-at-utc"] = "08/02/2026 07:00:00"
+    prior_tags["aca-managed-env-id"] = (
+        f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}/resourceGroups/"
+        f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
+        "managedEnvironments/cae-mobius77-staging"
+    )
     assert _verify_container_apps_infrastructure_fixture(monkeypatch, group_tags=prior_tags) == 1
 
     prior_tags["mobius-run-id"] = "altered"
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="container-apps-infrastructure-group-drift",
+    ):
+        _verify_container_apps_infrastructure_fixture(monkeypatch, group_tags=prior_tags)
+
+    prior_tags["mobius-run-id"] = "run-recovered-cleanup-seed"
+    expected_environment_id = prior_tags["aca-managed-env-id"]
+    prior_tags["aca-managed-env-id"] = f"{expected_environment_id}-nearby"
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="container-apps-infrastructure-group-drift",
+    ):
+        _verify_container_apps_infrastructure_fixture(monkeypatch, group_tags=prior_tags)
+
+    prior_tags["aca-managed-env-id"] = expected_environment_id
+    prior_tags["mobius-expires-at-utc"] = "08/03/2026 07:00:00"
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
         match="container-apps-infrastructure-group-drift",
