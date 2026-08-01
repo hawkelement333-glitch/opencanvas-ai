@@ -5,7 +5,7 @@
   "integrityDomain": "solarplexus-mobius/milestone-7.7/managed-binding-operation-overlay/v1",
   "authorizationSourceHead": "11564669bd5b40a88fdbf434c8137b063305eb4b",
   "historicalMatrixIntegritySha256": "100293931dcc71bb069e4f6fe06228360e0953b3b756544a555941d81bf8d6bc",
-  "managedBindingIntegritySha256": "86c26b75181fcf22d2b1bef51ace64264b483c2b1b4a0de1f35f225faea6b6dd",
+  "managedBindingIntegritySha256": "3e9e14e57f00345166f2014759f74d27a1cd557d3a38e418a78d9aa1b07ab554",
   "defaultAuthority": {
     "executionAuthorized": false,
     "mutationAuthorized": false,
@@ -435,6 +435,7 @@
       "parserDefinition": "strict-provider-metadata-v1",
       "sanitizedInputs": [
         "southcentralus",
+        "eastus-cleanup-automation-only",
         "closed-provider-resource-registry"
       ],
       "expectedScopes": ["matched-subscription-control-plane"],
@@ -497,7 +498,11 @@
         "azure-container-app-workload-profiles-v1"
       ],
       "parserDefinition": "strict-provider-metadata-v1",
-      "sanitizedInputs": ["southcentralus", "fixed-sku-registry"],
+      "sanitizedInputs": [
+        "southcentralus",
+        "eastus-cleanup-automation-only",
+        "fixed-sku-registry"
+      ],
       "expectedScopes": ["matched-subscription-control-plane"],
       "authorizationPredicates": [
         "fresh-matched-account",
@@ -989,5 +994,5 @@
       "replayDecision": "deny"
     }
   ],
-  "contractIntegritySha256": "9c65322c5c7c6c21cb3bf8c7f7cd5a9d06004e1374e1c1543aa565564cc4b1e8"
+  "contractIntegritySha256": "6bdcdb002fdbb85febc889d8dd54346e58e374eb893448e03ef9e92b8cd3a19d"
 }

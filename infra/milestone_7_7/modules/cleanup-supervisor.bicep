@@ -61,9 +61,9 @@ param leaseBindingResolved bool = false
 param cleanupTimerBindingResolved bool = false
 
 @allowed([
-  'southcentralus'
+  'eastus'
 ])
-param location string = 'southcentralus'
+param cleanupLocation string = 'eastus'
 
 @allowed([
   'rg-solarplexus-mobius-77-staging'
@@ -77,7 +77,7 @@ var enabled = managedBindingMode == 'managed-binding-one-run' && managedBindingD
 
 resource automationAccount 'Microsoft.Automation/automationAccounts@2024-10-23' = if (enabled) {
   name: 'aa-mobius77-cleanup'
-  location: location
+  location: cleanupLocation
   tags: lifecycleTags
   identity: {
     type: 'SystemAssigned'
@@ -94,7 +94,7 @@ resource automationAccount 'Microsoft.Automation/automationAccounts@2024-10-23' 
 resource cleanupRunbook 'Microsoft.Automation/automationAccounts/runbooks@2024-10-23' = if (enabled) {
   parent: automationAccount
   name: 'Remove-Mobius77Staging'
-  location: location
+  location: cleanupLocation
   tags: lifecycleTags
   properties: {
     description: 'Failsafe deletion of the exact Milestone 7.7 target resource group.'
@@ -151,5 +151,6 @@ output automationAccountName string = 'aa-mobius77-cleanup'
 output cleanupRunbookName string = 'Remove-Mobius77Staging'
 output cleanupScheduleName string = 'schedule-mobius77-cleanup'
 output cleanupPrincipalId string = enabled ? automationAccount.identity.principalId : ''
+output cleanupLocation string = cleanupLocation
 output publicNetworkAccess bool = false
 output managedBindingCleanupTimerResourceCreated bool = enabled && !empty(cleanupAtUtc)

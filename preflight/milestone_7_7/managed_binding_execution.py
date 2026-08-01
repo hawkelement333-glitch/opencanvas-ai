@@ -54,7 +54,8 @@ PACKAGE_RESULT_VERSION: Final = (
 )
 PROVIDER_METHOD = "azure-provider-resource-metadata-v1"
 PROVIDER_TYPE_INVENTORY_METHOD = "azure-provider-resource-type-inventory-v1"
-REGION = "southcentralus"
+STAGING_REGION = "southcentralus"
+CLEANUP_REGION = "eastus"
 METHOD_PLACEHOLDER: Final = re.compile(r"\{[A-Za-z][A-Za-z0-9]*\}")
 USAGE_DECIMAL_INTEGER: Final = re.compile(r"(?:0|[1-9][0-9]{0,19})")
 
@@ -100,6 +101,14 @@ _EXACT_REGION_INDEPENDENT_BINDINGS: Final[
         frozenset({"global"}),
     ),
 }
+_EXACT_CLEANUP_REGION_BINDINGS: Final = frozenset(
+    {
+        "Microsoft.Automation/automationAccounts",
+        "Microsoft.Automation/automationAccounts/jobSchedules",
+        "Microsoft.Automation/automationAccounts/runbooks",
+        "Microsoft.Automation/automationAccounts/schedules",
+    }
+)
 
 _PROVIDER_KEYS_BY_OPERATION: Final = {
     "regional-service-availability": (
@@ -459,7 +468,10 @@ def _regional_metadata_approved(
         return True
     expected = _EXACT_REGION_INDEPENDENT_BINDINGS.get(key)
     if expected is None:
-        return REGION in normalized_locations
+        required_region = (
+            CLEANUP_REGION if key in _EXACT_CLEANUP_REGION_BINDINGS else STAGING_REGION
+        )
+        return required_region in normalized_locations
     (
         expected_namespace,
         expected_resource_type,

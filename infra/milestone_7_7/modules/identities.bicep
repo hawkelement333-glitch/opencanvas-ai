@@ -18,6 +18,9 @@ param managedBindingMode string = 'contract-only'
 
 param managedBindingDeploymentEnabled bool = false
 
+@description('The cleanup-binding stage creates only the exact target-group role assignment.')
+param workloadIdentityDeploymentEnabled bool = false
+
 @allowed([
   false
 ])
@@ -40,8 +43,9 @@ param targetResourceGroupId string
 param cleanupAutomationPrincipalId string
 
 var enabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled
+var workloadIdentityEnabled = enabled && workloadIdentityDeploymentEnabled
 
-resource workloadIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = if (enabled) {
+resource workloadIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = if (workloadIdentityEnabled) {
   name: 'id-mobius77-api'
   location: location
   tags: lifecycleTags
@@ -66,5 +70,6 @@ output managedIdentityEnvironmentMappingResolved bool = managedIdentityEnvironme
 output crossScopeAuthorityAllowed bool = crossScopeAuthorityAllowed
 output managedBindingMode string = managedBindingMode
 output managedBindingDeploymentEnabled bool = enabled
-output workloadIdentityId string = enabled ? workloadIdentity.id : ''
-output workloadIdentityPrincipalId string = enabled ? workloadIdentity.properties.principalId : ''
+output workloadIdentityDeploymentEnabled bool = workloadIdentityEnabled
+output workloadIdentityId string = workloadIdentityEnabled ? workloadIdentity.id : ''
+output workloadIdentityPrincipalId string = workloadIdentityEnabled ? workloadIdentity.properties.principalId : ''

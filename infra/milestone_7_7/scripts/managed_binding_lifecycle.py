@@ -53,7 +53,8 @@ REGISTRY: Final = "acrmobius7711564669"
 AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup"
 RUNBOOK: Final = "Remove-Mobius77Staging"
 SCHEDULE: Final = "schedule-mobius77-cleanup"
-LOCATION: Final = "southcentralus"
+STAGING_LOCATION: Final = "southcentralus"
+CLEANUP_LOCATION: Final = "eastus"
 MAXIMUM_OUTPUT_BYTES: Final = 65_536
 DEPLOYMENT_TIMEOUT_SECONDS: Final = 1_800
 OPERATION_TIMEOUT_SECONDS: Final = 120
@@ -354,6 +355,8 @@ def _deploy_stage(
         "managedBindingMode=managed-binding-one-run",
         "managedBindingDeploymentEnabled=true",
         f"deploymentStage={stage}",
+        f"location={STAGING_LOCATION}",
+        f"cleanupLocation={CLEANUP_LOCATION}",
         f"authorizationLedgerSha256={ledger['ledgerIntegritySha256']}",
         f"cleanupAtUtc={_format_utc(cleanup_at)}",
         f"expectedUsdCents={expected_cost}",
@@ -384,7 +387,7 @@ def _deploy_stage(
             "--name",
             f"mobius77-managed-binding-{stage}",
             "--location",
-            LOCATION,
+            STAGING_LOCATION,
             "--subscription",
             subscription_id,
             "--template-file",
@@ -425,6 +428,186 @@ def _configure_cleanup_runbook(subscription_id: str) -> None:
         )
     )
     _run(("az", "automation", "runbook", "publish", *common))
+
+
+def _verify_cleanup_control(subscription_id: str, cleanup_at: datetime) -> str:
+    account = _run(
+        (
+            "az",
+            "automation",
+            "account",
+            "show",
+            "--resource-group",
+            CLEANUP_GROUP,
+            "--automation-account-name",
+            AUTOMATION_ACCOUNT,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "{location:location,localAuthDisabled:disableLocalAuth,principalId:identity.principalId,publicNetworkAccess:publicNetworkAccess,state:state}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(account, dict) or set(account) != {
+        "localAuthDisabled",
+        "location",
+        "principalId",
+        "publicNetworkAccess",
+        "state",
+    }:
+        _fail("cleanup-automation-output-malformed")
+    principal_id = account["principalId"]
+    if (
+        not isinstance(principal_id, str)
+        or re.fullmatch(r"[0-9a-fA-F-]{36}", principal_id) is None
+    ):
+        _fail("cleanup-automation-output-malformed")
+    if {key: value for key, value in account.items() if key != "principalId"} != {
+        "localAuthDisabled": True,
+        "location": CLEANUP_LOCATION,
+        "publicNetworkAccess": False,
+        "state": "Ok",
+    }:
+        _fail("cleanup-automation-not-ready")
+
+    runbook = _run(
+        (
+            "az",
+            "automation",
+            "runbook",
+            "show",
+            "--resource-group",
+            CLEANUP_GROUP,
+            "--automation-account-name",
+            AUTOMATION_ACCOUNT,
+            "--name",
+            RUNBOOK,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "{location:location,runbookType:runbookType,state:state}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if runbook != {
+        "location": CLEANUP_LOCATION,
+        "runbookType": "PowerShell72",
+        "state": "Published",
+    }:
+        _fail("cleanup-runbook-not-ready")
+
+    schedule = _run(
+        (
+            "az",
+            "automation",
+            "schedule",
+            "show",
+            "--resource-group",
+            CLEANUP_GROUP,
+            "--automation-account-name",
+            AUTOMATION_ACCOUNT,
+            "--name",
+            SCHEDULE,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "{isEnabled:isEnabled,startTime:startTime,timeZone:timeZone}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(schedule, dict) or set(schedule) != {
+        "isEnabled",
+        "startTime",
+        "timeZone",
+    }:
+        _fail("cleanup-schedule-output-malformed")
+    start_time = schedule["startTime"]
+    if not isinstance(start_time, str):
+        _fail("cleanup-schedule-output-malformed")
+    try:
+        observed_start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+    except ValueError:
+        _fail("cleanup-schedule-output-malformed")
+    if (
+        observed_start.tzinfo is None
+        or observed_start.utcoffset() != timedelta(0)
+        or schedule["isEnabled"] is not True
+        or schedule["timeZone"] != "Etc/UTC"
+        or observed_start.astimezone(UTC).replace(microsecond=0) != cleanup_at
+    ):
+        _fail("cleanup-schedule-not-armed")
+    return principal_id
+
+
+def _verify_cleanup_target_role(
+    subscription_id: str, principal_id: str, role_id: str
+) -> None:
+    if re.fullmatch(r"[0-9a-fA-F-]{36}", role_id) is None:
+        _fail("cleanup-role-definition-malformed")
+    target_scope = _scope(subscription_id, f"/resourceGroups/{TARGET_GROUP}")
+    role_definition_id = (
+        f"/subscriptions/{subscription_id}/providers/Microsoft.Authorization/"
+        f"roleDefinitions/{role_id}"
+    )
+    expected = {
+        "roleDefinitionId": role_definition_id.casefold(),
+        "scope": target_scope.casefold(),
+    }
+    deadline = time.monotonic() + 120.0
+    while time.monotonic() < deadline:
+        assignments = _run(
+            (
+                "az",
+                "role",
+                "assignment",
+                "list",
+                "--assignee-object-id",
+                principal_id,
+                "--all",
+                "--subscription",
+                subscription_id,
+                "--query",
+                "[].{roleDefinitionId:roleDefinitionId,scope:scope}",
+                "--output",
+                "json",
+                "--only-show-errors",
+            ),
+            require_json=True,
+        )
+        if not isinstance(assignments, list):
+            _fail("cleanup-role-output-malformed")
+        normalized: list[dict[str, str]] = []
+        for assignment in assignments:
+            if not isinstance(assignment, dict) or set(assignment) != {
+                "roleDefinitionId",
+                "scope",
+            }:
+                _fail("cleanup-role-output-malformed")
+            observed_role_id = assignment["roleDefinitionId"]
+            scope = assignment["scope"]
+            if not isinstance(observed_role_id, str) or not isinstance(scope, str):
+                _fail("cleanup-role-output-malformed")
+            normalized.append(
+                {
+                    "roleDefinitionId": observed_role_id.casefold(),
+                    "scope": scope.casefold(),
+                }
+            )
+        if normalized == [expected]:
+            return
+        if normalized:
+            _fail("cleanup-role-scope-not-exact")
+        time.sleep(5.0)
+    _fail("cleanup-role-assignment-unproved")
 
 
 def _signed_in_user_object_id() -> str:
@@ -609,6 +792,21 @@ def _pre_secret(
             maximum_cost=maximum_cost,
         )
         _configure_cleanup_runbook(subscription_id)
+        cleanup_principal_id = _verify_cleanup_control(subscription_id, cleanup_at)
+        _deploy_stage(
+            template_path=template,
+            subscription_id=subscription_id,
+            ledger=ledger,
+            stage="cleanup-binding",
+            cleanup_at=cleanup_at,
+            expected_cost=expected_cost,
+            maximum_cost=maximum_cost,
+        )
+        _verify_cleanup_target_role(
+            subscription_id,
+            cleanup_principal_id,
+            str(rbac["cleanupContributorRoleDefinitionId"]),
+        )
         _deploy_stage(
             template_path=template,
             subscription_id=subscription_id,
@@ -1258,7 +1456,7 @@ def _cleanup(subscription_id: str, receipt_directory: Path) -> dict[str, JsonVal
                 "--name",
                 KEY_VAULT,
                 "--location",
-                LOCATION,
+                STAGING_LOCATION,
                 "--subscription",
                 subscription_id,
                 "--only-show-errors",

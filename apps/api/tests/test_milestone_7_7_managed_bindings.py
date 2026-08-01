@@ -68,6 +68,12 @@ def test_managed_binding_contract_is_exact_integrity_bound_and_default_deny() ->
     assert tuple(item["id"] for item in overlay["lifecycleOperations"]) == (
         EXPECTED_LIFECYCLE_OPERATIONS
     )
+    operations = {item["id"]: item for item in overlay["operations"]}
+    for operation_id in ("regional-service-availability", "regional-sku-capabilities"):
+        assert operations[operation_id]["sanitizedInputs"][:2] == [
+            "southcentralus",
+            "eastus-cleanup-automation-only",
+        ]
     assert operation_authorization_decision(OPERATION_IDS[0]) == {
         "operationId": OPERATION_IDS[0],
         "decision": "deny",
@@ -86,6 +92,8 @@ def test_exact_names_scopes_secrets_runtime_and_private_source_are_closed() -> N
         "cleanupControl": "rg-solarplexus-mobius-77-cleanup-control",
         "target": "rg-solarplexus-mobius-77-staging",
     }
+    assert contract["location"] == "southcentralus"
+    assert contract["cleanupLocation"] == "eastus"
     assert contract["resources"]["keyVault"] == "kv-mobius77-11564669"
     assert contract["network"]["vnetCidr"] == "10.77.0.0/20"
     assert contract["network"]["privateEndpointsCidr"] == "10.77.2.0/24"
@@ -124,6 +132,19 @@ def test_contract_tampering_fails_closed() -> None:
     overlay["operationOrder"][0] = "altered-operation"
     with pytest.raises(ContractError, match=r"operation order|integrity"):
         validate_operation_overlay(overlay)
+
+
+@pytest.mark.parametrize("cleanup_location", [None, "", "southcentralus", "westus"])
+def test_cleanup_location_missing_or_outside_exact_allowlist_fails_closed(
+    cleanup_location: str | None,
+) -> None:
+    contract = deepcopy(load_managed_binding_contract())
+    if cleanup_location is None:
+        contract.pop("cleanupLocation")
+    else:
+        contract["cleanupLocation"] = cleanup_location
+    with pytest.raises(ContractError, match=r"cleanupLocation|closed contract"):
+        validate_managed_binding_contract(contract)
 
 
 def test_one_run_ledger_expires_and_receipts_reject_replay(tmp_path: Path) -> None:
@@ -231,7 +252,9 @@ class ManagedBindingFakeAdapter:
                 ),
                 "resourceType": resource_type,
                 "apiVersions": [self.versions[key]],
-                "locations": ["South Central US"],
+                "locations": [
+                    "East US" if namespace == "Microsoft.Automation" else "South Central US"
+                ],
             }
         else:
             raise AssertionError(f"unexpected fake command: {argv[:3]}")
@@ -248,8 +271,14 @@ def _automation_metadata_row(
     resource_type: str,
     *,
     api_versions: tuple[str, ...] = ("2024-10-23",),
-    locations: tuple[str, ...] = ("South Central US",),
+    locations: tuple[str, ...] | None = None,
 ) -> dict[str, JsonValue]:
+    if locations is None:
+        locations = (
+            ("East US",)
+            if "automationaccounts" in resource_type.casefold()
+            else ("South Central US",)
+        )
     return {
         "resourceType": resource_type,
         "apiVersions": list(api_versions),
@@ -506,6 +535,28 @@ def test_exact_automation_schedules_parent_fallback_succeeds(
     assert fields["parent-fallback-count"] == 1
     assert fields["pinned-api-version-count"] == 1
     assert fields["approved-region-count"] == 1
+
+
+def test_automation_cleanup_region_is_exact_and_staging_region_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    approved = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(direct_child=_automation_metadata_row("automationAccounts")),
+        provider_key="Microsoft.Automation/automationAccounts",
+    )
+    assert approved[0:2] == ("proved", "provider-prerequisites-proved")
+
+    blocked = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            direct_child=_automation_metadata_row(
+                "automationAccounts", locations=("South Central US",)
+            )
+        ),
+        provider_key="Microsoft.Automation/automationAccounts",
+    )
+    assert blocked[0:2] == ("blocked", "approved-region-unavailable")
 
 
 @pytest.mark.parametrize(
@@ -991,6 +1042,60 @@ def test_lifecycle_uses_supported_bicep_positional_input_contract() -> None:
     assert '"bicep",\n            "build",\n            str(MAIN_TEMPLATE),' in compile_template
     assert '"--file",' not in compile_template
     assert '"--outfile",\n            str(output_path),' in compile_template
+
+
+def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> None:
+    text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
+    assert 'STAGING_LOCATION: Final = "southcentralus"' in text
+    assert 'CLEANUP_LOCATION: Final = "eastus"' in text
+    assert 'f"location={STAGING_LOCATION}"' in text
+    assert 'f"cleanupLocation={CLEANUP_LOCATION}"' in text
+    assert '"state": "Ok"' in text
+    assert '"runbookType": "PowerShell72"' in text
+    assert 'schedule["timeZone"] != "Etc/UTC"' in text
+    assert 'stage="cleanup-binding"' in text
+    assert '"--assignee-object-id",\n                principal_id,' in text
+    assert '"--all",' in text
+    assert '"cleanup-role-scope-not-exact"' in text
+
+    pre_secret = text.split("def _pre_secret", 1)[1].split("def _private_tls_endpoint", 1)[0]
+    cleanup_deploy = pre_secret.index('stage="cleanup-control"')
+    configure = pre_secret.index("_configure_cleanup_runbook(subscription_id)")
+    verify_control = pre_secret.index("_verify_cleanup_control(subscription_id, cleanup_at)")
+    cleanup_binding = pre_secret.index('stage="cleanup-binding"')
+    verify_role = pre_secret.index("_verify_cleanup_target_role(")
+    staging_deploy = pre_secret.index('stage="pre-secret"')
+    assert (
+        cleanup_deploy < configure < verify_control < cleanup_binding < verify_role < staging_deploy
+    )
+
+
+def test_only_cleanup_automation_module_allows_east_us() -> None:
+    main = (INFRASTRUCTURE_ROOT / "main.bicep").read_text(encoding="utf-8")
+    cleanup = (INFRASTRUCTURE_ROOT / "modules" / "cleanup-supervisor.bicep").read_text(
+        encoding="utf-8"
+    )
+    assert "param location string = 'southcentralus'" in main
+    assert "param cleanupLocation string = 'eastus'" in main
+    assert "var cleanupBindingEnabled" in main
+    assert "var workloadEnabled" in main
+    assert "module identities './modules/identities.bicep' = if (targetEnabled)" in main
+    assert "workloadIdentityDeploymentEnabled: workloadEnabled" in main
+    identities = (INFRASTRUCTURE_ROOT / "modules" / "identities.bicep").read_text(
+        encoding="utf-8"
+    )
+    assert "var workloadIdentityEnabled = enabled && workloadIdentityDeploymentEnabled" in identities
+    assert "if (workloadIdentityEnabled)" in identities
+    for module_name in ("network", "observability", "registry", "keyVault", "compute"):
+        assert re.search(
+            rf"module {module_name} '\./modules/[^']+' = if \(workloadEnabled\) \{{",
+            main,
+        )
+    assert main.count("= if (workloadEnabled) {") == 5
+    assert "param cleanupLocation string = 'eastus'" in cleanup
+    for path in (INFRASTRUCTURE_ROOT / "modules").glob("*.bicep"):
+        if path.name != "cleanup-supervisor.bicep":
+            assert "eastus" not in path.read_text(encoding="utf-8")
 
 
 def test_lifecycle_method_definitions_use_repository_module_import() -> None:

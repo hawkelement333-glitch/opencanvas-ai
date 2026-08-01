@@ -24,6 +24,7 @@ param managedBindingDeploymentEnabled bool = false
 @allowed([
   'none'
   'cleanup-control'
+  'cleanup-binding'
   'pre-secret'
   'post-secret'
 ])
@@ -33,6 +34,12 @@ param deploymentStage string = 'none'
   'southcentralus'
 ])
 param location string = 'southcentralus'
+
+@description('The cleanup-control Automation account is the sole split-region exception.')
+@allowed([
+  'eastus'
+])
+param cleanupLocation string = 'eastus'
 
 @minLength(0)
 @maxLength(64)
@@ -64,9 +71,11 @@ param maximumPlausibleUsdCents int = 1
 
 var oneRunEnabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled && length(authorizationLedgerSha256) == 64
 var cleanupEnabled = oneRunEnabled && deploymentStage == 'cleanup-control'
+var cleanupBindingEnabled = oneRunEnabled && deploymentStage == 'cleanup-binding'
 var preSecretEnabled = oneRunEnabled && deploymentStage == 'pre-secret'
 var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret'
-var targetEnabled = preSecretEnabled || postSecretEnabled
+var workloadEnabled = preSecretEnabled || postSecretEnabled
+var targetEnabled = cleanupBindingEnabled || workloadEnabled
 
 var targetResourceGroupName = 'rg-solarplexus-mobius-77-staging'
 var cleanupResourceGroupName = 'rg-solarplexus-mobius-77-cleanup-control'
@@ -125,7 +134,7 @@ module cleanupSupervisor './modules/cleanup-supervisor.bicep' = if (cleanupEnabl
     deploymentEnabled: deploymentEnabled
     managedBindingMode: managedBindingMode
     managedBindingDeploymentEnabled: true
-    location: location
+    cleanupLocation: cleanupLocation
     targetResourceGroupName: targetResourceGroupName
     lifecycleTags: lifecycleTags
     cleanupAtUtc: cleanupAtUtc
@@ -134,7 +143,7 @@ module cleanupSupervisor './modules/cleanup-supervisor.bicep' = if (cleanupEnabl
   }
 }
 
-module network './modules/network.bicep' = if (targetEnabled) {
+module network './modules/network.bicep' = if (workloadEnabled) {
   name: 'mobius77-managed-binding-network'
   scope: targetResourceGroup
   params: {
@@ -155,6 +164,7 @@ module identities './modules/identities.bicep' = if (targetEnabled) {
     deploymentEnabled: deploymentEnabled
     managedBindingMode: managedBindingMode
     managedBindingDeploymentEnabled: true
+    workloadIdentityDeploymentEnabled: workloadEnabled
     location: location
     targetResourceGroupId: targetResourceGroup.id
     cleanupAutomationPrincipalId: existingCleanupAutomation.identity.principalId
@@ -162,7 +172,7 @@ module identities './modules/identities.bicep' = if (targetEnabled) {
   }
 }
 
-module observability './modules/observability.bicep' = if (targetEnabled) {
+module observability './modules/observability.bicep' = if (workloadEnabled) {
   name: 'mobius77-managed-binding-observability'
   scope: targetResourceGroup
   params: {
@@ -175,7 +185,7 @@ module observability './modules/observability.bicep' = if (targetEnabled) {
   }
 }
 
-module registry './modules/registry.bicep' = if (targetEnabled) {
+module registry './modules/registry.bicep' = if (workloadEnabled) {
   name: 'mobius77-managed-binding-registry'
   scope: targetResourceGroup
   params: {
@@ -191,7 +201,7 @@ module registry './modules/registry.bicep' = if (targetEnabled) {
   }
 }
 
-module keyVault './modules/key-vault.bicep' = if (targetEnabled) {
+module keyVault './modules/key-vault.bicep' = if (workloadEnabled) {
   name: 'mobius77-managed-binding-key-vault'
   scope: targetResourceGroup
   params: {
@@ -207,7 +217,7 @@ module keyVault './modules/key-vault.bicep' = if (targetEnabled) {
   }
 }
 
-module compute './modules/compute.bicep' = if (targetEnabled) {
+module compute './modules/compute.bicep' = if (workloadEnabled) {
   name: 'mobius77-managed-binding-compute'
   scope: targetResourceGroup
   params: {
@@ -239,5 +249,7 @@ output managedBindingDeploymentEnabled bool = oneRunEnabled
 output deploymentStage string = deploymentStage
 output targetResourceGroupName string = targetResourceGroupName
 output cleanupResourceGroupName string = cleanupResourceGroupName
+output stagingLocation string = location
+output cleanupLocation string = cleanupLocation
 output defaultProvisioningAuthorized bool = false
 output secretValueAccessAuthorized bool = false

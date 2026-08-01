@@ -9,6 +9,7 @@
     "contractVersion",
     "authorizationSourceHead",
     "location",
+    "cleanupLocation",
     "accountBinding",
     "defaultAuthority",
     "resourceGroups",
@@ -35,6 +36,7 @@
       "const": "11564669bd5b40a88fdbf434c8137b063305eb4b"
     },
     "location": { "const": "southcentralus" },
+    "cleanupLocation": { "const": "eastus" },
     "accountBinding": { "$ref": "#/$defs/closedMap" },
     "defaultAuthority": {
       "type": "object",

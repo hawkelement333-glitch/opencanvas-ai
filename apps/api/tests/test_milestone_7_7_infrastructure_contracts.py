@@ -291,6 +291,7 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "param uncertaintyContingencyBasisPoints int = 2500",
             "param hardMaximumHours int = 24",
             "param minimumCleanupReserveMinutes int = 90",
+            "param cleanupLocation string = 'eastus'",
         ],
         "compute.bicep": [
             "param computeTopology string = 'internal-azure-container-apps'",
