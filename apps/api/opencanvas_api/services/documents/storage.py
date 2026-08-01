@@ -400,20 +400,24 @@ class LocalVersionedObjectStorage:
 class AzureManagedIdentityTokenProvider:
     """Fetches short-lived Azure Storage tokens from the hosting workload identity."""
 
-    def __init__(self, *, endpoint: str, identity_header: str) -> None:
+    def __init__(
+        self, *, endpoint: str, identity_header: str, client_id: str | None = None
+    ) -> None:
         parsed = urlparse(endpoint)
         if parsed.scheme != "http" or not parsed.netloc:
             raise DocumentStorageError("The managed-identity endpoint is invalid.")
         self.endpoint = endpoint
         self._identity_header = identity_header
+        self._client_id = client_id
 
     async def get_token(self) -> str:
-        query = urlencode(
-            {
-                "api-version": "2019-08-01",
-                "resource": "https://storage.azure.com/",
-            }
-        )
+        parameters = {
+            "api-version": "2019-08-01",
+            "resource": "https://storage.azure.com/",
+        }
+        if self._client_id:
+            parameters["client_id"] = self._client_id
+        query = urlencode(parameters)
         separator = "&" if "?" in self.endpoint else "?"
         try:
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
@@ -816,6 +820,7 @@ def _azure_versioned_storage(settings: Settings) -> AzureBlobVersionedObjectStor
         token_provider=AzureManagedIdentityTokenProvider(
             endpoint=settings.azure_managed_identity_endpoint,
             identity_header=settings.azure_managed_identity_header,
+            client_id=settings.azure_managed_identity_client_id,
         ),
     )
 

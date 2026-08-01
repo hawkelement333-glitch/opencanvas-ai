@@ -51,6 +51,12 @@ resource workloadIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024
   tags: lifecycleTags
 }
 
+resource databaseAdministratorIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = if (workloadIdentityEnabled) {
+  name: 'id-mobius77-db-admin'
+  location: location
+  tags: lifecycleTags
+}
+
 resource cleanupTargetContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enabled) {
   name: guid(targetResourceGroupId, cleanupAutomationPrincipalId, 'b24988ac-6180-42a0-ab88-20f7382dd24c')
   properties: {
@@ -73,3 +79,8 @@ output managedBindingDeploymentEnabled bool = enabled
 output workloadIdentityDeploymentEnabled bool = workloadIdentityEnabled
 output workloadIdentityId string = workloadIdentityEnabled ? workloadIdentity.id : ''
 output workloadIdentityPrincipalId string = workloadIdentityEnabled ? workloadIdentity.properties.principalId : ''
+output workloadIdentityClientId string = workloadIdentityEnabled ? workloadIdentity.properties.clientId : ''
+output databaseAdministratorIdentityId string = workloadIdentityEnabled ? databaseAdministratorIdentity.id : ''
+output databaseAdministratorPrincipalId string = workloadIdentityEnabled ? databaseAdministratorIdentity.properties.principalId : ''
+output databaseAdministratorClientId string = workloadIdentityEnabled ? databaseAdministratorIdentity.properties.clientId : ''
+output databaseAdministratorName string = workloadIdentityEnabled ? databaseAdministratorIdentity.name : ''

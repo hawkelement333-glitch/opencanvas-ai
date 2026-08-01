@@ -42,6 +42,12 @@ param location string = 'southcentralus'
 ])
 param cleanupLocation string = 'westus'
 
+@description('PostgreSQL-only split-region exception selected from verified live capability.')
+@allowed([
+  'centralus'
+])
+param postgresLocation string = 'centralus'
+
 @minLength(0)
 @maxLength(64)
 param authorizationLedgerSha256 string = ''
@@ -210,6 +216,36 @@ module observability './modules/observability.bicep' = if (workloadEnabled) {
   }
 }
 
+module postgres './modules/postgres.bicep' = if (postSecretEnabled) {
+  name: 'mobius77-managed-binding-postgres'
+  scope: targetResourceGroup
+  params: {
+    managedBindingMode: managedBindingMode
+    managedBindingDeploymentEnabled: true
+    location: postgresLocation
+    stagingVirtualNetworkId: network.outputs.virtualNetworkId
+    databaseAdministratorIdentityId: identities.outputs.databaseAdministratorIdentityId
+    databaseAdministratorPrincipalId: identities.outputs.databaseAdministratorPrincipalId
+    databaseAdministratorName: identities.outputs.databaseAdministratorName
+    tenantId: tenant().tenantId
+    lifecycleTags: lifecycleTags
+  }
+}
+
+module redis './modules/redis.bicep' = if (postSecretEnabled) {
+  name: 'mobius77-managed-binding-redis'
+  scope: targetResourceGroup
+  params: {
+    managedBindingMode: managedBindingMode
+    managedBindingDeploymentEnabled: true
+    location: location
+    privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
+    virtualNetworkId: network.outputs.virtualNetworkId
+    workloadIdentityPrincipalId: identities.outputs.workloadIdentityPrincipalId
+    lifecycleTags: lifecycleTags
+  }
+}
+
 module registry './modules/registry.bicep' = if (workloadEnabled) {
   name: 'mobius77-managed-binding-registry'
   scope: targetResourceGroup
@@ -292,5 +328,10 @@ output cleanupResourceGroupName string = cleanupResourceGroupName
 output containerAppsInfrastructureResourceGroupName string = containerAppsInfrastructureResourceGroupName
 output stagingLocation string = location
 output cleanupLocation string = cleanupLocation
+output postgresLocation string = postgresLocation
+output postgresServerFqdn string = postSecretEnabled ? postgres.outputs.serverFqdn : ''
+output redisHostName string = postSecretEnabled ? redis.outputs.hostName : ''
+output redisPort int = postSecretEnabled ? redis.outputs.port : 10000
+output workloadIdentityClientId string = workloadEnabled ? identities.outputs.workloadIdentityClientId : ''
 output defaultProvisioningAuthorized bool = false
 output secretValueAccessAuthorized bool = false

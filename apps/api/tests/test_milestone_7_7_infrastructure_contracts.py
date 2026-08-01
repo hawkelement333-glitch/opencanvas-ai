@@ -257,9 +257,14 @@ def test_bicep_preserves_inert_defaults_and_gates_one_run_resources():
     declarations = re.findall(r"(?m)^\s*(?:resource|module)\s+[^\n]+", combined)
     assert declarations
     assert all("= if (" in declaration for declaration in declarations)
-    for name in ("policy.bicep", "postgres.bicep", "redis.bicep", "storage-scanner.bicep"):
+    for name in ("policy.bicep", "storage-scanner.bicep"):
         text = (ROOT / "modules" / name).read_text(encoding="utf-8")
         assert not re.search(r"(?m)^\s*(?:resource|module)\s+", text)
+    for name in ("postgres.bicep", "redis.bicep"):
+        text = (ROOT / "modules" / name).read_text(encoding="utf-8")
+        declarations = re.findall(r"(?m)^\s*(?:resource|module)\s+[^\n]+", text)
+        assert declarations
+        assert all("= if (enabled)" in declaration for declaration in declarations)
     main = (ROOT / "main.bicep").read_text(encoding="utf-8")
     assert "param checkpointMode string = 'contract-only'" in main
     assert "param deploymentEnabled bool = false" in main
@@ -498,8 +503,6 @@ def test_resource_policy_has_fixed_topology_and_provider_blocks():
     blocked = {item["logicalCapability"] for item in resource["blockedCandidateResourceTypes"]}
     assert blocked == {
         "defender-malware-scanning",
-        "managed-redis",
-        "managed-redis-database",
         "scanner-result-subscription",
         "scanner-result-system-topic",
     }

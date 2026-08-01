@@ -19,6 +19,10 @@
     "Microsoft.Automation/automationAccounts/schedules",
     "Microsoft.ContainerRegistry/registries",
     "Microsoft.DBforPostgreSQL/flexibleServers",
+    "Microsoft.DBforPostgreSQL/flexibleServers/administrators",
+    "Microsoft.Cache/redisEnterprise",
+    "Microsoft.Cache/redisEnterprise/databases",
+    "Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments",
     "Microsoft.Insights/actionGroups",
     "Microsoft.Insights/dataCollectionEndpoints",
     "Microsoft.Insights/dataCollectionRules",
@@ -41,6 +45,7 @@
     "Microsoft.Network/virtualNetworkGateways",
     "Microsoft.Network/virtualNetworks",
     "Microsoft.Network/virtualNetworks/subnets",
+    "Microsoft.Network/virtualNetworks/virtualNetworkPeerings",
     "Microsoft.OperationalInsights/workspaces",
     "Microsoft.Resources/resourceGroups",
     "Microsoft.Storage/storageAccounts",
@@ -48,16 +53,6 @@
     "Microsoft.Storage/storageAccounts/blobServices/containers"
   ],
   "blockedCandidateResourceTypes": [
-    {
-      "logicalCapability": "managed-redis",
-      "candidateType": "Microsoft.Cache/redisEnterprise",
-      "resolutionGate": "exact-provider-api-versions"
-    },
-    {
-      "logicalCapability": "managed-redis-database",
-      "candidateType": "Microsoft.Cache/redisEnterprise/databases",
-      "resolutionGate": "redis-custom-acl-support"
-    },
     {
       "logicalCapability": "defender-malware-scanning",
       "candidateType": "Microsoft.Security/defenderForStorageSettings",
@@ -150,6 +145,7 @@
       "retentionStatus": "unresolved"
     },
     "postgresql": {
+      "location": "centralus",
       "majorVersion": 17,
       "name": "Standard_D2ds_v5",
       "storageGiB": 64,

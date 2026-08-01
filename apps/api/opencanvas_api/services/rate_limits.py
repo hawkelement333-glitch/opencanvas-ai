@@ -162,6 +162,7 @@ class EntraRedisAuthentication:
     managed_identity_endpoint: str
     managed_identity_header: str | None
     operation_timeout_seconds: float
+    managed_identity_client_id: str | None = None
 
     async def credentials(self) -> RedisCredentials:
         headers = {"Metadata": "true"}
@@ -171,6 +172,8 @@ class EntraRedisAuthentication:
             "api-version": "2019-08-01",
             "resource": _TOKEN_AUDIENCE,
         }
+        if self.managed_identity_client_id:
+            parameters["client_id"] = self.managed_identity_client_id
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(self.operation_timeout_seconds),
@@ -551,6 +554,7 @@ def build_shared_rate_limit_service(settings: Settings) -> SharedRateLimitServic
                 username=settings.shared_rate_limit_redis_username or "",
                 managed_identity_endpoint=settings.shared_rate_limit_identity_endpoint or "",
                 managed_identity_header=settings.shared_rate_limit_identity_header,
+                managed_identity_client_id=settings.shared_rate_limit_identity_client_id,
                 operation_timeout_seconds=settings.shared_rate_limit_operation_timeout_seconds,
             )
         else:

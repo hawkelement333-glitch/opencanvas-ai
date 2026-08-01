@@ -3,15 +3,13 @@ from __future__ import annotations
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
-from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.engine.url import make_url
-from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from alembic import context
 from opencanvas_api.core.config import AppMode, DatabaseRole, get_settings
 from opencanvas_api.db.migrations import run_guarded_postgresql_migration
 from opencanvas_api.db.models import Base
+from opencanvas_api.db.session import Database
 
 config = context.config
 if config.config_file_name is not None:
@@ -62,31 +60,10 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    url = make_url(config.get_main_option("sqlalchemy.url"))
-    connect_args: dict[str, object] = {}
-    if url.drivername == "postgresql+asyncpg":
-        connect_args = {
-            "timeout": get_settings().database_connect_timeout_seconds,
-            "server_settings": {
-                "application_name": "solarplexus-mobius-migration",
-                "statement_timeout": "0",
-                "lock_timeout": str(get_settings().database_lock_timeout_ms),
-                "idle_in_transaction_session_timeout": str(
-                    get_settings().database_idle_transaction_timeout_ms
-                ),
-            },
-        }
-        if get_settings().database_tls_mode != "disable":
-            connect_args["ssl"] = get_settings().database_tls_mode
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-        connect_args=connect_args,
-    )
-    async with connectable.connect() as connection:
+    database = Database.from_settings(get_settings(), expected_role=DatabaseRole.MIGRATION)
+    async with database.engine.connect() as connection:
         await connection.run_sync(do_run_migrations)
-    await connectable.dispose()
+    await database.dispose()
 
 
 if context.is_offline_mode():

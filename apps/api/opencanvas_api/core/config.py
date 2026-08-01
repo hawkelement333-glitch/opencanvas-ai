@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     database_lock_timeout_ms: int = Field(default=5_000, ge=100, le=30_000)
     database_idle_transaction_timeout_ms: int = Field(default=30_000, ge=1_000, le=120_000)
     database_tls_mode: Literal["disable", "require", "verify-ca", "verify-full"] = "disable"
+    database_auth_mode: Literal["password", "entra"] = "password"
+    database_managed_identity_endpoint: str | None = None
+    database_managed_identity_header: str | None = None
+    database_managed_identity_client_id: str | None = None
     database_application_name: str = Field(
         default="solarplexus-mobius", min_length=3, max_length=63, pattern=r"^[a-z0-9-]+$"
     )
@@ -141,6 +145,7 @@ class Settings(BaseSettings):
     azure_retained_container: str = "retained"
     azure_managed_identity_endpoint: str | None = None
     azure_managed_identity_header: str | None = None
+    azure_managed_identity_client_id: str | None = None
 
     object_ingestion_mode: Literal["disabled", "deterministic", "trusted"] = "disabled"
     upload_capability_secret: str = Field(
@@ -191,6 +196,7 @@ class Settings(BaseSettings):
     shared_rate_limit_redis_username: str | None = None
     shared_rate_limit_identity_endpoint: str | None = None
     shared_rate_limit_identity_header: str | None = None
+    shared_rate_limit_identity_client_id: str | None = None
     shared_rate_limit_acl_username_file: Path | None = None
     shared_rate_limit_acl_password_file: Path | None = None
     shared_rate_limit_tls_ca_file: Path | None = None
@@ -315,10 +321,12 @@ class Settings(BaseSettings):
         "azure_storage_account_url",
         "azure_managed_identity_endpoint",
         "azure_managed_identity_header",
+        "azure_managed_identity_client_id",
         "shared_rate_limit_redis_url",
         "shared_rate_limit_redis_username",
         "shared_rate_limit_identity_endpoint",
         "shared_rate_limit_identity_header",
+        "shared_rate_limit_identity_client_id",
         "shared_rate_limit_acl_username_file",
         "shared_rate_limit_acl_password_file",
         "shared_rate_limit_tls_ca_file",
@@ -558,6 +566,23 @@ class Settings(BaseSettings):
             raise ValueError(f"{label} refuses a placeholder database credential")
         if self.database_tls_mode != "verify-full":
             raise ValueError(f"{label} requires verified PostgreSQL TLS")
+        if self.database_auth_mode == "entra":
+            required_database_identity = {
+                "OPENCANVAS_DATABASE_MANAGED_IDENTITY_ENDPOINT": (
+                    self.database_managed_identity_endpoint
+                ),
+                "OPENCANVAS_DATABASE_MANAGED_IDENTITY_CLIENT_ID": (
+                    self.database_managed_identity_client_id
+                ),
+            }
+            missing_database_identity = [
+                name for name, value in required_database_identity.items() if not value
+            ]
+            if missing_database_identity:
+                raise ValueError(
+                    f"{label} database identity is missing: "
+                    f"{', '.join(missing_database_identity)}"
+                )
         if self.database_expected_revision != EXPECTED_DATABASE_REVISION:
             raise ValueError(f"{label} requires the release's exact database revision")
         if not self.app_url.startswith("https://"):
