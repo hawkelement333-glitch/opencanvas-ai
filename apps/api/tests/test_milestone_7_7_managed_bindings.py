@@ -1061,12 +1061,19 @@ def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> No
     pre_secret = text.split("def _pre_secret", 1)[1].split("def _private_tls_endpoint", 1)[0]
     cleanup_deploy = pre_secret.index('stage="cleanup-control"')
     configure = pre_secret.index("_configure_cleanup_runbook(subscription_id)")
+    job_binding = pre_secret.index('stage="cleanup-job-binding"')
     verify_control = pre_secret.index("_verify_cleanup_control(subscription_id, cleanup_at)")
     cleanup_binding = pre_secret.index('stage="cleanup-binding"')
     verify_role = pre_secret.index("_verify_cleanup_target_role(")
     staging_deploy = pre_secret.index('stage="pre-secret"')
     assert (
-        cleanup_deploy < configure < verify_control < cleanup_binding < verify_role < staging_deploy
+        cleanup_deploy
+        < configure
+        < job_binding
+        < verify_control
+        < cleanup_binding
+        < verify_role
+        < staging_deploy
     )
 
 
@@ -1078,6 +1085,10 @@ def test_only_cleanup_automation_module_allows_west_us() -> None:
     assert "param location string = 'southcentralus'" in main
     assert "param cleanupLocation string = 'westus'" in main
     assert "var cleanupBindingEnabled" in main
+    assert "var cleanupJobScheduleEnabled" in main
+    assert "'cleanup-job-binding'" in main
+    assert "cleanupControlDeploymentEnabled: true" in main
+    assert "cleanupJobScheduleDeploymentEnabled: true" in main
     assert "var workloadEnabled" in main
     assert "module identities './modules/identities.bicep' = if (targetEnabled)" in main
     assert "workloadIdentityDeploymentEnabled: workloadEnabled" in main
@@ -1093,6 +1104,10 @@ def test_only_cleanup_automation_module_allows_west_us() -> None:
         )
     assert main.count("= if (workloadEnabled) {") == 5
     assert "param cleanupLocation string = 'westus'" in cleanup
+    assert "if (cleanupControlEnabled)" in cleanup
+    assert "if (jobScheduleEnabled)" in cleanup
+    assert "parent: existingAutomationAccount" in cleanup
+    assert "parent: automationAccount\n  name: 'Remove-Mobius77Staging'" in cleanup
     for path in (INFRASTRUCTURE_ROOT / "modules").glob("*.bicep"):
         if path.name != "cleanup-supervisor.bicep":
             assert "westus" not in path.read_text(encoding="utf-8")

@@ -18,6 +18,10 @@ param managedBindingMode string = 'contract-only'
 
 param managedBindingDeploymentEnabled bool = false
 
+param cleanupControlDeploymentEnabled bool = false
+
+param cleanupJobScheduleDeploymentEnabled bool = false
+
 @minValue(1)
 @maxValue(12000)
 param expectedUsdCents int
@@ -73,9 +77,11 @@ param targetResourceGroupName string = 'rg-solarplexus-mobius-77-staging'
 param lifecycleTags object = {}
 param cleanupAtUtc string = ''
 
-var enabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled
+var contractEnabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled
+var cleanupControlEnabled = contractEnabled && cleanupControlDeploymentEnabled && !cleanupJobScheduleDeploymentEnabled
+var jobScheduleEnabled = contractEnabled && cleanupJobScheduleDeploymentEnabled && !cleanupControlDeploymentEnabled
 
-resource automationAccount 'Microsoft.Automation/automationAccounts@2024-10-23' = if (enabled) {
+resource automationAccount 'Microsoft.Automation/automationAccounts@2024-10-23' = if (cleanupControlEnabled) {
   name: 'aa-mobius77-cleanup'
   location: cleanupLocation
   tags: lifecycleTags
@@ -91,7 +97,7 @@ resource automationAccount 'Microsoft.Automation/automationAccounts@2024-10-23' 
   }
 }
 
-resource cleanupRunbook 'Microsoft.Automation/automationAccounts/runbooks@2024-10-23' = if (enabled) {
+resource cleanupRunbook 'Microsoft.Automation/automationAccounts/runbooks@2024-10-23' = if (cleanupControlEnabled) {
   parent: automationAccount
   name: 'Remove-Mobius77Staging'
   location: cleanupLocation
@@ -104,7 +110,7 @@ resource cleanupRunbook 'Microsoft.Automation/automationAccounts/runbooks@2024-1
   }
 }
 
-resource cleanupSchedule 'Microsoft.Automation/automationAccounts/schedules@2024-10-23' = if (enabled) {
+resource cleanupSchedule 'Microsoft.Automation/automationAccounts/schedules@2024-10-23' = if (cleanupControlEnabled) {
   parent: automationAccount
   name: 'schedule-mobius77-cleanup'
   properties: {
@@ -116,18 +122,32 @@ resource cleanupSchedule 'Microsoft.Automation/automationAccounts/schedules@2024
   }
 }
 
-resource cleanupJobSchedule 'Microsoft.Automation/automationAccounts/jobSchedules@2024-10-23' = if (enabled) {
-  parent: automationAccount
-  name: guid(automationAccount.id, cleanupRunbook.name, cleanupSchedule.name)
+resource existingAutomationAccount 'Microsoft.Automation/automationAccounts@2024-10-23' existing = if (jobScheduleEnabled) {
+  name: 'aa-mobius77-cleanup'
+}
+
+resource existingCleanupRunbook 'Microsoft.Automation/automationAccounts/runbooks@2024-10-23' existing = if (jobScheduleEnabled) {
+  parent: existingAutomationAccount
+  name: 'Remove-Mobius77Staging'
+}
+
+resource existingCleanupSchedule 'Microsoft.Automation/automationAccounts/schedules@2024-10-23' existing = if (jobScheduleEnabled) {
+  parent: existingAutomationAccount
+  name: 'schedule-mobius77-cleanup'
+}
+
+resource cleanupJobSchedule 'Microsoft.Automation/automationAccounts/jobSchedules@2024-10-23' = if (jobScheduleEnabled) {
+  parent: existingAutomationAccount
+  name: guid(existingAutomationAccount.id, existingCleanupRunbook.name, existingCleanupSchedule.name)
   properties: {
     parameters: {
       TargetResourceGroupName: targetResourceGroupName
     }
     runbook: {
-      name: cleanupRunbook.name
+      name: existingCleanupRunbook.name
     }
     schedule: {
-      name: cleanupSchedule.name
+      name: existingCleanupSchedule.name
     }
   }
 }
@@ -146,11 +166,13 @@ output requiredTagCount int = requiredTagCount
 output leaseBindingResolved bool = leaseBindingResolved
 output cleanupTimerBindingResolved bool = cleanupTimerBindingResolved
 output managedBindingMode string = managedBindingMode
-output managedBindingDeploymentEnabled bool = enabled
+output managedBindingDeploymentEnabled bool = cleanupControlEnabled || jobScheduleEnabled
+output cleanupControlDeploymentEnabled bool = cleanupControlEnabled
+output cleanupJobScheduleDeploymentEnabled bool = jobScheduleEnabled
 output automationAccountName string = 'aa-mobius77-cleanup'
 output cleanupRunbookName string = 'Remove-Mobius77Staging'
 output cleanupScheduleName string = 'schedule-mobius77-cleanup'
-output cleanupPrincipalId string = enabled ? automationAccount.identity.principalId : ''
+output cleanupPrincipalId string = cleanupControlEnabled ? automationAccount.identity.principalId : ''
 output cleanupLocation string = cleanupLocation
 output publicNetworkAccess bool = false
-output managedBindingCleanupTimerResourceCreated bool = enabled && !empty(cleanupAtUtc)
+output managedBindingCleanupTimerResourceCreated bool = jobScheduleEnabled && !empty(cleanupAtUtc)

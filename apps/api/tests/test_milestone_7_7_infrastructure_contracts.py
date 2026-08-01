@@ -292,6 +292,8 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "param hardMaximumHours int = 24",
             "param minimumCleanupReserveMinutes int = 90",
             "param cleanupLocation string = 'westus'",
+            "param cleanupControlDeploymentEnabled bool = false",
+            "param cleanupJobScheduleDeploymentEnabled bool = false",
         ],
         "compute.bicep": [
             "param computeTopology string = 'internal-azure-container-apps'",

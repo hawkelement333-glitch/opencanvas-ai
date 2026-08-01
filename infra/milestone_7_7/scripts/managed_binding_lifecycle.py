@@ -792,6 +792,15 @@ def _pre_secret(
             maximum_cost=maximum_cost,
         )
         _configure_cleanup_runbook(subscription_id)
+        _deploy_stage(
+            template_path=template,
+            subscription_id=subscription_id,
+            ledger=ledger,
+            stage="cleanup-job-binding",
+            cleanup_at=cleanup_at,
+            expected_cost=expected_cost,
+            maximum_cost=maximum_cost,
+        )
         cleanup_principal_id = _verify_cleanup_control(subscription_id, cleanup_at)
         _deploy_stage(
             template_path=template,

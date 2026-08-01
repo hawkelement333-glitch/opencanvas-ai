@@ -24,6 +24,7 @@ param managedBindingDeploymentEnabled bool = false
 @allowed([
   'none'
   'cleanup-control'
+  'cleanup-job-binding'
   'cleanup-binding'
   'pre-secret'
   'post-secret'
@@ -70,7 +71,8 @@ param expectedUsdCents int = 1
 param maximumPlausibleUsdCents int = 1
 
 var oneRunEnabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled && length(authorizationLedgerSha256) == 64
-var cleanupEnabled = oneRunEnabled && deploymentStage == 'cleanup-control'
+var cleanupControlEnabled = oneRunEnabled && deploymentStage == 'cleanup-control'
+var cleanupJobScheduleEnabled = oneRunEnabled && deploymentStage == 'cleanup-job-binding'
 var cleanupBindingEnabled = oneRunEnabled && deploymentStage == 'cleanup-binding'
 var preSecretEnabled = oneRunEnabled && deploymentStage == 'pre-secret'
 var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret'
@@ -111,13 +113,13 @@ resource targetResourceGroup 'Microsoft.Resources/resourceGroups@2023-07-01' = i
   tags: lifecycleTags
 }
 
-resource cleanupResourceGroup 'Microsoft.Resources/resourceGroups@2023-07-01' = if (cleanupEnabled) {
+resource cleanupResourceGroup 'Microsoft.Resources/resourceGroups@2023-07-01' = if (cleanupControlEnabled) {
   name: cleanupResourceGroupName
   location: location
   tags: lifecycleTags
 }
 
-resource existingCleanupResourceGroup 'Microsoft.Resources/resourceGroups@2023-07-01' existing = if (targetEnabled) {
+resource existingCleanupResourceGroup 'Microsoft.Resources/resourceGroups@2023-07-01' existing = if (cleanupJobScheduleEnabled || targetEnabled) {
   name: cleanupResourceGroupName
 }
 
@@ -126,7 +128,7 @@ resource existingCleanupAutomation 'Microsoft.Automation/automationAccounts@2024
   scope: existingCleanupResourceGroup
 }
 
-module cleanupSupervisor './modules/cleanup-supervisor.bicep' = if (cleanupEnabled) {
+module cleanupSupervisor './modules/cleanup-supervisor.bicep' = if (cleanupControlEnabled) {
   name: 'mobius77-cleanup-control'
   scope: cleanupResourceGroup
   params: {
@@ -134,6 +136,27 @@ module cleanupSupervisor './modules/cleanup-supervisor.bicep' = if (cleanupEnabl
     deploymentEnabled: deploymentEnabled
     managedBindingMode: managedBindingMode
     managedBindingDeploymentEnabled: true
+    cleanupControlDeploymentEnabled: true
+    cleanupJobScheduleDeploymentEnabled: false
+    cleanupLocation: cleanupLocation
+    targetResourceGroupName: targetResourceGroupName
+    lifecycleTags: lifecycleTags
+    cleanupAtUtc: cleanupAtUtc
+    expectedUsdCents: expectedUsdCents
+    maximumPlausibleUsdCents: maximumPlausibleUsdCents
+  }
+}
+
+module cleanupJobBinding './modules/cleanup-supervisor.bicep' = if (cleanupJobScheduleEnabled) {
+  name: 'mobius77-cleanup-job-binding'
+  scope: existingCleanupResourceGroup
+  params: {
+    checkpointMode: checkpointMode
+    deploymentEnabled: deploymentEnabled
+    managedBindingMode: managedBindingMode
+    managedBindingDeploymentEnabled: true
+    cleanupControlDeploymentEnabled: false
+    cleanupJobScheduleDeploymentEnabled: true
     cleanupLocation: cleanupLocation
     targetResourceGroupName: targetResourceGroupName
     lifecycleTags: lifecycleTags
