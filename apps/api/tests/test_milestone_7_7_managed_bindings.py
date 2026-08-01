@@ -991,3 +991,20 @@ def test_lifecycle_uses_supported_bicep_positional_input_contract() -> None:
     assert '"bicep",\n            "build",\n            str(MAIN_TEMPLATE),' in compile_template
     assert '"--file",' not in compile_template
     assert '"--outfile",\n            str(output_path),' in compile_template
+
+
+def test_lifecycle_method_definitions_use_repository_module_import() -> None:
+    overlay = load_operation_overlay()
+    definitions = overlay["methodDefinitions"]
+
+    for operation in overlay["lifecycleOperations"]:
+        definition = definitions[operation["methodDefinition"]]
+        assert definition["argumentVector"][:3] == [
+            "-B",
+            "-m",
+            "infra.milestone_7_7.scripts.managed_binding_lifecycle",
+        ]
+        assert (
+            "infra/milestone_7_7/scripts/managed_binding_lifecycle.py"
+            not in definition["argumentVector"]
+        )

@@ -245,7 +245,8 @@
       "executable": "{python}",
       "argumentVector": [
         "-B",
-        "infra/milestone_7_7/scripts/managed_binding_lifecycle.py",
+        "-m",
+        "infra.milestone_7_7.scripts.managed_binding_lifecycle",
         "--operation",
         "pre-secret-provisioning",
         "--ledger",
@@ -261,7 +262,8 @@
       "executable": "{python}",
       "argumentVector": [
         "-B",
-        "infra/milestone_7_7/scripts/managed_binding_lifecycle.py",
+        "-m",
+        "infra.milestone_7_7.scripts.managed_binding_lifecycle",
         "--operation",
         "private-path-verification",
         "--ledger",
@@ -277,7 +279,8 @@
       "executable": "{python}",
       "argumentVector": [
         "-B",
-        "infra/milestone_7_7/scripts/managed_binding_lifecycle.py",
+        "-m",
+        "infra.milestone_7_7.scripts.managed_binding_lifecycle",
         "--operation",
         "post-secret-provisioning",
         "--ledger",
@@ -293,7 +296,8 @@
       "executable": "{python}",
       "argumentVector": [
         "-B",
-        "infra/milestone_7_7/scripts/managed_binding_lifecycle.py",
+        "-m",
+        "infra.milestone_7_7.scripts.managed_binding_lifecycle",
         "--operation",
         "temporary-authority-revocation",
         "--ledger",
@@ -309,7 +313,8 @@
       "executable": "{python}",
       "argumentVector": [
         "-B",
-        "infra/milestone_7_7/scripts/managed_binding_lifecycle.py",
+        "-m",
+        "infra.milestone_7_7.scripts.managed_binding_lifecycle",
         "--operation",
         "cleanup",
         "--ledger",
@@ -325,7 +330,8 @@
       "executable": "{python}",
       "argumentVector": [
         "-B",
-        "infra/milestone_7_7/scripts/managed_binding_lifecycle.py",
+        "-m",
+        "infra.milestone_7_7.scripts.managed_binding_lifecycle",
         "--operation",
         "zero-residue-verification",
         "--ledger",
@@ -983,5 +989,5 @@
       "replayDecision": "deny"
     }
   ],
-  "contractIntegritySha256": "3bbbaeba1c6cd8a09fb92719a7e3c44d6fa7c2004763c2500bd427c50e50ba38"
+  "contractIntegritySha256": "9c65322c5c7c6c21cb3bf8c7f7cd5a9d06004e1374e1c1543aa565564cc4b1e8"
 }
