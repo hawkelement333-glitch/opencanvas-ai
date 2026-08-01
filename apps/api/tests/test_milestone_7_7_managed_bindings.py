@@ -1164,27 +1164,15 @@ def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> No
     )
 
 
-def test_cleanup_job_schedule_verification_uses_exact_deployment_operation(
+def test_cleanup_job_schedule_verification_uses_exact_arm_guid_resource(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     subscription_id = "opaque-subscription"
-    job_schedule_id = (
-        "/subscriptions/opaque-subscription/resourceGroups/"
-        "rg-solarplexus-mobius-77-cleanup-control/providers/"
-        "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
-        "jobSchedules/00000000-0000-0000-0000-000000000001"
-    )
+    job_schedule_id = managed_binding_lifecycle._cleanup_job_schedule_id(subscription_id)
     observed: list[tuple[str, ...]] = []
 
     def exact_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
         observed.append(argv)
-        if argv[1:5] == ("deployment", "operation", "group", "list"):
-            return [
-                {
-                    "id": job_schedule_id,
-                    "type": "Microsoft.Automation/automationAccounts/jobSchedules",
-                }
-            ]
         if argv[1:3] == ("resource", "show"):
             return {
                 "id": job_schedule_id,
@@ -1198,62 +1186,62 @@ def test_cleanup_job_schedule_verification_uses_exact_deployment_operation(
 
     managed_binding_lifecycle._verify_cleanup_job_schedule(subscription_id)
 
-    assert observed[0][1:5] == ("deployment", "operation", "group", "list")
-    assert observed[1][1:3] == ("resource", "show")
-    assert observed[0][observed[0].index("--name") + 1] == "mobius77-cleanup-job-binding"
-    assert observed[0][observed[0].index("--resource-group") + 1] == (
-        "rg-solarplexus-mobius-77-cleanup-control"
-    )
-    assert "2024-10-23" in observed[1]
+    assert len(observed) == 1
+    assert observed[0][1:3] == ("resource", "show")
+    assert observed[0][observed[0].index("--ids") + 1] == job_schedule_id
+    assert "2024-10-23" in observed[0]
     source = inspect.getsource(managed_binding_lifecycle._verify_cleanup_job_schedule)
     assert '"job-schedule"' not in source
 
 
-@pytest.mark.parametrize("drift", ["missing", "duplicate", "wrong-target"])
+def test_cleanup_job_schedule_id_matches_bicep_guid_contract() -> None:
+    assert managed_binding_lifecycle._cleanup_job_schedule_id("opaque-subscription") == (
+        "/subscriptions/opaque-subscription/resourceGroups/"
+        "rg-solarplexus-mobius-77-cleanup-control/providers/"
+        "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
+        "jobSchedules/850098d1-ada7-5be4-9b4f-331e1c849edb"
+    )
+    cleanup = (INFRASTRUCTURE_ROOT / "modules" / "cleanup-supervisor.bicep").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "guid(existingAutomationAccount.id, existingCleanupRunbook.name, "
+        "existingCleanupSchedule.name)" in cleanup
+    )
+
+
+@pytest.mark.parametrize("drift", ["wrong-id", "wrong-runbook", "wrong-schedule", "wrong-target"])
 def test_cleanup_job_schedule_verification_fails_closed_on_drift(
     monkeypatch: pytest.MonkeyPatch, drift: str
 ) -> None:
     subscription_id = "opaque-subscription"
-    job_schedule_id = (
-        "/subscriptions/opaque-subscription/resourceGroups/"
-        "rg-solarplexus-mobius-77-cleanup-control/providers/"
-        "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
-        "jobSchedules/00000000-0000-0000-0000-000000000001"
-    )
+    job_schedule_id = managed_binding_lifecycle._cleanup_job_schedule_id(subscription_id)
 
     def drift_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
-        if argv[1:5] == ("deployment", "operation", "group", "list"):
-            row = {
-                "id": job_schedule_id,
-                "type": "Microsoft.Automation/automationAccounts/jobSchedules",
-            }
-            if drift == "missing":
-                return []
-            if drift == "duplicate":
-                return [row, row]
-            return [row]
         if argv[1:3] == ("resource", "show"):
             return {
-                "id": job_schedule_id,
-                "runbook": "Remove-Mobius77Staging",
-                "schedule": "schedule-mobius77-cleanup",
-                "target": "unexpected-group",
+                "id": "unexpected-id" if drift == "wrong-id" else job_schedule_id,
+                "runbook": (
+                    "unexpected-runbook" if drift == "wrong-runbook" else "Remove-Mobius77Staging"
+                ),
+                "schedule": (
+                    "unexpected-schedule"
+                    if drift == "wrong-schedule"
+                    else "schedule-mobius77-cleanup"
+                ),
+                "target": (
+                    "unexpected-group"
+                    if drift == "wrong-target"
+                    else "rg-solarplexus-mobius-77-staging"
+                ),
             }
         raise AssertionError(argv)
 
     monkeypatch.setattr(managed_binding_lifecycle, "_run", drift_run)
-    if drift == "missing":
-        moments = iter((0.0, 121.0))
-        monkeypatch.setattr(managed_binding_lifecycle.time, "monotonic", lambda: next(moments))
-        monkeypatch.setattr(managed_binding_lifecycle.time, "sleep", lambda _delay: None)
 
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
-        match=(
-            "cleanup-job-schedule-propagation-timeout"
-            if drift == "missing"
-            else "cleanup-job-schedule-not-ready"
-        ),
+        match="cleanup-job-schedule-not-ready",
     ):
         managed_binding_lifecycle._verify_cleanup_job_schedule(subscription_id)
 
@@ -1262,28 +1250,12 @@ def test_cleanup_job_schedule_verification_retries_exact_not_found(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     subscription_id = "opaque-subscription"
-    job_schedule_id = (
-        "/subscriptions/opaque-subscription/resourceGroups/"
-        "rg-solarplexus-mobius-77-cleanup-control/providers/"
-        "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
-        "jobSchedules/00000000-0000-0000-0000-000000000001"
-    )
-    list_attempts = 0
+    job_schedule_id = managed_binding_lifecycle._cleanup_job_schedule_id(subscription_id)
     show_attempts = 0
     sleeps: list[float] = []
 
     def eventual_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
-        nonlocal list_attempts, show_attempts
-        if argv[1:5] == ("deployment", "operation", "group", "list"):
-            list_attempts += 1
-            if list_attempts == 1:
-                raise managed_binding_lifecycle.AzureCommandError("notfound")
-            return [
-                {
-                    "id": job_schedule_id,
-                    "type": "Microsoft.Automation/automationAccounts/jobSchedules",
-                }
-            ]
+        nonlocal show_attempts
         if argv[1:3] == ("resource", "show"):
             show_attempts += 1
             if show_attempts == 1:
@@ -1302,9 +1274,27 @@ def test_cleanup_job_schedule_verification_retries_exact_not_found(
 
     managed_binding_lifecycle._verify_cleanup_job_schedule(subscription_id)
 
-    assert list_attempts == 3
     assert show_attempts == 2
-    assert sleeps == [5.0, 5.0]
+    assert sleeps == [5.0]
+
+
+def test_cleanup_job_schedule_verification_times_out_exact_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    moments = iter((0.0, 121.0))
+
+    def missing_run(_argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        raise managed_binding_lifecycle.AzureCommandError("notfound")
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", missing_run)
+    monkeypatch.setattr(managed_binding_lifecycle.time, "monotonic", lambda: next(moments))
+    monkeypatch.setattr(managed_binding_lifecycle.time, "sleep", lambda _delay: None)
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="cleanup-job-schedule-propagation-timeout",
+    ):
+        managed_binding_lifecycle._verify_cleanup_job_schedule("opaque-subscription")
 
 
 def test_cleanup_job_schedule_verification_rejects_nontransient_azure_error(

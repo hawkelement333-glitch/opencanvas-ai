@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Final, NoReturn, cast
+from uuid import UUID, uuid5
 
 from performance.milestone_7_7.framework import (
     ContractError,
@@ -160,7 +161,7 @@ TARGET_DEPLOYMENT_NAMES: Final = frozenset(
 CLEANUP_DEPLOYMENT_NAMES: Final = frozenset(
     {"mobius77-cleanup-control", "mobius77-cleanup-job-binding"}
 )
-CLEANUP_JOB_BINDING_DEPLOYMENT: Final = "mobius77-cleanup-job-binding"
+ARM_GUID_NAMESPACE: Final = UUID("11fb06fb-712d-4ddd-98c7-e71bbd588830")
 RECOVERED_CLEANUP_TAG_KEYS: Final = frozenset(
     {
         "mobius-cleanup-binding-sha256",
@@ -660,82 +661,23 @@ def _configure_cleanup_runbook(subscription_id: str) -> None:
     _run(("az", "automation", "runbook", "publish", *common))
 
 
+def _cleanup_job_schedule_id(subscription_id: str) -> str:
+    account_id = _scope(
+        subscription_id,
+        f"/resourceGroups/{CLEANUP_GROUP}/providers/"
+        f"Microsoft.Automation/automationAccounts/{AUTOMATION_ACCOUNT}",
+    )
+    job_schedule_name = uuid5(
+        ARM_GUID_NAMESPACE,
+        "-".join((account_id, RUNBOOK, SCHEDULE)),
+    )
+    return f"{account_id}/jobSchedules/{job_schedule_name}"
+
+
 def _verify_cleanup_job_schedule(subscription_id: str) -> None:
     deadline = time.monotonic() + CLEANUP_JOB_SCHEDULE_PROPAGATION_SECONDS
+    job_schedule_id = _cleanup_job_schedule_id(subscription_id)
     while True:
-        try:
-            rows = _run(
-                (
-                    "az",
-                    "deployment",
-                    "operation",
-                    "group",
-                    "list",
-                    "--resource-group",
-                    CLEANUP_GROUP,
-                    "--name",
-                    CLEANUP_JOB_BINDING_DEPLOYMENT,
-                    "--subscription",
-                    subscription_id,
-                    "--query",
-                    (
-                        "[?properties.targetResource.resourceType != null]."
-                        "{id:properties.targetResource.id,"
-                        "type:properties.targetResource.resourceType}"
-                    ),
-                    "--output",
-                    "json",
-                    "--only-show-errors",
-                ),
-                require_json=True,
-            )
-        except AzureCommandError as exc:
-            if exc.sanitized_azure_error_code not in {
-                "notfound",
-                "resource-not-found",
-            }:
-                raise
-            if time.monotonic() >= deadline:
-                _fail("cleanup-job-schedule-propagation-timeout")
-            time.sleep(CLEANUP_JOB_SCHEDULE_RETRY_SECONDS)
-            continue
-        if not isinstance(rows, list):
-            _fail("cleanup-job-schedule-output-malformed")
-        job_schedule_ids: list[str] = []
-        for row in rows:
-            if not isinstance(row, dict) or set(row) != {"id", "type"}:
-                _fail("cleanup-job-schedule-output-malformed")
-            resource_id = row["id"]
-            resource_type = row["type"]
-            if not isinstance(resource_id, str) or not isinstance(resource_type, str):
-                _fail("cleanup-job-schedule-output-malformed")
-            if (
-                resource_type.casefold()
-                == "microsoft.automation/automationaccounts/jobschedules"
-            ):
-                job_schedule_ids.append(resource_id)
-        if not job_schedule_ids:
-            if time.monotonic() >= deadline:
-                _fail("cleanup-job-schedule-propagation-timeout")
-            time.sleep(CLEANUP_JOB_SCHEDULE_RETRY_SECONDS)
-            continue
-        if len(job_schedule_ids) != 1:
-            _fail("cleanup-job-schedule-not-ready")
-        job_schedule_id = job_schedule_ids[0]
-        expected_prefix = _scope(
-            subscription_id,
-            f"/resourceGroups/{CLEANUP_GROUP}/providers/"
-            f"Microsoft.Automation/automationAccounts/{AUTOMATION_ACCOUNT}/"
-            "jobSchedules/",
-        )
-        if (
-            not job_schedule_id.casefold().startswith(expected_prefix.casefold())
-            or re.fullmatch(
-                r"[0-9a-fA-F-]{36}", job_schedule_id[len(expected_prefix) :]
-            )
-            is None
-        ):
-            _fail("cleanup-job-schedule-not-ready")
         try:
             job_schedule = _run(
                 (
