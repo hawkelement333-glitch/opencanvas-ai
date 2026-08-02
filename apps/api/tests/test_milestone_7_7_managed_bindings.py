@@ -2143,6 +2143,7 @@ def _verify_container_apps_infrastructure_fixture(
     resources: JsonValue = None,
     assignments: JsonValue = None,
     changed_inputs: str = "",
+    allow_prior_binding_with_changed_inputs: bool = False,
 ) -> int:
     subscription = SYNTHETIC_SUBSCRIPTION
     expected_tags = _test_recovered_cleanup_tags()
@@ -2212,6 +2213,7 @@ def _verify_container_apps_infrastructure_fixture(
         subscription_id=subscription,
         ledger=_test_lifecycle_ledger(),
         cleanup_at=datetime(2026, 8, 2, 23, 0, tzinfo=UTC),
+        allow_prior_binding_with_changed_inputs=allow_prior_binding_with_changed_inputs,
     )
 
 
@@ -2289,6 +2291,43 @@ def test_container_apps_infrastructure_accepts_ancestor_source_only_without_inpu
         match="container-apps-infrastructure-group-drift",
     ):
         _verify_container_apps_infrastructure_fixture(monkeypatch, group_tags=prior_tags)
+
+
+def test_container_apps_infrastructure_reconciles_only_lower_prior_cost_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prior_tags = _test_recovered_cleanup_tags()
+    prior_tags["mobius-cost-ceiling-usd-cents"] = "1"
+    prior_tags["mobius-source-commit"] = "d" * 40
+    prior_tags["mobius-expires-at-utc"] = "2026-08-02T07:00:00Z"
+    prior_tags["aca-managed-env-id"] = (
+        f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}/resourceGroups/"
+        f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
+        "managedEnvironments/cae-mobius77-staging"
+    )
+
+    assert (
+        _verify_container_apps_infrastructure_fixture(
+            monkeypatch,
+            group_tags=prior_tags,
+            changed_inputs="infra/milestone_7_7/main.bicep",
+            allow_prior_binding_with_changed_inputs=True,
+        )
+        == 1
+    )
+
+    for invalid_cost in ("999999", "-1", "1.0", "one", "\u0661"):
+        prior_tags["mobius-cost-ceiling-usd-cents"] = invalid_cost
+        with pytest.raises(
+            managed_binding_lifecycle.LifecycleError,
+            match="container-apps-infrastructure-group-drift",
+        ):
+            _verify_container_apps_infrastructure_fixture(
+                monkeypatch,
+                group_tags=prior_tags,
+                changed_inputs="infra/milestone_7_7/main.bicep",
+                allow_prior_binding_with_changed_inputs=True,
+            )
 
 
 def _reconcile_container_apps_infrastructure_tags_fixture(

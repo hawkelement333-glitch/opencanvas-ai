@@ -700,6 +700,7 @@ def _container_apps_infrastructure_tags_reconcilable(
         return False
     variable_keys = {
         "mobius-cleanup-binding-sha256",
+        "mobius-cost-ceiling-usd-cents",
         "mobius-expires-at-utc",
         "mobius-manifest-sha256",
         "mobius-run-id",
@@ -715,6 +716,19 @@ def _container_apps_infrastructure_tags_reconcilable(
         not isinstance(observed.get(key), str)
         or HEX_SHA256.fullmatch(str(observed[key])) is None
         for key in ("mobius-cleanup-binding-sha256", "mobius-manifest-sha256")
+    ):
+        return False
+    cost_key = "mobius-cost-ceiling-usd-cents"
+    observed_cost = observed.get(cost_key)
+    expected_cost = expected.get(cost_key)
+    if (
+        not isinstance(observed_cost, str)
+        or not observed_cost.isascii()
+        or not observed_cost.isdecimal()
+        or not isinstance(expected_cost, str)
+        or not expected_cost.isascii()
+        or not expected_cost.isdecimal()
+        or int(observed_cost) > int(expected_cost)
     ):
         return False
     observed_run_id = observed.get("mobius-run-id")
