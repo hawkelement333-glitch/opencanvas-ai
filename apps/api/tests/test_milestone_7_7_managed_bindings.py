@@ -2849,6 +2849,8 @@ def _test_preservation_state(
         "resumableCheckpoint": "pre-secret",
         "secretValueAccessed": False,
         "temporaryKeyVaultAssignmentId": None,
+        "temporaryKeyVaultAuthorityLedgerSha256": None,
+        "temporaryKeyVaultAuthorityProved": False,
         "temporaryRegistryAssignmentId": None,
     }
 
@@ -3731,6 +3733,11 @@ def test_fresh_pre_secret_resume_is_idempotent_and_skips_cleanup_recreation(
         "_temporary_role_assignment",
         lambda **_kwargs: "opaque-assignment",
     )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_wait_for_key_vault_metadata_authority",
+        lambda _subscription: None,
+    )
 
     for index, marker in enumerate(("a", "b")):
         receipt_directory = tmp_path / str(index)
@@ -3838,6 +3845,11 @@ def test_exact_cleanup_only_recovery_seed_is_reconciled_before_staging(
         managed_binding_lifecycle,
         "_temporary_role_assignment",
         lambda **_kwargs: "opaque-assignment",
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_wait_for_key_vault_metadata_authority",
+        lambda _subscription: None,
     )
 
     result = managed_binding_lifecycle._pre_secret(

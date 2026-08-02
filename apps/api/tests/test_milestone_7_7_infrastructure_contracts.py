@@ -1060,7 +1060,10 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
         "modules/network.bicep": {"c632b3df-fb67-4d84-bdcf-b95ad541b5c8"},
         "modules/registry.bicep": {"7f951dda-4ed3-4680-a7ca-43fe172d538d"},
         "modules/storage-scanner.bicep": {"ba92f5b4-2d11-453d-a403-e96b0029c9fe"},
-        "scripts/managed_binding_lifecycle.py": {"4d97b98b-1d4f-4787-a291-c67834d212e7"},
+        "scripts/managed_binding_lifecycle.py": {
+            "00000000-0000-0000-0000-000000000000",
+            "4d97b98b-1d4f-4787-a291-c67834d212e7",
+        },
     }
     for path in ROOT.rglob("*"):
         if not path.is_file():

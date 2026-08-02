@@ -154,7 +154,13 @@ CORRELATION_HASH_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/operation-correlation/v1\x00"
 )
 PROTECTED_OPERATION_CATALOG: Final = (
+    ("pre-secret-provisioning", "key-vault-temporary-authority-creation"),
+    ("pre-secret-provisioning", "key-vault-authority-propagation-proof"),
     ("post-secret-provisioning", "key-vault-secret-metadata-listing"),
+    ("post-secret-provisioning", "key-vault-temporary-authority-creation"),
+    ("post-secret-provisioning", "key-vault-authority-propagation-proof"),
+    ("post-secret-provisioning", "key-vault-temporary-authority-revocation"),
+    ("post-secret-provisioning", "key-vault-post-revocation-denial-proof"),
     (
         "post-secret-provisioning",
         "publisher-application-and-service-principal-creation",
@@ -180,6 +186,29 @@ PROTECTED_OPERATION_CATALOG: Final = (
     ("cleanup", "failure-cleanup-and-resource-group-deletion"),
     ("cleanup", "preserved-environment-reconciliation"),
 )
+TRANSIENT_STATE_FIELDS: Final = frozenset(
+    {
+        "activeStage",
+        "cleanupAtUtc",
+        "disposition",
+        "failedStage",
+        "lastCompletedStage",
+        "preSecretDeploymentName",
+        "repositoryHead",
+        "resumableCheckpoint",
+        "secretValueAccessed",
+        "temporaryKeyVaultAssignmentId",
+        "temporaryKeyVaultAuthorityLedgerSha256",
+        "temporaryKeyVaultAuthorityProved",
+        "temporaryRegistryAssignmentId",
+    }
+)
+KEY_VAULT_AUTHORITY_PROVED_STAGE: Final = "key-vault-authority-proved"
+KEY_VAULT_AUTHORITY_REVOKED_STAGE: Final = "key-vault-authority-revoked"
+LEGACY_TRANSIENT_STATE_FIELDS: Final = TRANSIENT_STATE_FIELDS - {
+    "temporaryKeyVaultAuthorityLedgerSha256",
+    "temporaryKeyVaultAuthorityProved",
+}
 SECURITY_CONTAINMENT_ERROR_CODES: Final = frozenset(
     {
         "cleanup-role-scope-not-exact",
@@ -916,6 +945,13 @@ def _process_attribution_spec(
                 }
                 else lifecycle_substage or mapped_substage
             )
+            if lifecycle_substage in {
+                "key-vault-temporary-authority-creation",
+                "key-vault-authority-propagation-proof",
+                "key-vault-temporary-authority-revocation",
+                "key-vault-post-revocation-denial-proof",
+            }:
+                operation_class = lifecycle_substage
         endpoint_class = {
             "key-vault-data-plane": "private-key-vault-data-plane",
             "local-tooling": "local-process",
@@ -3294,6 +3330,10 @@ def _temporary_role_assignment(
         "/subscriptions/"
     ):
         _fail("temporary-role-assignment-output-malformed")
+    if not assignment_id.casefold().startswith(
+        f"{scope}/providers/microsoft.authorization/roleassignments/".casefold()
+    ):
+        _fail("temporary-role-assignment-scope-not-exact")
     return assignment_id
 
 
@@ -3313,6 +3353,215 @@ def _delete_assignment(subscription_id: str, assignment_id: str) -> None:
             "none",
         )
     )
+
+
+def _ledger_integrity(ledger: Mapping[str, JsonValue]) -> str:
+    value = ledger.get("ledgerIntegritySha256")
+    if not isinstance(value, str) or HEX_SHA256.fullmatch(value) is None:
+        _fail("temporary-authority-ledger-binding-invalid")
+    return value
+
+
+def _validate_transient_state(
+    state: dict[str, JsonValue], *, ledger: Mapping[str, JsonValue]
+) -> None:
+    if set(state) != TRANSIENT_STATE_FIELDS:
+        _fail("transient-state-malformed")
+    if state.get("repositoryHead") != ledger.get("repositoryHead"):
+        _fail("transient-state-repository-head-mismatch")
+    if state.get("secretValueAccessed") is not False:
+        _fail("transient-state-secret-access-invalid")
+    if state.get("resumableCheckpoint") in {
+        "post-secret-provisioning",
+        "runtime-deployment-handoff",
+    }:
+        _fail("resumable-checkpoint-skips-key-vault-authority")
+    assignment_id = state.get("temporaryKeyVaultAssignmentId")
+    proved = state.get("temporaryKeyVaultAuthorityProved")
+    assignment_ledger = state.get("temporaryKeyVaultAuthorityLedgerSha256")
+    if assignment_id is None:
+        if proved is not False or assignment_ledger is not None:
+            _fail("temporary-key-vault-authority-state-invalid")
+    elif (
+        not isinstance(assignment_id, str)
+        or not assignment_id.startswith("/subscriptions/")
+        or not isinstance(proved, bool)
+        or not isinstance(assignment_ledger, str)
+        or HEX_SHA256.fullmatch(assignment_ledger) is None
+    ):
+        _fail("temporary-key-vault-authority-state-invalid")
+    registry_assignment = state.get("temporaryRegistryAssignmentId")
+    if registry_assignment is not None and (
+        not isinstance(registry_assignment, str)
+        or not registry_assignment.startswith("/subscriptions/")
+    ):
+        _fail("temporary-registry-authority-state-invalid")
+
+
+def _read_current_transient_state(
+    state_path: Path, *, ledger: Mapping[str, JsonValue]
+) -> dict[str, JsonValue]:
+    state = _read_state(state_path)
+    if set(state) == LEGACY_TRANSIENT_STATE_FIELDS:
+        if state.get("temporaryKeyVaultAssignmentId") is not None:
+            _fail("legacy-temporary-key-vault-authority-unreconciled")
+        state["temporaryKeyVaultAuthorityLedgerSha256"] = None
+        state["temporaryKeyVaultAuthorityProved"] = False
+        _replace_state(state_path, state)
+    _validate_transient_state(state, ledger=ledger)
+    return state
+
+
+def _last_durable_checkpoint(state: Mapping[str, JsonValue]) -> str | None:
+    for key in ("resumableCheckpoint", "lastCompletedStage"):
+        value = state.get(key)
+        if isinstance(value, str) and re.fullmatch(r"[a-z0-9-]{1,96}", value):
+            return value
+    return None
+
+
+def _key_vault_metadata_access_probe(subscription_id: str) -> None:
+    value = _run(
+        (
+            "az",
+            "keyvault",
+            "secret",
+            "list",
+            "--vault-name",
+            KEY_VAULT,
+            "--maxresults",
+            "1",
+            "--subscription",
+            subscription_id,
+            "--query",
+            "[:0]",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(value, list):
+        _fail("key-vault-authority-propagation-output-malformed")
+
+
+def _wait_for_key_vault_metadata_authority(subscription_id: str) -> None:
+    deadline = time.monotonic() + 600.0
+    while time.monotonic() < deadline:
+        _private_tls_endpoint(KEY_VAULT_HOST)
+        try:
+            with _attribution_scope(
+                lifecycle_substage="key-vault-authority-propagation-proof",
+                expected_authorization="allow",
+            ):
+                _key_vault_metadata_access_probe(subscription_id)
+            return
+        except AzureCommandError as error:
+            if error.sanitized_azure_error_code != "forbidden":
+                raise
+        time.sleep(10.0)
+    _fail("key-vault-authority-propagation-unproved")
+
+
+def _revoke_temporary_key_vault_authority(
+    *,
+    subscription_id: str,
+    state_path: Path,
+    state: dict[str, JsonValue],
+) -> bool:
+    assignment_id = state.get("temporaryKeyVaultAssignmentId")
+    if assignment_id is None:
+        return False
+    if not isinstance(assignment_id, str) or not assignment_id.startswith(
+        "/subscriptions/"
+    ):
+        _fail("temporary-key-vault-authority-state-invalid")
+    _mark_stage(state_path, state, "temporary-key-vault-authority-revocation")
+    with _attribution_scope(
+        lifecycle_substage="key-vault-temporary-authority-revocation",
+        expected_authorization="allow",
+    ):
+        _delete_assignment(subscription_id, assignment_id)
+    state["temporaryKeyVaultAssignmentId"] = None
+    state["temporaryKeyVaultAuthorityProved"] = False
+    state["temporaryKeyVaultAuthorityLedgerSha256"] = None
+    _replace_state(state_path, state)
+    with _attribution_scope(
+        lifecycle_substage="key-vault-post-revocation-denial-proof",
+        expected_authorization="deny",
+    ):
+        _wait_for_denial(
+            (
+                "az",
+                "keyvault",
+                "secret",
+                "list",
+                "--vault-name",
+                KEY_VAULT,
+                "--maxresults",
+                "1",
+                "--subscription",
+                subscription_id,
+                "--query",
+                "[:0]",
+                "--output",
+                "json",
+                "--only-show-errors",
+            ),
+            endpoint_host=KEY_VAULT_HOST,
+        )
+    state["activeStage"] = None
+    state["lastCompletedStage"] = KEY_VAULT_AUTHORITY_REVOKED_STAGE
+    state["resumableCheckpoint"] = KEY_VAULT_AUTHORITY_REVOKED_STAGE
+    _replace_state(state_path, state)
+    return True
+
+
+def _ensure_temporary_key_vault_authority(
+    *,
+    subscription_id: str,
+    ledger: Mapping[str, JsonValue],
+    state_path: Path,
+    state: dict[str, JsonValue],
+) -> None:
+    _validate_transient_state(state, ledger=ledger)
+    current_ledger = _ledger_integrity(ledger)
+    assignment_id = state.get("temporaryKeyVaultAssignmentId")
+    assignment_ledger = state.get("temporaryKeyVaultAuthorityLedgerSha256")
+    if assignment_id is not None and assignment_ledger != current_ledger:
+        _revoke_temporary_key_vault_authority(
+            subscription_id=subscription_id, state_path=state_path, state=state
+        )
+        assignment_id = None
+    if assignment_id is None:
+        contract = load_managed_binding_contract()
+        rbac = contract.get("rbac")
+        scopes = contract.get("scopeBinding")
+        if not isinstance(rbac, dict) or not isinstance(scopes, dict):
+            _fail("managed-binding-contract-malformed")
+        vault_scope = _scope(subscription_id, str(scopes["keyVault"]))
+        _mark_stage(state_path, state, "temporary-key-vault-authority-creation")
+        with _attribution_scope(
+            lifecycle_substage="key-vault-temporary-authority-creation",
+            expected_authorization="allow",
+        ):
+            assignment_id = _temporary_role_assignment(
+                subscription_id=subscription_id,
+                object_id=_signed_in_user_object_id(),
+                role_id=str(rbac["keyVaultSecretsOfficerRoleDefinitionId"]),
+                scope=vault_scope,
+            )
+        state["temporaryKeyVaultAssignmentId"] = assignment_id
+        state["temporaryKeyVaultAuthorityLedgerSha256"] = current_ledger
+        state["temporaryKeyVaultAuthorityProved"] = False
+        _replace_state(state_path, state)
+    _mark_stage(state_path, state, "key-vault-authority-propagation-proof")
+    _wait_for_key_vault_metadata_authority(subscription_id)
+    state["activeStage"] = None
+    state["lastCompletedStage"] = KEY_VAULT_AUTHORITY_PROVED_STAGE
+    state["resumableCheckpoint"] = KEY_VAULT_AUTHORITY_PROVED_STAGE
+    state["temporaryKeyVaultAuthorityProved"] = True
+    _replace_state(state_path, state)
 
 
 def _publisher_role_rows(
@@ -4490,8 +4739,7 @@ def _pre_secret(
     cleanup_at = _cleanup_deadline(_utc_now())
     contract = load_managed_binding_contract()
     rbac = contract["rbac"]
-    scopes = contract["scopeBinding"]
-    if not isinstance(rbac, dict) or not isinstance(scopes, dict):
+    if not isinstance(rbac, dict):
         _fail("managed-binding-contract-malformed")
     state_path = _state_path(receipt_directory)
     state: dict[str, JsonValue] = {
@@ -4507,6 +4755,8 @@ def _pre_secret(
         "resumableCheckpoint": PRE_SECRET_PRESERVABLE_STAGE,
         "secretValueAccessed": False,
         "temporaryKeyVaultAssignmentId": None,
+        "temporaryKeyVaultAuthorityLedgerSha256": None,
+        "temporaryKeyVaultAuthorityProved": False,
         "temporaryRegistryAssignmentId": None,
     }
     _write_state(state_path, state)
@@ -4629,19 +4879,14 @@ def _pre_secret(
     )
     _mark_stage(state_path, state, "pre-secret-verification", completed=True)
 
-    object_id = _signed_in_user_object_id()
-    vault_scope = _scope(subscription_id, str(scopes["keyVault"]))
-    _mark_stage(state_path, state, "temporary-key-vault-authority")
-    assignment_id = _temporary_role_assignment(
+    _ensure_temporary_key_vault_authority(
         subscription_id=subscription_id,
-        object_id=object_id,
-        role_id=str(rbac["keyVaultSecretsOfficerRoleDefinitionId"]),
-        scope=vault_scope,
+        ledger=ledger,
+        state_path=state_path,
+        state=state,
     )
-    state["temporaryKeyVaultAssignmentId"] = assignment_id
     state["activeStage"] = None
     state["disposition"] = LifecycleDisposition.COMPLETED.value
-    state["lastCompletedStage"] = "temporary-key-vault-authority"
     state["resumableCheckpoint"] = "secure-manual-entry"
     _replace_state(state_path, state)
     return {
@@ -5389,7 +5634,8 @@ def _post_secret(
     subscription_id: str,
     receipt_directory: Path,
 ) -> dict[str, JsonValue]:
-    state = _read_state(_state_path(receipt_directory))
+    state_path = _state_path(receipt_directory)
+    state = _read_current_transient_state(state_path, ledger=ledger)
     cleanup_at_raw = state.get("cleanupAtUtc")
     if not isinstance(cleanup_at_raw, str):
         _fail("cleanup-binding-missing")
@@ -5411,9 +5657,26 @@ def _post_secret(
         "opencanvas-telemetry-pseudonymization-secret",
         "opencanvas-observability-operator-user-ids",
     )
-    secret_states = _managed_secret_states(subscription_id)
-    if secret_states != dict.fromkeys(required_secret_names, True):
-        _fail("managed-secret-presence-or-state-unproved")
+    try:
+        _ensure_temporary_key_vault_authority(
+            subscription_id=subscription_id,
+            ledger=ledger,
+            state_path=state_path,
+            state=state,
+        )
+        with _attribution_scope(
+            lifecycle_substage="key-vault-secret-metadata-listing",
+            expected_authorization="allow",
+        ):
+            secret_states = _managed_secret_states(subscription_id)
+        if secret_states != dict.fromkeys(required_secret_names, True):
+            _fail("managed-secret-presence-or-state-unproved")
+    finally:
+        _revoke_temporary_key_vault_authority(
+            subscription_id=subscription_id,
+            state_path=state_path,
+            state=state,
+        )
     expected_cost, maximum_cost = _verified_cost()
     api_image_digest = _reconcile_published_api_image(
         ledger=ledger,
@@ -5453,12 +5716,13 @@ def _revoke(subscription_id: str, receipt_directory: Path) -> dict[str, JsonValu
     state_path = _state_path(receipt_directory)
     state = _read_state(state_path)
     removed = 0
-    key_vault_assignment_removed = False
+    key_vault_assignment_removed = _revoke_temporary_key_vault_authority(
+        subscription_id=subscription_id, state_path=state_path, state=state
+    )
+    if key_vault_assignment_removed:
+        removed += 1
     registry_assignment_removed = False
-    for key in (
-        "temporaryKeyVaultAssignmentId",
-        "temporaryRegistryAssignmentId",
-    ):
+    for key in ("temporaryRegistryAssignmentId",):
         value = state.get(key)
         if value is None:
             continue
@@ -5467,32 +5731,9 @@ def _revoke(subscription_id: str, receipt_directory: Path) -> dict[str, JsonValu
         _delete_assignment(subscription_id, value)
         state[key] = None
         removed += 1
-        if key == "temporaryKeyVaultAssignmentId":
-            key_vault_assignment_removed = True
         if key == "temporaryRegistryAssignmentId":
             registry_assignment_removed = True
         _replace_state(state_path, state)
-    if key_vault_assignment_removed:
-        _wait_for_denial(
-            (
-                "az",
-                "keyvault",
-                "secret",
-                "list",
-                "--vault-name",
-                KEY_VAULT,
-                "--maxresults",
-                "1",
-                "--subscription",
-                subscription_id,
-                "--query",
-                "[:0]",
-                "--output",
-                "json",
-                "--only-show-errors",
-            ),
-            endpoint_host=KEY_VAULT_HOST,
-        )
     if registry_assignment_removed:
         _wait_for_denial(
             (
@@ -5794,20 +6035,10 @@ def _state_for_pre_secret_preservation(
     ledger: dict[str, JsonValue],
     now: datetime,
 ) -> tuple[dict[str, JsonValue], datetime]:
-    state = _read_state(state_path)
-    if set(state) != {
-        "activeStage",
-        "cleanupAtUtc",
-        "disposition",
-        "failedStage",
-        "lastCompletedStage",
-        "preSecretDeploymentName",
-        "repositoryHead",
-        "resumableCheckpoint",
-        "secretValueAccessed",
-        "temporaryKeyVaultAssignmentId",
-        "temporaryRegistryAssignmentId",
-    }:
+    state = _read_current_transient_state(state_path, ledger=ledger)
+    try:
+        _validate_transient_state(state, ledger=ledger)
+    except LifecycleError:
         _fail("pre-secret-state-malformed")
     cleanup_at_raw = state["cleanupAtUtc"]
     if not isinstance(cleanup_at_raw, str):
@@ -5830,6 +6061,8 @@ def _state_for_pre_secret_preservation(
         or state["resumableCheckpoint"] != PRE_SECRET_PRESERVABLE_STAGE
         or state["secretValueAccessed"] is not False
         or state["temporaryKeyVaultAssignmentId"] is not None
+        or state["temporaryKeyVaultAuthorityLedgerSha256"] is not None
+        or state["temporaryKeyVaultAuthorityProved"] is not False
         or state["temporaryRegistryAssignmentId"] is not None
         or cleanup_at != AUTHORIZED_CLEANUP_AT_UTC
         or now >= cleanup_at - MINIMUM_CLEANUP_RESERVE
@@ -6019,17 +6252,36 @@ def _handle_failure(
             pass
 
     cleanup_status = "not-authorized-preserved"
+    durable_checkpoint: str | None = None
     if receipt_directory is not None:
         state_path = _state_path(receipt_directory)
         if state_path.is_file():
             try:
-                state = _read_state(state_path)
+                state = (
+                    _read_current_transient_state(state_path, ledger=ledger)
+                    if ledger is not None
+                    else _read_state(state_path)
+                )
+                durable_checkpoint = _last_durable_checkpoint(state)
+                if (
+                    subscription_id is not None
+                    and state.get("temporaryKeyVaultAssignmentId") is not None
+                ):
+                    _revoke_temporary_key_vault_authority(
+                        subscription_id=subscription_id,
+                        state_path=state_path,
+                        state=state,
+                    )
+                    cleanup_status = "temporary-key-vault-authority-revoked-and-denied"
+                    durable_checkpoint = KEY_VAULT_AUTHORITY_REVOKED_STAGE
                 state["activeStage"] = None
                 state["disposition"] = failure_disposition.value
                 state["failedStage"] = failed_stage
-                state["resumableCheckpoint"] = failed_stage
+                state["resumableCheckpoint"] = durable_checkpoint
                 _replace_state(state_path, state)
             except (ContractError, LifecycleError, OSError, ValueError):
+                # A malformed transient state cannot safely identify a role to revoke.
+                # Preserve it fail-closed; a verified assignment is revoked above.
                 pass
     record = _failure_record(
         disposition=failure_disposition,
@@ -6038,7 +6290,7 @@ def _handle_failure(
         error_code=error_code,
         azure_error_code=azure_error_code,
         proof={"proved": False},
-        resumable_checkpoint=None,
+        resumable_checkpoint=durable_checkpoint,
         cleanup_status=cleanup_status,
         ledger=ledger,
     )
