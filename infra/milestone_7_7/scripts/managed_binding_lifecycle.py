@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+from contextlib import contextmanager
+from contextvars import ContextVar
 import hashlib
 import http.client
 import ipaddress
@@ -23,7 +25,7 @@ import ssl
 import subprocess
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
@@ -144,6 +146,40 @@ CLEANUP_AUTHORIZATION_DOMAIN: Final = (
 )
 CLEANUP_AUTHORIZATION_FILE: Final = "cleanup-authorization.json"
 CLEANUP_AUTHORIZATION_MAXIMUM_AGE: Final = timedelta(hours=1)
+OPERATION_ATTRIBUTION_FILE: Final = "managed-binding-operation-attribution.json"
+OPERATION_ATTRIBUTION_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/operation-attribution/v1\x00"
+)
+CORRELATION_HASH_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/operation-correlation/v1\x00"
+)
+PROTECTED_OPERATION_CATALOG: Final = (
+    ("post-secret-provisioning", "key-vault-secret-metadata-listing"),
+    (
+        "post-secret-provisioning",
+        "publisher-application-and-service-principal-creation",
+    ),
+    ("post-secret-provisioning", "initial-acr-denial-token-proof"),
+    ("post-secret-provisioning", "acrpush-assignment-creation"),
+    ("post-secret-provisioning", "acrpush-propagation-verification"),
+    ("post-secret-provisioning", "acrpush-propagation-token-verification"),
+    ("post-secret-provisioning", "entra-token-acquisition"),
+    ("post-secret-provisioning", "private-acr-oauth-exchange"),
+    ("post-secret-provisioning", "private-acr-docker-login"),
+    ("post-secret-provisioning", "repository-specific-digest-verification"),
+    ("post-secret-provisioning", "immutable-image-publication"),
+    ("post-secret-provisioning", "mutable-tag-removal"),
+    ("post-secret-provisioning", "temporary-role-revocation"),
+    ("post-secret-provisioning", "post-revocation-token-denial-proof"),
+    ("post-secret-provisioning", "acr-manifest-denial-proof"),
+    ("post-secret-provisioning", "acr-pull-denial-proof"),
+    ("post-secret-provisioning", "acr-push-denial-proof"),
+    ("post-secret-provisioning", "publisher-identity-and-credential-deletion"),
+    ("post-secret-provisioning", "publisher-credential-and-cache-deletion"),
+    ("temporary-authority-revocation", "temporary-role-revocation"),
+    ("cleanup", "failure-cleanup-and-resource-group-deletion"),
+    ("cleanup", "preserved-environment-reconciliation"),
+)
 SECURITY_CONTAINMENT_ERROR_CODES: Final = frozenset(
     {
         "cleanup-role-scope-not-exact",
@@ -422,6 +458,19 @@ def _run(
         )
         if not execution_directory.is_dir():
             _fail("lifecycle-working-directory-invalid")
+    attribution, operation_id, attribution_spec = _begin_process_attribution(
+        argv, environment_overrides=environment_overrides
+    )
+    if (
+        attribution is not None
+        and operation_id is not None
+        and attribution_spec is not None
+        and attribution_spec["azureMutation"] is True
+    ):
+        attribution.mark_execution_began(
+            operation_id,
+            cleanup_or_revocation=attribution_spec["cleanupOrRevocation"] is True,
+        )
     try:
         completed = subprocess.run(
             actual,
@@ -434,24 +483,89 @@ def _run(
             timeout=timeout_seconds,
         )
     except (OSError, subprocess.TimeoutExpired):
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code="lifecycle-process-failed",
+            correlation_hash=None,
+            terminal_disposition="FAILED",
+        )
         _fail("lifecycle-process-failed")
     stdout = bytearray(completed.stdout)
     stderr = bytearray(completed.stderr)
+    attribution_finished = False
     try:
         if len(stdout) + len(stderr) > MAXIMUM_OUTPUT_BYTES:
             _fail("lifecycle-output-oversized")
         if completed.returncode != 0:
             if argv[0] == "az":
-                raise AzureCommandError(_sanitized_azure_error_code(stdout, stderr))
+                azure_error_code = _sanitized_azure_error_code(stdout, stderr)
+                _finish_process_attribution(
+                    attribution,
+                    operation_id,
+                    status_code=_sanitized_status_code(
+                        stdout,
+                        stderr,
+                        default="403"
+                        if azure_error_code == "forbidden"
+                        else "not-reported",
+                    ),
+                    azure_error_code=azure_error_code,
+                    correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+                    terminal_disposition="FAILED",
+                )
+                attribution_finished = True
+                raise AzureCommandError(azure_error_code)
+            _finish_process_attribution(
+                attribution,
+                operation_id,
+                status_code="not-reported",
+                azure_error_code="lifecycle-command-nonzero",
+                correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+                terminal_disposition="FAILED",
+            )
+            attribution_finished = True
             _fail("lifecycle-command-nonzero")
         if not require_json:
+            _finish_process_attribution(
+                attribution,
+                operation_id,
+                status_code="2xx-not-reported",
+                azure_error_code=None,
+                correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+                terminal_disposition="COMPLETED",
+            )
+            attribution_finished = True
             return None
         try:
             text = bytes(stdout).decode("utf-8", errors="strict")
             value = json.loads(text)
         except (UnicodeError, json.JSONDecodeError):
             _fail("lifecycle-json-malformed")
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="2xx-not-reported",
+            azure_error_code=None,
+            correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+            terminal_disposition="COMPLETED",
+        )
+        attribution_finished = True
         return cast(JsonValue, value)
+    except BaseException as exc:
+        if not attribution_finished:
+            _finish_process_attribution(
+                attribution,
+                operation_id,
+                status_code=_sanitized_status_code(
+                    stdout, stderr, default="not-reported"
+                ),
+                azure_error_code=_safe_attribution_error(exc),
+                correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+                terminal_disposition="FAILED",
+            )
+        raise
     finally:
         stdout.clear()
         stderr.clear()
@@ -559,6 +673,697 @@ def _replace_state(path: Path, value: dict[str, JsonValue]) -> None:
     except OSError:
         temporary.unlink(missing_ok=True)
         _fail("transient-state-replace-failed")
+
+
+_ACTIVE_ATTRIBUTION: ContextVar[_OperationAttribution | None] = ContextVar(
+    "managed_binding_active_attribution", default=None
+)
+_ATTRIBUTION_EXPECTED_AUTHORIZATION: ContextVar[str] = ContextVar(
+    "managed_binding_attribution_expected_authorization", default="allow"
+)
+_ATTRIBUTION_SUBSTAGE: ContextVar[str | None] = ContextVar(
+    "managed_binding_attribution_substage", default=None
+)
+
+
+def _operation_attribution_path(receipt_directory: Path) -> Path:
+    return receipt_directory / OPERATION_ATTRIBUTION_FILE
+
+
+def _safe_operation_token(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")
+    if re.fullmatch(r"[a-z0-9-]{1,96}", normalized) is None:
+        _fail("protected-operation-attribution-invalid")
+    return normalized
+
+
+def _safe_attribution_error(error: BaseException) -> str:
+    if isinstance(error, AzureCommandError):
+        return error.sanitized_azure_error_code
+    candidate = str(error)
+    if re.fullmatch(r"[a-z0-9-]{1,96}", candidate) is not None:
+        return candidate
+    return "failed-closed"
+
+
+def _sanitized_status_code(
+    stdout: bytearray, stderr: bytearray, *, default: str
+) -> str:
+    for buffer in (stderr, stdout):
+        try:
+            decoded = bytes(buffer).decode("utf-8", errors="strict")
+        except UnicodeError:
+            continue
+        matched = re.search(
+            r"(?i)\b(?:http\s*)?(?:status(?:\s*code)?)?\s*[:=]?\s*([1-5]\d{2})\b",
+            decoded,
+        )
+        if matched is not None:
+            return matched.group(1)
+    return default
+
+
+def _sanitized_correlation_hash(stdout: bytearray, stderr: bytearray) -> str | None:
+    pattern = re.compile(
+        r'(?i)(?:"(?:correlationId|requestId)"|\b(?:correlation|request)[-_ ]?id)'
+        r'\s*[:=]\s*"?([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})\b'
+    )
+    for buffer in (stderr, stdout):
+        try:
+            decoded = bytes(buffer).decode("utf-8", errors="strict")
+        except UnicodeError:
+            continue
+        matched = pattern.search(decoded)
+        if matched is not None:
+            return hashlib.sha256(
+                CORRELATION_HASH_DOMAIN + matched.group(1).casefold().encode("ascii")
+            ).hexdigest()
+    return None
+
+
+def _expected_authorization_result() -> str:
+    value = _ATTRIBUTION_EXPECTED_AUTHORIZATION.get()
+    if value not in {"allow", "deny"}:
+        _fail("protected-operation-attribution-invalid")
+    return value
+
+
+def _process_attribution_spec(
+    argv: tuple[str, ...],
+    *,
+    environment_overrides: Mapping[str, str] | None,
+    expected_authorization: str | None = None,
+) -> dict[str, JsonValue]:
+    if not argv:
+        _fail("protected-operation-attribution-invalid")
+    command = argv[0]
+    operation_class = ""
+    lifecycle_substage = _ATTRIBUTION_SUBSTAGE.get()
+    service_class = ""
+    endpoint_class = ""
+    mutation = False
+    cleanup_or_revocation = False
+
+    if command == "az":
+        process_map: dict[tuple[str, ...], tuple[str, str, str, bool, bool]] = {
+            ("az", "keyvault", "secret", "list"): (
+                "key-vault-secret-metadata-listing",
+                "key-vault-secret-metadata-listing",
+                "key-vault-data-plane",
+                False,
+                False,
+            ),
+            ("az", "ad", "sp", "create-for-rbac"): (
+                "publisher-application-and-service-principal-creation",
+                "publisher-application-and-service-principal-creation",
+                "microsoft-graph",
+                True,
+                False,
+            ),
+            ("az", "ad", "sp", "delete"): (
+                "publisher-service-principal-deletion",
+                "publisher-identity-and-credential-deletion",
+                "microsoft-graph",
+                True,
+                True,
+            ),
+            ("az", "ad", "app", "delete"): (
+                "publisher-application-deletion",
+                "publisher-identity-and-credential-deletion",
+                "microsoft-graph",
+                True,
+                True,
+            ),
+            ("az", "ad", "sp", "show"): (
+                "publisher-service-principal-propagation-verification",
+                "publisher-service-principal-propagation-verification",
+                "microsoft-graph",
+                False,
+                False,
+            ),
+            ("az", "ad", "sp", "list"): (
+                "publisher-service-principal-inventory",
+                "publisher-identity-and-credential-deletion",
+                "microsoft-graph",
+                False,
+                False,
+            ),
+            ("az", "ad", "app", "list"): (
+                "publisher-application-inventory",
+                "publisher-identity-and-credential-deletion",
+                "microsoft-graph",
+                False,
+                False,
+            ),
+            ("az", "role", "assignment", "create"): (
+                "acrpush-assignment-creation",
+                "acrpush-assignment-creation",
+                "azure-resource-manager",
+                True,
+                False,
+            ),
+            ("az", "role", "assignment", "delete"): (
+                "temporary-role-revocation",
+                "temporary-role-revocation",
+                "azure-resource-manager",
+                True,
+                True,
+            ),
+            ("az", "role", "assignment", "list"): (
+                "acrpush-propagation-verification",
+                "acrpush-propagation-verification",
+                "azure-resource-manager",
+                False,
+                False,
+            ),
+            (
+                "az",
+                "login",
+                "--service-principal",
+            ): (
+                "publisher-certificate-authentication",
+                "publisher-certificate-authentication",
+                "microsoft-entra",
+                False,
+                False,
+            ),
+            ("az", "account", "get-access-token"): (
+                "entra-token-acquisition",
+                "entra-token-acquisition",
+                "microsoft-entra",
+                False,
+                False,
+            ),
+            ("az", "deployment", "group", "create"): (
+                "managed-runtime-deployment",
+                "managed-runtime-deployment",
+                "azure-resource-manager",
+                True,
+                False,
+            ),
+            ("az", "group", "delete"): (
+                "resource-group-cleanup",
+                "failure-cleanup-and-resource-group-deletion",
+                "azure-resource-manager",
+                True,
+                True,
+            ),
+            ("az", "group", "exists"): (
+                "preserved-environment-reconciliation",
+                "failure-cleanup-and-preserved-environment-reconciliation",
+                "azure-resource-manager",
+                False,
+                False,
+            ),
+            ("az", "keyvault", "purge"): (
+                "key-vault-cleanup",
+                "failure-cleanup-and-resource-group-deletion",
+                "azure-resource-manager",
+                True,
+                True,
+            ),
+            ("az", "bicep", "build"): (
+                "template-compilation",
+                "template-compilation",
+                "local-tooling",
+                False,
+                False,
+            ),
+        }
+        matched_key = next(
+            (key for key in process_map if argv[: len(key)] == key), None
+        )
+        mapped = process_map.get(matched_key) if matched_key is not None else None
+        if mapped is None:
+            safe = "-".join(_safe_operation_token(value) for value in argv[:4])
+            operation_class = f"process-{safe}"
+            service_class = "azure-resource-manager"
+            endpoint_class = "azure-management-plane"
+        else:
+            (
+                operation_class,
+                mapped_substage,
+                service_class,
+                mutation,
+                cleanup_or_revocation,
+            ) = mapped
+            lifecycle_substage = (
+                mapped_substage
+                if matched_key
+                in {
+                    ("az", "account", "get-access-token"),
+                    ("az", "login", "--service-principal"),
+                }
+                else lifecycle_substage or mapped_substage
+            )
+        endpoint_class = {
+            "key-vault-data-plane": "private-key-vault-data-plane",
+            "local-tooling": "local-process",
+            "microsoft-entra": "microsoft-entra-token-endpoint",
+            "microsoft-graph": "microsoft-graph",
+        }.get(service_class, "azure-management-plane")
+    elif command == "docker":
+        docker_map: dict[tuple[str, ...], tuple[str, str, bool]] = {
+            ("docker", "buildx", "build"): (
+                "immutable-image-publication",
+                "immutable-image-publication",
+                True,
+            ),
+            ("docker", "manifest", "inspect"): (
+                "acr-manifest-denial-proof",
+                "post-revocation-manifest-denial-proof",
+                False,
+            ),
+            ("docker", "pull"): (
+                "acr-pull-denial-proof",
+                "post-revocation-pull-denial-proof",
+                False,
+            ),
+            ("docker", "push"): (
+                "acr-push-denial-proof",
+                "post-revocation-push-denial-proof",
+                True,
+            ),
+            ("docker", "image", "rm"): (
+                "publisher-local-image-cleanup",
+                "publisher-identity-and-credential-deletion",
+                False,
+            ),
+            ("docker", "login"): (
+                "private-acr-docker-login",
+                "private-acr-docker-login",
+                False,
+            ),
+            ("docker", "logout"): (
+                "publisher-docker-credential-clearance",
+                "publisher-identity-and-credential-deletion",
+                False,
+            ),
+            ("docker", "tag"): (
+                "publisher-local-revocation-probe-preparation",
+                "publisher-local-revocation-probe-preparation",
+                False,
+            ),
+        }
+        docker_matched_key = next(
+            (key for key in docker_map if argv[: len(key)] == key), None
+        )
+        docker_mapped = (
+            docker_map.get(docker_matched_key)
+            if docker_matched_key is not None
+            else None
+        )
+        if docker_mapped is None:
+            safe = "-".join(_safe_operation_token(value) for value in argv[:2])
+            operation_class = f"process-{safe}"
+            lifecycle_substage = lifecycle_substage or operation_class
+        else:
+            operation_class, mapped_substage, mutation = docker_mapped
+            lifecycle_substage = lifecycle_substage or mapped_substage
+        service_class = "azure-container-registry-data-plane"
+        endpoint_class = "private-acr-registry-data-plane"
+    elif command == "git":
+        operation_class = "repository-state-verification"
+        lifecycle_substage = lifecycle_substage or "repository-state-verification"
+        service_class = "local-repository"
+        endpoint_class = "local-process"
+    else:
+        _fail("protected-operation-attribution-invalid")
+
+    if lifecycle_substage is None:
+        lifecycle_substage = operation_class
+    if re.fullmatch(r"[a-z0-9-]{1,96}", lifecycle_substage) is None:
+        _fail("protected-operation-attribution-invalid")
+    identity_alias = (
+        "ephemeral-acr-publisher"
+        if environment_overrides is not None
+        and "AZURE_CONFIG_DIR" in environment_overrides
+        else "interactive-execution-identity"
+    )
+    return {
+        "lifecycleSubstage": lifecycle_substage,
+        "operationClass": operation_class,
+        "serviceClass": service_class,
+        "endpointClass": endpoint_class,
+        "identityAlias": identity_alias,
+        "expectedAuthorizationResult": expected_authorization
+        or _expected_authorization_result(),
+        "azureMutation": mutation,
+        "cleanupOrRevocation": cleanup_or_revocation,
+    }
+
+
+def _registry_attribution_spec(method: str, path: str) -> dict[str, JsonValue]:
+    mapped: dict[tuple[str, str], tuple[str, str, bool]] = {
+        ("POST", "/oauth2/exchange"): (
+            "private-acr-oauth-exchange",
+            "private-acr-oauth-exchange",
+            False,
+        ),
+        ("POST", "/oauth2/token"): (
+            "repository-scoped-acr-token-request",
+            "repository-scoped-acr-token-request",
+            False,
+        ),
+    }
+    scoped_substage = _ATTRIBUTION_SUBSTAGE.get()
+    if (method, path) in mapped:
+        operation_class, substage, mutation = mapped[(method, path)]
+        if (method, path) == ("POST", "/oauth2/token"):
+            if scoped_substage == "initial-acr-denial":
+                operation_class = "initial-acr-denial-token-proof"
+            elif scoped_substage == "acrpush-propagation-verification":
+                operation_class = "acrpush-propagation-token-verification"
+            elif scoped_substage == "post-revocation-acr-denial":
+                operation_class = "post-revocation-token-denial-proof"
+    elif method == "HEAD" and "/manifests/" in path:
+        operation_class = "repository-specific-digest-verification"
+        substage = "repository-specific-digest-verification"
+        mutation = False
+    elif method == "DELETE" and "/_tags/" in path:
+        operation_class = "mutable-tag-removal"
+        substage = "mutable-tag-removal"
+        mutation = True
+    else:
+        _fail("protected-operation-attribution-invalid")
+    return {
+        "lifecycleSubstage": scoped_substage or substage,
+        "operationClass": operation_class,
+        "serviceClass": "azure-container-registry-data-plane",
+        "endpointClass": "private-acr-registry-data-plane",
+        "identityAlias": "ephemeral-acr-publisher",
+        "expectedAuthorizationResult": _expected_authorization_result(),
+        "azureMutation": mutation,
+        "cleanupOrRevocation": False,
+    }
+
+
+class _OperationAttribution:
+    def __init__(self, *, receipt_directory: Path, lifecycle_stage: str) -> None:
+        self.path = _operation_attribution_path(receipt_directory)
+        self.lifecycle_stage = lifecycle_stage
+        self.document: dict[str, JsonValue] = {
+            "activeOperation": None,
+            "integritySha256": None,
+            "lifecycleOperation": lifecycle_stage,
+            "records": [],
+            "schemaVersion": "mobius.milestone-7.7.operation-attribution.v1",
+        }
+        if self.path.exists():
+            _fail("protected-operation-attribution-already-present")
+        self._persist(initial=True)
+
+    def _persist(self, *, initial: bool = False) -> None:
+        unsigned = {
+            key: value
+            for key, value in self.document.items()
+            if key != "integritySha256"
+        }
+        self.document["integritySha256"] = hashlib.sha256(
+            OPERATION_ATTRIBUTION_DOMAIN + canonical_bytes(unsigned)
+        ).hexdigest()
+        if initial:
+            _write_state(self.path, self.document)
+        else:
+            _replace_state(self.path, self.document)
+
+    def start(self, spec: Mapping[str, JsonValue]) -> str:
+        if self.document["activeOperation"] is not None:
+            _fail("protected-operation-attribution-active-operation-present")
+        records = self.document["records"]
+        if not isinstance(records, list):
+            _fail("protected-operation-attribution-malformed")
+        ordinal = len(records) + 1
+        record_id = f"{self.lifecycle_stage}-{ordinal:04d}"
+        record: dict[str, JsonValue] = {
+            "azureMutationBegan": False,
+            "cleanupOrRevocationRan": False,
+            "endpointClass": spec["endpointClass"],
+            "event": "pre-operation",
+            "expectedAuthorizationResult": spec["expectedAuthorizationResult"],
+            "finishedAtUtc": None,
+            "identityAlias": spec["identityAlias"],
+            "lifecycleStage": self.lifecycle_stage,
+            "lifecycleSubstage": spec["lifecycleSubstage"],
+            "operationClass": spec["operationClass"],
+            "operationId": record_id,
+            "requestOrCorrelationHash": None,
+            "sanitizedAzureErrorCode": None,
+            "sanitizedStatusCode": "not-observed",
+            "serviceClass": spec["serviceClass"],
+            "startedAtUtc": _format_utc(_utc_now()),
+            "terminalDisposition": "RUNNING",
+        }
+        self.document["activeOperation"] = dict(record)
+        records.append(record)
+        self._persist()
+        return record_id
+
+    def mark_execution_began(
+        self, operation_id: str, *, cleanup_or_revocation: bool
+    ) -> None:
+        active = self.document["activeOperation"]
+        if not isinstance(active, dict) or active.get("operationId") != operation_id:
+            _fail("protected-operation-attribution-active-operation-mismatch")
+        active["azureMutationBegan"] = True
+        active["cleanupOrRevocationRan"] = cleanup_or_revocation
+        records = self.document["records"]
+        if not isinstance(records, list):
+            _fail("protected-operation-attribution-malformed")
+        records.append({**active, "event": "execution-began"})
+        self._persist()
+
+    def finish(
+        self,
+        operation_id: str,
+        *,
+        status_code: str,
+        azure_error_code: str | None,
+        correlation_hash: str | None,
+        terminal_disposition: str,
+    ) -> None:
+        if (
+            status_code not in {"not-reported", "2xx-not-reported"}
+            and re.fullmatch(r"[1-5][0-9]{2}", status_code) is None
+        ):
+            _fail("protected-operation-attribution-status-invalid")
+        if terminal_disposition not in {"COMPLETED", "FAILED"}:
+            _fail("protected-operation-attribution-disposition-invalid")
+        if (
+            azure_error_code is not None
+            and re.fullmatch(r"[a-z0-9-]{1,64}", azure_error_code) is None
+        ):
+            _fail("protected-operation-attribution-error-invalid")
+        if (
+            correlation_hash is not None
+            and HEX_SHA256.fullmatch(correlation_hash) is None
+        ):
+            _fail("protected-operation-attribution-correlation-invalid")
+        active = self.document["activeOperation"]
+        if not isinstance(active, dict) or active.get("operationId") != operation_id:
+            _fail("protected-operation-attribution-active-operation-mismatch")
+        complete = {
+            **active,
+            "event": "post-operation",
+            "finishedAtUtc": _format_utc(_utc_now()),
+            "requestOrCorrelationHash": correlation_hash,
+            "sanitizedAzureErrorCode": azure_error_code,
+            "sanitizedStatusCode": status_code,
+            "terminalDisposition": terminal_disposition,
+        }
+        records = self.document["records"]
+        if not isinstance(records, list):
+            _fail("protected-operation-attribution-malformed")
+        records.append(complete)
+        self.document["activeOperation"] = None
+        self._persist()
+
+
+@contextmanager
+def _operation_attribution_session(
+    *, receipt_directory: Path, lifecycle_stage: str
+) -> Iterator[None]:
+    attribution = _OperationAttribution(
+        receipt_directory=receipt_directory, lifecycle_stage=lifecycle_stage
+    )
+    token = _ACTIVE_ATTRIBUTION.set(attribution)
+    try:
+        yield
+    finally:
+        _ACTIVE_ATTRIBUTION.reset(token)
+
+
+@contextmanager
+def _attribution_scope(
+    *, lifecycle_substage: str, expected_authorization: str
+) -> Iterator[None]:
+    if re.fullmatch(
+        r"[a-z0-9-]{1,96}", lifecycle_substage
+    ) is None or expected_authorization not in {"allow", "deny"}:
+        _fail("protected-operation-attribution-invalid")
+    substage_token = _ATTRIBUTION_SUBSTAGE.set(lifecycle_substage)
+    authorization_token = _ATTRIBUTION_EXPECTED_AUTHORIZATION.set(
+        expected_authorization
+    )
+    try:
+        yield
+    finally:
+        _ATTRIBUTION_EXPECTED_AUTHORIZATION.reset(authorization_token)
+        _ATTRIBUTION_SUBSTAGE.reset(substage_token)
+
+
+def _begin_process_attribution(
+    argv: tuple[str, ...],
+    *,
+    environment_overrides: Mapping[str, str] | None,
+    expected_authorization: str | None = None,
+) -> tuple[_OperationAttribution | None, str | None, dict[str, JsonValue] | None]:
+    attribution = _ACTIVE_ATTRIBUTION.get()
+    if attribution is None:
+        return None, None, None
+    spec = _process_attribution_spec(
+        argv,
+        environment_overrides=environment_overrides,
+        expected_authorization=expected_authorization,
+    )
+    return attribution, attribution.start(spec), spec
+
+
+def _finish_process_attribution(
+    attribution: _OperationAttribution | None,
+    operation_id: str | None,
+    *,
+    status_code: str,
+    azure_error_code: str | None,
+    correlation_hash: str | None,
+    terminal_disposition: str,
+) -> None:
+    if attribution is not None and operation_id is not None:
+        attribution.finish(
+            operation_id,
+            status_code=status_code,
+            azure_error_code=azure_error_code,
+            correlation_hash=correlation_hash,
+            terminal_disposition=terminal_disposition,
+        )
+
+
+def _remove_ephemeral_publisher_directory(path: Path) -> None:
+    attribution = _ACTIVE_ATTRIBUTION.get()
+    operation_id: str | None = None
+    if attribution is not None:
+        operation_id = attribution.start(
+            {
+                "lifecycleSubstage": "publisher-identity-and-credential-deletion",
+                "operationClass": "publisher-credential-and-cache-deletion",
+                "serviceClass": "local-ephemeral-storage",
+                "endpointClass": "local-process",
+                "identityAlias": "ephemeral-acr-publisher",
+                "expectedAuthorizationResult": "not-applicable",
+                "azureMutation": False,
+                "cleanupOrRevocation": True,
+            }
+        )
+    try:
+        shutil.rmtree(path)
+    except BaseException as exc:
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code=_safe_attribution_error(exc),
+            correlation_hash=None,
+            terminal_disposition="FAILED",
+        )
+        raise
+    _finish_process_attribution(
+        attribution,
+        operation_id,
+        status_code="2xx-not-reported",
+        azure_error_code=None,
+        correlation_hash=None,
+        terminal_disposition="COMPLETED",
+    )
+
+
+def _attributed_failed_stage(receipt_directory: Path) -> str | None:
+    path = _operation_attribution_path(receipt_directory)
+    if not path.is_file():
+        return None
+    try:
+        document = load_json(path)
+    except (ContractError, OSError, ValueError):
+        return "protected-attribution-invalid"
+    if not isinstance(document, dict) or set(document) != {
+        "activeOperation",
+        "integritySha256",
+        "lifecycleOperation",
+        "records",
+        "schemaVersion",
+    }:
+        return "protected-attribution-invalid"
+    integrity = document.get("integritySha256")
+    unsigned = {
+        key: value for key, value in document.items() if key != "integritySha256"
+    }
+    if (
+        not isinstance(integrity, str)
+        or HEX_SHA256.fullmatch(integrity) is None
+        or integrity
+        != hashlib.sha256(
+            OPERATION_ATTRIBUTION_DOMAIN + canonical_bytes(unsigned)
+        ).hexdigest()
+    ):
+        return "protected-attribution-invalid"
+    expected_record_fields = {
+        "azureMutationBegan",
+        "cleanupOrRevocationRan",
+        "endpointClass",
+        "event",
+        "expectedAuthorizationResult",
+        "finishedAtUtc",
+        "identityAlias",
+        "lifecycleStage",
+        "lifecycleSubstage",
+        "operationClass",
+        "operationId",
+        "requestOrCorrelationHash",
+        "sanitizedAzureErrorCode",
+        "sanitizedStatusCode",
+        "serviceClass",
+        "startedAtUtc",
+        "terminalDisposition",
+    }
+
+    def stage_from(value: JsonValue) -> str | None:
+        if not isinstance(value, dict) or set(value) != expected_record_fields:
+            return "protected-attribution-invalid"
+        stage = value.get("lifecycleSubstage")
+        if (
+            not isinstance(stage, str)
+            or re.fullmatch(r"[a-z0-9-]{1,96}", stage) is None
+        ):
+            return "protected-attribution-invalid"
+        return stage
+
+    active = document.get("activeOperation")
+    if active is not None:
+        return stage_from(active)
+    records = document.get("records")
+    if not isinstance(records, list):
+        return "protected-attribution-invalid"
+    for record in reversed(records):
+        if isinstance(record, dict) and record.get("terminalDisposition") == "FAILED":
+            return stage_from(record)
+    for record in reversed(records):
+        if (
+            isinstance(record, dict)
+            and record.get("event") == "post-operation"
+            and record.get("sanitizedStatusCode") == "403"
+            and record.get("expectedAuthorizationResult") == "allow"
+        ):
+            return stage_from(record)
+    return None
 
 
 def _mark_stage(
@@ -2920,6 +3725,11 @@ def _publisher_entra_token(
         "tsv",
         "--only-show-errors",
     )
+    attribution, operation_id, _attribution_spec = _begin_process_attribution(
+        argv,
+        environment_overrides=environment_overrides,
+        expected_authorization="allow",
+    )
     try:
         actual = _resolve_authorized_process_launch(argv).argv
         completed = subprocess.run(
@@ -2933,15 +3743,40 @@ def _publisher_entra_token(
             timeout=OPERATION_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.TimeoutExpired):
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code="publisher-entra-token-process-failed",
+            correlation_hash=None,
+            terminal_disposition="FAILED",
+        )
         _fail("publisher-entra-token-process-failed")
     stdout = bytearray(completed.stdout)
     stderr = bytearray(completed.stderr)
     token = bytearray()
+    attribution_finished = False
     try:
         if len(stdout) + len(stderr) > MAXIMUM_OUTPUT_BYTES:
             _fail("publisher-entra-token-output-oversized")
         if completed.returncode != 0:
-            raise AzureCommandError(_sanitized_azure_error_code(stdout, stderr))
+            azure_error_code = _sanitized_azure_error_code(stdout, stderr)
+            _finish_process_attribution(
+                attribution,
+                operation_id,
+                status_code=_sanitized_status_code(
+                    stdout,
+                    stderr,
+                    default="403"
+                    if azure_error_code == "forbidden"
+                    else "not-reported",
+                ),
+                azure_error_code=azure_error_code,
+                correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+                terminal_disposition="FAILED",
+            )
+            attribution_finished = True
+            raise AzureCommandError(azure_error_code)
         while stdout and stdout[-1] in b"\r\n\t ":
             stdout.pop()
         token.extend(stdout)
@@ -2950,9 +3785,29 @@ def _publisher_entra_token(
         _validate_entra_token(
             token, publisher_app_id=publisher_app_id, tenant_id=tenant_id
         )
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="2xx-not-reported",
+            azure_error_code=None,
+            correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+            terminal_disposition="COMPLETED",
+        )
+        attribution_finished = True
         return token
-    except Exception:
+    except BaseException as exc:
         token.clear()
+        if not attribution_finished:
+            _finish_process_attribution(
+                attribution,
+                operation_id,
+                status_code=_sanitized_status_code(
+                    stdout, stderr, default="not-reported"
+                ),
+                azure_error_code=_safe_attribution_error(exc),
+                correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+                terminal_disposition="FAILED",
+            )
         raise
     finally:
         stdout.clear()
@@ -3009,7 +3864,24 @@ def _private_registry_request(
     body: bytearray | None = None,
 ) -> tuple[int, dict[str, str], bytearray]:
     _validate_registry_request(method, path)
-    _private_tls_endpoint(REGISTRY_HOST)
+    attribution = _ACTIVE_ATTRIBUTION.get()
+    operation_id: str | None = None
+    attribution_spec: dict[str, JsonValue] | None = None
+    if attribution is not None:
+        attribution_spec = _registry_attribution_spec(method, path)
+        operation_id = attribution.start(attribution_spec)
+    try:
+        _private_tls_endpoint(REGISTRY_HOST)
+    except BaseException as exc:
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code=_safe_attribution_error(exc),
+            correlation_hash=None,
+            terminal_disposition="FAILED",
+        )
+        raise
     connection = http.client.HTTPSConnection(
         REGISTRY_HOST,
         port=443,
@@ -3018,6 +3890,16 @@ def _private_registry_request(
     )
     response_body = bytearray()
     try:
+        if (
+            attribution is not None
+            and operation_id is not None
+            and attribution_spec is not None
+            and attribution_spec["azureMutation"] is True
+        ):
+            attribution.mark_execution_began(
+                operation_id,
+                cleanup_or_revocation=attribution_spec["cleanupOrRevocation"] is True,
+            )
         connection.request(method, path, body=body, headers=dict(headers))
         response = connection.getresponse()
         response_body.extend(response.read(MAXIMUM_OUTPUT_BYTES + 1))
@@ -3030,9 +3912,36 @@ def _private_registry_request(
         content_type = response.getheader("Content-Type")
         if content_type is not None:
             retained_headers["content-type"] = content_type
+        correlation = response.getheader("x-ms-correlation-request-id")
+        correlation_hash = (
+            hashlib.sha256(
+                CORRELATION_HASH_DOMAIN + correlation.encode("ascii")
+            ).hexdigest()
+            if correlation is not None
+            and re.fullmatch(r"[0-9a-fA-F-]{36}", correlation) is not None
+            else None
+        )
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code=str(response.status),
+            azure_error_code=_sanitized_azure_error_code(response_body, bytearray())
+            if response.status >= 400
+            else None,
+            correlation_hash=correlation_hash,
+            terminal_disposition="COMPLETED",
+        )
         return response.status, retained_headers, response_body
-    except (OSError, ssl.SSLError, http.client.HTTPException):
+    except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
         response_body.clear()
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code=_safe_attribution_error(exc),
+            correlation_hash=None,
+            terminal_disposition="FAILED",
+        )
         _fail("publisher-private-registry-request-failed")
     finally:
         connection.close()
@@ -3076,12 +3985,16 @@ def _publisher_refresh_token(*, entra_token: bytearray, tenant_id: str) -> bytea
     )
     response = bytearray()
     try:
-        status, _headers, response = _private_registry_request(
-            "POST",
-            "/oauth2/exchange",
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            body=form,
-        )
+        with _attribution_scope(
+            lifecycle_substage="private-acr-oauth-exchange",
+            expected_authorization="allow",
+        ):
+            status, _headers, response = _private_registry_request(
+                "POST",
+                "/oauth2/exchange",
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                body=form,
+            )
         if status in {401, 403}:
             raise PublisherAccessPending("publisher-oauth-exchange-denied")
         if status != 200:
@@ -3199,11 +4112,15 @@ def _prove_initial_publisher_denial(
     tenant_id: str,
     environment: Mapping[str, str],
 ) -> None:
-    refresh_token, access_token = _publisher_repository_session(
-        publisher_app_id=publisher_app_id,
-        tenant_id=tenant_id,
-        environment=environment,
-    )
+    with _attribution_scope(
+        lifecycle_substage="initial-acr-denial",
+        expected_authorization="deny",
+    ):
+        refresh_token, access_token = _publisher_repository_session(
+            publisher_app_id=publisher_app_id,
+            tenant_id=tenant_id,
+            environment=environment,
+        )
     try:
         if access_token is not None:
             _fail("publisher-initial-denial-unproved")
@@ -3222,11 +4139,15 @@ def _wait_for_publisher_access(
     deadline = time.monotonic() + 600.0
     while True:
         try:
-            refresh_token, access_token = _publisher_repository_session(
-                publisher_app_id=publisher_app_id,
-                tenant_id=tenant_id,
-                environment=environment,
-            )
+            with _attribution_scope(
+                lifecycle_substage="acrpush-propagation-verification",
+                expected_authorization="allow",
+            ):
+                refresh_token, access_token = _publisher_repository_session(
+                    publisher_app_id=publisher_app_id,
+                    tenant_id=tenant_id,
+                    environment=environment,
+                )
         except PublisherAccessPending:
             refresh_token = bytearray()
             access_token = None
@@ -3248,11 +4169,15 @@ def _wait_for_publisher_denial(
     deadline = time.monotonic() + 600.0
     while True:
         try:
-            refresh_token, access_token = _publisher_repository_session(
-                publisher_app_id=publisher_app_id,
-                tenant_id=tenant_id,
-                environment=environment,
-            )
+            with _attribution_scope(
+                lifecycle_substage="post-revocation-acr-denial",
+                expected_authorization="deny",
+            ):
+                refresh_token, access_token = _publisher_repository_session(
+                    publisher_app_id=publisher_app_id,
+                    tenant_id=tenant_id,
+                    environment=environment,
+                )
         except PublisherAccessPending:
             refresh_token = bytearray()
             access_token = None
@@ -3430,6 +4355,21 @@ def _denial_probe(
 ) -> str:
     if not argv or argv[0] not in {"az", "docker"}:
         _fail("denial-probe-executable-unapproved")
+    attribution, operation_id, attribution_spec = _begin_process_attribution(
+        argv,
+        environment_overrides=environment_overrides,
+        expected_authorization="deny",
+    )
+    if (
+        attribution is not None
+        and operation_id is not None
+        and attribution_spec is not None
+        and attribution_spec["azureMutation"] is True
+    ):
+        attribution.mark_execution_began(
+            operation_id,
+            cleanup_or_revocation=attribution_spec["cleanupOrRevocation"] is True,
+        )
     try:
         if argv[0] == "az":
             actual = _resolve_authorized_process_launch(argv).argv
@@ -3455,13 +4395,31 @@ def _denial_probe(
             timeout=OPERATION_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.TimeoutExpired):
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code="denial-probe-process-failed",
+            correlation_hash=None,
+            terminal_disposition="FAILED",
+        )
         _fail("denial-probe-process-failed")
     stdout = bytearray(completed.stdout)
     stderr = bytearray(completed.stderr)
+    attribution_finished = False
     try:
         if len(stdout) + len(stderr) > MAXIMUM_OUTPUT_BYTES:
             _fail("denial-probe-output-oversized")
         if completed.returncode == 0:
+            _finish_process_attribution(
+                attribution,
+                operation_id,
+                status_code="2xx-not-reported",
+                azure_error_code=None,
+                correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+                terminal_disposition="COMPLETED",
+            )
+            attribution_finished = True
             return "allowed"
         try:
             message = bytes(stderr).decode("utf-8", errors="strict").casefold()
@@ -3473,7 +4431,29 @@ def _denial_probe(
         ):
             error_code = _sanitized_azure_error_code(stdout, stderr)
             _fail(f"denial-probe-result-ambiguous-{error_code}")
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code=_sanitized_status_code(stdout, stderr, default="403"),
+            azure_error_code=_sanitized_azure_error_code(stdout, stderr),
+            correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+            terminal_disposition="COMPLETED",
+        )
+        attribution_finished = True
         return "denied"
+    except BaseException as exc:
+        if not attribution_finished:
+            _finish_process_attribution(
+                attribution,
+                operation_id,
+                status_code=_sanitized_status_code(
+                    stdout, stderr, default="not-reported"
+                ),
+                azure_error_code=_safe_attribution_error(exc),
+                correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+                terminal_disposition="FAILED",
+            )
+        raise
     finally:
         stdout.clear()
         stderr.clear()
@@ -3791,10 +4771,16 @@ def _private_path(subscription_id: str) -> dict[str, JsonValue]:
 def _docker_login_with_refresh_token(
     refresh_token: bytearray, *, environment: Mapping[str, str]
 ) -> None:
+    attribution, operation_id, _attribution_spec = _begin_process_attribution(
+        ("docker", "login"),
+        environment_overrides=environment,
+        expected_authorization="allow",
+    )
     payload = bytearray(refresh_token)
     payload.append(ord("\n"))
     stdout = bytearray()
     stderr = bytearray()
+    attribution_finished = False
     try:
         completed = subprocess.run(
             (
@@ -3821,8 +4807,39 @@ def _docker_login_with_refresh_token(
             _fail("publisher-secret-echo-detected")
         if completed.returncode != 0:
             _fail("publisher-docker-login-failed")
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="2xx-not-reported",
+            azure_error_code=None,
+            correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+            terminal_disposition="COMPLETED",
+        )
+        attribution_finished = True
     except (OSError, subprocess.TimeoutExpired):
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code="publisher-docker-login-process-failed",
+            correlation_hash=None,
+            terminal_disposition="FAILED",
+        )
+        attribution_finished = True
         _fail("publisher-docker-login-process-failed")
+    except BaseException as exc:
+        if not attribution_finished:
+            _finish_process_attribution(
+                attribution,
+                operation_id,
+                status_code=_sanitized_status_code(
+                    stdout, stderr, default="not-reported"
+                ),
+                azure_error_code=_safe_attribution_error(exc),
+                correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+                terminal_disposition="FAILED",
+            )
+        raise
     finally:
         payload.clear()
         stdout.clear()
@@ -4129,7 +5146,7 @@ def _publish_api_image(
             ),
             environment_overrides=publisher_environment,
         )
-        shutil.rmtree(publisher_root)
+        _remove_ephemeral_publisher_directory(publisher_root)
         return immutable_reference
     finally:
         refresh_token.clear()
@@ -4148,7 +5165,7 @@ def _publish_api_image(
                 )
             publisher_deleted = True
         if publisher_root.exists():
-            shutil.rmtree(publisher_root)
+            _remove_ephemeral_publisher_directory(publisher_root)
         if denial_proved and not publisher_deleted:
             _fail("publisher-identity-state-malformed")
 
@@ -4855,9 +5872,18 @@ def _validate_preservation_proof(proof: dict[str, JsonValue]) -> None:
         _fail("pre-secret-preservation-proof-incomplete")
 
 
-def _safe_failed_stage(receipt_directory: Path | None) -> str:
+def _safe_failed_stage(receipt_directory: Path | None, *, operation: str) -> str:
     if receipt_directory is None:
         return "unknown"
+    attributed = _attributed_failed_stage(receipt_directory)
+    if attributed is not None:
+        return attributed
+    if operation in {
+        "post-secret-provisioning",
+        "temporary-authority-revocation",
+        "cleanup",
+    }:
+        return "protected-attribution-missing"
     path = _state_path(receipt_directory)
     if not path.is_file():
         return "unknown"
@@ -4931,7 +5957,7 @@ def _handle_failure(
         if error_code in SECURITY_CONTAINMENT_ERROR_CODES
         else LifecycleDisposition.PAUSED_PRESERVED
     )
-    failed_stage = _safe_failed_stage(receipt_directory)
+    failed_stage = _safe_failed_stage(receipt_directory, operation=operation)
     cancellation_codes = {
         "canceled",
         "cancelled",
@@ -5071,30 +6097,34 @@ def main() -> int:
             now_utc=now,
             expected_repository_head=args.repository_head,
         )
-        if args.operation == "pre-secret-provisioning":
-            result = _pre_secret(
-                ledger=ledger,
-                subscription_id=subscription_id,
-                receipt_directory=receipt_directory,
-            )
-        elif args.operation == "private-path-verification":
-            result = _private_path(subscription_id)
-        elif args.operation == "post-secret-provisioning":
-            result = _post_secret(
-                ledger=ledger,
-                subscription_id=subscription_id,
-                receipt_directory=receipt_directory,
-            )
-        elif args.operation == "temporary-authority-revocation":
-            result = _revoke(subscription_id, receipt_directory)
-        elif args.operation == "cleanup":
-            result = _cleanup(
-                subscription_id,
-                receipt_directory,
-                ledger=ledger,
-            )
-        else:
-            result = _zero_residue(subscription_id)
+        with _operation_attribution_session(
+            receipt_directory=receipt_directory,
+            lifecycle_stage=args.operation,
+        ):
+            if args.operation == "pre-secret-provisioning":
+                result = _pre_secret(
+                    ledger=ledger,
+                    subscription_id=subscription_id,
+                    receipt_directory=receipt_directory,
+                )
+            elif args.operation == "private-path-verification":
+                result = _private_path(subscription_id)
+            elif args.operation == "post-secret-provisioning":
+                result = _post_secret(
+                    ledger=ledger,
+                    subscription_id=subscription_id,
+                    receipt_directory=receipt_directory,
+                )
+            elif args.operation == "temporary-authority-revocation":
+                result = _revoke(subscription_id, receipt_directory)
+            elif args.operation == "cleanup":
+                result = _cleanup(
+                    subscription_id,
+                    receipt_directory,
+                    ledger=ledger,
+                )
+            else:
+                result = _zero_residue(subscription_id)
         result.setdefault("disposition", LifecycleDisposition.COMPLETED.value)
         print(json.dumps(result, separators=(",", ":"), sort_keys=True))
         return 0
