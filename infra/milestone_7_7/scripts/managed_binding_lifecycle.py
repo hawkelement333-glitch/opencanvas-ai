@@ -2682,6 +2682,7 @@ def _management_azure_config_directory() -> Path:
 
 def _wait_for_ephemeral_publisher_principal(app_id: str) -> str:
     deadline = time.monotonic() + 120.0
+    last_unproved_gate = "service-principal"
     while time.monotonic() < deadline:
         try:
             principal = _run(
@@ -2700,15 +2701,20 @@ def _wait_for_ephemeral_publisher_principal(app_id: str) -> str:
                 ),
                 require_json=True,
             )
-            if (
-                not isinstance(principal, dict)
-                or set(principal) != {"objectId", "servicePrincipalType"}
-                or principal.get("servicePrincipalType") != "Application"
-                or not isinstance(principal.get("objectId"), str)
-                or re.fullmatch(r"[0-9a-fA-F-]{36}", str(principal["objectId"])) is None
-            ):
-                _fail("publisher-service-principal-output-malformed")
-            object_id = str(principal["objectId"])
+        except AzureCommandError:
+            last_unproved_gate = "service-principal"
+            time.sleep(5.0)
+            continue
+        if (
+            not isinstance(principal, dict)
+            or set(principal) != {"objectId", "servicePrincipalType"}
+            or principal.get("servicePrincipalType") != "Application"
+            or not isinstance(principal.get("objectId"), str)
+            or re.fullmatch(r"[0-9a-fA-F-]{36}", str(principal["objectId"])) is None
+        ):
+            _fail("publisher-service-principal-output-malformed")
+        object_id = str(principal["objectId"])
+        try:
             groups = _run(
                 (
                     "az",
@@ -2727,12 +2733,14 @@ def _wait_for_ephemeral_publisher_principal(app_id: str) -> str:
                 ),
                 require_json=True,
             )
-            if not isinstance(groups, list) or groups:
-                _fail("publisher-group-membership-present")
-            return object_id
         except AzureCommandError:
+            last_unproved_gate = "group-membership"
             time.sleep(5.0)
-    _fail("publisher-service-principal-propagation-unproved")
+            continue
+        if not isinstance(groups, list) or groups:
+            _fail("publisher-group-membership-present")
+        return object_id
+    _fail(f"publisher-{last_unproved_gate}-propagation-unproved")
 
 
 def _create_ephemeral_publisher(
