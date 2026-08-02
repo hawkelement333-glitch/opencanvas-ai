@@ -88,6 +88,46 @@ EXPECTED_SECRET_BINDINGS: Final = (
         "opencanvas-smtp-password",
         "OPENCANVAS_SMTP_PASSWORD",
     ),
+    (
+        "opencanvas-session-secret",
+        "opencanvas-session-secret",
+        "OPENCANVAS_SESSION_SECRET",
+    ),
+    (
+        "opencanvas-invitation-secret",
+        "opencanvas-invitation-secret",
+        "OPENCANVAS_INVITATION_SECRET",
+    ),
+    (
+        "opencanvas-upload-capability-secret",
+        "opencanvas-upload-capability-secret",
+        "OPENCANVAS_UPLOAD_CAPABILITY_SECRET",
+    ),
+    (
+        "opencanvas-scanner-result-secret",
+        "opencanvas-scanner-result-secret",
+        "OPENCANVAS_SCANNER_RESULT_SECRET",
+    ),
+    (
+        "opencanvas-rate-limit-hmac-secret",
+        "opencanvas-rate-limit-hmac-secret",
+        "OPENCANVAS_SHARED_RATE_LIMIT_HMAC_SECRET",
+    ),
+    (
+        "opencanvas-telemetry-token",
+        "opencanvas-telemetry-token",
+        "OPENCANVAS_TELEMETRY_AUTH_TOKEN",
+    ),
+    (
+        "opencanvas-telemetry-pseudonymization-secret",
+        "opencanvas-telemetry-pseudonymization-secret",
+        "OPENCANVAS_TELEMETRY_PSEUDONYMIZATION_SECRET",
+    ),
+    (
+        "opencanvas-observability-operator-user-ids",
+        "opencanvas-observability-operator-user-ids",
+        "OPENCANVAS_OBSERVABILITY_OPERATOR_USER_IDS",
+    ),
 )
 EXPECTED_PROVIDER_REGISTRATIONS: Final = (
     "Microsoft.App",

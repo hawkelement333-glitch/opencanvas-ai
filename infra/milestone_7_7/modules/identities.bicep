@@ -22,9 +22,9 @@ param managedBindingDeploymentEnabled bool = false
 param workloadIdentityDeploymentEnabled bool = false
 
 @allowed([
-  false
+  true
 ])
-param managedIdentityEnvironmentMappingResolved bool = false
+param managedIdentityEnvironmentMappingResolved bool = true
 
 @allowed([
   false
@@ -47,6 +47,18 @@ var workloadIdentityEnabled = enabled && workloadIdentityDeploymentEnabled
 
 resource workloadIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = if (workloadIdentityEnabled) {
   name: 'id-mobius77-api'
+  location: location
+  tags: lifecycleTags
+}
+
+resource workerIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = if (workloadIdentityEnabled) {
+  name: 'id-mobius77-worker'
+  location: location
+  tags: lifecycleTags
+}
+
+resource telemetryIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = if (workloadIdentityEnabled) {
+  name: 'id-mobius77-telemetry'
   location: location
   tags: lifecycleTags
 }
@@ -80,7 +92,19 @@ output workloadIdentityDeploymentEnabled bool = workloadIdentityEnabled
 output workloadIdentityId string = workloadIdentityEnabled ? workloadIdentity.id : ''
 output workloadIdentityPrincipalId string = workloadIdentityEnabled ? workloadIdentity.properties.principalId : ''
 output workloadIdentityClientId string = workloadIdentityEnabled ? workloadIdentity.properties.clientId : ''
+output workloadIdentityName string = workloadIdentityEnabled ? workloadIdentity.name : ''
+output workerIdentityId string = workloadIdentityEnabled ? workerIdentity.id : ''
+output workerIdentityPrincipalId string = workloadIdentityEnabled ? workerIdentity.properties.principalId : ''
+output workerIdentityClientId string = workloadIdentityEnabled ? workerIdentity.properties.clientId : ''
+output workerIdentityName string = workloadIdentityEnabled ? workerIdentity.name : ''
+output telemetryIdentityId string = workloadIdentityEnabled ? telemetryIdentity.id : ''
+output telemetryIdentityPrincipalId string = workloadIdentityEnabled ? telemetryIdentity.properties.principalId : ''
+output telemetryIdentityClientId string = workloadIdentityEnabled ? telemetryIdentity.properties.clientId : ''
 output databaseAdministratorIdentityId string = workloadIdentityEnabled ? databaseAdministratorIdentity.id : ''
-output databaseAdministratorPrincipalId string = workloadIdentityEnabled ? databaseAdministratorIdentity.properties.principalId : ''
-output databaseAdministratorClientId string = workloadIdentityEnabled ? databaseAdministratorIdentity.properties.clientId : ''
+output databaseAdministratorPrincipalId string = workloadIdentityEnabled
+  ? databaseAdministratorIdentity.properties.principalId
+  : ''
+output databaseAdministratorClientId string = workloadIdentityEnabled
+  ? databaseAdministratorIdentity.properties.clientId
+  : ''
 output databaseAdministratorName string = workloadIdentityEnabled ? databaseAdministratorIdentity.name : ''

@@ -41,6 +41,8 @@ param location string = 'southcentralus'
 param privateEndpointSubnetId string = ''
 param virtualNetworkId string = ''
 param workloadIdentityPrincipalId string = ''
+param workerIdentityPrincipalId string = ''
+param telemetryIdentityPrincipalId string = ''
 param lifecycleTags object = {}
 
 var enabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled
@@ -80,6 +82,26 @@ resource workloadSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01
   scope: keyVault
   properties: {
     principalId: workloadIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', secretsUserRoleDefinitionId)
+  }
+}
+
+resource workerSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enabled) {
+  name: guid(keyVault.id, workerIdentityPrincipalId, secretsUserRoleDefinitionId)
+  scope: keyVault
+  properties: {
+    principalId: workerIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', secretsUserRoleDefinitionId)
+  }
+}
+
+resource telemetrySecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enabled) {
+  name: guid(keyVault.id, telemetryIdentityPrincipalId, secretsUserRoleDefinitionId)
+  scope: keyVault
+  properties: {
+    principalId: telemetryIdentityPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', secretsUserRoleDefinitionId)
   }

@@ -31,6 +31,7 @@ from preflight.milestone_7_7.execution import (
 )
 from preflight.milestone_7_7.framework import OPERATION_TIMEOUT_SECONDS
 from preflight.milestone_7_7.managed_binding_contracts import (
+    EXPECTED_SECRET_BINDINGS,
     INFRASTRUCTURE_ROOT,
     REPOSITORY_ROOT,
     build_authorization_ledger,
@@ -888,10 +889,9 @@ def _managed_provider_binding_contract() -> tuple[str, str, dict[str, JsonValue]
     compute_text = (INFRASTRUCTURE_ROOT / "modules" / "compute.bicep").read_text(
         encoding="utf-8"
     )
-    required = (
-        ("openai-api-key", "OPENAI_API_KEY"),
-        ("opencanvas-smtp-username", "OPENCANVAS_SMTP_USERNAME"),
-        ("opencanvas-smtp-password", "OPENCANVAS_SMTP_PASSWORD"),
+    required = tuple(
+        (secret_name, environment_name)
+        for secret_name, _reference, environment_name in EXPECTED_SECRET_BINDINGS
     )
     exact_bindings = []
     for raw_binding in secrets:

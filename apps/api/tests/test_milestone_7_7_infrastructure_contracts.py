@@ -257,10 +257,10 @@ def test_bicep_preserves_inert_defaults_and_gates_one_run_resources():
     declarations = re.findall(r"(?m)^\s*(?:resource|module)\s+[^\n]+", combined)
     assert declarations
     assert all("= if (" in declaration for declaration in declarations)
-    for name in ("policy.bicep", "storage-scanner.bicep"):
+    for name in ("policy.bicep",):
         text = (ROOT / "modules" / name).read_text(encoding="utf-8")
         assert not re.search(r"(?m)^\s*(?:resource|module)\s+", text)
-    for name in ("postgres.bicep", "redis.bicep"):
+    for name in ("postgres.bicep", "redis.bicep", "storage-scanner.bicep"):
         text = (ROOT / "modules" / name).read_text(encoding="utf-8")
         declarations = re.findall(r"(?m)^\s*(?:resource|module)\s+[^\n]+", text)
         assert declarations
@@ -362,7 +362,7 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
         "redis.bicep": [
             "param proposedSku string = 'Balanced_B0'",
             "param nodeCount int = 2",
-            "param providerContractResolved bool = false",
+            "param providerContractResolved bool = true",
         ],
         "registry.bicep": [
             "param registrySku string = 'Premium'",
@@ -1027,6 +1027,7 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
         "modules/key-vault.bicep": {"4633458b-17de-408a-b874-0445c86b69e6"},
         "modules/network.bicep": {"c632b3df-fb67-4d84-bdcf-b95ad541b5c8"},
         "modules/registry.bicep": {"7f951dda-4ed3-4680-a7ca-43fe172d538d"},
+        "modules/storage-scanner.bicep": {"ba92f5b4-2d11-453d-a403-e96b0029c9fe"},
         "scripts/managed_binding_lifecycle.py": {"4d97b98b-1d4f-4787-a291-c67834d212e7"},
     }
     for path in ROOT.rglob("*"):

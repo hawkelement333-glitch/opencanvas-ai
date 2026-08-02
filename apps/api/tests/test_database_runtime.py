@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from unittest.mock import Mock, patch
 
 import pytest
@@ -91,6 +92,33 @@ def test_complete_deployed_database_configuration_is_valid(mode: str) -> None:
     assert settings.runtime_mode.value == mode
     assert settings.database_tls_mode == "verify-full"
     assert settings.indexer_publication_mode == "disabled"
+
+
+def test_container_apps_identity_environment_maps_to_all_managed_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IDENTITY_ENDPOINT", "http://127.0.0.1:40342/metadata/identity/oauth2/token")
+    monkeypatch.setenv("IDENTITY_HEADER", "synthetic-container-apps-header")
+
+    settings = _deployed_settings(
+        database_auth_mode="entra",
+        database_managed_identity_endpoint=None,
+        database_managed_identity_header=None,
+        database_managed_identity_client_id="synthetic-api-client",
+        azure_managed_identity_endpoint=None,
+        azure_managed_identity_header=None,
+        azure_managed_identity_client_id="synthetic-api-client",
+        shared_rate_limit_identity_endpoint=None,
+        shared_rate_limit_identity_header=None,
+        shared_rate_limit_identity_client_id="synthetic-api-client",
+    )
+
+    assert settings.database_managed_identity_endpoint == os.environ["IDENTITY_ENDPOINT"]
+    assert settings.database_managed_identity_header == os.environ["IDENTITY_HEADER"]
+    assert settings.azure_managed_identity_endpoint == os.environ["IDENTITY_ENDPOINT"]
+    assert settings.azure_managed_identity_header == os.environ["IDENTITY_HEADER"]
+    assert settings.shared_rate_limit_identity_endpoint == os.environ["IDENTITY_ENDPOINT"]
+    assert settings.shared_rate_limit_identity_header == os.environ["IDENTITY_HEADER"]
 
 
 @pytest.mark.parametrize("mode", ["staging", "production"])

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
 from performance.milestone_7_7.framework import ContractError, JsonValue, canonical_bytes
 from preflight.milestone_7_7 import framework as topology_framework
@@ -124,6 +125,20 @@ def test_exact_names_scopes_secrets_runtime_and_private_source_are_closed() -> N
         ("openai-api-key", "OPENAI_API_KEY"),
         ("opencanvas-smtp-username", "OPENCANVAS_SMTP_USERNAME"),
         ("opencanvas-smtp-password", "OPENCANVAS_SMTP_PASSWORD"),
+        ("opencanvas-session-secret", "OPENCANVAS_SESSION_SECRET"),
+        ("opencanvas-invitation-secret", "OPENCANVAS_INVITATION_SECRET"),
+        ("opencanvas-upload-capability-secret", "OPENCANVAS_UPLOAD_CAPABILITY_SECRET"),
+        ("opencanvas-scanner-result-secret", "OPENCANVAS_SCANNER_RESULT_SECRET"),
+        ("opencanvas-rate-limit-hmac-secret", "OPENCANVAS_SHARED_RATE_LIMIT_HMAC_SECRET"),
+        ("opencanvas-telemetry-token", "OPENCANVAS_TELEMETRY_AUTH_TOKEN"),
+        (
+            "opencanvas-telemetry-pseudonymization-secret",
+            "OPENCANVAS_TELEMETRY_PSEUDONYMIZATION_SECRET",
+        ),
+        (
+            "opencanvas-observability-operator-user-ids",
+            "OPENCANVAS_OBSERVABILITY_OPERATOR_USER_IDS",
+        ),
     ]
     assert contract["providerRuntime"] == {
         "smtpHost": "sandbox.smtp.mailtrap.io",
@@ -1385,7 +1400,7 @@ def test_lifecycle_is_closed_private_digest_bound_and_secret_value_blind() -> No
     assert "repository-not-clean" in text
 
     compute = (INFRASTRUCTURE_ROOT / "modules" / "compute.bicep").read_text(encoding="utf-8")
-    assert compute.count("secretRef:") == 3
+    assert compute.count("secretRef:") >= 12
     assert "OPENAI_API_KEY" in compute
     assert "OPENCANVAS_OPENAI_API_KEY" not in compute
     assert "external: false" in compute
@@ -1394,7 +1409,9 @@ def test_lifecycle_is_closed_private_digest_bound_and_secret_value_blind() -> No
 
 def test_denial_probes_use_windows_safe_empty_projection() -> None:
     text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
-    publish = text.split("def _publish_api_image", 1)[1].split("def _private_revision_ready", 1)[0]
+    publish = text.split("def _publish_api_image", 1)[1].split(
+        "def _container_app_revision_ready", 1
+    )[0]
     revoke = text.split("def _revoke", 1)[1].split("def _current_resource_ids", 1)[0]
 
     assert publish.count('"[:0]"') == 1
@@ -1523,11 +1540,11 @@ def test_lifecycle_deployment_names_preserve_prior_azure_history() -> None:
 
 
 def test_lifecycle_cleanup_deadline_matches_azure_minute_precision() -> None:
-    observed = datetime(2026, 8, 1, 3, 5, 33, 987654, tzinfo=UTC)
+    observed = datetime(2026, 8, 1, 18, 5, 33, 987654, tzinfo=UTC)
 
     deadline = managed_binding_lifecycle._cleanup_deadline(observed)
 
-    assert deadline == datetime(2026, 8, 2, 7, 0, tzinfo=UTC)
+    assert deadline == datetime(2026, 8, 2, 23, 0, tzinfo=UTC)
     assert deadline == managed_binding_lifecycle.AUTHORIZED_CLEANUP_AT_UTC
     assert deadline <= observed + timedelta(hours=30)
 
@@ -1537,7 +1554,7 @@ def test_lifecycle_cleanup_deadline_matches_azure_minute_precision() -> None:
         managed_binding_lifecycle.LifecycleError,
         match="cleanup-deadline-expired-or-reserve-active",
     ):
-        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 2, 5, 30, tzinfo=UTC))
+        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 2, 21, 30, tzinfo=UTC))
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
         match="cleanup-deadline-outside-authorized-window",
@@ -1984,7 +2001,7 @@ def _test_preservation_state(
 ) -> dict[str, JsonValue]:
     return {
         "activeStage": "pre-secret",
-        "cleanupAtUtc": "2026-08-02T07:00:00Z",
+        "cleanupAtUtc": "2026-08-02T23:00:00Z",
         "disposition": "RUNNING",
         "failedStage": None,
         "lastCompletedStage": "cleanup-role-verification",
@@ -2026,7 +2043,7 @@ def _verify_container_apps_infrastructure_fixture(
 ) -> int:
     subscription = SYNTHETIC_SUBSCRIPTION
     expected_tags = _test_recovered_cleanup_tags()
-    expected_tags["mobius-expires-at-utc"] = "2026-08-02T07:00:00Z"
+    expected_tags["mobius-expires-at-utc"] = "2026-08-02T23:00:00Z"
     expected_environment_id = (
         f"/subscriptions/{subscription}/resourceGroups/"
         f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
@@ -2091,7 +2108,7 @@ def _verify_container_apps_infrastructure_fixture(
     return managed_binding_lifecycle._verify_container_apps_infrastructure(
         subscription_id=subscription,
         ledger=_test_lifecycle_ledger(),
-        cleanup_at=datetime(2026, 8, 2, 7, 0, tzinfo=UTC),
+        cleanup_at=datetime(2026, 8, 2, 23, 0, tzinfo=UTC),
     )
 
 
@@ -2106,7 +2123,7 @@ def test_container_apps_infrastructure_accepts_only_prior_ledger_hash(
 ) -> None:
     prior_tags = _test_recovered_cleanup_tags()
     prior_tags["mobius-cleanup-binding-sha256"] = "d" * 64
-    prior_tags["mobius-expires-at-utc"] = "08/02/2026 07:00:00"
+    prior_tags["mobius-expires-at-utc"] = "08/02/2026 23:00:00"
     prior_tags["aca-managed-env-id"] = (
         f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}/resourceGroups/"
         f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
@@ -2144,7 +2161,7 @@ def test_container_apps_infrastructure_accepts_ancestor_source_only_without_inpu
 ) -> None:
     prior_tags = _test_recovered_cleanup_tags()
     prior_tags["mobius-source-commit"] = "d" * 40
-    prior_tags["mobius-expires-at-utc"] = "08/02/2026 07:00:00"
+    prior_tags["mobius-expires-at-utc"] = "08/02/2026 23:00:00"
     prior_tags["aca-managed-env-id"] = (
         f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}/resourceGroups/"
         f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
@@ -2189,7 +2206,7 @@ def _reconcile_container_apps_infrastructure_tags_fixture(
     )
     expected = _test_recovered_cleanup_tags()
     expected["mobius-cleanup-binding-sha256"] = "e" * 64
-    expected["mobius-expires-at-utc"] = "2026-08-02T07:00:00Z"
+    expected["mobius-expires-at-utc"] = "2026-08-02T23:00:00Z"
     expected["mobius-manifest-sha256"] = "f" * 64
     expected["mobius-run-id"] = "m7.7-managed-binding-closeout-20260731"
     expected["mobius-source-commit"] = "c" * 40
@@ -2231,7 +2248,7 @@ def _reconcile_container_apps_infrastructure_tags_fixture(
     managed_binding_lifecycle._reconcile_container_apps_infrastructure_tags(
         subscription_id=subscription,
         ledger=_test_lifecycle_ledger(),
-        cleanup_at=datetime(2026, 8, 2, 7, 0, tzinfo=UTC),
+        cleanup_at=datetime(2026, 8, 2, 23, 0, tzinfo=UTC),
     )
     return calls
 
@@ -2351,7 +2368,9 @@ def test_private_revision_ready_requires_healthy_running_revision(
         raise AssertionError(argv)
 
     monkeypatch.setattr(managed_binding_lifecycle, "_run", fake_run)
-    managed_binding_lifecycle._private_revision_ready("opaque-subscription")
+    managed_binding_lifecycle._container_app_revision_ready(
+        "opaque-subscription", "ca-mobius77-api"
+    )
 
     revision = {
         "health": "Unhealthy",
@@ -2362,7 +2381,58 @@ def test_private_revision_ready_requires_healthy_running_revision(
         managed_binding_lifecycle.LifecycleError,
         match="container-app-revision-failed",
     ):
-        managed_binding_lifecycle._private_revision_ready("opaque-subscription")
+        managed_binding_lifecycle._container_app_revision_ready(
+            "opaque-subscription", "ca-mobius77-api"
+        )
+
+
+def test_migration_job_starts_once_and_requires_matching_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    execution_name = "caj-mobius77-migration-synthetic"
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        calls.append(argv)
+        if argv[1:4] == ("containerapp", "job", "start"):
+            return {"name": execution_name}
+        if argv[1:5] == ("containerapp", "job", "execution", "show"):
+            return {"name": execution_name, "status": "Succeeded"}
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", fake_run)
+    managed_binding_lifecycle._migration_job_ready("opaque-subscription")
+
+    assert sum(call[1:4] == ("containerapp", "job", "start") for call in calls) == 1
+    assert sum(call[1:5] == ("containerapp", "job", "execution", "show") for call in calls) == 1
+
+
+def test_migration_job_fails_closed_on_execution_identity_or_status_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    execution_name = "caj-mobius77-migration-synthetic"
+    status: JsonValue = {"name": "unexpected-execution", "status": "Succeeded"}
+
+    def fake_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        if argv[1:4] == ("containerapp", "job", "start"):
+            return {"name": execution_name}
+        if argv[1:5] == ("containerapp", "job", "execution", "show"):
+            return status
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", fake_run)
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="migration-job-status-output-malformed",
+    ):
+        managed_binding_lifecycle._migration_job_ready("opaque-subscription")
+
+    status = {"name": execution_name, "status": "Failed"}
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="migration-job-failed",
+    ):
+        managed_binding_lifecycle._migration_job_ready("opaque-subscription")
 
 
 def test_lifecycle_compiler_uses_existing_azure_cli_bicep_cache(
@@ -2535,7 +2605,7 @@ def test_safe_pre_secret_failures_are_preserved_from_resulting_state(
     monkeypatch.setattr(
         managed_binding_lifecycle,
         "_utc_now",
-        lambda: datetime(2026, 8, 1, 2, 0, tzinfo=UTC),
+        lambda: datetime(2026, 8, 1, 18, 0, tzinfo=UTC),
     )
     monkeypatch.setattr(
         managed_binding_lifecycle,
@@ -3265,7 +3335,9 @@ def test_main_delegates_terminal_handling_and_finally_paths_remain_strict() -> N
     text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
     main = text.split("def main()", 1)[1]
     failure_boundary = main.split("except (Exception, KeyboardInterrupt) as exc:", 1)[1]
-    publish = text.split("def _publish_api_image", 1)[1].split("def _private_revision_ready", 1)[0]
+    publish = text.split("def _publish_api_image", 1)[1].split(
+        "def _container_app_revision_ready", 1
+    )[0]
 
     assert "except (Exception, KeyboardInterrupt) as exc:" in main
     assert "_handle_failure(" in main

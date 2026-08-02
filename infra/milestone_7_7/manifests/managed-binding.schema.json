@@ -149,8 +149,8 @@
     "privateAcrSource": { "$ref": "#/$defs/closedMap" },
     "secrets": {
       "type": "array",
-      "minItems": 3,
-      "maxItems": 3,
+      "minItems": 11,
+      "maxItems": 11,
       "uniqueItems": true,
       "items": {
         "type": "object",

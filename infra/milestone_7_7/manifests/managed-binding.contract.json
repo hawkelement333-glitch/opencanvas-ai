@@ -216,6 +216,46 @@
       "keyVaultName": "opencanvas-smtp-password",
       "containerAppReference": "opencanvas-smtp-password",
       "environmentVariable": "OPENCANVAS_SMTP_PASSWORD"
+    },
+    {
+      "keyVaultName": "opencanvas-session-secret",
+      "containerAppReference": "opencanvas-session-secret",
+      "environmentVariable": "OPENCANVAS_SESSION_SECRET"
+    },
+    {
+      "keyVaultName": "opencanvas-invitation-secret",
+      "containerAppReference": "opencanvas-invitation-secret",
+      "environmentVariable": "OPENCANVAS_INVITATION_SECRET"
+    },
+    {
+      "keyVaultName": "opencanvas-upload-capability-secret",
+      "containerAppReference": "opencanvas-upload-capability-secret",
+      "environmentVariable": "OPENCANVAS_UPLOAD_CAPABILITY_SECRET"
+    },
+    {
+      "keyVaultName": "opencanvas-scanner-result-secret",
+      "containerAppReference": "opencanvas-scanner-result-secret",
+      "environmentVariable": "OPENCANVAS_SCANNER_RESULT_SECRET"
+    },
+    {
+      "keyVaultName": "opencanvas-rate-limit-hmac-secret",
+      "containerAppReference": "opencanvas-rate-limit-hmac-secret",
+      "environmentVariable": "OPENCANVAS_SHARED_RATE_LIMIT_HMAC_SECRET"
+    },
+    {
+      "keyVaultName": "opencanvas-telemetry-token",
+      "containerAppReference": "opencanvas-telemetry-token",
+      "environmentVariable": "OPENCANVAS_TELEMETRY_AUTH_TOKEN"
+    },
+    {
+      "keyVaultName": "opencanvas-telemetry-pseudonymization-secret",
+      "containerAppReference": "opencanvas-telemetry-pseudonymization-secret",
+      "environmentVariable": "OPENCANVAS_TELEMETRY_PSEUDONYMIZATION_SECRET"
+    },
+    {
+      "keyVaultName": "opencanvas-observability-operator-user-ids",
+      "containerAppReference": "opencanvas-observability-operator-user-ids",
+      "environmentVariable": "OPENCANVAS_OBSERVABILITY_OPERATOR_USER_IDS"
     }
   ],
   "manualSecretEntry": {

@@ -103,15 +103,8 @@ var moduleBoundaries = [
   'cleanup-supervisor'
 ]
 var unresolvedGates = [
-  'region-and-subscription-availability'
-  'exact-provider-api-versions'
-  'managed-identity-environment-mapping'
-  'redis-custom-acl-support'
-  'private-acr-source-path'
-  'telemetry-gateway'
   'scanner-result-bridge'
   'alert-destination'
-  'openai-smtp-test-providers'
   'evidence-retention'
 ]
 
@@ -241,7 +234,25 @@ module redis './modules/redis.bicep' = if (postSecretEnabled) {
     location: location
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     virtualNetworkId: network.outputs.virtualNetworkId
-    workloadIdentityPrincipalId: identities.outputs.workloadIdentityPrincipalId
+    apiIdentityPrincipalId: identities.outputs.workloadIdentityPrincipalId
+    workerIdentityPrincipalId: identities.outputs.workerIdentityPrincipalId
+    lifecycleTags: lifecycleTags
+  }
+}
+
+module storage './modules/storage-scanner.bicep' = if (postSecretEnabled) {
+  name: 'mobius77-managed-binding-storage'
+  scope: targetResourceGroup
+  params: {
+    checkpointMode: checkpointMode
+    deploymentEnabled: deploymentEnabled
+    managedBindingMode: managedBindingMode
+    managedBindingDeploymentEnabled: true
+    location: location
+    privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
+    virtualNetworkId: network.outputs.virtualNetworkId
+    apiIdentityPrincipalId: identities.outputs.workloadIdentityPrincipalId
+    workerIdentityPrincipalId: identities.outputs.workerIdentityPrincipalId
     lifecycleTags: lifecycleTags
   }
 }
@@ -257,6 +268,9 @@ module registry './modules/registry.bicep' = if (workloadEnabled) {
     location: location
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     workloadIdentityPrincipalId: identities.outputs.workloadIdentityPrincipalId
+    workerIdentityPrincipalId: identities.outputs.workerIdentityPrincipalId
+    telemetryIdentityPrincipalId: identities.outputs.telemetryIdentityPrincipalId
+    databaseAdministratorPrincipalId: identities.outputs.databaseAdministratorPrincipalId
     lifecycleTags: lifecycleTags
   }
 }
@@ -273,6 +287,8 @@ module keyVault './modules/key-vault.bicep' = if (workloadEnabled) {
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     virtualNetworkId: network.outputs.virtualNetworkId
     workloadIdentityPrincipalId: identities.outputs.workloadIdentityPrincipalId
+    workerIdentityPrincipalId: identities.outputs.workerIdentityPrincipalId
+    telemetryIdentityPrincipalId: identities.outputs.telemetryIdentityPrincipalId
     lifecycleTags: lifecycleTags
   }
 }
@@ -289,10 +305,27 @@ module compute './modules/compute.bicep' = if (workloadEnabled) {
     location: location
     containerAppsSubnetId: network.outputs.containerAppsSubnetId
     infrastructureResourceGroupName: containerAppsInfrastructureResourceGroupName
-    workloadIdentityId: identities.outputs.workloadIdentityId
+    apiIdentityId: identities.outputs.workloadIdentityId
+    apiIdentityClientId: identities.outputs.workloadIdentityClientId
+    apiIdentityName: identities.outputs.workloadIdentityName
+    workerIdentityId: identities.outputs.workerIdentityId
+    workerIdentityClientId: identities.outputs.workerIdentityClientId
+    workerIdentityName: identities.outputs.workerIdentityName
+    telemetryIdentityId: identities.outputs.telemetryIdentityId
+    databaseAdministratorIdentityId: identities.outputs.databaseAdministratorIdentityId
+    databaseAdministratorClientId: identities.outputs.databaseAdministratorClientId
+    databaseAdministratorName: identities.outputs.databaseAdministratorName
     keyVaultName: keyVault.outputs.keyVaultName
     registryLoginServer: registry.outputs.registryLoginServer
     apiImageDigest: apiImageDigest
+    postgresHost: postSecretEnabled ? postgres.outputs.serverFqdn : ''
+    postgresPort: postSecretEnabled ? postgres.outputs.serverPort : 5432
+    postgresDatabase: postSecretEnabled ? postgres.outputs.databaseName : ''
+    redisHost: postSecretEnabled ? redis.outputs.hostName : ''
+    redisPort: postSecretEnabled ? redis.outputs.port : 10000
+    redisApiUsername: postSecretEnabled ? redis.outputs.apiUsername : ''
+    redisWorkerUsername: postSecretEnabled ? redis.outputs.workerUsername : ''
+    storageAccountUrl: postSecretEnabled ? storage.outputs.storageAccountUrl : ''
     smtpHost: smtpHost
     smtpFromAddress: smtpFromAddress
     lifecycleTags: lifecycleTags
@@ -332,6 +365,9 @@ output postgresLocation string = postgresLocation
 output postgresServerFqdn string = postSecretEnabled ? postgres.outputs.serverFqdn : ''
 output redisHostName string = postSecretEnabled ? redis.outputs.hostName : ''
 output redisPort int = postSecretEnabled ? redis.outputs.port : 10000
+output storageAccountUrl string = postSecretEnabled ? storage.outputs.storageAccountUrl : ''
+output telemetryContainerAppId string = postSecretEnabled ? compute.outputs.telemetryContainerAppId : ''
+output migrationJobName string = postSecretEnabled ? compute.outputs.migrationJobName : ''
 output workloadIdentityClientId string = workloadEnabled ? identities.outputs.workloadIdentityClientId : ''
 output defaultProvisioningAuthorized bool = false
 output secretValueAccessAuthorized bool = false

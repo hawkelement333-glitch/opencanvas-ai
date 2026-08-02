@@ -45,18 +45,22 @@ resource regionalVnet 'Microsoft.Network/virtualNetworks@2026-01-01' = if (enabl
   tags: lifecycleTags
   properties: {
     addressSpace: { addressPrefixes: ['10.78.0.0/24'] }
-    subnets: [{
-      name: delegatedSubnetName
-      properties: {
-        addressPrefix: '10.78.0.0/26'
-        delegations: [{
-          name: 'postgres-flexible-server'
-          properties: { serviceName: 'Microsoft.DBforPostgreSQL/flexibleServers' }
-        }]
-        privateEndpointNetworkPolicies: 'Enabled'
-        privateLinkServiceNetworkPolicies: 'Enabled'
+    subnets: [
+      {
+        name: delegatedSubnetName
+        properties: {
+          addressPrefix: '10.78.0.0/26'
+          delegations: [
+            {
+              name: 'postgres-flexible-server'
+              properties: { serviceName: 'Microsoft.DBforPostgreSQL/flexibleServers' }
+            }
+          ]
+          privateEndpointNetworkPolicies: 'Enabled'
+          privateLinkServiceNetworkPolicies: 'Enabled'
+        }
       }
-    }]
+    ]
   }
 }
 
@@ -124,7 +128,11 @@ resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = if (ena
     backup: { backupRetentionDays: 7, geoRedundantBackup: 'Disabled' }
     highAvailability: { mode: 'ZoneRedundant' }
     network: {
-      delegatedSubnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', regionalVnetName, delegatedSubnetName)
+      delegatedSubnetResourceId: resourceId(
+        'Microsoft.Network/virtualNetworks/subnets',
+        regionalVnetName,
+        delegatedSubnetName
+      )
       privateDnsZoneArmResourceId: privateDnsZone.id
       publicNetworkAccess: 'Disabled'
     }
@@ -145,8 +153,20 @@ resource administrator 'Microsoft.DBforPostgreSQL/flexibleServers/administrators
   }
 }
 
+resource applicationDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = if (enabled) {
+  parent: server
+  name: 'opencanvas'
+  properties: {
+    charset: 'UTF8'
+    collation: 'en_US.utf8'
+  }
+  dependsOn: [administrator]
+}
+
 output serverId string = enabled ? server.id : ''
 output serverFqdn string = enabled ? server.properties.fullyQualifiedDomainName : ''
+output serverPort int = 5432
+output databaseName string = 'opencanvas'
 output privateDnsZoneId string = enabled ? privateDnsZone.id : ''
 output selectedLocation string = location
 output publicNetworkAccess string = 'Disabled'

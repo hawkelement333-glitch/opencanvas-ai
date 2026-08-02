@@ -3055,7 +3055,7 @@ def _reconcile_published_api_image(
     return immutable_reference
 
 
-def _private_revision_ready(subscription_id: str) -> None:
+def _container_app_revision_ready(subscription_id: str, app_name: str) -> None:
     deadline = time.monotonic() + 600.0
     while time.monotonic() < deadline:
         value = _run(
@@ -3068,7 +3068,7 @@ def _private_revision_ready(subscription_id: str) -> None:
                 "--resource-type",
                 "Microsoft.App/containerApps",
                 "--name",
-                "ca-mobius77-api",
+                app_name,
                 "--api-version",
                 "2026-01-01",
                 "--subscription",
@@ -3101,7 +3101,7 @@ def _private_revision_ready(subscription_id: str) -> None:
                     "--resource-group",
                     TARGET_GROUP,
                     "--name",
-                    "ca-mobius77-api",
+                    app_name,
                     "--revision",
                     latest,
                     "--subscription",
@@ -3132,6 +3132,80 @@ def _private_revision_ready(subscription_id: str) -> None:
     _fail("container-app-readiness-timeout")
 
 
+def _migration_job_ready(subscription_id: str) -> None:
+    started = _run(
+        (
+            "az",
+            "containerapp",
+            "job",
+            "start",
+            "--resource-group",
+            TARGET_GROUP,
+            "--name",
+            "caj-mobius77-migration",
+            "--subscription",
+            subscription_id,
+            "--query",
+            "{name:name}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(started, dict) or set(started) != {"name"}:
+        _fail("migration-job-start-output-malformed")
+    execution_name = started["name"]
+    if not isinstance(execution_name, str) or not execution_name.startswith(
+        "caj-mobius77-migration-"
+    ):
+        _fail("migration-job-start-output-malformed")
+    deadline = time.monotonic() + 1800.0
+    while time.monotonic() < deadline:
+        execution = _run(
+            (
+                "az",
+                "containerapp",
+                "job",
+                "execution",
+                "show",
+                "--resource-group",
+                TARGET_GROUP,
+                "--name",
+                "caj-mobius77-migration",
+                "--job-execution-name",
+                execution_name,
+                "--subscription",
+                subscription_id,
+                "--query",
+                "{name:name,status:properties.status}",
+                "--output",
+                "json",
+                "--only-show-errors",
+            ),
+            require_json=True,
+        )
+        if not isinstance(execution, dict) or set(execution) != {"name", "status"}:
+            _fail("migration-job-status-output-malformed")
+        if execution.get("name") != execution_name:
+            _fail("migration-job-status-output-malformed")
+        if execution.get("status") == "Succeeded":
+            return
+        if execution.get("status") in {"Canceled", "Failed"}:
+            _fail("migration-job-failed")
+        time.sleep(5.0)
+    _fail("migration-job-timeout")
+
+
+def _private_revision_ready(subscription_id: str) -> None:
+    for app_name in (
+        "ca-mobius77-telemetry",
+        "ca-mobius77-worker",
+        "ca-mobius77-api",
+    ):
+        _container_app_revision_ready(subscription_id, app_name)
+
+
 def _post_secret(
     *,
     ledger: dict[str, JsonValue],
@@ -3147,11 +3221,20 @@ def _post_secret(
     )
     if _utc_now() >= cleanup_at - timedelta(minutes=90):
         _fail("cleanup-reserve-active")
-    for secret_name in (
+    required_secret_names = (
         "openai-api-key",
         "opencanvas-smtp-username",
         "opencanvas-smtp-password",
-    ):
+        "opencanvas-session-secret",
+        "opencanvas-invitation-secret",
+        "opencanvas-upload-capability-secret",
+        "opencanvas-scanner-result-secret",
+        "opencanvas-rate-limit-hmac-secret",
+        "opencanvas-telemetry-token",
+        "opencanvas-telemetry-pseudonymization-secret",
+        "opencanvas-observability-operator-user-ids",
+    )
+    for secret_name in required_secret_names:
         secret_id = (
             f"/subscriptions/{subscription_id}/resourceGroups/{TARGET_GROUP}"
             f"/providers/Microsoft.KeyVault/vaults/{KEY_VAULT}/secrets/{secret_name}"
@@ -3197,10 +3280,12 @@ def _post_secret(
                 "smtpFromAddress": SMTP_FROM_ADDRESS,
             },
         )
+    _migration_job_ready(subscription_id)
     _private_revision_ready(subscription_id)
     return {
         "status": "private-revision-ready",
-        "managed-secret-count": 3,
+        "managed-secret-count": len(required_secret_names),
+        "migration-job-succeeded": True,
         "immutable-image-digest-bound": True,
         "canonical-openai-alias-only": True,
         "secret-value-accessed": False,

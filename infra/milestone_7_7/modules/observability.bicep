@@ -42,9 +42,9 @@ param retentionResolved bool = false
 param alertDestinationResolved bool = false
 
 @allowed([
-  false
+  true
 ])
-param telemetryGatewayResolved bool = false
+param telemetryGatewayResolved bool = true
 
 @allowed([
   'southcentralus'

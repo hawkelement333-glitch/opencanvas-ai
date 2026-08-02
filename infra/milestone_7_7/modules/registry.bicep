@@ -38,9 +38,9 @@ param administratorAccountEnabled bool = false
 param imageBindingCount int = 8
 
 @allowed([
-  false
+  true
 ])
-param imageDigestContractResolved bool = false
+param imageDigestContractResolved bool = true
 
 @allowed([
   'southcentralus'
@@ -50,6 +50,9 @@ param location string = 'southcentralus'
 param privateEndpointSubnetId string = ''
 param virtualNetworkId string = ''
 param workloadIdentityPrincipalId string = ''
+param workerIdentityPrincipalId string = ''
+param telemetryIdentityPrincipalId string = ''
+param databaseAdministratorPrincipalId string = ''
 param lifecycleTags object = {}
 
 var enabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled
@@ -117,7 +120,49 @@ resource workloadRegistryPull 'Microsoft.Authorization/roleAssignments@2022-04-0
   properties: {
     principalId: workloadIdentityPrincipalId
     principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+    )
+  }
+}
+
+resource workerRegistryPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enabled) {
+  name: guid(registry.id, workerIdentityPrincipalId, '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+  scope: registry
+  properties: {
+    principalId: workerIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+    )
+  }
+}
+
+resource telemetryRegistryPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enabled) {
+  name: guid(registry.id, telemetryIdentityPrincipalId, '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+  scope: registry
+  properties: {
+    principalId: telemetryIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+    )
+  }
+}
+
+resource migrationRegistryPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enabled) {
+  name: guid(registry.id, databaseAdministratorPrincipalId, '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+  scope: registry
+  properties: {
+    principalId: databaseAdministratorPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+    )
   }
 }
 

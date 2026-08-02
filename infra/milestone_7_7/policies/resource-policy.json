@@ -20,6 +20,7 @@
     "Microsoft.ContainerRegistry/registries",
     "Microsoft.DBforPostgreSQL/flexibleServers",
     "Microsoft.DBforPostgreSQL/flexibleServers/administrators",
+    "Microsoft.DBforPostgreSQL/flexibleServers/databases",
     "Microsoft.Cache/redisEnterprise",
     "Microsoft.Cache/redisEnterprise/databases",
     "Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments",

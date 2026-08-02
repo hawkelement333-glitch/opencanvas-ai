@@ -566,7 +566,7 @@ def test_framework_has_no_network_process_or_application_imports():
     assert not any(item in source for item in prohibited)
 
 
-def test_checkpoint_does_not_add_a_migration_or_change_checkpoint_1_bundle():
+def test_checkpoint_does_not_add_a_migration_and_binds_current_bundle():
     assert not list((REPO_ROOT / "apps" / "api" / "alembic" / "versions").glob("*0029*"))
     completed = subprocess.run(
         [
@@ -583,4 +583,4 @@ def test_checkpoint_does_not_add_a_migration_or_change_checkpoint_1_bundle():
         timeout=30,
     )
     assert completed.returncode == 0
-    assert "71b8c6a2d3aa9e4fd21c217ee92fba44acbf27926295ad67f9b2a236b779617b" in completed.stdout
+    assert "20d5eee8fedf72257c4442b70739d0ce1aa67d1c5533da89ea7d32d3085dbc24" in completed.stdout

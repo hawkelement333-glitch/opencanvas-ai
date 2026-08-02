@@ -15,8 +15,8 @@ param proposedSku string = 'Balanced_B0'
 @minValue(2)
 @maxValue(2)
 param nodeCount int = 2
-@allowed([false])
-param providerContractResolved bool = false
+@allowed([true])
+param providerContractResolved bool = true
 
 @allowed(['contract-only', 'managed-binding-one-run'])
 param managedBindingMode string
@@ -25,7 +25,8 @@ param managedBindingDeploymentEnabled bool
 param location string
 param privateEndpointSubnetId string
 param virtualNetworkId string
-param workloadIdentityPrincipalId string
+param apiIdentityPrincipalId string
+param workerIdentityPrincipalId string
 param lifecycleTags object
 
 var enabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled
@@ -56,7 +57,17 @@ resource accessPolicy 'Microsoft.Cache/redisEnterprise/databases/accessPolicyAss
   properties: {
     accessPolicyName: 'default'
     accessString: '+@read +@write +@connection +@scripting +time ~mobius:v1:*'
-    user: { objectId: workloadIdentityPrincipalId }
+    user: { objectId: apiIdentityPrincipalId }
+  }
+}
+
+resource workerAccessPolicy 'Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments@2026-05-01-preview' = if (enabled) {
+  parent: database
+  name: 'mobius77worker'
+  properties: {
+    accessPolicyName: 'default'
+    accessString: '+@read +@write +@connection +@scripting +time ~mobius:v1:*'
+    user: { objectId: workerIdentityPrincipalId }
   }
 }
 
@@ -79,10 +90,12 @@ resource privateEndpoint 'Microsoft.Network/privateEndpoints@2024-10-01' = if (e
   location: location
   tags: lifecycleTags
   properties: {
-    privateLinkServiceConnections: [{
-      name: 'redis'
-      properties: { groupIds: ['redisEnterprise'], privateLinkServiceId: cache.id }
-    }]
+    privateLinkServiceConnections: [
+      {
+        name: 'redis'
+        properties: { groupIds: ['redisEnterprise'], privateLinkServiceId: cache.id }
+      }
+    ]
     subnet: { id: privateEndpointSubnetId }
   }
 }
@@ -99,7 +112,8 @@ resource dnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2
 output cacheId string = enabled ? cache.id : ''
 output hostName string = enabled ? cache.properties.hostName : ''
 output port int = enabled ? database.properties.port : 10000
-output username string = workloadIdentityPrincipalId
+output apiUsername string = apiIdentityPrincipalId
+output workerUsername string = workerIdentityPrincipalId
 output publicNetworkAccess string = 'Disabled'
 output configuredSku string = proposedSku
 output configuredNodeCount int = nodeCount

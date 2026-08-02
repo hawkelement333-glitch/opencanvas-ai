@@ -426,6 +426,26 @@ class Settings(BaseSettings):
         self.demo_mode = mode is AppMode.DEMO
         self.environment = "development" if mode is AppMode.DEMO else mode.value  # type: ignore[assignment]
 
+        # Azure Container Apps injects these two values for every managed-identity
+        # enabled replica.  Map that provider-owned contract into each explicit
+        # application boundary without copying tokens or identity headers into
+        # deployment parameters.
+        identity_endpoint = os.getenv("IDENTITY_ENDPOINT")
+        identity_header = os.getenv("IDENTITY_HEADER")
+        if identity_endpoint:
+            if self.database_managed_identity_endpoint is None:
+                self.database_managed_identity_endpoint = identity_endpoint
+            if self.database_managed_identity_header is None:
+                self.database_managed_identity_header = identity_header
+            if self.azure_managed_identity_endpoint is None:
+                self.azure_managed_identity_endpoint = identity_endpoint
+            if self.azure_managed_identity_header is None:
+                self.azure_managed_identity_header = identity_header
+            if self.shared_rate_limit_identity_endpoint is None:
+                self.shared_rate_limit_identity_endpoint = identity_endpoint
+            if self.shared_rate_limit_identity_header is None:
+                self.shared_rate_limit_identity_header = identity_header
+
         if mode is AppMode.DEMO and "storage_provider" not in self.model_fields_set:
             self.storage_provider = "demo"
         if (
@@ -580,8 +600,7 @@ class Settings(BaseSettings):
             ]
             if missing_database_identity:
                 raise ValueError(
-                    f"{label} database identity is missing: "
-                    f"{', '.join(missing_database_identity)}"
+                    f"{label} database identity is missing: {', '.join(missing_database_identity)}"
                 )
         if self.database_expected_revision != EXPECTED_DATABASE_REVISION:
             raise ValueError(f"{label} requires the release's exact database revision")
