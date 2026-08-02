@@ -1,9 +1,9 @@
 {
   "contractVersion": "m7.7-lifecycle-policy-v1",
   "costControls": {
-    "absoluteCeilingUsdCents": 10000,
+    "absoluteCeilingUsdCents": 15000,
     "budgetAlertsAreEnforcement": false,
-    "provisioningBlockAboveUsdCents": 10000,
+    "provisioningBlockAboveUsdCents": 12000,
     "targetUsdCents": 10000,
     "minimumContingencyBasisPoints": 2500
   },
@@ -23,7 +23,7 @@
   "tagValueContracts": {
     "mobius-cleanup-binding-sha256": "runtime-lowercase-sha256",
     "mobius-contract-version": "m7.7-infrastructure-contract-v1",
-    "mobius-cost-ceiling-usd-cents": "runtime-maximum-plausible-at-or-below-10000",
+    "mobius-cost-ceiling-usd-cents": "runtime-maximum-plausible-at-or-below-15000",
     "mobius-data-class": "isolated-synthetic",
     "mobius-environment": "milestone-7.7-isolated",
     "mobius-expires-at-utc": "runtime-rfc3339-utc",

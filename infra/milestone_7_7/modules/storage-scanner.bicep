@@ -76,9 +76,9 @@ param scannerExerciseBytesCap int = 26214400
 param totalSyntheticUploadBytesCap int = 134217728
 
 @allowed([
-  false
+  true
 ])
-param scannerResultBridgeResolved bool = false
+param scannerResultBridgeResolved bool
 
 var enabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled
 var storageAccountName = 'stmobius7711564669'

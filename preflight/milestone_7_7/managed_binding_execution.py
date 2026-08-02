@@ -57,6 +57,7 @@ PROVIDER_METHOD = "azure-provider-resource-metadata-v1"
 PROVIDER_TYPE_INVENTORY_METHOD = "azure-provider-resource-type-inventory-v1"
 STAGING_REGION = "southcentralus"
 CLEANUP_REGION = "westus"
+POSTGRES_REGION = "centralus"
 METHOD_PLACEHOLDER: Final = re.compile(r"\{[A-Za-z][A-Za-z0-9]*\}")
 USAGE_DECIMAL_INTEGER: Final = re.compile(r"(?:0|[1-9][0-9]{0,19})")
 
@@ -110,13 +111,22 @@ _EXACT_CLEANUP_REGION_BINDINGS: Final = frozenset(
         "Microsoft.Automation/automationAccounts/schedules",
     }
 )
+_EXACT_POSTGRES_REGION_BINDINGS: Final = frozenset(
+    {
+        "Microsoft.DBforPostgreSQL/flexibleServers",
+        "Microsoft.DBforPostgreSQL/flexibleServers/administrators",
+        "Microsoft.DBforPostgreSQL/flexibleServers/databases",
+    }
+)
 
 _PROVIDER_KEYS_BY_OPERATION: Final = {
     "regional-service-availability": (
         "Microsoft.App/containerApps",
         "Microsoft.App/managedEnvironments",
         "Microsoft.Automation/automationAccounts",
+        "Microsoft.Cache/redisEnterprise",
         "Microsoft.ContainerRegistry/registries",
+        "Microsoft.DBforPostgreSQL/flexibleServers",
         "Microsoft.EventGrid/systemTopics",
         "Microsoft.KeyVault/vaults",
         "Microsoft.ManagedIdentity/userAssignedIdentities",
@@ -127,19 +137,24 @@ _PROVIDER_KEYS_BY_OPERATION: Final = {
         "Microsoft.Network/virtualNetworkGateways",
         "Microsoft.Network/virtualNetworks",
         "Microsoft.OperationalInsights/workspaces",
+        "Microsoft.Storage/storageAccounts",
     ),
     "provider-registration-api-versions": (),
     "regional-sku-capabilities": (
         "Microsoft.App/containerApps",
         "Microsoft.App/managedEnvironments",
         "Microsoft.Automation/automationAccounts",
+        "Microsoft.Cache/redisEnterprise",
+        "Microsoft.DBforPostgreSQL/flexibleServers",
         "Microsoft.KeyVault/vaults",
         "Microsoft.Network/virtualNetworkGateways",
         "Microsoft.OperationalInsights/workspaces",
     ),
     "private-endpoint-network-support": (
+        "Microsoft.Cache/redisEnterprise",
         "Microsoft.Network/privateEndpoints",
         "Microsoft.Network/virtualNetworks",
+        "Microsoft.Storage/storageAccounts",
     ),
     "private-dns-prerequisites": (
         "Microsoft.Network/dnsResolvers",
@@ -470,7 +485,11 @@ def _regional_metadata_approved(
     expected = _EXACT_REGION_INDEPENDENT_BINDINGS.get(key)
     if expected is None:
         required_region = (
-            CLEANUP_REGION if key in _EXACT_CLEANUP_REGION_BINDINGS else STAGING_REGION
+            CLEANUP_REGION
+            if key in _EXACT_CLEANUP_REGION_BINDINGS
+            else POSTGRES_REGION
+            if key in _EXACT_POSTGRES_REGION_BINDINGS
+            else STAGING_REGION
         )
         return required_region in normalized_locations
     (
@@ -945,7 +964,7 @@ def _cost_contract() -> tuple[str, str, dict[str, JsonValue]]:
         or isinstance(maximum, bool)
     ):
         raise ManagedBindingExecutionError("cost-envelope-malformed")
-    within = expected <= 10_000 and maximum <= 10_000
+    within = expected <= 12_000 and maximum <= 15_000
     return (
         ("proved" if within else "blocked"),
         ("cost-envelope-bounded" if within else "cost-envelope-exceeds-ceiling"),

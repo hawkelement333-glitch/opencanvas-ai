@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
 from performance.milestone_7_7.framework import ContractError, JsonValue, canonical_bytes
 from preflight.milestone_7_7 import framework as topology_framework
@@ -92,6 +91,48 @@ def test_managed_binding_contract_is_exact_integrity_bound_and_default_deny() ->
 
 def test_exact_names_scopes_secrets_runtime_and_private_source_are_closed() -> None:
     contract = load_managed_binding_contract()
+
+    assert contract["providerRegistrationRequirements"] == [
+        "Microsoft.App",
+        "Microsoft.Authorization",
+        "Microsoft.Automation",
+        "Microsoft.Cache",
+        "Microsoft.ContainerRegistry",
+        "Microsoft.DBforPostgreSQL",
+        "Microsoft.EventGrid",
+        "Microsoft.Insights",
+        "Microsoft.KeyVault",
+        "Microsoft.ManagedIdentity",
+        "Microsoft.Network",
+        "Microsoft.OperationalInsights",
+        "Microsoft.Resources",
+        "Microsoft.Security",
+        "Microsoft.Storage",
+    ]
+    assert {
+        key: contract["providerApiVersions"][key]
+        for key in (
+            "Microsoft.Cache/redisEnterprise",
+            "Microsoft.Cache/redisEnterprise/databases",
+            "Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments",
+            "Microsoft.DBforPostgreSQL/flexibleServers",
+            "Microsoft.DBforPostgreSQL/flexibleServers/administrators",
+            "Microsoft.DBforPostgreSQL/flexibleServers/databases",
+            "Microsoft.Storage/storageAccounts",
+            "Microsoft.Storage/storageAccounts/blobServices",
+            "Microsoft.Storage/storageAccounts/blobServices/containers",
+        )
+    } == {
+        "Microsoft.Cache/redisEnterprise": "2026-05-01-preview",
+        "Microsoft.Cache/redisEnterprise/databases": "2026-05-01-preview",
+        "Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments": ("2026-05-01-preview"),
+        "Microsoft.DBforPostgreSQL/flexibleServers": "2024-08-01",
+        "Microsoft.DBforPostgreSQL/flexibleServers/administrators": "2024-08-01",
+        "Microsoft.DBforPostgreSQL/flexibleServers/databases": "2024-08-01",
+        "Microsoft.Storage/storageAccounts": "2025-06-01",
+        "Microsoft.Storage/storageAccounts/blobServices": "2025-06-01",
+        "Microsoft.Storage/storageAccounts/blobServices/containers": "2025-06-01",
+    }
 
     assert contract["resourceGroups"] == {
         "cleanupControl": "rg-solarplexus-mobius-77-cleanup-control",
@@ -308,7 +349,11 @@ class ManagedBindingFakeAdapter:
                 "resourceType": resource_type,
                 "apiVersions": [self.versions[key]],
                 "locations": [
-                    "West US" if namespace == "Microsoft.Automation" else "South Central US"
+                    "West US"
+                    if namespace == "Microsoft.Automation"
+                    else "Central US"
+                    if namespace == "Microsoft.DBforPostgreSQL"
+                    else "South Central US"
                 ],
             }
         else:

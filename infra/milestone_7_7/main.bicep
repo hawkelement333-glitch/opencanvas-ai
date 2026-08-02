@@ -65,15 +65,18 @@ param smtpHost string = 'sandbox.smtp.mailtrap.io'
 ])
 param smtpFromAddress string = 'mobius77-validation@example.invalid'
 
+@description('Post-secret deployment requires the managed scanner-result bridge to be resolved explicitly.')
+param scannerResultBridgeResolved bool = false
+
 param lifecycleTags object = {}
 param cleanupAtUtc string = ''
 
 @minValue(1)
-@maxValue(10000)
+@maxValue(12000)
 param expectedUsdCents int = 1
 
 @minValue(1)
-@maxValue(10000)
+@maxValue(15000)
 param maximumPlausibleUsdCents int = 1
 
 var oneRunEnabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled && length(authorizationLedgerSha256) == 64
@@ -81,7 +84,7 @@ var cleanupControlEnabled = oneRunEnabled && deploymentStage == 'cleanup-control
 var cleanupJobScheduleEnabled = oneRunEnabled && deploymentStage == 'cleanup-job-binding'
 var cleanupBindingEnabled = oneRunEnabled && deploymentStage == 'cleanup-binding'
 var preSecretEnabled = oneRunEnabled && deploymentStage == 'pre-secret'
-var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret'
+var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret' && scannerResultBridgeResolved
 var workloadEnabled = preSecretEnabled || postSecretEnabled
 var targetEnabled = cleanupBindingEnabled || workloadEnabled
 
@@ -253,6 +256,7 @@ module storage './modules/storage-scanner.bicep' = if (postSecretEnabled) {
     virtualNetworkId: network.outputs.virtualNetworkId
     apiIdentityPrincipalId: identities.outputs.workloadIdentityPrincipalId
     workerIdentityPrincipalId: identities.outputs.workerIdentityPrincipalId
+    scannerResultBridgeResolved: scannerResultBridgeResolved
     lifecycleTags: lifecycleTags
   }
 }

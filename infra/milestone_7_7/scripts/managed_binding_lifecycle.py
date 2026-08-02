@@ -62,7 +62,8 @@ CLEANUP_LOCATION: Final = "westus"
 AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 2, 23, 0, tzinfo=UTC)
 MAXIMUM_AUTHORIZED_WINDOW: Final = timedelta(hours=30)
 MINIMUM_CLEANUP_RESERVE: Final = timedelta(minutes=90)
-ABSOLUTE_COST_CEILING_USD_CENTS: Final = 10_000
+PROVISIONING_COST_BLOCK_USD_CENTS: Final = 12_000
+ABSOLUTE_COST_CEILING_USD_CENTS: Final = 15_000
 MAXIMUM_OUTPUT_BYTES: Final = 65_536
 DEPLOYMENT_TIMEOUT_SECONDS: Final = 1_800
 OPERATION_TIMEOUT_SECONDS: Final = 120
@@ -549,7 +550,7 @@ def _verified_cost() -> tuple[int, int]:
         or not isinstance(maximum, int)
         or isinstance(maximum, bool)
         or expected < 1
-        or expected > ABSOLUTE_COST_CEILING_USD_CENTS
+        or expected > PROVISIONING_COST_BLOCK_USD_CENTS
         or maximum < expected
         or maximum > ABSOLUTE_COST_CEILING_USD_CENTS
     ):

@@ -1,12 +1,12 @@
 {
   "bindings": {
-    "checkpoint1BundleSha256": "20d5eee8fedf72257c4442b70739d0ce1aa67d1c5533da89ea7d32d3085dbc24",
+    "checkpoint1BundleSha256": "0b5259d8cd162966ce61d9158153883bfaaf71db4ddb57b41f09ad2538f7eaf9",
     "checkpoint2ManifestSha256": "7d8832aae03e00ec93a6203a2360555ba19b030912a406b775fc7b20630c1c26",
     "checkpoint2PlanSha256": "4c13cc8b536cef325a27a0a00b4d008d164ff5d955512e599df309f69c7f32b3",
     "checkpoint2ResultSha256": "a98e8122f5c16a448de69f17cc6b537ea03989843805bbb584dfc620ae5d5c79",
     "checkpoint3PackageSha256": "e88ab17245804f26d535ee225de1042ebf20d1fb6acf66e4cc755262c8e94ad1",
     "checkpoint4CatalogSha256": "bf38c10982a5ed3e15fe27174f0b472b44fa0e44c23d9c62f1a2e68148fac8be",
-    "checkpoint4PlanSha256": "faffedbfbd933254e01474599010ff0dc8d5cc46c01d67f34774dafc4790f985",
+    "checkpoint4PlanSha256": "3a424ef2435853e6974007b6174147bf92ac226a6fb2cf99f502bb88b3baafa9",
     "validationRequirementCatalogSha256": "069c9e00e984249b45ef8c5de5b28581b4f8fa1818e62d2af7269d584ae84791"
   },
   "capabilities": {
@@ -156,7 +156,7 @@
   ],
   "purpose": "aggregate-local-validation",
   "reportId": "m7.7-cp5-local-validation",
-  "reportIntegritySha256": "176ed7333d359c597bba8598ac2c21ec1cdb41535a1e409cdd2f57dbcfba89de",
+  "reportIntegritySha256": "70d5d3e6821c3eb56bd80f56f7c8be416bf89cdc19343a39d48c0cba624cfe77",
   "schemaVersion": "2020-12",
   "source": {
     "commitSha": "c4fdab9ed46ae8d1b8ef380dae9a3812155097c5",

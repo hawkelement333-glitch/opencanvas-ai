@@ -186,10 +186,10 @@
           "const": 104857600
         },
         "provisioningBlockAboveUsdCents": {
-          "const": 10000
+          "const": 12000
         },
         "absoluteCostCeilingUsdCents": {
-          "const": 10000
+          "const": 15000
         },
         "minimumCleanupReserveSeconds": {
           "const": 5400

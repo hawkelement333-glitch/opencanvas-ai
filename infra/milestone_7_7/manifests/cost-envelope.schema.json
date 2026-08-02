@@ -42,35 +42,35 @@
       "const": 10000
     },
     "provisioningBlockAboveUsdCents": {
-      "const": 10000
+      "const": 12000
     },
     "absoluteCeilingUsdCents": {
-      "const": 10000
+      "const": 15000
     },
     "expectedUsdCents": {
       "type": ["integer", "null"],
       "minimum": 1,
-      "maximum": 10000
+      "maximum": 12000
     },
     "baseMaximumUsdCents": {
       "type": ["integer", "null"],
       "minimum": 1,
-      "maximum": 10000
+      "maximum": 15000
     },
     "uncertaintyContingencyBasisPoints": {
       "type": "integer",
       "minimum": 2500,
-      "maximum": 10000
+      "maximum": 15000
     },
     "contingencyUsdCents": {
       "type": ["integer", "null"],
       "minimum": 1,
-      "maximum": 10000
+      "maximum": 15000
     },
     "maximumPlausibleUsdCents": {
       "type": ["integer", "null"],
       "minimum": 1,
-      "maximum": 10000
+      "maximum": 15000
     },
     "budgetAlertsAreEnforcement": {
       "const": false

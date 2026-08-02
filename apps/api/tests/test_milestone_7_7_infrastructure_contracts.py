@@ -276,6 +276,20 @@ def test_bicep_preserves_inert_defaults_and_gates_one_run_resources():
     assert "output moduleCount int = length(moduleBoundaries)" in main
 
 
+def test_post_secret_storage_requires_explicit_resolved_scanner_bridge():
+    main = (ROOT / "main.bicep").read_text(encoding="utf-8")
+    storage = (ROOT / "modules" / "storage-scanner.bicep").read_text(encoding="utf-8")
+
+    assert "param scannerResultBridgeResolved bool = false" in main
+    assert (
+        "var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret' "
+        "&& scannerResultBridgeResolved"
+    ) in main
+    assert "scannerResultBridgeResolved: scannerResultBridgeResolved" in main
+    assert "@allowed([\n  true\n])\nparam scannerResultBridgeResolved bool" in storage
+    assert "param scannerResultBridgeResolved bool = false" not in storage
+
+
 def test_module_inventory_and_safe_outputs_are_exact():
     names = sorted(path.name for path in (ROOT / "modules").glob("*.bicep"))
     assert names == [
@@ -529,17 +543,27 @@ def test_network_policy_has_exact_private_topology_and_public_ip_exceptions():
 def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
     value = _json(MANIFESTS / "cost-envelope.template.json")
     assert value["targetUsdCents"] == 10000
-    assert value["provisioningBlockAboveUsdCents"] == 10000
-    assert value["absoluteCeilingUsdCents"] == 10000
+    assert value["provisioningBlockAboveUsdCents"] == 12000
+    assert value["absoluteCeilingUsdCents"] == 15000
     assert value["uncertaintyContingencyBasisPoints"] == 2500
     assert value["budgetAlertsAreEnforcement"] is False
     assert value["resolutionStatus"] == "verified"
-    assert value["expectedUsdCents"] == 1958
-    assert value["baseMaximumUsdCents"] == 6881
-    assert value["contingencyUsdCents"] == 1721
-    assert value["maximumPlausibleUsdCents"] == 8602
-    assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 1958
-    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 6881
+    assert value["expectedUsdCents"] == 3105
+    assert value["baseMaximumUsdCents"] == 9395
+    assert value["contingencyUsdCents"] == 2349
+    assert value["maximumPlausibleUsdCents"] == 11744
+    assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 3105
+    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 9395
+    required_lines = {
+        "postgresql-zone-redundant-compute",
+        "postgresql-storage-and-backup",
+        "managed-redis-balanced-b0-two-node",
+        "object-storage-capacity-and-transactions",
+        "defender-malware-scanning",
+        "additional-private-connectivity-and-data",
+        "failed-cleanup-six-hour-exposure",
+    }
+    assert required_lines.issubset({item["name"] for item in value["lineItems"]})
     assert all(
         item["priceEvidenceStatus"] == "verified-official-retail" for item in value["lineItems"]
     )
@@ -547,10 +571,10 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
 
 
 def test_verified_cost_reconciles_base_contingency_and_maximum():
-    value = _resolved_cost()
+    value = _resolved_cost(expected=12000, base_maximum=12000)
     contract._validate_cost(value)
-    assert value["contingencyUsdCents"] == 2000
-    assert value["maximumPlausibleUsdCents"] == 10000
+    assert value["contingencyUsdCents"] == 3000
+    assert value["maximumPlausibleUsdCents"] == 15000
 
 
 def test_cost_rejects_zero_empty_over_block_at_ceiling_and_bad_contingency():
@@ -570,12 +594,12 @@ def test_cost_rejects_zero_empty_over_block_at_ceiling_and_bad_contingency():
     boolean_total["expectedUsdCents"] = True
     with pytest.raises(contract.ContractError, match="integer totals"):
         contract._validate_cost(boolean_total)
-    over_block = _resolved_cost(expected=10001, base_maximum=10001)
+    over_block = _resolved_cost(expected=12001, base_maximum=12001)
     with pytest.raises(contract.ContractError, match="provisioning block"):
         contract._validate_cost(over_block)
-    at_ceiling = _resolved_cost()
+    at_ceiling = _resolved_cost(expected=12000, base_maximum=12000)
     contract._validate_cost(at_ceiling)
-    over_ceiling = _resolved_cost(expected=8001, base_maximum=8001)
+    over_ceiling = _resolved_cost(expected=12000, base_maximum=12001)
     with pytest.raises(contract.ContractError, match="absolute ceiling"):
         contract._validate_cost(over_ceiling)
     bad_contingency = _resolved_cost()

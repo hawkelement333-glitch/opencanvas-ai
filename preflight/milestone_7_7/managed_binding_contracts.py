@@ -133,7 +133,9 @@ EXPECTED_PROVIDER_REGISTRATIONS: Final = (
     "Microsoft.App",
     "Microsoft.Authorization",
     "Microsoft.Automation",
+    "Microsoft.Cache",
     "Microsoft.ContainerRegistry",
+    "Microsoft.DBforPostgreSQL",
     "Microsoft.EventGrid",
     "Microsoft.Insights",
     "Microsoft.KeyVault",
@@ -142,6 +144,7 @@ EXPECTED_PROVIDER_REGISTRATIONS: Final = (
     "Microsoft.OperationalInsights",
     "Microsoft.Resources",
     "Microsoft.Security",
+    "Microsoft.Storage",
 )
 EXPECTED_LIFECYCLE_OPERATIONS: Final = (
     "pre-secret-provisioning",

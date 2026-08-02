@@ -126,7 +126,7 @@ EXPECTED_POLICY_DIGESTS = {
         "036a369242182e52018f98e0b27d2944492c977e82475edd8a9209fecd1afce2"
     ),
     "lifecycle-policy.json": (
-        "51b8f6a6217b1e316be949f769e24d71801d42de78cd7ad9cf86d2ba5b869b4a"
+        "b05104cef9b5a8247cf2fc5daa2f022f99ee558ffd0c4656334b69020af56d14"
     ),
     "network-policy.json": (
         "67fe0f29d7a69c78a08a213764da7498a6a83293c3e8838c7d3f971da15a851b"
@@ -140,7 +140,7 @@ EXPECTED_POLICY_DIGESTS = {
 }
 EXPECTED_SCHEMA_DIGESTS = {
     "cost-envelope.schema.json": (
-        "3f3d451efcd3b92786fc613f18ba6ed7ac57a04bf99ce6c825f256bc37bae39c"
+        "b4fd8fceca65828170446f430b17ed66aefda4be52aaafb5a5cbc8b546a4db0b"
     ),
     "environment.schema.json": (
         "27e038b925ccd66b1172942dd7bf1963bd681fd1e92769f6d46a34d720187076"
@@ -629,9 +629,9 @@ def _validate_cost(value: Mapping[str, Any]) -> None:
     names = [item["name"] for item in lines]
     if len(names) != len(set(names)):
         raise ContractError("cost line-item names are not unique")
-    if expected > 10000:
+    if expected > 12000:
         raise ContractError("expected cost exceeds the provisioning block")
-    if maximum > 10000:
+    if maximum > 15000:
         raise ContractError("maximum cost exceeds the absolute ceiling")
     if expected > base_maximum:
         raise ContractError("expected cost exceeds the base maximum")
@@ -761,10 +761,10 @@ def _validate_policies(root: Path, environment: Mapping[str, Any]) -> None:
     if network_address_plan != environment_address_plan:
         raise ContractError("environment and network policy address plans differ")
     if lifecycle["costControls"] != {
-        "absoluteCeilingUsdCents": 10000,
+        "absoluteCeilingUsdCents": 15000,
         "budgetAlertsAreEnforcement": False,
         "minimumContingencyBasisPoints": 2500,
-        "provisioningBlockAboveUsdCents": 10000,
+        "provisioningBlockAboveUsdCents": 12000,
         "targetUsdCents": 10000,
     }:
         raise ContractError("fixed cost controls differ")

@@ -107,7 +107,13 @@
     "Microsoft.Automation/automationAccounts/jobSchedules": "2024-10-23",
     "Microsoft.Automation/automationAccounts/runbooks": "2024-10-23",
     "Microsoft.Automation/automationAccounts/schedules": "2024-10-23",
+    "Microsoft.Cache/redisEnterprise": "2026-05-01-preview",
+    "Microsoft.Cache/redisEnterprise/databases": "2026-05-01-preview",
+    "Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments": "2026-05-01-preview",
     "Microsoft.ContainerRegistry/registries": "2025-11-01",
+    "Microsoft.DBforPostgreSQL/flexibleServers": "2024-08-01",
+    "Microsoft.DBforPostgreSQL/flexibleServers/administrators": "2024-08-01",
+    "Microsoft.DBforPostgreSQL/flexibleServers/databases": "2024-08-01",
     "Microsoft.EventGrid/eventSubscriptions": "2025-02-15",
     "Microsoft.EventGrid/systemTopics": "2025-02-15",
     "Microsoft.Insights/diagnosticSettings": "2016-09-01",
@@ -126,13 +132,18 @@
     "Microsoft.Network/virtualNetworkGateways": "2026-01-01",
     "Microsoft.Network/virtualNetworks": "2026-01-01",
     "Microsoft.Resources/resourceGroups": "2023-07-01",
-    "Microsoft.Security/defenderForStorageSettings": "2025-06-01"
+    "Microsoft.Security/defenderForStorageSettings": "2025-06-01",
+    "Microsoft.Storage/storageAccounts": "2025-06-01",
+    "Microsoft.Storage/storageAccounts/blobServices": "2025-06-01",
+    "Microsoft.Storage/storageAccounts/blobServices/containers": "2025-06-01"
   },
   "providerRegistrationRequirements": [
     "Microsoft.App",
     "Microsoft.Authorization",
     "Microsoft.Automation",
+    "Microsoft.Cache",
     "Microsoft.ContainerRegistry",
+    "Microsoft.DBforPostgreSQL",
     "Microsoft.EventGrid",
     "Microsoft.Insights",
     "Microsoft.KeyVault",
@@ -140,7 +151,8 @@
     "Microsoft.Network",
     "Microsoft.OperationalInsights",
     "Microsoft.Resources",
-    "Microsoft.Security"
+    "Microsoft.Security",
+    "Microsoft.Storage"
   ],
   "rbac": {
     "acrPullRoleDefinitionId": "7f951dda-4ed3-4680-a7ca-43fe172d538d",

@@ -226,9 +226,9 @@ def test_plan_limits_do_not_exceed_prior_checkpoint_boundaries() -> None:
     assert limits["maximumArrivalRatePerSecond"] == 100
     assert limits["maximumRetriesPerRequest"] == 2
     assert limits["maximumSyntheticUploadBytes"] == 134_217_728
-    assert limits["provisioningBlockAboveUsdCents"] == 10_000
-    assert limits["absoluteCostCeilingUsdCents"] == 10_000
-    assert limits["provisioningBlockAboveUsdCents"] == limits["absoluteCostCeilingUsdCents"]
+    assert limits["provisioningBlockAboveUsdCents"] == 12_000
+    assert limits["absoluteCostCeilingUsdCents"] == 15_000
+    assert limits["provisioningBlockAboveUsdCents"] < limits["absoluteCostCeilingUsdCents"]
 
 
 @pytest.mark.parametrize("field", sorted(_plan()))

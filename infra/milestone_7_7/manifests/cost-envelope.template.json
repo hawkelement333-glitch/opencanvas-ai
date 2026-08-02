@@ -5,13 +5,13 @@
   "provisioningAuthorized": false,
   "currency": "USD",
   "targetUsdCents": 10000,
-  "provisioningBlockAboveUsdCents": 10000,
-  "absoluteCeilingUsdCents": 10000,
-  "expectedUsdCents": 1958,
-  "baseMaximumUsdCents": 6881,
+  "provisioningBlockAboveUsdCents": 12000,
+  "absoluteCeilingUsdCents": 15000,
+  "expectedUsdCents": 3105,
+  "baseMaximumUsdCents": 9395,
   "uncertaintyContingencyBasisPoints": 2500,
-  "contingencyUsdCents": 1721,
-  "maximumPlausibleUsdCents": 8602,
+  "contingencyUsdCents": 2349,
+  "maximumPlausibleUsdCents": 11744,
   "budgetAlertsAreEnforcement": false,
   "hardLeaseHours": 30,
   "lineItems": [
@@ -85,6 +85,48 @@
       "name": "bounded-public-data-transfer",
       "expectedUsdCents": 18,
       "baseMaximumUsdCents": 174,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "postgresql-zone-redundant-compute",
+      "expectedUsdCents": 965,
+      "baseMaximumUsdCents": 1206,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "postgresql-storage-and-backup",
+      "expectedUsdCents": 35,
+      "baseMaximumUsdCents": 150,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "managed-redis-balanced-b0-two-node",
+      "expectedUsdCents": 87,
+      "baseMaximumUsdCents": 108,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "object-storage-capacity-and-transactions",
+      "expectedUsdCents": 25,
+      "baseMaximumUsdCents": 100,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "defender-malware-scanning",
+      "expectedUsdCents": 10,
+      "baseMaximumUsdCents": 100,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "additional-private-connectivity-and-data",
+      "expectedUsdCents": 25,
+      "baseMaximumUsdCents": 100,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "failed-cleanup-six-hour-exposure",
+      "expectedUsdCents": 0,
+      "baseMaximumUsdCents": 750,
       "priceEvidenceStatus": "verified-official-retail"
     }
   ]
