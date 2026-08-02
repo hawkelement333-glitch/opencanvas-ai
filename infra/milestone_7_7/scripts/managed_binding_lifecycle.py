@@ -2815,14 +2815,16 @@ def _wait_for_publisher_access(
     argv: tuple[str, ...], *, environment: Mapping[str, str]
 ) -> None:
     deadline = time.monotonic() + 600.0
-    while time.monotonic() < deadline:
+    while True:
         _private_tls_endpoint(REGISTRY_HOST)
         try:
             _run(argv, require_json=True, environment_overrides=environment)
             return
         except AzureCommandError:
-            time.sleep(10.0)
-    _fail("publisher-role-propagation-unproved")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _fail("publisher-role-propagation-unproved")
+            time.sleep(min(10.0, remaining))
 
 
 def _delete_ephemeral_publisher(

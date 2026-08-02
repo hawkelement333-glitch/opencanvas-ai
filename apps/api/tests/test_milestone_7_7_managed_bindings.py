@@ -1814,6 +1814,37 @@ def test_ephemeral_publisher_principal_retries_bounded_propagation(
     assert calls == 2
 
 
+def test_publisher_access_probes_at_propagation_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    sleeps: list[float] = []
+
+    def run(_argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise managed_binding_lifecycle.AzureCommandError("authorization-failed")
+        return []
+
+    monotonic_values = iter((0.0, 599.0))
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
+    monkeypatch.setattr(managed_binding_lifecycle, "_private_tls_endpoint", lambda _hostname: None)
+    monkeypatch.setattr(
+        managed_binding_lifecycle.time,
+        "monotonic",
+        lambda: next(monotonic_values),
+    )
+    monkeypatch.setattr(managed_binding_lifecycle.time, "sleep", sleeps.append)
+
+    managed_binding_lifecycle._wait_for_publisher_access(
+        ("az", "acr", "repository", "list"), environment={}
+    )
+
+    assert calls == 2
+    assert sleeps == [1.0]
+
+
 def test_lifecycle_working_directory_must_be_outside_repository() -> None:
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
