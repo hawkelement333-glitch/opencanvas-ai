@@ -2671,6 +2671,15 @@ def _reset_ephemeral_directory(path: Path) -> None:
         _fail("publisher-auth-cache-reset-failed")
 
 
+def _management_azure_config_directory() -> Path:
+    configured = os.environ.get("AZURE_CONFIG_DIR")
+    candidate = Path(configured) if configured else Path.home() / ".azure"
+    resolved = _outside_repository(candidate, "management-azure-config-directory")
+    if not resolved.is_dir():
+        _fail("management-azure-config-directory-invalid")
+    return resolved
+
+
 def _create_ephemeral_publisher(
     *, ledger: dict[str, JsonValue], publisher_directory: Path
 ) -> tuple[str, str, str, Path]:
@@ -2681,6 +2690,7 @@ def _create_ephemeral_publisher(
     ):
         _fail("publisher-ledger-binding-invalid")
     display_name = f"mobius77-acr-publisher-{ledger_integrity[:12]}"
+    management_azure_config = _management_azure_config_directory()
     created = _run(
         (
             "az",
@@ -2700,7 +2710,10 @@ def _create_ephemeral_publisher(
             "--only-show-errors",
         ),
         require_json=True,
-        environment_overrides={"USERPROFILE": str(publisher_directory)},
+        environment_overrides={
+            "AZURE_CONFIG_DIR": str(management_azure_config),
+            "USERPROFILE": str(publisher_directory),
+        },
         working_directory=publisher_directory,
     )
     if not isinstance(created, dict) or set(created) != {

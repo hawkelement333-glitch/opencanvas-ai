@@ -1725,6 +1725,8 @@ def test_ephemeral_publisher_generates_certificate_only_in_restricted_directory(
 ) -> None:
     publisher_directory = tmp_path / "publisher"
     publisher_directory.mkdir(mode=0o700)
+    management_azure_config = tmp_path / "management-azure-config"
+    management_azure_config.mkdir(mode=0o700)
     certificate_path = publisher_directory / "generated-certificate.pem"
     calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
 
@@ -1734,7 +1736,10 @@ def test_ephemeral_publisher_generates_certificate_only_in_restricted_directory(
             assert "--create-cert" in argv
             assert "--cert" not in argv
             assert kwargs["working_directory"] == publisher_directory
-            assert kwargs["environment_overrides"] == {"USERPROFILE": str(publisher_directory)}
+            assert kwargs["environment_overrides"] == {
+                "AZURE_CONFIG_DIR": str(management_azure_config),
+                "USERPROFILE": str(publisher_directory),
+            }
             certificate_path.write_text("synthetic-certificate", encoding="ascii")
             return {
                 "appId": "00000000-0000-0000-0000-000000000091",
@@ -1751,6 +1756,11 @@ def test_ephemeral_publisher_generates_certificate_only_in_restricted_directory(
         raise AssertionError(argv)
 
     monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_management_azure_config_directory",
+        lambda: management_azure_config,
+    )
     app_id, object_id, tenant_id, observed_certificate = (
         managed_binding_lifecycle._create_ephemeral_publisher(
             ledger={"ledgerIntegritySha256": "a" * 64},
