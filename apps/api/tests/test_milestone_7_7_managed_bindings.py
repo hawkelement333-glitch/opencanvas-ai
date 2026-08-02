@@ -2375,11 +2375,11 @@ def test_lifecycle_deployment_names_preserve_prior_azure_history() -> None:
 
 
 def test_lifecycle_cleanup_deadline_matches_azure_minute_precision() -> None:
-    observed = datetime(2026, 8, 1, 18, 5, 33, 987654, tzinfo=UTC)
+    observed = datetime(2026, 8, 2, 6, 5, 33, 987654, tzinfo=UTC)
 
     deadline = managed_binding_lifecycle._cleanup_deadline(observed)
 
-    assert deadline == datetime(2026, 8, 2, 23, 0, tzinfo=UTC)
+    assert deadline == datetime(2026, 8, 3, 11, 0, tzinfo=UTC)
     assert deadline == managed_binding_lifecycle.AUTHORIZED_CLEANUP_AT_UTC
     assert deadline <= observed + timedelta(hours=30)
 
@@ -2389,12 +2389,12 @@ def test_lifecycle_cleanup_deadline_matches_azure_minute_precision() -> None:
         managed_binding_lifecycle.LifecycleError,
         match="cleanup-deadline-expired-or-reserve-active",
     ):
-        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 2, 21, 30, tzinfo=UTC))
+        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 3, 9, 30, tzinfo=UTC))
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
         match="cleanup-deadline-outside-authorized-window",
     ):
-        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 7, 31, 0, 59, tzinfo=UTC))
+        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 2, 4, 59, tzinfo=UTC))
 
 
 def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> None:
@@ -2840,7 +2840,7 @@ def _test_preservation_state(
 ) -> dict[str, JsonValue]:
     return {
         "activeStage": "pre-secret",
-        "cleanupAtUtc": "2026-08-02T23:00:00Z",
+        "cleanupAtUtc": "2026-08-03T11:00:00Z",
         "disposition": "RUNNING",
         "failedStage": None,
         "lastCompletedStage": "cleanup-role-verification",
@@ -2885,7 +2885,7 @@ def _verify_container_apps_infrastructure_fixture(
 ) -> int:
     subscription = SYNTHETIC_SUBSCRIPTION
     expected_tags = _test_recovered_cleanup_tags()
-    expected_tags["mobius-expires-at-utc"] = "2026-08-02T23:00:00Z"
+    expected_tags["mobius-expires-at-utc"] = "2026-08-03T11:00:00Z"
     expected_environment_id = (
         f"/subscriptions/{subscription}/resourceGroups/"
         f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
@@ -2950,7 +2950,7 @@ def _verify_container_apps_infrastructure_fixture(
     return managed_binding_lifecycle._verify_container_apps_infrastructure(
         subscription_id=subscription,
         ledger=_test_lifecycle_ledger(),
-        cleanup_at=datetime(2026, 8, 2, 23, 0, tzinfo=UTC),
+        cleanup_at=datetime(2026, 8, 3, 11, 0, tzinfo=UTC),
         allow_prior_binding_with_changed_inputs=allow_prior_binding_with_changed_inputs,
     )
 
@@ -2966,7 +2966,7 @@ def test_container_apps_infrastructure_accepts_only_prior_ledger_hash(
 ) -> None:
     prior_tags = _test_recovered_cleanup_tags()
     prior_tags["mobius-cleanup-binding-sha256"] = "d" * 64
-    prior_tags["mobius-expires-at-utc"] = "08/02/2026 23:00:00"
+    prior_tags["mobius-expires-at-utc"] = "08/03/2026 11:00:00"
     prior_tags["aca-managed-env-id"] = (
         f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}/resourceGroups/"
         f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
@@ -2991,7 +2991,7 @@ def test_container_apps_infrastructure_accepts_only_prior_ledger_hash(
         _verify_container_apps_infrastructure_fixture(monkeypatch, group_tags=prior_tags)
 
     prior_tags["aca-managed-env-id"] = expected_environment_id
-    prior_tags["mobius-expires-at-utc"] = "08/03/2026 07:00:00"
+    prior_tags["mobius-expires-at-utc"] = "08/03/2026 12:00:00"
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
         match="container-apps-infrastructure-group-drift",
@@ -3004,7 +3004,7 @@ def test_container_apps_infrastructure_accepts_ancestor_source_only_without_inpu
 ) -> None:
     prior_tags = _test_recovered_cleanup_tags()
     prior_tags["mobius-source-commit"] = "d" * 40
-    prior_tags["mobius-expires-at-utc"] = "08/02/2026 23:00:00"
+    prior_tags["mobius-expires-at-utc"] = "08/03/2026 11:00:00"
     prior_tags["aca-managed-env-id"] = (
         f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}/resourceGroups/"
         f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
@@ -3086,7 +3086,7 @@ def _reconcile_container_apps_infrastructure_tags_fixture(
     )
     expected = _test_recovered_cleanup_tags()
     expected["mobius-cleanup-binding-sha256"] = "e" * 64
-    expected["mobius-expires-at-utc"] = "2026-08-02T23:00:00Z"
+    expected["mobius-expires-at-utc"] = "2026-08-03T11:00:00Z"
     expected["mobius-manifest-sha256"] = "f" * 64
     expected["mobius-run-id"] = "m7.7-managed-binding-closeout-20260731"
     expected["mobius-source-commit"] = "c" * 40
@@ -3128,7 +3128,7 @@ def _reconcile_container_apps_infrastructure_tags_fixture(
     managed_binding_lifecycle._reconcile_container_apps_infrastructure_tags(
         subscription_id=subscription,
         ledger=_test_lifecycle_ledger(),
-        cleanup_at=datetime(2026, 8, 2, 23, 0, tzinfo=UTC),
+        cleanup_at=datetime(2026, 8, 3, 11, 0, tzinfo=UTC),
     )
     return calls
 
@@ -3145,7 +3145,7 @@ def test_container_apps_infrastructure_tags_reconcile_exact_prior_binding(
     (
         lambda tags: tags.update({"mobius-run-id": "bad"}),
         lambda tags: tags.update({"mobius-source-commit": "not-a-commit"}),
-        lambda tags: tags.update({"mobius-expires-at-utc": "08/03/2026 07:00:00"}),
+        lambda tags: tags.update({"mobius-expires-at-utc": "08/03/2026 12:00:00"}),
         lambda tags: tags.update({"mobius-public-access": "allowed"}),
         lambda tags: tags.update({"aca-managed-env-id": "nearby"}),
         lambda tags: tags.update({"unexpected": "tag"}),

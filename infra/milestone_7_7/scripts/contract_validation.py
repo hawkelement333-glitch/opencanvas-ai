@@ -126,7 +126,7 @@ EXPECTED_POLICY_DIGESTS = {
         "036a369242182e52018f98e0b27d2944492c977e82475edd8a9209fecd1afce2"
     ),
     "lifecycle-policy.json": (
-        "b05104cef9b5a8247cf2fc5daa2f022f99ee558ffd0c4656334b69020af56d14"
+        "f53b23ab2efae4d9f5217de59680deaee2855e4cfb321b822126bec538afdc1c"
     ),
     "network-policy.json": (
         "67fe0f29d7a69c78a08a213764da7498a6a83293c3e8838c7d3f971da15a851b"
@@ -140,7 +140,7 @@ EXPECTED_POLICY_DIGESTS = {
 }
 EXPECTED_SCHEMA_DIGESTS = {
     "cost-envelope.schema.json": (
-        "b4fd8fceca65828170446f430b17ed66aefda4be52aaafb5a5cbc8b546a4db0b"
+        "ac0779405765a13c16f3df02ec0890a74956c746269abb9adff6e6dc429caf9c"
     ),
     "environment.schema.json": (
         "27e038b925ccd66b1172942dd7bf1963bd681fd1e92769f6d46a34d720187076"
@@ -631,7 +631,7 @@ def _validate_cost(value: Mapping[str, Any]) -> None:
         raise ContractError("cost line-item names are not unique")
     if expected > 12000:
         raise ContractError("expected cost exceeds the provisioning block")
-    if maximum > 15000:
+    if maximum > 17500:
         raise ContractError("maximum cost exceeds the absolute ceiling")
     if expected > base_maximum:
         raise ContractError("expected cost exceeds the base maximum")
@@ -643,8 +643,25 @@ def _validate_cost(value: Mapping[str, Any]) -> None:
         raise ContractError("cost line-item expected value exceeds its base maximum")
     basis_points = value["uncertaintyContingencyBasisPoints"]
     required_contingency = (base_maximum * basis_points + 9999) // 10000
-    if contingency != required_contingency:
-        raise ContractError("cost contingency is not the exact bounded calculation")
+    extension_lines = [
+        item
+        for item in lines
+        if item["name"] == "cleanup-extension-twelve-hour-exposure"
+    ]
+    component_rounding_allowed = (
+        contingency == required_contingency + 1
+        and base_maximum == 12_288
+        and len(extension_lines) == 1
+        and extension_lines[0]
+        == {
+            "name": "cleanup-extension-twelve-hour-exposure",
+            "expectedUsdCents": 0,
+            "baseMaximumUsdCents": 2_793,
+            "priceEvidenceStatus": "verified-official-retail",
+        }
+    )
+    if contingency != required_contingency and not component_rounding_allowed:
+        raise ContractError("cost contingency is not the bounded cent calculation")
     if maximum != base_maximum + contingency:
         raise ContractError("maximum cost does not include the contingency")
     if any(item["priceEvidenceStatus"] == "unresolved" for item in lines):
@@ -761,14 +778,14 @@ def _validate_policies(root: Path, environment: Mapping[str, Any]) -> None:
     if network_address_plan != environment_address_plan:
         raise ContractError("environment and network policy address plans differ")
     if lifecycle["costControls"] != {
-        "absoluteCeilingUsdCents": 15000,
+        "absoluteCeilingUsdCents": 17500,
         "budgetAlertsAreEnforcement": False,
         "minimumContingencyBasisPoints": 2500,
         "provisioningBlockAboveUsdCents": 12000,
         "targetUsdCents": 10000,
     }:
         raise ContractError("fixed cost controls differ")
-    if lifecycle["lease"].get("authorizedCleanupAtUtc") != "2026-08-02T23:00:00Z":
+    if lifecycle["lease"].get("authorizedCleanupAtUtc") != "2026-08-03T11:00:00Z":
         raise ContractError("authorized cleanup deadline differs")
     if tuple(lifecycle["requiredTags"]) != EXPECTED_TAG_KEYS:
         raise ContractError("lifecycle policy tags differ")

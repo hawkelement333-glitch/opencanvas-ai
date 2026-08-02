@@ -189,7 +189,7 @@
           "const": 12000
         },
         "absoluteCostCeilingUsdCents": {
-          "const": 15000
+          "const": 17500
         },
         "minimumCleanupReserveSeconds": {
           "const": 5400
