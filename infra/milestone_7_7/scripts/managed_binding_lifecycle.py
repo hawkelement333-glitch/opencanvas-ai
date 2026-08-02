@@ -3029,7 +3029,8 @@ def _denial_probe(
             marker in message
             for marker in ("403", "denied", "forbidden", "permission", "unauthorized")
         ):
-            _fail("denial-probe-result-ambiguous")
+            error_code = _sanitized_azure_error_code(stdout, stderr)
+            _fail(f"denial-probe-result-ambiguous-{error_code}")
         return "denied"
     finally:
         stdout.clear()
