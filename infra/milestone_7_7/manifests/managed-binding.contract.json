@@ -4,6 +4,7 @@
   "authorizationSourceHead": "11564669bd5b40a88fdbf434c8137b063305eb4b",
   "location": "southcentralus",
   "cleanupLocation": "westus",
+  "redisLocation": "australiacentral",
   "accountBinding": {
     "cloud": "AzureCloud",
     "subscriptionFingerprint": "f4493115ce6375cf0e5d0616bede57126075fdb27ac78ea0ba7e0085252a7028",
@@ -67,6 +68,7 @@
     "keyVault": "standard",
     "containerAppsWorkloadProfile": "Consumption",
     "containerRegistry": "Premium",
+    "redis": "Balanced_B0",
     "vpnGateway": "VpnGw1AZ",
     "logAnalytics": "PerGB2018",
     "automationAccount": "Basic"

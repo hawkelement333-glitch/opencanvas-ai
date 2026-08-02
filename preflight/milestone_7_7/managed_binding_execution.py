@@ -58,6 +58,7 @@ PROVIDER_TYPE_INVENTORY_METHOD = "azure-provider-resource-type-inventory-v1"
 STAGING_REGION = "southcentralus"
 CLEANUP_REGION = "westus"
 POSTGRES_REGION = "centralus"
+REDIS_REGION = "australiacentral"
 METHOD_PLACEHOLDER: Final = re.compile(r"\{[A-Za-z][A-Za-z0-9]*\}")
 USAGE_DECIMAL_INTEGER: Final = re.compile(r"(?:0|[1-9][0-9]{0,19})")
 
@@ -116,6 +117,13 @@ _EXACT_POSTGRES_REGION_BINDINGS: Final = frozenset(
         "Microsoft.DBforPostgreSQL/flexibleServers",
         "Microsoft.DBforPostgreSQL/flexibleServers/administrators",
         "Microsoft.DBforPostgreSQL/flexibleServers/databases",
+    }
+)
+_EXACT_REDIS_REGION_BINDINGS: Final = frozenset(
+    {
+        "Microsoft.Cache/redisEnterprise",
+        "Microsoft.Cache/redisEnterprise/databases",
+        "Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments",
     }
 )
 
@@ -487,6 +495,8 @@ def _regional_metadata_approved(
         required_region = (
             CLEANUP_REGION
             if key in _EXACT_CLEANUP_REGION_BINDINGS
+            else REDIS_REGION
+            if key in _EXACT_REDIS_REGION_BINDINGS
             else POSTGRES_REGION
             if key in _EXACT_POSTGRES_REGION_BINDINGS
             else STAGING_REGION

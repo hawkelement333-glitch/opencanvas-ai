@@ -244,6 +244,8 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         raise ContractError("managed-binding region differs")
     if contract["cleanupLocation"] != CLEANUP_LOCATION:
         raise ContractError("managed-binding cleanup region differs")
+    if contract["redisLocation"] != "australiacentral":
+        raise ContractError("managed-binding Redis region differs")
     if contract["resourceGroups"] != EXPECTED_RESOURCE_GROUPS:
         raise ContractError("managed-binding resource groups differ")
     authority = _as_object(contract["defaultAuthority"], "$.defaultAuthority")
@@ -302,6 +304,8 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
     fixed_skus = _as_object(contract["fixedSkus"], "$.fixedSkus")
     if fixed_skus.get("vpnGateway") != "VpnGw1AZ":
         raise ContractError("managed-binding VPN gateway SKU differs")
+    if fixed_skus.get("redis") != "Balanced_B0":
+        raise ContractError("managed-binding Redis SKU differs")
 
     network = _as_object(contract["network"], "$.network")
     vnet = ipaddress.ip_network(str(network["vnetCidr"]), strict=True)

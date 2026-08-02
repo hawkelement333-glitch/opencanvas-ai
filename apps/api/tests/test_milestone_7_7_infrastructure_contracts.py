@@ -377,6 +377,11 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "param proposedSku string = 'Balanced_B0'",
             "param nodeCount int = 2",
             "param providerContractResolved bool = true",
+            "param cacheLocation string",
+            "param privateEndpointLocation string",
+            "sku: { name: proposedSku }",
+            "location: cacheLocation",
+            "location: privateEndpointLocation",
         ],
         "registry.bicep": [
             "param registrySku string = 'Premium'",
@@ -503,6 +508,8 @@ def test_resource_policy_has_fixed_topology_and_provider_blocks():
     assert resource["fixedSkus"]["postgresql"]["name"] == "Standard_D2ds_v5"
     assert resource["fixedSkus"]["containerRegistry"]["name"] == "Premium"
     assert resource["fixedSkus"]["redis"]["providerClusteringEnum"] is None
+    assert resource["fixedSkus"]["redis"]["location"] == "australiacentral"
+    assert resource["fixedSkus"]["redis"]["privateEndpointLocation"] == ("southcentralus")
     assert resource["fixedSkus"]["vpnGateway"] == {
         "name": "VpnGw1AZ",
         "maximumLifetimeHours": 12,
@@ -548,16 +555,17 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
     assert value["uncertaintyContingencyBasisPoints"] == 2500
     assert value["budgetAlertsAreEnforcement"] is False
     assert value["resolutionStatus"] == "verified"
-    assert value["expectedUsdCents"] == 3105
-    assert value["baseMaximumUsdCents"] == 9395
-    assert value["contingencyUsdCents"] == 2349
-    assert value["maximumPlausibleUsdCents"] == 11744
-    assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 3105
-    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 9395
+    assert value["expectedUsdCents"] == 3110
+    assert value["baseMaximumUsdCents"] == 9495
+    assert value["contingencyUsdCents"] == 2374
+    assert value["maximumPlausibleUsdCents"] == 11869
+    assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 3110
+    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 9495
     required_lines = {
         "postgresql-zone-redundant-compute",
         "postgresql-storage-and-backup",
         "managed-redis-balanced-b0-two-node",
+        "redis-intercontinental-private-link-data",
         "object-storage-capacity-and-transactions",
         "defender-malware-scanning",
         "additional-private-connectivity-and-data",

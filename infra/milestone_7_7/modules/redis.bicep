@@ -21,8 +21,10 @@ param providerContractResolved bool = true
 @allowed(['contract-only', 'managed-binding-one-run'])
 param managedBindingMode string
 param managedBindingDeploymentEnabled bool
+@allowed(['australiacentral'])
+param cacheLocation string
 @allowed(['southcentralus'])
-param location string
+param privateEndpointLocation string
 param privateEndpointSubnetId string
 param virtualNetworkId string
 param apiIdentityPrincipalId string
@@ -34,9 +36,9 @@ var cacheName = 'redis-mobius77-11564669'
 
 resource cache 'Microsoft.Cache/redisEnterprise@2026-05-01-preview' = if (enabled) {
   name: cacheName
-  location: location
+  location: cacheLocation
   tags: lifecycleTags
-  sku: { name: 'Balanced_B0' }
+  sku: { name: proposedSku }
   properties: { minimumTlsVersion: '1.2', publicNetworkAccess: 'Disabled' }
 }
 
@@ -87,7 +89,7 @@ resource dnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-
 
 resource privateEndpoint 'Microsoft.Network/privateEndpoints@2024-10-01' = if (enabled) {
   name: 'pe-mobius77-redis'
-  location: location
+  location: privateEndpointLocation
   tags: lifecycleTags
   properties: {
     privateLinkServiceConnections: [
@@ -117,6 +119,8 @@ output workerUsername string = workerIdentityPrincipalId
 output publicNetworkAccess string = 'Disabled'
 output configuredSku string = proposedSku
 output configuredNodeCount int = nodeCount
+output configuredCacheLocation string = cacheLocation
+output configuredPrivateEndpointLocation string = privateEndpointLocation
 output providerContractResolved bool = providerContractResolved
 output checkpointMode string = checkpointMode
 output deploymentEnabled bool = deploymentEnabled

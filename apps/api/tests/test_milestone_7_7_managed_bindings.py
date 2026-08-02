@@ -141,12 +141,14 @@ def test_exact_names_scopes_secrets_runtime_and_private_source_are_closed() -> N
     }
     assert contract["location"] == "southcentralus"
     assert contract["cleanupLocation"] == "westus"
+    assert contract["redisLocation"] == "australiacentral"
     assert contract["resources"]["keyVault"] == "kv-mobius77-11564669"
     assert contract["network"]["vnetCidr"] == "10.77.0.0/20"
     assert contract["network"]["privateEndpointsCidr"] == "10.77.2.0/24"
     assert contract["network"]["publicApplicationIngress"] is False
     assert contract["network"]["publicKeyVaultAccess"] is False
     assert contract["fixedSkus"]["vpnGateway"] == "VpnGw1AZ"
+    assert contract["fixedSkus"]["redis"] == "Balanced_B0"
     assert contract["vpn"] == {
         "gatewaySku": "VpnGw1AZ",
         "gatewayGeneration": "Generation2",
@@ -240,6 +242,26 @@ def test_cleanup_location_missing_or_outside_exact_allowlist_fails_closed(
     else:
         contract["cleanupLocation"] = cleanup_location
     with pytest.raises(ContractError, match=r"cleanupLocation|closed contract"):
+        validate_managed_binding_contract(contract)
+
+
+@pytest.mark.parametrize("redis_location", [None, "", "southcentralus", "australiaeast"])
+def test_redis_location_missing_or_outside_exact_allowlist_fails_closed(
+    redis_location: str | None,
+) -> None:
+    contract = deepcopy(load_managed_binding_contract())
+    if redis_location is None:
+        contract.pop("redisLocation")
+    else:
+        contract["redisLocation"] = redis_location
+    with pytest.raises(ContractError, match=r"redisLocation|Redis region|closed contract"):
+        validate_managed_binding_contract(contract)
+
+
+def test_redis_sku_change_fails_closed() -> None:
+    contract = deepcopy(load_managed_binding_contract())
+    contract["fixedSkus"]["redis"] = "Balanced_B1"
+    with pytest.raises(ContractError, match="Redis SKU"):
         validate_managed_binding_contract(contract)
 
 
@@ -351,6 +373,8 @@ class ManagedBindingFakeAdapter:
                 "locations": [
                     "West US"
                     if namespace == "Microsoft.Automation"
+                    else "Australia Central"
+                    if namespace == "Microsoft.Cache"
                     else "Central US"
                     if namespace == "Microsoft.DBforPostgreSQL"
                     else "South Central US"
@@ -972,6 +996,36 @@ def test_automation_cleanup_region_is_exact_and_staging_region_is_rejected(
             )
         ),
         provider_key="Microsoft.Automation/automationAccounts",
+    )
+    assert blocked[0:2] == ("blocked", "approved-region-unavailable")
+
+
+def test_redis_region_is_exact_and_staging_region_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    approved = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            direct_child=_automation_metadata_row(
+                "redisEnterprise",
+                api_versions=("2026-05-01-preview",),
+                locations=("Australia Central",),
+            )
+        ),
+        provider_key="Microsoft.Cache/redisEnterprise",
+    )
+    assert approved[0:2] == ("proved", "provider-prerequisites-proved")
+
+    blocked = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            direct_child=_automation_metadata_row(
+                "redisEnterprise",
+                api_versions=("2026-05-01-preview",),
+                locations=("South Central US",),
+            )
+        ),
+        provider_key="Microsoft.Cache/redisEnterprise",
     )
     assert blocked[0:2] == ("blocked", "approved-region-unavailable")
 
@@ -1612,6 +1666,7 @@ def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> No
     assert 'STAGING_LOCATION: Final = "southcentralus"' in text
     assert 'CLEANUP_LOCATION: Final = "westus"' in text
     assert 'f"location={STAGING_LOCATION}"' in text
+    assert 'f"redisLocation={REDIS_LOCATION}"' in text
     assert 'f"cleanupLocation={CLEANUP_LOCATION}"' in text
     assert '"state": "Ok"' in text
     assert '"runbookType": "PowerShell72"' in text
@@ -1940,6 +1995,9 @@ def test_only_cleanup_automation_module_allows_west_us() -> None:
     )
     assert "param location string = 'southcentralus'" in main
     assert "param cleanupLocation string = 'westus'" in main
+    assert "param redisLocation string = 'australiacentral'" in main
+    assert "cacheLocation: redisLocation" in main
+    assert "privateEndpointLocation: location" in main
     assert "var cleanupBindingEnabled" in main
     assert "var cleanupJobScheduleEnabled" in main
     assert "'cleanup-job-binding'" in main

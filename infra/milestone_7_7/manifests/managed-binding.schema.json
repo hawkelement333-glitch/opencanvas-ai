@@ -10,6 +10,7 @@
     "authorizationSourceHead",
     "location",
     "cleanupLocation",
+    "redisLocation",
     "accountBinding",
     "defaultAuthority",
     "resourceGroups",
@@ -37,6 +38,7 @@
     },
     "location": { "const": "southcentralus" },
     "cleanupLocation": { "const": "westus" },
+    "redisLocation": { "const": "australiacentral" },
     "accountBinding": { "$ref": "#/$defs/closedMap" },
     "defaultAuthority": {
       "type": "object",

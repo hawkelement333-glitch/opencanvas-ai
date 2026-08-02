@@ -7,11 +7,11 @@
   "targetUsdCents": 10000,
   "provisioningBlockAboveUsdCents": 12000,
   "absoluteCeilingUsdCents": 15000,
-  "expectedUsdCents": 3105,
-  "baseMaximumUsdCents": 9395,
+  "expectedUsdCents": 3110,
+  "baseMaximumUsdCents": 9495,
   "uncertaintyContingencyBasisPoints": 2500,
-  "contingencyUsdCents": 2349,
-  "maximumPlausibleUsdCents": 11744,
+  "contingencyUsdCents": 2374,
+  "maximumPlausibleUsdCents": 11869,
   "budgetAlertsAreEnforcement": false,
   "hardLeaseHours": 30,
   "lineItems": [
@@ -103,6 +103,12 @@
       "name": "managed-redis-balanced-b0-two-node",
       "expectedUsdCents": 87,
       "baseMaximumUsdCents": 108,
+      "priceEvidenceStatus": "verified-official-retail"
+    },
+    {
+      "name": "redis-intercontinental-private-link-data",
+      "expectedUsdCents": 5,
+      "baseMaximumUsdCents": 100,
       "priceEvidenceStatus": "verified-official-retail"
     },
     {

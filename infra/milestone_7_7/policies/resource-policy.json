@@ -157,6 +157,8 @@
       "publicNetworkAccess": false
     },
     "redis": {
+      "location": "australiacentral",
+      "privateEndpointLocation": "southcentralus",
       "name": "Balanced_B0",
       "nodeCount": 2,
       "clusteringBehavior": "single-shard-nonclustered",

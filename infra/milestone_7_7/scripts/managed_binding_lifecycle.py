@@ -59,6 +59,7 @@ RUNBOOK: Final = "Remove-Mobius77Staging"
 SCHEDULE: Final = "schedule-mobius77-cleanup"
 STAGING_LOCATION: Final = "southcentralus"
 CLEANUP_LOCATION: Final = "westus"
+REDIS_LOCATION: Final = "australiacentral"
 AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 2, 23, 0, tzinfo=UTC)
 MAXIMUM_AUTHORIZED_WINDOW: Final = timedelta(hours=30)
 MINIMUM_CLEANUP_RESERVE: Final = timedelta(minutes=90)
@@ -917,6 +918,7 @@ def _deploy_stage(
         f"deploymentStage={stage}",
         f"location={STAGING_LOCATION}",
         f"cleanupLocation={CLEANUP_LOCATION}",
+        f"redisLocation={REDIS_LOCATION}",
         f"authorizationLedgerSha256={ledger['ledgerIntegritySha256']}",
         f"cleanupAtUtc={_format_utc(cleanup_at)}",
         f"expectedUsdCents={expected_cost}",

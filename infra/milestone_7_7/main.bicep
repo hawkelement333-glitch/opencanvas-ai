@@ -48,6 +48,12 @@ param cleanupLocation string = 'westus'
 ])
 param postgresLocation string = 'centralus'
 
+@description('Redis-only split-region exception selected from subscription-scoped SKU capability.')
+@allowed([
+  'australiacentral'
+])
+param redisLocation string = 'australiacentral'
+
 @minLength(0)
 @maxLength(64)
 param authorizationLedgerSha256 string = ''
@@ -234,7 +240,8 @@ module redis './modules/redis.bicep' = if (postSecretEnabled) {
   params: {
     managedBindingMode: managedBindingMode
     managedBindingDeploymentEnabled: true
-    location: location
+    cacheLocation: redisLocation
+    privateEndpointLocation: location
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     virtualNetworkId: network.outputs.virtualNetworkId
     apiIdentityPrincipalId: identities.outputs.workloadIdentityPrincipalId
@@ -366,6 +373,7 @@ output containerAppsInfrastructureResourceGroupName string = containerAppsInfras
 output stagingLocation string = location
 output cleanupLocation string = cleanupLocation
 output postgresLocation string = postgresLocation
+output redisLocation string = redisLocation
 output postgresServerFqdn string = postSecretEnabled ? postgres.outputs.serverFqdn : ''
 output redisHostName string = postSecretEnabled ? redis.outputs.hostName : ''
 output redisPort int = postSecretEnabled ? redis.outputs.port : 10000
