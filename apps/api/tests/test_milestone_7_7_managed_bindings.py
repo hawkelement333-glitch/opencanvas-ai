@@ -1491,8 +1491,8 @@ def test_lifecycle_is_closed_private_digest_bound_and_secret_value_blind() -> No
     assert "OPENCANVAS_OPENAI_API_KEY" not in text
     assert "--expose-token" not in text
     assert "--password" not in text
-    assert 'docker",\n                        "buildx' in text
-    assert 'repository",\n                        "untag' in text
+    assert '"buildx"' in text
+    assert '"untag"' in text
     assert "@sha256:" in text
     assert "private-endpoint-resolved-publicly" in text
     assert "temporary-authority-revocation-unproved" in text
@@ -1519,32 +1519,274 @@ def test_denial_probes_use_windows_safe_empty_projection() -> None:
     assert '"length(@)"' not in revoke
 
 
-def test_recovered_api_image_requires_exact_unchanged_source(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    digest = "sha256:" + "a" * 64
-    source_tag = "source-" + managed_binding_lifecycle.RECOVERABLE_API_IMAGE_SOURCE_COMMIT
-    calls: list[tuple[str, ...]] = []
+def test_ephemeral_publisher_role_inventory_is_exact_and_default_deny() -> None:
+    publisher_object_id = "00000000-0000-0000-0000-000000000071"
+    role_id = "00000000-0000-0000-0000-000000000072"
+    registry_scope = (
+        "/subscriptions/opaque-subscription/resourceGroups/"
+        "rg-solarplexus-mobius-77-staging/providers/"
+        "Microsoft.ContainerRegistry/registries/acrmobius7711564669"
+    )
+    expected = {
+        "principalId": publisher_object_id.casefold(),
+        "roleDefinitionId": (
+            "/subscriptions/opaque-subscription/providers/"
+            f"Microsoft.Authorization/roleDefinitions/{role_id}"
+        ).casefold(),
+        "scope": registry_scope.casefold(),
+    }
 
-    def run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue | None:
-        calls.append(argv)
-        if "show-tags" in argv:
-            return [source_tag]
-        if "show" in argv:
-            return {"digest": digest}
-        return None
-
-    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
-    monkeypatch.setattr(managed_binding_lifecycle, "_run_text", lambda _argv: "")
-
-    result = managed_binding_lifecycle._reconcile_published_api_image(
-        ledger={"repositoryHead": AUTHORIZATION_SOURCE_HEAD},
-        subscription_id="opaque-subscription",
-        receipt_directory=Path("opaque-receipts"),
+    managed_binding_lifecycle._validate_publisher_role_inventory(
+        [],
+        publisher_object_id=publisher_object_id,
+        registry_scope=registry_scope,
+        acr_push_role_id=role_id,
+        assignment_required=False,
+    )
+    managed_binding_lifecycle._validate_publisher_role_inventory(
+        [expected],
+        publisher_object_id=publisher_object_id,
+        registry_scope=registry_scope,
+        acr_push_role_id=role_id,
+        assignment_required=True,
     )
 
-    assert result == f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api@{digest}"
+    inherited_or_persistent = [
+        [expected],
+        [{**expected, "scope": "/subscriptions/opaque-subscription"}],
+        [{**expected, "roleDefinitionId": expected["roleDefinitionId"] + "-nearby"}],
+        [{**expected, "principalId": "00000000-0000-0000-0000-000000000073"}],
+        [expected, expected],
+    ]
+    for rows in inherited_or_persistent:
+        with pytest.raises(managed_binding_lifecycle.LifecycleError):
+            managed_binding_lifecycle._validate_publisher_role_inventory(
+                rows,
+                publisher_object_id=publisher_object_id,
+                registry_scope=registry_scope,
+                acr_push_role_id=role_id,
+                assignment_required=False,
+            )
+
+    missing_nearby_duplicate_or_extra = [
+        [],
+        [{**expected, "scope": registry_scope + "-nearby"}],
+        [{**expected, "roleDefinitionId": expected["roleDefinitionId"] + "-nearby"}],
+        [expected, expected],
+        [
+            expected,
+            {
+                **expected,
+                "roleDefinitionId": expected["roleDefinitionId"] + "-extra",
+            },
+        ],
+    ]
+    for rows in missing_nearby_duplicate_or_extra:
+        with pytest.raises(
+            managed_binding_lifecycle.LifecycleError,
+            match="publisher-role-inventory-drift",
+        ):
+            managed_binding_lifecycle._validate_publisher_role_inventory(
+                rows,
+                publisher_object_id=publisher_object_id,
+                registry_scope=registry_scope,
+                acr_push_role_id=role_id,
+                assignment_required=True,
+            )
+
+
+@pytest.mark.parametrize(
+    "authority",
+    [
+        "owner",
+        "contributor",
+        "acr-push",
+        "acr-tasks",
+        "quick-build",
+        "wildcard",
+        "group-derived",
+        "ancestor-scope",
+    ],
+)
+def test_ephemeral_publisher_rejects_every_inherited_authority(authority: str) -> None:
+    publisher_object_id = "00000000-0000-0000-0000-000000000081"
+    registry_scope = (
+        "/subscriptions/opaque-subscription/resourceGroups/"
+        "rg-solarplexus-mobius-77-staging/providers/"
+        "Microsoft.ContainerRegistry/registries/acrmobius7711564669"
+    )
+    row = {
+        "principalId": publisher_object_id,
+        "roleDefinitionId": (
+            "/subscriptions/opaque-subscription/providers/"
+            f"Microsoft.Authorization/roleDefinitions/{authority}"
+        ),
+        "scope": registry_scope,
+    }
+    if authority == "group-derived":
+        row["principalId"] = "00000000-0000-0000-0000-000000000082"
+    if authority == "ancestor-scope":
+        row["scope"] = "/subscriptions/opaque-subscription"
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="publisher-inherited-authority",
+    ):
+        managed_binding_lifecycle._validate_publisher_role_inventory(
+            [row],
+            publisher_object_id=publisher_object_id,
+            registry_scope=registry_scope,
+            acr_push_role_id="8311e382-0749-4cb8-b61a-304f252e45ec",
+            assignment_required=False,
+        )
+
+
+def test_ephemeral_publisher_role_inventory_normalizes_and_rejects_malformed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row: JsonValue = {
+        "principalId": "ABCDEF00-0000-0000-0000-000000000001",
+        "roleDefinitionId": "/SUBSCRIPTIONS/OPAQUE/ROLE",
+        "scope": "/SUBSCRIPTIONS/OPAQUE/SCOPE",
+    }
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_run",
+        lambda *_args, **_kwargs: [row],
+    )
+    assert managed_binding_lifecycle._publisher_role_rows(
+        subscription_id="opaque-subscription",
+        publisher_app_id="opaque-application",
+    ) == [
+        {
+            "principalId": "abcdef00-0000-0000-0000-000000000001",
+            "roleDefinitionId": "/subscriptions/opaque/role",
+            "scope": "/subscriptions/opaque/scope",
+        }
+    ]
+
+    row = {"principalId": "opaque", "scope": "opaque"}
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="publisher-role-inventory-malformed",
+    ):
+        managed_binding_lifecycle._publisher_role_rows(
+            subscription_id="opaque-subscription",
+            publisher_app_id="opaque-application",
+        )
+
+
+def test_ephemeral_publisher_is_same_principal_and_delete_after_denial() -> None:
+    publish = inspect.getsource(managed_binding_lifecycle._publish_api_image)
+    create = publish.index("_create_ephemeral_publisher(")
+    initial_denial = publish.index("_wait_for_denial(", create)
+    assignment = publish.index("_temporary_publisher_role_assignment(", initial_denial)
+    build = publish.index('"buildx",', assignment)
+    revoke = publish.index("_delete_assignment(subscription_id, assignment_id)", build)
+    cache_reset = publish.index("_reset_ephemeral_directory(docker_config)", revoke)
+    post_revoke_denial = publish.index("_wait_for_denial(", cache_reset)
+    denial_proved = publish.index("denial_proved = True", post_revoke_denial)
+    identity_delete = publish.index("_delete_ephemeral_publisher(", denial_proved)
+
+    assert create < initial_denial < assignment < build < revoke
+    assert revoke < cache_reset < post_revoke_denial < denial_proved < identity_delete
+    assert "_signed_in_user_object_id" not in publish
+    assert '"--assignee-principal-type",\n            "ServicePrincipal"' in inspect.getsource(
+        managed_binding_lifecycle._temporary_publisher_role_assignment
+    )
+    assert publish.count("environment_overrides=publisher_environment") >= 12
+    assert '"docker", "pull"' in publish
+    assert '"docker", "push"' in publish
+    assert '"docker", "manifest", "inspect"' in publish
+    assert '"acr",\n                "login"' in publish
+    assert "_verify_cleanup_control(subscription_id, cleanup_at)" in publish
+    assert publish.count("_verify_cleanup_control(subscription_id, cleanup_at)") == 2
+    assert "--expose-token" not in publish
+
+
+def test_ephemeral_publisher_identity_has_no_group_or_persistent_role_path() -> None:
+    create = inspect.getsource(managed_binding_lifecycle._create_ephemeral_publisher)
+    inventory = inspect.getsource(managed_binding_lifecycle._publisher_role_rows)
+    deletion = inspect.getsource(managed_binding_lifecycle._delete_ephemeral_publisher)
+
+    assert '"--skip-assignment"' in create
+    assert '"--create-cert"' in create
+    assert '"get-member-groups"' in create
+    assert '"--all"' in inventory
+    assert '"--include-groups"' in inventory
+    assert '"ad",\n            "sp",\n            "delete"' in deletion
+    assert '"ad",\n            "app",\n            "delete"' in deletion
+    assert "publisher-identity-deletion-unproved" in deletion
+
+
+def test_denial_probe_requires_remote_authorization_denial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Launch:
+        argv = ("az", "acr", "repository", "list")
+
+    returncode = 0
+    stderr = b""
+
+    def run(*_args: object, **_kwargs: object) -> object:
+        return managed_binding_lifecycle.subprocess.CompletedProcess(
+            args=Launch.argv,
+            returncode=returncode,
+            stdout=b"",
+            stderr=stderr,
+        )
+
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_resolve_authorized_process_launch",
+        lambda _argv: Launch(),
+    )
+    monkeypatch.setattr(managed_binding_lifecycle.subprocess, "run", run)
+
+    probe = ("az", "acr", "repository", "list")
+    assert managed_binding_lifecycle._denial_probe(probe) == "allowed"
+
+    returncode = 1
+    stderr = b"Forbidden"
+    assert managed_binding_lifecycle._denial_probe(probe) == "denied"
+
+    stderr = b"unclassified transport failure"
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="denial-probe-result-ambiguous",
+    ):
+        managed_binding_lifecycle._denial_probe(probe)
+
+
+def test_image_reconciliation_always_delegates_to_isolated_publisher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, ...]] = []
+    published = f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api@sha256:" + "a" * 64
+
+    def run(argv: tuple[str, ...], **_kwargs: object) -> None:
+        calls.append(argv)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
+    published_calls: list[tuple[dict[str, JsonValue], str, Path]] = []
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_publish_api_image",
+        lambda *, ledger, subscription_id, receipt_directory: (
+            published_calls.append((ledger, subscription_id, receipt_directory)) or published
+        ),
+    )
+    ledger: dict[str, JsonValue] = {"repositoryHead": AUTHORIZATION_SOURCE_HEAD}
+
+    result = managed_binding_lifecycle._reconcile_published_api_image(
+        ledger=ledger,
+        subscription_id="opaque-subscription",
+        receipt_directory=tmp_path,
+    )
+
+    assert result == published
     assert calls[0][0:3] == ("git", "merge-base", "--is-ancestor")
+    assert published_calls == [(ledger, "opaque-subscription", tmp_path)]
 
 
 def test_changed_api_image_inputs_publish_new_immutable_image(
@@ -1578,40 +1820,15 @@ def test_changed_api_image_inputs_publish_new_immutable_image(
     assert calls == [(ledger, "opaque-subscription", tmp_path)]
 
 
-def test_recovered_api_image_fails_closed_on_tag_or_digest_mismatch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(managed_binding_lifecycle, "_run_text", lambda _argv: "")
-    monkeypatch.setattr(
-        managed_binding_lifecycle,
-        "_run",
-        lambda argv, **_kwargs: [] if "show-tags" in argv else None,
-    )
-    with pytest.raises(
-        managed_binding_lifecycle.LifecycleError,
-        match="recovered-image-source-tag-mismatch",
-    ):
-        managed_binding_lifecycle._reconcile_published_api_image(
-            ledger={"repositoryHead": AUTHORIZATION_SOURCE_HEAD},
-            subscription_id="opaque-subscription",
-            receipt_directory=Path("opaque-receipts"),
-        )
+def test_image_reconciliation_has_no_owner_acr_data_plane_path() -> None:
+    reconcile = inspect.getsource(managed_binding_lifecycle._reconcile_published_api_image)
 
-    source_tag = "source-" + managed_binding_lifecycle.RECOVERABLE_API_IMAGE_SOURCE_COMMIT
-    monkeypatch.setattr(
-        managed_binding_lifecycle,
-        "_run",
-        lambda argv, **_kwargs: [source_tag] if "show-tags" in argv else {"digest": "mutable"},
-    )
-    with pytest.raises(
-        managed_binding_lifecycle.LifecycleError,
-        match="recovered-image-digest-output-malformed",
-    ):
-        managed_binding_lifecycle._reconcile_published_api_image(
-            ledger={"repositoryHead": AUTHORIZATION_SOURCE_HEAD},
-            subscription_id="opaque-subscription",
-            receipt_directory=Path("opaque-receipts"),
-        )
+    assert "_publish_api_image(" in reconcile
+    assert '"acr"' not in reconcile
+    assert '"repository"' not in reconcile
+    assert '"show-tags"' not in reconcile
+    assert '"digest"' not in reconcile
+    assert "_signed_in_user_object_id" not in reconcile
 
 
 def test_lifecycle_uses_supported_cached_azure_cli_bicep_contract() -> None:

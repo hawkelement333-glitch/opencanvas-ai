@@ -380,8 +380,14 @@ def _run(
             _fail("azure-launcher-unapproved")
     environment = _environment()
     if environment_overrides is not None:
-        if set(environment_overrides) - {"DOCKER_CONFIG"}:
+        if set(environment_overrides) - {"AZURE_CONFIG_DIR", "DOCKER_CONFIG"}:
             _fail("lifecycle-environment-override-unapproved")
+        for key, value in environment_overrides.items():
+            if not isinstance(value, str):
+                _fail("lifecycle-environment-override-unapproved")
+            resolved = _outside_repository(Path(value), key.casefold())
+            if not resolved.is_dir():
+                _fail("lifecycle-environment-override-unapproved")
         environment.update(environment_overrides)
     try:
         completed = subprocess.run(
@@ -2474,15 +2480,415 @@ def _delete_assignment(subscription_id: str, assignment_id: str) -> None:
     )
 
 
-def _denial_probe(argv: tuple[str, ...]) -> str:
-    if not argv or argv[0] != "az":
+def _publisher_role_rows(
+    *, subscription_id: str, publisher_app_id: str
+) -> list[dict[str, str]]:
+    rows = _run(
+        (
+            "az",
+            "role",
+            "assignment",
+            "list",
+            "--assignee",
+            publisher_app_id,
+            "--all",
+            "--include-groups",
+            "--fill-principal-name",
+            "false",
+            "--subscription",
+            subscription_id,
+            "--query",
+            "[].{principalId:principalId,roleDefinitionId:roleDefinitionId,scope:scope}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(rows, list):
+        _fail("publisher-role-inventory-malformed")
+    normalized: list[dict[str, str]] = []
+    for row in rows:
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"principalId", "roleDefinitionId", "scope"}
+            or not all(isinstance(value, str) for value in row.values())
+        ):
+            _fail("publisher-role-inventory-malformed")
+        normalized.append(
+            {
+                "principalId": str(row["principalId"]).casefold(),
+                "roleDefinitionId": str(row["roleDefinitionId"]).casefold(),
+                "scope": str(row["scope"]).casefold(),
+            }
+        )
+    return normalized
+
+
+def _validate_publisher_role_inventory(
+    rows: list[dict[str, str]],
+    *,
+    publisher_object_id: str,
+    registry_scope: str,
+    acr_push_role_id: str,
+    assignment_required: bool,
+) -> None:
+    expected = {
+        "principalId": publisher_object_id.casefold(),
+        "roleDefinitionId": (
+            f"{registry_scope.rsplit('/resourceGroups/', 1)[0]}"
+            f"/providers/Microsoft.Authorization/roleDefinitions/{acr_push_role_id}"
+        ).casefold(),
+        "scope": registry_scope.casefold(),
+    }
+    if assignment_required:
+        if rows != [expected]:
+            _fail("publisher-role-inventory-drift")
+    elif rows:
+        _fail("publisher-inherited-authority")
+
+
+def _wait_for_publisher_role_inventory(
+    *,
+    subscription_id: str,
+    publisher_app_id: str,
+    publisher_object_id: str,
+    registry_scope: str,
+    acr_push_role_id: str,
+    assignment_required: bool,
+) -> None:
+    deadline = time.monotonic() + 600.0
+    while time.monotonic() < deadline:
+        try:
+            _validate_publisher_role_inventory(
+                _publisher_role_rows(
+                    subscription_id=subscription_id,
+                    publisher_app_id=publisher_app_id,
+                ),
+                publisher_object_id=publisher_object_id,
+                registry_scope=registry_scope,
+                acr_push_role_id=acr_push_role_id,
+                assignment_required=assignment_required,
+            )
+            return
+        except LifecycleError as exc:
+            if str(exc) not in {
+                "publisher-inherited-authority",
+                "publisher-role-inventory-drift",
+            }:
+                raise
+            time.sleep(10.0)
+    _fail("publisher-role-propagation-unproved")
+
+
+def _temporary_publisher_role_assignment(
+    *,
+    subscription_id: str,
+    publisher_app_id: str,
+    publisher_object_id: str,
+    role_id: str,
+    scope: str,
+) -> str:
+    _validate_publisher_role_inventory(
+        _publisher_role_rows(
+            subscription_id=subscription_id,
+            publisher_app_id=publisher_app_id,
+        ),
+        publisher_object_id=publisher_object_id,
+        registry_scope=scope,
+        acr_push_role_id=role_id,
+        assignment_required=False,
+    )
+    created = _run(
+        (
+            "az",
+            "role",
+            "assignment",
+            "create",
+            "--assignee-object-id",
+            publisher_object_id,
+            "--assignee-principal-type",
+            "ServicePrincipal",
+            "--role",
+            role_id,
+            "--scope",
+            scope,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "{id:id}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(created, dict) or set(created) != {"id"}:
+        _fail("publisher-role-assignment-output-malformed")
+    assignment_id = created["id"]
+    if not isinstance(assignment_id, str) or not assignment_id.startswith(
+        "/subscriptions/"
+    ):
+        _fail("publisher-role-assignment-output-malformed")
+    _wait_for_publisher_role_inventory(
+        subscription_id=subscription_id,
+        publisher_app_id=publisher_app_id,
+        publisher_object_id=publisher_object_id,
+        registry_scope=scope,
+        acr_push_role_id=role_id,
+        assignment_required=True,
+    )
+    return assignment_id
+
+
+def _secure_ephemeral_directory(path: Path) -> Path:
+    resolved = _outside_repository(path, "publisher-directory")
+    try:
+        resolved.mkdir(mode=0o700, parents=False, exist_ok=False)
+        os.chmod(resolved, 0o700)
+    except OSError:
+        _fail("publisher-directory-create-failed")
+    return resolved
+
+
+def _reset_ephemeral_directory(path: Path) -> None:
+    resolved = _outside_repository(path, "publisher-directory")
+    try:
+        if resolved.exists():
+            shutil.rmtree(resolved)
+        resolved.mkdir(mode=0o700, parents=False, exist_ok=False)
+        os.chmod(resolved, 0o700)
+    except OSError:
+        _fail("publisher-auth-cache-reset-failed")
+
+
+def _create_ephemeral_publisher(
+    *, ledger: dict[str, JsonValue], publisher_directory: Path
+) -> tuple[str, str, str, Path]:
+    ledger_integrity = ledger.get("ledgerIntegritySha256")
+    if (
+        not isinstance(ledger_integrity, str)
+        or HEX_SHA256.fullmatch(ledger_integrity) is None
+    ):
+        _fail("publisher-ledger-binding-invalid")
+    certificate_path = publisher_directory / "publisher-certificate.pem"
+    display_name = f"mobius77-acr-publisher-{ledger_integrity[:12]}"
+    created = _run(
+        (
+            "az",
+            "ad",
+            "sp",
+            "create-for-rbac",
+            "--name",
+            display_name,
+            "--create-cert",
+            "--cert",
+            str(certificate_path),
+            "--years",
+            "1",
+            "--skip-assignment",
+            "--query",
+            "{appId:appId,tenant:tenant}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(created, dict) or set(created) != {"appId", "tenant"}:
+        _fail("publisher-identity-output-malformed")
+    app_id = created["appId"]
+    tenant_id = created["tenant"]
+    if not all(
+        isinstance(value, str) and re.fullmatch(r"[0-9a-fA-F-]{36}", value)
+        for value in (app_id, tenant_id)
+    ):
+        _fail("publisher-identity-output-malformed")
+    if not certificate_path.is_file() or certificate_path.stat().st_size <= 0:
+        _fail("publisher-certificate-missing")
+    try:
+        os.chmod(certificate_path, 0o600)
+    except OSError:
+        _fail("publisher-certificate-permissions-failed")
+    principal = _run(
+        (
+            "az",
+            "ad",
+            "sp",
+            "show",
+            "--id",
+            str(app_id),
+            "--query",
+            "{objectId:id,servicePrincipalType:servicePrincipalType}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if (
+        not isinstance(principal, dict)
+        or set(principal) != {"objectId", "servicePrincipalType"}
+        or principal.get("servicePrincipalType") != "Application"
+        or not isinstance(principal.get("objectId"), str)
+        or re.fullmatch(r"[0-9a-fA-F-]{36}", str(principal["objectId"])) is None
+    ):
+        _fail("publisher-service-principal-output-malformed")
+    object_id = str(principal["objectId"])
+    groups = _run(
+        (
+            "az",
+            "ad",
+            "sp",
+            "get-member-groups",
+            "--id",
+            object_id,
+            "--security-enabled-only",
+            "false",
+            "--query",
+            "[].{id:id}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(groups, list) or groups:
+        _fail("publisher-group-membership-present")
+    return str(app_id), object_id, str(tenant_id), certificate_path
+
+
+def _publisher_login(
+    *,
+    publisher_app_id: str,
+    tenant_id: str,
+    certificate_path: Path,
+    environment: Mapping[str, str],
+) -> None:
+    _run(
+        (
+            "az",
+            "login",
+            "--service-principal",
+            "--username",
+            publisher_app_id,
+            "--tenant",
+            tenant_id,
+            "--certificate",
+            str(certificate_path),
+            "--allow-no-subscriptions",
+            "--output",
+            "none",
+            "--only-show-errors",
+        ),
+        environment_overrides=environment,
+    )
+
+
+def _wait_for_publisher_access(
+    argv: tuple[str, ...], *, environment: Mapping[str, str]
+) -> None:
+    deadline = time.monotonic() + 600.0
+    while time.monotonic() < deadline:
+        _private_tls_endpoint(REGISTRY_HOST)
+        try:
+            _run(argv, require_json=True, environment_overrides=environment)
+            return
+        except AzureCommandError:
+            time.sleep(10.0)
+    _fail("publisher-role-propagation-unproved")
+
+
+def _delete_ephemeral_publisher(
+    *, publisher_app_id: str, publisher_object_id: str
+) -> None:
+    _run(
+        (
+            "az",
+            "ad",
+            "sp",
+            "delete",
+            "--id",
+            publisher_object_id,
+            "--only-show-errors",
+            "--output",
+            "none",
+        )
+    )
+    _run(
+        (
+            "az",
+            "ad",
+            "app",
+            "delete",
+            "--id",
+            publisher_app_id,
+            "--only-show-errors",
+            "--output",
+            "none",
+        )
+    )
+    applications = _run(
+        (
+            "az",
+            "ad",
+            "app",
+            "list",
+            "--filter",
+            f"appId eq '{publisher_app_id}'",
+            "--query",
+            "[].{id:id}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    principals = _run(
+        (
+            "az",
+            "ad",
+            "sp",
+            "list",
+            "--filter",
+            f"appId eq '{publisher_app_id}'",
+            "--query",
+            "[].{id:id}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if applications != [] or principals != []:
+        _fail("publisher-identity-deletion-unproved")
+
+
+def _denial_probe(
+    argv: tuple[str, ...],
+    *,
+    environment_overrides: Mapping[str, str] | None = None,
+) -> str:
+    if not argv or argv[0] not in {"az", "docker"}:
         _fail("denial-probe-executable-unapproved")
     try:
-        actual = _resolve_authorized_process_launch(argv).argv
+        if argv[0] == "az":
+            actual = _resolve_authorized_process_launch(argv).argv
+        else:
+            actual = (_resolved_executable("docker"), *argv[1:])
+        environment = _environment()
+        if environment_overrides is not None:
+            if set(environment_overrides) - {"AZURE_CONFIG_DIR", "DOCKER_CONFIG"}:
+                _fail("lifecycle-environment-override-unapproved")
+            for key, value in environment_overrides.items():
+                resolved = _outside_repository(Path(value), key.casefold())
+                if not resolved.is_dir():
+                    _fail("lifecycle-environment-override-unapproved")
+            environment.update(environment_overrides)
         completed = subprocess.run(
             actual,
             cwd=REPOSITORY_ROOT,
-            env=_environment(),
+            env=environment,
             stdin=subprocess.DEVNULL,
             capture_output=True,
             check=False,
@@ -2513,11 +2919,16 @@ def _denial_probe(argv: tuple[str, ...]) -> str:
         stderr.clear()
 
 
-def _wait_for_denial(argv: tuple[str, ...], *, endpoint_host: str) -> None:
+def _wait_for_denial(
+    argv: tuple[str, ...],
+    *,
+    endpoint_host: str,
+    environment_overrides: Mapping[str, str] | None = None,
+) -> None:
     deadline = time.monotonic() + 600.0
     while time.monotonic() < deadline:
         _private_tls_endpoint(endpoint_host)
-        if _denial_probe(argv) == "denied":
+        if _denial_probe(argv, environment_overrides=environment_overrides) == "denied":
             return
         time.sleep(10.0)
     _fail("temporary-authority-revocation-unproved")
@@ -2885,152 +3296,315 @@ def _publish_api_image(
     scopes = contract["scopeBinding"]
     if not isinstance(rbac, dict) or not isinstance(scopes, dict):
         _fail("managed-binding-contract-malformed")
-    object_id = _signed_in_user_object_id()
     registry_scope = _scope(subscription_id, str(scopes["containerRegistry"]))
     assignment_id: str | None = None
+    publisher_app_id: str | None = None
+    publisher_object_id: str | None = None
+    publisher_deleted = False
+    denial_proved = False
     source_tag = f"source-{repository_head}"
     image_by_tag = f"{REGISTRY_HOST}/opencanvas-api:{source_tag}"
+    publisher_root = receipt_directory / "ephemeral-publisher"
+    _secure_ephemeral_directory(publisher_root)
+    azure_config = _secure_ephemeral_directory(publisher_root / "azure-config")
+    docker_config = _secure_ephemeral_directory(publisher_root / "docker-config")
+    publisher_environment = {
+        "AZURE_CONFIG_DIR": str(azure_config),
+        "DOCKER_CONFIG": str(docker_config),
+    }
+    cleanup_at_raw = state.get("cleanupAtUtc")
+    if not isinstance(cleanup_at_raw, str):
+        _fail("cleanup-binding-missing")
     try:
-        assignment_id = _temporary_role_assignment(
+        cleanup_at = datetime.strptime(cleanup_at_raw, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=UTC
+        )
+    except ValueError:
+        _fail("cleanup-binding-missing")
+    try:
+        (
+            publisher_app_id,
+            publisher_object_id,
+            tenant_id,
+            certificate_path,
+        ) = _create_ephemeral_publisher(
+            ledger=ledger,
+            publisher_directory=publisher_root,
+        )
+        _validate_publisher_role_inventory(
+            _publisher_role_rows(
+                subscription_id=subscription_id,
+                publisher_app_id=publisher_app_id,
+            ),
+            publisher_object_id=publisher_object_id,
+            registry_scope=registry_scope,
+            acr_push_role_id=str(rbac["acrPushRoleDefinitionId"]),
+            assignment_required=False,
+        )
+        _publisher_login(
+            publisher_app_id=publisher_app_id,
+            tenant_id=tenant_id,
+            certificate_path=certificate_path,
+            environment=publisher_environment,
+        )
+        repository_list = (
+            "az",
+            "acr",
+            "repository",
+            "list",
+            "--name",
+            REGISTRY,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "[:0]",
+            "--output",
+            "json",
+            "--only-show-errors",
+        )
+        _wait_for_denial(
+            repository_list,
+            endpoint_host=REGISTRY_HOST,
+            environment_overrides=publisher_environment,
+        )
+        _verify_cleanup_control(subscription_id, cleanup_at)
+        assignment_id = _temporary_publisher_role_assignment(
             subscription_id=subscription_id,
-            object_id=object_id,
+            publisher_app_id=publisher_app_id,
+            publisher_object_id=publisher_object_id,
             role_id=str(rbac["acrPushRoleDefinitionId"]),
             scope=registry_scope,
         )
         state["temporaryRegistryAssignmentId"] = assignment_id
         _replace_state(state_path, state)
-        with tempfile.TemporaryDirectory(
-            prefix="mobius77-docker-auth-"
-        ) as docker_directory:
-            docker_config = Path(docker_directory).resolve()
-            _outside_repository(docker_config, "docker-config")
-            os.chmod(docker_config, 0o700)
-            docker_environment = {"DOCKER_CONFIG": str(docker_config)}
+        _run(
+            ("az", "logout", "--only-show-errors", "--output", "none"),
+            environment_overrides=publisher_environment,
+        )
+        _reset_ephemeral_directory(azure_config)
+        _publisher_login(
+            publisher_app_id=publisher_app_id,
+            tenant_id=tenant_id,
+            certificate_path=certificate_path,
+            environment=publisher_environment,
+        )
+        _wait_for_publisher_access(repository_list, environment=publisher_environment)
+        _run(
+            (
+                "az",
+                "acr",
+                "login",
+                "--name",
+                REGISTRY,
+                "--subscription",
+                subscription_id,
+                "--only-show-errors",
+                "--output",
+                "none",
+            ),
+            environment_overrides=publisher_environment,
+        )
+        try:
+            _assert_source_tag_absent(
+                subscription_id=subscription_id,
+                source_tag=source_tag,
+                docker_environment=publisher_environment,
+            )
+            _run(
+                (
+                    "docker",
+                    "buildx",
+                    "build",
+                    "--file",
+                    "apps/api/Dockerfile",
+                    "--tag",
+                    image_by_tag,
+                    "--push",
+                    "--provenance=false",
+                    "--sbom=false",
+                    "--quiet",
+                    ".",
+                ),
+                timeout_seconds=DEPLOYMENT_TIMEOUT_SECONDS,
+                environment_overrides=publisher_environment,
+            )
+            digest_projection = _run(
+                (
+                    "az",
+                    "acr",
+                    "repository",
+                    "show",
+                    "--name",
+                    REGISTRY,
+                    "--image",
+                    f"opencanvas-api:{source_tag}",
+                    "--subscription",
+                    subscription_id,
+                    "--query",
+                    "{digest:digest}",
+                    "--output",
+                    "json",
+                    "--only-show-errors",
+                ),
+                require_json=True,
+                environment_overrides=publisher_environment,
+            )
+            if not isinstance(digest_projection, dict) or set(digest_projection) != {
+                "digest"
+            }:
+                _fail("registry-digest-output-malformed")
+            raw_digest = digest_projection["digest"]
+            if (
+                not isinstance(raw_digest, str)
+                or RAW_IMAGE_DIGEST.fullmatch(raw_digest) is None
+            ):
+                _fail("registry-digest-output-malformed")
             _run(
                 (
                     "az",
                     "acr",
-                    "login",
+                    "repository",
+                    "untag",
                     "--name",
                     REGISTRY,
+                    "--image",
+                    f"opencanvas-api:{source_tag}",
                     "--subscription",
                     subscription_id,
+                    "--yes",
                     "--only-show-errors",
                     "--output",
                     "none",
                 ),
-                environment_overrides=docker_environment,
+                environment_overrides=publisher_environment,
             )
-            try:
-                _assert_source_tag_absent(
-                    subscription_id=subscription_id,
-                    source_tag=source_tag,
-                    docker_environment=docker_environment,
-                )
-                _run(
-                    (
-                        "docker",
-                        "buildx",
-                        "build",
-                        "--file",
-                        "apps/api/Dockerfile",
-                        "--tag",
-                        image_by_tag,
-                        "--push",
-                        "--provenance=false",
-                        "--sbom=false",
-                        "--quiet",
-                        ".",
-                    ),
-                    timeout_seconds=DEPLOYMENT_TIMEOUT_SECONDS,
-                    environment_overrides=docker_environment,
-                )
-                digest_projection = _run(
-                    (
-                        "az",
-                        "acr",
-                        "repository",
-                        "show",
-                        "--name",
-                        REGISTRY,
-                        "--image",
-                        f"opencanvas-api:{source_tag}",
-                        "--subscription",
-                        subscription_id,
-                        "--query",
-                        "{digest:digest}",
-                        "--output",
-                        "json",
-                        "--only-show-errors",
-                    ),
-                    require_json=True,
-                    environment_overrides=docker_environment,
-                )
-                if not isinstance(digest_projection, dict) or set(
-                    digest_projection
-                ) != {"digest"}:
-                    _fail("registry-digest-output-malformed")
-                raw_digest = digest_projection["digest"]
-                if (
-                    not isinstance(raw_digest, str)
-                    or RAW_IMAGE_DIGEST.fullmatch(raw_digest) is None
-                ):
-                    _fail("registry-digest-output-malformed")
-                _run(
-                    (
-                        "az",
-                        "acr",
-                        "repository",
-                        "untag",
-                        "--name",
-                        REGISTRY,
-                        "--image",
-                        f"opencanvas-api:{source_tag}",
-                        "--subscription",
-                        subscription_id,
-                        "--yes",
-                        "--only-show-errors",
-                        "--output",
-                        "none",
-                    ),
-                    environment_overrides=docker_environment,
-                )
-                _assert_source_tag_absent(
-                    subscription_id=subscription_id,
-                    source_tag=source_tag,
-                    docker_environment=docker_environment,
-                )
-                immutable_reference = f"{REGISTRY_HOST}/opencanvas-api@{raw_digest}"
-                if IMAGE_DIGEST.fullmatch(immutable_reference) is None:
-                    _fail("registry-immutable-reference-malformed")
-                return immutable_reference
-            finally:
-                _run(
-                    ("docker", "logout", REGISTRY_HOST),
-                    environment_overrides=docker_environment,
-                )
+            _assert_source_tag_absent(
+                subscription_id=subscription_id,
+                source_tag=source_tag,
+                docker_environment=publisher_environment,
+            )
+            immutable_reference = f"{REGISTRY_HOST}/opencanvas-api@{raw_digest}"
+            if IMAGE_DIGEST.fullmatch(immutable_reference) is None:
+                _fail("registry-immutable-reference-malformed")
+            _run(
+                ("docker", "pull", immutable_reference),
+                timeout_seconds=DEPLOYMENT_TIMEOUT_SECONDS,
+                environment_overrides=publisher_environment,
+            )
+            revocation_probe = (
+                f"{REGISTRY_HOST}/opencanvas-api:revocation-probe-"
+                f"{str(ledger['ledgerIntegritySha256'])[:12]}"
+            )
+            _run(
+                ("docker", "tag", immutable_reference, revocation_probe),
+                environment_overrides=publisher_environment,
+            )
+        finally:
+            _run(
+                ("docker", "logout", REGISTRY_HOST),
+                environment_overrides=publisher_environment,
+            )
+
+        _delete_assignment(subscription_id, assignment_id)
+        assignment_id = None
+        state["temporaryRegistryAssignmentId"] = None
+        _replace_state(state_path, state)
+        _wait_for_publisher_role_inventory(
+            subscription_id=subscription_id,
+            publisher_app_id=publisher_app_id,
+            publisher_object_id=publisher_object_id,
+            registry_scope=registry_scope,
+            acr_push_role_id=str(rbac["acrPushRoleDefinitionId"]),
+            assignment_required=False,
+        )
+        _run(
+            ("az", "logout", "--only-show-errors", "--output", "none"),
+            environment_overrides=publisher_environment,
+        )
+        _reset_ephemeral_directory(azure_config)
+        _reset_ephemeral_directory(docker_config)
+        _publisher_login(
+            publisher_app_id=publisher_app_id,
+            tenant_id=tenant_id,
+            certificate_path=certificate_path,
+            environment=publisher_environment,
+        )
+        _wait_for_denial(
+            (
+                "az",
+                "acr",
+                "login",
+                "--name",
+                REGISTRY,
+                "--subscription",
+                subscription_id,
+                "--only-show-errors",
+                "--output",
+                "none",
+            ),
+            endpoint_host=REGISTRY_HOST,
+            environment_overrides=publisher_environment,
+        )
+        _reset_ephemeral_directory(docker_config)
+        for probe in (
+            repository_list,
+            (
+                "az",
+                "acr",
+                "repository",
+                "show",
+                "--name",
+                REGISTRY,
+                "--image",
+                f"opencanvas-api@{raw_digest}",
+                "--subscription",
+                subscription_id,
+                "--query",
+                "{digest:digest}",
+                "--output",
+                "json",
+                "--only-show-errors",
+            ),
+            ("docker", "manifest", "inspect", immutable_reference),
+            ("docker", "pull", immutable_reference),
+            ("docker", "push", revocation_probe),
+        ):
+            _wait_for_denial(
+                probe,
+                endpoint_host=REGISTRY_HOST,
+                environment_overrides=publisher_environment,
+            )
+        denial_proved = True
+        _verify_cleanup_control(subscription_id, cleanup_at)
+        _delete_ephemeral_publisher(
+            publisher_app_id=publisher_app_id,
+            publisher_object_id=publisher_object_id,
+        )
+        publisher_deleted = True
+        _run(
+            (
+                "docker",
+                "image",
+                "rm",
+                "--force",
+                revocation_probe,
+                immutable_reference,
+            ),
+            environment_overrides=publisher_environment,
+        )
+        shutil.rmtree(publisher_root)
+        return immutable_reference
     finally:
         if assignment_id is not None:
             _delete_assignment(subscription_id, assignment_id)
             state["temporaryRegistryAssignmentId"] = None
             _replace_state(state_path, state)
-            _wait_for_denial(
-                (
-                    "az",
-                    "acr",
-                    "repository",
-                    "list",
-                    "--name",
-                    REGISTRY,
-                    "--subscription",
-                    subscription_id,
-                    "--query",
-                    "[:0]",
-                    "--output",
-                    "json",
-                    "--only-show-errors",
-                ),
-                endpoint_host=REGISTRY_HOST,
+        if denial_proved and not publisher_deleted:
+            if publisher_app_id is None or publisher_object_id is None:
+                _fail("publisher-identity-state-malformed")
+            _delete_ephemeral_publisher(
+                publisher_app_id=publisher_app_id,
+                publisher_object_id=publisher_object_id,
             )
 
 
@@ -3052,77 +3626,11 @@ def _reconcile_published_api_image(
             repository_head,
         )
     )
-    changed_inputs = _run_text(
-        (
-            "git",
-            "diff",
-            "--name-only",
-            f"{RECOVERABLE_API_IMAGE_SOURCE_COMMIT}..{repository_head}",
-            "--",
-            *API_IMAGE_BUILD_INPUTS,
-        )
+    return _publish_api_image(
+        ledger=ledger,
+        subscription_id=subscription_id,
+        receipt_directory=receipt_directory,
     )
-    if changed_inputs:
-        return _publish_api_image(
-            ledger=ledger,
-            subscription_id=subscription_id,
-            receipt_directory=receipt_directory,
-        )
-    source_tag = f"source-{RECOVERABLE_API_IMAGE_SOURCE_COMMIT}"
-    tags = _run(
-        (
-            "az",
-            "acr",
-            "repository",
-            "show-tags",
-            "--name",
-            REGISTRY,
-            "--repository",
-            "opencanvas-api",
-            "--subscription",
-            subscription_id,
-            "--query",
-            "[]",
-            "--output",
-            "json",
-            "--only-show-errors",
-        ),
-        require_json=True,
-    )
-    if tags != [source_tag]:
-        _fail("recovered-image-source-tag-mismatch")
-    digest_projection = _run(
-        (
-            "az",
-            "acr",
-            "repository",
-            "show",
-            "--name",
-            REGISTRY,
-            "--image",
-            f"opencanvas-api:{source_tag}",
-            "--subscription",
-            subscription_id,
-            "--query",
-            "{digest:digest}",
-            "--output",
-            "json",
-            "--only-show-errors",
-        ),
-        require_json=True,
-    )
-    if not isinstance(digest_projection, dict) or set(digest_projection) != {"digest"}:
-        _fail("recovered-image-digest-output-malformed")
-    raw_digest = digest_projection["digest"]
-    if (
-        not isinstance(raw_digest, str)
-        or RAW_IMAGE_DIGEST.fullmatch(raw_digest) is None
-    ):
-        _fail("recovered-image-digest-output-malformed")
-    immutable_reference = f"{REGISTRY_HOST}/opencanvas-api@{raw_digest}"
-    if IMAGE_DIGEST.fullmatch(immutable_reference) is None:
-        _fail("recovered-image-digest-output-malformed")
-    return immutable_reference
 
 
 def _container_app_revision_ready(subscription_id: str, app_name: str) -> None:
