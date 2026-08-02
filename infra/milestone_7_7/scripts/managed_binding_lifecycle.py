@@ -381,7 +381,11 @@ def _run(
             _fail("azure-launcher-unapproved")
     environment = _environment()
     if environment_overrides is not None:
-        if set(environment_overrides) - {"AZURE_CONFIG_DIR", "DOCKER_CONFIG"}:
+        if set(environment_overrides) - {
+            "AZURE_CONFIG_DIR",
+            "DOCKER_CONFIG",
+            "USERPROFILE",
+        }:
             _fail("lifecycle-environment-override-unapproved")
         for key, value in environment_overrides.items():
             if not isinstance(value, str):
@@ -1865,10 +1869,7 @@ def _verify_pre_secret_role_inventory(
             if relative not in target_resources:
                 continue
             if any(
-                (
-                    "microsoft.managedidentity/userassignedidentities/"
-                    f"{identity_name}"
-                )
+                (f"microsoft.managedidentity/userassignedidentities/{identity_name}")
                 not in target_resources
                 for identity_name in identity_names
             ):
@@ -2699,6 +2700,7 @@ def _create_ephemeral_publisher(
             "--only-show-errors",
         ),
         require_json=True,
+        environment_overrides={"USERPROFILE": str(publisher_directory)},
         working_directory=publisher_directory,
     )
     if not isinstance(created, dict) or set(created) != {

@@ -1720,7 +1720,8 @@ def test_ephemeral_publisher_identity_has_no_group_or_persistent_role_path() -> 
 
 
 def test_ephemeral_publisher_generates_certificate_only_in_restricted_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     publisher_directory = tmp_path / "publisher"
     publisher_directory.mkdir(mode=0o700)
@@ -1733,6 +1734,7 @@ def test_ephemeral_publisher_generates_certificate_only_in_restricted_directory(
             assert "--create-cert" in argv
             assert "--cert" not in argv
             assert kwargs["working_directory"] == publisher_directory
+            assert kwargs["environment_overrides"] == {"USERPROFILE": str(publisher_directory)}
             certificate_path.write_text("synthetic-certificate", encoding="ascii")
             return {
                 "appId": "00000000-0000-0000-0000-000000000091",
@@ -1814,7 +1816,8 @@ def test_denial_probe_requires_remote_authorization_denial(
 
 
 def test_image_reconciliation_always_delegates_to_isolated_publisher(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, ...]] = []
     published = f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api@sha256:" + "a" * 64
@@ -1845,7 +1848,8 @@ def test_image_reconciliation_always_delegates_to_isolated_publisher(
 
 
 def test_changed_api_image_inputs_publish_new_immutable_image(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     published = f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api@sha256:" + "b" * 64
     monkeypatch.setattr(managed_binding_lifecycle, "_run", lambda *_args, **_kwargs: None)
@@ -3592,8 +3596,7 @@ def test_target_inventory_accepts_only_exact_managed_binding_identities(
 ) -> None:
     subscription_id = "opaque-subscription"
     group_scope = (
-        f"/subscriptions/{subscription_id}/resourceGroups/"
-        f"{managed_binding_lifecycle.TARGET_GROUP}"
+        f"/subscriptions/{subscription_id}/resourceGroups/{managed_binding_lifecycle.TARGET_GROUP}"
     )
     names = (
         "id-mobius77-worker",
@@ -3625,9 +3628,7 @@ def test_target_inventory_accepts_only_exact_managed_binding_identities(
     assert managed_binding_lifecycle._resource_group_inventory(
         subscription_id=subscription_id,
         group=managed_binding_lifecycle.TARGET_GROUP,
-    ) == frozenset(
-        f"microsoft.managedidentity/userassignedidentities/{name}" for name in names
-    )
+    ) == frozenset(f"microsoft.managedidentity/userassignedidentities/{name}" for name in names)
 
     rows = inventory_rows(("id-mobius77-worker-nearby",))
     with pytest.raises(
@@ -3645,16 +3646,13 @@ def test_pre_secret_role_inventory_requires_exact_managed_identity_matrix(
 ) -> None:
     subscription_id = "opaque-subscription"
     target_scope = (
-        f"/subscriptions/{subscription_id}/resourceGroups/"
-        f"{managed_binding_lifecycle.TARGET_GROUP}"
+        f"/subscriptions/{subscription_id}/resourceGroups/{managed_binding_lifecycle.TARGET_GROUP}"
     )
     cleanup_scope = (
-        f"/subscriptions/{subscription_id}/resourceGroups/"
-        f"{managed_binding_lifecycle.CLEANUP_GROUP}"
+        f"/subscriptions/{subscription_id}/resourceGroups/{managed_binding_lifecycle.CLEANUP_GROUP}"
     )
     key_vault_scope = (
-        f"{target_scope}/providers/Microsoft.KeyVault/vaults/"
-        f"{managed_binding_lifecycle.KEY_VAULT}"
+        f"{target_scope}/providers/Microsoft.KeyVault/vaults/{managed_binding_lifecycle.KEY_VAULT}"
     )
     registry_scope = (
         f"{target_scope}/providers/Microsoft.ContainerRegistry/registries/"
@@ -3670,8 +3668,7 @@ def test_pre_secret_role_inventory_requires_exact_managed_identity_matrix(
     rbac = contract["rbac"]
     assert isinstance(rbac, dict)
     role_prefix = (
-        f"/subscriptions/{subscription_id}/providers/"
-        "microsoft.authorization/roledefinitions/"
+        f"/subscriptions/{subscription_id}/providers/microsoft.authorization/roledefinitions/"
     )
     cleanup_principal = "00000000-0000-0000-0000-999999999999"
 
@@ -3744,9 +3741,9 @@ def test_pre_secret_role_inventory_requires_exact_managed_identity_matrix(
         target_resources=target_resources,
     )
 
-    expected_by_scope[key_vault_scope.casefold()] = expected_by_scope[
-        key_vault_scope.casefold()
-    ][:-1]
+    expected_by_scope[key_vault_scope.casefold()] = expected_by_scope[key_vault_scope.casefold()][
+        :-1
+    ]
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
         match="pre-secret-role-inventory-drift",
