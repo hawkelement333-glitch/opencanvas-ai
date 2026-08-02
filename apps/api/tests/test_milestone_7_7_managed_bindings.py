@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import inspect
 import json
@@ -51,6 +52,16 @@ LIFECYCLE_SCRIPT = INFRASTRUCTURE_ROOT / "scripts" / "managed_binding_lifecycle.
 SYNTHETIC_SUBSCRIPTION = "synthetic-managed-binding-subscription"
 SYNTHETIC_TENANT = "synthetic-managed-binding-tenant"
 NOW = datetime(2026, 7, 31, 18, 0, tzinfo=UTC)
+
+
+def _synthetic_jwt(claims: Mapping[str, object]) -> bytearray:
+    def encode(value: Mapping[str, object]) -> bytes:
+        raw = json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        return base64.urlsafe_b64encode(raw).rstrip(b"=")
+
+    return bytearray(
+        encode({"alg": "RS256", "typ": "JWT"}) + b"." + encode(claims) + b".synthetic-signature"
+    )
 
 
 def test_managed_binding_contract_is_exact_integrity_bound_and_default_deny() -> None:
@@ -1490,9 +1501,11 @@ def test_lifecycle_is_closed_private_digest_bound_and_secret_value_blind() -> No
     assert "--runtime-config" not in text
     assert "OPENCANVAS_OPENAI_API_KEY" not in text
     assert "--expose-token" not in text
-    assert "--password" not in text
+    assert '"--password",' not in text
+    assert '"--password-stdin"' in text
     assert '"buildx"' in text
-    assert '"untag"' in text
+    assert "/_tags/" in text
+    assert '"get-access-token"' in text
     assert "@sha256:" in text
     assert "private-endpoint-resolved-publicly" in text
     assert "temporary-authority-revocation-unproved" in text
@@ -1513,7 +1526,7 @@ def test_denial_probes_use_windows_safe_empty_projection() -> None:
     )[0]
     revoke = text.split("def _revoke", 1)[1].split("def _current_resource_ids", 1)[0]
 
-    assert publish.count('"[:0]"') == 1
+    assert '"[:0]"' not in publish
     assert revoke.count('"[:0]"') == 2
     assert '"length(@)"' not in publish
     assert '"length(@)"' not in revoke
@@ -1679,29 +1692,33 @@ def test_ephemeral_publisher_role_inventory_normalizes_and_rejects_malformed(
 def test_ephemeral_publisher_is_same_principal_and_delete_after_denial() -> None:
     publish = inspect.getsource(managed_binding_lifecycle._publish_api_image)
     create = publish.index("_create_ephemeral_publisher(")
-    initial_denial = publish.index("_wait_for_denial(", create)
+    initial_denial = publish.index("_prove_initial_publisher_denial(", create)
     assignment = publish.index("_temporary_publisher_role_assignment(", initial_denial)
+    access = publish.index("_wait_for_publisher_access(", assignment)
     build = publish.index('"buildx",', assignment)
     revoke = publish.index("_delete_assignment(subscription_id, assignment_id)", build)
     cache_reset = publish.index("_reset_ephemeral_directory(docker_config)", revoke)
-    post_revoke_denial = publish.index("_wait_for_denial(", cache_reset)
+    post_revoke_denial = publish.index("_wait_for_publisher_denial(", cache_reset)
     denial_proved = publish.index("denial_proved = True", post_revoke_denial)
     identity_delete = publish.index("_delete_ephemeral_publisher(", denial_proved)
 
-    assert create < initial_denial < assignment < build < revoke
+    assert create < initial_denial < assignment < access < build < revoke
     assert revoke < cache_reset < post_revoke_denial < denial_proved < identity_delete
     assert "_signed_in_user_object_id" not in publish
     assert '"--assignee-principal-type",\n            "ServicePrincipal"' in inspect.getsource(
         managed_binding_lifecycle._temporary_publisher_role_assignment
     )
-    assert publish.count("environment_overrides=publisher_environment") >= 12
+    assert publish.count("environment_overrides=publisher_environment") >= 8
     assert '"docker", "pull"' in publish
     assert '"docker", "push"' in publish
     assert '"docker", "manifest", "inspect"' in publish
-    assert '"acr",\n                "login"' in publish
+    assert '"acr",\n                "login"' not in publish
+    assert '"acr",\n            "repository"' not in publish
+    assert "_docker_login_with_refresh_token(" in publish
+    assert "_remove_source_tag(" in publish
+    assert "_acr_manifest_digest(" in publish
     assert "_verify_cleanup_control(subscription_id, cleanup_at)" in publish
     assert publish.count("_verify_cleanup_control(subscription_id, cleanup_at)") == 2
-    assert publish.count("accept_unclassified_initial_acr_denial=True") == 1
     assert "--expose-token" not in publish
 
 
@@ -1777,7 +1794,7 @@ def test_ephemeral_publisher_generates_certificate_only_in_restricted_directory(
     assert object_id.endswith("93")
     assert tenant_id.endswith("92")
     assert observed_certificate == certificate_path.resolve()
-    assert len(calls) == 3
+    assert len(calls) == 2
 
 
 def test_ephemeral_publisher_principal_retries_bounded_propagation(
@@ -1820,16 +1837,15 @@ def test_publisher_access_probes_at_propagation_deadline(
     calls = 0
     sleeps: list[float] = []
 
-    def run(_argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+    def session(**_kwargs: object) -> tuple[bytearray, bytearray | None]:
         nonlocal calls
         calls += 1
         if calls == 1:
-            raise managed_binding_lifecycle.AzureCommandError("authorization-failed")
-        return []
+            return bytearray(b"refresh-token-value"), None
+        return bytearray(b"refresh-token-value"), bytearray(b"access-token-value")
 
     monotonic_values = iter((0.0, 599.0))
-    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
-    monkeypatch.setattr(managed_binding_lifecycle, "_private_tls_endpoint", lambda _hostname: None)
+    monkeypatch.setattr(managed_binding_lifecycle, "_publisher_repository_session", session)
     monkeypatch.setattr(
         managed_binding_lifecycle.time,
         "monotonic",
@@ -1837,12 +1853,362 @@ def test_publisher_access_probes_at_propagation_deadline(
     )
     monkeypatch.setattr(managed_binding_lifecycle.time, "sleep", sleeps.append)
 
-    managed_binding_lifecycle._wait_for_publisher_access(
-        ("az", "acr", "repository", "list"), environment={}
+    refresh_token, access_token = managed_binding_lifecycle._wait_for_publisher_access(
+        publisher_app_id="publisher-app",
+        tenant_id="publisher-tenant",
+        environment={},
     )
 
     assert calls == 2
     assert sleeps == [1.0]
+    assert refresh_token == b"refresh-token-value"
+    assert access_token == b"access-token-value"
+
+
+def test_publisher_oauth_exchange_is_private_and_exact_repository_scoped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant_id = "00000000-0000-0000-0000-000000000101"
+    expires = int((NOW + timedelta(hours=1)).timestamp())
+    access_jwt = _synthetic_jwt(
+        {
+            "access": [
+                {
+                    "actions": ["pull", "push", "delete"],
+                    "name": "opencanvas-api",
+                    "type": "repository",
+                }
+            ],
+            "aud": managed_binding_lifecycle.REGISTRY_HOST,
+            "exp": expires,
+            "nbf": int((NOW - timedelta(minutes=1)).timestamp()),
+            "tenant": tenant_id,
+        }
+    )
+    calls: list[tuple[str, str, bytes]] = []
+
+    def request(
+        method: str,
+        path: str,
+        *,
+        headers: Mapping[str, str],
+        body: bytearray | None = None,
+    ) -> tuple[int, dict[str, str], bytearray]:
+        assert headers == {"Content-Type": "application/x-www-form-urlencoded"}
+        calls.append((method, path, bytes(body or b"")))
+        if path == "/oauth2/exchange":
+            return 200, {}, bytearray(json.dumps({"refresh_token": "r" * 64}).encode())
+        return (
+            200,
+            {},
+            bytearray(
+                json.dumps(
+                    {
+                        "access_token": access_jwt.decode("ascii"),
+                        "expires_in": 3600,
+                        "issued_at": "synthetic",
+                    }
+                ).encode()
+            ),
+        )
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_private_registry_request", request)
+    monkeypatch.setattr(managed_binding_lifecycle, "_utc_now", lambda: NOW)
+
+    entra_token = bytearray(b"e" * 64)
+    refresh_token = managed_binding_lifecycle._publisher_refresh_token(
+        entra_token=entra_token, tenant_id=tenant_id
+    )
+    repository_token = managed_binding_lifecycle._publisher_repository_token(
+        refresh_token=refresh_token, tenant_id=tenant_id
+    )
+
+    assert repository_token is not None
+    assert [call[:2] for call in calls] == [
+        ("POST", "/oauth2/exchange"),
+        ("POST", "/oauth2/token"),
+    ]
+    assert b"service=acrmobius7711564669.azurecr.io" in calls[0][2]
+    assert b"tenant=00000000-0000-0000-0000-000000000101" in calls[0][2]
+    assert b"scope=repository%3Aopencanvas-api%3Apull%2Cpush%2Cdelete" in calls[1][2]
+    assert b"_catalog" not in b"".join(call[2] for call in calls)
+    assert b"/subscriptions/" not in b"".join(call[2] for call in calls)
+    entra_token.clear()
+    refresh_token.clear()
+    repository_token.clear()
+
+
+def test_publisher_tokens_fail_closed_for_binding_time_and_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_id = "00000000-0000-0000-0000-000000000111"
+    tenant_id = "00000000-0000-0000-0000-000000000112"
+    valid_time = {
+        "exp": int((NOW + timedelta(hours=1)).timestamp()),
+        "nbf": int((NOW - timedelta(minutes=1)).timestamp()),
+    }
+    monkeypatch.setattr(managed_binding_lifecycle, "_utc_now", lambda: NOW)
+
+    valid_entra = _synthetic_jwt(
+        {
+            **valid_time,
+            "appid": app_id,
+            "aud": managed_binding_lifecycle.ACR_TOKEN_RESOURCE,
+            "tid": tenant_id,
+        }
+    )
+    managed_binding_lifecycle._validate_entra_token(
+        valid_entra, publisher_app_id=app_id, tenant_id=tenant_id
+    )
+
+    invalid_entra_claims = (
+        {**valid_time, "appid": app_id, "aud": "wrong-audience", "tid": tenant_id},
+        {
+            **valid_time,
+            "appid": app_id,
+            "aud": managed_binding_lifecycle.ACR_TOKEN_RESOURCE,
+            "tid": "wrong-tenant",
+        },
+        {
+            "appid": app_id,
+            "aud": managed_binding_lifecycle.ACR_TOKEN_RESOURCE,
+            "exp": int((NOW - timedelta(minutes=1)).timestamp()),
+            "nbf": int((NOW - timedelta(hours=1)).timestamp()),
+            "tid": tenant_id,
+        },
+    )
+    for claims in invalid_entra_claims:
+        with pytest.raises(managed_binding_lifecycle.LifecycleError):
+            managed_binding_lifecycle._validate_entra_token(
+                _synthetic_jwt(claims),
+                publisher_app_id=app_id,
+                tenant_id=tenant_id,
+            )
+    with pytest.raises(managed_binding_lifecycle.LifecycleError):
+        managed_binding_lifecycle._validate_entra_token(
+            bytearray(b"not-a-jwt"),
+            publisher_app_id=app_id,
+            tenant_id=tenant_id,
+        )
+
+    def acr_token(*, audience: str, name: str, actions: list[str]) -> bytearray:
+        return _synthetic_jwt(
+            {
+                **valid_time,
+                "access": [{"actions": actions, "name": name, "type": "repository"}],
+                "aud": audience,
+                "tenant": tenant_id,
+            }
+        )
+
+    assert managed_binding_lifecycle._acr_access_is_exact(
+        acr_token(
+            audience=managed_binding_lifecycle.REGISTRY_HOST,
+            name="opencanvas-api",
+            actions=["pull", "push", "delete"],
+        ),
+        tenant_id=tenant_id,
+    )
+    for token in (
+        acr_token(
+            audience="wrong.azurecr.io",
+            name="opencanvas-api",
+            actions=["pull", "push", "delete"],
+        ),
+        acr_token(
+            audience=managed_binding_lifecycle.REGISTRY_HOST,
+            name="wrong-repository",
+            actions=["pull", "push", "delete"],
+        ),
+        acr_token(
+            audience=managed_binding_lifecycle.REGISTRY_HOST,
+            name="opencanvas-api",
+            actions=["pull", "push", "delete", "metadata_read"],
+        ),
+    ):
+        with pytest.raises(managed_binding_lifecycle.LifecycleError):
+            managed_binding_lifecycle._acr_access_is_exact(token, tenant_id=tenant_id)
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/v2/_catalog"),
+        ("GET", "/v2/opencanvas-api/tags/list"),
+        ("HEAD", "/v2/wrong/manifests/source-" + "a" * 40),
+        ("HEAD", "/v2/opencanvas-api/manifests/wrong-tag"),
+        ("DELETE", "/acr/v1/wrong/_tags/source-" + "a" * 40),
+    ],
+)
+def test_publisher_registry_requests_reject_catalog_and_nearby_targets(
+    method: str, path: str
+) -> None:
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="publisher-registry-request-scope-invalid",
+    ):
+        managed_binding_lifecycle._validate_registry_request(method, path)
+
+
+def test_repository_digest_and_tag_removal_preserve_immutable_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_tag = "source-" + "a" * 40
+    digest = "sha256:" + "b" * 64
+    responses = iter(
+        (
+            (200, {"docker-content-digest": digest}, bytearray()),
+            (202, {}, bytearray()),
+            (404, {}, bytearray()),
+            (200, {"docker-content-digest": digest}, bytearray()),
+        )
+    )
+    calls: list[tuple[str, str]] = []
+
+    def request(
+        method: str,
+        path: str,
+        *,
+        headers: Mapping[str, str],
+        body: bytearray | None = None,
+    ) -> tuple[int, dict[str, str], bytearray]:
+        assert body is None
+        assert headers["Authorization"].startswith("Bearer ")
+        calls.append((method, path))
+        return next(responses)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_private_registry_request", request)
+    access_token = bytearray(b"a" * 64)
+
+    assert (
+        managed_binding_lifecycle._acr_manifest_digest(access_token, reference=source_tag) == digest
+    )
+    managed_binding_lifecycle._remove_source_tag(access_token, source_tag=source_tag)
+    managed_binding_lifecycle._assert_source_tag_absent(
+        source_tag=source_tag, access_token=access_token
+    )
+    assert managed_binding_lifecycle._acr_manifest_digest(access_token, reference=digest) == digest
+    assert calls == [
+        ("HEAD", f"/v2/opencanvas-api/manifests/{source_tag}"),
+        ("DELETE", f"/acr/v1/opencanvas-api/_tags/{source_tag}"),
+        ("HEAD", f"/v2/opencanvas-api/manifests/{source_tag}"),
+        ("HEAD", f"/v2/opencanvas-api/manifests/{digest}"),
+    ]
+    assert all("_catalog" not in path for _method, path in calls)
+
+
+def test_docker_login_uses_secret_stdin_and_isolated_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    azure_config = tmp_path / "azure"
+    docker_config = tmp_path / "docker"
+    azure_config.mkdir()
+    docker_config.mkdir()
+    environment = {
+        "AZURE_CONFIG_DIR": str(azure_config),
+        "DOCKER_CONFIG": str(docker_config),
+    }
+    observed: dict[str, object] = {}
+
+    def run(argv: tuple[str, ...], **kwargs: object) -> object:
+        observed["argv"] = argv
+        observed["payload"] = kwargs["input"]
+        observed["payloadCopy"] = bytes(cast(bytearray, kwargs["input"]))
+        observed["environment"] = kwargs["env"]
+        return managed_binding_lifecycle.subprocess.CompletedProcess(
+            args=argv, returncode=0, stdout=b"Login Succeeded", stderr=b""
+        )
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_resolved_executable", lambda _name: "docker")
+    monkeypatch.setattr(managed_binding_lifecycle.subprocess, "run", run)
+    refresh_token = bytearray(b"r" * 64)
+
+    managed_binding_lifecycle._docker_login_with_refresh_token(
+        refresh_token, environment=environment
+    )
+
+    assert refresh_token == b"r" * 64
+    assert observed["payloadCopy"] == b"r" * 64 + b"\n"
+    assert observed["payload"] == bytearray()
+    assert b"r" * 64 not in " ".join(cast(tuple[str, ...], observed["argv"])).encode()
+    assert b"r" * 64 not in json.dumps(observed["environment"], default=str).encode()
+    assert cast(tuple[str, ...], observed["argv"])[-1] == "--password-stdin"
+
+
+def test_entra_token_uses_certificate_session_without_argument_or_environment_leak(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app_id = "00000000-0000-0000-0000-000000000121"
+    tenant_id = "00000000-0000-0000-0000-000000000122"
+    azure_config = tmp_path / "azure"
+    docker_config = tmp_path / "docker"
+    azure_config.mkdir()
+    docker_config.mkdir()
+    environment = {
+        "AZURE_CONFIG_DIR": str(azure_config),
+        "DOCKER_CONFIG": str(docker_config),
+    }
+    token = _synthetic_jwt(
+        {
+            "appid": app_id,
+            "aud": managed_binding_lifecycle.ACR_TOKEN_RESOURCE,
+            "exp": int((NOW + timedelta(hours=1)).timestamp()),
+            "nbf": int((NOW - timedelta(minutes=1)).timestamp()),
+            "tid": tenant_id,
+        }
+    )
+    observed: dict[str, object] = {}
+
+    class Launch:
+        argv = ("az.exe", "account", "get-access-token")
+
+    def run(argv: tuple[str, ...], **kwargs: object) -> object:
+        observed["argv"] = argv
+        observed["environment"] = kwargs["env"]
+        return managed_binding_lifecycle.subprocess.CompletedProcess(
+            args=argv,
+            returncode=0,
+            stdout=bytes(token) + b"\r\n",
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(
+        managed_binding_lifecycle, "_resolve_authorized_process_launch", lambda _argv: Launch()
+    )
+    monkeypatch.setattr(managed_binding_lifecycle.subprocess, "run", run)
+    monkeypatch.setattr(managed_binding_lifecycle, "_utc_now", lambda: NOW)
+
+    observed_token = managed_binding_lifecycle._publisher_entra_token(
+        publisher_app_id=app_id,
+        tenant_id=tenant_id,
+        environment_overrides=environment,
+    )
+
+    assert observed_token == token
+    assert bytes(token) not in " ".join(cast(tuple[str, ...], observed["argv"])).encode()
+    assert bytes(token) not in json.dumps(observed["environment"], default=str).encode()
+    assert observed["argv"] == Launch.argv
+
+
+def test_publisher_oauth_path_never_logs_or_uses_arm_registry_lookup() -> None:
+    publish = inspect.getsource(managed_binding_lifecycle._publish_api_image)
+    entra = inspect.getsource(managed_binding_lifecycle._publisher_entra_token)
+    oauth = inspect.getsource(managed_binding_lifecycle._publisher_refresh_token)
+    oauth += inspect.getsource(managed_binding_lifecycle._publisher_repository_token)
+    data_plane = inspect.getsource(managed_binding_lifecycle._private_registry_request)
+
+    assert '"acr"' not in publish
+    assert 'repository", "list' not in publish
+    assert "_catalog" not in publish + oauth + data_plane
+    assert "management.azure.com" not in publish + oauth + data_plane
+    assert '"account",\n        "get-access-token"' in entra
+    assert '"--resource",\n        ACR_TOKEN_RESOURCE' in entra
+    assert "print(" not in entra + oauth + data_plane
+    assert "logger" not in entra + oauth + data_plane
+    assert "os.environ" not in entra + oauth + data_plane
+    assert "--expose-token" not in entra + oauth + data_plane
+    assert publish.index("refresh_token.clear()") < publish.index('"buildx",')
+    assert publish.count("_reset_ephemeral_directory(docker_config)") >= 3
 
 
 def test_lifecycle_working_directory_must_be_outside_repository() -> None:
@@ -1893,30 +2259,6 @@ def test_denial_probe_requires_remote_authorization_denial(
         match="denial-probe-result-ambiguous",
     ):
         managed_binding_lifecycle._denial_probe(probe)
-
-    initial_probe = (
-        "az",
-        "acr",
-        "repository",
-        "list",
-        "--query",
-        "[:0]",
-    )
-    assert (
-        managed_binding_lifecycle._denial_probe(
-            initial_probe,
-            accept_unclassified_initial_acr_denial=True,
-        )
-        == "denied"
-    )
-    with pytest.raises(
-        managed_binding_lifecycle.LifecycleError,
-        match="unclassified-denial-probe-scope-invalid",
-    ):
-        managed_binding_lifecycle._denial_probe(
-            probe,
-            accept_unclassified_initial_acr_denial=True,
-        )
 
 
 def test_image_reconciliation_always_delegates_to_isolated_publisher(

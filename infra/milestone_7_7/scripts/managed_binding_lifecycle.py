@@ -9,7 +9,10 @@ values.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hashlib
+import http.client
 import ipaddress
 import json
 import os
@@ -80,6 +83,20 @@ SMTP_HOST: Final = "sandbox.smtp.mailtrap.io"
 SMTP_FROM_ADDRESS: Final = "mobius77-validation@example.invalid"
 KEY_VAULT_HOST: Final = f"{KEY_VAULT}.vault.azure.net"
 REGISTRY_HOST: Final = f"{REGISTRY}.azurecr.io"
+PUBLISHER_REPOSITORY: Final = "opencanvas-api"
+ACR_TOKEN_RESOURCE: Final = "https://containerregistry.azure.net"
+ACR_REFRESH_TOKEN_USERNAME: Final = "00000000-0000-0000-0000-000000000000"
+PUBLISHER_REPOSITORY_SCOPE: Final = (
+    f"repository:{PUBLISHER_REPOSITORY}:pull,push,delete"
+)
+MAXIMUM_TOKEN_BYTES: Final = 16_384
+TOKEN_BYTES: Final = re.compile(rb"^[A-Za-z0-9._~+/=-]{32,16384}$")
+MANIFEST_ACCEPT: Final = (
+    "application/vnd.oci.image.manifest.v1+json,"
+    "application/vnd.oci.image.index.v1+json,"
+    "application/vnd.docker.distribution.manifest.v2+json,"
+    "application/vnd.docker.distribution.manifest.list.v2+json"
+)
 RECOVERABLE_API_IMAGE_SOURCE_COMMIT: Final = "24dbad86c44baef53120d75ed993ac8165549f72"
 API_IMAGE_BUILD_INPUTS: Final = (
     "apps/api/Dockerfile",
@@ -250,6 +267,10 @@ class AzureCommandError(LifecycleError):
     def __init__(self, sanitized_azure_error_code: str) -> None:
         super().__init__("lifecycle-command-nonzero")
         self.sanitized_azure_error_code = sanitized_azure_error_code
+
+
+class PublisherAccessPending(LifecycleError):
+    """The exact repository scope has not propagated to ACR yet."""
 
 
 def _utc_now() -> datetime:
@@ -2811,20 +2832,439 @@ def _publisher_login(
     )
 
 
-def _wait_for_publisher_access(
-    argv: tuple[str, ...], *, environment: Mapping[str, str]
+def _publisher_environment(
+    environment_overrides: Mapping[str, str],
+) -> dict[str, str]:
+    if set(environment_overrides) != {"AZURE_CONFIG_DIR", "DOCKER_CONFIG"}:
+        _fail("publisher-environment-invalid")
+    environment = _environment()
+    for key, value in environment_overrides.items():
+        resolved = _outside_repository(Path(value), key.casefold())
+        if not resolved.is_dir():
+            _fail("publisher-environment-invalid")
+        environment[key] = value
+    return environment
+
+
+def _jwt_claims(token: bytearray) -> dict[str, JsonValue]:
+    if len(token) > MAXIMUM_TOKEN_BYTES or TOKEN_BYTES.fullmatch(token) is None:
+        _fail("publisher-token-malformed")
+    parts = bytes(token).split(b".")
+    if len(parts) != 3 or any(not part for part in parts):
+        _fail("publisher-token-malformed")
+    padding = b"=" * (-len(parts[1]) % 4)
+    try:
+        payload = bytearray(base64.urlsafe_b64decode(parts[1] + padding))
+    except (ValueError, binascii.Error):
+        _fail("publisher-token-malformed")
+    try:
+        if len(payload) > MAXIMUM_TOKEN_BYTES:
+            _fail("publisher-token-malformed")
+        value = json.loads(payload)
+    except (UnicodeError, json.JSONDecodeError):
+        _fail("publisher-token-malformed")
+    finally:
+        payload.clear()
+    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
+        _fail("publisher-token-malformed")
+    return cast(dict[str, JsonValue], value)
+
+
+def _validate_token_time(claims: Mapping[str, JsonValue]) -> None:
+    now = int(_utc_now().timestamp())
+    expires = claims.get("exp")
+    not_before = claims.get("nbf")
+    if (
+        not isinstance(expires, int)
+        or isinstance(expires, bool)
+        or expires <= now + 60
+        or not isinstance(not_before, int)
+        or isinstance(not_before, bool)
+        or not_before > now + 60
+    ):
+        _fail("publisher-token-time-invalid")
+
+
+def _validate_entra_token(
+    token: bytearray, *, publisher_app_id: str, tenant_id: str
 ) -> None:
+    claims = _jwt_claims(token)
+    try:
+        _validate_token_time(claims)
+        client_id = claims.get("appid", claims.get("azp"))
+        if (
+            claims.get("aud") != ACR_TOKEN_RESOURCE
+            or claims.get("tid") != tenant_id
+            or client_id != publisher_app_id
+        ):
+            _fail("publisher-entra-token-binding-invalid")
+    finally:
+        claims.clear()
+
+
+def _publisher_entra_token(
+    *,
+    publisher_app_id: str,
+    tenant_id: str,
+    environment_overrides: Mapping[str, str],
+) -> bytearray:
+    argv = (
+        "az",
+        "account",
+        "get-access-token",
+        "--resource",
+        ACR_TOKEN_RESOURCE,
+        "--query",
+        "accessToken",
+        "--output",
+        "tsv",
+        "--only-show-errors",
+    )
+    try:
+        actual = _resolve_authorized_process_launch(argv).argv
+        completed = subprocess.run(
+            actual,
+            cwd=REPOSITORY_ROOT,
+            env=_publisher_environment(environment_overrides),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=False,
+            shell=False,
+            timeout=OPERATION_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        _fail("publisher-entra-token-process-failed")
+    stdout = bytearray(completed.stdout)
+    stderr = bytearray(completed.stderr)
+    token = bytearray()
+    try:
+        if len(stdout) + len(stderr) > MAXIMUM_OUTPUT_BYTES:
+            _fail("publisher-entra-token-output-oversized")
+        if completed.returncode != 0:
+            raise AzureCommandError(_sanitized_azure_error_code(stdout, stderr))
+        while stdout and stdout[-1] in b"\r\n\t ":
+            stdout.pop()
+        token.extend(stdout)
+        if TOKEN_BYTES.fullmatch(token) is None or bytes(token) in stderr:
+            _fail("publisher-entra-token-output-malformed")
+        _validate_entra_token(
+            token, publisher_app_id=publisher_app_id, tenant_id=tenant_id
+        )
+        return token
+    except Exception:
+        token.clear()
+        raise
+    finally:
+        stdout.clear()
+        stderr.clear()
+
+
+def _form_body(fields: tuple[tuple[bytes, bytes | bytearray], ...]) -> bytearray:
+    body = bytearray()
+    unreserved = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    allowed = set(unreserved)
+    for field_index, (name, value) in enumerate(fields):
+        if not name or any(byte not in allowed for byte in name):
+            _fail("publisher-oauth-form-invalid")
+        if field_index:
+            body.append(ord("&"))
+        body.extend(name)
+        body.append(ord("="))
+        for byte in value:
+            if byte in allowed:
+                body.append(byte)
+            else:
+                body.extend(f"%{byte:02X}".encode("ascii"))
+    if len(body) > MAXIMUM_OUTPUT_BYTES:
+        body.clear()
+        _fail("publisher-oauth-form-oversized")
+    return body
+
+
+def _validate_registry_request(method: str, path: str) -> None:
+    exact = {
+        ("POST", "/oauth2/exchange"),
+        ("POST", "/oauth2/token"),
+    }
+    if (method, path) in exact:
+        return
+    manifest = re.fullmatch(
+        r"/v2/opencanvas-api/manifests/"
+        r"(?:source-[0-9a-f]{40}|sha256:[0-9a-f]{64})",
+        path,
+    )
+    tag = re.fullmatch(r"/acr/v1/opencanvas-api/_tags/source-[0-9a-f]{40}", path)
+    if (method == "HEAD" and manifest is not None) or (
+        method == "DELETE" and tag is not None
+    ):
+        return
+    _fail("publisher-registry-request-scope-invalid")
+
+
+def _private_registry_request(
+    method: str,
+    path: str,
+    *,
+    headers: Mapping[str, str],
+    body: bytearray | None = None,
+) -> tuple[int, dict[str, str], bytearray]:
+    _validate_registry_request(method, path)
+    _private_tls_endpoint(REGISTRY_HOST)
+    connection = http.client.HTTPSConnection(
+        REGISTRY_HOST,
+        port=443,
+        timeout=10.0,
+        context=ssl.create_default_context(),
+    )
+    response_body = bytearray()
+    try:
+        connection.request(method, path, body=body, headers=dict(headers))
+        response = connection.getresponse()
+        response_body.extend(response.read(MAXIMUM_OUTPUT_BYTES + 1))
+        if len(response_body) > MAXIMUM_OUTPUT_BYTES:
+            _fail("publisher-registry-output-oversized")
+        retained_headers: dict[str, str] = {}
+        digest = response.getheader("Docker-Content-Digest")
+        if digest is not None:
+            retained_headers["docker-content-digest"] = digest
+        content_type = response.getheader("Content-Type")
+        if content_type is not None:
+            retained_headers["content-type"] = content_type
+        return response.status, retained_headers, response_body
+    except (OSError, ssl.SSLError, http.client.HTTPException):
+        response_body.clear()
+        _fail("publisher-private-registry-request-failed")
+    finally:
+        connection.close()
+
+
+def _oauth_secret(
+    body: bytearray,
+    *,
+    key: str,
+    allowed_keys: frozenset[str],
+) -> bytearray:
+    try:
+        value = json.loads(body)
+    except (UnicodeError, json.JSONDecodeError):
+        _fail("publisher-oauth-response-malformed")
+    if (
+        not isinstance(value, dict)
+        or set(value) - allowed_keys
+        or key not in value
+        or not isinstance(value[key], str)
+    ):
+        _fail("publisher-oauth-response-malformed")
+    raw_secret = cast(str, value[key])
+    secret = bytearray(raw_secret.encode("ascii", errors="strict"))
+    value[key] = None
+    value.clear()
+    if len(secret) > MAXIMUM_TOKEN_BYTES or TOKEN_BYTES.fullmatch(secret) is None:
+        secret.clear()
+        _fail("publisher-oauth-response-malformed")
+    return secret
+
+
+def _publisher_refresh_token(*, entra_token: bytearray, tenant_id: str) -> bytearray:
+    form = _form_body(
+        (
+            (b"grant_type", b"access_token"),
+            (b"service", REGISTRY_HOST.encode("ascii")),
+            (b"tenant", tenant_id.encode("ascii")),
+            (b"access_token", entra_token),
+        )
+    )
+    response = bytearray()
+    try:
+        status, _headers, response = _private_registry_request(
+            "POST",
+            "/oauth2/exchange",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            body=form,
+        )
+        if status in {401, 403}:
+            raise PublisherAccessPending("publisher-oauth-exchange-denied")
+        if status != 200:
+            _fail("publisher-oauth-exchange-failed")
+        return _oauth_secret(
+            response,
+            key="refresh_token",
+            allowed_keys=frozenset({"refresh_token"}),
+        )
+    finally:
+        form.clear()
+        response.clear()
+
+
+def _acr_access_is_exact(token: bytearray, *, tenant_id: str) -> bool:
+    claims = _jwt_claims(token)
+    try:
+        _validate_token_time(claims)
+        if claims.get("aud") != REGISTRY_HOST:
+            _fail("publisher-acr-token-audience-invalid")
+        token_tenant = claims.get("tid", claims.get("tenant"))
+        if token_tenant is not None and token_tenant != tenant_id:
+            _fail("publisher-acr-token-tenant-invalid")
+        access = claims.get("access")
+        if access in (None, []):
+            return False
+        if not isinstance(access, list) or len(access) != 1:
+            _fail("publisher-acr-token-scope-invalid")
+        item = access[0]
+        if not isinstance(item, dict) or set(item) != {"actions", "name", "type"}:
+            _fail("publisher-acr-token-scope-invalid")
+        actions = item.get("actions")
+        if (
+            item.get("type") != "repository"
+            or item.get("name") != PUBLISHER_REPOSITORY
+            or not isinstance(actions, list)
+            or len(actions) != 3
+            or set(actions) != {"pull", "push", "delete"}
+            or any(not isinstance(action, str) for action in actions)
+        ):
+            _fail("publisher-acr-token-scope-invalid")
+        return True
+    finally:
+        claims.clear()
+
+
+def _publisher_repository_token(
+    *, refresh_token: bytearray, tenant_id: str
+) -> bytearray | None:
+    form = _form_body(
+        (
+            (b"grant_type", b"refresh_token"),
+            (b"service", REGISTRY_HOST.encode("ascii")),
+            (b"scope", PUBLISHER_REPOSITORY_SCOPE.encode("ascii")),
+            (b"refresh_token", refresh_token),
+        )
+    )
+    response = bytearray()
+    try:
+        status, _headers, response = _private_registry_request(
+            "POST",
+            "/oauth2/token",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            body=form,
+        )
+        if status in {401, 403}:
+            return None
+        if status != 200:
+            _fail("publisher-oauth-token-request-failed")
+        token = _oauth_secret(
+            response,
+            key="access_token",
+            allowed_keys=frozenset({"access_token", "expires_in", "issued_at"}),
+        )
+        if not _acr_access_is_exact(token, tenant_id=tenant_id):
+            token.clear()
+            return None
+        return token
+    finally:
+        form.clear()
+        response.clear()
+
+
+def _publisher_repository_session(
+    *,
+    publisher_app_id: str,
+    tenant_id: str,
+    environment: Mapping[str, str],
+) -> tuple[bytearray, bytearray | None]:
+    entra_token = _publisher_entra_token(
+        publisher_app_id=publisher_app_id,
+        tenant_id=tenant_id,
+        environment_overrides=environment,
+    )
+    refresh_token = bytearray()
+    try:
+        refresh_token = _publisher_refresh_token(
+            entra_token=entra_token, tenant_id=tenant_id
+        )
+    finally:
+        entra_token.clear()
+    try:
+        access_token = _publisher_repository_token(
+            refresh_token=refresh_token, tenant_id=tenant_id
+        )
+        return refresh_token, access_token
+    except Exception:
+        refresh_token.clear()
+        raise
+
+
+def _prove_initial_publisher_denial(
+    *,
+    publisher_app_id: str,
+    tenant_id: str,
+    environment: Mapping[str, str],
+) -> None:
+    refresh_token, access_token = _publisher_repository_session(
+        publisher_app_id=publisher_app_id,
+        tenant_id=tenant_id,
+        environment=environment,
+    )
+    try:
+        if access_token is not None:
+            _fail("publisher-initial-denial-unproved")
+    finally:
+        refresh_token.clear()
+        if access_token is not None:
+            access_token.clear()
+
+
+def _wait_for_publisher_access(
+    *,
+    publisher_app_id: str,
+    tenant_id: str,
+    environment: Mapping[str, str],
+) -> tuple[bytearray, bytearray]:
     deadline = time.monotonic() + 600.0
     while True:
-        _private_tls_endpoint(REGISTRY_HOST)
         try:
-            _run(argv, require_json=True, environment_overrides=environment)
-            return
-        except AzureCommandError:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                _fail("publisher-role-propagation-unproved")
-            time.sleep(min(10.0, remaining))
+            refresh_token, access_token = _publisher_repository_session(
+                publisher_app_id=publisher_app_id,
+                tenant_id=tenant_id,
+                environment=environment,
+            )
+        except PublisherAccessPending:
+            refresh_token = bytearray()
+            access_token = None
+        if access_token is not None:
+            return refresh_token, access_token
+        refresh_token.clear()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _fail("publisher-role-propagation-unproved")
+        time.sleep(min(10.0, remaining))
+
+
+def _wait_for_publisher_denial(
+    *,
+    publisher_app_id: str,
+    tenant_id: str,
+    environment: Mapping[str, str],
+) -> bytearray:
+    deadline = time.monotonic() + 600.0
+    while True:
+        try:
+            refresh_token, access_token = _publisher_repository_session(
+                publisher_app_id=publisher_app_id,
+                tenant_id=tenant_id,
+                environment=environment,
+            )
+        except PublisherAccessPending:
+            refresh_token = bytearray()
+            access_token = None
+        if access_token is None and refresh_token:
+            return refresh_token
+        refresh_token.clear()
+        if access_token is not None:
+            access_token.clear()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _fail("temporary-authority-revocation-unproved")
+        time.sleep(min(10.0, remaining))
 
 
 def _delete_ephemeral_publisher(
@@ -2987,16 +3427,9 @@ def _denial_probe(
     argv: tuple[str, ...],
     *,
     environment_overrides: Mapping[str, str] | None = None,
-    accept_unclassified_initial_acr_denial: bool = False,
 ) -> str:
     if not argv or argv[0] not in {"az", "docker"}:
         _fail("denial-probe-executable-unapproved")
-    if accept_unclassified_initial_acr_denial and not (
-        argv[:4] == ("az", "acr", "repository", "list")
-        and "--query" in argv
-        and "[:0]" in argv
-    ):
-        _fail("unclassified-denial-probe-scope-invalid")
     try:
         if argv[0] == "az":
             actual = _resolve_authorized_process_launch(argv).argv
@@ -3039,8 +3472,7 @@ def _denial_probe(
             for marker in ("403", "denied", "forbidden", "permission", "unauthorized")
         ):
             error_code = _sanitized_azure_error_code(stdout, stderr)
-            if not accept_unclassified_initial_acr_denial:
-                _fail(f"denial-probe-result-ambiguous-{error_code}")
+            _fail(f"denial-probe-result-ambiguous-{error_code}")
         return "denied"
     finally:
         stdout.clear()
@@ -3052,7 +3484,6 @@ def _wait_for_denial(
     *,
     endpoint_host: str,
     environment_overrides: Mapping[str, str] | None = None,
-    accept_unclassified_initial_acr_denial: bool = False,
 ) -> None:
     deadline = time.monotonic() + 600.0
     while time.monotonic() < deadline:
@@ -3061,9 +3492,6 @@ def _wait_for_denial(
             _denial_probe(
                 argv,
                 environment_overrides=environment_overrides,
-                accept_unclassified_initial_acr_denial=(
-                    accept_unclassified_initial_acr_denial
-                ),
             )
             == "denied"
         ):
@@ -3360,60 +3788,111 @@ def _private_path(subscription_id: str) -> dict[str, JsonValue]:
     }
 
 
-def _assert_source_tag_absent(
-    *,
-    subscription_id: str,
-    source_tag: str,
-    docker_environment: Mapping[str, str],
+def _docker_login_with_refresh_token(
+    refresh_token: bytearray, *, environment: Mapping[str, str]
 ) -> None:
-    repositories = _run(
-        (
-            "az",
-            "acr",
-            "repository",
-            "list",
-            "--name",
-            REGISTRY,
-            "--subscription",
-            subscription_id,
-            "--query",
-            "[?@=='opencanvas-api']",
-            "--output",
-            "json",
-            "--only-show-errors",
-        ),
-        require_json=True,
-        environment_overrides=docker_environment,
-    )
-    if repositories not in ([], ["opencanvas-api"]):
-        _fail("registry-repository-output-malformed")
-    if repositories == []:
-        return
-    tags = _run(
-        (
-            "az",
-            "acr",
-            "repository",
-            "show-tags",
-            "--name",
-            REGISTRY,
-            "--repository",
-            "opencanvas-api",
-            "--subscription",
-            subscription_id,
-            "--query",
-            f"[?@=='{source_tag}']",
-            "--output",
-            "json",
-            "--only-show-errors",
-        ),
-        require_json=True,
-        environment_overrides=docker_environment,
-    )
-    if tags not in ([], [source_tag]):
-        _fail("registry-tag-output-malformed")
-    if tags:
+    payload = bytearray(refresh_token)
+    payload.append(ord("\n"))
+    stdout = bytearray()
+    stderr = bytearray()
+    try:
+        completed = subprocess.run(
+            (
+                _resolved_executable("docker"),
+                "login",
+                REGISTRY_HOST,
+                "--username",
+                ACR_REFRESH_TOKEN_USERNAME,
+                "--password-stdin",
+            ),
+            cwd=REPOSITORY_ROOT,
+            env=_publisher_environment(environment),
+            input=payload,
+            capture_output=True,
+            check=False,
+            shell=False,
+            timeout=OPERATION_TIMEOUT_SECONDS,
+        )
+        stdout.extend(completed.stdout)
+        stderr.extend(completed.stderr)
+        if len(stdout) + len(stderr) > MAXIMUM_OUTPUT_BYTES:
+            _fail("publisher-docker-login-output-oversized")
+        if bytes(refresh_token) in stdout or bytes(refresh_token) in stderr:
+            _fail("publisher-secret-echo-detected")
+        if completed.returncode != 0:
+            _fail("publisher-docker-login-failed")
+    except (OSError, subprocess.TimeoutExpired):
+        _fail("publisher-docker-login-process-failed")
+    finally:
+        payload.clear()
+        stdout.clear()
+        stderr.clear()
+
+
+def _registry_authorization(access_token: bytearray) -> str:
+    value = bytearray(b"Bearer ")
+    value.extend(access_token)
+    try:
+        return value.decode("ascii", errors="strict")
+    except UnicodeError:
+        _fail("publisher-acr-token-malformed")
+    finally:
+        value.clear()
+
+
+def _acr_manifest_digest(access_token: bytearray, *, reference: str) -> str | None:
+    if not (
+        re.fullmatch(r"source-[0-9a-f]{40}", reference)
+        or RAW_IMAGE_DIGEST.fullmatch(reference)
+    ):
+        _fail("registry-manifest-reference-invalid")
+    body = bytearray()
+    try:
+        status, headers, body = _private_registry_request(
+            "HEAD",
+            f"/v2/{PUBLISHER_REPOSITORY}/manifests/{reference}",
+            headers={
+                "Accept": MANIFEST_ACCEPT,
+                "Authorization": _registry_authorization(access_token),
+            },
+        )
+        if status == 404:
+            return None
+        if status in {401, 403}:
+            raise PublisherAccessPending("publisher-repository-access-denied")
+        if status != 200:
+            _fail("registry-manifest-verification-failed")
+        digest = headers.get("docker-content-digest")
+        if digest is None or RAW_IMAGE_DIGEST.fullmatch(digest) is None:
+            _fail("registry-digest-output-malformed")
+        if RAW_IMAGE_DIGEST.fullmatch(reference) and digest != reference:
+            _fail("registry-immutable-digest-mismatch")
+        return digest
+    finally:
+        body.clear()
+
+
+def _assert_source_tag_absent(*, source_tag: str, access_token: bytearray) -> None:
+    if _acr_manifest_digest(access_token, reference=source_tag) is not None:
         _fail("registry-source-tag-already-present")
+
+
+def _remove_source_tag(access_token: bytearray, *, source_tag: str) -> None:
+    if re.fullmatch(r"source-[0-9a-f]{40}", source_tag) is None:
+        _fail("registry-source-tag-invalid")
+    body = bytearray()
+    try:
+        status, _headers, body = _private_registry_request(
+            "DELETE",
+            f"/acr/v1/{PUBLISHER_REPOSITORY}/_tags/{source_tag}",
+            headers={"Authorization": _registry_authorization(access_token)},
+        )
+        if status in {401, 403}:
+            raise PublisherAccessPending("publisher-tag-removal-denied")
+        if status not in {200, 202, 204}:
+            _fail("registry-source-tag-removal-failed")
+    finally:
+        body.clear()
 
 
 def _publish_api_image(
@@ -3440,6 +3919,8 @@ def _publish_api_image(
     publisher_object_id: str | None = None
     publisher_deleted = False
     denial_proved = False
+    refresh_token = bytearray()
+    access_token = bytearray()
     source_tag = f"source-{repository_head}"
     image_by_tag = f"{REGISTRY_HOST}/opencanvas-api:{source_tag}"
     publisher_root = receipt_directory / "ephemeral-publisher"
@@ -3485,26 +3966,10 @@ def _publish_api_image(
             certificate_path=certificate_path,
             environment=publisher_environment,
         )
-        repository_list = (
-            "az",
-            "acr",
-            "repository",
-            "list",
-            "--name",
-            REGISTRY,
-            "--subscription",
-            subscription_id,
-            "--query",
-            "[:0]",
-            "--output",
-            "json",
-            "--only-show-errors",
-        )
-        _wait_for_denial(
-            repository_list,
-            endpoint_host=REGISTRY_HOST,
-            environment_overrides=publisher_environment,
-            accept_unclassified_initial_acr_denial=True,
+        _prove_initial_publisher_denial(
+            publisher_app_id=publisher_app_id,
+            tenant_id=tenant_id,
+            environment=publisher_environment,
         )
         _verify_cleanup_control(subscription_id, cleanup_at)
         assignment_id = _temporary_publisher_role_assignment(
@@ -3527,27 +3992,19 @@ def _publish_api_image(
             certificate_path=certificate_path,
             environment=publisher_environment,
         )
-        _wait_for_publisher_access(repository_list, environment=publisher_environment)
-        _run(
-            (
-                "az",
-                "acr",
-                "login",
-                "--name",
-                REGISTRY,
-                "--subscription",
-                subscription_id,
-                "--only-show-errors",
-                "--output",
-                "none",
-            ),
-            environment_overrides=publisher_environment,
+        refresh_token, access_token = _wait_for_publisher_access(
+            publisher_app_id=publisher_app_id,
+            tenant_id=tenant_id,
+            environment=publisher_environment,
         )
+        _docker_login_with_refresh_token(
+            refresh_token, environment=publisher_environment
+        )
+        refresh_token.clear()
         try:
             _assert_source_tag_absent(
-                subscription_id=subscription_id,
                 source_tag=source_tag,
-                docker_environment=publisher_environment,
+                access_token=access_token,
             )
             _run(
                 (
@@ -3567,61 +4024,16 @@ def _publish_api_image(
                 timeout_seconds=DEPLOYMENT_TIMEOUT_SECONDS,
                 environment_overrides=publisher_environment,
             )
-            digest_projection = _run(
-                (
-                    "az",
-                    "acr",
-                    "repository",
-                    "show",
-                    "--name",
-                    REGISTRY,
-                    "--image",
-                    f"opencanvas-api:{source_tag}",
-                    "--subscription",
-                    subscription_id,
-                    "--query",
-                    "{digest:digest}",
-                    "--output",
-                    "json",
-                    "--only-show-errors",
-                ),
-                require_json=True,
-                environment_overrides=publisher_environment,
-            )
-            if not isinstance(digest_projection, dict) or set(digest_projection) != {
-                "digest"
-            }:
+            raw_digest = _acr_manifest_digest(access_token, reference=source_tag)
+            if raw_digest is None:
                 _fail("registry-digest-output-malformed")
-            raw_digest = digest_projection["digest"]
-            if (
-                not isinstance(raw_digest, str)
-                or RAW_IMAGE_DIGEST.fullmatch(raw_digest) is None
-            ):
-                _fail("registry-digest-output-malformed")
-            _run(
-                (
-                    "az",
-                    "acr",
-                    "repository",
-                    "untag",
-                    "--name",
-                    REGISTRY,
-                    "--image",
-                    f"opencanvas-api:{source_tag}",
-                    "--subscription",
-                    subscription_id,
-                    "--yes",
-                    "--only-show-errors",
-                    "--output",
-                    "none",
-                ),
-                environment_overrides=publisher_environment,
-            )
+            _remove_source_tag(access_token, source_tag=source_tag)
             _assert_source_tag_absent(
-                subscription_id=subscription_id,
                 source_tag=source_tag,
-                docker_environment=publisher_environment,
+                access_token=access_token,
             )
+            if _acr_manifest_digest(access_token, reference=raw_digest) != raw_digest:
+                _fail("registry-immutable-digest-mismatch")
             immutable_reference = f"{REGISTRY_HOST}/opencanvas-api@{raw_digest}"
             if IMAGE_DIGEST.fullmatch(immutable_reference) is None:
                 _fail("registry-immutable-reference-malformed")
@@ -3643,6 +4055,9 @@ def _publish_api_image(
                 ("docker", "logout", REGISTRY_HOST),
                 environment_overrides=publisher_environment,
             )
+            refresh_token.clear()
+            access_token.clear()
+            _reset_ephemeral_directory(docker_config)
 
         _delete_assignment(subscription_id, assignment_id)
         assignment_id = None
@@ -3668,51 +4083,34 @@ def _publish_api_image(
             certificate_path=certificate_path,
             environment=publisher_environment,
         )
-        _wait_for_denial(
-            (
-                "az",
-                "acr",
-                "login",
-                "--name",
-                REGISTRY,
-                "--subscription",
-                subscription_id,
-                "--only-show-errors",
-                "--output",
-                "none",
-            ),
-            endpoint_host=REGISTRY_HOST,
-            environment_overrides=publisher_environment,
+        denial_refresh_token = _wait_for_publisher_denial(
+            publisher_app_id=publisher_app_id,
+            tenant_id=tenant_id,
+            environment=publisher_environment,
         )
-        _reset_ephemeral_directory(docker_config)
-        for probe in (
-            repository_list,
-            (
-                "az",
-                "acr",
-                "repository",
-                "show",
-                "--name",
-                REGISTRY,
-                "--image",
-                f"opencanvas-api@{raw_digest}",
-                "--subscription",
-                subscription_id,
-                "--query",
-                "{digest:digest}",
-                "--output",
-                "json",
-                "--only-show-errors",
-            ),
-            ("docker", "manifest", "inspect", immutable_reference),
-            ("docker", "pull", immutable_reference),
-            ("docker", "push", revocation_probe),
-        ):
-            _wait_for_denial(
-                probe,
-                endpoint_host=REGISTRY_HOST,
+        try:
+            _docker_login_with_refresh_token(
+                denial_refresh_token, environment=publisher_environment
+            )
+        finally:
+            denial_refresh_token.clear()
+        try:
+            for probe in (
+                ("docker", "manifest", "inspect", immutable_reference),
+                ("docker", "pull", immutable_reference),
+                ("docker", "push", revocation_probe),
+            ):
+                _wait_for_denial(
+                    probe,
+                    endpoint_host=REGISTRY_HOST,
+                    environment_overrides=publisher_environment,
+                )
+        finally:
+            _run(
+                ("docker", "logout", REGISTRY_HOST),
                 environment_overrides=publisher_environment,
             )
+            _reset_ephemeral_directory(docker_config)
         denial_proved = True
         _verify_cleanup_control(subscription_id, cleanup_at)
         _delete_ephemeral_publisher(
@@ -3734,6 +4132,8 @@ def _publish_api_image(
         shutil.rmtree(publisher_root)
         return immutable_reference
     finally:
+        refresh_token.clear()
+        access_token.clear()
         if assignment_id is not None:
             _delete_assignment(subscription_id, assignment_id)
             state["temporaryRegistryAssignmentId"] = None
