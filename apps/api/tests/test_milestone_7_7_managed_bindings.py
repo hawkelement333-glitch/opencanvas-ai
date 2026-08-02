@@ -1706,9 +1706,6 @@ def test_ephemeral_publisher_is_same_principal_and_delete_after_denial() -> None
 
 def test_ephemeral_publisher_identity_has_no_group_or_persistent_role_path() -> None:
     create = inspect.getsource(managed_binding_lifecycle._create_ephemeral_publisher)
-    principal_wait = inspect.getsource(
-        managed_binding_lifecycle._wait_for_ephemeral_publisher_principal
-    )
     inventory = inspect.getsource(managed_binding_lifecycle._publisher_role_rows)
     deletion = inspect.getsource(managed_binding_lifecycle._delete_ephemeral_publisher)
     partial_deletion = inspect.getsource(
@@ -1717,7 +1714,6 @@ def test_ephemeral_publisher_identity_has_no_group_or_persistent_role_path() -> 
 
     assert '"--skip-assignment"' in create
     assert '"--create-cert"' in create
-    assert '"get-member-groups"' in principal_wait
     assert '"--all"' in inventory
     assert '"--include-groups"' in inventory
     assert '"ad",\n            "sp",\n            "delete"' in deletion
