@@ -3301,6 +3301,59 @@ def test_recovered_cleanup_seed_rejects_resource_or_role_drift(
         managed_binding_lifecycle._verify_recovered_cleanup_seed_state(subscription_id)
 
 
+def test_target_inventory_accepts_only_exact_managed_binding_identities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subscription_id = "opaque-subscription"
+    group_scope = (
+        f"/subscriptions/{subscription_id}/resourceGroups/"
+        f"{managed_binding_lifecycle.TARGET_GROUP}"
+    )
+    names = (
+        "id-mobius77-worker",
+        "id-mobius77-telemetry",
+        "id-mobius77-db-admin",
+    )
+
+    def inventory_rows(observed_names: tuple[str, ...]) -> list[JsonValue]:
+        return [
+            {
+                "id": (
+                    f"{group_scope}/providers/Microsoft.ManagedIdentity/"
+                    f"userAssignedIdentities/{name}"
+                ),
+                "location": "southcentralus",
+                "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+            }
+            for name in observed_names
+        ]
+
+    rows = inventory_rows(names)
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_container_apps_private_dns_projection",
+        lambda *_args: ("private.example.invalid", "10.0.0.1"),
+    )
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", lambda *_args, **_kwargs: rows)
+
+    assert managed_binding_lifecycle._resource_group_inventory(
+        subscription_id=subscription_id,
+        group=managed_binding_lifecycle.TARGET_GROUP,
+    ) == frozenset(
+        f"microsoft.managedidentity/userassignedidentities/{name}" for name in names
+    )
+
+    rows = inventory_rows(("id-mobius77-worker-nearby",))
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-resource-inventory-drift",
+    ):
+        managed_binding_lifecycle._resource_group_inventory(
+            subscription_id=subscription_id,
+            group=managed_binding_lifecycle.TARGET_GROUP,
+        )
+
+
 def test_cleanup_is_idempotent_without_residue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

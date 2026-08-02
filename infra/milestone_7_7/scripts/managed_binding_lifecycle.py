@@ -163,6 +163,18 @@ TARGET_RESOURCE_LOCATIONS: Final = (
         "southcentralus",
     ),
     (
+        "microsoft.managedidentity/userassignedidentities/id-mobius77-worker",
+        "southcentralus",
+    ),
+    (
+        "microsoft.managedidentity/userassignedidentities/id-mobius77-telemetry",
+        "southcentralus",
+    ),
+    (
+        "microsoft.managedidentity/userassignedidentities/id-mobius77-db-admin",
+        "southcentralus",
+    ),
+    (
         "microsoft.operationalinsights/workspaces/law-mobius77-staging",
         "southcentralus",
     ),
