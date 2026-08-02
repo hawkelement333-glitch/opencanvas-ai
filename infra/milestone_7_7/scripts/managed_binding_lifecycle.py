@@ -368,6 +368,7 @@ def _run(
     timeout_seconds: int = OPERATION_TIMEOUT_SECONDS,
     require_json: bool = False,
     environment_overrides: Mapping[str, str] | None = None,
+    working_directory: Path | None = None,
 ) -> JsonValue | None:
     if not argv or argv[0] not in {"az", "bicep", "docker", "git"}:
         _fail("lifecycle-executable-unapproved")
@@ -389,10 +390,17 @@ def _run(
             if not resolved.is_dir():
                 _fail("lifecycle-environment-override-unapproved")
         environment.update(environment_overrides)
+    execution_directory = REPOSITORY_ROOT
+    if working_directory is not None:
+        execution_directory = _outside_repository(
+            working_directory, "lifecycle-working-directory"
+        )
+        if not execution_directory.is_dir():
+            _fail("lifecycle-working-directory-invalid")
     try:
         completed = subprocess.run(
             actual,
-            cwd=REPOSITORY_ROOT,
+            cwd=execution_directory,
             env=environment,
             stdin=subprocess.DEVNULL,
             capture_output=True,
@@ -2671,7 +2679,6 @@ def _create_ephemeral_publisher(
         or HEX_SHA256.fullmatch(ledger_integrity) is None
     ):
         _fail("publisher-ledger-binding-invalid")
-    certificate_path = publisher_directory / "publisher-certificate.pem"
     display_name = f"mobius77-acr-publisher-{ledger_integrity[:12]}"
     created = _run(
         (
@@ -2682,28 +2689,37 @@ def _create_ephemeral_publisher(
             "--name",
             display_name,
             "--create-cert",
-            "--cert",
-            str(certificate_path),
             "--years",
             "1",
             "--skip-assignment",
             "--query",
-            "{appId:appId,tenant:tenant}",
+            "{appId:appId,certificatePath:fileWithCertAndPrivateKey,tenant:tenant}",
             "--output",
             "json",
             "--only-show-errors",
         ),
         require_json=True,
+        working_directory=publisher_directory,
     )
-    if not isinstance(created, dict) or set(created) != {"appId", "tenant"}:
+    if not isinstance(created, dict) or set(created) != {
+        "appId",
+        "certificatePath",
+        "tenant",
+    }:
         _fail("publisher-identity-output-malformed")
     app_id = created["appId"]
+    raw_certificate_path = created["certificatePath"]
     tenant_id = created["tenant"]
     if not all(
         isinstance(value, str) and re.fullmatch(r"[0-9a-fA-F-]{36}", value)
         for value in (app_id, tenant_id)
     ):
         _fail("publisher-identity-output-malformed")
+    if not isinstance(raw_certificate_path, str) or not raw_certificate_path:
+        _fail("publisher-certificate-path-malformed")
+    certificate_path = Path(raw_certificate_path).resolve()
+    if certificate_path.parent != publisher_directory.resolve():
+        _fail("publisher-certificate-path-outside-directory")
     if not certificate_path.is_file() or certificate_path.stat().st_size <= 0:
         _fail("publisher-certificate-missing")
     try:

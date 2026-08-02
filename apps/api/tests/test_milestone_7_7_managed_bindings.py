@@ -1719,6 +1719,61 @@ def test_ephemeral_publisher_identity_has_no_group_or_persistent_role_path() -> 
     assert "publisher-identity-deletion-unproved" in deletion
 
 
+def test_ephemeral_publisher_generates_certificate_only_in_restricted_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publisher_directory = tmp_path / "publisher"
+    publisher_directory.mkdir(mode=0o700)
+    certificate_path = publisher_directory / "generated-certificate.pem"
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+    def run(argv: tuple[str, ...], **kwargs: object) -> JsonValue:
+        calls.append((argv, kwargs))
+        if argv[1:4] == ("ad", "sp", "create-for-rbac"):
+            assert "--create-cert" in argv
+            assert "--cert" not in argv
+            assert kwargs["working_directory"] == publisher_directory
+            certificate_path.write_text("synthetic-certificate", encoding="ascii")
+            return {
+                "appId": "00000000-0000-0000-0000-000000000091",
+                "certificatePath": str(certificate_path),
+                "tenant": "00000000-0000-0000-0000-000000000092",
+            }
+        if argv[1:4] == ("ad", "sp", "show"):
+            return {
+                "objectId": "00000000-0000-0000-0000-000000000093",
+                "servicePrincipalType": "Application",
+            }
+        if argv[1:4] == ("ad", "sp", "get-member-groups"):
+            return []
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
+    app_id, object_id, tenant_id, observed_certificate = (
+        managed_binding_lifecycle._create_ephemeral_publisher(
+            ledger={"ledgerIntegritySha256": "a" * 64},
+            publisher_directory=publisher_directory,
+        )
+    )
+
+    assert app_id.endswith("91")
+    assert object_id.endswith("93")
+    assert tenant_id.endswith("92")
+    assert observed_certificate == certificate_path.resolve()
+    assert len(calls) == 3
+
+
+def test_lifecycle_working_directory_must_be_outside_repository() -> None:
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="lifecycle-working-directory-inside-repository",
+    ):
+        managed_binding_lifecycle._run(
+            ("git", "status"),
+            working_directory=managed_binding_lifecycle.REPOSITORY_ROOT,
+        )
+
+
 def test_denial_probe_requires_remote_authorization_denial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
