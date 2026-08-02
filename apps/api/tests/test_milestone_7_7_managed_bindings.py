@@ -3354,6 +3354,124 @@ def test_target_inventory_accepts_only_exact_managed_binding_identities(
         )
 
 
+def test_pre_secret_role_inventory_requires_exact_managed_identity_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subscription_id = "opaque-subscription"
+    target_scope = (
+        f"/subscriptions/{subscription_id}/resourceGroups/"
+        f"{managed_binding_lifecycle.TARGET_GROUP}"
+    )
+    cleanup_scope = (
+        f"/subscriptions/{subscription_id}/resourceGroups/"
+        f"{managed_binding_lifecycle.CLEANUP_GROUP}"
+    )
+    key_vault_scope = (
+        f"{target_scope}/providers/Microsoft.KeyVault/vaults/"
+        f"{managed_binding_lifecycle.KEY_VAULT}"
+    )
+    registry_scope = (
+        f"{target_scope}/providers/Microsoft.ContainerRegistry/registries/"
+        f"{managed_binding_lifecycle.REGISTRY}"
+    )
+    principal_ids = {
+        name: f"00000000-0000-0000-0000-{index:012d}"
+        for index, name in enumerate(
+            sorted(managed_binding_lifecycle.MANAGED_BINDING_IDENTITY_NAMES), start=1
+        )
+    }
+    contract = managed_binding_lifecycle.load_managed_binding_contract()
+    rbac = contract["rbac"]
+    assert isinstance(rbac, dict)
+    role_prefix = (
+        f"/subscriptions/{subscription_id}/providers/"
+        "microsoft.authorization/roledefinitions/"
+    )
+    cleanup_principal = "00000000-0000-0000-0000-999999999999"
+
+    expected_by_scope: dict[str, list[dict[str, str]]] = {
+        target_scope.casefold(): [
+            {
+                "principalId": cleanup_principal,
+                "roleDefinitionId": (
+                    role_prefix + str(rbac["cleanupContributorRoleDefinitionId"])
+                ).casefold(),
+                "scope": target_scope.casefold(),
+            }
+        ],
+        cleanup_scope.casefold(): [],
+        (
+            f"{cleanup_scope}/providers/Microsoft.Automation/automationAccounts/"
+            f"{managed_binding_lifecycle.AUTOMATION_ACCOUNT}"
+        ).casefold(): [],
+    }
+    for scope, role_id, identity_names in (
+        (
+            key_vault_scope,
+            str(rbac["keyVaultSecretsUserRoleDefinitionId"]),
+            ("id-mobius77-api", "id-mobius77-worker", "id-mobius77-telemetry"),
+        ),
+        (
+            registry_scope,
+            str(rbac["acrPullRoleDefinitionId"]),
+            (
+                "id-mobius77-api",
+                "id-mobius77-worker",
+                "id-mobius77-telemetry",
+                "id-mobius77-db-admin",
+            ),
+        ),
+    ):
+        expected_by_scope[scope.casefold()] = [
+            {
+                "principalId": principal_ids[name],
+                "roleDefinitionId": (role_prefix + role_id).casefold(),
+                "scope": scope.casefold(),
+            }
+            for name in identity_names
+        ]
+
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_managed_identity_principal",
+        lambda _subscription_id, name: principal_ids[name],
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_exact_scope_role_rows",
+        lambda _subscription_id, scope: expected_by_scope[scope.casefold()],
+    )
+    target_resources = frozenset(
+        {
+            "microsoft.keyvault/vaults/kv-mobius77-11564669",
+            "microsoft.containerregistry/registries/acrmobius7711564669",
+            *(
+                "microsoft.managedidentity/userassignedidentities/" + name
+                for name in managed_binding_lifecycle.MANAGED_BINDING_IDENTITY_NAMES
+            ),
+        }
+    )
+
+    managed_binding_lifecycle._verify_pre_secret_role_inventory(
+        subscription_id=subscription_id,
+        cleanup_principal_id=cleanup_principal,
+        target_resources=target_resources,
+    )
+
+    expected_by_scope[key_vault_scope.casefold()] = expected_by_scope[
+        key_vault_scope.casefold()
+    ][:-1]
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-role-inventory-drift",
+    ):
+        managed_binding_lifecycle._verify_pre_secret_role_inventory(
+            subscription_id=subscription_id,
+            cleanup_principal_id=cleanup_principal,
+            target_resources=target_resources,
+        )
+
+
 def test_cleanup_is_idempotent_without_residue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

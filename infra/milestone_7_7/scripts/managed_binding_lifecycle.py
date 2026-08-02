@@ -1750,7 +1750,19 @@ def _verify_recovered_cleanup_seed_state(subscription_id: str) -> None:
         _fail("recovered-cleanup-role-drift")
 
 
-def _workload_identity_principal(subscription_id: str) -> str:
+MANAGED_BINDING_IDENTITY_NAMES: Final = frozenset(
+    {
+        "id-mobius77-api",
+        "id-mobius77-worker",
+        "id-mobius77-telemetry",
+        "id-mobius77-db-admin",
+    }
+)
+
+
+def _managed_identity_principal(subscription_id: str, identity_name: str) -> str:
+    if identity_name not in MANAGED_BINDING_IDENTITY_NAMES:
+        _fail("pre-secret-workload-identity-malformed")
     value = _run(
         (
             "az",
@@ -1759,7 +1771,7 @@ def _workload_identity_principal(subscription_id: str) -> str:
             "--resource-group",
             TARGET_GROUP,
             "--name",
-            "id-mobius77-api",
+            identity_name,
             "--subscription",
             subscription_id,
             "--query",
@@ -1813,33 +1825,55 @@ def _verify_pre_secret_role_inventory(
     ):
         _fail("pre-secret-role-inventory-drift")
 
-    identity_relative = (
-        "microsoft.managedidentity/userassignedidentities/id-mobius77-api"
-    )
     protected_resources = {
         "microsoft.keyvault/vaults/kv-mobius77-11564669": (
             f"{target_scope}/providers/Microsoft.KeyVault/vaults/{KEY_VAULT}",
             str(rbac["keyVaultSecretsUserRoleDefinitionId"]),
+            (
+                "id-mobius77-api",
+                "id-mobius77-worker",
+                "id-mobius77-telemetry",
+            ),
         ),
         "microsoft.containerregistry/registries/acrmobius7711564669": (
             f"{target_scope}/providers/Microsoft.ContainerRegistry/registries/{REGISTRY}",
             str(rbac["acrPullRoleDefinitionId"]),
+            (
+                "id-mobius77-api",
+                "id-mobius77-worker",
+                "id-mobius77-telemetry",
+                "id-mobius77-db-admin",
+            ),
         ),
     }
     if any(relative in target_resources for relative in protected_resources):
-        if identity_relative not in target_resources:
-            _fail("pre-secret-role-inventory-drift")
-        workload_principal = _workload_identity_principal(subscription_id).casefold()
-        for relative, (scope, role_id) in protected_resources.items():
+        for relative, (scope, role_id, identity_names) in protected_resources.items():
             if relative not in target_resources:
                 continue
-            expected = {
-                "principalId": workload_principal,
-                "roleDefinitionId": (role_prefix + role_id).casefold(),
-                "scope": scope.casefold(),
-            }
+            if any(
+                (
+                    "microsoft.managedidentity/userassignedidentities/"
+                    f"{identity_name}"
+                )
+                not in target_resources
+                for identity_name in identity_names
+            ):
+                _fail("pre-secret-role-inventory-drift")
+            expected = sorted(
+                (
+                    {
+                        "principalId": _managed_identity_principal(
+                            subscription_id, identity_name
+                        ).casefold(),
+                        "roleDefinitionId": (role_prefix + role_id).casefold(),
+                        "scope": scope.casefold(),
+                    }
+                    for identity_name in identity_names
+                ),
+                key=lambda row: row["principalId"],
+            )
             rows = _exact_scope_role_rows(subscription_id, scope)
-            if rows not in ([], [expected]):
+            if rows and sorted(rows, key=lambda row: row["principalId"]) != expected:
                 _fail("pre-secret-role-inventory-drift")
 
 
