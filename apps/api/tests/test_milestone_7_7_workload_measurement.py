@@ -583,4 +583,4 @@ def test_checkpoint_does_not_add_a_migration_and_binds_current_bundle():
         timeout=30,
     )
     assert completed.returncode == 0
-    assert "1c92773379300b3916622a9d2c77851b9b751c1017cf2c12ba0a55aa9efa7763" in completed.stdout
+    assert "f734d3a351b57c8ee7da435936c15b285e12af909a1153e8fafc517a9fb24390" in completed.stdout

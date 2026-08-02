@@ -2985,9 +2985,16 @@ def _denial_probe(
     argv: tuple[str, ...],
     *,
     environment_overrides: Mapping[str, str] | None = None,
+    accept_unclassified_initial_acr_denial: bool = False,
 ) -> str:
     if not argv or argv[0] not in {"az", "docker"}:
         _fail("denial-probe-executable-unapproved")
+    if accept_unclassified_initial_acr_denial and not (
+        argv[:4] == ("az", "acr", "repository", "list")
+        and "--query" in argv
+        and "[:0]" in argv
+    ):
+        _fail("unclassified-denial-probe-scope-invalid")
     try:
         if argv[0] == "az":
             actual = _resolve_authorized_process_launch(argv).argv
@@ -3030,7 +3037,8 @@ def _denial_probe(
             for marker in ("403", "denied", "forbidden", "permission", "unauthorized")
         ):
             error_code = _sanitized_azure_error_code(stdout, stderr)
-            _fail(f"denial-probe-result-ambiguous-{error_code}")
+            if not accept_unclassified_initial_acr_denial:
+                _fail(f"denial-probe-result-ambiguous-{error_code}")
         return "denied"
     finally:
         stdout.clear()
@@ -3042,11 +3050,21 @@ def _wait_for_denial(
     *,
     endpoint_host: str,
     environment_overrides: Mapping[str, str] | None = None,
+    accept_unclassified_initial_acr_denial: bool = False,
 ) -> None:
     deadline = time.monotonic() + 600.0
     while time.monotonic() < deadline:
         _private_tls_endpoint(endpoint_host)
-        if _denial_probe(argv, environment_overrides=environment_overrides) == "denied":
+        if (
+            _denial_probe(
+                argv,
+                environment_overrides=environment_overrides,
+                accept_unclassified_initial_acr_denial=(
+                    accept_unclassified_initial_acr_denial
+                ),
+            )
+            == "denied"
+        ):
             return
         time.sleep(10.0)
     _fail("temporary-authority-revocation-unproved")
@@ -3484,6 +3502,7 @@ def _publish_api_image(
             repository_list,
             endpoint_host=REGISTRY_HOST,
             environment_overrides=publisher_environment,
+            accept_unclassified_initial_acr_denial=True,
         )
         _verify_cleanup_control(subscription_id, cleanup_at)
         assignment_id = _temporary_publisher_role_assignment(

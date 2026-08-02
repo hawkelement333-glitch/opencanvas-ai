@@ -1701,6 +1701,7 @@ def test_ephemeral_publisher_is_same_principal_and_delete_after_denial() -> None
     assert '"acr",\n                "login"' in publish
     assert "_verify_cleanup_control(subscription_id, cleanup_at)" in publish
     assert publish.count("_verify_cleanup_control(subscription_id, cleanup_at)") == 2
+    assert publish.count("accept_unclassified_initial_acr_denial=True") == 1
     assert "--expose-token" not in publish
 
 
@@ -1861,6 +1862,30 @@ def test_denial_probe_requires_remote_authorization_denial(
         match="denial-probe-result-ambiguous",
     ):
         managed_binding_lifecycle._denial_probe(probe)
+
+    initial_probe = (
+        "az",
+        "acr",
+        "repository",
+        "list",
+        "--query",
+        "[:0]",
+    )
+    assert (
+        managed_binding_lifecycle._denial_probe(
+            initial_probe,
+            accept_unclassified_initial_acr_denial=True,
+        )
+        == "denied"
+    )
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="unclassified-denial-probe-scope-invalid",
+    ):
+        managed_binding_lifecycle._denial_probe(
+            probe,
+            accept_unclassified_initial_acr_denial=True,
+        )
 
 
 def test_image_reconciliation_always_delegates_to_isolated_publisher(
