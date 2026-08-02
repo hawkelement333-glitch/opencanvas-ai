@@ -3472,6 +3472,45 @@ def test_pre_secret_role_inventory_requires_exact_managed_identity_matrix(
         )
 
 
+def test_managed_secret_states_use_only_exact_metadata_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows: JsonValue = [
+        {"enabled": True, "name": "opencanvas-session-secret"},
+        {"enabled": True, "name": "openai-api-key"},
+    ]
+    observed_argv: tuple[str, ...] | None = None
+
+    def fake_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        nonlocal observed_argv
+        observed_argv = argv
+        return rows
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", fake_run)
+
+    assert managed_binding_lifecycle._managed_secret_states("opaque-subscription") == {
+        "openai-api-key": True,
+        "opencanvas-session-secret": True,
+    }
+    assert observed_argv is not None
+    assert observed_argv[1:4] == ("keyvault", "secret", "list")
+    assert "--query" in observed_argv
+    assert "value" not in " ".join(observed_argv).casefold()
+
+    for malformed in (
+        [{"enabled": True, "name": "duplicate"}, {"enabled": True, "name": "duplicate"}],
+        [{"enabled": "true", "name": "wrong-type"}],
+        [{"enabled": True, "name": "extra", "value": "forbidden"}],
+        {"enabled": True, "name": "not-a-list"},
+    ):
+        rows = malformed
+        with pytest.raises(
+            managed_binding_lifecycle.LifecycleError,
+            match="managed-secret-presence-or-state-unproved",
+        ):
+            managed_binding_lifecycle._managed_secret_states("opaque-subscription")
+
+
 def test_cleanup_is_idempotent_without_residue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

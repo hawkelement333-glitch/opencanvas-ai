@@ -3269,6 +3269,43 @@ def _private_revision_ready(subscription_id: str) -> None:
         _container_app_revision_ready(subscription_id, app_name)
 
 
+def _managed_secret_states(subscription_id: str) -> dict[str, bool]:
+    rows = _run(
+        (
+            "az",
+            "keyvault",
+            "secret",
+            "list",
+            "--vault-name",
+            KEY_VAULT,
+            "--subscription",
+            subscription_id,
+            "--query",
+            "[].{name:name,enabled:attributes.enabled}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(rows, list):
+        _fail("managed-secret-presence-or-state-unproved")
+    result: dict[str, bool] = {}
+    for row in rows:
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"enabled", "name"}
+            or not isinstance(row.get("name"), str)
+            or not isinstance(row.get("enabled"), bool)
+        ):
+            _fail("managed-secret-presence-or-state-unproved")
+        name = str(row["name"])
+        if name in result:
+            _fail("managed-secret-presence-or-state-unproved")
+        result[name] = bool(row["enabled"])
+    return result
+
+
 def _post_secret(
     *,
     ledger: dict[str, JsonValue],
@@ -3297,30 +3334,9 @@ def _post_secret(
         "opencanvas-telemetry-pseudonymization-secret",
         "opencanvas-observability-operator-user-ids",
     )
-    for secret_name in required_secret_names:
-        secret_id = (
-            f"/subscriptions/{subscription_id}/resourceGroups/{TARGET_GROUP}"
-            f"/providers/Microsoft.KeyVault/vaults/{KEY_VAULT}/secrets/{secret_name}"
-        )
-        value = _run(
-            (
-                "az",
-                "resource",
-                "show",
-                "--ids",
-                secret_id,
-                "--api-version",
-                "2026-02-01",
-                "--query",
-                "{enabled:properties.attributes.enabled}",
-                "--output",
-                "json",
-                "--only-show-errors",
-            ),
-            require_json=True,
-        )
-        if value != {"enabled": True}:
-            _fail("managed-secret-presence-or-state-unproved")
+    secret_states = _managed_secret_states(subscription_id)
+    if secret_states != dict.fromkeys(required_secret_names, True):
+        _fail("managed-secret-presence-or-state-unproved")
     expected_cost, maximum_cost = _verified_cost()
     api_image_digest = _reconcile_published_api_image(
         ledger=ledger,
