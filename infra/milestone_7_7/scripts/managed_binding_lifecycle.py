@@ -3035,7 +3035,10 @@ def _publish_api_image(
 
 
 def _reconcile_published_api_image(
-    *, ledger: dict[str, JsonValue], subscription_id: str
+    *,
+    ledger: dict[str, JsonValue],
+    subscription_id: str,
+    receipt_directory: Path,
 ) -> str:
     repository_head = str(ledger["repositoryHead"])
     if HEX_SHA40.fullmatch(repository_head) is None:
@@ -3060,7 +3063,11 @@ def _reconcile_published_api_image(
         )
     )
     if changed_inputs:
-        _fail("recovered-image-build-input-drift")
+        return _publish_api_image(
+            ledger=ledger,
+            subscription_id=subscription_id,
+            receipt_directory=receipt_directory,
+        )
     source_tag = f"source-{RECOVERABLE_API_IMAGE_SOURCE_COMMIT}"
     tags = _run(
         (
@@ -3341,6 +3348,7 @@ def _post_secret(
     api_image_digest = _reconcile_published_api_image(
         ledger=ledger,
         subscription_id=subscription_id,
+        receipt_directory=receipt_directory,
     )
     with tempfile.TemporaryDirectory(prefix="mobius77-binding-") as directory:
         template = Path(directory) / "main.json"

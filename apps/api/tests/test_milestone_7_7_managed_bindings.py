@@ -1540,30 +1540,42 @@ def test_recovered_api_image_requires_exact_unchanged_source(
     result = managed_binding_lifecycle._reconcile_published_api_image(
         ledger={"repositoryHead": AUTHORIZATION_SOURCE_HEAD},
         subscription_id="opaque-subscription",
+        receipt_directory=Path("opaque-receipts"),
     )
 
     assert result == f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api@{digest}"
     assert calls[0][0:3] == ("git", "merge-base", "--is-ancestor")
 
 
-def test_recovered_api_image_fails_closed_on_build_input_drift(
-    monkeypatch: pytest.MonkeyPatch,
+def test_changed_api_image_inputs_publish_new_immutable_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    published = f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api@sha256:" + "b" * 64
     monkeypatch.setattr(managed_binding_lifecycle, "_run", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         managed_binding_lifecycle,
         "_run_text",
         lambda _argv: "apps/api/opencanvas_api/main.py",
     )
+    calls: list[tuple[dict[str, JsonValue], str, Path]] = []
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_publish_api_image",
+        lambda *, ledger, subscription_id, receipt_directory: (
+            calls.append((ledger, subscription_id, receipt_directory)) or published
+        ),
+    )
 
-    with pytest.raises(
-        managed_binding_lifecycle.LifecycleError,
-        match="recovered-image-build-input-drift",
-    ):
+    ledger: dict[str, JsonValue] = {"repositoryHead": AUTHORIZATION_SOURCE_HEAD}
+    assert (
         managed_binding_lifecycle._reconcile_published_api_image(
-            ledger={"repositoryHead": AUTHORIZATION_SOURCE_HEAD},
+            ledger=ledger,
             subscription_id="opaque-subscription",
+            receipt_directory=tmp_path,
         )
+        == published
+    )
+    assert calls == [(ledger, "opaque-subscription", tmp_path)]
 
 
 def test_recovered_api_image_fails_closed_on_tag_or_digest_mismatch(
@@ -1582,6 +1594,7 @@ def test_recovered_api_image_fails_closed_on_tag_or_digest_mismatch(
         managed_binding_lifecycle._reconcile_published_api_image(
             ledger={"repositoryHead": AUTHORIZATION_SOURCE_HEAD},
             subscription_id="opaque-subscription",
+            receipt_directory=Path("opaque-receipts"),
         )
 
     source_tag = "source-" + managed_binding_lifecycle.RECOVERABLE_API_IMAGE_SOURCE_COMMIT
@@ -1597,6 +1610,7 @@ def test_recovered_api_image_fails_closed_on_tag_or_digest_mismatch(
         managed_binding_lifecycle._reconcile_published_api_image(
             ledger={"repositoryHead": AUTHORIZATION_SOURCE_HEAD},
             subscription_id="opaque-subscription",
+            receipt_directory=Path("opaque-receipts"),
         )
 
 
