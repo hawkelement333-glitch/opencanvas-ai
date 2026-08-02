@@ -2680,6 +2680,61 @@ def _management_azure_config_directory() -> Path:
     return resolved
 
 
+def _wait_for_ephemeral_publisher_principal(app_id: str) -> str:
+    deadline = time.monotonic() + 120.0
+    while time.monotonic() < deadline:
+        try:
+            principal = _run(
+                (
+                    "az",
+                    "ad",
+                    "sp",
+                    "show",
+                    "--id",
+                    app_id,
+                    "--query",
+                    "{objectId:id,servicePrincipalType:servicePrincipalType}",
+                    "--output",
+                    "json",
+                    "--only-show-errors",
+                ),
+                require_json=True,
+            )
+            if (
+                not isinstance(principal, dict)
+                or set(principal) != {"objectId", "servicePrincipalType"}
+                or principal.get("servicePrincipalType") != "Application"
+                or not isinstance(principal.get("objectId"), str)
+                or re.fullmatch(r"[0-9a-fA-F-]{36}", str(principal["objectId"])) is None
+            ):
+                _fail("publisher-service-principal-output-malformed")
+            object_id = str(principal["objectId"])
+            groups = _run(
+                (
+                    "az",
+                    "ad",
+                    "sp",
+                    "get-member-groups",
+                    "--id",
+                    object_id,
+                    "--security-enabled-only",
+                    "false",
+                    "--query",
+                    "[].{id:id}",
+                    "--output",
+                    "json",
+                    "--only-show-errors",
+                ),
+                require_json=True,
+            )
+            if not isinstance(groups, list) or groups:
+                _fail("publisher-group-membership-present")
+            return object_id
+        except AzureCommandError:
+            time.sleep(5.0)
+    _fail("publisher-service-principal-propagation-unproved")
+
+
 def _create_ephemeral_publisher(
     *, ledger: dict[str, JsonValue], publisher_directory: Path
 ) -> tuple[str, str, str, Path]:
@@ -2741,51 +2796,11 @@ def _create_ephemeral_publisher(
         os.chmod(certificate_path, 0o600)
     except OSError:
         _fail("publisher-certificate-permissions-failed")
-    principal = _run(
-        (
-            "az",
-            "ad",
-            "sp",
-            "show",
-            "--id",
-            str(app_id),
-            "--query",
-            "{objectId:id,servicePrincipalType:servicePrincipalType}",
-            "--output",
-            "json",
-            "--only-show-errors",
-        ),
-        require_json=True,
-    )
-    if (
-        not isinstance(principal, dict)
-        or set(principal) != {"objectId", "servicePrincipalType"}
-        or principal.get("servicePrincipalType") != "Application"
-        or not isinstance(principal.get("objectId"), str)
-        or re.fullmatch(r"[0-9a-fA-F-]{36}", str(principal["objectId"])) is None
-    ):
-        _fail("publisher-service-principal-output-malformed")
-    object_id = str(principal["objectId"])
-    groups = _run(
-        (
-            "az",
-            "ad",
-            "sp",
-            "get-member-groups",
-            "--id",
-            object_id,
-            "--security-enabled-only",
-            "false",
-            "--query",
-            "[].{id:id}",
-            "--output",
-            "json",
-            "--only-show-errors",
-        ),
-        require_json=True,
-    )
-    if not isinstance(groups, list) or groups:
-        _fail("publisher-group-membership-present")
+    try:
+        object_id = _wait_for_ephemeral_publisher_principal(str(app_id))
+    except LifecycleError:
+        _delete_ephemeral_publisher_by_app_id(str(app_id))
+        raise
     return str(app_id), object_id, str(tenant_id), certificate_path
 
 
@@ -2892,6 +2907,97 @@ def _delete_ephemeral_publisher(
         require_json=True,
     )
     if applications != [] or principals != []:
+        _fail("publisher-identity-deletion-unproved")
+
+
+def _delete_ephemeral_publisher_by_app_id(app_id: str) -> None:
+    principals = _run(
+        (
+            "az",
+            "ad",
+            "sp",
+            "list",
+            "--filter",
+            f"appId eq '{app_id}'",
+            "--query",
+            "[].{appId:appId,objectId:id,servicePrincipalType:servicePrincipalType}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(principals, list) or len(principals) > 1:
+        _fail("publisher-partial-identity-inventory-malformed")
+    if principals:
+        principal = principals[0]
+        if (
+            not isinstance(principal, dict)
+            or set(principal) != {"appId", "objectId", "servicePrincipalType"}
+            or principal.get("appId") != app_id
+            or principal.get("servicePrincipalType") != "Application"
+            or not isinstance(principal.get("objectId"), str)
+        ):
+            _fail("publisher-partial-identity-inventory-malformed")
+        _run(
+            (
+                "az",
+                "ad",
+                "sp",
+                "delete",
+                "--id",
+                str(principal["objectId"]),
+                "--only-show-errors",
+                "--output",
+                "none",
+            )
+        )
+    _run(
+        (
+            "az",
+            "ad",
+            "app",
+            "delete",
+            "--id",
+            app_id,
+            "--only-show-errors",
+            "--output",
+            "none",
+        )
+    )
+    applications = _run(
+        (
+            "az",
+            "ad",
+            "app",
+            "list",
+            "--filter",
+            f"appId eq '{app_id}'",
+            "--query",
+            "[].{id:id}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    remaining_principals = _run(
+        (
+            "az",
+            "ad",
+            "sp",
+            "list",
+            "--filter",
+            f"appId eq '{app_id}'",
+            "--query",
+            "[].{id:id}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if applications != [] or remaining_principals != []:
         _fail("publisher-identity-deletion-unproved")
 
 
@@ -3630,13 +3736,19 @@ def _publish_api_image(
             _delete_assignment(subscription_id, assignment_id)
             state["temporaryRegistryAssignmentId"] = None
             _replace_state(state_path, state)
+        if not publisher_deleted and publisher_app_id is not None:
+            if publisher_object_id is None:
+                _delete_ephemeral_publisher_by_app_id(publisher_app_id)
+            else:
+                _delete_ephemeral_publisher(
+                    publisher_app_id=publisher_app_id,
+                    publisher_object_id=publisher_object_id,
+                )
+            publisher_deleted = True
+        if publisher_root.exists():
+            shutil.rmtree(publisher_root)
         if denial_proved and not publisher_deleted:
-            if publisher_app_id is None or publisher_object_id is None:
-                _fail("publisher-identity-state-malformed")
-            _delete_ephemeral_publisher(
-                publisher_app_id=publisher_app_id,
-                publisher_object_id=publisher_object_id,
-            )
+            _fail("publisher-identity-state-malformed")
 
 
 def _reconcile_published_api_image(

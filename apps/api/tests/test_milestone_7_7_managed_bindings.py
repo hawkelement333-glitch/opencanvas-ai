@@ -1706,17 +1706,25 @@ def test_ephemeral_publisher_is_same_principal_and_delete_after_denial() -> None
 
 def test_ephemeral_publisher_identity_has_no_group_or_persistent_role_path() -> None:
     create = inspect.getsource(managed_binding_lifecycle._create_ephemeral_publisher)
+    principal_wait = inspect.getsource(
+        managed_binding_lifecycle._wait_for_ephemeral_publisher_principal
+    )
     inventory = inspect.getsource(managed_binding_lifecycle._publisher_role_rows)
     deletion = inspect.getsource(managed_binding_lifecycle._delete_ephemeral_publisher)
+    partial_deletion = inspect.getsource(
+        managed_binding_lifecycle._delete_ephemeral_publisher_by_app_id
+    )
 
     assert '"--skip-assignment"' in create
     assert '"--create-cert"' in create
-    assert '"get-member-groups"' in create
+    assert '"get-member-groups"' in principal_wait
     assert '"--all"' in inventory
     assert '"--include-groups"' in inventory
     assert '"ad",\n            "sp",\n            "delete"' in deletion
     assert '"ad",\n            "app",\n            "delete"' in deletion
     assert "publisher-identity-deletion-unproved" in deletion
+    assert '"ad",\n            "app",\n            "delete"' in partial_deletion
+    assert "publisher-partial-identity-inventory-malformed" in partial_deletion
 
 
 def test_ephemeral_publisher_generates_certificate_only_in_restricted_directory(
@@ -1773,6 +1781,40 @@ def test_ephemeral_publisher_generates_certificate_only_in_restricted_directory(
     assert tenant_id.endswith("92")
     assert observed_certificate == certificate_path.resolve()
     assert len(calls) == 3
+
+
+def test_ephemeral_publisher_principal_retries_bounded_propagation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        nonlocal calls
+        if argv[1:4] == ("ad", "sp", "show"):
+            calls += 1
+            if calls == 1:
+                raise managed_binding_lifecycle.AzureCommandError("azure-command-nonzero")
+            return {
+                "objectId": "00000000-0000-0000-0000-000000000093",
+                "servicePrincipalType": "Application",
+            }
+        if argv[1:4] == ("ad", "sp", "get-member-groups"):
+            return []
+        raise AssertionError(argv)
+
+    monotonic_values = iter((0.0, 1.0, 2.0))
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
+    monkeypatch.setattr(
+        managed_binding_lifecycle.time,
+        "monotonic",
+        lambda: next(monotonic_values),
+    )
+    monkeypatch.setattr(managed_binding_lifecycle.time, "sleep", lambda _value: None)
+
+    assert managed_binding_lifecycle._wait_for_ephemeral_publisher_principal(
+        "00000000-0000-0000-0000-000000000091"
+    ).endswith("93")
+    assert calls == 2
 
 
 def test_lifecycle_working_directory_must_be_outside_repository() -> None:
