@@ -1251,10 +1251,6 @@ def _registry_attribution_spec(method: str, path: str) -> dict[str, JsonValue]:
         operation_class = "repository-specific-digest-verification"
         substage = "repository-specific-digest-verification"
         mutation = False
-    elif method == "DELETE" and "/_tags/" in path:
-        operation_class = "mutable-tag-removal"
-        substage = "mutable-tag-removal"
-        mutation = True
     else:
         _fail("protected-operation-attribution-invalid")
     return {
@@ -4573,10 +4569,7 @@ def _validate_registry_request(method: str, path: str) -> None:
         r"(?:source-[0-9a-f]{40}|sha256:[0-9a-f]{64})",
         path,
     )
-    tag = re.fullmatch(r"/acr/v1/opencanvas-api/_tags/source-[0-9a-f]{40}", path)
-    if (method == "HEAD" and manifest is not None) or (
-        method == "DELETE" and tag is not None
-    ):
+    if method == "HEAD" and manifest is not None:
         return
     _fail("publisher-registry-request-scope-invalid")
 
@@ -5852,22 +5845,51 @@ def _assert_source_tag_absent(*, source_tag: str, access_token: bytearray) -> No
         _fail("registry-source-tag-already-present")
 
 
-def _remove_source_tag(access_token: bytearray, *, source_tag: str) -> None:
-    if re.fullmatch(r"source-[0-9a-f]{40}", source_tag) is None:
-        _fail("registry-source-tag-invalid")
-    body = bytearray()
+def _build_api_image_by_digest(
+    *,
+    environment: Mapping[str, str],
+    metadata_path: Path,
+) -> str:
+    resolved_metadata = _outside_repository(
+        metadata_path, "publisher-build-metadata"
+    )
+    if resolved_metadata.exists() or not resolved_metadata.parent.is_dir():
+        _fail("publisher-build-metadata-state-invalid")
     try:
-        status, _headers, body = _private_registry_request(
-            "DELETE",
-            f"/acr/v1/{PUBLISHER_REPOSITORY}/_tags/{source_tag}",
-            headers={"Authorization": _registry_authorization(access_token)},
+        _run(
+            (
+                "docker",
+                "buildx",
+                "build",
+                "--file",
+                "apps/api/Dockerfile",
+                "--output",
+                (
+                    f"type=image,name={REGISTRY_HOST}/{PUBLISHER_REPOSITORY},"
+                    "push=true,push-by-digest=true"
+                ),
+                "--metadata-file",
+                str(resolved_metadata),
+                "--provenance=false",
+                "--sbom=false",
+                "--quiet",
+                ".",
+            ),
+            timeout_seconds=DEPLOYMENT_TIMEOUT_SECONDS,
+            environment_overrides=environment,
         )
-        if status in {401, 403}:
-            raise PublisherAccessPending("publisher-tag-removal-denied")
-        if status not in {200, 202, 204}:
-            _fail("registry-source-tag-removal-failed")
+        metadata = load_json(resolved_metadata)
+        if not isinstance(metadata, dict):
+            _fail("publisher-build-metadata-malformed")
+        raw_digest = metadata.get("containerimage.digest")
+        if (
+            not isinstance(raw_digest, str)
+            or RAW_IMAGE_DIGEST.fullmatch(raw_digest) is None
+        ):
+            _fail("publisher-build-metadata-malformed")
+        return raw_digest
     finally:
-        body.clear()
+        resolved_metadata.unlink(missing_ok=True)
 
 
 def _publish_api_image(
@@ -5897,7 +5919,6 @@ def _publish_api_image(
     refresh_token = bytearray()
     access_token = bytearray()
     source_tag = f"source-{repository_head}"
-    image_by_tag = f"{REGISTRY_HOST}/opencanvas-api:{source_tag}"
     publisher_root = receipt_directory / "ephemeral-publisher"
     _secure_ephemeral_directory(publisher_root)
     azure_config = _secure_ephemeral_directory(publisher_root / "azure-config")
@@ -5981,34 +6002,20 @@ def _publish_api_image(
                 source_tag=source_tag,
                 access_token=access_token,
             )
-            _run(
-                (
-                    "docker",
-                    "buildx",
-                    "build",
-                    "--file",
-                    "apps/api/Dockerfile",
-                    "--tag",
-                    image_by_tag,
-                    "--push",
-                    "--provenance=false",
-                    "--sbom=false",
-                    "--quiet",
-                    ".",
-                ),
-                timeout_seconds=DEPLOYMENT_TIMEOUT_SECONDS,
-                environment_overrides=publisher_environment,
-            )
-            raw_digest = _acr_manifest_digest(access_token, reference=source_tag)
-            if raw_digest is None:
-                _fail("registry-digest-output-malformed")
-            _remove_source_tag(access_token, source_tag=source_tag)
-            _assert_source_tag_absent(
-                source_tag=source_tag,
-                access_token=access_token,
+            raw_digest = _build_api_image_by_digest(
+                environment=publisher_environment,
+                metadata_path=publisher_root / "build-metadata.json",
             )
             if _acr_manifest_digest(access_token, reference=raw_digest) != raw_digest:
                 _fail("registry-immutable-digest-mismatch")
+            with _attribution_scope(
+                lifecycle_substage="mutable-tag-removal",
+                expected_authorization="allow",
+            ):
+                _assert_source_tag_absent(
+                    source_tag=source_tag,
+                    access_token=access_token,
+                )
             immutable_reference = f"{REGISTRY_HOST}/opencanvas-api@{raw_digest}"
             if IMAGE_DIGEST.fullmatch(immutable_reference) is None:
                 _fail("registry-immutable-reference-malformed")

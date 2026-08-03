@@ -1505,7 +1505,8 @@ def test_lifecycle_is_closed_private_digest_bound_and_secret_value_blind() -> No
     assert '"--password",' not in text
     assert '"--password-stdin"' in text
     assert '"buildx"' in text
-    assert "/_tags/" in text
+    assert "push-by-digest=true" in text
+    assert "/_tags/" not in text
     assert '"get-access-token"' in text
     assert "@sha256:" in text
     assert "private-endpoint-resolved-publicly" in text
@@ -1696,7 +1697,7 @@ def test_ephemeral_publisher_is_same_principal_and_delete_after_denial() -> None
     initial_denial = publish.index("_prove_initial_publisher_denial(", create)
     assignment = publish.index("_temporary_publisher_role_assignment(", initial_denial)
     access = publish.index("_wait_for_publisher_access(", assignment)
-    build = publish.index('"buildx",', assignment)
+    build = publish.index("_build_api_image_by_digest(", assignment)
     revoke = publish.index("_delete_assignment(subscription_id, assignment_id)", build)
     cache_reset = publish.index("_reset_ephemeral_directory(docker_config)", revoke)
     post_revoke_denial = publish.index("_wait_for_publisher_denial(", cache_reset)
@@ -1716,7 +1717,11 @@ def test_ephemeral_publisher_is_same_principal_and_delete_after_denial() -> None
     assert '"acr",\n                "login"' not in publish
     assert '"acr",\n            "repository"' not in publish
     assert "_docker_login_with_refresh_token(" in publish
-    assert "_remove_source_tag(" in publish
+    assert "_build_api_image_by_digest(" in publish
+    assert "push-by-digest=true" in inspect.getsource(
+        managed_binding_lifecycle._build_api_image_by_digest
+    )
+    assert "_remove_source_tag(" not in publish
     assert "_acr_manifest_digest(" in publish
     assert "_verify_cleanup_control(subscription_id, cleanup_at)" in publish
     assert publish.count("_verify_cleanup_control(subscription_id, cleanup_at)") == 2
@@ -2044,6 +2049,7 @@ def test_publisher_tokens_fail_closed_for_binding_time_and_scope(
         ("GET", "/v2/opencanvas-api/tags/list"),
         ("HEAD", "/v2/wrong/manifests/source-" + "a" * 40),
         ("HEAD", "/v2/opencanvas-api/manifests/wrong-tag"),
+        ("DELETE", "/acr/v1/opencanvas-api/_tags/source-" + "a" * 40),
         ("DELETE", "/acr/v1/wrong/_tags/source-" + "a" * 40),
     ],
 )
@@ -2057,15 +2063,41 @@ def test_publisher_registry_requests_reject_catalog_and_nearby_targets(
         managed_binding_lifecycle._validate_registry_request(method, path)
 
 
-def test_repository_digest_and_tag_removal_preserve_immutable_manifest(
+def test_digest_only_publication_preserves_immutable_manifest_without_a_tag(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     source_tag = "source-" + "a" * 40
     digest = "sha256:" + "b" * 64
+    metadata_path = tmp_path / "build-metadata.json"
+    observed: dict[str, object] = {}
+
+    def run(argv: tuple[str, ...], **kwargs: object) -> None:
+        observed["argv"] = argv
+        observed["kwargs"] = kwargs
+        metadata_path.write_text(json.dumps({"containerimage.digest": digest}), encoding="utf-8")
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_outside_repository",
+        lambda path, _label: path,
+    )
+    assert (
+        managed_binding_lifecycle._build_api_image_by_digest(
+            environment={"AZURE_CONFIG_DIR": str(tmp_path)},
+            metadata_path=metadata_path,
+        )
+        == digest
+    )
+    argv = cast(tuple[str, ...], observed["argv"])
+    assert "--tag" not in argv
+    assert "--push" not in argv
+    assert any("push-by-digest=true" in item for item in argv)
+    assert not metadata_path.exists()
+
     responses = iter(
         (
-            (200, {"docker-content-digest": digest}, bytearray()),
-            (202, {}, bytearray()),
             (404, {}, bytearray()),
             (200, {"docker-content-digest": digest}, bytearray()),
         )
@@ -2087,21 +2119,51 @@ def test_repository_digest_and_tag_removal_preserve_immutable_manifest(
     monkeypatch.setattr(managed_binding_lifecycle, "_private_registry_request", request)
     access_token = bytearray(b"a" * 64)
 
-    assert (
-        managed_binding_lifecycle._acr_manifest_digest(access_token, reference=source_tag) == digest
-    )
-    managed_binding_lifecycle._remove_source_tag(access_token, source_tag=source_tag)
     managed_binding_lifecycle._assert_source_tag_absent(
         source_tag=source_tag, access_token=access_token
     )
     assert managed_binding_lifecycle._acr_manifest_digest(access_token, reference=digest) == digest
     assert calls == [
         ("HEAD", f"/v2/opencanvas-api/manifests/{source_tag}"),
-        ("DELETE", f"/acr/v1/opencanvas-api/_tags/{source_tag}"),
-        ("HEAD", f"/v2/opencanvas-api/manifests/{source_tag}"),
         ("HEAD", f"/v2/opencanvas-api/manifests/{digest}"),
     ]
     assert all("_catalog" not in path for _method, path in calls)
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        [],
+        {},
+        {"containerimage.digest": "not-a-digest"},
+        {"containerimage.digest": "sha256:" + "b" * 63},
+    ],
+)
+def test_digest_only_publication_fails_closed_for_malformed_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    metadata: JsonValue,
+) -> None:
+    metadata_path = tmp_path / "build-metadata.json"
+
+    def run(_argv: tuple[str, ...], **_kwargs: object) -> None:
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_outside_repository",
+        lambda path, _label: path,
+    )
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="publisher-build-metadata-malformed",
+    ):
+        managed_binding_lifecycle._build_api_image_by_digest(
+            environment={"AZURE_CONFIG_DIR": str(tmp_path)},
+            metadata_path=metadata_path,
+        )
+    assert not metadata_path.exists()
 
 
 def test_docker_login_uses_secret_stdin_and_isolated_state(
@@ -2214,7 +2276,7 @@ def test_publisher_oauth_path_never_logs_or_uses_arm_registry_lookup() -> None:
     assert "logger" not in entra + oauth + data_plane
     assert "os.environ" not in entra + oauth + data_plane
     assert "--expose-token" not in entra + oauth + data_plane
-    assert publish.index("refresh_token.clear()") < publish.index('"buildx",')
+    assert publish.index("refresh_token.clear()") < publish.index("_build_api_image_by_digest(")
     assert publish.count("_reset_ephemeral_directory(docker_config)") >= 3
 
 
