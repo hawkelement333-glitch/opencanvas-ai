@@ -31,6 +31,7 @@ from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Final, NoReturn, cast
+from urllib.parse import urlsplit
 
 from performance.milestone_7_7.framework import (
     ContractError,
@@ -348,6 +349,10 @@ class AzureCommandError(LifecycleError):
 
 class PublisherAccessPending(LifecycleError):
     """The exact repository scope has not propagated to ACR yet."""
+
+
+class PublisherOAuthTransient(LifecycleError):
+    """One explicitly recognized, non-mutating OAuth condition may be retried once."""
 
 
 def _utc_now() -> datetime:
@@ -1211,6 +1216,11 @@ def _process_attribution_spec(
 
 def _registry_attribution_spec(method: str, path: str) -> dict[str, JsonValue]:
     mapped: dict[tuple[str, str], tuple[str, str, bool]] = {
+        ("GET", "/v2/"): (
+            "private-acr-bearer-challenge",
+            "private-acr-bearer-challenge",
+            False,
+        ),
         ("POST", "/oauth2/exchange"): (
             "private-acr-oauth-exchange",
             "private-acr-oauth-exchange",
@@ -1225,7 +1235,14 @@ def _registry_attribution_spec(method: str, path: str) -> dict[str, JsonValue]:
     scoped_substage = _ATTRIBUTION_SUBSTAGE.get()
     if (method, path) in mapped:
         operation_class, substage, mutation = mapped[(method, path)]
-        if (method, path) == ("POST", "/oauth2/token"):
+        if (method, path) == ("POST", "/oauth2/exchange"):
+            if scoped_substage == "initial-acr-denial":
+                operation_class = "initial-acr-denial-exchange-proof"
+            elif scoped_substage == "acrpush-propagation-verification":
+                operation_class = "acrpush-propagation-exchange-verification"
+            elif scoped_substage == "post-revocation-acr-denial":
+                operation_class = "post-revocation-exchange-denial-proof"
+        elif (method, path) == ("POST", "/oauth2/token"):
             if scoped_substage == "initial-acr-denial":
                 operation_class = "initial-acr-denial-token-proof"
             elif scoped_substage == "acrpush-propagation-verification":
@@ -1747,22 +1764,30 @@ def _attributed_failed_stage(receipt_directory: Path) -> str | None:
     records = document.get("records")
     if not isinstance(records, list):
         return "protected-attribution-invalid"
+    resolved: set[tuple[str, str, str]] = set()
     for record in reversed(records):
-        if isinstance(record, dict) and record.get("terminalDisposition") in {
-            "FAILED",
-            "TIMED_OUT",
-            "CANCELLED",
-            "UNCERTAIN",
-        }:
-            return stage_from(record)
-    for record in reversed(records):
-        if (
-            isinstance(record, dict)
-            and record.get("event") == "post-operation"
-            and record.get("sanitizedStatusCode") == "403"
+        if not isinstance(record, dict) or record.get("event") != "post-operation":
+            continue
+        stage = stage_from(record)
+        if stage is None or stage == "protected-attribution-invalid":
+            return stage
+        operation_class = record.get("operationClass")
+        lifecycle_stage = record.get("lifecycleStage")
+        if not isinstance(operation_class, str) or not isinstance(lifecycle_stage, str):
+            return "protected-attribution-invalid"
+        key = (lifecycle_stage, stage, operation_class)
+        terminal = record.get("terminalDisposition")
+        unexpected_denial = (
+            record.get("sanitizedStatusCode") in {"401", "403"}
             and record.get("expectedAuthorizationResult") == "allow"
+        )
+        if terminal in {"FAILED", "TIMED_OUT", "CANCELLED", "UNCERTAIN"} or (
+            terminal == "SUCCEEDED" and unexpected_denial
         ):
-            return stage_from(record)
+            if key not in resolved:
+                return stage
+        elif terminal in {"SUCCEEDED", "SKIPPED_ALREADY_SATISFIED"}:
+            resolved.add(key)
     return None
 
 
@@ -4358,12 +4383,18 @@ def _validate_token_time(claims: Mapping[str, JsonValue]) -> None:
     if (
         not isinstance(expires, int)
         or isinstance(expires, bool)
-        or expires <= now + 60
         or not isinstance(not_before, int)
         or isinstance(not_before, bool)
-        or not_before > now + 60
     ):
         _fail("publisher-token-time-invalid")
+    if expires <= now:
+        raise PublisherOAuthTransient("publisher-token-expired")
+    if expires <= now + 60:
+        _fail("publisher-token-lifetime-insufficient")
+    if not_before > now + 60:
+        _fail("publisher-token-time-invalid")
+    if not_before > now:
+        raise PublisherOAuthTransient("publisher-token-not-yet-valid")
 
 
 def _validate_entra_token(
@@ -4533,6 +4564,7 @@ def _form_body(fields: tuple[tuple[bytes, bytes | bytearray], ...]) -> bytearray
 
 def _validate_registry_request(method: str, path: str) -> None:
     exact = {
+        ("GET", "/v2/"),
         ("POST", "/oauth2/exchange"),
         ("POST", "/oauth2/token"),
     }
@@ -4559,6 +4591,12 @@ def _private_registry_request(
     body: bytearray | None = None,
 ) -> tuple[int, dict[str, str], bytearray]:
     _validate_registry_request(method, path)
+    if path in {"/oauth2/exchange", "/oauth2/token"} and headers != {
+        "Content-Type": "application/x-www-form-urlencoded"
+    }:
+        _fail("publisher-oauth-request-content-type-invalid")
+    if (method, path) == ("GET", "/v2/") and (headers or body is not None):
+        _fail("publisher-registry-challenge-request-invalid")
     attribution = _ACTIVE_ATTRIBUTION.get()
     operation_id: str | None = None
     attribution_spec: dict[str, JsonValue] | None = None
@@ -4584,6 +4622,9 @@ def _private_registry_request(
         context=ssl.create_default_context(),
     )
     response_body = bytearray()
+    attribution_finished = False
+    correlation_hash: str | None = None
+    observed_status = "not-reported"
     try:
         if attribution is not None and operation_id is not None and attribution_spec is not None:
             attribution.mark_request_attempt_began(
@@ -4591,9 +4632,10 @@ def _private_registry_request(
                 cleanup_or_revocation=attribution_spec["cleanupOrRevocation"] is True,
             )
         connection.request(method, path, body=body, headers=dict(headers))
-        response = connection.getresponse()
         if attribution is not None and operation_id is not None:
             attribution.mark_azure_request_issued(operation_id)
+        response = connection.getresponse()
+        observed_status = str(response.status)
         response_body.extend(response.read(MAXIMUM_OUTPUT_BYTES + 1))
         if len(response_body) > MAXIMUM_OUTPUT_BYTES:
             _fail("publisher-registry-output-oversized")
@@ -4604,6 +4646,9 @@ def _private_registry_request(
         content_type = response.getheader("Content-Type")
         if content_type is not None:
             retained_headers["content-type"] = content_type
+        challenge = response.getheader("WWW-Authenticate")
+        if challenge is not None and (method, path) == ("GET", "/v2/"):
+            retained_headers["www-authenticate"] = challenge
         correlation = response.getheader("x-ms-correlation-request-id")
         correlation_hash = (
             hashlib.sha256(CORRELATION_HASH_DOMAIN + correlation.encode("ascii")).hexdigest()
@@ -4611,16 +4656,51 @@ def _private_registry_request(
             and re.fullmatch(r"[0-9a-fA-F-]{36}", correlation) is not None
             else None
         )
+        expected_authorization = (
+            attribution_spec["expectedAuthorizationResult"]
+            if attribution_spec is not None
+            else _expected_authorization_result()
+        )
+        oauth_request = path in {"/oauth2/exchange", "/oauth2/token"}
+        expected_denial = expected_authorization == "deny" and response.status in {
+            401,
+            403,
+        }
+        response_succeeded = (
+            expected_denial
+            or (expected_authorization == "allow" and response.status == 200)
+            or (not oauth_request and (method, path) != ("GET", "/v2/"))
+        )
+        if oauth_request and response.status == 200:
+            media_type = retained_headers.get("content-type", "").split(";", 1)[0]
+            if media_type.casefold() != "application/json":
+                _fail("publisher-oauth-response-content-type-invalid")
+            token_key = "refresh_token" if path == "/oauth2/exchange" else "access_token"
+            allowed_keys = (
+                frozenset({"refresh_token"})
+                if path == "/oauth2/exchange"
+                else frozenset({"access_token", "expires_in", "issued_at"})
+            )
+            probe = _oauth_secret(response_body, key=token_key, allowed_keys=allowed_keys)
+            probe.clear()
+        if (method, path) == ("GET", "/v2/"):
+            response_succeeded = expected_denial
+        azure_error_code = None
+        if not response_succeeded:
+            azure_error_code = (
+                f"acr-oauth-http-{response.status}"
+                if oauth_request or (method, path) == ("GET", "/v2/")
+                else _sanitized_azure_error_code(response_body, bytearray())
+            )
         _finish_process_attribution(
             attribution,
             operation_id,
-            status_code=str(response.status),
-            azure_error_code=_sanitized_azure_error_code(response_body, bytearray())
-            if response.status >= 400
-            else None,
+            status_code=observed_status,
+            azure_error_code=azure_error_code,
             correlation_hash=correlation_hash,
-            terminal_disposition="SUCCEEDED",
+            terminal_disposition="SUCCEEDED" if response_succeeded else "FAILED",
         )
+        attribution_finished = True
         return response.status, retained_headers, response_body
     except TimeoutError as exc:
         response_body.clear()
@@ -4632,6 +4712,9 @@ def _private_registry_request(
             correlation_hash=None,
             terminal_disposition="TIMED_OUT",
         )
+        attribution_finished = True
+        if path in {"/v2/", "/oauth2/exchange", "/oauth2/token"}:
+            raise PublisherOAuthTransient("publisher-private-registry-request-timed-out")
         _fail("publisher-private-registry-request-timed-out")
     except KeyboardInterrupt as exc:
         response_body.clear()
@@ -4646,16 +4729,17 @@ def _private_registry_request(
         raise
     except BaseException as exc:
         response_body.clear()
-        _finish_process_attribution(
-            attribution,
-            operation_id,
-            status_code="not-reported",
-            azure_error_code=_safe_attribution_error(exc),
-            correlation_hash=None,
-            terminal_disposition="UNCERTAIN"
-            if isinstance(exc, (OSError, ssl.SSLError, http.client.HTTPException))
-            else "FAILED",
-        )
+        if not attribution_finished:
+            _finish_process_attribution(
+                attribution,
+                operation_id,
+                status_code=observed_status,
+                azure_error_code=_safe_attribution_error(exc),
+                correlation_hash=correlation_hash,
+                terminal_disposition="UNCERTAIN"
+                if isinstance(exc, (OSError, ssl.SSLError, http.client.HTTPException))
+                else "FAILED",
+            )
         if isinstance(exc, (OSError, ssl.SSLError, http.client.HTTPException)):
             _fail("publisher-private-registry-request-failed")
         raise
@@ -4690,20 +4774,89 @@ def _oauth_secret(
     return secret
 
 
-def _publisher_refresh_token(*, entra_token: bytearray, tenant_id: str) -> bytearray:
+def _challenge_service(header: str) -> str:
+    if "\r" in header or "\n" in header:
+        _fail("publisher-registry-challenge-malformed")
+    matched = re.fullmatch(r"(?i)Bearer\s+(.+)", header)
+    if matched is None:
+        _fail("publisher-registry-challenge-malformed")
+    raw_parameters = matched.group(1)
+    if re.fullmatch(
+        r'\s*[A-Za-z][A-Za-z0-9_-]*="[^"\r\n]+"'
+        r'(?:\s*,\s*[A-Za-z][A-Za-z0-9_-]*="[^"\r\n]+")*\s*',
+        raw_parameters,
+    ) is None:
+        _fail("publisher-registry-challenge-malformed")
+    parameters: dict[str, str] = {}
+    for parameter in re.finditer(
+        r'([A-Za-z][A-Za-z0-9_-]*)="([^"\r\n]+)"', raw_parameters
+    ):
+        normalized = parameter.group(1).casefold()
+        if normalized in parameters:
+            _fail("publisher-registry-challenge-malformed")
+        parameters[normalized] = parameter.group(2)
+    if set(parameters) not in ({"realm", "service"}, {"realm", "service", "scope"}):
+        _fail("publisher-registry-challenge-malformed")
+    realm = urlsplit(parameters["realm"])
+    if (
+        realm.scheme != "https"
+        or realm.hostname != REGISTRY_HOST
+        or realm.port not in {None, 443}
+        or realm.username is not None
+        or realm.password is not None
+        or realm.path != "/oauth2/token"
+        or realm.query
+        or realm.fragment
+        or parameters["service"] != REGISTRY_HOST
+    ):
+        _fail("publisher-registry-challenge-binding-invalid")
+    scope = parameters.get("scope")
+    if scope is not None and scope != PUBLISHER_REPOSITORY_SCOPE:
+        _fail("publisher-registry-challenge-scope-invalid")
+    return parameters["service"]
+
+
+def _registry_bearer_challenge() -> str:
+    body = bytearray()
+    retained_headers: dict[str, str] = {}
+    try:
+        with _attribution_scope(
+            lifecycle_substage="private-acr-bearer-challenge",
+            expected_authorization="deny",
+        ):
+            status, retained_headers, body = _private_registry_request(
+                "GET", "/v2/", headers={}
+            )
+        if status != 401:
+            _fail("publisher-registry-challenge-status-invalid")
+        challenge = retained_headers.pop("www-authenticate", None)
+        if challenge is None:
+            _fail("publisher-registry-challenge-missing")
+        return _challenge_service(challenge)
+    finally:
+        retained_headers.clear()
+        body.clear()
+
+
+def _publisher_refresh_token(
+    *, entra_token: bytearray, tenant_id: str, service: str
+) -> bytearray | None:
+    if service != REGISTRY_HOST:
+        _fail("publisher-oauth-service-invalid")
     form = _form_body(
         (
             (b"grant_type", b"access_token"),
-            (b"service", REGISTRY_HOST.encode("ascii")),
+            (b"service", service.encode("ascii")),
             (b"tenant", tenant_id.encode("ascii")),
             (b"access_token", entra_token),
         )
     )
     response = bytearray()
     try:
+        expected_authorization = _expected_authorization_result()
         with _attribution_scope(
             lifecycle_substage="private-acr-oauth-exchange",
-            expected_authorization="allow",
+            expected_authorization=expected_authorization,
         ):
             status, _headers, response = _private_registry_request(
                 "POST",
@@ -4711,10 +4864,12 @@ def _publisher_refresh_token(*, entra_token: bytearray, tenant_id: str) -> bytea
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
                 body=form,
             )
-        if status in {401, 403}:
-            raise PublisherAccessPending("publisher-oauth-exchange-denied")
+        if status in {401, 403} and expected_authorization == "deny":
+            return None
+        if status in {429, *range(500, 600)}:
+            raise PublisherOAuthTransient(f"publisher-oauth-exchange-http-{status}")
         if status != 200:
-            _fail("publisher-oauth-exchange-failed")
+            _fail(f"publisher-oauth-exchange-http-{status}")
         return _oauth_secret(
             response,
             key="refresh_token",
@@ -4758,28 +4913,37 @@ def _acr_access_is_exact(token: bytearray, *, tenant_id: str) -> bool:
 
 
 def _publisher_repository_token(
-    *, refresh_token: bytearray, tenant_id: str
+    *, refresh_token: bytearray, tenant_id: str, service: str
 ) -> bytearray | None:
+    if service != REGISTRY_HOST:
+        _fail("publisher-oauth-service-invalid")
     form = _form_body(
         (
             (b"grant_type", b"refresh_token"),
-            (b"service", REGISTRY_HOST.encode("ascii")),
+            (b"service", service.encode("ascii")),
             (b"scope", PUBLISHER_REPOSITORY_SCOPE.encode("ascii")),
             (b"refresh_token", refresh_token),
         )
     )
     response = bytearray()
     try:
-        status, _headers, response = _private_registry_request(
-            "POST",
-            "/oauth2/token",
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            body=form,
-        )
-        if status in {401, 403}:
+        expected_authorization = _expected_authorization_result()
+        with _attribution_scope(
+            lifecycle_substage="repository-scoped-acr-token-request",
+            expected_authorization=expected_authorization,
+        ):
+            status, _headers, response = _private_registry_request(
+                "POST",
+                "/oauth2/token",
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                body=form,
+            )
+        if status in {401, 403} and expected_authorization == "deny":
             return None
+        if status in {429, *range(500, 600)}:
+            raise PublisherOAuthTransient(f"publisher-oauth-token-http-{status}")
         if status != 200:
-            _fail("publisher-oauth-token-request-failed")
+            _fail(f"publisher-oauth-token-http-{status}")
         token = _oauth_secret(
             response,
             key="access_token",
@@ -4787,11 +4951,49 @@ def _publisher_repository_token(
         )
         if not _acr_access_is_exact(token, tenant_id=tenant_id):
             token.clear()
-            return None
+            if expected_authorization == "deny":
+                return None
+            _fail("publisher-acr-token-scope-missing")
         return token
     finally:
         form.clear()
         response.clear()
+
+
+def _publisher_repository_session_once(
+    *,
+    publisher_app_id: str,
+    tenant_id: str,
+    environment: Mapping[str, str],
+) -> tuple[bytearray, bytearray | None]:
+    service = _registry_bearer_challenge()
+    entra_token = _publisher_entra_token(
+        publisher_app_id=publisher_app_id,
+        tenant_id=tenant_id,
+        environment_overrides=environment,
+    )
+    refresh_token = bytearray()
+    try:
+        exchanged = _publisher_refresh_token(
+            entra_token=entra_token,
+            tenant_id=tenant_id,
+            service=service,
+        )
+        if exchanged is None:
+            return refresh_token, None
+        refresh_token = exchanged
+    finally:
+        entra_token.clear()
+    try:
+        access_token = _publisher_repository_token(
+            refresh_token=refresh_token,
+            tenant_id=tenant_id,
+            service=service,
+        )
+        return refresh_token, access_token
+    except Exception:
+        refresh_token.clear()
+        raise
 
 
 def _publisher_repository_session(
@@ -4800,26 +5002,17 @@ def _publisher_repository_session(
     tenant_id: str,
     environment: Mapping[str, str],
 ) -> tuple[bytearray, bytearray | None]:
-    entra_token = _publisher_entra_token(
-        publisher_app_id=publisher_app_id,
-        tenant_id=tenant_id,
-        environment_overrides=environment,
-    )
-    refresh_token = bytearray()
-    try:
-        refresh_token = _publisher_refresh_token(
-            entra_token=entra_token, tenant_id=tenant_id
-        )
-    finally:
-        entra_token.clear()
-    try:
-        access_token = _publisher_repository_token(
-            refresh_token=refresh_token, tenant_id=tenant_id
-        )
-        return refresh_token, access_token
-    except Exception:
-        refresh_token.clear()
-        raise
+    for attempt in range(2):
+        try:
+            return _publisher_repository_session_once(
+                publisher_app_id=publisher_app_id,
+                tenant_id=tenant_id,
+                environment=environment,
+            )
+        except PublisherOAuthTransient:
+            if attempt == 1:
+                raise
+    _fail("publisher-oauth-retry-state-invalid")
 
 
 def _prove_initial_publisher_denial(

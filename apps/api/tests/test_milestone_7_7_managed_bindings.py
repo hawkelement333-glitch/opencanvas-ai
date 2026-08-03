@@ -1918,10 +1918,15 @@ def test_publisher_oauth_exchange_is_private_and_exact_repository_scoped(
 
     entra_token = bytearray(b"e" * 64)
     refresh_token = managed_binding_lifecycle._publisher_refresh_token(
-        entra_token=entra_token, tenant_id=tenant_id
+        entra_token=entra_token,
+        tenant_id=tenant_id,
+        service=managed_binding_lifecycle.REGISTRY_HOST,
     )
+    assert refresh_token is not None
     repository_token = managed_binding_lifecycle._publisher_repository_token(
-        refresh_token=refresh_token, tenant_id=tenant_id
+        refresh_token=refresh_token,
+        tenant_id=tenant_id,
+        service=managed_binding_lifecycle.REGISTRY_HOST,
     )
 
     assert repository_token is not None

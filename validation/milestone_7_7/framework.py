@@ -47,7 +47,7 @@ REQUIREMENT_CATALOG_DOMAIN: Final = b"mobius.m7.7.validation-requirements.v1\0"
 
 SOURCE_COMMIT: Final = "c4fdab9ed46ae8d1b8ef380dae9a3812155097c5"
 CHECKPOINT1_BUNDLE_SHA256: Final = (
-    "8daececdca85ba39a351484ca322065fa5a9cab3bdc8757f22ec8299fc95b530"
+    "1781cb26e4cf818c4edab4caaa2bc8203ec0b85ce2fef9f2becf3da2a794c0ce"
 )
 CHECKPOINT2_MANIFEST_SHA256: Final = (
     "7d8832aae03e00ec93a6203a2360555ba19b030912a406b775fc7b20630c1c26"
