@@ -142,6 +142,7 @@ resource cleanupJobSchedule 'Microsoft.Automation/automationAccounts/jobSchedule
   properties: {
     parameters: {
       TargetResourceGroupName: targetResourceGroupName
+      CleanupAuthorized: 'true'
     }
     runbook: {
       name: existingCleanupRunbook.name

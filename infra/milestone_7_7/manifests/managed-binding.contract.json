@@ -64,6 +64,18 @@
     "cleanupSchedule": "schedule-mobius77-cleanup",
     "containerAppsInfrastructureResourceGroup": "rg-solarplexus-mobius-77-containerapps-infrastructure"
   },
+  "cleanupExecution": {
+    "authorizationParameter": "CleanupAuthorized",
+    "authorizationValue": true,
+    "targetParameter": "TargetResourceGroupName",
+    "targetResourceGroup": "rg-solarplexus-mobius-77-staging",
+    "subscriptionFingerprint": "f4493115ce6375cf0e5d0616bede57126075fdb27ac78ea0ba7e0085252a7028",
+    "deadlineUtc": "2026-08-03T11:00:00Z",
+    "cleanupContributorRoleDefinitionId": "b24988ac-6180-42a0-ab88-20f7382dd24c",
+    "deletionWaitSeconds": 2700,
+    "absenceVerificationSeconds": 300,
+    "publishedContentSha256": "127c554e94f72b20bdd7eb23e79373ea716428b379e8fb1421a8e33523cf2552"
+  },
   "fixedSkus": {
     "keyVault": "standard",
     "containerAppsWorkloadProfile": "Consumption",

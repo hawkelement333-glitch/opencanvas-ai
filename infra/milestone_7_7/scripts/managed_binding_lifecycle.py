@@ -46,6 +46,7 @@ from preflight.milestone_7_7.execution import (
 from preflight.milestone_7_7.managed_binding_contracts import (
     REPOSITORY_ROOT,
     claim_operation_receipt,
+    cleanup_runbook_sha256,
     load_managed_binding_contract,
     validate_authorization_ledger,
 )
@@ -453,9 +454,12 @@ def _run(
     *,
     timeout_seconds: int = OPERATION_TIMEOUT_SECONDS,
     require_json: bool = False,
+    require_text: bool = False,
     environment_overrides: Mapping[str, str] | None = None,
     working_directory: Path | None = None,
 ) -> JsonValue | None:
+    if require_json and require_text:
+        _fail("lifecycle-output-contract-conflict")
     if not argv or argv[0] not in {"az", "bicep", "docker", "git"}:
         _fail("lifecycle-executable-unapproved")
     executable = _resolved_executable(argv[0])
@@ -556,7 +560,7 @@ def _run(
             )
             attribution_finished = True
             _fail("lifecycle-command-nonzero")
-        if not require_json:
+        if not require_json and not require_text:
             _finish_process_attribution(
                 attribution,
                 operation_id,
@@ -567,6 +571,21 @@ def _run(
             )
             attribution_finished = True
             return None
+        if require_text:
+            try:
+                value_text = bytes(stdout).decode("utf-8", errors="strict")
+            except UnicodeError:
+                _fail("lifecycle-text-malformed")
+            _finish_process_attribution(
+                attribution,
+                operation_id,
+                status_code="2xx-not-reported",
+                azure_error_code=None,
+                correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+                terminal_disposition="COMPLETED",
+            )
+            attribution_finished = True
+            return value_text
         try:
             text = bytes(stdout).decode("utf-8", errors="strict")
             value = json.loads(text)
@@ -1871,31 +1890,43 @@ def _deploy_stage(
 
 
 def _configure_cleanup_runbook(subscription_id: str) -> None:
-    common = (
-        "--resource-group",
-        CLEANUP_GROUP,
-        "--automation-account-name",
-        AUTOMATION_ACCOUNT,
-        "--name",
-        RUNBOOK,
-        "--subscription",
+    runbook_id = _scope(
         subscription_id,
-        "--only-show-errors",
-        "--output",
-        "none",
+        f"/resourceGroups/{CLEANUP_GROUP}/providers/Microsoft.Automation/"
+        f"automationAccounts/{AUTOMATION_ACCOUNT}/runbooks/{RUNBOOK}",
     )
     _run(
         (
             "az",
-            "automation",
-            "runbook",
-            "replace-content",
-            *common,
-            "--content",
+            "rest",
+            "--method",
+            "put",
+            "--url",
+            f"https://management.azure.com{runbook_id}/draft/content"
+            f"?api-version={AUTOMATION_API_VERSION}",
+            "--headers",
+            "Content-Type=text/plain",
+            "--body",
             f"@{CLEANUP_RUNBOOK}",
+            "--only-show-errors",
+            "--output",
+            "none",
         )
     )
-    _run(("az", "automation", "runbook", "publish", *common))
+    _run(
+        (
+            "az",
+            "rest",
+            "--method",
+            "post",
+            "--url",
+            f"https://management.azure.com{runbook_id}/publish"
+            f"?api-version={AUTOMATION_API_VERSION}",
+            "--only-show-errors",
+            "--output",
+            "none",
+        )
+    )
 
 
 def _verify_cleanup_job_schedule(subscription_id: str) -> None:
@@ -2039,9 +2070,11 @@ def _verify_cleanup_job_schedule(subscription_id: str) -> None:
         }:
             _fail("cleanup-job-schedule-output-malformed")
         parameters = exact_job_schedule["parameters"]
-        if not isinstance(parameters, dict) or len(parameters) != 1:
+        if not isinstance(parameters, dict) or len(parameters) != 2:
             _fail("cleanup-job-schedule-not-ready")
-        parameter_name, parameter_value = next(iter(parameters.items()))
+        normalized_parameters = {
+            str(name).casefold(): value for name, value in parameters.items()
+        }
         if (
             exact_job_schedule["id"] != resource_id
             or exact_job_schedule["jobScheduleId"] != job_schedule_id
@@ -2050,9 +2083,11 @@ def _verify_cleanup_job_schedule(subscription_id: str) -> None:
             or not isinstance(exact_job_schedule["type"], str)
             or exact_job_schedule["type"].casefold()
             != "microsoft.automation/automationaccounts/jobschedules"
-            or not isinstance(parameter_name, str)
-            or parameter_name.casefold() != "targetresourcegroupname"
-            or parameter_value != TARGET_GROUP
+            or normalized_parameters
+            != {
+                "cleanupauthorized": "true",
+                "targetresourcegroupname": TARGET_GROUP,
+            }
         ):
             _fail("cleanup-job-schedule-not-ready")
         return
@@ -2129,6 +2164,32 @@ def _verify_cleanup_control(subscription_id: str, cleanup_at: datetime) -> str:
         "state": "Published",
     }:
         _fail("cleanup-runbook-not-ready")
+    published_content = _run(
+        (
+            "az",
+            "rest",
+            "--method",
+            "get",
+            "--url",
+            (
+                "https://management.azure.com"
+                f"{_scope(subscription_id, f'/resourceGroups/{CLEANUP_GROUP}/providers/Microsoft.Automation/automationAccounts/{AUTOMATION_ACCOUNT}/runbooks/{RUNBOOK}')}/content"
+                f"?api-version={AUTOMATION_API_VERSION}"
+            ),
+            "--output",
+            "tsv",
+            "--only-show-errors",
+        ),
+        require_text=True,
+    )
+    contract = load_managed_binding_contract()
+    cleanup_execution = cast(dict[str, JsonValue], contract["cleanupExecution"])
+    if (
+        not isinstance(published_content, str)
+        or cleanup_runbook_sha256(published_content)
+        != cleanup_execution["publishedContentSha256"]
+    ):
+        _fail("cleanup-runbook-content-drift")
 
     schedule = _run(
         (

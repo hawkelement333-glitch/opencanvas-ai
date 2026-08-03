@@ -9,6 +9,7 @@ grants execution or mutation authority.
 from __future__ import annotations
 
 import copy
+import hashlib
 import ipaddress
 import os
 import re
@@ -37,6 +38,9 @@ MANIFEST_PATH: Final = (
 )
 MANIFEST_SCHEMA_PATH: Final = (
     INFRASTRUCTURE_ROOT / "manifests" / "managed-binding.schema.json"
+)
+CLEANUP_RUNBOOK_PATH: Final = (
+    INFRASTRUCTURE_ROOT / "scripts" / "Remove-Mobius77Staging.ps1"
 )
 OVERLAY_PATH: Final = ROOT / "managed-binding-operation-contracts.json"
 OVERLAY_SCHEMA_PATH: Final = ROOT / "managed-binding-operation-contracts.schema.json"
@@ -210,6 +214,11 @@ def managed_binding_integrity_sha256(value: JsonValue) -> str:
     return integrity_sha256(value, MANAGED_BINDING_DOMAIN)
 
 
+def cleanup_runbook_sha256(value: str) -> str:
+    normalized = value.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n") + "\n"
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def operation_overlay_integrity_sha256(value: dict[str, JsonValue]) -> str:
     body = {
         key: _copy_json(item)
@@ -248,6 +257,29 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         raise ContractError("managed-binding Redis region differs")
     if contract["resourceGroups"] != EXPECTED_RESOURCE_GROUPS:
         raise ContractError("managed-binding resource groups differ")
+    cleanup_execution = _as_object(
+        contract["cleanupExecution"], "$.cleanupExecution"
+    )
+    expected_cleanup_execution = {
+        "absenceVerificationSeconds": 300,
+        "authorizationParameter": "CleanupAuthorized",
+        "authorizationValue": True,
+        "cleanupContributorRoleDefinitionId": (
+            "b24988ac-6180-42a0-ab88-20f7382dd24c"
+        ),
+        "deadlineUtc": "2026-08-03T11:00:00Z",
+        "deletionWaitSeconds": 2700,
+        "publishedContentSha256": cleanup_runbook_sha256(
+            CLEANUP_RUNBOOK_PATH.read_text(encoding="utf-8")
+        ),
+        "subscriptionFingerprint": (
+            "f4493115ce6375cf0e5d0616bede57126075fdb27ac78ea0ba7e0085252a7028"
+        ),
+        "targetParameter": "TargetResourceGroupName",
+        "targetResourceGroup": "rg-solarplexus-mobius-77-staging",
+    }
+    if cleanup_execution != expected_cleanup_execution:
+        raise ContractError("managed-binding cleanup execution contract differs")
     authority = _as_object(contract["defaultAuthority"], "$.defaultAuthority")
     if authority != {
         "executionAuthorized": False,

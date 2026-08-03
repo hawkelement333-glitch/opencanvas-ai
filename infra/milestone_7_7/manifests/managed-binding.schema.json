@@ -16,6 +16,7 @@
     "resourceGroups",
     "scopeBinding",
     "resources",
+    "cleanupExecution",
     "fixedSkus",
     "network",
     "networkQuotaRequirements",
@@ -59,6 +60,38 @@
     "resourceGroups": { "$ref": "#/$defs/stringMap" },
     "scopeBinding": { "$ref": "#/$defs/stringMap" },
     "resources": { "$ref": "#/$defs/stringMap" },
+    "cleanupExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorizationParameter",
+        "authorizationValue",
+        "targetParameter",
+        "targetResourceGroup",
+        "subscriptionFingerprint",
+        "deadlineUtc",
+        "cleanupContributorRoleDefinitionId",
+        "deletionWaitSeconds",
+        "absenceVerificationSeconds",
+        "publishedContentSha256"
+      ],
+      "properties": {
+        "authorizationParameter": { "const": "CleanupAuthorized" },
+        "authorizationValue": { "const": true },
+        "targetParameter": { "const": "TargetResourceGroupName" },
+        "targetResourceGroup": {
+          "const": "rg-solarplexus-mobius-77-staging"
+        },
+        "subscriptionFingerprint": { "$ref": "#/$defs/sha256" },
+        "deadlineUtc": { "const": "2026-08-03T11:00:00Z" },
+        "cleanupContributorRoleDefinitionId": {
+          "const": "b24988ac-6180-42a0-ab88-20f7382dd24c"
+        },
+        "deletionWaitSeconds": { "const": 2700 },
+        "absenceVerificationSeconds": { "const": 300 },
+        "publishedContentSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
     "fixedSkus": { "$ref": "#/$defs/stringMap" },
     "network": {
       "type": "object",
@@ -205,6 +238,10 @@
     }
   },
   "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "stringMap": {
       "type": "object",
       "minProperties": 1,

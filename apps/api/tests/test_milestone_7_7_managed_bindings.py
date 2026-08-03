@@ -30,6 +30,7 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     HISTORICAL_MATRIX_SHA256,
     build_authorization_ledger,
     claim_operation_receipt,
+    cleanup_runbook_sha256,
     load_managed_binding_contract,
     load_operation_overlay,
     managed_binding_integrity_sha256,
@@ -2456,7 +2457,10 @@ def _job_schedule_get_response() -> dict[str, JsonValue]:
     row = cast(list[dict[str, JsonValue]], _job_schedule_list_response()["value"])[0]
     return {
         **row,
-        "parameters": {"TargetResourceGroupName": "rg-solarplexus-mobius-77-staging"},
+        "parameters": {
+            "CleanupAuthorized": "true",
+            "TargetResourceGroupName": "rg-solarplexus-mobius-77-staging",
+        },
     }
 
 
@@ -2509,6 +2513,9 @@ def test_cleanup_job_schedule_verification_discovers_then_gets_exact_resource(
         "wrong-schedule",
         "wrong-target",
         "wrong-parameter",
+        "missing-authorization",
+        "false-authorization",
+        "null-authorization",
         "extra-parameter",
         "wrong-type",
         "next-link",
@@ -2547,6 +2554,12 @@ def test_cleanup_job_schedule_verification_fails_closed_on_drift(
                 parameters["TargetResourceGroupName"] = "unexpected-group"
             elif drift == "wrong-parameter":
                 row["parameters"] = {"TargetResourceGroup": "rg-solarplexus-mobius-77-staging"}
+            elif drift == "missing-authorization":
+                parameters.pop("CleanupAuthorized", None)
+            elif drift == "false-authorization":
+                parameters["CleanupAuthorized"] = "false"
+            elif drift == "null-authorization":
+                parameters["CleanupAuthorized"] = None
             elif drift == "extra-parameter":
                 parameters["Unexpected"] = "value"
             elif drift == "wrong-type":
@@ -2647,7 +2660,14 @@ def test_cleanup_job_schedule_verification_retries_exact_get_not_found(
 
 @pytest.mark.parametrize(
     "parameters",
-    [None, {}, {"TargetResourceGroupName": "unexpected-group"}],
+    [
+        None,
+        {},
+        {
+            "CleanupAuthorized": "true",
+            "TargetResourceGroupName": "unexpected-group",
+        },
+    ],
 )
 def test_cleanup_job_schedule_verification_rejects_unproved_exact_parameters(
     monkeypatch: pytest.MonkeyPatch, parameters: JsonValue
@@ -4327,14 +4347,64 @@ def test_cleanup_guard_rejects_missing_stale_or_altered_authority(
     assert delete_calls == []
 
 
-def test_timer_runbook_can_only_pause_and_preserve() -> None:
+def test_timer_runbook_is_exactly_guarded_and_deletion_capable() -> None:
     text = managed_binding_lifecycle.CLEANUP_RUNBOOK.read_text(encoding="utf-8")
 
-    assert "PAUSED_PRESERVED" in text
-    assert "cleanupAuthorized = $false" in text
-    assert "Remove-AzResourceGroup" not in text
+    assert '[bool] $CleanupAuthorized' in text
+    assert 'if ($CleanupAuthorized -ne $true)' in text
+    assert '$TargetResourceGroupName -cne $ExactTargetResourceGroup' in text
+    assert '"rg-solarplexus-mobius-77-staging"' in text
+    assert '"rg-solarplexus-mobius-73-staging"' in text
+    assert '"rg-solarplexus-mobius-77-cleanup-control"' in text
+    assert '"rg-solarplexus-mobius-77-containerapps-infrastructure"' in text
+    assert "Get-AzRoleAssignment" in text
+    assert "Remove-AzResourceGroup" in text
+    assert "-AsJob" in text
+    assert "Wait-Job -Job $deleteJob -Timeout 2700" in text
+    assert 'deletionResult = "ALREADY_ABSENT"' in text
+    assert 'deletionResult = "DELETED"' in text
     assert "Remove-AzKeyVault" not in text
     assert "Remove-AzRoleAssignment" not in text
+
+
+def test_cleanup_publication_and_evidence_are_content_bound() -> None:
+    configure = inspect.getsource(managed_binding_lifecycle._configure_cleanup_runbook)
+    verify = inspect.getsource(managed_binding_lifecycle._verify_cleanup_control)
+    contract = load_managed_binding_contract()
+
+    assert '"rest"' in configure
+    assert '"put"' in configure
+    assert '"post"' in configure
+    assert "/draft/content" in configure
+    assert "/publish" in configure
+    assert "replace-content" not in configure
+    assert "/content" in verify
+    assert "cleanup_runbook_sha256(published_content)" in verify
+    assert contract["cleanupExecution"]["publishedContentSha256"] == (
+        cleanup_runbook_sha256(
+            managed_binding_lifecycle.CLEANUP_RUNBOOK.read_text(encoding="utf-8")
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("authorizationValue", False),
+        ("targetResourceGroup", "rg-solarplexus-mobius-77-cleanup-control"),
+        ("deadlineUtc", "2026-08-03T12:00:00Z"),
+        ("deletionWaitSeconds", 0),
+        ("publishedContentSha256", "0" * 64),
+    ],
+)
+def test_cleanup_execution_contract_tampering_fails_closed(
+    field: str, value: JsonValue
+) -> None:
+    contract = deepcopy(load_managed_binding_contract())
+    cast(dict[str, JsonValue], contract["cleanupExecution"])[field] = value
+
+    with pytest.raises(ContractError, match=r"cleanup execution|closed contract|schema"):
+        validate_managed_binding_contract(contract)
 
 
 @pytest.mark.parametrize(
