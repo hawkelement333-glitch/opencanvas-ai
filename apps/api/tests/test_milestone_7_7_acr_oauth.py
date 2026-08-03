@@ -402,6 +402,93 @@ def test_generic_401_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize(
+    ("endpoint", "status"),
+    [
+        ("exchange", 401),
+        ("exchange", 403),
+        ("token", 401),
+        ("token", 403),
+    ],
+)
+def test_propagation_scoped_denial_is_pending_only_during_acrpush_verification(
+    endpoint: str, status: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        lifecycle,
+        "_private_registry_request",
+        lambda *_args, **_kwargs: (status, {}, bytearray()),
+    )
+
+    with (
+        lifecycle._attribution_scope(
+            lifecycle_substage="acrpush-propagation-verification",
+            expected_authorization="allow",
+        ),
+        pytest.raises(lifecycle.PublisherAccessPending, match=f"http-{status}"),
+    ):
+        if endpoint == "exchange":
+            lifecycle._publisher_refresh_token(
+                entra_token=bytearray(b"e" * 64),
+                tenant_id="00000000-0000-0000-0000-000000000001",
+                service=lifecycle.REGISTRY_HOST,
+            )
+        else:
+            lifecycle._publisher_repository_token(
+                refresh_token=bytearray(b"r" * 64),
+                tenant_id="00000000-0000-0000-0000-000000000001",
+                service=lifecycle.REGISTRY_HOST,
+            )
+
+
+def test_allow_401_outside_propagation_remains_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        lifecycle,
+        "_private_registry_request",
+        lambda *_args, **_kwargs: (401, {}, bytearray()),
+    )
+
+    with pytest.raises(lifecycle.LifecycleError, match="exchange-http-401") as error:
+        lifecycle._publisher_refresh_token(
+            entra_token=bytearray(b"e" * 64),
+            tenant_id="00000000-0000-0000-0000-000000000001",
+            service=lifecycle.REGISTRY_HOST,
+        )
+    assert not isinstance(error.value, lifecycle.PublisherAccessPending)
+
+
+def test_acrpush_propagation_pending_retries_with_fresh_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    sleeps: list[float] = []
+
+    def session(**_kwargs: object) -> tuple[bytearray, bytearray | None]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise lifecycle.PublisherAccessPending("publisher-oauth-exchange-propagation-http-401")
+        return bytearray(b"r" * 64), bytearray(b"a" * 64)
+
+    monotonic = iter((0.0, 1.0))
+    monkeypatch.setattr(lifecycle, "_publisher_repository_session", session)
+    monkeypatch.setattr(lifecycle.time, "monotonic", lambda: next(monotonic))
+    monkeypatch.setattr(lifecycle.time, "sleep", sleeps.append)
+
+    refresh, access = lifecycle._wait_for_publisher_access(
+        publisher_app_id="app",
+        tenant_id="tenant",
+        environment={},
+    )
+    assert calls == 2
+    assert sleeps == [10.0]
+    assert access is not None
+    refresh.clear()
+    access.clear()
+
+
+@pytest.mark.parametrize(
     "error",
     [
         "publisher-token-expired",

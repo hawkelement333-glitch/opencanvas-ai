@@ -4854,6 +4854,9 @@ def _publisher_refresh_token(
     response = bytearray()
     try:
         expected_authorization = _expected_authorization_result()
+        propagation_verification = (
+            _ATTRIBUTION_SUBSTAGE.get() == "acrpush-propagation-verification"
+        )
         with _attribution_scope(
             lifecycle_substage="private-acr-oauth-exchange",
             expected_authorization=expected_authorization,
@@ -4866,6 +4869,10 @@ def _publisher_refresh_token(
             )
         if status in {401, 403} and expected_authorization == "deny":
             return None
+        if status in {401, 403} and propagation_verification:
+            raise PublisherAccessPending(
+                f"publisher-oauth-exchange-propagation-http-{status}"
+            )
         if status in {429, *range(500, 600)}:
             raise PublisherOAuthTransient(f"publisher-oauth-exchange-http-{status}")
         if status != 200:
@@ -4928,6 +4935,9 @@ def _publisher_repository_token(
     response = bytearray()
     try:
         expected_authorization = _expected_authorization_result()
+        propagation_verification = (
+            _ATTRIBUTION_SUBSTAGE.get() == "acrpush-propagation-verification"
+        )
         with _attribution_scope(
             lifecycle_substage="repository-scoped-acr-token-request",
             expected_authorization=expected_authorization,
@@ -4940,6 +4950,10 @@ def _publisher_repository_token(
             )
         if status in {401, 403} and expected_authorization == "deny":
             return None
+        if status in {401, 403} and propagation_verification:
+            raise PublisherAccessPending(
+                f"publisher-oauth-token-propagation-http-{status}"
+            )
         if status in {429, *range(500, 600)}:
             raise PublisherOAuthTransient(f"publisher-oauth-token-http-{status}")
         if status != 200:
