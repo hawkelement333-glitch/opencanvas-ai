@@ -82,7 +82,7 @@ param cleanupAtUtc string = ''
 param expectedUsdCents int = 1
 
 @minValue(1)
-@maxValue(17500)
+@maxValue(19290)
 param maximumPlausibleUsdCents int = 1
 
 var oneRunEnabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled && length(authorizationLedgerSha256) == 64

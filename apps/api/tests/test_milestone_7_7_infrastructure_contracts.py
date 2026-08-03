@@ -551,16 +551,16 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
     value = _json(MANIFESTS / "cost-envelope.template.json")
     assert value["targetUsdCents"] == 10000
     assert value["provisioningBlockAboveUsdCents"] == 12000
-    assert value["absoluteCeilingUsdCents"] == 17500
+    assert value["absoluteCeilingUsdCents"] == 19290
     assert value["uncertaintyContingencyBasisPoints"] == 2500
     assert value["budgetAlertsAreEnforcement"] is False
     assert value["resolutionStatus"] == "verified"
     assert value["expectedUsdCents"] == 3110
-    assert value["baseMaximumUsdCents"] == 12288
-    assert value["contingencyUsdCents"] == 3073
-    assert value["maximumPlausibleUsdCents"] == 15361
+    assert value["baseMaximumUsdCents"] == 15431
+    assert value["contingencyUsdCents"] == 3858
+    assert value["maximumPlausibleUsdCents"] == 19289
     assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 3110
-    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 12288
+    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 15431
     required_lines = {
         "postgresql-zone-redundant-compute",
         "postgresql-storage-and-backup",
@@ -570,7 +570,7 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
         "defender-malware-scanning",
         "additional-private-connectivity-and-data",
         "failed-cleanup-six-hour-exposure",
-        "cleanup-extension-twelve-hour-exposure",
+        "cleanup-extension-twenty-five-and-half-hour-exposure",
     }
     assert required_lines.issubset({item["name"] for item in value["lineItems"]})
     assert all(
@@ -580,10 +580,10 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
 
 
 def test_verified_cost_reconciles_base_contingency_and_maximum():
-    value = _resolved_cost(expected=12000, base_maximum=14000)
+    value = _resolved_cost(expected=12000, base_maximum=15432)
     contract._validate_cost(value)
-    assert value["contingencyUsdCents"] == 3500
-    assert value["maximumPlausibleUsdCents"] == 17500
+    assert value["contingencyUsdCents"] == 3858
+    assert value["maximumPlausibleUsdCents"] == 19290
 
 
 def test_cost_rejects_zero_empty_over_block_at_ceiling_and_bad_contingency():
@@ -606,9 +606,9 @@ def test_cost_rejects_zero_empty_over_block_at_ceiling_and_bad_contingency():
     over_block = _resolved_cost(expected=12001, base_maximum=12001)
     with pytest.raises(contract.ContractError, match="provisioning block"):
         contract._validate_cost(over_block)
-    at_ceiling = _resolved_cost(expected=12000, base_maximum=14000)
+    at_ceiling = _resolved_cost(expected=12000, base_maximum=15432)
     contract._validate_cost(at_ceiling)
-    over_ceiling = _resolved_cost(expected=12000, base_maximum=14001)
+    over_ceiling = _resolved_cost(expected=12000, base_maximum=15433)
     with pytest.raises(contract.ContractError, match="absolute ceiling"):
         contract._validate_cost(over_ceiling)
     bad_contingency = _resolved_cost()
@@ -616,26 +616,7 @@ def test_cost_rejects_zero_empty_over_block_at_ceiling_and_bad_contingency():
     with pytest.raises(contract.ContractError, match="bounded cent calculation"):
         contract._validate_cost(bad_contingency)
 
-    rounded_contingency = _resolved_cost(expected=8000, base_maximum=12288)
-    rounded_contingency["lineItems"] = [
-        {
-            "name": "complete-isolated-environment",
-            "expectedUsdCents": 8000,
-            "baseMaximumUsdCents": 9495,
-            "priceEvidenceStatus": "verified-official-retail",
-        },
-        {
-            "name": "cleanup-extension-twelve-hour-exposure",
-            "expectedUsdCents": 0,
-            "baseMaximumUsdCents": 2793,
-            "priceEvidenceStatus": "verified-official-retail",
-        },
-    ]
-    rounded_contingency["contingencyUsdCents"] += 1
-    rounded_contingency["maximumPlausibleUsdCents"] += 1
-    contract._validate_cost(rounded_contingency)
-
-    unrelated_rounding = _resolved_cost(expected=8000, base_maximum=12288)
+    unrelated_rounding = _resolved_cost(expected=8000, base_maximum=15431)
     unrelated_rounding["contingencyUsdCents"] += 1
     unrelated_rounding["maximumPlausibleUsdCents"] += 1
     with pytest.raises(contract.ContractError, match="bounded cent calculation"):
@@ -1081,6 +1062,9 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
             "b86a8fe4-44ce-4948-aee5-eccb2c155cd7",
             "c632b3df-fb67-4d84-bdcf-b95ad541b5c8",
         },
+        "manifests/managed-binding.schema.json": {
+            "b24988ac-6180-42a0-ab88-20f7382dd24c"
+        },
         "modules/identities.bicep": {"b24988ac-6180-42a0-ab88-20f7382dd24c"},
         "modules/key-vault.bicep": {"4633458b-17de-408a-b874-0445c86b69e6"},
         "modules/network.bicep": {"c632b3df-fb67-4d84-bdcf-b95ad541b5c8"},
@@ -1089,6 +1073,9 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
         "scripts/managed_binding_lifecycle.py": {
             "00000000-0000-0000-0000-000000000000",
             "4d97b98b-1d4f-4787-a291-c67834d212e7",
+        },
+        "scripts/Remove-Mobius77Staging.ps1": {
+            "b24988ac-6180-42a0-ab88-20f7382dd24c"
         },
     }
     for path in ROOT.rglob("*"):

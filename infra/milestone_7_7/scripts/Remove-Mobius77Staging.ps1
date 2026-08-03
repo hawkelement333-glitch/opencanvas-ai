@@ -18,10 +18,12 @@ $ProtectedResourceGroups = @(
 )
 $ExpectedSubscriptionFingerprint = "f4493115ce6375cf0e5d0616bede57126075fdb27ac78ea0ba7e0085252a7028"
 $SubscriptionFingerprintDomain = "mobius.azure.subscription-context.v1"
+$ExpectedCleanupPrincipalFingerprint = "19a9f97779cd2eb9acfdc04797f1fc5339316ee1a424ca79b70661beffa33260"
+$CleanupPrincipalFingerprintDomain = "mobius.azure.cleanup-principal.v1"
 $ExpectedRoleDefinitionId = "b24988ac-6180-42a0-ab88-20f7382dd24c"
 $CleanupLaunchGrace = [TimeSpan]::FromMinutes(30)
 $ScheduledCleanupAtUtc = [DateTimeOffset]::ParseExact(
-    "2026-08-03T11:00:00Z",
+    "2026-08-04T00:30:00Z",
     "yyyy-MM-ddTHH:mm:ssZ",
     [Globalization.CultureInfo]::InvariantCulture,
     [Globalization.DateTimeStyles]::AssumeUniversal
@@ -52,8 +54,7 @@ if (
 }
 
 Disable-AzContextAutosave -Scope Process | Out-Null
-Connect-AzAccount -Identity -ErrorAction Stop | Out-Null
-$context = Get-AzContext -ErrorAction Stop
+$context = (Connect-AzAccount -Identity -ErrorAction Stop).Context
 if ($null -eq $context -or [string]::IsNullOrWhiteSpace($context.Subscription.Id)) {
     Stop-Cleanup "subscription-context-missing"
 }
@@ -74,20 +75,58 @@ finally {
 if ($observedFingerprint -cne $ExpectedSubscriptionFingerprint) {
     Stop-Cleanup "subscription-mismatch"
 }
-Set-AzContext -SubscriptionId $context.Subscription.Id -ErrorAction Stop | Out-Null
+$context = Set-AzContext `
+    -SubscriptionId $context.Subscription.Id `
+    -DefaultProfile $context `
+    -ErrorAction Stop
 
-$principalObjectId = $context.Account.Id
-if ([string]::IsNullOrWhiteSpace($principalObjectId)) {
-    Stop-Cleanup "identity-missing"
-}
 $targetScope = "/subscriptions/$($context.Subscription.Id)/resourceGroups/$ExactTargetResourceGroup"
-$assignments = @(
-    Get-AzRoleAssignment -ObjectId $principalObjectId -Scope $targetScope -ErrorAction Stop |
-        Where-Object {
-            $_.RoleDefinitionId -match "/$ExpectedRoleDefinitionId$" -and
-            $_.Scope -ceq $targetScope
-        }
+$roleAssignmentsPath = (
+    "$targetScope/providers/Microsoft.Authorization/roleAssignments" +
+    "?api-version=2022-04-01&`$filter=atScope()"
 )
+$roleAssignmentsResponse = Invoke-AzRestMethod `
+    -Method GET `
+    -Path $roleAssignmentsPath `
+    -DefaultProfile $context `
+    -ErrorAction Stop
+$roleAssignmentPayload = $roleAssignmentsResponse.Content | ConvertFrom-Json -Depth 16
+if ($null -eq $roleAssignmentPayload -or $null -ne $roleAssignmentPayload.nextLink) {
+    Stop-Cleanup "role-inventory-malformed"
+}
+$assignments = @()
+foreach ($assignment in @($roleAssignmentPayload.value)) {
+    $principalId = [string] $assignment.properties.principalId
+    $roleDefinitionId = [string] $assignment.properties.roleDefinitionId
+    $scope = [string] $assignment.properties.scope
+    if (
+        [string]::IsNullOrWhiteSpace($principalId) -or
+        [string]::IsNullOrWhiteSpace($roleDefinitionId) -or
+        [string]::IsNullOrWhiteSpace($scope)
+    ) {
+        Stop-Cleanup "role-inventory-malformed"
+    }
+    $principalBytes = [Text.Encoding]::UTF8.GetBytes(
+        $CleanupPrincipalFingerprintDomain + [char]0 + $principalId.ToLowerInvariant()
+    )
+    $principalHasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        $principalFingerprint = [Convert]::ToHexString(
+            $principalHasher.ComputeHash($principalBytes)
+        ).ToLowerInvariant()
+    }
+    finally {
+        $principalHasher.Dispose()
+        [Array]::Clear($principalBytes, 0, $principalBytes.Length)
+    }
+    if (
+        $principalFingerprint -ceq $ExpectedCleanupPrincipalFingerprint -and
+        $roleDefinitionId -match "/$ExpectedRoleDefinitionId$" -and
+        $scope -ceq $targetScope
+    ) {
+        $assignments += $assignment
+    }
+}
 if ($assignments.Count -ne 1) {
     Stop-Cleanup "role-scope-unproved"
 }

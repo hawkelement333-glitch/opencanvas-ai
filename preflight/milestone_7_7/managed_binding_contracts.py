@@ -263,7 +263,10 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "authorizationParameter": "CleanupAuthorized",
         "authorizationValue": True,
         "cleanupContributorRoleDefinitionId": ("b24988ac-6180-42a0-ab88-20f7382dd24c"),
-        "deadlineUtc": "2026-08-03T11:00:00Z",
+        "cleanupPrincipalFingerprintSha256": (
+            "19a9f97779cd2eb9acfdc04797f1fc5339316ee1a424ca79b70661beffa33260"
+        ),
+        "deadlineUtc": "2026-08-04T00:30:00Z",
         "deletionWaitSeconds": 2700,
         "launchGraceSeconds": 1800,
         "publishedContentSha256": cleanup_runbook_sha256(

@@ -1875,7 +1875,7 @@ def test_publisher_oauth_exchange_is_private_and_exact_repository_scoped(
         {
             "access": [
                 {
-                    "actions": ["pull", "push", "delete"],
+                    "actions": ["pull", "push"],
                     "name": "opencanvas-api",
                     "type": "repository",
                 }
@@ -1936,7 +1936,8 @@ def test_publisher_oauth_exchange_is_private_and_exact_repository_scoped(
     ]
     assert b"service=acrmobius7711564669.azurecr.io" in calls[0][2]
     assert b"tenant=00000000-0000-0000-0000-000000000101" in calls[0][2]
-    assert b"scope=repository%3Aopencanvas-api%3Apull%2Cpush%2Cdelete" in calls[1][2]
+    assert b"scope=" not in calls[0][2]
+    assert b"scope=repository%3Aopencanvas-api%3Apull%2Cpush" in calls[1][2]
     assert b"_catalog" not in b"".join(call[2] for call in calls)
     assert b"/subscriptions/" not in b"".join(call[2] for call in calls)
     entra_token.clear()
@@ -2011,7 +2012,7 @@ def test_publisher_tokens_fail_closed_for_binding_time_and_scope(
         acr_token(
             audience=managed_binding_lifecycle.REGISTRY_HOST,
             name="opencanvas-api",
-            actions=["pull", "push", "delete"],
+            actions=["pull", "push"],
         ),
         tenant_id=tenant_id,
     )
@@ -2019,17 +2020,17 @@ def test_publisher_tokens_fail_closed_for_binding_time_and_scope(
         acr_token(
             audience="wrong.azurecr.io",
             name="opencanvas-api",
-            actions=["pull", "push", "delete"],
+            actions=["pull", "push"],
         ),
         acr_token(
             audience=managed_binding_lifecycle.REGISTRY_HOST,
             name="wrong-repository",
-            actions=["pull", "push", "delete"],
+            actions=["pull", "push"],
         ),
         acr_token(
             audience=managed_binding_lifecycle.REGISTRY_HOST,
             name="opencanvas-api",
-            actions=["pull", "push", "delete", "metadata_read"],
+            actions=["pull", "push", "delete"],
         ),
     ):
         with pytest.raises(managed_binding_lifecycle.LifecycleError):
@@ -2381,11 +2382,11 @@ def test_lifecycle_deployment_names_preserve_prior_azure_history() -> None:
 
 
 def test_lifecycle_cleanup_deadline_matches_azure_minute_precision() -> None:
-    observed = datetime(2026, 8, 2, 6, 5, 33, 987654, tzinfo=UTC)
+    observed = datetime(2026, 8, 2, 18, 30, 0, tzinfo=UTC)
 
     deadline = managed_binding_lifecycle._cleanup_deadline(observed)
 
-    assert deadline == datetime(2026, 8, 3, 11, 0, tzinfo=UTC)
+    assert deadline == datetime(2026, 8, 4, 0, 30, tzinfo=UTC)
     assert deadline == managed_binding_lifecycle.AUTHORIZED_CLEANUP_AT_UTC
     assert deadline <= observed + timedelta(hours=30)
 
@@ -2395,12 +2396,12 @@ def test_lifecycle_cleanup_deadline_matches_azure_minute_precision() -> None:
         managed_binding_lifecycle.LifecycleError,
         match="cleanup-deadline-expired-or-reserve-active",
     ):
-        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 3, 9, 30, tzinfo=UTC))
+        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 3, 23, 0, tzinfo=UTC))
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
         match="cleanup-deadline-outside-authorized-window",
     ):
-        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 2, 4, 59, tzinfo=UTC))
+        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 2, 18, 29, tzinfo=UTC))
 
 
 def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> None:
@@ -2865,7 +2866,7 @@ def _test_preservation_state(
 ) -> dict[str, JsonValue]:
     return {
         "activeStage": "pre-secret",
-        "cleanupAtUtc": "2026-08-03T11:00:00Z",
+        "cleanupAtUtc": "2026-08-04T00:30:00Z",
         "disposition": "RUNNING",
         "failedStage": None,
         "lastCompletedStage": "cleanup-role-verification",
@@ -2910,7 +2911,7 @@ def _verify_container_apps_infrastructure_fixture(
 ) -> int:
     subscription = SYNTHETIC_SUBSCRIPTION
     expected_tags = _test_recovered_cleanup_tags()
-    expected_tags["mobius-expires-at-utc"] = "2026-08-03T11:00:00Z"
+    expected_tags["mobius-expires-at-utc"] = "2026-08-04T00:30:00Z"
     expected_environment_id = (
         f"/subscriptions/{subscription}/resourceGroups/"
         f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
@@ -3111,7 +3112,7 @@ def _reconcile_container_apps_infrastructure_tags_fixture(
     )
     expected = _test_recovered_cleanup_tags()
     expected["mobius-cleanup-binding-sha256"] = "e" * 64
-    expected["mobius-expires-at-utc"] = "2026-08-03T11:00:00Z"
+    expected["mobius-expires-at-utc"] = "2026-08-04T00:30:00Z"
     expected["mobius-manifest-sha256"] = "f" * 64
     expected["mobius-run-id"] = "m7.7-managed-binding-closeout-20260731"
     expected["mobius-source-commit"] = "c" * 40
@@ -4395,9 +4396,14 @@ def test_timer_runbook_is_bounded_guarded_and_deletion_capable() -> None:
     assert '"rg-solarplexus-mobius-73-staging"' in text
     assert '"rg-solarplexus-mobius-77-cleanup-control"' in text
     assert '"rg-solarplexus-mobius-77-containerapps-infrastructure"' in text
-    assert "Get-AzRoleAssignment" in text
-    assert "-Scope $targetScope" in text
-    assert "$_.Scope -ceq $targetScope" in text
+    assert "Get-AzRoleAssignment" not in text
+    assert "Invoke-AzRestMethod" in text
+    assert "Microsoft.Authorization/roleAssignments" in text
+    assert "api-version=2022-04-01" in text
+    assert "`$filter=atScope()" in text
+    assert "$scope -ceq $targetScope" in text
+    assert "$ExpectedCleanupPrincipalFingerprint" in text
+    assert "$CleanupPrincipalFingerprintDomain" in text
     assert "if ($assignments.Count -ne 1)" in text
     assert "Connect-AzAccount -Identity" in text
     assert "Remove-AzResourceGroup" in text
@@ -4410,7 +4416,7 @@ def test_timer_runbook_is_bounded_guarded_and_deletion_capable() -> None:
 
     launch_guard = text.index("$ExecutionStartedAtUtc -lt $ScheduledCleanupAtUtc")
     identity = text.index("Connect-AzAccount -Identity")
-    role_scope = text.index("Get-AzRoleAssignment")
+    role_scope = text.index("Invoke-AzRestMethod")
     already_absent = text.index('deletionResult = "ALREADY_ABSENT"')
     deletion = text.index("Remove-AzResourceGroup")
     assert launch_guard < identity < role_scope < already_absent < deletion
@@ -4433,6 +4439,7 @@ def test_timer_runbook_is_bounded_guarded_and_deletion_capable() -> None:
         "targetResourceGroup",
         "deadlineUtc",
         "launchGraceSeconds",
+        "cleanupPrincipalFingerprintSha256",
     ],
 )
 def test_cleanup_execution_required_fields_fail_closed_when_missing(
@@ -4471,11 +4478,12 @@ def test_cleanup_publication_and_evidence_are_content_bound() -> None:
     [
         ("authorizationValue", False),
         ("targetResourceGroup", "rg-solarplexus-mobius-77-cleanup-control"),
-        ("deadlineUtc", "2026-08-03T12:00:00Z"),
-        ("deadlineUtc", "2026-08-03T11:00:00-05:00"),
+        ("deadlineUtc", "2026-08-04T00:31:00Z"),
+        ("deadlineUtc", "2026-08-03T19:30:00-05:00"),
         ("launchGraceSeconds", 0),
         ("launchGraceSeconds", 1801),
         ("deletionWaitSeconds", 0),
+        ("cleanupPrincipalFingerprintSha256", "0" * 64),
         ("publishedContentSha256", "0" * 64),
     ],
 )

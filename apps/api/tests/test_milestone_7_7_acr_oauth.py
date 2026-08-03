@@ -49,7 +49,7 @@ def _records(path: Path) -> list[dict[str, object]]:
         (
             'bearer service="acrmobius7711564669.azurecr.io",'
             'realm="https://acrmobius7711564669.azurecr.io/oauth2/token",'
-            'scope="repository:opencanvas-api:pull,push,delete"'
+            'scope="repository:opencanvas-api:pull,push"'
         ),
     ],
 )
@@ -153,7 +153,7 @@ def test_exchange_and_repository_token_forms_are_exact(
         {
             "access": [
                 {
-                    "actions": ["pull", "push", "delete"],
+                    "actions": ["pull", "push"],
                     "name": "opencanvas-api",
                     "type": "repository",
                 }
@@ -208,11 +208,48 @@ def test_exchange_and_repository_token_forms_are_exact(
     assert b"grant_type=access_token" in calls[0][3]
     assert b"service=acrmobius7711564669.azurecr.io" in calls[0][3]
     assert f"tenant={tenant}".encode() in calls[0][3]
+    assert b"scope=" not in calls[0][3]
     assert b"grant_type=refresh_token" in calls[1][3]
-    assert b"scope=repository%3Aopencanvas-api%3Apull%2Cpush%2Cdelete" in calls[1][3]
+    assert b"scope=repository%3Aopencanvas-api%3Apull%2Cpush" in calls[1][3]
     assert b"_catalog" not in calls[0][3] + calls[1][3]
     refresh.clear()
     access.clear()
+
+
+@pytest.mark.parametrize(
+    "actions",
+    [
+        ["pull"],
+        ["push"],
+        ["pull", "push", "delete"],
+        ["pull", "push", "catalog"],
+    ],
+)
+def test_repository_token_requires_exact_acrpush_action_intersection(
+    actions: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant = "00000000-0000-0000-0000-000000000001"
+    token = _jwt(
+        {
+            "access": [
+                {
+                    "actions": actions,
+                    "name": "opencanvas-api",
+                    "type": "repository",
+                }
+            ],
+            "aud": lifecycle.REGISTRY_HOST,
+            "exp": int((NOW + timedelta(hours=1)).timestamp()),
+            "nbf": int((NOW - timedelta(minutes=1)).timestamp()),
+            "tenant": tenant,
+        }
+    )
+    monkeypatch.setattr(lifecycle, "_utc_now", lambda: NOW)
+    try:
+        with pytest.raises(lifecycle.LifecycleError, match="scope-invalid"):
+            lifecycle._acr_access_is_exact(token, tenant_id=tenant)
+    finally:
+        token.clear()
 
 
 @pytest.mark.parametrize("service", ["wrong.azurecr.io", "", "*.azurecr.io"])

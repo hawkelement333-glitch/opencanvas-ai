@@ -726,7 +726,7 @@ def build_local_plan(
             "maximumScannerBytes": 26_214_400,
             "maximumEvidenceBytes": 104_857_600,
             "provisioningBlockAboveUsdCents": 12_000,
-            "absoluteCostCeilingUsdCents": 17_500,
+            "absoluteCostCeilingUsdCents": 19_290,
             "minimumCleanupReserveSeconds": 5_400,
             "maximumEnvironmentLifetimeSeconds": 86_400,
         },

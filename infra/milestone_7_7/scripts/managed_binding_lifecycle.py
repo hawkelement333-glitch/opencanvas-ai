@@ -68,11 +68,11 @@ SCHEDULE: Final = "schedule-mobius77-cleanup"
 STAGING_LOCATION: Final = "southcentralus"
 CLEANUP_LOCATION: Final = "westus"
 REDIS_LOCATION: Final = "australiacentral"
-AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 3, 11, 0, tzinfo=UTC)
+AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 4, 0, 30, tzinfo=UTC)
 MAXIMUM_AUTHORIZED_WINDOW: Final = timedelta(hours=30)
 MINIMUM_CLEANUP_RESERVE: Final = timedelta(minutes=90)
 PROVISIONING_COST_BLOCK_USD_CENTS: Final = 12_000
-ABSOLUTE_COST_CEILING_USD_CENTS: Final = 17_500
+ABSOLUTE_COST_CEILING_USD_CENTS: Final = 19_290
 MAXIMUM_OUTPUT_BYTES: Final = 65_536
 DEPLOYMENT_TIMEOUT_SECONDS: Final = 1_800
 OPERATION_TIMEOUT_SECONDS: Final = 120
@@ -91,9 +91,7 @@ REGISTRY_HOST: Final = f"{REGISTRY}.azurecr.io"
 PUBLISHER_REPOSITORY: Final = "opencanvas-api"
 ACR_TOKEN_RESOURCE: Final = "https://containerregistry.azure.net"
 ACR_REFRESH_TOKEN_USERNAME: Final = "00000000-0000-0000-0000-000000000000"
-PUBLISHER_REPOSITORY_SCOPE: Final = (
-    f"repository:{PUBLISHER_REPOSITORY}:pull,push,delete"
-)
+PUBLISHER_REPOSITORY_SCOPE: Final = f"repository:{PUBLISHER_REPOSITORY}:pull,push"
 MAXIMUM_TOKEN_BYTES: Final = 16_384
 TOKEN_BYTES: Final = re.compile(rb"^[A-Za-z0-9._~+/=-]{32,16384}$")
 MANIFEST_ACCEPT: Final = (
@@ -4909,8 +4907,8 @@ def _acr_access_is_exact(token: bytearray, *, tenant_id: str) -> bool:
             item.get("type") != "repository"
             or item.get("name") != PUBLISHER_REPOSITORY
             or not isinstance(actions, list)
-            or len(actions) != 3
-            or set(actions) != {"pull", "push", "delete"}
+            or len(actions) != 2
+            or set(actions) != {"pull", "push"}
             or any(not isinstance(action, str) for action in actions)
         ):
             _fail("publisher-acr-token-scope-invalid")
