@@ -11,8 +11,6 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
-from contextlib import contextmanager
-from contextvars import ContextVar
 import hashlib
 import http.client
 import ipaddress
@@ -24,8 +22,11 @@ import socket
 import ssl
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
@@ -139,9 +140,7 @@ DEPLOYMENT_STAGES: Final = frozenset(
     }
 )
 PRE_SECRET_PRESERVABLE_STAGE: Final = "pre-secret"
-DISPOSITION_DOMAIN: Final = (
-    b"solarplexus-mobius/milestone-7.7/lifecycle-disposition/v1\x00"
-)
+DISPOSITION_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/lifecycle-disposition/v1\x00"
 CLEANUP_AUTHORIZATION_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/cleanup-authorization/v1\x00"
 )
@@ -151,9 +150,13 @@ OPERATION_ATTRIBUTION_FILE: Final = "managed-binding-operation-attribution.json"
 OPERATION_ATTRIBUTION_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/operation-attribution/v1\x00"
 )
-CORRELATION_HASH_DOMAIN: Final = (
-    b"solarplexus-mobius/milestone-7.7/operation-correlation/v1\x00"
+OPERATION_ID_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/protected-operation-id/v1\x00"
+LIFECYCLE_PROCESS_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/lifecycle-process/v1\x00"
+OPERATION_ATTRIBUTION_LOCK_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/operation-attribution-lock/v1\x00"
 )
+OPERATION_ATTRIBUTION_LOCK_FILE: Final = "managed-binding-operation-attribution.lock.json"
+CORRELATION_HASH_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/operation-correlation/v1\x00"
 PROTECTED_OPERATION_CATALOG: Final = (
     ("pre-secret-provisioning", "key-vault-temporary-authority-creation"),
     ("pre-secret-provisioning", "key-vault-authority-propagation-proof"),
@@ -186,6 +189,14 @@ PROTECTED_OPERATION_CATALOG: Final = (
     ("temporary-authority-revocation", "temporary-role-revocation"),
     ("cleanup", "failure-cleanup-and-resource-group-deletion"),
     ("cleanup", "preserved-environment-reconciliation"),
+)
+LOCAL_PRE_REQUEST_ERROR_CODES: Final = frozenset(
+    {
+        "lifecycle-bookkeeping-failed",
+        "lifecycle-process-launch-failed",
+        "lifecycle-serialization-failed",
+        "protected-operation-attribution-reconciliation-failed",
+    }
 )
 TRANSIENT_STATE_FIELDS: Final = frozenset(
     {
@@ -462,6 +473,9 @@ def _run(
         _fail("lifecycle-output-contract-conflict")
     if not argv or argv[0] not in {"az", "bicep", "docker", "git"}:
         _fail("lifecycle-executable-unapproved")
+    attribution, operation_id, attribution_spec = _begin_process_attribution(
+        argv, environment_overrides=environment_overrides
+    )
     executable = _resolved_executable(argv[0])
     actual = (executable, *argv[1:])
     if argv[0] == "az":
@@ -486,21 +500,11 @@ def _run(
         environment.update(environment_overrides)
     execution_directory = REPOSITORY_ROOT
     if working_directory is not None:
-        execution_directory = _outside_repository(
-            working_directory, "lifecycle-working-directory"
-        )
+        execution_directory = _outside_repository(working_directory, "lifecycle-working-directory")
         if not execution_directory.is_dir():
             _fail("lifecycle-working-directory-invalid")
-    attribution, operation_id, attribution_spec = _begin_process_attribution(
-        argv, environment_overrides=environment_overrides
-    )
-    if (
-        attribution is not None
-        and operation_id is not None
-        and attribution_spec is not None
-        and attribution_spec["azureMutation"] is True
-    ):
-        attribution.mark_execution_began(
+    if attribution is not None and operation_id is not None and attribution_spec is not None:
+        attribution.mark_request_attempt_began(
             operation_id,
             cleanup_or_revocation=attribution_spec["cleanupOrRevocation"] is True,
         )
@@ -515,16 +519,38 @@ def _run(
             shell=False,
             timeout=timeout_seconds,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:
         _finish_process_attribution(
             attribution,
             operation_id,
             status_code="not-reported",
-            azure_error_code="lifecycle-process-failed",
+            azure_error_code="lifecycle-process-timed-out",
             correlation_hash=None,
-            terminal_disposition="FAILED",
+            terminal_disposition="TIMED_OUT",
         )
-        _fail("lifecycle-process-failed")
+        _fail("lifecycle-process-timed-out")
+    except KeyboardInterrupt:
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code="lifecycle-process-cancelled",
+            correlation_hash=None,
+            terminal_disposition="CANCELLED",
+        )
+        raise
+    except OSError:
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code="lifecycle-process-launch-failed",
+            correlation_hash=None,
+            terminal_disposition="UNCERTAIN",
+        )
+        _fail("lifecycle-process-launch-failed")
+    if attribution is not None and operation_id is not None:
+        attribution.mark_azure_request_issued(operation_id)
     stdout = bytearray(completed.stdout)
     stderr = bytearray(completed.stderr)
     attribution_finished = False
@@ -540,9 +566,7 @@ def _run(
                     status_code=_sanitized_status_code(
                         stdout,
                         stderr,
-                        default="403"
-                        if azure_error_code == "forbidden"
-                        else "not-reported",
+                        default="403" if azure_error_code == "forbidden" else "not-reported",
                     ),
                     azure_error_code=azure_error_code,
                     correlation_hash=_sanitized_correlation_hash(stdout, stderr),
@@ -567,7 +591,7 @@ def _run(
                 status_code="2xx-not-reported",
                 azure_error_code=None,
                 correlation_hash=_sanitized_correlation_hash(stdout, stderr),
-                terminal_disposition="COMPLETED",
+                terminal_disposition="SUCCEEDED",
             )
             attribution_finished = True
             return None
@@ -582,7 +606,7 @@ def _run(
                 status_code="2xx-not-reported",
                 azure_error_code=None,
                 correlation_hash=_sanitized_correlation_hash(stdout, stderr),
-                terminal_disposition="COMPLETED",
+                terminal_disposition="SUCCEEDED",
             )
             attribution_finished = True
             return value_text
@@ -597,7 +621,7 @@ def _run(
             status_code="2xx-not-reported",
             azure_error_code=None,
             correlation_hash=_sanitized_correlation_hash(stdout, stderr),
-            terminal_disposition="COMPLETED",
+            terminal_disposition="SUCCEEDED",
         )
         attribution_finished = True
         return cast(JsonValue, value)
@@ -606,9 +630,7 @@ def _run(
             _finish_process_attribution(
                 attribution,
                 operation_id,
-                status_code=_sanitized_status_code(
-                    stdout, stderr, default="not-reported"
-                ),
+                status_code=_sanitized_status_code(stdout, stderr, default="not-reported"),
                 azure_error_code=_safe_attribution_error(exc),
                 correlation_hash=_sanitized_correlation_hash(stdout, stderr),
                 terminal_disposition="FAILED",
@@ -736,6 +758,120 @@ _ATTRIBUTION_SUBSTAGE: ContextVar[str | None] = ContextVar(
 
 def _operation_attribution_path(receipt_directory: Path) -> Path:
     return receipt_directory / OPERATION_ATTRIBUTION_FILE
+
+
+def _operation_attribution_lock_path(receipt_directory: Path) -> Path:
+    return receipt_directory / OPERATION_ATTRIBUTION_LOCK_FILE
+
+
+def _lifecycle_process_id(*, ledger_integrity: str, repository_head: str) -> str:
+    if (
+        HEX_SHA256.fullmatch(ledger_integrity) is None
+        or HEX_SHA40.fullmatch(repository_head) is None
+    ):
+        _fail("protected-operation-attribution-binding-invalid")
+    return hashlib.sha256(
+        LIFECYCLE_PROCESS_DOMAIN
+        + ledger_integrity.encode("ascii")
+        + b"\x00"
+        + repository_head.encode("ascii")
+    ).hexdigest()
+
+
+def _process_is_running(process_id: int) -> bool:
+    if process_id < 1:
+        return False
+    if process_id == os.getpid():
+        return True
+    if os.name == "nt":
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(0x1000, False, process_id)
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        return ctypes.get_last_error() == 5
+    try:
+        os.kill(process_id, 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError):
+        return True
+    return True
+
+
+def _attribution_lock_integrity(value: Mapping[str, JsonValue]) -> str:
+    return hashlib.sha256(
+        OPERATION_ATTRIBUTION_LOCK_DOMAIN + canonical_bytes(dict(value))
+    ).hexdigest()
+
+
+def _acquire_operation_attribution_lock(
+    *, receipt_directory: Path, lifecycle_process_id: str
+) -> Path:
+    path = _operation_attribution_lock_path(receipt_directory)
+    for attempt in range(2):
+        body: dict[str, JsonValue] = {
+            "acquiredAtUtc": _format_utc(_utc_now()),
+            "lifecycleProcessId": lifecycle_process_id,
+            "ownerProcessId": os.getpid(),
+            "schemaVersion": "mobius.milestone-7.7.operation-attribution-lock.v1",
+        }
+        document = {**body, "integritySha256": _attribution_lock_integrity(body)}
+        try:
+            _write_state(path, document)
+            return path
+        except LifecycleError as exc:
+            if str(exc) != "transient-state-already-present" or attempt != 0:
+                raise
+        try:
+            observed = _read_state(path)
+        except (ContractError, LifecycleError, OSError, ValueError):
+            _fail("protected-operation-attribution-lock-invalid")
+        if set(observed) != {
+            "acquiredAtUtc",
+            "integritySha256",
+            "lifecycleProcessId",
+            "ownerProcessId",
+            "schemaVersion",
+        }:
+            _fail("protected-operation-attribution-lock-invalid")
+        unsigned = {key: value for key, value in observed.items() if key != "integritySha256"}
+        owner = observed.get("ownerProcessId")
+        if (
+            observed.get("schemaVersion") != "mobius.milestone-7.7.operation-attribution-lock.v1"
+            or observed.get("lifecycleProcessId") != lifecycle_process_id
+            or not isinstance(owner, int)
+            or isinstance(owner, bool)
+            or observed.get("integritySha256") != _attribution_lock_integrity(unsigned)
+        ):
+            _fail("protected-operation-attribution-lock-invalid")
+        if _process_is_running(owner):
+            _fail("protected-operation-attribution-concurrent-process")
+        attribution_path = _operation_attribution_path(receipt_directory)
+        if attribution_path.is_file():
+            prior = _read_state(attribution_path)
+            if prior.get("activeOperation") is not None:
+                _fail("protected-operation-attribution-interrupted-operation")
+        try:
+            path.unlink()
+        except OSError:
+            _fail("protected-operation-attribution-lock-reconcile-failed")
+    _fail("protected-operation-attribution-lock-unavailable")
+
+
+def _release_operation_attribution_lock(path: Path, *, lifecycle_process_id: str) -> None:
+    observed = _read_state(path)
+    if (
+        observed.get("lifecycleProcessId") != lifecycle_process_id
+        or observed.get("ownerProcessId") != os.getpid()
+    ):
+        _fail("protected-operation-attribution-lock-ownership-mismatch")
+    try:
+        path.unlink()
+    except OSError:
+        _fail("protected-operation-attribution-lock-release-failed")
 
 
 def _safe_operation_token(value: str) -> str:
@@ -1042,6 +1178,11 @@ def _process_attribution_spec(
         lifecycle_substage = lifecycle_substage or "repository-state-verification"
         service_class = "local-repository"
         endpoint_class = "local-process"
+    elif command == "bicep":
+        operation_class = "template-compilation"
+        lifecycle_substage = lifecycle_substage or "template-compilation"
+        service_class = "local-tooling"
+        endpoint_class = "local-process"
     else:
         _fail("protected-operation-attribution-invalid")
 
@@ -1114,26 +1255,65 @@ def _registry_attribution_spec(method: str, path: str) -> dict[str, JsonValue]:
 
 
 class _OperationAttribution:
-    def __init__(self, *, receipt_directory: Path, lifecycle_stage: str) -> None:
+    def __init__(
+        self,
+        *,
+        receipt_directory: Path,
+        lifecycle_stage: str,
+        ledger_integrity: str,
+        repository_head: str,
+    ) -> None:
         self.path = _operation_attribution_path(receipt_directory)
         self.lifecycle_stage = lifecycle_stage
-        self.document: dict[str, JsonValue] = {
-            "activeOperation": None,
-            "integritySha256": None,
-            "lifecycleOperation": lifecycle_stage,
-            "records": [],
-            "schemaVersion": "mobius.milestone-7.7.operation-attribution.v1",
-        }
+        self.ledger_integrity = ledger_integrity
+        self.repository_head = repository_head
+        self.lifecycle_process_id = _lifecycle_process_id(
+            ledger_integrity=ledger_integrity, repository_head=repository_head
+        )
+        self._mutex = threading.RLock()
         if self.path.exists():
-            _fail("protected-operation-attribution-already-present")
-        self._persist(initial=True)
+            self.document = self._load_existing()
+        else:
+            self.document = {
+                "activeOperation": None,
+                "integritySha256": None,
+                "ledgerIntegritySha256": ledger_integrity,
+                "lifecycleProcessId": self.lifecycle_process_id,
+                "records": [],
+                "repositoryHead": repository_head,
+                "schemaVersion": "mobius.milestone-7.7.operation-attribution.v2",
+            }
+            self._persist(initial=True)
+
+    def _load_existing(self) -> dict[str, JsonValue]:
+        document = _read_state(self.path)
+        if set(document) != {
+            "activeOperation",
+            "integritySha256",
+            "ledgerIntegritySha256",
+            "lifecycleProcessId",
+            "records",
+            "repositoryHead",
+            "schemaVersion",
+        }:
+            _fail("protected-operation-attribution-malformed")
+        unsigned = {key: value for key, value in document.items() if key != "integritySha256"}
+        if (
+            document.get("schemaVersion") != "mobius.milestone-7.7.operation-attribution.v2"
+            or document.get("ledgerIntegritySha256") != self.ledger_integrity
+            or document.get("repositoryHead") != self.repository_head
+            or document.get("lifecycleProcessId") != self.lifecycle_process_id
+            or document.get("integritySha256")
+            != hashlib.sha256(OPERATION_ATTRIBUTION_DOMAIN + canonical_bytes(unsigned)).hexdigest()
+            or not isinstance(document.get("records"), list)
+        ):
+            _fail("protected-operation-attribution-binding-invalid")
+        if document.get("activeOperation") is not None:
+            _fail("protected-operation-attribution-interrupted-operation")
+        return document
 
     def _persist(self, *, initial: bool = False) -> None:
-        unsigned = {
-            key: value
-            for key, value in self.document.items()
-            if key != "integritySha256"
-        }
+        unsigned = {key: value for key, value in self.document.items() if key != "integritySha256"}
         self.document["integritySha256"] = hashlib.sha256(
             OPERATION_ATTRIBUTION_DOMAIN + canonical_bytes(unsigned)
         ).hexdigest()
@@ -1142,51 +1322,114 @@ class _OperationAttribution:
         else:
             _replace_state(self.path, self.document)
 
-    def start(self, spec: Mapping[str, JsonValue]) -> str:
-        if self.document["activeOperation"] is not None:
-            _fail("protected-operation-attribution-active-operation-present")
-        records = self.document["records"]
+    def _record_for(self, operation_id: str) -> dict[str, JsonValue] | None:
+        records = self.document.get("records")
         if not isinstance(records, list):
             _fail("protected-operation-attribution-malformed")
-        ordinal = len(records) + 1
-        record_id = f"{self.lifecycle_stage}-{ordinal:04d}"
-        record: dict[str, JsonValue] = {
-            "azureMutationBegan": False,
-            "cleanupOrRevocationRan": False,
-            "endpointClass": spec["endpointClass"],
-            "event": "pre-operation",
-            "expectedAuthorizationResult": spec["expectedAuthorizationResult"],
-            "finishedAtUtc": None,
-            "identityAlias": spec["identityAlias"],
-            "lifecycleStage": self.lifecycle_stage,
-            "lifecycleSubstage": spec["lifecycleSubstage"],
-            "operationClass": spec["operationClass"],
-            "operationId": record_id,
-            "requestOrCorrelationHash": None,
-            "sanitizedAzureErrorCode": None,
-            "sanitizedStatusCode": "not-observed",
-            "serviceClass": spec["serviceClass"],
-            "startedAtUtc": _format_utc(_utc_now()),
-            "terminalDisposition": "RUNNING",
-        }
-        self.document["activeOperation"] = dict(record)
-        records.append(record)
-        self._persist()
-        return record_id
+        for value in reversed(records):
+            if isinstance(value, dict) and value.get("operationId") == operation_id:
+                return value
+        return None
 
-    def mark_execution_began(
-        self, operation_id: str, *, cleanup_or_revocation: bool
-    ) -> None:
-        active = self.document["activeOperation"]
-        if not isinstance(active, dict) or active.get("operationId") != operation_id:
-            _fail("protected-operation-attribution-active-operation-mismatch")
-        active["azureMutationBegan"] = True
-        active["cleanupOrRevocationRan"] = cleanup_or_revocation
-        records = self.document["records"]
-        if not isinstance(records, list):
-            _fail("protected-operation-attribution-malformed")
-        records.append({**active, "event": "execution-began"})
-        self._persist()
+    def start(
+        self,
+        spec: Mapping[str, JsonValue],
+        *,
+        retry_of_operation_id: str | None = None,
+        retry_count: int = 0,
+    ) -> str:
+        with self._mutex:
+            if self.document["activeOperation"] is not None:
+                _fail("protected-operation-attribution-active-operation-present")
+            records = self.document["records"]
+            if not isinstance(records, list):
+                _fail("protected-operation-attribution-malformed")
+            ordinal = (
+                sum(
+                    1
+                    for value in records
+                    if isinstance(value, dict) and value.get("event") == "pre-operation"
+                )
+                + 1
+            )
+            binding: dict[str, JsonValue] = {
+                "ledgerIntegritySha256": self.ledger_integrity,
+                "lifecycleProcessId": self.lifecycle_process_id,
+                "lifecycleStage": self.lifecycle_stage,
+                "lifecycleSubstage": spec["lifecycleSubstage"],
+                "operationClass": spec["operationClass"],
+                "ordinal": ordinal,
+                "repositoryHead": self.repository_head,
+                "retryCount": retry_count,
+                "retryOfOperationId": retry_of_operation_id,
+            }
+            record_id = hashlib.sha256(OPERATION_ID_DOMAIN + canonical_bytes(binding)).hexdigest()
+            record: dict[str, JsonValue] = {
+                "azureMutationBegan": False,
+                "azureMutationCompleted": False,
+                "azureMutationExpected": spec["azureMutation"],
+                "azureRequestIssued": False,
+                "cleanupOrRevocationRan": False,
+                "endpointClass": spec["endpointClass"],
+                "event": "pre-operation",
+                "expectedAuthorizationResult": spec["expectedAuthorizationResult"],
+                "finishedAtUtc": None,
+                "identityAlias": spec["identityAlias"],
+                "ledgerIntegritySha256": self.ledger_integrity,
+                "lifecycleProcessId": self.lifecycle_process_id,
+                "lifecycleStage": self.lifecycle_stage,
+                "lifecycleSubstage": spec["lifecycleSubstage"],
+                "operationClass": spec["operationClass"],
+                "operationId": record_id,
+                "repositoryHead": self.repository_head,
+                "requestAttemptBegan": False,
+                "requestOrCorrelationHash": None,
+                "retryCount": retry_count,
+                "retryOfOperationId": retry_of_operation_id,
+                "sanitizedAzureErrorCode": None,
+                "sanitizedStatusCode": "not-observed",
+                "serviceClass": spec["serviceClass"],
+                "startedAtUtc": _format_utc(_utc_now()),
+                "terminalDisposition": "STARTED",
+            }
+            self.document["activeOperation"] = dict(record)
+            records.append(record)
+            self._persist()
+            return record_id
+
+    def mark_request_attempt_began(self, operation_id: str, *, cleanup_or_revocation: bool) -> None:
+        with self._mutex:
+            active = self.document["activeOperation"]
+            if not isinstance(active, dict) or active.get("operationId") != operation_id:
+                _fail("protected-operation-attribution-active-operation-mismatch")
+            active["requestAttemptBegan"] = True
+            active["azureMutationBegan"] = active["azureMutationExpected"] is True
+            active["cleanupOrRevocationRan"] = cleanup_or_revocation
+            records = self.document["records"]
+            if not isinstance(records, list):
+                _fail("protected-operation-attribution-malformed")
+            records.append({**active, "event": "request-attempt-began"})
+            self._persist()
+
+    def mark_azure_request_issued(self, operation_id: str) -> None:
+        with self._mutex:
+            active = self.document["activeOperation"]
+            if not isinstance(active, dict) or active.get("operationId") != operation_id:
+                _fail("protected-operation-attribution-active-operation-mismatch")
+            active["azureRequestIssued"] = True
+            self._persist()
+
+    def mark_local_effect_began(self, operation_id: str, *, cleanup_or_revocation: bool) -> None:
+        with self._mutex:
+            active = self.document["activeOperation"]
+            if not isinstance(active, dict) or active.get("operationId") != operation_id:
+                _fail("protected-operation-attribution-active-operation-mismatch")
+            active["cleanupOrRevocationRan"] = cleanup_or_revocation
+            records = self.document["records"]
+            if not isinstance(records, list):
+                _fail("protected-operation-attribution-malformed")
+            records.append({**active, "event": "local-effect-began"})
+            self._persist()
 
     def finish(
         self,
@@ -1202,64 +1445,133 @@ class _OperationAttribution:
             and re.fullmatch(r"[1-5][0-9]{2}", status_code) is None
         ):
             _fail("protected-operation-attribution-status-invalid")
-        if terminal_disposition not in {"COMPLETED", "FAILED"}:
+        if terminal_disposition not in {
+            "SUCCEEDED",
+            "FAILED",
+            "TIMED_OUT",
+            "CANCELLED",
+            "UNCERTAIN",
+            "SKIPPED_ALREADY_SATISFIED",
+        }:
             _fail("protected-operation-attribution-disposition-invalid")
         if (
             azure_error_code is not None
             and re.fullmatch(r"[a-z0-9-]{1,64}", azure_error_code) is None
         ):
             _fail("protected-operation-attribution-error-invalid")
-        if (
-            correlation_hash is not None
-            and HEX_SHA256.fullmatch(correlation_hash) is None
-        ):
+        if correlation_hash is not None and HEX_SHA256.fullmatch(correlation_hash) is None:
             _fail("protected-operation-attribution-correlation-invalid")
-        active = self.document["activeOperation"]
-        if not isinstance(active, dict) or active.get("operationId") != operation_id:
-            _fail("protected-operation-attribution-active-operation-mismatch")
-        complete = {
-            **active,
-            "event": "post-operation",
-            "finishedAtUtc": _format_utc(_utc_now()),
-            "requestOrCorrelationHash": correlation_hash,
-            "sanitizedAzureErrorCode": azure_error_code,
-            "sanitizedStatusCode": status_code,
-            "terminalDisposition": terminal_disposition,
-        }
-        records = self.document["records"]
-        if not isinstance(records, list):
+        with self._mutex:
+            active = self.document["activeOperation"]
+            if not isinstance(active, dict) or active.get("operationId") != operation_id:
+                _fail("protected-operation-attribution-active-operation-mismatch")
+            complete = {
+                **active,
+                "azureMutationCompleted": terminal_disposition
+                in {"SUCCEEDED", "SKIPPED_ALREADY_SATISFIED"}
+                and active.get("azureMutationBegan") is True,
+                "event": "post-operation",
+                "finishedAtUtc": _format_utc(_utc_now()),
+                "requestOrCorrelationHash": correlation_hash,
+                "sanitizedAzureErrorCode": azure_error_code,
+                "sanitizedStatusCode": status_code,
+                "terminalDisposition": terminal_disposition,
+            }
+            records = self.document["records"]
+            if not isinstance(records, list):
+                _fail("protected-operation-attribution-malformed")
+            records.append(complete)
+            self.document["activeOperation"] = None
+            self._persist()
+
+    def close_active(self, *, error: BaseException, disposition: str) -> None:
+        active = self.document.get("activeOperation")
+        if not isinstance(active, dict):
+            return
+        operation_id = active.get("operationId")
+        if not isinstance(operation_id, str):
             _fail("protected-operation-attribution-malformed")
-        records.append(complete)
-        self.document["activeOperation"] = None
-        self._persist()
+        self.finish(
+            operation_id,
+            status_code="not-reported",
+            azure_error_code=_safe_attribution_error(error),
+            correlation_hash=None,
+            terminal_disposition=disposition,
+        )
+
+    def retry_local_pre_request(
+        self, failed_operation_id: str, spec: Mapping[str, JsonValue]
+    ) -> str:
+        with self._mutex:
+            prior = self._record_for(failed_operation_id)
+            if (
+                prior is None
+                or prior.get("event") != "post-operation"
+                or prior.get("terminalDisposition") != "FAILED"
+                or prior.get("requestAttemptBegan") is not False
+                or prior.get("azureRequestIssued") is not False
+                or prior.get("azureMutationBegan") is not False
+                or prior.get("azureMutationCompleted") is not False
+                or prior.get("sanitizedAzureErrorCode") not in LOCAL_PRE_REQUEST_ERROR_CODES
+                or prior.get("lifecycleProcessId") != self.lifecycle_process_id
+                or prior.get("ledgerIntegritySha256") != self.ledger_integrity
+                or prior.get("repositoryHead") != self.repository_head
+                or prior.get("lifecycleStage") != self.lifecycle_stage
+                or prior.get("lifecycleSubstage") != spec.get("lifecycleSubstage")
+                or prior.get("operationClass") != spec.get("operationClass")
+                or prior.get("retryCount") != 0
+            ):
+                _fail("local-pre-request-retry-not-authorized")
+            return self.start(spec, retry_of_operation_id=failed_operation_id, retry_count=1)
 
 
 @contextmanager
 def _operation_attribution_session(
-    *, receipt_directory: Path, lifecycle_stage: str
+    *,
+    receipt_directory: Path,
+    lifecycle_stage: str,
+    ledger_integrity: str,
+    repository_head: str,
 ) -> Iterator[None]:
-    attribution = _OperationAttribution(
-        receipt_directory=receipt_directory, lifecycle_stage=lifecycle_stage
+    lifecycle_process_id = _lifecycle_process_id(
+        ledger_integrity=ledger_integrity, repository_head=repository_head
     )
+    lock_path = _acquire_operation_attribution_lock(
+        receipt_directory=receipt_directory,
+        lifecycle_process_id=lifecycle_process_id,
+    )
+    try:
+        attribution = _OperationAttribution(
+            receipt_directory=receipt_directory,
+            lifecycle_stage=lifecycle_stage,
+            ledger_integrity=ledger_integrity,
+            repository_head=repository_head,
+        )
+    except BaseException:
+        _release_operation_attribution_lock(lock_path, lifecycle_process_id=lifecycle_process_id)
+        raise
     token = _ACTIVE_ATTRIBUTION.set(attribution)
     try:
         yield
+    except KeyboardInterrupt as exc:
+        attribution.close_active(error=exc, disposition="CANCELLED")
+        raise
+    except BaseException as exc:
+        attribution.close_active(error=exc, disposition="FAILED")
+        raise
     finally:
         _ACTIVE_ATTRIBUTION.reset(token)
+        _release_operation_attribution_lock(lock_path, lifecycle_process_id=lifecycle_process_id)
 
 
 @contextmanager
-def _attribution_scope(
-    *, lifecycle_substage: str, expected_authorization: str
-) -> Iterator[None]:
+def _attribution_scope(*, lifecycle_substage: str, expected_authorization: str) -> Iterator[None]:
     if re.fullmatch(
         r"[a-z0-9-]{1,96}", lifecycle_substage
     ) is None or expected_authorization not in {"allow", "deny"}:
         _fail("protected-operation-attribution-invalid")
     substage_token = _ATTRIBUTION_SUBSTAGE.set(lifecycle_substage)
-    authorization_token = _ATTRIBUTION_EXPECTED_AUTHORIZATION.set(
-        expected_authorization
-    )
+    authorization_token = _ATTRIBUTION_EXPECTED_AUTHORIZATION.set(expected_authorization)
     try:
         yield
     finally:
@@ -1319,8 +1631,19 @@ def _remove_ephemeral_publisher_directory(path: Path) -> None:
                 "cleanupOrRevocation": True,
             }
         )
+        attribution.mark_local_effect_began(operation_id, cleanup_or_revocation=True)
     try:
         shutil.rmtree(path)
+    except KeyboardInterrupt as exc:
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code=_safe_attribution_error(exc),
+            correlation_hash=None,
+            terminal_disposition="CANCELLED",
+        )
+        raise
     except BaseException as exc:
         _finish_process_attribution(
             attribution,
@@ -1337,7 +1660,7 @@ def _remove_ephemeral_publisher_directory(path: Path) -> None:
         status_code="2xx-not-reported",
         azure_error_code=None,
         correlation_hash=None,
-        terminal_disposition="COMPLETED",
+        terminal_disposition="SUCCEEDED",
     )
 
 
@@ -1352,37 +1675,51 @@ def _attributed_failed_stage(receipt_directory: Path) -> str | None:
     if not isinstance(document, dict) or set(document) != {
         "activeOperation",
         "integritySha256",
-        "lifecycleOperation",
+        "ledgerIntegritySha256",
+        "lifecycleProcessId",
         "records",
+        "repositoryHead",
         "schemaVersion",
     }:
         return "protected-attribution-invalid"
     integrity = document.get("integritySha256")
-    unsigned = {
-        key: value for key, value in document.items() if key != "integritySha256"
-    }
+    unsigned = {key: value for key, value in document.items() if key != "integritySha256"}
     if (
         not isinstance(integrity, str)
         or HEX_SHA256.fullmatch(integrity) is None
         or integrity
-        != hashlib.sha256(
-            OPERATION_ATTRIBUTION_DOMAIN + canonical_bytes(unsigned)
-        ).hexdigest()
+        != hashlib.sha256(OPERATION_ATTRIBUTION_DOMAIN + canonical_bytes(unsigned)).hexdigest()
+        or document.get("schemaVersion") != "mobius.milestone-7.7.operation-attribution.v2"
+        or not isinstance(document.get("ledgerIntegritySha256"), str)
+        or HEX_SHA256.fullmatch(str(document.get("ledgerIntegritySha256"))) is None
+        or not isinstance(document.get("lifecycleProcessId"), str)
+        or HEX_SHA256.fullmatch(str(document.get("lifecycleProcessId"))) is None
+        or not isinstance(document.get("repositoryHead"), str)
+        or HEX_SHA40.fullmatch(str(document.get("repositoryHead"))) is None
     ):
         return "protected-attribution-invalid"
     expected_record_fields = {
         "azureMutationBegan",
+        "azureMutationCompleted",
+        "azureMutationExpected",
+        "azureRequestIssued",
         "cleanupOrRevocationRan",
         "endpointClass",
         "event",
         "expectedAuthorizationResult",
         "finishedAtUtc",
         "identityAlias",
+        "ledgerIntegritySha256",
+        "lifecycleProcessId",
         "lifecycleStage",
         "lifecycleSubstage",
         "operationClass",
         "operationId",
+        "repositoryHead",
+        "requestAttemptBegan",
         "requestOrCorrelationHash",
+        "retryCount",
+        "retryOfOperationId",
         "sanitizedAzureErrorCode",
         "sanitizedStatusCode",
         "serviceClass",
@@ -1397,6 +1734,9 @@ def _attributed_failed_stage(receipt_directory: Path) -> str | None:
         if (
             not isinstance(stage, str)
             or re.fullmatch(r"[a-z0-9-]{1,96}", stage) is None
+            or value.get("ledgerIntegritySha256") != document.get("ledgerIntegritySha256")
+            or value.get("lifecycleProcessId") != document.get("lifecycleProcessId")
+            or value.get("repositoryHead") != document.get("repositoryHead")
         ):
             return "protected-attribution-invalid"
         return stage
@@ -1408,7 +1748,12 @@ def _attributed_failed_stage(receipt_directory: Path) -> str | None:
     if not isinstance(records, list):
         return "protected-attribution-invalid"
     for record in reversed(records):
-        if isinstance(record, dict) and record.get("terminalDisposition") == "FAILED":
+        if isinstance(record, dict) and record.get("terminalDisposition") in {
+            "FAILED",
+            "TIMED_OUT",
+            "CANCELLED",
+            "UNCERTAIN",
+        }:
             return stage_from(record)
     for record in reversed(records):
         if (
@@ -1446,7 +1791,28 @@ def _write_disposition(
         _fail("disposition-integrity-prepopulated")
     integrity = hashlib.sha256(DISPOSITION_DOMAIN + canonical_bytes(record)).hexdigest()
     complete = {**record, "dispositionIntegritySha256": integrity}
-    _write_state(_disposition_path(receipt_directory), complete)
+    path = _disposition_path(receipt_directory)
+    if path.is_file():
+        prior = _read_state(path)
+        prior_integrity = prior.get("dispositionIntegritySha256")
+        prior_unsigned = {
+            key: value for key, value in prior.items() if key != "dispositionIntegritySha256"
+        }
+        if (
+            not isinstance(prior_integrity, str)
+            or HEX_SHA256.fullmatch(prior_integrity) is None
+            or prior_integrity
+            != hashlib.sha256(DISPOSITION_DOMAIN + canonical_bytes(prior_unsigned)).hexdigest()
+        ):
+            _fail("prior-disposition-integrity-invalid")
+        archive = receipt_directory / (
+            f"managed-binding-lifecycle-disposition-{prior_integrity}.json"
+        )
+        if not archive.exists():
+            _write_state(archive, prior)
+        _replace_state(path, complete)
+    else:
+        _write_state(path, complete)
     return complete
 
 
@@ -4042,26 +4408,51 @@ def _publisher_entra_token(
     )
     try:
         actual = _resolve_authorized_process_launch(argv).argv
+        publisher_environment = _publisher_environment(environment_overrides)
+        if attribution is not None and operation_id is not None:
+            attribution.mark_request_attempt_began(operation_id, cleanup_or_revocation=False)
         completed = subprocess.run(
             actual,
             cwd=REPOSITORY_ROOT,
-            env=_publisher_environment(environment_overrides),
+            env=publisher_environment,
             stdin=subprocess.DEVNULL,
             capture_output=True,
             check=False,
             shell=False,
             timeout=OPERATION_TIMEOUT_SECONDS,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:
         _finish_process_attribution(
             attribution,
             operation_id,
             status_code="not-reported",
-            azure_error_code="publisher-entra-token-process-failed",
+            azure_error_code="publisher-entra-token-process-timed-out",
             correlation_hash=None,
-            terminal_disposition="FAILED",
+            terminal_disposition="TIMED_OUT",
         )
-        _fail("publisher-entra-token-process-failed")
+        _fail("publisher-entra-token-process-timed-out")
+    except KeyboardInterrupt:
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code="publisher-entra-token-process-cancelled",
+            correlation_hash=None,
+            terminal_disposition="CANCELLED",
+        )
+        raise
+    except OSError:
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code="publisher-entra-token-process-launch-failed",
+            correlation_hash=None,
+            terminal_disposition="UNCERTAIN",
+        )
+        _fail("publisher-entra-token-process-launch-failed")
+    if attribution is not None and operation_id is not None:
+        attribution.mark_azure_request_issued(operation_id)
     stdout = bytearray(completed.stdout)
     stderr = bytearray(completed.stderr)
     token = bytearray()
@@ -4077,9 +4468,7 @@ def _publisher_entra_token(
                 status_code=_sanitized_status_code(
                     stdout,
                     stderr,
-                    default="403"
-                    if azure_error_code == "forbidden"
-                    else "not-reported",
+                    default="403" if azure_error_code == "forbidden" else "not-reported",
                 ),
                 azure_error_code=azure_error_code,
                 correlation_hash=_sanitized_correlation_hash(stdout, stderr),
@@ -4092,16 +4481,14 @@ def _publisher_entra_token(
         token.extend(stdout)
         if TOKEN_BYTES.fullmatch(token) is None or bytes(token) in stderr:
             _fail("publisher-entra-token-output-malformed")
-        _validate_entra_token(
-            token, publisher_app_id=publisher_app_id, tenant_id=tenant_id
-        )
+        _validate_entra_token(token, publisher_app_id=publisher_app_id, tenant_id=tenant_id)
         _finish_process_attribution(
             attribution,
             operation_id,
             status_code="2xx-not-reported",
             azure_error_code=None,
             correlation_hash=_sanitized_correlation_hash(stdout, stderr),
-            terminal_disposition="COMPLETED",
+            terminal_disposition="SUCCEEDED",
         )
         attribution_finished = True
         return token
@@ -4111,9 +4498,7 @@ def _publisher_entra_token(
             _finish_process_attribution(
                 attribution,
                 operation_id,
-                status_code=_sanitized_status_code(
-                    stdout, stderr, default="not-reported"
-                ),
+                status_code=_sanitized_status_code(stdout, stderr, default="not-reported"),
                 azure_error_code=_safe_attribution_error(exc),
                 correlation_hash=_sanitized_correlation_hash(stdout, stderr),
                 terminal_disposition="FAILED",
@@ -4200,18 +4585,15 @@ def _private_registry_request(
     )
     response_body = bytearray()
     try:
-        if (
-            attribution is not None
-            and operation_id is not None
-            and attribution_spec is not None
-            and attribution_spec["azureMutation"] is True
-        ):
-            attribution.mark_execution_began(
+        if attribution is not None and operation_id is not None and attribution_spec is not None:
+            attribution.mark_request_attempt_began(
                 operation_id,
                 cleanup_or_revocation=attribution_spec["cleanupOrRevocation"] is True,
             )
         connection.request(method, path, body=body, headers=dict(headers))
         response = connection.getresponse()
+        if attribution is not None and operation_id is not None:
+            attribution.mark_azure_request_issued(operation_id)
         response_body.extend(response.read(MAXIMUM_OUTPUT_BYTES + 1))
         if len(response_body) > MAXIMUM_OUTPUT_BYTES:
             _fail("publisher-registry-output-oversized")
@@ -4224,9 +4606,7 @@ def _private_registry_request(
             retained_headers["content-type"] = content_type
         correlation = response.getheader("x-ms-correlation-request-id")
         correlation_hash = (
-            hashlib.sha256(
-                CORRELATION_HASH_DOMAIN + correlation.encode("ascii")
-            ).hexdigest()
+            hashlib.sha256(CORRELATION_HASH_DOMAIN + correlation.encode("ascii")).hexdigest()
             if correlation is not None
             and re.fullmatch(r"[0-9a-fA-F-]{36}", correlation) is not None
             else None
@@ -4239,10 +4619,10 @@ def _private_registry_request(
             if response.status >= 400
             else None,
             correlation_hash=correlation_hash,
-            terminal_disposition="COMPLETED",
+            terminal_disposition="SUCCEEDED",
         )
         return response.status, retained_headers, response_body
-    except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
+    except TimeoutError as exc:
         response_body.clear()
         _finish_process_attribution(
             attribution,
@@ -4250,9 +4630,35 @@ def _private_registry_request(
             status_code="not-reported",
             azure_error_code=_safe_attribution_error(exc),
             correlation_hash=None,
-            terminal_disposition="FAILED",
+            terminal_disposition="TIMED_OUT",
         )
-        _fail("publisher-private-registry-request-failed")
+        _fail("publisher-private-registry-request-timed-out")
+    except KeyboardInterrupt as exc:
+        response_body.clear()
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code=_safe_attribution_error(exc),
+            correlation_hash=None,
+            terminal_disposition="CANCELLED",
+        )
+        raise
+    except BaseException as exc:
+        response_body.clear()
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code=_safe_attribution_error(exc),
+            correlation_hash=None,
+            terminal_disposition="UNCERTAIN"
+            if isinstance(exc, (OSError, ssl.SSLError, http.client.HTTPException))
+            else "FAILED",
+        )
+        if isinstance(exc, (OSError, ssl.SSLError, http.client.HTTPException)):
+            _fail("publisher-private-registry-request-failed")
+        raise
     finally:
         connection.close()
 
@@ -4670,16 +5076,6 @@ def _denial_probe(
         environment_overrides=environment_overrides,
         expected_authorization="deny",
     )
-    if (
-        attribution is not None
-        and operation_id is not None
-        and attribution_spec is not None
-        and attribution_spec["azureMutation"] is True
-    ):
-        attribution.mark_execution_began(
-            operation_id,
-            cleanup_or_revocation=attribution_spec["cleanupOrRevocation"] is True,
-        )
     try:
         if argv[0] == "az":
             actual = _resolve_authorized_process_launch(argv).argv
@@ -4694,6 +5090,11 @@ def _denial_probe(
                 if not resolved.is_dir():
                     _fail("lifecycle-environment-override-unapproved")
             environment.update(environment_overrides)
+        if attribution is not None and operation_id is not None and attribution_spec is not None:
+            attribution.mark_request_attempt_began(
+                operation_id,
+                cleanup_or_revocation=attribution_spec["cleanupOrRevocation"] is True,
+            )
         completed = subprocess.run(
             actual,
             cwd=REPOSITORY_ROOT,
@@ -4704,16 +5105,38 @@ def _denial_probe(
             shell=False,
             timeout=OPERATION_TIMEOUT_SECONDS,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:
         _finish_process_attribution(
             attribution,
             operation_id,
             status_code="not-reported",
-            azure_error_code="denial-probe-process-failed",
+            azure_error_code="denial-probe-process-timed-out",
             correlation_hash=None,
-            terminal_disposition="FAILED",
+            terminal_disposition="TIMED_OUT",
         )
-        _fail("denial-probe-process-failed")
+        _fail("denial-probe-process-timed-out")
+    except KeyboardInterrupt:
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code="denial-probe-process-cancelled",
+            correlation_hash=None,
+            terminal_disposition="CANCELLED",
+        )
+        raise
+    except OSError:
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code="denial-probe-process-launch-failed",
+            correlation_hash=None,
+            terminal_disposition="UNCERTAIN",
+        )
+        _fail("denial-probe-process-launch-failed")
+    if attribution is not None and operation_id is not None:
+        attribution.mark_azure_request_issued(operation_id)
     stdout = bytearray(completed.stdout)
     stderr = bytearray(completed.stderr)
     attribution_finished = False
@@ -4727,7 +5150,7 @@ def _denial_probe(
                 status_code="2xx-not-reported",
                 azure_error_code=None,
                 correlation_hash=_sanitized_correlation_hash(stdout, stderr),
-                terminal_disposition="COMPLETED",
+                terminal_disposition="SUCCEEDED",
             )
             attribution_finished = True
             return "allowed"
@@ -4747,7 +5170,7 @@ def _denial_probe(
             status_code=_sanitized_status_code(stdout, stderr, default="403"),
             azure_error_code=_sanitized_azure_error_code(stdout, stderr),
             correlation_hash=_sanitized_correlation_hash(stdout, stderr),
-            terminal_disposition="COMPLETED",
+            terminal_disposition="SUCCEEDED",
         )
         attribution_finished = True
         return "denied"
@@ -4756,9 +5179,7 @@ def _denial_probe(
             _finish_process_attribution(
                 attribution,
                 operation_id,
-                status_code=_sanitized_status_code(
-                    stdout, stderr, default="not-reported"
-                ),
+                status_code=_sanitized_status_code(stdout, stderr, default="not-reported"),
                 azure_error_code=_safe_attribution_error(exc),
                 correlation_hash=_sanitized_correlation_hash(stdout, stderr),
                 terminal_disposition="FAILED",
@@ -5088,9 +5509,13 @@ def _docker_login_with_refresh_token(
     stderr = bytearray()
     attribution_finished = False
     try:
+        publisher_environment = _publisher_environment(environment)
+        docker_executable = _resolved_executable("docker")
+        if attribution is not None and operation_id is not None:
+            attribution.mark_request_attempt_began(operation_id, cleanup_or_revocation=False)
         completed = subprocess.run(
             (
-                _resolved_executable("docker"),
+                docker_executable,
                 "login",
                 REGISTRY_HOST,
                 "--username",
@@ -5098,13 +5523,15 @@ def _docker_login_with_refresh_token(
                 "--password-stdin",
             ),
             cwd=REPOSITORY_ROOT,
-            env=_publisher_environment(environment),
+            env=publisher_environment,
             input=payload,
             capture_output=True,
             check=False,
             shell=False,
             timeout=OPERATION_TIMEOUT_SECONDS,
         )
+        if attribution is not None and operation_id is not None:
+            attribution.mark_azure_request_issued(operation_id)
         stdout.extend(completed.stdout)
         stderr.extend(completed.stderr)
         if len(stdout) + len(stderr) > MAXIMUM_OUTPUT_BYTES:
@@ -5119,28 +5546,48 @@ def _docker_login_with_refresh_token(
             status_code="2xx-not-reported",
             azure_error_code=None,
             correlation_hash=_sanitized_correlation_hash(stdout, stderr),
-            terminal_disposition="COMPLETED",
+            terminal_disposition="SUCCEEDED",
         )
         attribution_finished = True
-    except (OSError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:
         _finish_process_attribution(
             attribution,
             operation_id,
             status_code="not-reported",
-            azure_error_code="publisher-docker-login-process-failed",
+            azure_error_code="publisher-docker-login-process-timed-out",
             correlation_hash=None,
-            terminal_disposition="FAILED",
+            terminal_disposition="TIMED_OUT",
         )
         attribution_finished = True
-        _fail("publisher-docker-login-process-failed")
+        _fail("publisher-docker-login-process-timed-out")
+    except KeyboardInterrupt:
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code="publisher-docker-login-process-cancelled",
+            correlation_hash=None,
+            terminal_disposition="CANCELLED",
+        )
+        attribution_finished = True
+        raise
+    except OSError:
+        _finish_process_attribution(
+            attribution,
+            operation_id,
+            status_code="not-reported",
+            azure_error_code="publisher-docker-login-process-launch-failed",
+            correlation_hash=None,
+            terminal_disposition="UNCERTAIN",
+        )
+        attribution_finished = True
+        _fail("publisher-docker-login-process-launch-failed")
     except BaseException as exc:
         if not attribution_finished:
             _finish_process_attribution(
                 attribution,
                 operation_id,
-                status_code=_sanitized_status_code(
-                    stdout, stderr, default="not-reported"
-                ),
+                status_code=_sanitized_status_code(stdout, stderr, default="not-reported"),
                 azure_error_code=_safe_attribution_error(exc),
                 correlation_hash=_sanitized_correlation_hash(stdout, stderr),
                 terminal_disposition="FAILED",
@@ -6172,11 +6619,7 @@ def _safe_failed_stage(receipt_directory: Path | None, *, operation: str) -> str
     attributed = _attributed_failed_stage(receipt_directory)
     if attributed is not None:
         return attributed
-    if operation in {
-        "post-secret-provisioning",
-        "temporary-authority-revocation",
-        "cleanup",
-    }:
+    if operation in LIFECYCLE_OPERATIONS:
         return "protected-attribution-missing"
     path = _state_path(receipt_directory)
     if not path.is_file():
@@ -6413,6 +6856,8 @@ def main() -> int:
         with _operation_attribution_session(
             receipt_directory=receipt_directory,
             lifecycle_stage=args.operation,
+            ledger_integrity=_ledger_integrity(ledger),
+            repository_head=args.repository_head,
         ):
             if args.operation == "pre-secret-provisioning":
                 result = _pre_secret(
