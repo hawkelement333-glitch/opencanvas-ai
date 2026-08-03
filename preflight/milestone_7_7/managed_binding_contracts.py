@@ -257,18 +257,15 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         raise ContractError("managed-binding Redis region differs")
     if contract["resourceGroups"] != EXPECTED_RESOURCE_GROUPS:
         raise ContractError("managed-binding resource groups differ")
-    cleanup_execution = _as_object(
-        contract["cleanupExecution"], "$.cleanupExecution"
-    )
+    cleanup_execution = _as_object(contract["cleanupExecution"], "$.cleanupExecution")
     expected_cleanup_execution = {
         "absenceVerificationSeconds": 300,
         "authorizationParameter": "CleanupAuthorized",
         "authorizationValue": True,
-        "cleanupContributorRoleDefinitionId": (
-            "b24988ac-6180-42a0-ab88-20f7382dd24c"
-        ),
+        "cleanupContributorRoleDefinitionId": ("b24988ac-6180-42a0-ab88-20f7382dd24c"),
         "deadlineUtc": "2026-08-03T11:00:00Z",
         "deletionWaitSeconds": 2700,
+        "launchGraceSeconds": 1800,
         "publishedContentSha256": cleanup_runbook_sha256(
             CLEANUP_RUNBOOK_PATH.read_text(encoding="utf-8")
         ),

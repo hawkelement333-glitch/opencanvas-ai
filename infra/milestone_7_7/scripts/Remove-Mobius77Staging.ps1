@@ -8,6 +8,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+$ExecutionStartedAtUtc = [DateTimeOffset]::UtcNow
 
 $ExactTargetResourceGroup = "rg-solarplexus-mobius-77-staging"
 $ProtectedResourceGroups = @(
@@ -18,12 +19,14 @@ $ProtectedResourceGroups = @(
 $ExpectedSubscriptionFingerprint = "f4493115ce6375cf0e5d0616bede57126075fdb27ac78ea0ba7e0085252a7028"
 $SubscriptionFingerprintDomain = "mobius.azure.subscription-context.v1"
 $ExpectedRoleDefinitionId = "b24988ac-6180-42a0-ab88-20f7382dd24c"
-$AuthorizedCleanupDeadlineUtc = [DateTimeOffset]::ParseExact(
+$CleanupLaunchGrace = [TimeSpan]::FromMinutes(30)
+$ScheduledCleanupAtUtc = [DateTimeOffset]::ParseExact(
     "2026-08-03T11:00:00Z",
     "yyyy-MM-ddTHH:mm:ssZ",
     [Globalization.CultureInfo]::InvariantCulture,
     [Globalization.DateTimeStyles]::AssumeUniversal
 ).ToUniversalTime()
+$LatestCleanupLaunchAtUtc = $ScheduledCleanupAtUtc.Add($CleanupLaunchGrace)
 
 function Stop-Cleanup([string] $Reason) {
     throw "cleanup-contract-$Reason"
@@ -41,8 +44,11 @@ if ($ProtectedResourceGroups -ccontains $TargetResourceGroupName) {
 if ($CleanupAuthorized -ne $true) {
     Stop-Cleanup "authorization-denied"
 }
-if ([DateTimeOffset]::UtcNow -gt $AuthorizedCleanupDeadlineUtc) {
-    Stop-Cleanup "deadline-expired"
+if (
+    $ExecutionStartedAtUtc -lt $ScheduledCleanupAtUtc -or
+    $ExecutionStartedAtUtc -gt $LatestCleanupLaunchAtUtc
+) {
+    Stop-Cleanup "outside-launch-window"
 }
 
 Disable-AzContextAutosave -Scope Process | Out-Null

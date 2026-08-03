@@ -4347,17 +4347,54 @@ def test_cleanup_guard_rejects_missing_stale_or_altered_authority(
     assert delete_calls == []
 
 
-def test_timer_runbook_is_exactly_guarded_and_deletion_capable() -> None:
+@pytest.mark.parametrize(
+    ("offset_seconds", "expected"),
+    [
+        (-1, False),
+        (0, True),
+        (1, True),
+        (300, True),
+        (900, True),
+        (1800, True),
+        (1801, False),
+    ],
+)
+def test_cleanup_launch_window_boundaries(offset_seconds: int, expected: bool) -> None:
+    contract = load_managed_binding_contract()
+    cleanup = cast(dict[str, JsonValue], contract["cleanupExecution"])
+    scheduled = datetime.strptime(cast(str, cleanup["deadlineUtc"]), "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=UTC
+    )
+    execution_started = scheduled + timedelta(seconds=offset_seconds)
+    latest = scheduled + timedelta(seconds=cast(int, cleanup["launchGraceSeconds"]))
+
+    assert (scheduled <= execution_started <= latest) is expected
+
+
+def test_timer_runbook_is_bounded_guarded_and_deletion_capable() -> None:
     text = managed_binding_lifecycle.CLEANUP_RUNBOOK.read_text(encoding="utf-8")
 
-    assert '[bool] $CleanupAuthorized' in text
-    assert 'if ($CleanupAuthorized -ne $true)' in text
-    assert '$TargetResourceGroupName -cne $ExactTargetResourceGroup' in text
+    assert "[bool] $CleanupAuthorized" in text
+    assert text.count("$ExecutionStartedAtUtc = [DateTimeOffset]::UtcNow") == 1
+    assert "$CleanupLaunchGrace = [TimeSpan]::FromMinutes(30)" in text
+    assert "$LatestCleanupLaunchAtUtc = $ScheduledCleanupAtUtc.Add(" in text
+    assert "$ExecutionStartedAtUtc -lt $ScheduledCleanupAtUtc" in text
+    assert "$ExecutionStartedAtUtc -gt $LatestCleanupLaunchAtUtc" in text
+    assert 'Stop-Cleanup "outside-launch-window"' in text
+    assert "AuthorizedCleanupDeadlineUtc" not in text
+    assert "if ($CleanupAuthorized -ne $true)" in text
+    assert "[Parameter(Mandatory = $true)]" in text
+    assert 'Stop-Cleanup "target-missing"' in text
+    assert "$TargetResourceGroupName -cne $ExactTargetResourceGroup" in text
     assert '"rg-solarplexus-mobius-77-staging"' in text
     assert '"rg-solarplexus-mobius-73-staging"' in text
     assert '"rg-solarplexus-mobius-77-cleanup-control"' in text
     assert '"rg-solarplexus-mobius-77-containerapps-infrastructure"' in text
     assert "Get-AzRoleAssignment" in text
+    assert "-Scope $targetScope" in text
+    assert "$_.Scope -ceq $targetScope" in text
+    assert "if ($assignments.Count -ne 1)" in text
+    assert "Connect-AzAccount -Identity" in text
     assert "Remove-AzResourceGroup" in text
     assert "-AsJob" in text
     assert "Wait-Job -Job $deleteJob -Timeout 2700" in text
@@ -4365,6 +4402,43 @@ def test_timer_runbook_is_exactly_guarded_and_deletion_capable() -> None:
     assert 'deletionResult = "DELETED"' in text
     assert "Remove-AzKeyVault" not in text
     assert "Remove-AzRoleAssignment" not in text
+
+    launch_guard = text.index("$ExecutionStartedAtUtc -lt $ScheduledCleanupAtUtc")
+    identity = text.index("Connect-AzAccount -Identity")
+    role_scope = text.index("Get-AzRoleAssignment")
+    already_absent = text.index('deletionResult = "ALREADY_ABSENT"')
+    deletion = text.index("Remove-AzResourceGroup")
+    assert launch_guard < identity < role_scope < already_absent < deletion
+    assert "$LatestCleanupLaunchAtUtc" not in text[deletion:]
+    assert 'Stop-Cleanup "deletion-timeout"' in text
+    assert "finally" in text
+    assert "Remove-Job -Job $deleteJob -Force" in text
+    assert "Write-Host" not in text
+    assert "Write-Verbose" not in text
+    assert "*mobius77*" not in text
+    assert "Get-AzKeyVaultSecret" not in text
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "authorizationParameter",
+        "authorizationValue",
+        "targetParameter",
+        "targetResourceGroup",
+        "deadlineUtc",
+        "launchGraceSeconds",
+    ],
+)
+def test_cleanup_execution_required_fields_fail_closed_when_missing(
+    field: str,
+) -> None:
+    contract = deepcopy(load_managed_binding_contract())
+    cleanup = cast(dict[str, JsonValue], contract["cleanupExecution"])
+    del cleanup[field]
+
+    with pytest.raises(ContractError, match=r"cleanup execution|schema|required"):
+        validate_managed_binding_contract(contract)
 
 
 def test_cleanup_publication_and_evidence_are_content_bound() -> None:
@@ -4393,13 +4467,14 @@ def test_cleanup_publication_and_evidence_are_content_bound() -> None:
         ("authorizationValue", False),
         ("targetResourceGroup", "rg-solarplexus-mobius-77-cleanup-control"),
         ("deadlineUtc", "2026-08-03T12:00:00Z"),
+        ("deadlineUtc", "2026-08-03T11:00:00-05:00"),
+        ("launchGraceSeconds", 0),
+        ("launchGraceSeconds", 1801),
         ("deletionWaitSeconds", 0),
         ("publishedContentSha256", "0" * 64),
     ],
 )
-def test_cleanup_execution_contract_tampering_fails_closed(
-    field: str, value: JsonValue
-) -> None:
+def test_cleanup_execution_contract_tampering_fails_closed(field: str, value: JsonValue) -> None:
     contract = deepcopy(load_managed_binding_contract())
     cast(dict[str, JsonValue], contract["cleanupExecution"])[field] = value
 
