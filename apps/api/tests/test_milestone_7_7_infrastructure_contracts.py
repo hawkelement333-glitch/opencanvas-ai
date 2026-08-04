@@ -274,6 +274,7 @@ def test_bicep_preserves_inert_defaults_and_gates_one_run_resources():
     assert "output secretValueAccessAuthorized bool = false" in main
     assert "output deploymentEnabled bool = deploymentEnabled" in main
     assert "output moduleCount int = length(moduleBoundaries)" in main
+    assert "@maxValue(22500)\nparam maximumPlausibleUsdCents int = 1" in main
 
 
 def test_post_secret_storage_requires_explicit_resolved_scanner_bridge():
@@ -321,6 +322,7 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
     expected_tokens = {
         "cleanup-supervisor.bicep": [
             "param expectedUsdCents int",
+            "@maxValue(22500)",
             "param maximumPlausibleUsdCents int",
             "param uncertaintyContingencyBasisPoints int = 2500",
             "param hardMaximumHours int = 30",
@@ -551,16 +553,16 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
     value = _json(MANIFESTS / "cost-envelope.template.json")
     assert value["targetUsdCents"] == 10000
     assert value["provisioningBlockAboveUsdCents"] == 12000
-    assert value["absoluteCeilingUsdCents"] == 17500
+    assert value["absoluteCeilingUsdCents"] == 22500
     assert value["uncertaintyContingencyBasisPoints"] == 2500
     assert value["budgetAlertsAreEnforcement"] is False
     assert value["resolutionStatus"] == "verified"
     assert value["expectedUsdCents"] == 3110
-    assert value["baseMaximumUsdCents"] == 11650
-    assert value["contingencyUsdCents"] == 2913
-    assert value["maximumPlausibleUsdCents"] == 14563
+    assert value["baseMaximumUsdCents"] == 15902
+    assert value["contingencyUsdCents"] == 3976
+    assert value["maximumPlausibleUsdCents"] == 19878
     assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 3110
-    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 11650
+    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 15902
     required_lines = {
         "postgresql-zone-redundant-compute",
         "postgresql-storage-and-backup",
@@ -570,7 +572,7 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
         "defender-malware-scanning",
         "additional-private-connectivity-and-data",
         "failed-cleanup-six-hour-exposure",
-        "cleanup-extension-nine-and-quarter-hour-exposure",
+        "cleanup-extension-twenty-seven-and-half-hour-exposure",
     }
     assert required_lines.issubset({item["name"] for item in value["lineItems"]})
     assert all(
@@ -606,9 +608,9 @@ def test_cost_rejects_zero_empty_over_block_at_ceiling_and_bad_contingency():
     over_block = _resolved_cost(expected=12001, base_maximum=12001)
     with pytest.raises(contract.ContractError, match="provisioning block"):
         contract._validate_cost(over_block)
-    at_ceiling = _resolved_cost(expected=12000, base_maximum=14000)
+    at_ceiling = _resolved_cost(expected=12000, base_maximum=18000)
     contract._validate_cost(at_ceiling)
-    over_ceiling = _resolved_cost(expected=12000, base_maximum=14001)
+    over_ceiling = _resolved_cost(expected=12000, base_maximum=18001)
     with pytest.raises(contract.ContractError, match="absolute ceiling"):
         contract._validate_cost(over_ceiling)
     bad_contingency = _resolved_cost()

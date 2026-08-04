@@ -72,7 +72,7 @@
     "unsigned"
   ],
   "limits": {
-    "absoluteCostCeilingUsdCents": 17500,
+    "absoluteCostCeilingUsdCents": 22500,
     "maximumArrivalRatePerSecond": 100,
     "maximumAttemptsPerScenario": 1,
     "maximumConcurrency": 128,
@@ -90,7 +90,7 @@
     "provisioningBlockAboveUsdCents": 12000
   },
   "planId": "m7.7-cp4-local-failure-plan",
-  "planIntegritySha256": "bc0132f8babe576656b9422d17a05cc21e674bf9f7b7418cd68d4915b2a049f3",
+  "planIntegritySha256": "bd667c6f82c57f4e556765b9246c1b84987b25ab89e9aaf9ee293d0c6d319bbc",
   "purpose": "local-failure-injection-framework",
   "safety": {
     "credentialsAllowed": false,
