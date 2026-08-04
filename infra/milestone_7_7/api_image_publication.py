@@ -9,7 +9,6 @@ import re
 import shutil
 import subprocess
 import tempfile
-import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,6 +19,9 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     REPOSITORY_ROOT,
     load_managed_binding_contract,
 )
+from preflight.milestone_7_7.publication_path_admission import (
+    verify_private_registry_publication_path,
+)
 
 from infra.milestone_7_7.scripts.managed_binding_lifecycle import (
     API_IMAGE_BUILDER_PREFIX,
@@ -27,18 +29,15 @@ from infra.milestone_7_7.scripts.managed_binding_lifecycle import (
     API_IMAGE_BUILD_INPUT_DOMAIN,
     API_IMAGE_PLATFORM,
     DEPLOYMENT_TIMEOUT_SECONDS,
-    DOCKER_PUSH_MAXIMUM_ATTEMPTS,
     HEX_SHA256,
     HEX_SHA40,
     IMAGE_DIGEST,
     _LIFECYCLE_MODULE_IDENTITY as _LIFECYCLE_MODULE_IDENTITY,
-    MAXIMUM_OUTPUT_BYTES,
     PREBUILT_IMAGE_RECORD_DOMAIN,
     PREBUILT_IMAGE_RECORD_VERSION,
     PUBLISHER_REPOSITORY,
     RAW_IMAGE_DIGEST,
     REGISTRY_HOST,
-    DockerPushTransient,
     PublisherAccessPending,
     _acr_manifest_digest,
     _assert_source_tag_absent,
@@ -81,6 +80,38 @@ from infra.milestone_7_7.scripts.managed_binding_lifecycle import (
     _wait_for_publisher_role_inventory,
 )
 
+DOCKER_PUSH_EVIDENCE_DOMAIN = (
+    b"solarplexus-mobius/milestone-7.7/docker-push-evidence/v1\x00"
+)
+DOCKER_PUSH_EVIDENCE_VERSION = "mobius.milestone-7.7.docker-push-evidence.v1"
+DOCKER_PUSH_EVIDENCE_FILE = "docker-push-evidence.json"
+DOCKER_PUSH_MAXIMUM_OUTPUT_BYTES = 4 * 1024 * 1024
+SENSITIVE_PUSH_OUTPUT_PATTERNS = (
+    re.compile(r"(?i)(Authorization\s*:\s*)(?:Bearer|Basic)\s+\S+"),
+    re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{16,}"),
+    re.compile(
+        r"(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----"
+    ),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+"),
+    re.compile(
+        r"(?i)(?:[A-Z]:\\(?:"
+        + "Users"
+        + r")\\|/(?:"
+        + "Users"
+        + r")/|/(?:"
+        + "home"
+        + r")/)[^/\s\\]+(?:[/\\][^\s]*)?"
+    ),
+    re.compile(r"(?i)/subscriptions/[0-9a-f-]{36}(?:/[^\s]*)?"),
+    re.compile(
+        r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}\b"
+    ),
+    re.compile(
+        r"\b(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})\b"
+    ),
+)
+
 
 class PublicationAttemptFailure(RuntimeError):
     """Preserve the first publication failure when closeout also fails."""
@@ -93,6 +124,141 @@ class PublicationAttemptFailure(RuntimeError):
         self.primary_error_code = _safe_attribution_error(primary_error)
         self.secondary_error_code = _safe_attribution_error(secondary_error)
         super().__init__(self.primary_error_code)
+
+
+def _format_utc(value: datetime) -> str:
+    return value.astimezone(UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _sanitize_push_output(raw: bytes) -> str:
+    text = raw.decode("utf-8", errors="replace").replace(
+        REGISTRY_HOST, "[private-registry]"
+    )
+    for pattern in SENSITIVE_PUSH_OUTPUT_PATTERNS:
+        text = pattern.sub(
+            r"\1[redacted]"
+            if pattern is SENSITIVE_PUSH_OUTPUT_PATTERNS[0]
+            else "[redacted]",
+            text,
+        )
+    return text
+
+
+def _material_error_lines(stdout: str, stderr: str) -> tuple[str | None, str | None]:
+    markers = re.compile(
+        r"(?i)(?:error|failed|failure|denied|unauthorized|forbidden|timeout|"
+        r"reset|refused|eof|unavailable|not found|unknown|only one connection)"
+    )
+    lines = [
+        line.strip()
+        for stream in (stderr, stdout)
+        for line in stream.splitlines()
+        if line.strip() and markers.search(line)
+    ]
+    return (lines[0], lines[-1]) if lines else (None, None)
+
+
+def _docker_runtime_metadata(
+    docker_executable: str, *, environment: Mapping[str, str]
+) -> dict[str, str]:
+    commands = {
+        "context": (docker_executable, "context", "show"),
+        "endpoint": (
+            docker_executable,
+            "context",
+            "inspect",
+            "--format",
+            "{{json .Endpoints.docker.Host}}",
+        ),
+        "version": (docker_executable, "version", "--format", "{{json .}}"),
+    }
+    results: dict[str, str] = {}
+    for name, command in commands.items():
+        completed = subprocess.run(
+            command,
+            cwd=REPOSITORY_ROOT,
+            env=dict(environment),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=False,
+            shell=False,
+            timeout=120,
+        )
+        if completed.returncode != 0 or completed.stderr:
+            _fail("publisher-docker-runtime-metadata-unavailable")
+        try:
+            results[name] = completed.stdout.decode("utf-8", errors="strict").strip()
+        except UnicodeError:
+            _fail("publisher-docker-runtime-metadata-malformed")
+    if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", results["context"]) is None:
+        _fail("publisher-docker-runtime-metadata-malformed")
+    try:
+        endpoint = json.loads(results["endpoint"])
+    except json.JSONDecodeError:
+        _fail("publisher-docker-runtime-metadata-malformed")
+    if not isinstance(endpoint, str) or not endpoint:
+        _fail("publisher-docker-runtime-metadata-malformed")
+    endpoint_class = next(
+        (
+            name
+            for prefix, name in (
+                ("npipe://", "windows-npipe"),
+                ("unix://", "local-unix-socket"),
+                ("tcp://", "tcp"),
+                ("ssh://", "ssh"),
+            )
+            if endpoint.casefold().startswith(prefix)
+        ),
+        "opaque",
+    )
+    try:
+        version = json.loads(results["version"])
+    except json.JSONDecodeError:
+        _fail("publisher-docker-runtime-metadata-malformed")
+    if not isinstance(version, dict):
+        _fail("publisher-docker-runtime-metadata-malformed")
+    client = version.get("Client")
+    server = version.get("Server")
+    if not isinstance(client, dict) or not isinstance(server, dict):
+        _fail("publisher-docker-runtime-metadata-malformed")
+    client_version = client.get("Version")
+    server_version = server.get("Version")
+    server_os = server.get("Os")
+    if not all(
+        isinstance(value, str) for value in (client_version, server_version, server_os)
+    ):
+        _fail("publisher-docker-runtime-metadata-malformed")
+    return {
+        "context": results["context"],
+        "clientVersion": str(client_version),
+        "serverVersion": str(server_version),
+        "serverOs": str(server_os),
+        "endpointClass": endpoint_class,
+        "endpointSha256": hashlib.sha256(endpoint.encode()).hexdigest(),
+    }
+
+
+def _write_docker_push_evidence(path: Path, body: dict[str, JsonValue]) -> None:
+    resolved = _outside_repository(path, "docker-push-evidence")
+    temporary = resolved.with_suffix(".tmp")
+    if not resolved.parent.is_dir() or temporary.exists():
+        _fail("publisher-docker-push-evidence-state-invalid")
+    value = {
+        **body,
+        "integritySha256": hashlib.sha256(
+            DOCKER_PUSH_EVIDENCE_DOMAIN + canonical_bytes(body)
+        ).hexdigest(),
+    }
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(canonical_bytes(value))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, resolved)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+        _fail("publisher-docker-push-evidence-write-failed")
 
 
 def _api_image_reference(repository_head: str) -> str:
@@ -528,7 +694,12 @@ def _docker_push_error_code(stdout: bytearray, stderr: bytearray) -> str:
     )
 
 
-def _docker_push_once(image_reference: str, *, environment: Mapping[str, str]) -> str:
+def _docker_push_once(
+    image_reference: str,
+    *,
+    environment: Mapping[str, str],
+    evidence_path: Path,
+) -> str:
     if not re.fullmatch(
         rf"{re.escape(REGISTRY_HOST)}/{PUBLISHER_REPOSITORY}:source-[0-9a-f]{{40}}",
         image_reference,
@@ -543,55 +714,197 @@ def _docker_push_once(image_reference: str, *, environment: Mapping[str, str]) -
     stdout = bytearray()
     stderr = bytearray()
     attribution_finished = False
+    started_at = datetime.now(tz=UTC)
+    publisher_environment = _publisher_environment(environment)
+    docker_executable = _resolved_executable("docker")
+    runtime = _docker_runtime_metadata(
+        docker_executable, environment=publisher_environment
+    )
+    source_tag = image_reference.rsplit(":", maxsplit=1)[1]
+    command_projection: list[JsonValue] = [
+        Path(docker_executable).name,
+        "push",
+        f"[private-registry]/{PUBLISHER_REPOSITORY}:{source_tag}",
+    ]
+    initial: dict[str, JsonValue] = {
+        "schemaVersion": DOCKER_PUSH_EVIDENCE_VERSION,
+        "status": "STARTED",
+        "command": command_projection,
+        "credentialsPresentInCommand": False,
+        "dockerClientVersion": runtime["clientVersion"],
+        "dockerContext": runtime["context"],
+        "dockerDaemonEndpointClass": runtime["endpointClass"],
+        "dockerDaemonEndpointSha256": runtime["endpointSha256"],
+        "dockerDaemonOs": runtime["serverOs"],
+        "dockerDaemonVersion": runtime["serverVersion"],
+        "registryHostSha256": hashlib.sha256(REGISTRY_HOST.encode("ascii")).hexdigest(),
+        "repository": PUBLISHER_REPOSITORY,
+        "sourceTag": source_tag,
+        "startedAtUtc": _format_utc(started_at),
+        "finishedAtUtc": None,
+        "actualExitCode": None,
+        "timedOut": False,
+        "processKilled": False,
+        "azureMutationBegan": False,
+        "azureMutationState": "NOT_BEGUN",
+        "stdoutComplete": False,
+        "stderrComplete": False,
+        "stdoutSanitized": "",
+        "stderrSanitized": "",
+        "stdoutSanitizedSha256": hashlib.sha256(b"").hexdigest(),
+        "stderrSanitizedSha256": hashlib.sha256(b"").hexdigest(),
+        "firstMaterialError": None,
+        "finalMaterialError": None,
+        "rawOutputRetained": False,
+        "secretValueRetained": False,
+    }
+    _write_docker_push_evidence(evidence_path, initial)
+
+    def finalize_evidence(
+        *,
+        status: str,
+        exit_code: int | None,
+        timed_out: bool,
+        process_killed: bool,
+        mutation_state: str,
+    ) -> tuple[str, str]:
+        stdout_text = _sanitize_push_output(bytes(stdout))
+        stderr_text = _sanitize_push_output(bytes(stderr))
+        output_within_bound = (
+            len(stdout) + len(stderr) <= DOCKER_PUSH_MAXIMUM_OUTPUT_BYTES
+        )
+        if not output_within_bound:
+            stdout_text = "[sanitized-output-exceeded-bound]"
+            stderr_text = "[sanitized-output-exceeded-bound]"
+        first_error, final_error = _material_error_lines(stdout_text, stderr_text)
+        body = {
+            **initial,
+            "status": status,
+            "finishedAtUtc": _format_utc(datetime.now(tz=UTC)),
+            "actualExitCode": exit_code,
+            "timedOut": timed_out,
+            "processKilled": process_killed,
+            "azureMutationBegan": (
+                True
+                if mutation_state == "CONFIRMED"
+                else False
+                if mutation_state == "NOT_BEGUN"
+                else None
+            ),
+            "azureMutationState": mutation_state,
+            "stdoutComplete": output_within_bound,
+            "stderrComplete": output_within_bound,
+            "stdoutSanitized": stdout_text,
+            "stderrSanitized": stderr_text,
+            "stdoutSanitizedSha256": hashlib.sha256(stdout_text.encode()).hexdigest(),
+            "stderrSanitizedSha256": hashlib.sha256(stderr_text.encode()).hexdigest(),
+            "firstMaterialError": first_error,
+            "finalMaterialError": final_error,
+        }
+        _write_docker_push_evidence(evidence_path, body)
+        if not output_within_bound:
+            _fail("publisher-docker-push-output-oversized")
+        return stdout_text, stderr_text
+
     try:
-        publisher_environment = _publisher_environment(environment)
-        docker_executable = _resolved_executable("docker")
         if attribution is not None and operation_id is not None:
             attribution.mark_request_attempt_began(
                 operation_id, cleanup_or_revocation=False
             )
-        completed = subprocess.run(
+        process = subprocess.Popen(
             (docker_executable, "push", image_reference),
             cwd=REPOSITORY_ROOT,
             env=publisher_environment,
             stdin=subprocess.DEVNULL,
-            capture_output=True,
-            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             shell=False,
-            timeout=DEPLOYMENT_TIMEOUT_SECONDS,
         )
         if attribution is not None and operation_id is not None:
             attribution.mark_azure_request_issued(operation_id)
-        stdout.extend(completed.stdout)
-        stderr.extend(completed.stderr)
-        if len(stdout) + len(stderr) > MAXIMUM_OUTPUT_BYTES:
-            _fail("publisher-docker-push-output-oversized")
-        if completed.returncode != 0:
+        try:
+            raw_stdout, raw_stderr = process.communicate(
+                timeout=DEPLOYMENT_TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired:
+            process.kill()
+            raw_stdout, raw_stderr = process.communicate()
+            stdout.extend(raw_stdout)
+            stderr.extend(raw_stderr)
+            finalize_evidence(
+                status="TIMED_OUT",
+                exit_code=process.returncode,
+                timed_out=True,
+                process_killed=True,
+                mutation_state="UNKNOWN_PENDING_REGISTRY_RECONCILIATION",
+            )
+            _finish_process_attribution(
+                attribution,
+                operation_id,
+                status_code="process-timeout",
+                azure_error_code="publisher-docker-push-process-timed-out",
+                correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+                terminal_disposition="TIMED_OUT",
+            )
+            attribution_finished = True
+            _fail("publisher-docker-push-process-timed-out")
+        except KeyboardInterrupt:
+            process.kill()
+            raw_stdout, raw_stderr = process.communicate()
+            stdout.extend(raw_stdout)
+            stderr.extend(raw_stderr)
+            finalize_evidence(
+                status="CANCELLED",
+                exit_code=process.returncode,
+                timed_out=False,
+                process_killed=True,
+                mutation_state="UNKNOWN_PENDING_REGISTRY_RECONCILIATION",
+            )
+            _finish_process_attribution(
+                attribution,
+                operation_id,
+                status_code="process-cancelled",
+                azure_error_code="publisher-docker-push-process-cancelled",
+                correlation_hash=_sanitized_correlation_hash(stdout, stderr),
+                terminal_disposition="CANCELLED",
+            )
+            attribution_finished = True
+            raise
+        stdout.extend(raw_stdout)
+        stderr.extend(raw_stderr)
+        stdout_text, stderr_text = finalize_evidence(
+            status="SUCCEEDED" if process.returncode == 0 else "FAILED",
+            exit_code=process.returncode,
+            timed_out=False,
+            process_killed=False,
+            mutation_state=(
+                "CONFIRMED"
+                if process.returncode == 0
+                else "UNKNOWN_PENDING_REGISTRY_RECONCILIATION"
+            ),
+        )
+        if process.returncode != 0:
             error_code = _docker_push_error_code(stdout, stderr)
             _finish_process_attribution(
                 attribution,
                 operation_id,
-                status_code=_sanitized_status_code(
-                    stdout, stderr, default="not-reported"
-                ),
+                status_code=f"process-exit-{process.returncode}",
                 azure_error_code=error_code,
                 correlation_hash=_sanitized_correlation_hash(stdout, stderr),
                 terminal_disposition="FAILED",
             )
             attribution_finished = True
-            if error_code == "publisher-docker-push-transient":
-                raise DockerPushTransient(error_code)
             _fail(error_code)
-        source_tag = image_reference.rsplit(":", maxsplit=1)[1].encode("ascii")
+        source_tag_bytes = source_tag.encode("ascii")
         digest_pattern = (
             rb"(?im)^(?:"
-            + re.escape(source_tag)
+            + re.escape(source_tag_bytes)
             + rb":\s*)?digest:\s*(sha256:[0-9a-f]{64})\s+size:\s*[1-9][0-9]*\s*$"
         )
         digest_matches = {
             match.group(1)
-            for buffer in (stdout, stderr)
-            for match in re.finditer(digest_pattern, bytes(buffer))
+            for buffer in (stdout_text, stderr_text)
+            for match in re.finditer(digest_pattern, buffer.encode())
         }
         if len(digest_matches) != 1:
             _fail("publisher-docker-push-digest-malformed")
@@ -606,29 +919,14 @@ def _docker_push_once(image_reference: str, *, environment: Mapping[str, str]) -
         )
         attribution_finished = True
         return raw_digest
-    except subprocess.TimeoutExpired:
-        _finish_process_attribution(
-            attribution,
-            operation_id,
-            status_code="not-reported",
-            azure_error_code="publisher-docker-push-process-timed-out",
-            correlation_hash=None,
-            terminal_disposition="TIMED_OUT",
-        )
-        attribution_finished = True
-        _fail("publisher-docker-push-process-timed-out")
-    except KeyboardInterrupt:
-        _finish_process_attribution(
-            attribution,
-            operation_id,
-            status_code="not-reported",
-            azure_error_code="publisher-docker-push-process-cancelled",
-            correlation_hash=None,
-            terminal_disposition="CANCELLED",
-        )
-        attribution_finished = True
-        raise
     except OSError:
+        finalize_evidence(
+            status="LAUNCH_FAILED",
+            exit_code=None,
+            timed_out=False,
+            process_killed=False,
+            mutation_state="NOT_BEGUN",
+        )
         _finish_process_attribution(
             attribution,
             operation_id,
@@ -663,17 +961,14 @@ def _docker_push_prebuilt_image(
     source_tag: str,
     environment: Mapping[str, str],
     access_token: bytearray,
+    evidence_path: Path,
 ) -> str:
-    for attempt in range(DOCKER_PUSH_MAXIMUM_ATTEMPTS):
-        try:
-            return _docker_push_once(image_reference, environment=environment)
-        except DockerPushTransient:
-            if attempt + 1 == DOCKER_PUSH_MAXIMUM_ATTEMPTS:
-                raise
-            if _acr_manifest_digest(access_token, reference=source_tag) is not None:
-                _fail("publisher-docker-push-result-ambiguous")
-            time.sleep(5.0)
-    _fail("publisher-docker-push-retry-state-invalid")
+    del source_tag, access_token
+    return _docker_push_once(
+        image_reference,
+        environment=environment,
+        evidence_path=evidence_path,
+    )
 
 
 def _publish_api_image(
@@ -709,6 +1004,7 @@ def _publish_api_image(
     refresh_token = bytearray()
     access_token = bytearray()
     source_tag = f"source-{repository_head}"
+    push_evidence_path = receipt_directory / DOCKER_PUSH_EVIDENCE_FILE
     publisher_root = receipt_directory / "ephemeral-publisher"
     _secure_ephemeral_directory(publisher_root)
     azure_config = _secure_ephemeral_directory(publisher_root / "azure-config")
@@ -798,11 +1094,29 @@ def _publish_api_image(
                 expected_authorization="allow",
             ):
                 publication_attempted = True
-                pushed_digest = _docker_push_prebuilt_image(
-                    image_by_tag,
-                    source_tag=source_tag,
-                    environment=publisher_environment,
-                    access_token=access_token,
+                verify_private_registry_publication_path(
+                    repository_head=repository_head
+                )
+                try:
+                    pushed_digest = _docker_push_prebuilt_image(
+                        image_by_tag,
+                        source_tag=source_tag,
+                        environment=publisher_environment,
+                        access_token=access_token,
+                        evidence_path=push_evidence_path,
+                    )
+                except BaseException as push_error:
+                    try:
+                        verify_private_registry_publication_path(
+                            repository_head=repository_head
+                        )
+                    except BaseException as probe_error:
+                        raise PublicationAttemptFailure(
+                            push_error, probe_error
+                        ) from probe_error
+                    raise
+                verify_private_registry_publication_path(
+                    repository_head=repository_head
                 )
             resolved_digest = _acr_manifest_digest(access_token, reference=source_tag)
             if resolved_digest != pushed_digest:

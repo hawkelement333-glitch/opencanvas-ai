@@ -1726,6 +1726,15 @@ def test_ephemeral_publisher_is_same_principal_and_delete_after_denial() -> None
     assert "_docker_login_with_refresh_token(" in publish
     assert "buildx" not in publish
     assert "_docker_push_prebuilt_image(" in publish
+    assert publish.count("verify_private_registry_publication_path(") == 3
+    first_path_probe = publish.index("verify_private_registry_publication_path(", access)
+    second_path_probe = publish.index(
+        "verify_private_registry_publication_path(", first_path_probe + 1
+    )
+    final_path_probe = publish.index(
+        "verify_private_registry_publication_path(", second_path_probe + 1
+    )
+    assert first_path_probe < push < second_path_probe < final_path_probe < tag_removal
     assert "_remove_source_tag(" in publish
     assert "_acr_manifest_digest(" in publish
     assert "_verify_cleanup_control(subscription_id, cleanup_at)" in publish
@@ -2294,15 +2303,188 @@ def test_ordinary_docker_push_is_exact_isolated_and_returns_only_digest(
         "DOCKER_CONFIG": str(tmp_path / "docker"),
     }
 
-    def run(*args: object, **kwargs: object) -> object:
-        observed["args"] = args
-        observed["kwargs"] = kwargs
-        return managed_binding_lifecycle.subprocess.CompletedProcess(
-            args=args,
-            returncode=0,
-            stdout=(f"source-{'a' * 40}: digest: {digest} size: 1234\n").encode(),
-            stderr=b"",
+    evidence_path = tmp_path / "docker-push-evidence.json"
+
+    class Process:
+        returncode = 0
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            observed["args"] = args
+            observed["kwargs"] = kwargs
+            started = json.loads(evidence_path.read_text(encoding="utf-8"))
+            assert started["status"] == "STARTED"
+            assert started["actualExitCode"] is None
+
+        def communicate(self, *, timeout: int) -> tuple[bytes, bytes]:
+            assert timeout == managed_binding_lifecycle.DEPLOYMENT_TIMEOUT_SECONDS
+            return (
+                f"source-{'a' * 40}: digest: {digest} size: 1234\n".encode(),
+                b"",
+            )
+
+        def kill(self) -> None:
+            raise AssertionError("successful push must not be killed")
+
+    monkeypatch.setattr(
+        api_image_publication,
+        "_begin_process_attribution",
+        lambda *_args, **_kwargs: (None, None, None),
+    )
+    monkeypatch.setattr(
+        api_image_publication,
+        "_publisher_environment",
+        lambda environment: dict(environment),
+    )
+    monkeypatch.setattr(
+        api_image_publication,
+        "_docker_runtime_metadata",
+        lambda *_args, **_kwargs: {
+            "clientVersion": "29.6.2",
+            "context": "desktop-linux",
+            "endpointClass": "windows-npipe",
+            "endpointSha256": "c" * 64,
+            "serverOs": "linux",
+            "serverVersion": "29.6.2",
+        },
+    )
+    monkeypatch.setattr(api_image_publication, "_resolved_executable", lambda value: value)
+    monkeypatch.setattr(api_image_publication.subprocess, "Popen", Process)
+
+    assert (
+        api_image_publication._docker_push_once(
+            image_reference,
+            environment=isolated_environment,
+            evidence_path=evidence_path,
         )
+        == digest
+    )
+    assert observed["args"] == (("docker", "push", image_reference),)
+    kwargs = cast(dict[str, object], observed["kwargs"])
+    assert kwargs["env"] == isolated_environment
+    assert kwargs["stdin"] is managed_binding_lifecycle.subprocess.DEVNULL
+    assert kwargs["stdout"] is managed_binding_lifecycle.subprocess.PIPE
+    assert kwargs["stderr"] is managed_binding_lifecycle.subprocess.PIPE
+    assert kwargs["shell"] is False
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert evidence["status"] == "SUCCEEDED"
+    assert evidence["actualExitCode"] == 0
+    assert evidence["stdoutComplete"] is True
+    assert evidence["stderrComplete"] is True
+    assert managed_binding_lifecycle.REGISTRY_HOST not in json.dumps(evidence)
+
+
+def test_docker_push_runtime_metadata_records_context_versions_and_hashed_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = "npipe:////./pipe/dockerDesktopLinuxEngine"
+    responses = iter(
+        (
+            managed_binding_lifecycle.subprocess.CompletedProcess(
+                args=(), returncode=0, stdout=b"desktop-linux\n", stderr=b""
+            ),
+            managed_binding_lifecycle.subprocess.CompletedProcess(
+                args=(), returncode=0, stdout=json.dumps(endpoint).encode(), stderr=b""
+            ),
+            managed_binding_lifecycle.subprocess.CompletedProcess(
+                args=(),
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "Client": {"Version": "29.6.2"},
+                        "Server": {"Version": "29.6.2", "Os": "linux"},
+                    }
+                ).encode(),
+                stderr=b"",
+            ),
+        )
+    )
+    observed: list[tuple[str, ...]] = []
+
+    def run(command: tuple[str, ...], **_kwargs: object) -> object:
+        observed.append(command)
+        return next(responses)
+
+    monkeypatch.setattr(api_image_publication.subprocess, "run", run)
+    result = api_image_publication._docker_runtime_metadata(
+        "docker", environment={"DOCKER_CONFIG": "opaque"}
+    )
+    assert result == {
+        "clientVersion": "29.6.2",
+        "context": "desktop-linux",
+        "endpointClass": "windows-npipe",
+        "endpointSha256": hashlib.sha256(endpoint.encode()).hexdigest(),
+        "serverOs": "linux",
+        "serverVersion": "29.6.2",
+    }
+    assert observed == [
+        ("docker", "context", "show"),
+        ("docker", "context", "inspect", "--format", "{{json .Endpoints.docker.Host}}"),
+        ("docker", "version", "--format", "{{json .}}"),
+    ]
+
+
+def test_docker_push_has_no_wrapper_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    image_reference = f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api:source-" + "a" * 40
+    attempts = 0
+
+    def push_once(_image: str, *, environment: Mapping[str, str], evidence_path: Path) -> str:
+        nonlocal attempts
+        assert environment == {"DOCKER_CONFIG": "opaque"}
+        assert evidence_path == tmp_path / "push.json"
+        attempts += 1
+        raise managed_binding_lifecycle.LifecycleError("publisher-docker-push-transient")
+
+    monkeypatch.setattr(api_image_publication, "_docker_push_once", push_once)
+    with pytest.raises(managed_binding_lifecycle.LifecycleError) as captured:
+        api_image_publication._docker_push_prebuilt_image(
+            image_reference,
+            source_tag="source-" + "a" * 40,
+            environment={"DOCKER_CONFIG": "opaque"},
+            access_token=bytearray(b"x" * 64),
+            evidence_path=tmp_path / "push.json",
+        )
+    assert str(captured.value) == "publisher-docker-push-transient"
+    assert attempts == 1
+    assert (
+        api_image_publication._docker_push_error_code(
+            bytearray(), bytearray(b"only one connection allowed")
+        )
+        == "publisher-docker-push-failed"
+    )
+
+
+@pytest.mark.parametrize(
+    ("stdout", "stderr", "expected_first"),
+    [
+        (b"", b"denied: repository scope rejected\n", "denied: repository scope rejected"),
+        (b"error: transport reset\n", b"", "error: transport reset"),
+    ],
+)
+def test_failed_docker_push_preserves_exact_exit_and_separate_sanitized_streams(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    stdout: bytes,
+    stderr: bytes,
+    expected_first: str,
+) -> None:
+    image_reference = f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api:source-" + "a" * 40
+    evidence_path = tmp_path / "docker-push-evidence.json"
+
+    class Process:
+        returncode = 23
+
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def communicate(self, *, timeout: int) -> tuple[bytes, bytes]:
+            assert timeout == managed_binding_lifecycle.DEPLOYMENT_TIMEOUT_SECONDS
+            return stdout, stderr
+
+        def kill(self) -> None:
+            raise AssertionError("non-timeout failure must not be killed")
 
     monkeypatch.setattr(
         api_image_publication,
@@ -2315,58 +2497,163 @@ def test_ordinary_docker_push_is_exact_isolated_and_returns_only_digest(
         lambda environment: dict(environment),
     )
     monkeypatch.setattr(api_image_publication, "_resolved_executable", lambda value: value)
-    monkeypatch.setattr(api_image_publication.subprocess, "run", run)
-
-    assert (
-        api_image_publication._docker_push_once(image_reference, environment=isolated_environment)
-        == digest
-    )
-    assert observed["args"] == (("docker", "push", image_reference),)
-    kwargs = cast(dict[str, object], observed["kwargs"])
-    assert kwargs["env"] == isolated_environment
-    assert kwargs["stdin"] is managed_binding_lifecycle.subprocess.DEVNULL
-    assert kwargs["capture_output"] is True
-    assert kwargs["shell"] is False
-
-
-def test_docker_push_retry_is_bounded_to_transient_unambiguous_result(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    image_reference = f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api:source-" + "a" * 40
-    digest = "sha256:" + "b" * 64
-    attempts = 0
-
-    def push_once(_image: str, *, environment: Mapping[str, str]) -> str:
-        nonlocal attempts
-        assert environment == {"DOCKER_CONFIG": "opaque"}
-        attempts += 1
-        if attempts == 1:
-            raise managed_binding_lifecycle.DockerPushTransient("publisher-docker-push-transient")
-        return digest
-
-    monkeypatch.setattr(api_image_publication, "_docker_push_once", push_once)
     monkeypatch.setattr(
         api_image_publication,
-        "_acr_manifest_digest",
-        lambda _token, *, reference: None,
+        "_docker_runtime_metadata",
+        lambda *_args, **_kwargs: {
+            "clientVersion": "29.6.2",
+            "context": "desktop-linux",
+            "endpointClass": "windows-npipe",
+            "endpointSha256": "c" * 64,
+            "serverOs": "linux",
+            "serverVersion": "29.6.2",
+        },
     )
-    monkeypatch.setattr(api_image_publication.time, "sleep", lambda _seconds: None)
-    assert (
-        api_image_publication._docker_push_prebuilt_image(
+    monkeypatch.setattr(api_image_publication.subprocess, "Popen", Process)
+
+    with pytest.raises(managed_binding_lifecycle.LifecycleError):
+        api_image_publication._docker_push_once(
             image_reference,
-            source_tag="source-" + "a" * 40,
             environment={"DOCKER_CONFIG": "opaque"},
-            access_token=bytearray(b"x" * 64),
+            evidence_path=evidence_path,
         )
-        == digest
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert evidence["status"] == "FAILED"
+    assert evidence["actualExitCode"] == 23
+    assert evidence["stdoutSanitized"] == stdout.decode()
+    assert evidence["stderrSanitized"] == stderr.decode()
+    assert evidence["firstMaterialError"] == expected_first
+    assert evidence["finalMaterialError"] == expected_first
+
+
+def test_docker_push_evidence_sanitizes_sensitive_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    image_reference = f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api:source-" + "a" * 40
+    evidence_path = tmp_path / "docker-push-evidence.json"
+    raw = (
+        b"Authorization: Bearer abcdefghijklmnopqrstuvwxyz012345\n"
+        b"error at C:\\Users\\private-user\\secret.txt from 10.77.2.4\n"
     )
-    assert attempts == managed_binding_lifecycle.DOCKER_PUSH_MAXIMUM_ATTEMPTS == 2
-    assert (
-        api_image_publication._docker_push_error_code(
-            bytearray(), bytearray(b"only one connection allowed")
+
+    class Process:
+        returncode = 1
+
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def communicate(self, *, timeout: int) -> tuple[bytes, bytes]:
+            return b"", raw
+
+        def kill(self) -> None:
+            raise AssertionError("non-timeout failure must not be killed")
+
+    monkeypatch.setattr(
+        api_image_publication,
+        "_begin_process_attribution",
+        lambda *_args, **_kwargs: (None, None, None),
+    )
+    monkeypatch.setattr(
+        api_image_publication,
+        "_publisher_environment",
+        lambda environment: dict(environment),
+    )
+    monkeypatch.setattr(api_image_publication, "_resolved_executable", lambda value: value)
+    monkeypatch.setattr(
+        api_image_publication,
+        "_docker_runtime_metadata",
+        lambda *_args, **_kwargs: {
+            "clientVersion": "29.6.2",
+            "context": "desktop-linux",
+            "endpointClass": "windows-npipe",
+            "endpointSha256": "c" * 64,
+            "serverOs": "linux",
+            "serverVersion": "29.6.2",
+        },
+    )
+    monkeypatch.setattr(api_image_publication.subprocess, "Popen", Process)
+
+    with pytest.raises(managed_binding_lifecycle.LifecycleError):
+        api_image_publication._docker_push_once(
+            image_reference,
+            environment={"DOCKER_CONFIG": "opaque"},
+            evidence_path=evidence_path,
         )
-        == "publisher-docker-push-failed"
+    encoded = evidence_path.read_text(encoding="utf-8")
+    assert "abcdefghijklmnopqrstuvwxyz012345" not in encoded
+    assert "private-user" not in encoded
+    assert "10.77.2.4" not in encoded
+    assert encoded.count("[redacted]") >= 3
+
+
+def test_docker_push_timeout_kills_exact_process_and_preserves_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    image_reference = f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api:source-" + "a" * 40
+    evidence_path = tmp_path / "docker-push-evidence.json"
+
+    class Process:
+        returncode: int | None = None
+        killed = False
+        calls = 0
+
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def communicate(self, *, timeout: int | None = None) -> tuple[bytes, bytes]:
+            self.calls += 1
+            if self.calls == 1:
+                assert timeout == managed_binding_lifecycle.DEPLOYMENT_TIMEOUT_SECONDS
+                raise api_image_publication.subprocess.TimeoutExpired("docker push", timeout)
+            assert timeout is None
+            assert self.killed is True
+            return b"partial output\n", b"error: timed out\n"
+
+        def kill(self) -> None:
+            self.killed = True
+            self.returncode = 137
+
+    monkeypatch.setattr(
+        api_image_publication,
+        "_begin_process_attribution",
+        lambda *_args, **_kwargs: (None, None, None),
     )
+    monkeypatch.setattr(
+        api_image_publication,
+        "_publisher_environment",
+        lambda environment: dict(environment),
+    )
+    monkeypatch.setattr(api_image_publication, "_resolved_executable", lambda value: value)
+    monkeypatch.setattr(
+        api_image_publication,
+        "_docker_runtime_metadata",
+        lambda *_args, **_kwargs: {
+            "clientVersion": "29.6.2",
+            "context": "desktop-linux",
+            "endpointClass": "windows-npipe",
+            "endpointSha256": "c" * 64,
+            "serverOs": "linux",
+            "serverVersion": "29.6.2",
+        },
+    )
+    monkeypatch.setattr(api_image_publication.subprocess, "Popen", Process)
+
+    with pytest.raises(managed_binding_lifecycle.LifecycleError) as captured:
+        api_image_publication._docker_push_once(
+            image_reference,
+            environment={"DOCKER_CONFIG": "opaque"},
+            evidence_path=evidence_path,
+        )
+    assert str(captured.value) == "publisher-docker-push-process-timed-out"
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert evidence["status"] == "TIMED_OUT"
+    assert evidence["actualExitCode"] == 137
+    assert evidence["timedOut"] is True
+    assert evidence["processKilled"] is True
+    assert evidence["azureMutationBegan"] is None
+    assert evidence["azureMutationState"] == "UNKNOWN_PENDING_REGISTRY_RECONCILIATION"
 
 
 def test_digest_cleanup_dns_failure_does_not_mask_original_push_failure(
