@@ -23,7 +23,7 @@ $CleanupPrincipalFingerprintDomain = "mobius.azure.cleanup-principal.v1"
 $ExpectedRoleDefinitionId = "b24988ac-6180-42a0-ab88-20f7382dd24c"
 $CleanupLaunchGrace = [TimeSpan]::FromMinutes(30)
 $ScheduledCleanupAtUtc = [DateTimeOffset]::ParseExact(
-    "2026-08-04T00:30:00Z",
+    "2026-08-04T08:00:00Z",
     "yyyy-MM-ddTHH:mm:ssZ",
     [Globalization.CultureInfo]::InvariantCulture,
     [Globalization.DateTimeStyles]::AssumeUniversal

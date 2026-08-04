@@ -551,16 +551,16 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
     value = _json(MANIFESTS / "cost-envelope.template.json")
     assert value["targetUsdCents"] == 10000
     assert value["provisioningBlockAboveUsdCents"] == 12000
-    assert value["absoluteCeilingUsdCents"] == 19290
+    assert value["absoluteCeilingUsdCents"] == 15000
     assert value["uncertaintyContingencyBasisPoints"] == 2500
     assert value["budgetAlertsAreEnforcement"] is False
     assert value["resolutionStatus"] == "verified"
     assert value["expectedUsdCents"] == 3110
-    assert value["baseMaximumUsdCents"] == 15431
-    assert value["contingencyUsdCents"] == 3858
-    assert value["maximumPlausibleUsdCents"] == 19289
+    assert value["baseMaximumUsdCents"] == 11358
+    assert value["contingencyUsdCents"] == 2840
+    assert value["maximumPlausibleUsdCents"] == 14198
     assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 3110
-    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 15431
+    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 11358
     required_lines = {
         "postgresql-zone-redundant-compute",
         "postgresql-storage-and-backup",
@@ -570,7 +570,7 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
         "defender-malware-scanning",
         "additional-private-connectivity-and-data",
         "failed-cleanup-six-hour-exposure",
-        "cleanup-extension-twenty-five-and-half-hour-exposure",
+        "cleanup-extension-eight-hour-exposure",
     }
     assert required_lines.issubset({item["name"] for item in value["lineItems"]})
     assert all(
@@ -580,10 +580,10 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
 
 
 def test_verified_cost_reconciles_base_contingency_and_maximum():
-    value = _resolved_cost(expected=12000, base_maximum=15432)
+    value = _resolved_cost(expected=12000, base_maximum=12000)
     contract._validate_cost(value)
-    assert value["contingencyUsdCents"] == 3858
-    assert value["maximumPlausibleUsdCents"] == 19290
+    assert value["contingencyUsdCents"] == 3000
+    assert value["maximumPlausibleUsdCents"] == 15000
 
 
 def test_cost_rejects_zero_empty_over_block_at_ceiling_and_bad_contingency():
@@ -606,9 +606,9 @@ def test_cost_rejects_zero_empty_over_block_at_ceiling_and_bad_contingency():
     over_block = _resolved_cost(expected=12001, base_maximum=12001)
     with pytest.raises(contract.ContractError, match="provisioning block"):
         contract._validate_cost(over_block)
-    at_ceiling = _resolved_cost(expected=12000, base_maximum=15432)
+    at_ceiling = _resolved_cost(expected=12000, base_maximum=12000)
     contract._validate_cost(at_ceiling)
-    over_ceiling = _resolved_cost(expected=12000, base_maximum=15433)
+    over_ceiling = _resolved_cost(expected=12000, base_maximum=12001)
     with pytest.raises(contract.ContractError, match="absolute ceiling"):
         contract._validate_cost(over_ceiling)
     bad_contingency = _resolved_cost()
@@ -616,7 +616,7 @@ def test_cost_rejects_zero_empty_over_block_at_ceiling_and_bad_contingency():
     with pytest.raises(contract.ContractError, match="bounded cent calculation"):
         contract._validate_cost(bad_contingency)
 
-    unrelated_rounding = _resolved_cost(expected=8000, base_maximum=15431)
+    unrelated_rounding = _resolved_cost(expected=8000, base_maximum=11358)
     unrelated_rounding["contingencyUsdCents"] += 1
     unrelated_rounding["maximumPlausibleUsdCents"] += 1
     with pytest.raises(contract.ContractError, match="bounded cent calculation"):

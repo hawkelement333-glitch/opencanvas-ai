@@ -6,12 +6,12 @@
   "currency": "USD",
   "targetUsdCents": 10000,
   "provisioningBlockAboveUsdCents": 12000,
-  "absoluteCeilingUsdCents": 19290,
+  "absoluteCeilingUsdCents": 15000,
   "expectedUsdCents": 3110,
-  "baseMaximumUsdCents": 15431,
+  "baseMaximumUsdCents": 11358,
   "uncertaintyContingencyBasisPoints": 2500,
-  "contingencyUsdCents": 3858,
-  "maximumPlausibleUsdCents": 19289,
+  "contingencyUsdCents": 2840,
+  "maximumPlausibleUsdCents": 14198,
   "budgetAlertsAreEnforcement": false,
   "hardLeaseHours": 30,
   "lineItems": [
@@ -136,9 +136,9 @@
       "priceEvidenceStatus": "verified-official-retail"
     },
     {
-      "name": "cleanup-extension-twenty-five-and-half-hour-exposure",
+      "name": "cleanup-extension-eight-hour-exposure",
       "expectedUsdCents": 0,
-      "baseMaximumUsdCents": 5936,
+      "baseMaximumUsdCents": 1863,
       "priceEvidenceStatus": "verified-official-retail"
     }
   ]

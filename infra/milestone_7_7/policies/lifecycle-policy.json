@@ -1,7 +1,7 @@
 {
   "contractVersion": "m7.7-lifecycle-policy-v1",
   "costControls": {
-    "absoluteCeilingUsdCents": 19290,
+    "absoluteCeilingUsdCents": 15000,
     "budgetAlertsAreEnforcement": false,
     "provisioningBlockAboveUsdCents": 12000,
     "targetUsdCents": 10000,
@@ -23,7 +23,7 @@
   "tagValueContracts": {
     "mobius-cleanup-binding-sha256": "runtime-lowercase-sha256",
     "mobius-contract-version": "m7.7-infrastructure-contract-v1",
-    "mobius-cost-ceiling-usd-cents": "runtime-maximum-plausible-at-or-below-19290",
+    "mobius-cost-ceiling-usd-cents": "runtime-maximum-plausible-at-or-below-15000",
     "mobius-data-class": "isolated-synthetic",
     "mobius-environment": "milestone-7.7-isolated",
     "mobius-expires-at-utc": "runtime-rfc3339-utc",
@@ -41,7 +41,7 @@
     "extensionRequiresSeparateAuthorization": true,
     "rollingExtensionAllowed": false,
     "exactUtcBindingsRequired": true,
-    "authorizedCleanupAtUtc": "2026-08-04T00:30:00Z"
+    "authorizedCleanupAtUtc": "2026-08-04T08:00:00Z"
   },
   "cleanup": {
     "service": "AzureAutomation",

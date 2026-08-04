@@ -70,13 +70,13 @@
     "targetParameter": "TargetResourceGroupName",
     "targetResourceGroup": "rg-solarplexus-mobius-77-staging",
     "subscriptionFingerprint": "f4493115ce6375cf0e5d0616bede57126075fdb27ac78ea0ba7e0085252a7028",
-    "deadlineUtc": "2026-08-04T00:30:00Z",
+    "deadlineUtc": "2026-08-04T08:00:00Z",
     "launchGraceSeconds": 1800,
     "cleanupContributorRoleDefinitionId": "b24988ac-6180-42a0-ab88-20f7382dd24c",
     "cleanupPrincipalFingerprintSha256": "19a9f97779cd2eb9acfdc04797f1fc5339316ee1a424ca79b70661beffa33260",
     "deletionWaitSeconds": 2700,
     "absenceVerificationSeconds": 300,
-    "publishedContentSha256": "d53f88ae0f685d2716bb59bb298bac5fd5b7cfd42d47a269ad438402e18b1e30"
+    "publishedContentSha256": "ff78f91f0a2a2cddf804e079e01d5966346154c06bfead3d33bee86927f86133"
   },
   "fixedSkus": {
     "keyVault": "standard",
