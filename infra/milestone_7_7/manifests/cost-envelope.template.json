@@ -8,10 +8,10 @@
   "provisioningBlockAboveUsdCents": 12000,
   "absoluteCeilingUsdCents": 15000,
   "expectedUsdCents": 3110,
-  "baseMaximumUsdCents": 11358,
+  "baseMaximumUsdCents": 11650,
   "uncertaintyContingencyBasisPoints": 2500,
-  "contingencyUsdCents": 2840,
-  "maximumPlausibleUsdCents": 14198,
+  "contingencyUsdCents": 2913,
+  "maximumPlausibleUsdCents": 14563,
   "budgetAlertsAreEnforcement": false,
   "hardLeaseHours": 30,
   "lineItems": [
@@ -136,9 +136,9 @@
       "priceEvidenceStatus": "verified-official-retail"
     },
     {
-      "name": "cleanup-extension-eight-hour-exposure",
+      "name": "cleanup-extension-nine-and-quarter-hour-exposure",
       "expectedUsdCents": 0,
-      "baseMaximumUsdCents": 1863,
+      "baseMaximumUsdCents": 2155,
       "priceEvidenceStatus": "verified-official-retail"
     }
   ]

@@ -556,11 +556,11 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
     assert value["budgetAlertsAreEnforcement"] is False
     assert value["resolutionStatus"] == "verified"
     assert value["expectedUsdCents"] == 3110
-    assert value["baseMaximumUsdCents"] == 11358
-    assert value["contingencyUsdCents"] == 2840
-    assert value["maximumPlausibleUsdCents"] == 14198
+    assert value["baseMaximumUsdCents"] == 11650
+    assert value["contingencyUsdCents"] == 2913
+    assert value["maximumPlausibleUsdCents"] == 14563
     assert sum(item["expectedUsdCents"] for item in value["lineItems"]) == 3110
-    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 11358
+    assert sum(item["baseMaximumUsdCents"] for item in value["lineItems"]) == 11650
     required_lines = {
         "postgresql-zone-redundant-compute",
         "postgresql-storage-and-backup",
@@ -570,7 +570,7 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
         "defender-malware-scanning",
         "additional-private-connectivity-and-data",
         "failed-cleanup-six-hour-exposure",
-        "cleanup-extension-eight-hour-exposure",
+        "cleanup-extension-nine-and-quarter-hour-exposure",
     }
     assert required_lines.issubset({item["name"] for item in value["lineItems"]})
     assert all(
