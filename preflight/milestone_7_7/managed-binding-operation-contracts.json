@@ -305,7 +305,9 @@
         "--receipt-directory",
         "{receiptDirectory}",
         "--repository-head",
-        "{repositoryHead}"
+        "{repositoryHead}",
+        "--prebuilt-image-record",
+        "{prebuiltImageRecord}"
       ],
       "controlPlaneOnly": false
     },
@@ -1016,5 +1018,5 @@
       "replayDecision": "deny"
     }
   ],
-  "contractIntegritySha256": "1f87bea72ab5f9ffcaf053d0e49ea49e1c481b57a8bf8a3ee5141043a85c243c"
+  "contractIntegritySha256": "6c12435a1cd272b4f6d12a682669e5b3e7800d32f06821167cfcef5a6da1dc65"
 }

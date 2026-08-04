@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from infra.milestone_7_7 import api_image_publication
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
 from performance.milestone_7_7.framework import ContractError, JsonValue, canonical_bytes
 from preflight.milestone_7_7 import framework as topology_framework
@@ -50,6 +51,7 @@ from preflight.milestone_7_7.operation_contracts import OPERATION_IDS
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 INFRASTRUCTURE_ROOT = REPOSITORY_ROOT / "infra" / "milestone_7_7"
 LIFECYCLE_SCRIPT = INFRASTRUCTURE_ROOT / "scripts" / "managed_binding_lifecycle.py"
+IMAGE_PUBLICATION_SCRIPT = INFRASTRUCTURE_ROOT / "api_image_publication.py"
 SYNTHETIC_SUBSCRIPTION = "synthetic-managed-binding-subscription"
 SYNTHETIC_TENANT = "synthetic-managed-binding-tenant"
 NOW = datetime(2026, 7, 31, 18, 0, tzinfo=UTC)
@@ -1499,14 +1501,17 @@ def test_closed_package_blocks_on_unregistered_required_provider(
 
 def test_lifecycle_is_closed_private_digest_bound_and_secret_value_blind() -> None:
     text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
+    text += IMAGE_PUBLICATION_SCRIPT.read_text(encoding="utf-8")
     assert "--runtime-config" not in text
     assert "OPENCANVAS_OPENAI_API_KEY" not in text
     assert "--expose-token" not in text
     assert '"--password",' not in text
     assert '"--password-stdin"' in text
     assert '"buildx"' in text
-    assert "push-by-digest=true" in text
-    assert "/_tags/" not in text
+    assert '"--load"' in text
+    assert "push-by-digest=true" not in text
+    assert '"docker", "push", image_reference' in text
+    assert "/_tags/" in text
     assert '"get-access-token"' in text
     assert "@sha256:" in text
     assert "private-endpoint-resolved-publicly" in text
@@ -1523,9 +1528,9 @@ def test_lifecycle_is_closed_private_digest_bound_and_secret_value_blind() -> No
 
 def test_denial_probes_use_windows_safe_empty_projection() -> None:
     text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
-    publish = text.split("def _publish_api_image", 1)[1].split(
-        "def _container_app_revision_ready", 1
-    )[0]
+    publish = IMAGE_PUBLICATION_SCRIPT.read_text(encoding="utf-8").split(
+        "def _publish_api_image", 1
+    )[1]
     revoke = text.split("def _revoke", 1)[1].split("def _current_resource_ids", 1)[0]
 
     assert '"[:0]"' not in publish
@@ -1692,19 +1697,21 @@ def test_ephemeral_publisher_role_inventory_normalizes_and_rejects_malformed(
 
 
 def test_ephemeral_publisher_is_same_principal_and_delete_after_denial() -> None:
-    publish = inspect.getsource(managed_binding_lifecycle._publish_api_image)
+    publish = inspect.getsource(api_image_publication._publish_api_image)
+    prebuilt = publish.index("_load_prebuilt_api_image_record(")
     create = publish.index("_create_ephemeral_publisher(")
     initial_denial = publish.index("_prove_initial_publisher_denial(", create)
     assignment = publish.index("_temporary_publisher_role_assignment(", initial_denial)
     access = publish.index("_wait_for_publisher_access(", assignment)
-    build = publish.index("_build_api_image_by_digest(", assignment)
-    revoke = publish.index("_delete_assignment(subscription_id, assignment_id)", build)
+    push = publish.index("_docker_push_prebuilt_image(", assignment)
+    tag_removal = publish.index("_remove_source_tag(", push)
+    revoke = publish.index("_delete_assignment(subscription_id, assignment_id)", push)
     cache_reset = publish.index("_reset_ephemeral_directory(docker_config)", revoke)
     post_revoke_denial = publish.index("_wait_for_publisher_denial(", cache_reset)
     denial_proved = publish.index("denial_proved = True", post_revoke_denial)
     identity_delete = publish.index("_delete_ephemeral_publisher(", denial_proved)
 
-    assert create < initial_denial < assignment < access < build < revoke
+    assert prebuilt < create < initial_denial < assignment < access < push < tag_removal < revoke
     assert revoke < cache_reset < post_revoke_denial < denial_proved < identity_delete
     assert "_signed_in_user_object_id" not in publish
     assert '"--assignee-principal-type",\n            "ServicePrincipal"' in inspect.getsource(
@@ -1717,11 +1724,9 @@ def test_ephemeral_publisher_is_same_principal_and_delete_after_denial() -> None
     assert '"acr",\n                "login"' not in publish
     assert '"acr",\n            "repository"' not in publish
     assert "_docker_login_with_refresh_token(" in publish
-    assert "_build_api_image_by_digest(" in publish
-    assert "push-by-digest=true" in inspect.getsource(
-        managed_binding_lifecycle._build_api_image_by_digest
-    )
-    assert "_remove_source_tag(" not in publish
+    assert "buildx" not in publish
+    assert "_docker_push_prebuilt_image(" in publish
+    assert "_remove_source_tag(" in publish
     assert "_acr_manifest_digest(" in publish
     assert "_verify_cleanup_control(subscription_id, cleanup_at)" in publish
     assert publish.count("_verify_cleanup_control(subscription_id, cleanup_at)") == 2
@@ -2063,41 +2068,183 @@ def test_publisher_registry_requests_reject_catalog_and_nearby_targets(
         managed_binding_lifecycle._validate_registry_request(method, path)
 
 
-def test_digest_only_publication_preserves_immutable_manifest_without_a_tag(
+def test_production_image_build_uses_one_owned_docker_container_builder_and_load(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    record_path = tmp_path / "prebuilt-image.json"
+    temporary_root = tmp_path / "buildkit-state"
+    temporary_root.mkdir()
+    image_id = "sha256:" + "b" * 64
+    build_input = "c" * 64
+    commands: list[tuple[str, ...]] = []
+    active_builder: str | None = None
+
+    def inventory() -> list[dict[str, JsonValue]]:
+        rows: list[dict[str, JsonValue]] = [
+            {
+                "Current": True,
+                "Driver": "docker",
+                "Name": "desktop-linux",
+                "Nodes": [
+                    {
+                        "Name": "desktop-linux",
+                        "Platforms": ["linux/amd64"],
+                        "Status": "running",
+                    }
+                ],
+            }
+        ]
+        if active_builder is not None:
+            rows.append(
+                {
+                    "Current": False,
+                    "Driver": "docker-container",
+                    "Name": active_builder,
+                    "Nodes": [
+                        {
+                            "Name": active_builder + "0",
+                            "Platforms": ["linux/amd64"],
+                            "Status": "running",
+                        }
+                    ],
+                }
+            )
+        return rows
+
+    def run(argv: tuple[str, ...], **_kwargs: object) -> str | None:
+        nonlocal active_builder
+        commands.append(argv)
+        if argv[:3] == ("docker", "buildx", "create"):
+            active_builder = argv[argv.index("--name") + 1]
+            return active_builder
+        if argv[:3] == ("docker", "buildx", "rm"):
+            active_builder = None
+        return None
+
+    monkeypatch.setattr(api_image_publication, "_verify_repository_state", lambda _head: None)
+    monkeypatch.setattr(api_image_publication, "_outside_repository", lambda path, _label: path)
+    monkeypatch.setattr(api_image_publication, "_remove_stale_api_image_builders", lambda: None)
+    monkeypatch.setattr(api_image_publication, "_buildx_inventory", inventory)
+    monkeypatch.setattr(api_image_publication, "_run", run)
+    monkeypatch.setattr(
+        api_image_publication.tempfile, "mkdtemp", lambda **_kwargs: str(temporary_root)
+    )
+    monkeypatch.setattr(
+        api_image_publication,
+        "_api_image_build_input_sha256",
+        lambda _head: build_input,
+    )
+    monkeypatch.setattr(
+        api_image_publication,
+        "_inspect_local_api_image",
+        lambda _reference: (image_id, image_id),
+    )
+
+    record = api_image_publication._prebuild_api_image(
+        repository_head="a" * 40, record_path=record_path
+    )
+
+    create = next(command for command in commands if command[:3] == ("docker", "buildx", "create"))
+    build = next(command for command in commands if command[:3] == ("docker", "buildx", "build"))
+    remove = next(command for command in commands if command[:3] == ("docker", "buildx", "rm"))
+    builder_name = create[create.index("--name") + 1]
+    assert create[create.index("--driver") + 1] == "docker-container"
+    assert build[build.index("--builder") + 1] == builder_name
+    assert build[build.index("--target") + 1] == "runner"
+    assert build[build.index("--platform") + 1] == "linux/amd64"
+    assert "--load" in build
+    assert "--push" not in build
+    assert not any("cache-to" in argument for argument in build)
+    assert remove[-1] == builder_name
+    assert active_builder is None
+    assert not temporary_root.exists()
+    assert record["buildInputSha256"] == build_input
+    assert record["imageId"] == image_id
+    assert record["configDigest"] == image_id
+    assert record_path.is_file()
+
+
+def test_lifecycle_and_publication_module_state_is_shared_and_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    assert (
+        api_image_publication._LIFECYCLE_MODULE_IDENTITY
+        is managed_binding_lifecycle._LIFECYCLE_MODULE_IDENTITY
+    )
+    lifecycle_source = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
+    assert "sys.modules[_CANONICAL_LIFECYCLE_MODULE] = sys.modules[__name__]" in (lifecycle_source)
+
+    monkeypatch.setattr(api_image_publication, "_LIFECYCLE_MODULE_IDENTITY", object())
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="api-image-publication-module-state-mismatch",
+    ):
+        managed_binding_lifecycle._prebuild_api_image(
+            repository_head="a" * 40,
+            record_path=tmp_path / "must-not-be-created.json",
+        )
+
+
+def test_prebuilt_image_record_rejects_source_drift_and_image_identity_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    head = "a" * 40
+    image_id = "sha256:" + "b" * 64
+    build_input = "c" * 64
+    unsigned = api_image_publication._prebuilt_record_unsigned(
+        repository_head=head,
+        build_input_sha256=build_input,
+        image_id=image_id,
+        config_digest=image_id,
+    )
+    record: dict[str, JsonValue] = {
+        **unsigned,
+        "integritySha256": hashlib.sha256(
+            managed_binding_lifecycle.PREBUILT_IMAGE_RECORD_DOMAIN + canonical_bytes(unsigned)
+        ).hexdigest(),
+    }
+    path = tmp_path / "record.json"
+    path.write_bytes(canonical_bytes(record))
+    monkeypatch.setattr(api_image_publication, "_outside_repository", lambda value, _label: value)
+    monkeypatch.setattr(
+        api_image_publication,
+        "_api_image_build_input_sha256",
+        lambda _head: "d" * 64,
+    )
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="prebuilt-api-image-source-drift",
+    ):
+        api_image_publication._load_prebuilt_api_image_record(path, repository_head=head)
+
+    monkeypatch.setattr(
+        api_image_publication,
+        "_api_image_build_input_sha256",
+        lambda _head: build_input,
+    )
+    monkeypatch.setattr(
+        api_image_publication,
+        "_inspect_local_api_image",
+        lambda _reference: ("sha256:" + "e" * 64, "sha256:" + "e" * 64),
+    )
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="prebuilt-api-image-identity-mismatch",
+    ):
+        api_image_publication._load_prebuilt_api_image_record(path, repository_head=head)
+
+
+def test_mutable_tag_removal_preserves_immutable_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     source_tag = "source-" + "a" * 40
     digest = "sha256:" + "b" * 64
-    metadata_path = tmp_path / "build-metadata.json"
-    observed: dict[str, object] = {}
-
-    def run(argv: tuple[str, ...], **kwargs: object) -> None:
-        observed["argv"] = argv
-        observed["kwargs"] = kwargs
-        metadata_path.write_text(json.dumps({"containerimage.digest": digest}), encoding="utf-8")
-
-    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
-    monkeypatch.setattr(
-        managed_binding_lifecycle,
-        "_outside_repository",
-        lambda path, _label: path,
-    )
-    assert (
-        managed_binding_lifecycle._build_api_image_by_digest(
-            environment={"AZURE_CONFIG_DIR": str(tmp_path)},
-            metadata_path=metadata_path,
-        )
-        == digest
-    )
-    argv = cast(tuple[str, ...], observed["argv"])
-    assert "--tag" not in argv
-    assert "--push" not in argv
-    assert any("push-by-digest=true" in item for item in argv)
-    assert not metadata_path.exists()
-
     responses = iter(
         (
+            (202, {}, bytearray()),
             (404, {}, bytearray()),
             (200, {"docker-content-digest": digest}, bytearray()),
         )
@@ -2116,54 +2263,125 @@ def test_digest_only_publication_preserves_immutable_manifest_without_a_tag(
         calls.append((method, path))
         return next(responses)
 
+    monkeypatch.setattr(api_image_publication, "_private_registry_request", request)
     monkeypatch.setattr(managed_binding_lifecycle, "_private_registry_request", request)
     access_token = bytearray(b"a" * 64)
-
+    api_image_publication._remove_source_tag(access_token, source_tag=source_tag)
     managed_binding_lifecycle._assert_source_tag_absent(
         source_tag=source_tag, access_token=access_token
     )
     assert managed_binding_lifecycle._acr_manifest_digest(access_token, reference=digest) == digest
     assert calls == [
+        (
+            "DELETE",
+            f"/acr/v1/opencanvas-api/_tags/{source_tag}?api-version=2021-07-01",
+        ),
         ("HEAD", f"/v2/opencanvas-api/manifests/{source_tag}"),
         ("HEAD", f"/v2/opencanvas-api/manifests/{digest}"),
     ]
     assert all("_catalog" not in path for _method, path in calls)
 
 
-@pytest.mark.parametrize(
-    "metadata",
-    [
-        [],
-        {},
-        {"containerimage.digest": "not-a-digest"},
-        {"containerimage.digest": "sha256:" + "b" * 63},
-    ],
-)
-def test_digest_only_publication_fails_closed_for_malformed_metadata(
+def test_ordinary_docker_push_is_exact_isolated_and_returns_only_digest(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    metadata: JsonValue,
 ) -> None:
-    metadata_path = tmp_path / "build-metadata.json"
+    image_reference = f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api:source-" + "a" * 40
+    digest = "sha256:" + "b" * 64
+    observed: dict[str, object] = {}
+    isolated_environment = {
+        "AZURE_CONFIG_DIR": str(tmp_path / "azure"),
+        "DOCKER_CONFIG": str(tmp_path / "docker"),
+    }
 
-    def run(_argv: tuple[str, ...], **_kwargs: object) -> None:
-        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
-
-    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
-    monkeypatch.setattr(
-        managed_binding_lifecycle,
-        "_outside_repository",
-        lambda path, _label: path,
-    )
-    with pytest.raises(
-        managed_binding_lifecycle.LifecycleError,
-        match="publisher-build-metadata-malformed",
-    ):
-        managed_binding_lifecycle._build_api_image_by_digest(
-            environment={"AZURE_CONFIG_DIR": str(tmp_path)},
-            metadata_path=metadata_path,
+    def run(*args: object, **kwargs: object) -> object:
+        observed["args"] = args
+        observed["kwargs"] = kwargs
+        return managed_binding_lifecycle.subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout=(f"source-{'a' * 40}: digest: {digest} size: 1234\n").encode(),
+            stderr=b"",
         )
-    assert not metadata_path.exists()
+
+    monkeypatch.setattr(
+        api_image_publication,
+        "_begin_process_attribution",
+        lambda *_args, **_kwargs: (None, None, None),
+    )
+    monkeypatch.setattr(
+        api_image_publication,
+        "_publisher_environment",
+        lambda environment: dict(environment),
+    )
+    monkeypatch.setattr(api_image_publication, "_resolved_executable", lambda value: value)
+    monkeypatch.setattr(api_image_publication.subprocess, "run", run)
+
+    assert (
+        api_image_publication._docker_push_once(image_reference, environment=isolated_environment)
+        == digest
+    )
+    assert observed["args"] == (("docker", "push", image_reference),)
+    kwargs = cast(dict[str, object], observed["kwargs"])
+    assert kwargs["env"] == isolated_environment
+    assert kwargs["stdin"] is managed_binding_lifecycle.subprocess.DEVNULL
+    assert kwargs["capture_output"] is True
+    assert kwargs["shell"] is False
+
+
+def test_docker_push_retry_is_bounded_to_transient_unambiguous_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image_reference = f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api:source-" + "a" * 40
+    digest = "sha256:" + "b" * 64
+    attempts = 0
+
+    def push_once(_image: str, *, environment: Mapping[str, str]) -> str:
+        nonlocal attempts
+        assert environment == {"DOCKER_CONFIG": "opaque"}
+        attempts += 1
+        if attempts == 1:
+            raise managed_binding_lifecycle.DockerPushTransient("publisher-docker-push-transient")
+        return digest
+
+    monkeypatch.setattr(api_image_publication, "_docker_push_once", push_once)
+    monkeypatch.setattr(
+        api_image_publication,
+        "_acr_manifest_digest",
+        lambda _token, *, reference: None,
+    )
+    monkeypatch.setattr(api_image_publication.time, "sleep", lambda _seconds: None)
+    assert (
+        api_image_publication._docker_push_prebuilt_image(
+            image_reference,
+            source_tag="source-" + "a" * 40,
+            environment={"DOCKER_CONFIG": "opaque"},
+            access_token=bytearray(b"x" * 64),
+        )
+        == digest
+    )
+    assert attempts == managed_binding_lifecycle.DOCKER_PUSH_MAXIMUM_ATTEMPTS == 2
+    assert (
+        api_image_publication._docker_push_error_code(
+            bytearray(), bytearray(b"only one connection allowed")
+        )
+        == "publisher-docker-push-failed"
+    )
+
+
+def test_live_publisher_cannot_build_and_fails_closed_on_digest_mismatch() -> None:
+    publish = inspect.getsource(api_image_publication._publish_api_image)
+    push = inspect.getsource(api_image_publication._docker_push_once)
+    assert "buildx" not in publish
+    assert "docker build" not in publish
+    assert '(docker_executable, "push", image_reference)' in push
+    assert "registry-pushed-digest-mismatch" in publish
+    assert publish.index("_load_prebuilt_api_image_record(") < publish.index(
+        "_create_ephemeral_publisher("
+    )
+    assert publish.index("_remove_source_tag(") < publish.index(
+        "_delete_assignment(subscription_id, assignment_id)"
+    )
 
 
 def test_docker_login_uses_secret_stdin_and_isolated_state(
@@ -2260,7 +2478,7 @@ def test_entra_token_uses_certificate_session_without_argument_or_environment_le
 
 
 def test_publisher_oauth_path_never_logs_or_uses_arm_registry_lookup() -> None:
-    publish = inspect.getsource(managed_binding_lifecycle._publish_api_image)
+    publish = inspect.getsource(api_image_publication._publish_api_image)
     entra = inspect.getsource(managed_binding_lifecycle._publisher_entra_token)
     oauth = inspect.getsource(managed_binding_lifecycle._publisher_refresh_token)
     oauth += inspect.getsource(managed_binding_lifecycle._publisher_repository_token)
@@ -2276,7 +2494,7 @@ def test_publisher_oauth_path_never_logs_or_uses_arm_registry_lookup() -> None:
     assert "logger" not in entra + oauth + data_plane
     assert "os.environ" not in entra + oauth + data_plane
     assert "--expose-token" not in entra + oauth + data_plane
-    assert publish.index("refresh_token.clear()") < publish.index("_build_api_image_by_digest(")
+    assert publish.index("refresh_token.clear()") < publish.index("_docker_push_prebuilt_image(")
     assert publish.count("_reset_ephemeral_directory(docker_config)") >= 3
 
 
@@ -2341,12 +2559,16 @@ def test_image_reconciliation_always_delegates_to_isolated_publisher(
         calls.append(argv)
 
     monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
-    published_calls: list[tuple[dict[str, JsonValue], str, Path]] = []
+    prebuilt_record = tmp_path / "prebuilt-image.json"
+    published_calls: list[tuple[dict[str, JsonValue], str, Path, Path]] = []
     monkeypatch.setattr(
         managed_binding_lifecycle,
         "_publish_api_image",
-        lambda *, ledger, subscription_id, receipt_directory: (
-            published_calls.append((ledger, subscription_id, receipt_directory)) or published
+        lambda *, ledger, subscription_id, receipt_directory, prebuilt_image_record: (
+            published_calls.append(
+                (ledger, subscription_id, receipt_directory, prebuilt_image_record)
+            )
+            or published
         ),
     )
     ledger: dict[str, JsonValue] = {"repositoryHead": AUTHORIZATION_SOURCE_HEAD}
@@ -2355,11 +2577,12 @@ def test_image_reconciliation_always_delegates_to_isolated_publisher(
         ledger=ledger,
         subscription_id="opaque-subscription",
         receipt_directory=tmp_path,
+        prebuilt_image_record=prebuilt_record,
     )
 
     assert result == published
     assert calls[0][0:3] == ("git", "merge-base", "--is-ancestor")
-    assert published_calls == [(ledger, "opaque-subscription", tmp_path)]
+    assert published_calls == [(ledger, "opaque-subscription", tmp_path, prebuilt_record)]
 
 
 def test_changed_api_image_inputs_publish_new_immutable_image(
@@ -2373,12 +2596,14 @@ def test_changed_api_image_inputs_publish_new_immutable_image(
         "_run_text",
         lambda _argv: "apps/api/opencanvas_api/main.py",
     )
-    calls: list[tuple[dict[str, JsonValue], str, Path]] = []
+    prebuilt_record = tmp_path / "prebuilt-image.json"
+    calls: list[tuple[dict[str, JsonValue], str, Path, Path]] = []
     monkeypatch.setattr(
         managed_binding_lifecycle,
         "_publish_api_image",
-        lambda *, ledger, subscription_id, receipt_directory: (
-            calls.append((ledger, subscription_id, receipt_directory)) or published
+        lambda *, ledger, subscription_id, receipt_directory, prebuilt_image_record: (
+            calls.append((ledger, subscription_id, receipt_directory, prebuilt_image_record))
+            or published
         ),
     )
 
@@ -2388,10 +2613,11 @@ def test_changed_api_image_inputs_publish_new_immutable_image(
             ledger=ledger,
             subscription_id="opaque-subscription",
             receipt_directory=tmp_path,
+            prebuilt_image_record=prebuilt_record,
         )
         == published
     )
-    assert calls == [(ledger, "opaque-subscription", tmp_path)]
+    assert calls == [(ledger, "opaque-subscription", tmp_path, prebuilt_record)]
 
 
 def test_image_reconciliation_has_no_owner_acr_data_plane_path() -> None:
@@ -4648,9 +4874,9 @@ def test_main_delegates_terminal_handling_and_finally_paths_remain_strict() -> N
     text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
     main = text.split("def main()", 1)[1]
     failure_boundary = main.split("except (Exception, KeyboardInterrupt) as exc:", 1)[1]
-    publish = text.split("def _publish_api_image", 1)[1].split(
-        "def _container_app_revision_ready", 1
-    )[0]
+    publish = IMAGE_PUBLICATION_SCRIPT.read_text(encoding="utf-8").split(
+        "def _publish_api_image", 1
+    )[1]
 
     assert "except (Exception, KeyboardInterrupt) as exc:" in main
     assert "_handle_failure(" in main

@@ -158,6 +158,7 @@ def test_post_secret_always_revokes_temporary_authority_after_metadata_failure(
             ledger=ledger,
             subscription_id="opaque-subscription",
             receipt_directory=tmp_path,
+            prebuilt_image_record=tmp_path / "prebuilt-image.json",
         )
 
     assert calls == ["authority-proved", "authority-revoked-and-denied"]

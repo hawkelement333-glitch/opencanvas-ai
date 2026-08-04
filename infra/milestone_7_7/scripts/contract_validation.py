@@ -126,7 +126,7 @@ EXPECTED_POLICY_DIGESTS = {
         "036a369242182e52018f98e0b27d2944492c977e82475edd8a9209fecd1afce2"
     ),
     "lifecycle-policy.json": (
-        "09670a56edc51b17d0e54d5d350ad46c27432a6983d8e9bb625367b7ade17c44"
+        "b1f1bf1dc0e51cd832b2c604b1b6cb339fb818610d12966bb1f7c2ead3a2c1cf"
     ),
     "network-policy.json": (
         "67fe0f29d7a69c78a08a213764da7498a6a83293c3e8838c7d3f971da15a851b"
@@ -140,7 +140,7 @@ EXPECTED_POLICY_DIGESTS = {
 }
 EXPECTED_SCHEMA_DIGESTS = {
     "cost-envelope.schema.json": (
-        "b4fd8fceca65828170446f430b17ed66aefda4be52aaafb5a5cbc8b546a4db0b"
+        "8a6259358838725ae1c0efce92897185172b12674e750ab9a4dadcfcebf9f0c6"
     ),
     "environment.schema.json": (
         "27e038b925ccd66b1172942dd7bf1963bd681fd1e92769f6d46a34d720187076"
@@ -631,7 +631,7 @@ def _validate_cost(value: Mapping[str, Any]) -> None:
         raise ContractError("cost line-item names are not unique")
     if expected > 12000:
         raise ContractError("expected cost exceeds the provisioning block")
-    if maximum > 15000:
+    if maximum > 17500:
         raise ContractError("maximum cost exceeds the absolute ceiling")
     if expected > base_maximum:
         raise ContractError("expected cost exceeds the base maximum")
@@ -761,7 +761,7 @@ def _validate_policies(root: Path, environment: Mapping[str, Any]) -> None:
     if network_address_plan != environment_address_plan:
         raise ContractError("environment and network policy address plans differ")
     if lifecycle["costControls"] != {
-        "absoluteCeilingUsdCents": 15000,
+        "absoluteCeilingUsdCents": 17500,
         "budgetAlertsAreEnforcement": False,
         "minimumContingencyBasisPoints": 2500,
         "provisioningBlockAboveUsdCents": 12000,

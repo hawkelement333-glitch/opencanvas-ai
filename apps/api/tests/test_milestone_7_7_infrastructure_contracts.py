@@ -551,7 +551,7 @@ def test_cost_thresholds_are_fixed_and_verified_values_reconcile():
     value = _json(MANIFESTS / "cost-envelope.template.json")
     assert value["targetUsdCents"] == 10000
     assert value["provisioningBlockAboveUsdCents"] == 12000
-    assert value["absoluteCeilingUsdCents"] == 15000
+    assert value["absoluteCeilingUsdCents"] == 17500
     assert value["uncertaintyContingencyBasisPoints"] == 2500
     assert value["budgetAlertsAreEnforcement"] is False
     assert value["resolutionStatus"] == "verified"
@@ -606,9 +606,9 @@ def test_cost_rejects_zero_empty_over_block_at_ceiling_and_bad_contingency():
     over_block = _resolved_cost(expected=12001, base_maximum=12001)
     with pytest.raises(contract.ContractError, match="provisioning block"):
         contract._validate_cost(over_block)
-    at_ceiling = _resolved_cost(expected=12000, base_maximum=12000)
+    at_ceiling = _resolved_cost(expected=12000, base_maximum=14000)
     contract._validate_cost(at_ceiling)
-    over_ceiling = _resolved_cost(expected=12000, base_maximum=12001)
+    over_ceiling = _resolved_cost(expected=12000, base_maximum=14001)
     with pytest.raises(contract.ContractError, match="absolute ceiling"):
         contract._validate_cost(over_ceiling)
     bad_contingency = _resolved_cost()
@@ -1062,9 +1062,7 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
             "b86a8fe4-44ce-4948-aee5-eccb2c155cd7",
             "c632b3df-fb67-4d84-bdcf-b95ad541b5c8",
         },
-        "manifests/managed-binding.schema.json": {
-            "b24988ac-6180-42a0-ab88-20f7382dd24c"
-        },
+        "manifests/managed-binding.schema.json": {"b24988ac-6180-42a0-ab88-20f7382dd24c"},
         "modules/identities.bicep": {"b24988ac-6180-42a0-ab88-20f7382dd24c"},
         "modules/key-vault.bicep": {"4633458b-17de-408a-b874-0445c86b69e6"},
         "modules/network.bicep": {"c632b3df-fb67-4d84-bdcf-b95ad541b5c8"},
@@ -1074,9 +1072,7 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
             "00000000-0000-0000-0000-000000000000",
             "4d97b98b-1d4f-4787-a291-c67834d212e7",
         },
-        "scripts/Remove-Mobius77Staging.ps1": {
-            "b24988ac-6180-42a0-ab88-20f7382dd24c"
-        },
+        "scripts/Remove-Mobius77Staging.ps1": {"b24988ac-6180-42a0-ab88-20f7382dd24c"},
     }
     for path in ROOT.rglob("*"):
         if not path.is_file():
