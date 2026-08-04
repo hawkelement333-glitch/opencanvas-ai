@@ -82,6 +82,19 @@ from infra.milestone_7_7.scripts.managed_binding_lifecycle import (
 )
 
 
+class PublicationAttemptFailure(RuntimeError):
+    """Preserve the first publication failure when closeout also fails."""
+
+    primary_failed_stage = "immutable-image-publication"
+
+    def __init__(
+        self, primary_error: BaseException, secondary_error: BaseException
+    ) -> None:
+        self.primary_error_code = _safe_attribution_error(primary_error)
+        self.secondary_error_code = _safe_attribution_error(secondary_error)
+        super().__init__(self.primary_error_code)
+
+
 def _api_image_reference(repository_head: str) -> str:
     if HEX_SHA40.fullmatch(repository_head) is None:
         _fail("repository-head-invalid")
@@ -464,6 +477,29 @@ def _remove_source_tag(access_token: bytearray, *, source_tag: str) -> None:
         body.clear()
 
 
+def _cleanup_failed_publication(
+    access_token: bytearray,
+    *,
+    source_tag: str,
+    primary_error: BaseException | None,
+) -> None:
+    try:
+        observed_source_digest = _acr_manifest_digest(
+            access_token, reference=source_tag
+        )
+        if observed_source_digest is not None:
+            with _attribution_scope(
+                lifecycle_substage="failure-publication-tag-cleanup",
+                expected_authorization="allow",
+            ):
+                _remove_source_tag(access_token, source_tag=source_tag)
+        _assert_source_tag_absent(source_tag=source_tag, access_token=access_token)
+    except BaseException as cleanup_error:
+        if primary_error is None:
+            raise
+        raise PublicationAttemptFailure(primary_error, cleanup_error) from cleanup_error
+
+
 def _docker_push_error_code(stdout: bytearray, stderr: bytearray) -> str:
     try:
         text = (
@@ -751,6 +787,7 @@ def _publish_api_image(
             refresh_token, environment=publisher_environment
         )
         refresh_token.clear()
+        primary_publication_error: BaseException | None = None
         try:
             _assert_source_tag_absent(
                 source_tag=source_tag,
@@ -799,19 +836,15 @@ def _publish_api_image(
                 ("docker", "tag", immutable_reference, revocation_probe),
                 environment_overrides=publisher_environment,
             )
+        except BaseException as error:
+            primary_publication_error = error
+            raise
         finally:
             if publication_attempted and access_token:
-                observed_source_digest = _acr_manifest_digest(
-                    access_token, reference=source_tag
-                )
-                if observed_source_digest is not None:
-                    with _attribution_scope(
-                        lifecycle_substage="failure-publication-tag-cleanup",
-                        expected_authorization="allow",
-                    ):
-                        _remove_source_tag(access_token, source_tag=source_tag)
-                _assert_source_tag_absent(
-                    source_tag=source_tag, access_token=access_token
+                _cleanup_failed_publication(
+                    access_token,
+                    source_tag=source_tag,
+                    primary_error=primary_publication_error,
                 )
             _run(
                 ("docker", "logout", REGISTRY_HOST),

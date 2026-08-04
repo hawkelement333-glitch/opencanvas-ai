@@ -42,6 +42,10 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     validate_authorization_ledger,
 )
 from preflight.milestone_7_7.operation_contracts import OPERATION_IDS
+from preflight.milestone_7_7.publication_path_admission import (
+    PublicationPathAdmissionError,
+    verify_private_registry_publication_path,
+)
 
 RESULT_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/managed-binding-operation-result/v1\0"
@@ -1485,6 +1489,7 @@ def materialize_ledger(
         or resolved_repository in resolved_path.parents
     ):
         raise ManagedBindingExecutionError("ledger-path-inside-repository")
+    verify_private_registry_publication_path(repository_head=repository_head)
     ledger = build_authorization_ledger(
         issued_at_utc=_utc_now() if now_utc is None else now_utc,
         repository_head=repository_head,
@@ -1570,6 +1575,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ContractError,
         ManagedBindingExecutionError,
         PreflightExecutionError,
+        PublicationPathAdmissionError,
     ) as exc:
         error_code = getattr(exc, "error_code", "managed-binding-contract-invalid")
         print(

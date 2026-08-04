@@ -2369,6 +2369,103 @@ def test_docker_push_retry_is_bounded_to_transient_unambiguous_result(
     )
 
 
+def test_digest_cleanup_dns_failure_does_not_mask_original_push_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    primary = managed_binding_lifecycle.LifecycleError("publisher-docker-push-failed")
+    secondary = managed_binding_lifecycle.LifecycleError("private-endpoint-dns-unavailable")
+
+    def digest(_token: bytearray, *, reference: str) -> None:
+        assert reference == "source-" + "a" * 40
+        raise secondary
+
+    monkeypatch.setattr(api_image_publication, "_acr_manifest_digest", digest)
+
+    with pytest.raises(api_image_publication.PublicationAttemptFailure) as captured:
+        api_image_publication._cleanup_failed_publication(
+            bytearray(b"x" * 64),
+            source_tag="source-" + "a" * 40,
+            primary_error=primary,
+        )
+    assert str(captured.value) == "publisher-docker-push-failed"
+    assert captured.value.primary_error_code == "publisher-docker-push-failed"
+    assert captured.value.secondary_error_code == "private-endpoint-dns-unavailable"
+    assert captured.value.primary_failed_stage == "immutable-image-publication"
+
+    failure_record = managed_binding_lifecycle._failure_record
+    observed_failed_stage: list[str] = []
+
+    def record(**kwargs: object) -> dict[str, JsonValue]:
+        observed_failed_stage.append(cast(str, kwargs["failed_stage"]))
+        return failure_record(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_failure_record", record)
+    result = managed_binding_lifecycle._handle_failure(
+        error=captured.value,
+        operation="post-secret-provisioning",
+        ledger=None,
+        subscription_id=None,
+        receipt_directory=None,
+    )
+    assert result["error"] == "publisher-docker-push-failed"
+    assert result["sanitized-azure-error-code"] is None
+    assert observed_failed_stage == ["immutable-image-publication"]
+
+
+def test_cleanup_dns_failure_remains_primary_without_prior_publication_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secondary = managed_binding_lifecycle.LifecycleError("private-endpoint-dns-unavailable")
+    monkeypatch.setattr(
+        api_image_publication,
+        "_acr_manifest_digest",
+        lambda _token, *, reference: (_ for _ in ()).throw(secondary),
+    )
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="private-endpoint-dns-unavailable",
+    ):
+        api_image_publication._cleanup_failed_publication(
+            bytearray(b"x" * 64),
+            source_tag="source-" + "a" * 40,
+            primary_error=None,
+        )
+
+
+def test_publication_path_is_reproved_before_protected_receipt_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[tuple[str, str]] = []
+
+    def verify(*, repository_head: str) -> dict[str, JsonValue]:
+        observed.append(("verify", repository_head))
+        return {"status": "proved"}
+
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "verify_private_registry_publication_path",
+        verify,
+    )
+    for operation in (
+        "pre-secret-provisioning",
+        "private-path-verification",
+        "post-secret-provisioning",
+    ):
+        managed_binding_lifecycle._verify_publication_path_before_claim(
+            operation=operation, repository_head="a" * 40
+        )
+    managed_binding_lifecycle._verify_publication_path_before_claim(
+        operation="cleanup", repository_head="a" * 40
+    )
+    assert observed == [("verify", "a" * 40)] * 3
+
+    main_source = inspect.getsource(managed_binding_lifecycle.main)
+    assert main_source.index("_verify_publication_path_before_claim(") < main_source.index(
+        "claim_operation_receipt("
+    )
+
+
 def test_live_publisher_cannot_build_and_fails_closed_on_digest_mismatch() -> None:
     publish = inspect.getsource(api_image_publication._publish_api_image)
     push = inspect.getsource(api_image_publication._docker_push_once)

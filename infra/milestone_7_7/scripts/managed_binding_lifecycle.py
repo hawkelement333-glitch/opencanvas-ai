@@ -53,6 +53,9 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     load_managed_binding_contract,
     validate_authorization_ledger,
 )
+from preflight.milestone_7_7.publication_path_admission import (
+    verify_private_registry_publication_path,
+)
 
 _CANONICAL_LIFECYCLE_MODULE: Final = (
     "infra.milestone_7_7.scripts.managed_binding_lifecycle"
@@ -5844,6 +5847,17 @@ def _private_path(subscription_id: str) -> dict[str, JsonValue]:
     }
 
 
+def _verify_publication_path_before_claim(
+    *, operation: str, repository_head: str
+) -> None:
+    if operation in {
+        "pre-secret-provisioning",
+        "private-path-verification",
+        "post-secret-provisioning",
+    }:
+        verify_private_registry_publication_path(repository_head=repository_head)
+
+
 def _docker_login_with_refresh_token(
     refresh_token: bytearray, *, environment: Mapping[str, str]
 ) -> None:
@@ -6812,7 +6826,13 @@ def _handle_failure(
         if error_code in SECURITY_CONTAINMENT_ERROR_CODES
         else LifecycleDisposition.PAUSED_PRESERVED
     )
-    failed_stage = _safe_failed_stage(receipt_directory, operation=operation)
+    primary_failed_stage = getattr(error, "primary_failed_stage", None)
+    failed_stage = (
+        primary_failed_stage
+        if isinstance(primary_failed_stage, str)
+        and re.fullmatch(r"[a-z0-9-]{1,96}", primary_failed_stage) is not None
+        else _safe_failed_stage(receipt_directory, operation=operation)
+    )
     cancellation_codes = {
         "canceled",
         "cancelled",
@@ -7032,6 +7052,9 @@ def main() -> int:
         )
         _verify_repository_state(args.repository_head)
         subscription_id = _account_binding(now)
+        _verify_publication_path_before_claim(
+            operation=operation, repository_head=args.repository_head
+        )
         claim_operation_receipt(
             ledger=ledger,
             operation_id=operation,
