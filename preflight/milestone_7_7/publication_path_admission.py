@@ -149,6 +149,8 @@ def _classify_daemon_registry_result(
         )
     ):
         return "registry-reached-without-credentials"
+    if "failed to resolve reference" in output and ": not found" in output:
+        return "registry-reached-without-credentials"
     _fail("publication-path-registry-response-unrecognized")
 
 

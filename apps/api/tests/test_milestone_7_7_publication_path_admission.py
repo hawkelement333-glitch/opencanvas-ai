@@ -107,6 +107,28 @@ def test_exact_host_and_daemon_publication_path_passes_without_credentials(
     )
 
 
+def test_exact_registry_not_found_response_proves_credential_free_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference = (
+        f"{admission.REGISTRY_HOST}/{admission.REGISTRY_REPOSITORY}:"
+        f"mobius77-publication-path-probe-{HEAD}"
+    )
+    run, _calls = _runner(
+        f'failed to resolve reference "{reference}": {reference}: not found'.encode()
+    )
+    monkeypatch.setattr(admission.shutil, "which", lambda *_args, **_kwargs: "C:/docker.exe")
+
+    result = admission.verify_private_registry_publication_path(
+        repository_head=HEAD,
+        runner=run,
+        host_probe=lambda _hostname: None,
+        base_environment=_base_environment(),
+    )
+
+    assert result["probeOutcome"] == "registry-reached-without-credentials"
+
+
 @pytest.mark.parametrize(
     ("message", "error_code"),
     [
