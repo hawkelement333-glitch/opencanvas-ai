@@ -126,7 +126,7 @@ EXPECTED_POLICY_DIGESTS = {
         "036a369242182e52018f98e0b27d2944492c977e82475edd8a9209fecd1afce2"
     ),
     "lifecycle-policy.json": (
-        "202e5c44621a0d9e267acb8f2588b83e2a0c72280dbb026e06bc69b2f658fee4"
+        "9efa36e6938104ae27500709ce285c91dea748b533d69a569e28a7786b7b63fe"
     ),
     "network-policy.json": (
         "67fe0f29d7a69c78a08a213764da7498a6a83293c3e8838c7d3f971da15a851b"
@@ -768,7 +768,7 @@ def _validate_policies(root: Path, environment: Mapping[str, Any]) -> None:
         "targetUsdCents": 10000,
     }:
         raise ContractError("fixed cost controls differ")
-    if lifecycle["lease"].get("authorizedCleanupAtUtc") != "2026-08-05T04:15:00Z":
+    if lifecycle["lease"].get("authorizedCleanupAtUtc") != "2026-08-05T06:45:00Z":
         raise ContractError("authorized cleanup deadline differs")
     if tuple(lifecycle["requiredTags"]) != EXPECTED_TAG_KEYS:
         raise ContractError("lifecycle policy tags differ")
