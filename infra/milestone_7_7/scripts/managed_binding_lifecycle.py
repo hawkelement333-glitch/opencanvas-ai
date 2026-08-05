@@ -1310,9 +1310,29 @@ def _registry_attribution_spec(method: str, path: str) -> dict[str, JsonValue]:
                 operation_class = "acrpush-propagation-token-verification"
             elif scoped_substage == "post-revocation-acr-denial":
                 operation_class = "post-revocation-token-denial-proof"
+    elif method == "GET" and "/_tags/" in path:
+        operation_class = "source-tag-properties-verification"
+        substage = "source-tag-properties-verification"
+        mutation = False
+    elif method == "GET" and "/_manifests/" in path:
+        operation_class = "acr-manifest-properties-verification"
+        substage = "acr-manifest-properties-verification"
+        mutation = False
     elif method == "HEAD" and "/manifests/" in path:
         operation_class = "repository-specific-digest-verification"
         substage = "repository-specific-digest-verification"
+        mutation = False
+    elif method == "GET" and "/manifests/" in path:
+        operation_class = "raw-manifest-content-verification"
+        substage = "raw-manifest-content-verification"
+        mutation = False
+    elif method == "HEAD" and "/blobs/" in path:
+        operation_class = "config-blob-existence-verification"
+        substage = "config-blob-existence-verification"
+        mutation = False
+    elif method == "GET" and "/blobs/" in path:
+        operation_class = "config-blob-content-verification"
+        substage = "config-blob-content-verification"
         mutation = False
     elif method == "DELETE" and "/_tags/" in path:
         operation_class = "mutable-tag-removal"
@@ -4700,7 +4720,8 @@ def _validate_registry_request(method: str, path: str) -> None:
         return
     manifest = re.fullmatch(
         r"/v2/opencanvas-api/manifests/"
-        r"(?:source-[0-9a-f]{40}|sha256:[0-9a-f]{64})",
+        r"(?:source-[0-9a-f]{40}|sha256:[0-9a-f]{64})"
+        r"(?:\?api-version=2021-07-01)?",
         path,
     )
     tag = re.fullmatch(
@@ -4712,14 +4733,21 @@ def _validate_registry_request(method: str, path: str) -> None:
         r"/acr/v1/opencanvas-api/_tags\?api-version=2021-07-01",
         path,
     )
+    manifest_properties = re.fullmatch(
+        r"/acr/v1/opencanvas-api/_manifests/sha256:[0-9a-f]{64}"
+        r"\?api-version=2021-07-01",
+        path,
+    )
     blob = re.fullmatch(
         r"/v2/opencanvas-api/blobs/sha256:[0-9a-f]{64}",
         path,
     )
     if (
         (method in {"GET", "HEAD"} and manifest is not None)
-        or (method == "GET" and blob is not None)
+        or (method in {"GET", "HEAD"} and blob is not None)
         or (method == "GET" and tag_inventory is not None)
+        or (method == "GET" and manifest_properties is not None)
+        or (method == "GET" and tag is not None)
         or (method == "DELETE" and tag is not None)
     ):
         return
@@ -4793,6 +4821,9 @@ def _private_registry_request(
         content_type = response.getheader("Content-Type")
         if content_type is not None:
             retained_headers["content-type"] = content_type
+        content_length = response.getheader("Content-Length")
+        if content_length is not None:
+            retained_headers["content-length"] = content_length
         challenge = response.getheader("WWW-Authenticate")
         if challenge is not None and (method, path) == ("GET", "/v2/"):
             retained_headers["www-authenticate"] = challenge

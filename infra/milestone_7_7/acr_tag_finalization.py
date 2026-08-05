@@ -56,6 +56,13 @@ REPOSITORY_CONTRIBUTOR_ROLE_ID: Final = "2efddaa5-3f1f-4df3-97df-af3f13818f4c"
 FINALIZER_SCOPE: Final = f"repository:{lifecycle.PUBLISHER_REPOSITORY}:pull,delete"
 HEX_SHA40: Final = re.compile(r"^[0-9a-f]{40}$")
 HEX_SHA256: Final = re.compile(r"^[0-9a-f]{64}$")
+RAW_DIGEST: Final = re.compile(r"^sha256:[0-9a-f]{64}$")
+OCI_MANIFEST: Final = "application/vnd.oci.image.manifest.v1+json"
+DOCKER_MANIFEST: Final = "application/vnd.docker.distribution.manifest.v2+json"
+OCI_INDEX: Final = "application/vnd.oci.image.index.v1+json"
+DOCKER_INDEX: Final = "application/vnd.docker.distribution.manifest.list.v2+json"
+LEAF_MEDIA_TYPES: Final = frozenset({OCI_MANIFEST, DOCKER_MANIFEST})
+INDEX_MEDIA_TYPES: Final = frozenset({OCI_INDEX, DOCKER_INDEX})
 ABAC_CONDITION_VERSION: Final = "2.0"
 ABAC_CONDITION: Final = """(
  (
@@ -372,54 +379,314 @@ def _repository_tags(token: bytearray) -> dict[str, str]:
     return result
 
 
-def _manifest_identity(token: bytearray) -> dict[str, JsonValue]:
-    body = bytearray()
-    config_body = bytearray()
+def _normalized_content_type(headers: Mapping[str, str]) -> str:
+    value = headers.get("content-type")
+    if not isinstance(value, str):
+        _fail("immutable-manifest-content-type-missing")
+    return value.split(";", 1)[0].strip().casefold()
+
+
+def _descriptor(
+    value: JsonValue, *, platform_required: bool = False
+) -> dict[str, JsonValue]:
+    size = value.get("size") if isinstance(value, dict) else None
+    if (
+        not isinstance(value, dict)
+        or not isinstance(value.get("mediaType"), str)
+        or not isinstance(value.get("digest"), str)
+        or RAW_DIGEST.fullmatch(str(value["digest"])) is None
+        or not isinstance(size, int)
+        or isinstance(size, bool)
+        or size <= 0
+    ):
+        _fail("immutable-manifest-descriptor-malformed")
+    if platform_required:
+        platform = value.get("platform")
+        if (
+            not isinstance(platform, dict)
+            or not isinstance(platform.get("os"), str)
+            or not isinstance(platform.get("architecture"), str)
+        ):
+            _fail("immutable-manifest-platform-malformed")
+    return value
+
+
+def _parse_tag_properties(
+    status: int, headers: Mapping[str, str], body: bytearray
+) -> dict[str, JsonValue]:
+    del headers
+    if status != 200 or not body:
+        _fail("source-tag-properties-unavailable")
     try:
-        status, headers, body = lifecycle._private_registry_request(
-            "GET",
-            f"/v2/{lifecycle.PUBLISHER_REPOSITORY}/manifests/{MANIFEST_DIGEST}",
-            headers={
-                "Authorization": lifecycle._registry_authorization(token),
-                "Accept": lifecycle.MANIFEST_ACCEPT,
-            },
-        )
-        if status != 200 or headers.get("docker-content-digest") != MANIFEST_DIGEST:
-            _fail("immutable-manifest-unavailable-or-mismatched")
         value = json.loads(body)
-        if (
-            not isinstance(value, dict)
-            or value.get("schemaVersion") != 2
-            or not isinstance(value.get("config"), dict)
-            or value["config"].get("digest") != REGISTRY_CONFIG_DIGEST
-            or not isinstance(value.get("layers"), list)
-            or len(value["layers"]) != 13
-        ):
-            _fail("immutable-manifest-identity-mismatch")
-        status, _headers, config_body = lifecycle._private_registry_request(
-            "GET",
-            f"/v2/{lifecycle.PUBLISHER_REPOSITORY}/blobs/{REGISTRY_CONFIG_DIGEST}",
-            headers={"Authorization": lifecycle._registry_authorization(token)},
+    except (UnicodeError, json.JSONDecodeError):
+        _fail("source-tag-properties-malformed")
+    if (
+        not isinstance(value, dict)
+        or not isinstance(value.get("registry"), str)
+        or value.get("imageName") != lifecycle.PUBLISHER_REPOSITORY
+        or not isinstance(value.get("tag"), dict)
+    ):
+        _fail("source-tag-properties-malformed")
+    tag = cast(dict[str, JsonValue], value["tag"])
+    attributes = tag.get("changeableAttributes")
+    if (
+        tag.get("name") != SOURCE_TAG
+        or not isinstance(tag.get("digest"), str)
+        or RAW_DIGEST.fullmatch(str(tag["digest"])) is None
+        or not isinstance(attributes, dict)
+        or attributes.get("deleteEnabled") is not True
+        or attributes.get("readEnabled") is not True
+        or not isinstance(attributes.get("writeEnabled"), bool)
+        or (
+            "listEnabled" in attributes
+            and not isinstance(attributes.get("listEnabled"), bool)
         )
-        config = json.loads(config_body)
-        if (
-            status != 200
-            or not isinstance(config, dict)
-            or config.get("architecture") != "amd64"
-            or config.get("os") != "linux"
-        ):
-            _fail("immutable-config-identity-mismatch")
-        return {
-            "manifestDigest": MANIFEST_DIGEST,
-            "configDigest": REGISTRY_CONFIG_DIGEST,
-            "platform": "linux/amd64",
-            "layerCount": 13,
-        }
+    ):
+        _fail("source-tag-properties-mismatch-or-locked")
+    return {
+        "digest": str(tag["digest"]),
+        "deleteEnabled": True,
+        "readEnabled": True,
+        "writeEnabled": cast(bool, attributes["writeEnabled"]),
+    }
+
+
+def _parse_manifest_head(
+    status: int,
+    headers: Mapping[str, str],
+    body: bytearray,
+    *,
+    expected_digest: str,
+) -> dict[str, JsonValue]:
+    if status != 200 or body:
+        _fail("immutable-manifest-head-invalid")
+    observed = headers.get("docker-content-digest")
+    if observed is not None and observed != expected_digest:
+        _fail("immutable-manifest-head-digest-mismatch")
+    return {
+        "bodyEmpty": True,
+        "dockerContentDigestPresent": observed is not None,
+    }
+
+
+def _parse_raw_manifest(
+    status: int,
+    headers: Mapping[str, str],
+    body: bytearray,
+    *,
+    expected_digest: str,
+) -> dict[str, JsonValue]:
+    if status != 200 or not body:
+        _fail("immutable-manifest-get-empty-or-unavailable")
+    media_type = _normalized_content_type(headers)
+    if media_type not in LEAF_MEDIA_TYPES | INDEX_MEDIA_TYPES:
+        _fail("immutable-manifest-media-type-unsupported")
+    computed = "sha256:" + hashlib.sha256(body).hexdigest()
+    if computed != expected_digest:
+        _fail("immutable-manifest-body-digest-mismatch")
+    header_digest = headers.get("docker-content-digest")
+    if header_digest is not None and header_digest != expected_digest:
+        _fail("immutable-manifest-header-digest-mismatch")
+    try:
+        value = json.loads(body)
     except (UnicodeError, json.JSONDecodeError):
         _fail("immutable-manifest-response-malformed")
+    if not isinstance(value, dict) or value.get("schemaVersion") != 2:
+        _fail("immutable-manifest-response-malformed")
+    declared_type = value.get("mediaType")
+    if declared_type is not None and declared_type != media_type:
+        _fail("immutable-manifest-media-type-mismatch")
+    if media_type in LEAF_MEDIA_TYPES:
+        config = _descriptor(value.get("config"))
+        layers = value.get("layers")
+        if not isinstance(layers, list):
+            _fail("immutable-manifest-layers-malformed")
+        for layer in layers:
+            _descriptor(layer)
+        return {
+            "kind": "leaf",
+            "mediaType": media_type,
+            "digest": expected_digest,
+            "configDigest": str(config["digest"]),
+            "layerCount": len(layers),
+        }
+    manifests = value.get("manifests")
+    if not isinstance(manifests, list):
+        _fail("immutable-index-manifests-malformed")
+    matches: list[dict[str, JsonValue]] = []
+    for item in manifests:
+        descriptor = _descriptor(item, platform_required=True)
+        platform = cast(dict[str, JsonValue], descriptor["platform"])
+        if platform.get("os") == "linux" and platform.get("architecture") == "amd64":
+            matches.append(descriptor)
+    if len(matches) != 1:
+        _fail("immutable-index-platform-cardinality-invalid")
+    return {
+        "kind": "index",
+        "mediaType": media_type,
+        "digest": expected_digest,
+        "childDigest": str(matches[0]["digest"]),
+    }
+
+
+def _parse_manifest_properties(
+    status: int,
+    headers: Mapping[str, str],
+    body: bytearray,
+    *,
+    expected_digest: str,
+    source_tag_expected: bool,
+) -> dict[str, JsonValue]:
+    del headers
+    if status != 200 or not body:
+        _fail("acr-manifest-properties-unavailable")
+    try:
+        value = json.loads(body)
+    except (UnicodeError, json.JSONDecodeError):
+        _fail("acr-manifest-properties-malformed")
+    if (
+        not isinstance(value, dict)
+        or not isinstance(value.get("registry"), str)
+        or value.get("imageName") != lifecycle.PUBLISHER_REPOSITORY
+        or not isinstance(value.get("manifest"), dict)
+    ):
+        _fail("acr-manifest-properties-malformed")
+    manifest = cast(dict[str, JsonValue], value["manifest"])
+    attributes = manifest.get("changeableAttributes")
+    tags = manifest.get("tags")
+    if (
+        manifest.get("digest") != expected_digest
+        or manifest.get("architecture") != "amd64"
+        or manifest.get("os") != "linux"
+        or not isinstance(tags, list)
+        or any(not isinstance(tag, str) for tag in tags)
+        or (SOURCE_TAG in tags) is not source_tag_expected
+        or not isinstance(attributes, dict)
+        or attributes.get("readEnabled") is not True
+        or not isinstance(attributes.get("deleteEnabled"), bool)
+    ):
+        _fail("acr-manifest-properties-mismatch")
+    return {
+        "digest": expected_digest,
+        "platform": "linux/amd64",
+        "sourceTagPresent": source_tag_expected,
+    }
+
+
+def _parse_blob_head(status: int, headers: Mapping[str, str], body: bytearray) -> None:
+    del headers
+    if status != 200 or body:
+        _fail("immutable-config-blob-head-invalid")
+
+
+def _registry_read(
+    token: bytearray,
+    method: str,
+    path: str,
+    *,
+    accept_manifest: bool = False,
+) -> tuple[int, dict[str, str], bytearray]:
+    headers = {"Authorization": lifecycle._registry_authorization(token)}
+    if accept_manifest:
+        headers.update(
+            {"Accept": lifecycle.MANIFEST_ACCEPT, "Accept-Encoding": "identity"}
+        )
+    return lifecycle._private_registry_request(method, path, headers=headers)
+
+
+def _tag_properties(token: bytearray) -> dict[str, JsonValue]:
+    body = bytearray()
+    try:
+        status, headers, body = _registry_read(
+            token,
+            "GET",
+            f"/acr/v1/{lifecycle.PUBLISHER_REPOSITORY}/_tags/{SOURCE_TAG}"
+            "?api-version=2021-07-01",
+        )
+        return _parse_tag_properties(status, headers, body)
     finally:
         body.clear()
-        config_body.clear()
+
+
+def _manifest_identity(
+    token: bytearray, *, top_level_digest: str, source_tag_expected: bool
+) -> dict[str, JsonValue]:
+    if RAW_DIGEST.fullmatch(top_level_digest) is None:
+        _fail("immutable-manifest-reference-invalid")
+    bodies: list[bytearray] = []
+    try:
+        status, headers, body = _registry_read(
+            token,
+            "HEAD",
+            f"/v2/{lifecycle.PUBLISHER_REPOSITORY}/manifests/{top_level_digest}"
+            "?api-version=2021-07-01",
+            accept_manifest=True,
+        )
+        bodies.append(body)
+        _parse_manifest_head(status, headers, body, expected_digest=top_level_digest)
+        status, headers, body = _registry_read(
+            token,
+            "GET",
+            f"/v2/{lifecycle.PUBLISHER_REPOSITORY}/manifests/{top_level_digest}"
+            "?api-version=2021-07-01",
+            accept_manifest=True,
+        )
+        bodies.append(body)
+        top = _parse_raw_manifest(
+            status, headers, body, expected_digest=top_level_digest
+        )
+        child_digest: str | None = None
+        leaf = top
+        if top["kind"] == "index":
+            child_digest = str(top["childDigest"])
+            status, headers, body = _registry_read(
+                token,
+                "GET",
+                f"/v2/{lifecycle.PUBLISHER_REPOSITORY}/manifests/{child_digest}"
+                "?api-version=2021-07-01",
+                accept_manifest=True,
+            )
+            bodies.append(body)
+            leaf = _parse_raw_manifest(
+                status, headers, body, expected_digest=child_digest
+            )
+            if leaf["kind"] != "leaf":
+                _fail("immutable-index-child-not-leaf")
+        config_digest = str(leaf["configDigest"])
+        if config_digest != REGISTRY_CONFIG_DIGEST:
+            _fail("immutable-config-digest-mismatch")
+        status, headers, body = _registry_read(
+            token,
+            "HEAD",
+            f"/v2/{lifecycle.PUBLISHER_REPOSITORY}/blobs/{config_digest}",
+        )
+        bodies.append(body)
+        _parse_blob_head(status, headers, body)
+        status, headers, body = _registry_read(
+            token,
+            "GET",
+            f"/acr/v1/{lifecycle.PUBLISHER_REPOSITORY}/_manifests/"
+            f"{top_level_digest}?api-version=2021-07-01",
+        )
+        bodies.append(body)
+        _parse_manifest_properties(
+            status,
+            headers,
+            body,
+            expected_digest=top_level_digest,
+            source_tag_expected=source_tag_expected,
+        )
+        return {
+            "manifestDigest": top_level_digest,
+            "childManifestDigest": child_digest,
+            "configDigest": config_digest,
+            "platform": "linux/amd64",
+            "layerCount": leaf["layerCount"],
+        }
+    finally:
+        for body in bodies:
+            body.clear()
 
 
 def _finalizer_access_is_exact(token: bytearray, *, tenant_id: str) -> bool:
@@ -808,6 +1075,75 @@ def _finalizer_environment(root: Path) -> tuple[Path, dict[str, str]]:
     }
 
 
+def _cleanup_finalizer(
+    *,
+    subscription_id: str,
+    assignment_ids: Sequence[str],
+    app_id: str | None,
+    object_id: str | None,
+    tenant_id: str | None,
+    certificate_path: Path | None,
+    environment: Mapping[str, str],
+    finalizer_root: Path,
+    registry_scope: str,
+    roles: Sequence[Mapping[str, JsonValue]],
+) -> list[str]:
+    errors: list[str] = []
+    for assignment_id in reversed(assignment_ids):
+        try:
+            lifecycle._delete_assignment(subscription_id, assignment_id)
+        except BaseException as exc:
+            errors.append(_sanitized_error_code(exc))
+    if app_id is not None and object_id is not None:
+        try:
+            _wait_role_inventory(
+                subscription_id=subscription_id,
+                app_id=app_id,
+                object_id=object_id,
+                registry_scope=registry_scope,
+                roles=roles,
+                required=False,
+            )
+        except BaseException as exc:
+            errors.append(_sanitized_error_code(exc))
+        try:
+            lifecycle._reset_ephemeral_directory(Path(environment["AZURE_CONFIG_DIR"]))
+            if certificate_path is not None and tenant_id is not None:
+                lifecycle._publisher_login(
+                    publisher_app_id=app_id,
+                    tenant_id=tenant_id,
+                    certificate_path=certificate_path,
+                    environment=environment,
+                )
+                denial_refresh = _wait_for_finalizer_denial(
+                    publisher_app_id=app_id,
+                    tenant_id=tenant_id,
+                    environment=environment,
+                )
+                denial_refresh.clear()
+        except BaseException as exc:
+            errors.append(_sanitized_error_code(exc))
+        try:
+            lifecycle._delete_ephemeral_publisher_by_app_id(app_id)
+        except BaseException as exc:
+            errors.append(_sanitized_error_code(exc))
+    if finalizer_root.exists():
+        try:
+            shutil.rmtree(finalizer_root)
+        except OSError as exc:
+            errors.append(_sanitized_error_code(exc))
+    return errors
+
+
+def _raise_preserving_primary(
+    primary_error: BaseException | None, cleanup_errors: Sequence[str]
+) -> None:
+    if primary_error is not None:
+        raise primary_error
+    if cleanup_errors:
+        _fail("finalizer-cleanup-failed")
+
+
 def execute_finalization(
     *, ledger_path: Path, receipt_directory: Path, control_plane_head: str
 ) -> dict[str, JsonValue]:
@@ -854,7 +1190,6 @@ def execute_finalization(
     )
     if image_id != LOCAL_IMAGE_ID or config_id != LOCAL_IMAGE_ID:
         _fail("finalization-local-image-drift")
-    _live_tag_metadata(subscription_id)
     registry_scope = lifecycle._scope(
         subscription_id,
         f"/resourceGroups/{lifecycle.TARGET_GROUP}/providers/"
@@ -863,6 +1198,7 @@ def execute_finalization(
     finalizer_root, environment = _finalizer_environment(receipt_root)
     app_id: str | None = None
     object_id: str | None = None
+    tenant_id: str | None = None
     certificate_path: Path | None = None
     assignment_ids: list[str] = []
     refresh_token = bytearray()
@@ -935,16 +1271,23 @@ def execute_finalization(
         )
         if not _finalizer_access_is_exact(access_token, tenant_id=tenant_id):
             _fail("finalizer-token-scope-missing")
+        tag_properties = _tag_properties(access_token)
+        top_level_digest = str(tag_properties["digest"])
+        if top_level_digest != MANIFEST_DIGEST:
+            _fail("source-tag-digest-mismatch-before-delete")
         if (
             lifecycle._acr_manifest_digest(access_token, reference=SOURCE_TAG)
-            != MANIFEST_DIGEST
+            != top_level_digest
         ):
-            _fail("source-tag-digest-mismatch-before-delete")
-        manifest_before = _manifest_identity(access_token)
+            _fail("source-tag-head-digest-mismatch-before-delete")
+        manifest_before = _manifest_identity(
+            access_token,
+            top_level_digest=top_level_digest,
+            source_tag_expected=True,
+        )
         tags_before = _repository_tags(access_token)
-        if tags_before.get(SOURCE_TAG) != MANIFEST_DIGEST:
+        if tags_before.get(SOURCE_TAG) != top_level_digest:
             _fail("source-tag-state-mismatch-or-locked")
-        _live_tag_metadata(subscription_id)
         body = bytearray()
         try:
             delete_status, _headers, body = lifecycle._private_registry_request(
@@ -955,7 +1298,7 @@ def execute_finalization(
                     "Authorization": lifecycle._registry_authorization(access_token)
                 },
             )
-            if delete_status not in {200, 202, 204}:
+            if delete_status != 202:
                 _fail(f"tag-delete-http-{delete_status}")
         except lifecycle.LifecycleError as exc:
             if str(exc) != "publisher-private-registry-request-failed":
@@ -968,7 +1311,11 @@ def execute_finalization(
             is not None
         ):
             _fail("source-tag-remains-after-delete")
-        manifest_after = _manifest_identity(access_token)
+        manifest_after = _manifest_identity(
+            access_token,
+            top_level_digest=top_level_digest,
+            source_tag_expected=False,
+        )
         tags_after = _repository_tags(access_token)
         expected_after = dict(tags_before)
         expected_after.pop(SOURCE_TAG)
@@ -979,47 +1326,20 @@ def execute_finalization(
     finally:
         access_token.clear()
         refresh_token.clear()
-        for assignment_id in reversed(assignment_ids):
-            try:
-                lifecycle._delete_assignment(subscription_id, assignment_id)
-            except BaseException as exc:
-                cleanup_errors.append(_sanitized_error_code(exc))
-        if app_id is not None and object_id is not None:
-            try:
-                _wait_role_inventory(
-                    subscription_id=subscription_id,
-                    app_id=app_id,
-                    object_id=object_id,
-                    registry_scope=registry_scope,
-                    roles=roles,
-                    required=False,
-                )
-                lifecycle._reset_ephemeral_directory(
-                    Path(environment["AZURE_CONFIG_DIR"])
-                )
-                if certificate_path is not None:
-                    lifecycle._publisher_login(
-                        publisher_app_id=app_id,
-                        tenant_id=tenant_id,
-                        certificate_path=certificate_path,
-                        environment=environment,
-                    )
-                    denial_refresh = _wait_for_finalizer_denial(
-                        publisher_app_id=app_id,
-                        tenant_id=tenant_id,
-                        environment=environment,
-                    )
-                    denial_refresh.clear()
-                lifecycle._delete_ephemeral_publisher(
-                    publisher_app_id=app_id, publisher_object_id=object_id
-                )
-            except BaseException as exc:
-                cleanup_errors.append(_sanitized_error_code(exc))
-        if finalizer_root.exists():
-            try:
-                shutil.rmtree(finalizer_root)
-            except OSError as exc:
-                cleanup_errors.append(_sanitized_error_code(exc))
+        cleanup_errors.extend(
+            _cleanup_finalizer(
+                subscription_id=subscription_id,
+                assignment_ids=assignment_ids,
+                app_id=app_id,
+                object_id=object_id,
+                tenant_id=tenant_id,
+                certificate_path=certificate_path,
+                environment=environment,
+                finalizer_root=finalizer_root,
+                registry_scope=registry_scope,
+                roles=roles,
+            )
+        )
     if primary_error is not None or cleanup_errors:
         failure_unsigned: dict[str, JsonValue] = {
             "schemaVersion": EVIDENCE_VERSION,
@@ -1040,9 +1360,7 @@ def execute_finalization(
             "evidenceIntegritySha256": _integrity(failure_unsigned, EVIDENCE_DOMAIN),
         }
         _write_exclusive(receipt_root / "acr-tag-finalization.failure.json", failure)
-        if primary_error is not None:
-            raise primary_error
-        _fail("finalizer-cleanup-failed")
+        _raise_preserving_primary(primary_error, cleanup_errors)
     if manifest_before != manifest_after or manifest_after is None:
         _fail("immutable-manifest-changed-during-untag")
     evidence_unsigned: dict[str, JsonValue] = {
