@@ -530,6 +530,24 @@ def _parse_raw_manifest(
     }
 
 
+def _normalize_manifest_tags(value: JsonValue, *, post_delete: bool) -> tuple[str, ...]:
+    if value is None:
+        if post_delete:
+            return ()
+        _fail("acr-manifest-tags-missing-before-delete")
+    if not isinstance(value, list):
+        _fail("acr-manifest-tags-malformed")
+    normalized_items: list[str] = []
+    for tag in value:
+        if not isinstance(tag, str):
+            _fail("acr-manifest-tags-malformed")
+        normalized_items.append(tag)
+    normalized = tuple(normalized_items)
+    if len(set(normalized)) != len(normalized):
+        _fail("acr-manifest-tags-duplicate")
+    return normalized
+
+
 def _parse_manifest_properties(
     status: int,
     headers: Mapping[str, str],
@@ -554,13 +572,15 @@ def _parse_manifest_properties(
         _fail("acr-manifest-properties-malformed")
     manifest = cast(dict[str, JsonValue], value["manifest"])
     attributes = manifest.get("changeableAttributes")
-    tags = manifest.get("tags")
+    if "tags" not in manifest:
+        _fail("acr-manifest-tags-missing")
+    tags = _normalize_manifest_tags(
+        manifest["tags"], post_delete=not source_tag_expected
+    )
     if (
         manifest.get("digest") != expected_digest
         or manifest.get("architecture") != "amd64"
         or manifest.get("os") != "linux"
-        or not isinstance(tags, list)
-        or any(not isinstance(tag, str) for tag in tags)
         or (SOURCE_TAG in tags) is not source_tag_expected
         or not isinstance(attributes, dict)
         or attributes.get("readEnabled") is not True
@@ -571,6 +591,7 @@ def _parse_manifest_properties(
         "digest": expected_digest,
         "platform": "linux/amd64",
         "sourceTagPresent": source_tag_expected,
+        "tagCount": len(tags),
     }
 
 

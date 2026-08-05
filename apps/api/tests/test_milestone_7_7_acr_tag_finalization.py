@@ -467,6 +467,67 @@ def test_acr_manifest_properties_uses_nested_manifest() -> None:
     assert parsed["platform"] == "linux/amd64"
 
 
+@pytest.mark.parametrize("tags", [None, []])
+def test_post_delete_empty_manifest_tags_are_normalized(tags: object) -> None:
+    payload = {
+        "registry": "registry-alias",
+        "imageName": "opencanvas-api",
+        "manifest": {
+            "digest": finalization.MANIFEST_DIGEST,
+            "architecture": "amd64",
+            "os": "linux",
+            "tags": tags,
+            "changeableAttributes": {"readEnabled": True, "deleteEnabled": True},
+        },
+    }
+    parsed = finalization._parse_manifest_properties(
+        200,
+        {},
+        bytearray(json.dumps(payload).encode()),
+        expected_digest=finalization.MANIFEST_DIGEST,
+        source_tag_expected=False,
+    )
+    assert parsed["sourceTagPresent"] is False
+    assert parsed["tagCount"] == 0
+
+
+@pytest.mark.parametrize("tags", ["tag", {"name": "tag"}, ["tag", 1]])
+def test_invalid_manifest_tag_collections_fail_closed(tags: object) -> None:
+    payload = {
+        "registry": "registry-alias",
+        "imageName": "opencanvas-api",
+        "manifest": {
+            "digest": finalization.MANIFEST_DIGEST,
+            "architecture": "amd64",
+            "os": "linux",
+            "tags": tags,
+            "changeableAttributes": {"readEnabled": True, "deleteEnabled": True},
+        },
+    }
+    with pytest.raises(finalization.TagFinalizationError, match="acr-manifest-tags-malformed"):
+        finalization._parse_manifest_properties(
+            200,
+            {},
+            bytearray(json.dumps(payload).encode()),
+            expected_digest=finalization.MANIFEST_DIGEST,
+            source_tag_expected=False,
+        )
+
+
+def test_pre_delete_null_manifest_tags_fail_closed() -> None:
+    with pytest.raises(
+        finalization.TagFinalizationError,
+        match="acr-manifest-tags-missing-before-delete",
+    ):
+        finalization._normalize_manifest_tags(None, post_delete=False)
+
+
+def test_post_delete_surviving_tags_are_retained() -> None:
+    assert finalization._normalize_manifest_tags(["retained-tag"], post_delete=True) == (
+        "retained-tag",
+    )
+
+
 def test_manifest_and_config_digests_remain_distinct() -> None:
     body, digest = _raw(_leaf())
     parsed = finalization._parse_raw_manifest(
