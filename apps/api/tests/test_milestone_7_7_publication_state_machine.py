@@ -157,3 +157,189 @@ def test_propagation_timeout_has_no_delete_transition() -> None:
         state_machine.simulate_current_image_publication(
             oauth_responses=(401, 403), post_delete_tags=None
         )
+
+
+def _already_pushed_inputs(
+    *, source_tag_present: bool
+) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+    control_plane_head = "d" * 40
+    image_source_commit = "c" * 40
+    record = publication.AlreadyPushedPublicationRecord(
+        control_plane_head=control_plane_head,
+        image_source_commit=image_source_commit,
+        build_input_sha256="e" * 64,
+        local_image_id="sha256:" + "f" * 64,
+        config_digest="sha256:" + "b" * 64,
+        registry_manifest_digest="sha256:" + "a" * 64,
+        platform="linux/amd64",
+        registry_host=publication.REGISTRY_HOST,
+        repository="opencanvas-api",
+        source_tag=f"source-{image_source_commit}",
+        push_started_at_utc="2026-08-05T00:00:00Z",
+        push_completed_at_utc="2026-08-05T00:01:00Z",
+        docker_exit_code=0,
+        docker_timed_out=False,
+        stdout_sha256="1" * 64,
+        stderr_sha256="2" * 64,
+        publication_evidence_integrity="3" * 64,
+        cleanup_generation=2,
+        cleanup_deadline_utc="2026-08-06T00:00:00Z",
+        prior_lifecycle_evidence="4" * 64,
+        operation_id="reconcile-already-pushed-publication",
+    )
+    observation = publication.AlreadyPushedRegistryObservation(
+        registry_manifest_digest=record.registry_manifest_digest,
+        config_digest=record.config_digest,
+        platform=record.platform,
+        registry_host=record.registry_host,
+        repository=record.repository,
+        source_tag=record.source_tag,
+        source_tag_present=source_tag_present,
+        observed_at_utc="2026-08-05T00:02:00Z",
+        read_evidence_integrity="5" * 64,
+    )
+    ledger = {
+        "repositoryHead": control_plane_head,
+        "publishedImage": {
+            "publicationState": "pending",
+            "imageSourceCommit": record.image_source_commit,
+            "imageBuildInputSha256": record.build_input_sha256,
+            "localImageId": record.local_image_id,
+            "imageConfigDigest": record.config_digest,
+            "platform": record.platform,
+            "repository": record.repository,
+            "sourceTag": record.source_tag,
+        },
+        "ledgerIntegritySha256": "6" * 64,
+    }
+    return ledger, record.as_json(), observation.as_json()
+
+
+def _reconciliation_mocks(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    calls: list[str] = []
+    monkeypatch.setattr(publication, "_state_path", lambda _path: Path("state.json"))
+    monkeypatch.setattr(
+        publication,
+        "_read_state",
+        lambda _path: {"temporaryRegistryAssignmentId": None},
+    )
+    monkeypatch.setattr(
+        publication,
+        "verify_private_registry_publication_path",
+        lambda **_kwargs: calls.append("path"),
+    )
+
+    def reject_upload(name: str):
+        def reject(**_kwargs: object) -> None:
+            pytest.fail(f"upload-only call reached: {name}")
+
+        return reject
+
+    for name in (
+        "_create_ephemeral_publisher",
+        "_temporary_publisher_role_assignment",
+        "_docker_push_prebuilt_image",
+    ):
+        monkeypatch.setattr(
+            publication,
+            name,
+            reject_upload(name),
+        )
+    return calls
+
+
+def test_already_pushed_reconciliation_uses_the_canonical_finalizer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ledger, record, observation = _already_pushed_inputs(source_tag_present=True)
+    calls = _reconciliation_mocks(monkeypatch)
+
+    def finalize(**kwargs: object) -> dict[str, object]:
+        calls.append("finalizer")
+        machine = kwargs["publication"]
+        assert isinstance(machine, state_machine.PublicationStateMachine)
+        for state in (
+            state_machine.PublicationState.FINALIZER_AUTHORITY_READY,
+            state_machine.PublicationState.FINALIZER_AUTHENTICATION_PROVED,
+            state_machine.PublicationState.SOURCE_TAG_REMOVED,
+            state_machine.PublicationState.IMMUTABLE_MANIFEST_REPROVED,
+            state_machine.PublicationState.PUBLISHER_FINALIZER_REVOKED,
+            state_machine.PublicationState.PUBLICATION_EVIDENCE_PERSISTED,
+        ):
+            machine.advance(state)
+        return {"sourceTagAbsent": True, "immutableManifestRetained": True}
+
+    monkeypatch.setattr(finalization, "finalize_current_publication", finalize)
+    result = publication._publish_api_image(
+        ledger=ledger,
+        subscription_id="opaque-subscription",
+        receipt_directory=tmp_path,
+        mode=state_machine.PublicationMode.ALREADY_PUSHED_RECONCILIATION,
+        already_pushed_record=record,
+        registry_observation=observation,
+    )
+    assert result.endswith("@sha256:" + "a" * 64)
+    assert calls == ["path", "finalizer"]
+
+
+def test_already_pushed_source_absent_skips_finalizer_and_upload(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ledger, record, observation = _already_pushed_inputs(source_tag_present=False)
+    calls = _reconciliation_mocks(monkeypatch)
+    monkeypatch.setattr(
+        finalization,
+        "finalize_current_publication",
+        lambda **_kwargs: pytest.fail("finalizer reached for an absent source tag"),
+    )
+    result = publication._publish_api_image(
+        ledger=ledger,
+        subscription_id="opaque-subscription",
+        receipt_directory=tmp_path,
+        mode=state_machine.PublicationMode.ALREADY_PUSHED_RECONCILIATION,
+        already_pushed_record=record,
+        registry_observation=observation,
+    )
+    assert result.endswith("@sha256:" + "a" * 64)
+    assert calls == ["path"]
+
+
+def test_already_pushed_mismatch_fails_before_finalizer_or_delete(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ledger, record, observation = _already_pushed_inputs(source_tag_present=True)
+    observation["registryManifestDigest"] = "sha256:" + "9" * 64
+    calls = _reconciliation_mocks(monkeypatch)
+    with pytest.raises(RuntimeError, match="already-pushed-observation-integrity-invalid"):
+        publication._publish_api_image(
+            ledger=ledger,
+            subscription_id="opaque-subscription",
+            receipt_directory=tmp_path,
+            mode=state_machine.PublicationMode.ALREADY_PUSHED_RECONCILIATION,
+            already_pushed_record=record,
+            registry_observation=observation,
+        )
+    assert calls == []
+
+
+def test_already_pushed_rejects_naked_boolean_admission(tmp_path: Path) -> None:
+    ledger, _record, _observation = _already_pushed_inputs(source_tag_present=True)
+    with pytest.raises(RuntimeError, match="already-pushed-record-fields-invalid"):
+        publication._publish_api_image(
+            ledger=ledger,
+            subscription_id="opaque-subscription",
+            receipt_directory=tmp_path,
+            mode=state_machine.PublicationMode.ALREADY_PUSHED_RECONCILIATION,
+            already_pushed_record={"alreadyPushed": True},
+            registry_observation={"alreadyPushed": True},
+        )
+
+
+def test_paused_preserved_has_one_reconciliation_entry_and_no_upload_entry() -> None:
+    assert state_machine.CANONICAL_PUBLICATION_ENTRY_POINTS["paused-preserved"] == (
+        "reconcile-already-pushed-publication"
+    )
+    source = inspect.getsource(publication._reconcile_already_pushed_publication)
+    assert "_create_ephemeral_publisher" not in source
+    assert "_temporary_publisher_role_assignment" not in source
+    assert "_docker_push_prebuilt_image" not in source

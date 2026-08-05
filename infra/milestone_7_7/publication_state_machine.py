@@ -11,6 +11,7 @@ class PublicationState(str, Enum):
     IMAGE_ADMITTED = "IMAGE_ADMITTED"
     LOCAL_IMAGE_VERIFIED = "LOCAL_IMAGE_VERIFIED"
     PUBLICATION_PATH_PROVED = "PUBLICATION_PATH_PROVED"
+    ALREADY_PUSHED_RECONCILED = "ALREADY_PUSHED_RECONCILED"
     PUBLISHER_CREATED = "PUBLISHER_CREATED"
     UPLOAD_AUTHORITY_READY = "UPLOAD_AUTHORITY_READY"
     IMAGE_PUSHED = "IMAGE_PUSHED"
@@ -33,12 +34,50 @@ def _fail(code: str) -> NoReturn:
     raise PublicationStateError(code)
 
 
-ORDER: Final = tuple(PublicationState)
+class PublicationMode(str, Enum):
+    FRESH_UPLOAD = "FRESH_UPLOAD"
+    ALREADY_PUSHED_RECONCILIATION = "ALREADY_PUSHED_RECONCILIATION"
+
+
+FRESH_UPLOAD_ORDER: Final = tuple(
+    state
+    for state in PublicationState
+    if state is not PublicationState.ALREADY_PUSHED_RECONCILED
+)
+ALREADY_PUSHED_RECONCILIATION_ORDER: Final = (
+    PublicationState.IMAGE_ADMITTED,
+    PublicationState.PUBLICATION_PATH_PROVED,
+    PublicationState.ALREADY_PUSHED_RECONCILED,
+    PublicationState.IMMUTABLE_MANIFEST_PROVED,
+    PublicationState.UPLOAD_AUTHORITY_REVOKED,
+    PublicationState.FINALIZER_AUTHORITY_READY,
+    PublicationState.FINALIZER_AUTHENTICATION_PROVED,
+    PublicationState.SOURCE_TAG_REMOVED,
+    PublicationState.IMMUTABLE_MANIFEST_REPROVED,
+    PublicationState.PUBLISHER_FINALIZER_REVOKED,
+    PublicationState.PUBLICATION_EVIDENCE_PERSISTED,
+    PublicationState.PUBLICATION_COMPLETE,
+)
+ALREADY_PUSHED_SOURCE_ABSENT_ORDER: Final = (
+    PublicationState.IMAGE_ADMITTED,
+    PublicationState.PUBLICATION_PATH_PROVED,
+    PublicationState.ALREADY_PUSHED_RECONCILED,
+    PublicationState.IMMUTABLE_MANIFEST_PROVED,
+    PublicationState.UPLOAD_AUTHORITY_REVOKED,
+    PublicationState.SOURCE_TAG_REMOVED,
+    PublicationState.IMMUTABLE_MANIFEST_REPROVED,
+    PublicationState.PUBLISHER_FINALIZER_REVOKED,
+    PublicationState.PUBLICATION_EVIDENCE_PERSISTED,
+    PublicationState.PUBLICATION_COMPLETE,
+)
+# Compatibility alias for fresh-upload regression fixtures.
+ORDER: Final = FRESH_UPLOAD_ORDER
 CANONICAL_PUBLICATION_ENTRY_POINTS: Final = {
     "publish-api-image": "api_image_publication._publish_api_image_stage",
     "post-secret-provisioning": "requires-published-manifest-state",
     "downstream-deployment": "requires-published-manifest-state",
-    "paused-preserved": "reconciles-into-publish-api-image",
+    "reconcile-already-pushed-publication": "api_image_publication._publish_api_image",
+    "paused-preserved": "reconcile-already-pushed-publication",
     "failure-closeout": "outermost-revocation-and-cleanup",
     "cleanup-only": "no-publication-transition",
 }
@@ -49,17 +88,29 @@ class PublicationStateMachine:
     """Reject skipped, duplicate, or out-of-order publication transitions."""
 
     completed: list[PublicationState] = field(default_factory=list)
+    mode: PublicationMode = PublicationMode.FRESH_UPLOAD
+    source_tag_present: bool = True
+
+    @property
+    def order(self) -> tuple[PublicationState, ...]:
+        if self.mode is PublicationMode.FRESH_UPLOAD:
+            return FRESH_UPLOAD_ORDER
+        return (
+            ALREADY_PUSHED_RECONCILIATION_ORDER
+            if self.source_tag_present
+            else ALREADY_PUSHED_SOURCE_ABSENT_ORDER
+        )
 
     def advance(self, state: PublicationState) -> None:
         expected_index = len(self.completed)
-        if expected_index >= len(ORDER):
+        if expected_index >= len(self.order):
             _fail("publication-transition-duplicate")
-        if state is not ORDER[expected_index]:
+        if state is not self.order[expected_index]:
             _fail("publication-transition-out-of-order")
         self.completed.append(state)
 
     def assert_complete(self) -> None:
-        if tuple(self.completed) != ORDER:
+        if tuple(self.completed) != self.order:
             _fail("publication-transition-incomplete")
 
 

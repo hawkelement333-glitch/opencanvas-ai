@@ -311,6 +311,25 @@
       ],
       "controlPlaneOnly": false
     },
+    "lifecycle-reconcile-already-pushed-publication-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "-m",
+        "infra.milestone_7_7.scripts.reconcile_already_pushed_publication",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--already-pushed-record",
+        "{alreadyPushedRecordPath}",
+        "--registry-observation",
+        "{registryObservationPath}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
     "lifecycle-post-secret-provisioning-v1": {
       "executable": "{python}",
       "argumentVector": [
@@ -985,6 +1004,28 @@
       "replayDecision": "deny"
     },
     {
+      "id": "reconcile-already-pushed-publication",
+      "methodDefinition": "lifecycle-reconcile-already-pushed-publication-v1",
+      "mutation": true,
+      "authorizationPredicate": [
+        "paused-preserved-publication-state",
+        "retained-push-evidence-integrity",
+        "read-only-registry-reconciliation",
+        "valid-unconsumed-one-run-ledger"
+      ],
+      "scope": [
+        "exact-private-registry-path",
+        "exact-container-registry-resource"
+      ],
+      "terminalStates": [
+        "image-published-and-revoked",
+        "paused-preserved",
+        "contained-preserved"
+      ],
+      "failureDispositionPolicy": "pause-preserved",
+      "replayDecision": "deny"
+    },
+    {
       "id": "post-secret-provisioning",
       "methodDefinition": "lifecycle-post-secret-provisioning-v1",
       "mutation": true,
@@ -1058,5 +1099,5 @@
       "replayDecision": "deny"
     }
   ],
-  "contractIntegritySha256": "be2507c8a12c8f5c4609ad9e208137ddb9e5d99796b80d0438955e8a28caaf81"
+  "contractIntegritySha256": "635bdf67cf92e98ab895dfb1fbb449fbb41f7820ac5d4e4de9f75ac3381bc873"
 }

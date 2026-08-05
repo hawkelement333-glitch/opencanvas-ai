@@ -339,7 +339,7 @@ def test_local_dry_run_never_authorizes_or_invokes_azure() -> None:
     result = dry_run()
     assert result["status"] == "valid-local-only"
     assert result["operationCount"] == 15
-    assert result["lifecycleOperationCount"] == 7
+    assert result["lifecycleOperationCount"] == 8
     assert result["azureProcessInvocations"] == 0
     assert result["provisioningAuthorized"] is False
     assert result["secretAccessAuthorized"] is False
@@ -3570,11 +3570,12 @@ def test_lifecycle_method_definitions_use_repository_module_import() -> None:
 
     for operation in overlay["lifecycleOperations"]:
         definition = definitions[operation["methodDefinition"]]
-        assert definition["argumentVector"][:3] == [
-            "-B",
-            "-m",
-            "infra.milestone_7_7.scripts.managed_binding_lifecycle",
-        ]
+        expected_module = (
+            "infra.milestone_7_7.scripts.reconcile_already_pushed_publication"
+            if operation["id"] == "reconcile-already-pushed-publication"
+            else "infra.milestone_7_7.scripts.managed_binding_lifecycle"
+        )
+        assert definition["argumentVector"][:3] == ["-B", "-m", expected_module]
         assert (
             "infra/milestone_7_7/scripts/managed_binding_lifecycle.py"
             not in definition["argumentVector"]

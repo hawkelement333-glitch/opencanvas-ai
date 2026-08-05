@@ -182,6 +182,7 @@ EXPECTED_LIFECYCLE_OPERATIONS: Final = (
     "pre-secret-provisioning",
     "private-path-verification",
     "publish-api-image",
+    "reconcile-already-pushed-publication",
     "post-secret-provisioning",
     "temporary-authority-revocation",
     "cleanup",

@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -24,6 +25,7 @@ from preflight.milestone_7_7.publication_path_admission import (
 )
 
 from infra.milestone_7_7.publication_state_machine import (
+    PublicationMode,
     PublicationState,
     PublicationStateMachine,
 )
@@ -94,6 +96,16 @@ DOCKER_PUSH_EVIDENCE_DOMAIN = (
 )
 DOCKER_PUSH_EVIDENCE_VERSION = "mobius.milestone-7.7.docker-push-evidence.v1"
 DOCKER_PUSH_EVIDENCE_FILE = "docker-push-evidence.json"
+ALREADY_PUSHED_RECORD_VERSION = "mobius.milestone-7.7.already-pushed-publication.v1"
+ALREADY_PUSHED_RECORD_DOMAIN = (
+    b"solarplexus-mobius/milestone-7.7/already-pushed-publication/v1\x00"
+)
+ALREADY_PUSHED_OBSERVATION_VERSION = (
+    "mobius.milestone-7.7.already-pushed-registry-observation.v1"
+)
+ALREADY_PUSHED_OBSERVATION_DOMAIN = (
+    b"solarplexus-mobius/milestone-7.7/already-pushed-registry-observation/v1\x00"
+)
 DOCKER_PUSH_MAXIMUM_OUTPUT_BYTES = 4 * 1024 * 1024
 SENSITIVE_PUSH_OUTPUT_PATTERNS = (
     re.compile(r"(?i)(Authorization\s*:\s*)(?:Bearer|Basic)\s+\S+"),
@@ -133,6 +145,302 @@ class PublicationAttemptFailure(RuntimeError):
         self.primary_error_code = _safe_attribution_error(primary_error)
         self.secondary_error_code = _safe_attribution_error(secondary_error)
         super().__init__(self.primary_error_code)
+
+
+@dataclass(frozen=True)
+class AlreadyPushedPublicationRecord:
+    """Integrity-bound evidence that permits reconciliation, never upload."""
+
+    control_plane_head: str
+    image_source_commit: str
+    build_input_sha256: str
+    local_image_id: str
+    config_digest: str
+    registry_manifest_digest: str
+    platform: str
+    registry_host: str
+    repository: str
+    source_tag: str
+    push_started_at_utc: str
+    push_completed_at_utc: str
+    docker_exit_code: int
+    docker_timed_out: bool
+    stdout_sha256: str
+    stderr_sha256: str
+    publication_evidence_integrity: str
+    cleanup_generation: int
+    cleanup_deadline_utc: str
+    prior_lifecycle_evidence: str
+    operation_id: str
+
+    def unsigned(self) -> dict[str, JsonValue]:
+        return {
+            "schemaVersion": ALREADY_PUSHED_RECORD_VERSION,
+            "controlPlaneHead": self.control_plane_head,
+            "imageSourceCommit": self.image_source_commit,
+            "imageBuildInputSha256": self.build_input_sha256,
+            "localImageId": self.local_image_id,
+            "imageConfigDigest": self.config_digest,
+            "registryManifestDigest": self.registry_manifest_digest,
+            "platform": self.platform,
+            "registryHost": self.registry_host,
+            "repository": self.repository,
+            "sourceTag": self.source_tag,
+            "pushStartedAtUtc": self.push_started_at_utc,
+            "pushCompletedAtUtc": self.push_completed_at_utc,
+            "dockerExitCode": self.docker_exit_code,
+            "dockerTimedOut": self.docker_timed_out,
+            "stdoutSha256": self.stdout_sha256,
+            "stderrSha256": self.stderr_sha256,
+            "publicationEvidenceIntegritySha256": self.publication_evidence_integrity,
+            "cleanupGeneration": self.cleanup_generation,
+            "cleanupDeadlineUtc": self.cleanup_deadline_utc,
+            "priorLifecycleEvidenceSha256": self.prior_lifecycle_evidence,
+            "authorizedOperationId": self.operation_id,
+        }
+
+    def as_json(self) -> dict[str, JsonValue]:
+        unsigned = self.unsigned()
+        return {
+            **unsigned,
+            "integritySha256": hashlib.sha256(
+                ALREADY_PUSHED_RECORD_DOMAIN + canonical_bytes(unsigned)
+            ).hexdigest(),
+        }
+
+
+@dataclass(frozen=True)
+class AlreadyPushedRegistryObservation:
+    """Sanitized, integrity-bound read-only registry truth for reconciliation."""
+
+    registry_manifest_digest: str
+    config_digest: str
+    platform: str
+    registry_host: str
+    repository: str
+    source_tag: str
+    source_tag_present: bool
+    observed_at_utc: str
+    read_evidence_integrity: str
+
+    def unsigned(self) -> dict[str, JsonValue]:
+        return {
+            "schemaVersion": ALREADY_PUSHED_OBSERVATION_VERSION,
+            "registryManifestDigest": self.registry_manifest_digest,
+            "imageConfigDigest": self.config_digest,
+            "platform": self.platform,
+            "registryHost": self.registry_host,
+            "repository": self.repository,
+            "sourceTag": self.source_tag,
+            "sourceTagPresent": self.source_tag_present,
+            "observedAtUtc": self.observed_at_utc,
+            "readEvidenceIntegritySha256": self.read_evidence_integrity,
+        }
+
+    def as_json(self) -> dict[str, JsonValue]:
+        unsigned = self.unsigned()
+        return {
+            **unsigned,
+            "integritySha256": hashlib.sha256(
+                ALREADY_PUSHED_OBSERVATION_DOMAIN + canonical_bytes(unsigned)
+            ).hexdigest(),
+        }
+
+
+def validate_already_pushed_publication_record(
+    value: Mapping[str, JsonValue], *, control_plane_head: str
+) -> AlreadyPushedPublicationRecord:
+    required = {
+        "schemaVersion",
+        "controlPlaneHead",
+        "imageSourceCommit",
+        "imageBuildInputSha256",
+        "localImageId",
+        "imageConfigDigest",
+        "registryManifestDigest",
+        "platform",
+        "registryHost",
+        "repository",
+        "sourceTag",
+        "pushStartedAtUtc",
+        "pushCompletedAtUtc",
+        "dockerExitCode",
+        "dockerTimedOut",
+        "stdoutSha256",
+        "stderrSha256",
+        "publicationEvidenceIntegritySha256",
+        "cleanupGeneration",
+        "cleanupDeadlineUtc",
+        "priorLifecycleEvidenceSha256",
+        "authorizedOperationId",
+        "integritySha256",
+    }
+    if set(value) != required:
+        _fail("already-pushed-record-fields-invalid")
+    unsigned = {key: value[key] for key in required - {"integritySha256"}}
+    integrity = value.get("integritySha256")
+    if (
+        not isinstance(integrity, str)
+        or HEX_SHA256.fullmatch(integrity) is None
+        or integrity
+        != hashlib.sha256(
+            ALREADY_PUSHED_RECORD_DOMAIN + canonical_bytes(unsigned)
+        ).hexdigest()
+    ):
+        _fail("already-pushed-record-integrity-invalid")
+    strings = (
+        "controlPlaneHead",
+        "imageSourceCommit",
+        "imageBuildInputSha256",
+        "localImageId",
+        "imageConfigDigest",
+        "registryManifestDigest",
+        "platform",
+        "registryHost",
+        "repository",
+        "sourceTag",
+        "pushStartedAtUtc",
+        "pushCompletedAtUtc",
+        "stdoutSha256",
+        "stderrSha256",
+        "publicationEvidenceIntegritySha256",
+        "cleanupDeadlineUtc",
+        "priorLifecycleEvidenceSha256",
+        "authorizedOperationId",
+    )
+    if (
+        value.get("schemaVersion") != ALREADY_PUSHED_RECORD_VERSION
+        or value.get("controlPlaneHead") != control_plane_head
+        or any(not isinstance(value[key], str) for key in strings)
+        or any(
+            HEX_SHA256.fullmatch(str(value[key])) is None
+            for key in (
+                "imageBuildInputSha256",
+                "stdoutSha256",
+                "stderrSha256",
+                "publicationEvidenceIntegritySha256",
+                "priorLifecycleEvidenceSha256",
+            )
+        )
+        or HEX_SHA40.fullmatch(str(value["imageSourceCommit"])) is None
+        or RAW_IMAGE_DIGEST.fullmatch(str(value["localImageId"])) is None
+        or RAW_IMAGE_DIGEST.fullmatch(str(value["imageConfigDigest"])) is None
+        or RAW_IMAGE_DIGEST.fullmatch(str(value["registryManifestDigest"])) is None
+        or value.get("platform") != API_IMAGE_PLATFORM
+        or value.get("registryHost") != REGISTRY_HOST
+        or value.get("repository") != PUBLISHER_REPOSITORY
+        or str(value.get("sourceTag")) != f"source-{value['imageSourceCommit']}"
+        or type(value.get("dockerExitCode")) is not int
+        or value.get("dockerExitCode") != 0
+        or value.get("dockerTimedOut") is not False
+        or type(value.get("cleanupGeneration")) is not int
+        or value.get("cleanupGeneration") != 2
+        or value.get("authorizedOperationId") != "reconcile-already-pushed-publication"
+    ):
+        _fail("already-pushed-record-binding-invalid")
+    try:
+        push_started = datetime.strptime(
+            str(value["pushStartedAtUtc"]), "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=UTC)
+        push_completed = datetime.strptime(
+            str(value["pushCompletedAtUtc"]), "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=UTC)
+        cleanup_deadline = datetime.strptime(
+            str(value["cleanupDeadlineUtc"]), "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=UTC)
+    except ValueError:
+        _fail("already-pushed-record-time-invalid")
+    if push_started.year < 2026 or not (
+        push_started < push_completed < cleanup_deadline
+    ):
+        _fail("already-pushed-record-time-invalid")
+    return AlreadyPushedPublicationRecord(
+        control_plane_head=str(value["controlPlaneHead"]),
+        image_source_commit=str(value["imageSourceCommit"]),
+        build_input_sha256=str(value["imageBuildInputSha256"]),
+        local_image_id=str(value["localImageId"]),
+        config_digest=str(value["imageConfigDigest"]),
+        registry_manifest_digest=str(value["registryManifestDigest"]),
+        platform=str(value["platform"]),
+        registry_host=str(value["registryHost"]),
+        repository=str(value["repository"]),
+        source_tag=str(value["sourceTag"]),
+        push_started_at_utc=str(value["pushStartedAtUtc"]),
+        push_completed_at_utc=str(value["pushCompletedAtUtc"]),
+        docker_exit_code=cast(int, value["dockerExitCode"]),
+        docker_timed_out=cast(bool, value["dockerTimedOut"]),
+        stdout_sha256=str(value["stdoutSha256"]),
+        stderr_sha256=str(value["stderrSha256"]),
+        publication_evidence_integrity=str(value["publicationEvidenceIntegritySha256"]),
+        cleanup_generation=cast(int, value["cleanupGeneration"]),
+        cleanup_deadline_utc=str(value["cleanupDeadlineUtc"]),
+        prior_lifecycle_evidence=str(value["priorLifecycleEvidenceSha256"]),
+        operation_id=str(value["authorizedOperationId"]),
+    )
+
+
+def validate_already_pushed_registry_observation(
+    value: Mapping[str, JsonValue], *, record: AlreadyPushedPublicationRecord
+) -> AlreadyPushedRegistryObservation:
+    required = {
+        "schemaVersion",
+        "registryManifestDigest",
+        "imageConfigDigest",
+        "platform",
+        "registryHost",
+        "repository",
+        "sourceTag",
+        "sourceTagPresent",
+        "observedAtUtc",
+        "readEvidenceIntegritySha256",
+        "integritySha256",
+    }
+    if set(value) != required:
+        _fail("already-pushed-observation-fields-invalid")
+    unsigned = {key: value[key] for key in required - {"integritySha256"}}
+    integrity = value.get("integritySha256")
+    if (
+        not isinstance(integrity, str)
+        or HEX_SHA256.fullmatch(integrity) is None
+        or integrity
+        != hashlib.sha256(
+            ALREADY_PUSHED_OBSERVATION_DOMAIN + canonical_bytes(unsigned)
+        ).hexdigest()
+    ):
+        _fail("already-pushed-observation-integrity-invalid")
+    if (
+        value.get("schemaVersion") != ALREADY_PUSHED_OBSERVATION_VERSION
+        or value.get("registryManifestDigest") != record.registry_manifest_digest
+        or value.get("imageConfigDigest") != record.config_digest
+        or value.get("platform") != record.platform
+        or value.get("registryHost") != record.registry_host
+        or value.get("repository") != record.repository
+        or value.get("sourceTag") != record.source_tag
+        or type(value.get("sourceTagPresent")) is not bool
+        or not isinstance(value.get("observedAtUtc"), str)
+        or not isinstance(value.get("readEvidenceIntegritySha256"), str)
+        or HEX_SHA256.fullmatch(str(value["readEvidenceIntegritySha256"])) is None
+    ):
+        _fail("already-pushed-observation-binding-invalid")
+    try:
+        observed = datetime.strptime(
+            str(value["observedAtUtc"]), "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=UTC)
+    except ValueError:
+        _fail("already-pushed-observation-time-invalid")
+    if observed.year < 2026:
+        _fail("already-pushed-observation-time-invalid")
+    return AlreadyPushedRegistryObservation(
+        registry_manifest_digest=record.registry_manifest_digest,
+        config_digest=record.config_digest,
+        platform=record.platform,
+        registry_host=record.registry_host,
+        repository=record.repository,
+        source_tag=record.source_tag,
+        source_tag_present=cast(bool, value["sourceTagPresent"]),
+        observed_at_utc=str(value["observedAtUtc"]),
+        read_evidence_integrity=str(value["readEvidenceIntegritySha256"]),
+    )
 
 
 def _format_utc(value: datetime) -> str:
@@ -966,13 +1274,121 @@ def _docker_push_prebuilt_image(
     )
 
 
+def _reconcile_already_pushed_publication(
+    *,
+    ledger: dict[str, JsonValue],
+    subscription_id: str,
+    receipt_directory: Path,
+    already_pushed_record: Mapping[str, JsonValue],
+    registry_observation: Mapping[str, JsonValue],
+) -> str:
+    """Enter the single canonical finalizer path without an upload capability."""
+    repository_head = ledger.get("repositoryHead")
+    published = ledger.get("publishedImage")
+    if (
+        not isinstance(repository_head, str)
+        or HEX_SHA40.fullmatch(repository_head) is None
+        or not isinstance(published, dict)
+        or published.get("publicationState") != "pending"
+    ):
+        _fail("already-pushed-ledger-binding-invalid")
+    record = validate_already_pushed_publication_record(
+        already_pushed_record, control_plane_head=repository_head
+    )
+    observation = validate_already_pushed_registry_observation(
+        registry_observation, record=record
+    )
+    if (
+        published.get("imageSourceCommit") != record.image_source_commit
+        or published.get("imageBuildInputSha256") != record.build_input_sha256
+        or published.get("localImageId") != record.local_image_id
+        or published.get("imageConfigDigest") != record.config_digest
+        or published.get("platform") != record.platform
+        or published.get("repository") != record.repository
+        or published.get("sourceTag") != record.source_tag
+    ):
+        _fail("already-pushed-ledger-record-mismatch")
+    state_path = _state_path(receipt_directory)
+    state = _read_state(state_path)
+    if state.get("temporaryRegistryAssignmentId") is not None:
+        _fail("temporary-registry-authority-already-present")
+    publication = PublicationStateMachine(
+        mode=PublicationMode.ALREADY_PUSHED_RECONCILIATION,
+        source_tag_present=observation.source_tag_present,
+    )
+    publication.advance(PublicationState.IMAGE_ADMITTED)
+    verify_private_registry_publication_path(repository_head=record.image_source_commit)
+    publication.advance(PublicationState.PUBLICATION_PATH_PROVED)
+    publication.advance(PublicationState.ALREADY_PUSHED_RECONCILED)
+    publication.advance(PublicationState.IMMUTABLE_MANIFEST_PROVED)
+    # A reconciliation entry never owns upload authority.  This state is an
+    # explicit zero-authority invariant, not a role revocation action.
+    publication.advance(PublicationState.UPLOAD_AUTHORITY_REVOKED)
+    immutable_reference = (
+        f"{record.registry_host}/{record.repository}@{record.registry_manifest_digest}"
+    )
+    if IMAGE_DIGEST.fullmatch(immutable_reference) is None:
+        _fail("already-pushed-immutable-reference-malformed")
+    if observation.source_tag_present:
+        from infra.milestone_7_7 import acr_tag_finalization
+
+        finalization = acr_tag_finalization.finalize_current_publication(
+            ledger=ledger,
+            subscription_id=subscription_id,
+            receipt_directory=receipt_directory,
+            source_tag=record.source_tag,
+            manifest_digest=record.registry_manifest_digest,
+            registry_config_digest=record.config_digest,
+            publication=publication,
+        )
+        if (
+            finalization.get("sourceTagAbsent") is not True
+            or finalization.get("immutableManifestRetained") is not True
+        ):
+            _fail("already-pushed-finalizer-evidence-invalid")
+    else:
+        # No finalizer is created when read-only reconciliation proves the
+        # mutable tag is already absent and the immutable manifest survives.
+        publication.advance(PublicationState.SOURCE_TAG_REMOVED)
+        publication.advance(PublicationState.IMMUTABLE_MANIFEST_REPROVED)
+        publication.advance(PublicationState.PUBLISHER_FINALIZER_REVOKED)
+        publication.advance(PublicationState.PUBLICATION_EVIDENCE_PERSISTED)
+    publication.advance(PublicationState.PUBLICATION_COMPLETE)
+    publication.assert_complete()
+    return immutable_reference
+
+
 def _publish_api_image(
     *,
     ledger: dict[str, JsonValue],
     subscription_id: str,
     receipt_directory: Path,
-    prebuilt_image_record: Path,
+    prebuilt_image_record: Path | None = None,
+    mode: PublicationMode = PublicationMode.FRESH_UPLOAD,
+    already_pushed_record: Mapping[str, JsonValue] | None = None,
+    registry_observation: Mapping[str, JsonValue] | None = None,
 ) -> str:
+    if mode is PublicationMode.ALREADY_PUSHED_RECONCILIATION:
+        if (
+            prebuilt_image_record is not None
+            or already_pushed_record is None
+            or registry_observation is None
+        ):
+            _fail("already-pushed-reconciliation-admission-invalid")
+        return _reconcile_already_pushed_publication(
+            ledger=ledger,
+            subscription_id=subscription_id,
+            receipt_directory=receipt_directory,
+            already_pushed_record=already_pushed_record,
+            registry_observation=registry_observation,
+        )
+    if (
+        mode is not PublicationMode.FRESH_UPLOAD
+        or prebuilt_image_record is None
+        or already_pushed_record is not None
+        or registry_observation is not None
+    ):
+        _fail("fresh-upload-admission-invalid")
     publication = PublicationStateMachine()
     repository_head = str(ledger["repositoryHead"])
     published = ledger.get("publishedImage")
@@ -1449,6 +1865,71 @@ def _publish_api_image_stage(
         "evidence-integrity-sha256": integrity,
         "immutable-image-published": True,
         "publisher-revoked": True,
+        "secret-value-accessed": False,
+        "status": "image-published-and-revoked",
+    }
+
+
+def _reconcile_already_pushed_publication_stage(
+    *,
+    ledger: dict[str, JsonValue],
+    subscription_id: str,
+    receipt_directory: Path,
+    already_pushed_record_path: Path,
+    registry_observation_path: Path,
+) -> dict[str, JsonValue]:
+    """Persist the canonical result from a paused, already-pushed image."""
+    state_path = _state_path(receipt_directory)
+    state = _read_current_transient_state(state_path, ledger=ledger)
+    if (
+        state.get("privatePathProved") is not True
+        or state.get("publishedManifestDigest") is not None
+        or state.get("publisherRevocationProved") is not False
+    ):
+        _fail("already-pushed-reconciliation-stage-prerequisite-missing")
+    record_value = load_json(
+        _outside_repository(already_pushed_record_path, "already-pushed-record")
+    )
+    observation_value = load_json(
+        _outside_repository(registry_observation_path, "registry-observation")
+    )
+    if not isinstance(record_value, dict) or not isinstance(observation_value, dict):
+        _fail("already-pushed-reconciliation-input-malformed")
+    immutable_reference = _publish_api_image(
+        ledger=ledger,
+        subscription_id=subscription_id,
+        receipt_directory=receipt_directory,
+        mode=PublicationMode.ALREADY_PUSHED_RECONCILIATION,
+        already_pushed_record=cast(Mapping[str, JsonValue], record_value),
+        registry_observation=cast(Mapping[str, JsonValue], observation_value),
+    )
+    record = validate_already_pushed_publication_record(
+        cast(Mapping[str, JsonValue], record_value),
+        control_plane_head=str(ledger["repositoryHead"]),
+    )
+    result: dict[str, JsonValue] = {
+        "configDigest": record.config_digest,
+        "imageBuildInputSha256": record.build_input_sha256,
+        "imageSourceCommit": record.image_source_commit,
+        "localImageId": record.local_image_id,
+        "manifestDigest": record.registry_manifest_digest,
+        "platform": record.platform,
+        "publisherResidueZero": True,
+        "reconciliationMode": PublicationMode.ALREADY_PUSHED_RECONCILIATION.value,
+        "repository": record.repository,
+        "sourceTagRemoved": True,
+    }
+    state["publicationEvidenceIntegritySha256"] = _publication_result_integrity(result)
+    state["publishedManifestDigest"] = immutable_reference.rsplit("@", 1)[1]
+    state["publisherRevocationProved"] = True
+    state["lastCompletedStage"] = "reconcile-already-pushed-publication"
+    state["resumableCheckpoint"] = "post-secret-provisioning"
+    _replace_state(state_path, state)
+    return {
+        "evidence-integrity-sha256": state["publicationEvidenceIntegritySha256"],
+        "immutable-image-published": True,
+        "publisher-revoked": True,
+        "reconciliation-mode": PublicationMode.ALREADY_PUSHED_RECONCILIATION.value,
         "secret-value-accessed": False,
         "status": "image-published-and-revoked",
     }
