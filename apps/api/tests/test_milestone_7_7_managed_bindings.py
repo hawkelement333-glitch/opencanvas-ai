@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from infra.milestone_7_7 import api_image_publication
+from infra.milestone_7_7 import acr_tag_finalization, api_image_publication
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
 from performance.milestone_7_7.framework import ContractError, JsonValue, canonical_bytes
 from preflight.milestone_7_7 import framework as topology_framework
@@ -1712,23 +1712,24 @@ def test_ephemeral_publisher_role_inventory_normalizes_and_rejects_malformed(
         )
 
 
-def test_ephemeral_publisher_is_same_principal_and_delete_after_denial() -> None:
+def test_ephemeral_publisher_is_same_principal_and_finalizer_deletes_after_denial() -> None:
     publish = inspect.getsource(api_image_publication._publish_api_image)
     prebuilt = publish.index("_load_prebuilt_api_image_record(")
+    path_admission = publish.index("verify_private_registry_publication_path(")
     create = publish.index("_create_ephemeral_publisher(")
     initial_denial = publish.index("_prove_initial_publisher_denial(", create)
     assignment = publish.index("_temporary_publisher_role_assignment(", initial_denial)
     access = publish.index("_wait_for_publisher_access(", assignment)
     push = publish.index("_docker_push_prebuilt_image(", assignment)
-    tag_removal = publish.index("_remove_source_tag(", push)
     revoke = publish.index("_delete_assignment(subscription_id, assignment_id)", push)
     cache_reset = publish.index("_reset_ephemeral_directory(docker_config)", revoke)
     post_revoke_denial = publish.index("_wait_for_publisher_denial(", cache_reset)
     denial_proved = publish.index("denial_proved = True", post_revoke_denial)
     identity_delete = publish.index("_delete_ephemeral_publisher(", denial_proved)
+    finalizer = publish.index("finalize_current_publication(", identity_delete)
 
-    assert prebuilt < create < initial_denial < assignment < access < push < tag_removal < revoke
-    assert revoke < cache_reset < post_revoke_denial < denial_proved < identity_delete
+    assert prebuilt < path_admission < create < initial_denial < assignment < access < push < revoke
+    assert revoke < cache_reset < post_revoke_denial < denial_proved < identity_delete < finalizer
     assert "_signed_in_user_object_id" not in publish
     assert '"--assignee-principal-type",\n            "ServicePrincipal"' in inspect.getsource(
         managed_binding_lifecycle._temporary_publisher_role_assignment
@@ -1742,7 +1743,7 @@ def test_ephemeral_publisher_is_same_principal_and_delete_after_denial() -> None
     assert "_docker_login_with_refresh_token(" in publish
     assert "buildx" not in publish
     assert "_docker_push_prebuilt_image(" in publish
-    assert publish.count("verify_private_registry_publication_path(") == 3
+    assert publish.count("verify_private_registry_publication_path(") == 4
     first_path_probe = publish.index("verify_private_registry_publication_path(", access)
     second_path_probe = publish.index(
         "verify_private_registry_publication_path(", first_path_probe + 1
@@ -1750,8 +1751,8 @@ def test_ephemeral_publisher_is_same_principal_and_delete_after_denial() -> None
     final_path_probe = publish.index(
         "verify_private_registry_publication_path(", second_path_probe + 1
     )
-    assert first_path_probe < push < second_path_probe < final_path_probe < tag_removal
-    assert "_remove_source_tag(" in publish
+    assert first_path_probe < push < second_path_probe < final_path_probe < revoke
+    assert "_remove_source_tag(" not in publish
     assert "_acr_manifest_digest(" in publish
     assert "_verify_cleanup_control(subscription_id, cleanup_at)" in publish
     assert publish.count("_verify_cleanup_control(subscription_id, cleanup_at)") == 2
@@ -2266,49 +2267,14 @@ def test_prebuilt_image_record_rejects_source_drift_and_image_identity_mismatch(
         )
 
 
-def test_mutable_tag_removal_preserves_immutable_manifest(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    source_tag = "source-" + "a" * 40
-    digest = "sha256:" + "b" * 64
-    responses = iter(
-        (
-            (202, {}, bytearray()),
-            (404, {}, bytearray()),
-            (200, {"docker-content-digest": digest}, bytearray()),
-        )
-    )
-    calls: list[tuple[str, str]] = []
-
-    def request(
-        method: str,
-        path: str,
-        *,
-        headers: Mapping[str, str],
-        body: bytearray | None = None,
-    ) -> tuple[int, dict[str, str], bytearray]:
-        assert body is None
-        assert headers["Authorization"].startswith("Bearer ")
-        calls.append((method, path))
-        return next(responses)
-
-    monkeypatch.setattr(api_image_publication, "_private_registry_request", request)
-    monkeypatch.setattr(managed_binding_lifecycle, "_private_registry_request", request)
-    access_token = bytearray(b"a" * 64)
-    api_image_publication._remove_source_tag(access_token, source_tag=source_tag)
-    managed_binding_lifecycle._assert_source_tag_absent(
-        source_tag=source_tag, access_token=access_token
-    )
-    assert managed_binding_lifecycle._acr_manifest_digest(access_token, reference=digest) == digest
-    assert calls == [
-        (
-            "DELETE",
-            f"/acr/v1/opencanvas-api/_tags/{source_tag}?api-version=2021-07-01",
-        ),
-        ("HEAD", f"/v2/opencanvas-api/manifests/{source_tag}"),
-        ("HEAD", f"/v2/opencanvas-api/manifests/{digest}"),
-    ]
-    assert all("_catalog" not in path for _method, path in calls)
+def test_mutable_tag_removal_preserves_immutable_manifest() -> None:
+    source = inspect.getsource(acr_tag_finalization.finalize_current_publication)
+    assert '"DELETE"' in source
+    assert "_tags/{source_tag}" in source
+    assert "source-tag-remains-after-delete" in source
+    assert "immutable-manifest-changed-during-untag" in source
+    assert "repository-tag-inventory-changed-outside-target" in source
+    assert "_catalog" not in source
 
 
 def test_ordinary_docker_push_is_exact_isolated_and_returns_only_digest(
@@ -2676,68 +2642,13 @@ def test_docker_push_timeout_kills_exact_process_and_preserves_evidence(
     assert evidence["azureMutationState"] == "UNKNOWN_PENDING_REGISTRY_RECONCILIATION"
 
 
-def test_digest_cleanup_dns_failure_does_not_mask_original_push_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    primary = managed_binding_lifecycle.LifecycleError("publisher-docker-push-failed")
-    secondary = managed_binding_lifecycle.LifecycleError("private-endpoint-dns-unavailable")
-
-    def digest(_token: bytearray, *, reference: str) -> None:
-        assert reference == "source-" + "a" * 40
-        raise secondary
-
-    monkeypatch.setattr(api_image_publication, "_acr_manifest_digest", digest)
-
-    with pytest.raises(api_image_publication.PublicationAttemptFailure) as captured:
-        api_image_publication._cleanup_failed_publication(
-            bytearray(b"x" * 64),
-            source_tag="source-" + "a" * 40,
-            primary_error=primary,
-        )
-    assert str(captured.value) == "publisher-docker-push-failed"
-    assert captured.value.primary_error_code == "publisher-docker-push-failed"
-    assert captured.value.secondary_error_code == "private-endpoint-dns-unavailable"
-    assert captured.value.primary_failed_stage == "immutable-image-publication"
-
-    failure_record = managed_binding_lifecycle._failure_record
-    observed_failed_stage: list[str] = []
-
-    def record(**kwargs: object) -> dict[str, JsonValue]:
-        observed_failed_stage.append(cast(str, kwargs["failed_stage"]))
-        return failure_record(**kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(managed_binding_lifecycle, "_failure_record", record)
-    result = managed_binding_lifecycle._handle_failure(
-        error=captured.value,
-        operation="post-secret-provisioning",
-        ledger=None,
-        subscription_id=None,
-        receipt_directory=None,
+def test_publisher_failure_cannot_use_the_finalizer_delete_path() -> None:
+    publish = inspect.getsource(api_image_publication._publish_api_image)
+    assert "failure-publication-tag-cleanup" not in publish
+    assert "_remove_source_tag" not in publish
+    assert publish.index("finalize_current_publication(") > publish.index(
+        "_delete_ephemeral_publisher("
     )
-    assert result["error"] == "publisher-docker-push-failed"
-    assert result["sanitized-azure-error-code"] is None
-    assert observed_failed_stage == ["immutable-image-publication"]
-
-
-def test_cleanup_dns_failure_remains_primary_without_prior_publication_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    secondary = managed_binding_lifecycle.LifecycleError("private-endpoint-dns-unavailable")
-    monkeypatch.setattr(
-        api_image_publication,
-        "_acr_manifest_digest",
-        lambda _token, *, reference: (_ for _ in ()).throw(secondary),
-    )
-
-    with pytest.raises(
-        managed_binding_lifecycle.LifecycleError,
-        match="private-endpoint-dns-unavailable",
-    ):
-        api_image_publication._cleanup_failed_publication(
-            bytearray(b"x" * 64),
-            source_tag="source-" + "a" * 40,
-            primary_error=None,
-        )
 
 
 def test_downstream_receipt_claim_does_not_reopen_completed_publication_path() -> None:
@@ -2767,7 +2678,7 @@ def test_live_publisher_cannot_build_and_fails_closed_on_digest_mismatch() -> No
     assert publish.index("_load_prebuilt_api_image_record(") < publish.index(
         "_create_ephemeral_publisher("
     )
-    assert publish.index("_remove_source_tag(") < publish.index(
+    assert publish.index("finalize_current_publication(") > publish.index(
         "_delete_assignment(subscription_id, assignment_id)"
     )
 

@@ -23,6 +23,7 @@ from preflight.milestone_7_7.managed_binding_contracts import (
 )
 
 from . import api_image_publication as image_publication
+from .publication_state_machine import PublicationState, PublicationStateMachine
 from .scripts import managed_binding_lifecycle as lifecycle
 
 LEDGER_VERSION: Final = "mobius.milestone-7.7.acr-tag-finalization-ledger.v1"
@@ -555,6 +556,7 @@ def _parse_manifest_properties(
     *,
     expected_digest: str,
     source_tag_expected: bool,
+    source_tag: str = SOURCE_TAG,
 ) -> dict[str, JsonValue]:
     del headers
     if status != 200 or not body:
@@ -581,7 +583,7 @@ def _parse_manifest_properties(
         manifest.get("digest") != expected_digest
         or manifest.get("architecture") != "amd64"
         or manifest.get("os") != "linux"
-        or (SOURCE_TAG in tags) is not source_tag_expected
+        or (source_tag in tags) is not source_tag_expected
         or not isinstance(attributes, dict)
         or attributes.get("readEnabled") is not True
         or not isinstance(attributes.get("deleteEnabled"), bool)
@@ -616,13 +618,17 @@ def _registry_read(
     return lifecycle._private_registry_request(method, path, headers=headers)
 
 
-def _tag_properties(token: bytearray) -> dict[str, JsonValue]:
+def _tag_properties(
+    token: bytearray, *, source_tag: str = SOURCE_TAG
+) -> dict[str, JsonValue]:
+    if re.fullmatch(r"source-[0-9a-f]{40}", source_tag) is None:
+        _fail("finalizer-source-tag-invalid")
     body = bytearray()
     try:
         status, headers, body = _registry_read(
             token,
             "GET",
-            f"/acr/v1/{lifecycle.PUBLISHER_REPOSITORY}/_tags/{SOURCE_TAG}"
+            f"/acr/v1/{lifecycle.PUBLISHER_REPOSITORY}/_tags/{source_tag}"
             "?api-version=2021-07-01",
         )
         return _parse_tag_properties(status, headers, body)
@@ -631,7 +637,12 @@ def _tag_properties(token: bytearray) -> dict[str, JsonValue]:
 
 
 def _manifest_identity(
-    token: bytearray, *, top_level_digest: str, source_tag_expected: bool
+    token: bytearray,
+    *,
+    top_level_digest: str,
+    source_tag_expected: bool,
+    registry_config_digest: str = REGISTRY_CONFIG_DIGEST,
+    source_tag: str = SOURCE_TAG,
 ) -> dict[str, JsonValue]:
     if RAW_DIGEST.fullmatch(top_level_digest) is None:
         _fail("immutable-manifest-reference-invalid")
@@ -675,7 +686,7 @@ def _manifest_identity(
             if leaf["kind"] != "leaf":
                 _fail("immutable-index-child-not-leaf")
         config_digest = str(leaf["configDigest"])
-        if config_digest != REGISTRY_CONFIG_DIGEST:
+        if config_digest != registry_config_digest:
             _fail("immutable-config-digest-mismatch")
         status, headers, body = _registry_read(
             token,
@@ -697,6 +708,7 @@ def _manifest_identity(
             body,
             expected_digest=top_level_digest,
             source_tag_expected=source_tag_expected,
+            source_tag=source_tag,
         )
         return {
             "manifestDigest": top_level_digest,
@@ -1165,9 +1177,218 @@ def _raise_preserving_primary(
         _fail("finalizer-cleanup-failed")
 
 
+def finalize_current_publication(
+    *,
+    ledger: Mapping[str, JsonValue],
+    subscription_id: str,
+    receipt_directory: Path,
+    source_tag: str,
+    manifest_digest: str,
+    registry_config_digest: str,
+    publication: PublicationStateMachine,
+) -> dict[str, JsonValue]:
+    """Untags one published image under the active lifecycle ledger.
+
+    This is intentionally a library-only transition: it never creates a second
+    ledger, does not rediscover the image, and is callable only after the
+    publisher has revoked its exact ``AcrPush`` grant.
+    """
+    if (
+        re.fullmatch(r"source-[0-9a-f]{40}", source_tag) is None
+        or RAW_DIGEST.fullmatch(manifest_digest) is None
+        or RAW_DIGEST.fullmatch(registry_config_digest) is None
+        or not isinstance(ledger.get("ledgerIntegritySha256"), str)
+    ):
+        _fail("current-publication-finalization-binding-invalid")
+    receipt_root = _outside_repository(receipt_directory, "finalization-receipt")
+    mode = _registry_mode(subscription_id)
+    roles = registry_role_plan(mode)
+    registry_scope = lifecycle._scope(
+        subscription_id,
+        f"/resourceGroups/{lifecycle.TARGET_GROUP}/providers/"
+        f"Microsoft.ContainerRegistry/registries/{lifecycle.REGISTRY}",
+    )
+    finalizer_root, environment = _finalizer_environment(receipt_root)
+    app_id: str | None = None
+    object_id: str | None = None
+    tenant_id: str | None = None
+    certificate_path: Path | None = None
+    assignment_ids: list[str] = []
+    refresh_token = bytearray()
+    access_token = bytearray()
+    delete_status: int | None = None
+    manifest_before: dict[str, JsonValue] | None = None
+    manifest_after: dict[str, JsonValue] | None = None
+    primary_error: BaseException | None = None
+    cleanup_errors: list[str] = []
+    try:
+        app_id, object_id, tenant_id, certificate_path = (
+            lifecycle._create_ephemeral_publisher(
+                ledger=dict(ledger),
+                publisher_directory=finalizer_root,
+                identity_prefix="mobius77-acr-finalizer",
+            )
+        )
+        _validate_role_inventory(
+            subscription_id=subscription_id,
+            app_id=app_id,
+            object_id=object_id,
+            registry_scope=registry_scope,
+            roles=roles,
+            required=False,
+        )
+        lifecycle._publisher_login(
+            publisher_app_id=app_id,
+            tenant_id=tenant_id,
+            certificate_path=certificate_path,
+            environment=environment,
+        )
+        _prove_initial_finalizer_denial(
+            publisher_app_id=app_id, tenant_id=tenant_id, environment=environment
+        )
+        for role in roles:
+            assignment_ids.append(
+                _assign_role(
+                    subscription_id=subscription_id,
+                    object_id=object_id,
+                    registry_scope=registry_scope,
+                    role=role,
+                )
+            )
+        publication.advance(PublicationState.FINALIZER_AUTHORITY_READY)
+        _wait_role_inventory(
+            subscription_id=subscription_id,
+            app_id=app_id,
+            object_id=object_id,
+            registry_scope=registry_scope,
+            roles=roles,
+            required=True,
+        )
+        lifecycle._run(
+            ("az", "logout", "--only-show-errors", "--output", "none"),
+            environment_overrides=environment,
+        )
+        lifecycle._reset_ephemeral_directory(Path(environment["AZURE_CONFIG_DIR"]))
+        lifecycle._publisher_login(
+            publisher_app_id=app_id,
+            tenant_id=tenant_id,
+            certificate_path=certificate_path,
+            environment=environment,
+        )
+        refresh_token, access_token = _wait_for_finalizer_access(
+            publisher_app_id=app_id, tenant_id=tenant_id, environment=environment
+        )
+        if not _finalizer_access_is_exact(access_token, tenant_id=tenant_id):
+            _fail("finalizer-token-scope-missing")
+        publication.advance(PublicationState.FINALIZER_AUTHENTICATION_PROVED)
+        tag_properties = _tag_properties(access_token, source_tag=source_tag)
+        if str(tag_properties["digest"]) != manifest_digest:
+            _fail("source-tag-digest-mismatch-before-delete")
+        if (
+            lifecycle._acr_manifest_digest(access_token, reference=source_tag)
+            != manifest_digest
+        ):
+            _fail("source-tag-head-digest-mismatch-before-delete")
+        manifest_before = _manifest_identity(
+            access_token,
+            top_level_digest=manifest_digest,
+            source_tag_expected=True,
+            registry_config_digest=registry_config_digest,
+            source_tag=source_tag,
+        )
+        tags_before = _repository_tags(access_token)
+        if tags_before.get(source_tag) != manifest_digest:
+            _fail("source-tag-state-mismatch-or-locked")
+        body = bytearray()
+        try:
+            delete_status, _headers, body = lifecycle._private_registry_request(
+                "DELETE",
+                f"/acr/v1/{lifecycle.PUBLISHER_REPOSITORY}/_tags/{source_tag}?api-version=2021-07-01",
+                headers={
+                    "Authorization": lifecycle._registry_authorization(access_token)
+                },
+            )
+            if delete_status != 202:
+                _fail(f"tag-delete-http-{delete_status}")
+        finally:
+            body.clear()
+        publication.advance(PublicationState.SOURCE_TAG_REMOVED)
+        if (
+            lifecycle._acr_manifest_digest(access_token, reference=source_tag)
+            is not None
+        ):
+            _fail("source-tag-remains-after-delete")
+        manifest_after = _manifest_identity(
+            access_token,
+            top_level_digest=manifest_digest,
+            source_tag_expected=False,
+            registry_config_digest=registry_config_digest,
+            source_tag=source_tag,
+        )
+        tags_after = _repository_tags(access_token)
+        expected_after = dict(tags_before)
+        expected_after.pop(source_tag)
+        if tags_after != expected_after:
+            _fail("repository-tag-inventory-changed-outside-target")
+        publication.advance(PublicationState.IMMUTABLE_MANIFEST_REPROVED)
+    except BaseException as exc:
+        primary_error = exc
+    finally:
+        access_token.clear()
+        refresh_token.clear()
+        cleanup_errors.extend(
+            _cleanup_finalizer(
+                subscription_id=subscription_id,
+                assignment_ids=assignment_ids,
+                app_id=app_id,
+                object_id=object_id,
+                tenant_id=tenant_id,
+                certificate_path=certificate_path,
+                environment=environment,
+                finalizer_root=finalizer_root,
+                registry_scope=registry_scope,
+                roles=roles,
+            )
+        )
+    _raise_preserving_primary(primary_error, cleanup_errors)
+    publication.advance(PublicationState.PUBLISHER_FINALIZER_REVOKED)
+    if manifest_before != manifest_after or manifest_after is None:
+        _fail("immutable-manifest-changed-during-untag")
+    unsigned: dict[str, JsonValue] = {
+        "schemaVersion": EVIDENCE_VERSION,
+        "ledgerIntegritySha256": str(ledger["ledgerIntegritySha256"]),
+        "manifestDigest": manifest_digest,
+        "registryConfigDigest": registry_config_digest,
+        "sourceTagSha256": hashlib.sha256(source_tag.encode("ascii")).hexdigest(),
+        "sourceTagAbsent": True,
+        "immutableManifestRetained": True,
+        "platform": "linux/amd64",
+        "registryRoleAssignmentMode": mode,
+        "roleDefinitionIds": [str(role["roleDefinitionId"]) for role in roles],
+        "roleScope": "exact-container-registry-resource",
+        "repositoryTokenScope": FINALIZER_SCOPE,
+        "deleteStatus": delete_status,
+        "assignmentCountRevoked": len(assignment_ids),
+        "finalizerIdentityDeleted": True,
+        "secretValueAccessed": False,
+        "completedAtUtc": _format_utc(_utc_now()),
+    }
+    evidence = {
+        **unsigned,
+        "evidenceIntegritySha256": _integrity(unsigned, EVIDENCE_DOMAIN),
+    }
+    _write_exclusive(receipt_root / "acr-tag-finalization.evidence.json", evidence)
+    publication.advance(PublicationState.PUBLICATION_EVIDENCE_PERSISTED)
+    return evidence
+
+
 def execute_finalization(
     *, ledger_path: Path, receipt_directory: Path, control_plane_head: str
 ) -> dict[str, JsonValue]:
+    # This old independent-ledger implementation is intentionally unreachable.
+    # The retained body is historical evidence until its dedicated removal;
+    # no direct caller may re-open a second publication transaction.
+    _fail("standalone-finalization-retired")
     _repository_state(control_plane_head)
     now = _utc_now()
     ledger = validate_continuation_ledger(
@@ -1433,51 +1654,21 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
-    try:
-        if args.materialize_ledger:
-            if args.receipt_directory is not None:
-                _fail("finalization-command-contract-invalid")
-            result = materialize_continuation_ledger(
-                ledger_path=args.ledger,
-                control_plane_head=args.control_plane_head,
-            )
-            safe = {
-                "status": "materialized",
-                "ledgerIntegritySha256": result["ledgerIntegritySha256"],
-                "expiresAtUtc": result["expiresAtUtc"],
-                "registryRoleAssignmentMode": result["registryRoleAssignmentMode"],
-            }
-        else:
-            if args.receipt_directory is None:
-                _fail("finalization-command-contract-invalid")
-            result = execute_finalization(
-                ledger_path=args.ledger,
-                receipt_directory=args.receipt_directory,
-                control_plane_head=args.control_plane_head,
-            )
-            safe = {
-                "status": "IMAGE_PUBLISHED",
-                "evidenceIntegritySha256": result["evidenceIntegritySha256"],
-                "manifestDigest": result["manifestDigest"],
-                "sourceTagAbsent": result["sourceTagAbsent"],
-                "immutableManifestRetained": result["immutableManifestRetained"],
-                "finalizerIdentityDeleted": result["finalizerIdentityDeleted"],
-            }
-        print(json.dumps(safe, separators=(",", ":"), sort_keys=True))
-        return 0
-    except (Exception, KeyboardInterrupt) as exc:
-        code = str(exc)
-        if re.fullmatch(r"[a-z0-9-]{1,96}", code) is None:
-            code = type(exc).__name__
-        print(
-            json.dumps(
-                {"status": "TAG_FINALIZATION_BLOCKED", "error": code},
-                separators=(",", ":"),
-                sort_keys=True,
-            )
+    del argv
+    # A standalone finalizer used to create an independent ledger and could
+    # therefore race the lifecycle-owned publisher.  Keep the module importable
+    # for its exact finalizer transition, but deliberately retire that entrypoint.
+    print(
+        json.dumps(
+            {
+                "status": "TAG_FINALIZATION_RETIRED",
+                "error": "lifecycle-ledger-required",
+            },
+            separators=(",", ":"),
+            sort_keys=True,
         )
-        return 130 if isinstance(exc, KeyboardInterrupt) else 2
+    )
+    return 2
 
 
 if __name__ == "__main__":

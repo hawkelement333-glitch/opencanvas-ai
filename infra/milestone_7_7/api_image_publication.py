@@ -23,6 +23,11 @@ from preflight.milestone_7_7.publication_path_admission import (
     verify_private_registry_publication_path,
 )
 
+from infra.milestone_7_7.publication_state_machine import (
+    PublicationState,
+    PublicationStateMachine,
+)
+
 from infra.milestone_7_7.scripts.managed_binding_lifecycle import (
     API_IMAGE_BUILDER_PREFIX,
     API_IMAGE_BUILD_INPUTS,
@@ -42,7 +47,6 @@ from infra.milestone_7_7.scripts.managed_binding_lifecycle import (
     RAW_IMAGE_DIGEST,
     REGISTRY_HOST,
     REGISTRY,
-    PublisherAccessPending,
     _acr_manifest_digest,
     _assert_source_tag_absent,
     _attribution_scope,
@@ -55,7 +59,6 @@ from infra.milestone_7_7.scripts.managed_binding_lifecycle import (
     _fail,
     _finish_process_attribution,
     _outside_repository,
-    _private_registry_request,
     _private_tls_endpoint,
     _prove_initial_publisher_denial,
     _publisher_environment,
@@ -63,7 +66,6 @@ from infra.milestone_7_7.scripts.managed_binding_lifecycle import (
     _publisher_role_rows,
     _read_state,
     _read_current_transient_state,
-    _registry_authorization,
     _remove_ephemeral_publisher_directory,
     _replace_state,
     _reset_ephemeral_directory,
@@ -659,50 +661,6 @@ def _prebuild_api_image(
     return record
 
 
-def _remove_source_tag(access_token: bytearray, *, source_tag: str) -> None:
-    if re.fullmatch(r"source-[0-9a-f]{40}", source_tag) is None:
-        _fail("registry-source-tag-invalid")
-    body = bytearray()
-    try:
-        status, _headers, body = _private_registry_request(
-            "DELETE",
-            (
-                f"/acr/v1/{PUBLISHER_REPOSITORY}/_tags/{source_tag}"
-                "?api-version=2021-07-01"
-            ),
-            headers={"Authorization": _registry_authorization(access_token)},
-        )
-        if status in {401, 403}:
-            raise PublisherAccessPending("publisher-tag-removal-denied")
-        if status not in {200, 202, 204}:
-            _fail("registry-source-tag-removal-failed")
-    finally:
-        body.clear()
-
-
-def _cleanup_failed_publication(
-    access_token: bytearray,
-    *,
-    source_tag: str,
-    primary_error: BaseException | None,
-) -> None:
-    try:
-        observed_source_digest = _acr_manifest_digest(
-            access_token, reference=source_tag
-        )
-        if observed_source_digest is not None:
-            with _attribution_scope(
-                lifecycle_substage="failure-publication-tag-cleanup",
-                expected_authorization="allow",
-            ):
-                _remove_source_tag(access_token, source_tag=source_tag)
-        _assert_source_tag_absent(source_tag=source_tag, access_token=access_token)
-    except BaseException as cleanup_error:
-        if primary_error is None:
-            raise
-        raise PublicationAttemptFailure(primary_error, cleanup_error) from cleanup_error
-
-
 def _docker_push_error_code(stdout: bytearray, stderr: bytearray) -> str:
     try:
         text = (
@@ -1015,10 +973,12 @@ def _publish_api_image(
     receipt_directory: Path,
     prebuilt_image_record: Path,
 ) -> str:
+    publication = PublicationStateMachine()
     repository_head = str(ledger["repositoryHead"])
     published = ledger.get("publishedImage")
     if HEX_SHA40.fullmatch(repository_head) is None or not isinstance(published, dict):
         _fail("repository-head-invalid")
+    publication.advance(PublicationState.IMAGE_ADMITTED)
     image_source_commit = published.get("imageSourceCommit")
     if (
         not isinstance(image_source_commit, str)
@@ -1036,6 +996,7 @@ def _publish_api_image(
         image_source_commit=image_source_commit,
         control_plane_head=repository_head,
     )
+    publication.advance(PublicationState.LOCAL_IMAGE_VERIFIED)
     if (
         record.get("buildInputSha256") != published.get("imageBuildInputSha256")
         or record.get("imageId") != published.get("localImageId")
@@ -1044,6 +1005,8 @@ def _publish_api_image(
         or published.get("sourceTag") != f"source-{image_source_commit}"
     ):
         _fail("pending-image-ledger-record-mismatch")
+    verify_private_registry_publication_path(repository_head=image_source_commit)
+    publication.advance(PublicationState.PUBLICATION_PATH_PROVED)
     image_by_tag = _api_image_reference(image_source_commit)
     contract = load_managed_binding_contract()
     rbac = contract["rbac"]
@@ -1056,7 +1019,8 @@ def _publish_api_image(
     publisher_object_id: str | None = None
     publisher_deleted = False
     denial_proved = False
-    publication_attempted = False
+    immutable_reference: str | None = None
+    raw_digest: str | None = None
     refresh_token = bytearray()
     access_token = bytearray()
     source_tag = f"source-{image_source_commit}"
@@ -1088,6 +1052,7 @@ def _publish_api_image(
             ledger=ledger,
             publisher_directory=publisher_root,
         )
+        publication.advance(PublicationState.PUBLISHER_CREATED)
         _validate_publisher_role_inventory(
             _publisher_role_rows(
                 subscription_id=subscription_id,
@@ -1117,6 +1082,7 @@ def _publish_api_image(
             role_id=str(rbac["acrPushRoleDefinitionId"]),
             scope=registry_scope,
         )
+        publication.advance(PublicationState.UPLOAD_AUTHORITY_READY)
         state["temporaryRegistryAssignmentId"] = assignment_id
         _replace_state(state_path, state)
         _run(
@@ -1139,7 +1105,6 @@ def _publish_api_image(
             refresh_token, environment=publisher_environment
         )
         refresh_token.clear()
-        primary_publication_error: BaseException | None = None
         try:
             _assert_source_tag_absent(
                 source_tag=source_tag,
@@ -1149,7 +1114,6 @@ def _publish_api_image(
                 lifecycle_substage="immutable-image-publication",
                 expected_authorization="allow",
             ):
-                publication_attempted = True
                 verify_private_registry_publication_path(
                     repository_head=image_source_commit
                 )
@@ -1178,18 +1142,10 @@ def _publish_api_image(
             if resolved_digest != pushed_digest:
                 _fail("registry-pushed-digest-mismatch")
             raw_digest = pushed_digest
+            publication.advance(PublicationState.IMAGE_PUSHED)
             if _acr_manifest_digest(access_token, reference=raw_digest) != raw_digest:
                 _fail("registry-immutable-digest-mismatch")
-            with _attribution_scope(
-                lifecycle_substage="mutable-tag-removal",
-                expected_authorization="allow",
-            ):
-                _remove_source_tag(access_token, source_tag=source_tag)
-                _assert_source_tag_absent(
-                    source_tag=source_tag, access_token=access_token
-                )
-            if _acr_manifest_digest(access_token, reference=raw_digest) != raw_digest:
-                _fail("registry-immutable-manifest-removed-with-tag")
+            publication.advance(PublicationState.IMMUTABLE_MANIFEST_PROVED)
             immutable_reference = f"{REGISTRY_HOST}/opencanvas-api@{raw_digest}"
             if IMAGE_DIGEST.fullmatch(immutable_reference) is None:
                 _fail("registry-immutable-reference-malformed")
@@ -1206,16 +1162,9 @@ def _publish_api_image(
                 ("docker", "tag", immutable_reference, revocation_probe),
                 environment_overrides=publisher_environment,
             )
-        except BaseException as error:
-            primary_publication_error = error
+        except BaseException:
             raise
         finally:
-            if publication_attempted and access_token:
-                _cleanup_failed_publication(
-                    access_token,
-                    source_tag=source_tag,
-                    primary_error=primary_publication_error,
-                )
             _run(
                 ("docker", "logout", REGISTRY_HOST),
                 environment_overrides=publisher_environment,
@@ -1226,6 +1175,7 @@ def _publish_api_image(
 
         _delete_assignment(subscription_id, assignment_id)
         assignment_id = None
+        publication.advance(PublicationState.UPLOAD_AUTHORITY_REVOKED)
         state["temporaryRegistryAssignmentId"] = None
         _replace_state(state_path, state)
         _wait_for_publisher_role_inventory(
@@ -1283,6 +1233,32 @@ def _publish_api_image(
             publisher_object_id=publisher_object_id,
         )
         publisher_deleted = True
+        if immutable_reference is None or raw_digest is None:
+            _fail("publisher-immutable-image-identity-missing")
+        # The publisher has now been denied and deleted.  Only a distinct
+        # pull/delete finalizer may issue the exact source-tag DELETE.
+        from infra.milestone_7_7 import acr_tag_finalization
+
+        with _attribution_scope(
+            lifecycle_substage="mutable-tag-finalization",
+            expected_authorization="allow",
+        ):
+            finalization = acr_tag_finalization.finalize_current_publication(
+                ledger=ledger,
+                subscription_id=subscription_id,
+                receipt_directory=receipt_directory,
+                source_tag=source_tag,
+                manifest_digest=raw_digest,
+                registry_config_digest=str(record["configDigest"]),
+                publication=publication,
+            )
+        if (
+            finalization.get("sourceTagAbsent") is not True
+            or finalization.get("immutableManifestRetained") is not True
+        ):
+            _fail("publisher-finalizer-evidence-invalid")
+        publication.advance(PublicationState.PUBLICATION_COMPLETE)
+        publication.assert_complete()
         _run(
             (
                 "docker",
