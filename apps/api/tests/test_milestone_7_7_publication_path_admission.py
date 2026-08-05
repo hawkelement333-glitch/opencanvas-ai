@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import inspect
 import subprocess
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
+
 from preflight.milestone_7_7 import managed_binding_execution
 from preflight.milestone_7_7 import publication_path_admission as admission
 
@@ -290,24 +292,7 @@ def test_unexpected_probe_pull_is_removed_before_failing_closed(
     assert cleanup[-1].endswith(f"mobius77-publication-path-probe-{HEAD}")
 
 
-def test_ledger_is_not_written_when_publication_path_is_unproved(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    ledger_path = tmp_path / "authorization-ledger.json"
+def test_downstream_ledger_does_not_reopen_completed_publication_path() -> None:
+    source = inspect.getsource(managed_binding_execution.materialize_ledger)
 
-    def blocked(*, repository_head: str) -> dict[str, object]:
-        assert repository_head == HEAD
-        raise admission.PublicationPathAdmissionError("publication-path-daemon-dns-unavailable")
-
-    monkeypatch.setattr(
-        managed_binding_execution,
-        "verify_private_registry_publication_path",
-        blocked,
-    )
-
-    with pytest.raises(
-        admission.PublicationPathAdmissionError,
-        match="publication-path-daemon-dns-unavailable",
-    ):
-        managed_binding_execution.materialize_ledger(ledger_path=ledger_path, repository_head=HEAD)
-    assert not ledger_path.exists()
+    assert "verify_private_registry_publication_path" not in source
