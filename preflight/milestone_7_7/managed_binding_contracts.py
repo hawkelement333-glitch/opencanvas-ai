@@ -16,7 +16,7 @@ import re
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Final
+from typing import Final, Mapping
 from uuid import UUID, uuid5
 
 from performance.milestone_7_7.framework import (
@@ -82,25 +82,9 @@ MAXIMUM_CONTRACT_BYTES: Final = 524_288
 HEX_SHA40 = re.compile(r"^[0-9a-f]{40}$")
 HEX_SHA64 = re.compile(r"^[0-9a-f]{64}$")
 RFC3339_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
-PUBLISHED_IMAGE_SOURCE_COMMIT: Final = "948e81b5bf34f5c2f5069ee40568beb09cb997d3"
-PUBLISHED_IMAGE_BUILD_INPUT_SHA256: Final = (
-    "16758013417d703a9ebe661511ff1fc305653372286909cdbbc6e9c29a6e613c"
-)
-PUBLISHED_REGISTRY_MANIFEST_DIGEST: Final = (
-    "sha256:6aceb88fbf4564c621d8553e461b2e496ec543b48d1a59080958d937eddec99c"
-)
-PUBLISHED_IMAGE_CONFIG_DIGEST: Final = (
-    "sha256:c43be0285f3399d893d796397f9895a552f8504e61ce61dfac3ba95dd64d2b41"
-)
-PUBLISHED_IMAGE_LOCAL_ID: Final = PUBLISHED_REGISTRY_MANIFEST_DIGEST
-PUBLISHED_IMAGE_PLATFORM: Final = "linux/amd64"
-PUBLISHED_IMAGE_REPOSITORY: Final = "opencanvas-api"
-PUBLISHED_PUBLICATION_EVIDENCE_SHA256: Final = (
-    "9e9f93b9e6587b7bd8c2814e424ddbc177e1d4f42d59cde1321ad3872f9c2ef1"
-)
-PUBLISHED_REVOCATION_EVIDENCE_SHA256: Final = (
-    "c634ff8e4f45888d05318682838ebe7c629211a74287ff38c8c7240a676139f6"
-)
+IMAGE_PUBLICATION_REPOSITORY: Final = "opencanvas-api"
+IMAGE_PUBLICATION_PLATFORM: Final = "linux/amd64"
+HISTORICAL_IMAGE_SOURCE_COMMIT: Final = "948e81b5bf34f5c2f5069ee40568beb09cb997d3"
 API_IMAGE_BUILD_INPUTS: Final = (
     "apps/api/Dockerfile",
     "apps/api/Dockerfile.dockerignore",
@@ -197,6 +181,7 @@ EXPECTED_PROVIDER_REGISTRATIONS: Final = (
 EXPECTED_LIFECYCLE_OPERATIONS: Final = (
     "pre-secret-provisioning",
     "private-path-verification",
+    "publish-api-image",
     "post-secret-provisioning",
     "temporary-authority-revocation",
     "cleanup",
@@ -844,17 +829,52 @@ def load_operation_overlay() -> dict[str, JsonValue]:
     return validate_operation_overlay(load_json(OVERLAY_PATH))
 
 
-def published_image_identity(*, control_plane_head: str) -> dict[str, JsonValue]:
-    """Bind a proved immutable image independently from orchestration HEAD."""
+def pending_image_identity(
+    *, control_plane_head: str, value: Mapping[str, JsonValue]
+) -> dict[str, JsonValue]:
+    """Validate the exact local image that one ledger may publish once."""
 
     if HEX_SHA40.fullmatch(control_plane_head) is None:
-        raise ContractError("published image control plane HEAD is invalid")
+        raise ContractError("pending image control plane HEAD is invalid")
+    image = _as_object(_copy_json(dict(value)), "$.pendingImage")
+    exact_fields = {
+        "configDigest",
+        "imageBuildInputSha256",
+        "imageSourceCommit",
+        "localImageId",
+        "platform",
+        "registryManifestDigest",
+        "repository",
+        "sourceTag",
+    }
+    if set(image) != exact_fields:
+        raise ContractError("pending image fields differ")
+    source_commit = image.get("imageSourceCommit")
+    build_input = image.get("imageBuildInputSha256")
+    image_id = image.get("localImageId")
+    config_digest = image.get("configDigest")
+    if (
+        not isinstance(source_commit, str)
+        or HEX_SHA40.fullmatch(source_commit) is None
+        or source_commit == HISTORICAL_IMAGE_SOURCE_COMMIT
+        or not isinstance(build_input, str)
+        or HEX_SHA64.fullmatch(build_input) is None
+        or not isinstance(image_id, str)
+        or not image_id.startswith("sha256:")
+        or HEX_SHA64.fullmatch(image_id.removeprefix("sha256:")) is None
+        or config_digest != image_id
+        or image.get("platform") != IMAGE_PUBLICATION_PLATFORM
+        or image.get("repository") != IMAGE_PUBLICATION_REPOSITORY
+        or image.get("sourceTag") != f"source-{source_commit}"
+        or image.get("registryManifestDigest") is not None
+    ):
+        raise ContractError("pending image identity is invalid")
     completed = subprocess.run(
         (
             "git",
             "diff",
             "--quiet",
-            PUBLISHED_IMAGE_SOURCE_COMMIT,
+            source_commit,
             control_plane_head,
             "--",
             *API_IMAGE_BUILD_INPUTS,
@@ -867,20 +887,20 @@ def published_image_identity(*, control_plane_head: str) -> dict[str, JsonValue]
         timeout=30,
     )
     if completed.returncode == 1:
-        raise ContractError("published image build inputs changed")
+        raise ContractError("pending image build inputs changed")
     if completed.returncode != 0:
-        raise ContractError("published image input comparison failed")
+        raise ContractError("pending image input comparison failed")
     return {
         "controlPlaneHead": control_plane_head,
-        "imageSourceCommit": PUBLISHED_IMAGE_SOURCE_COMMIT,
-        "imageBuildInputSha256": PUBLISHED_IMAGE_BUILD_INPUT_SHA256,
-        "registryManifestDigest": PUBLISHED_REGISTRY_MANIFEST_DIGEST,
-        "imageConfigDigest": PUBLISHED_IMAGE_CONFIG_DIGEST,
-        "localImageId": PUBLISHED_IMAGE_LOCAL_ID,
-        "platform": PUBLISHED_IMAGE_PLATFORM,
-        "repository": PUBLISHED_IMAGE_REPOSITORY,
-        "publicationEvidenceIntegritySha256": PUBLISHED_PUBLICATION_EVIDENCE_SHA256,
-        "publisherRevocationEvidenceIntegritySha256": PUBLISHED_REVOCATION_EVIDENCE_SHA256,
+        "imageSourceCommit": source_commit,
+        "imageBuildInputSha256": build_input,
+        "registryManifestDigest": None,
+        "imageConfigDigest": config_digest,
+        "localImageId": image_id,
+        "platform": IMAGE_PUBLICATION_PLATFORM,
+        "repository": IMAGE_PUBLICATION_REPOSITORY,
+        "sourceTag": image["sourceTag"],
+        "publicationState": "pending",
     }
 
 
@@ -888,6 +908,7 @@ def build_authorization_ledger(
     *,
     issued_at_utc: datetime,
     repository_head: str,
+    pending_image: Mapping[str, JsonValue],
     maximum_lifetime_seconds: int = MAXIMUM_LEDGER_LIFETIME_SECONDS,
 ) -> dict[str, JsonValue]:
     if HEX_SHA40.fullmatch(repository_head) is None:
@@ -905,7 +926,9 @@ def build_authorization_ledger(
         "issuedAtUtc": _format_utc(issued),
         "expiresAtUtc": _format_utc(expires),
         "repositoryHead": repository_head,
-        "publishedImage": published_image_identity(control_plane_head=repository_head),
+        "publishedImage": pending_image_identity(
+            control_plane_head=repository_head, value=pending_image
+        ),
         "authorizationSourceHead": AUTHORIZATION_SOURCE_HEAD,
         "historicalMatrixIntegritySha256": HISTORICAL_MATRIX_SHA256,
         "managedBindingIntegritySha256": managed_binding_integrity_sha256(
@@ -983,10 +1006,21 @@ def validate_authorization_ledger(
         raise ContractError("authorization ledger identity differs")
     if ledger["repositoryHead"] != expected_repository_head:
         raise ContractError("authorization ledger repository binding differs")
-    if ledger["publishedImage"] != published_image_identity(
-        control_plane_head=expected_repository_head
+    published = _as_object(ledger["publishedImage"], "$.publishedImage")
+    pending = {
+        "imageSourceCommit": published.get("imageSourceCommit"),
+        "imageBuildInputSha256": published.get("imageBuildInputSha256"),
+        "localImageId": published.get("localImageId"),
+        "configDigest": published.get("imageConfigDigest"),
+        "platform": published.get("platform"),
+        "repository": published.get("repository"),
+        "sourceTag": published.get("sourceTag"),
+        "registryManifestDigest": published.get("registryManifestDigest"),
+    }
+    if published != pending_image_identity(
+        control_plane_head=expected_repository_head, value=pending
     ):
-        raise ContractError("authorization ledger published image binding differs")
+        raise ContractError("authorization ledger pending image binding differs")
     if ledger["authorizationSourceHead"] != AUTHORIZATION_SOURCE_HEAD:
         raise ContractError("authorization ledger source binding differs")
     if ledger["historicalMatrixIntegritySha256"] != HISTORICAL_MATRIX_SHA256:

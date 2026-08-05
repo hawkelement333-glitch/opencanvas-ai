@@ -29,7 +29,6 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     AUTHORIZATION_SOURCE_HEAD,
     EXPECTED_LIFECYCLE_OPERATIONS,
     HISTORICAL_MATRIX_SHA256,
-    PUBLISHED_IMAGE_SOURCE_COMMIT,
     build_authorization_ledger,
     claim_operation_receipt,
     cleanup_runbook_sha256,
@@ -56,6 +55,20 @@ IMAGE_PUBLICATION_SCRIPT = INFRASTRUCTURE_ROOT / "api_image_publication.py"
 SYNTHETIC_SUBSCRIPTION = "synthetic-managed-binding-subscription"
 SYNTHETIC_TENANT = "synthetic-managed-binding-tenant"
 NOW = datetime(2026, 7, 31, 18, 0, tzinfo=UTC)
+TEST_IMAGE_SOURCE_COMMIT = "7321e69b8296660c53015a05e5b01b9adf1e302f"
+
+
+def _pending_image(source_commit: str = TEST_IMAGE_SOURCE_COMMIT) -> dict[str, JsonValue]:
+    return {
+        "imageSourceCommit": source_commit,
+        "imageBuildInputSha256": "a" * 64,
+        "localImageId": "sha256:" + "b" * 64,
+        "configDigest": "sha256:" + "b" * 64,
+        "platform": "linux/amd64",
+        "repository": "opencanvas-api",
+        "sourceTag": f"source-{source_commit}",
+        "registryManifestDigest": None,
+    }
 
 
 def _synthetic_jwt(claims: Mapping[str, object]) -> bytearray:
@@ -281,10 +294,11 @@ def test_redis_sku_change_fails_closed() -> None:
 
 
 def test_one_run_ledger_expires_and_receipts_reject_replay(tmp_path: Path) -> None:
-    head = "d632516d74ff7cfc65de75e0507c09157f1f2577"
+    head = TEST_IMAGE_SOURCE_COMMIT
     ledger = build_authorization_ledger(
         issued_at_utc=NOW,
         repository_head=head,
+        pending_image=_pending_image(),
         maximum_lifetime_seconds=60,
     )
     allowed = operation_authorization_decision(
@@ -325,7 +339,7 @@ def test_local_dry_run_never_authorizes_or_invokes_azure() -> None:
     result = dry_run()
     assert result["status"] == "valid-local-only"
     assert result["operationCount"] == 15
-    assert result["lifecycleOperationCount"] == 6
+    assert result["lifecycleOperationCount"] == 7
     assert result["azureProcessInvocations"] == 0
     assert result["provisioningAuthorized"] is False
     assert result["secretAccessAuthorized"] is False
@@ -1474,14 +1488,15 @@ def test_closed_package_blocks_on_unregistered_required_provider(
         canonical_bytes(
             build_authorization_ledger(
                 issued_at_utc=NOW,
-                repository_head=PUBLISHED_IMAGE_SOURCE_COMMIT,
+                repository_head=TEST_IMAGE_SOURCE_COMMIT,
+                pending_image=_pending_image(),
             )
         )
     )
     adapter = ManagedBindingFakeAdapter()
     result = execute_package_one(
         ledger_path=ledger_path,
-        repository_head=PUBLISHED_IMAGE_SOURCE_COMMIT,
+        repository_head=TEST_IMAGE_SOURCE_COMMIT,
         receipt_directory=tmp_path / "receipts",
         adapter=adapter,
         now_utc=NOW,
@@ -2201,7 +2216,7 @@ def test_prebuilt_image_record_rejects_source_drift_and_image_identity_mismatch(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    head = "a" * 40
+    head = TEST_IMAGE_SOURCE_COMMIT
     image_id = "sha256:" + "b" * 64
     build_input = "c" * 64
     unsigned = api_image_publication._prebuilt_record_unsigned(
@@ -2228,7 +2243,9 @@ def test_prebuilt_image_record_rejects_source_drift_and_image_identity_mismatch(
         managed_binding_lifecycle.LifecycleError,
         match="prebuilt-api-image-source-drift",
     ):
-        api_image_publication._load_prebuilt_api_image_record(path, repository_head=head)
+        api_image_publication._load_prebuilt_api_image_record(
+            path, image_source_commit=head, control_plane_head=head
+        )
 
     monkeypatch.setattr(
         api_image_publication,
@@ -2244,7 +2261,9 @@ def test_prebuilt_image_record_rejects_source_drift_and_image_identity_mismatch(
         managed_binding_lifecycle.LifecycleError,
         match="prebuilt-api-image-identity-mismatch",
     ):
-        api_image_publication._load_prebuilt_api_image_record(path, repository_head=head)
+        api_image_publication._load_prebuilt_api_image_record(
+            path, image_source_commit=head, control_plane_head=head
+        )
 
 
 def test_mutable_tag_removal_preserves_immutable_manifest(
@@ -2921,35 +2940,32 @@ def test_image_reconciliation_uses_ledger_bound_immutable_digest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[tuple[str, ...]] = []
     published = f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api@sha256:" + "a" * 64
-
-    def run(argv: tuple[str, ...], **_kwargs: object) -> None:
-        calls.append(argv)
-
-    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
     ledger: dict[str, JsonValue] = {
         "publishedImage": {
             "repository": "opencanvas-api",
-            "registryManifestDigest": "sha256:" + "a" * 64,
+            "publicationState": "pending",
         }
+    }
+    state: dict[str, JsonValue] = {
+        "publishedManifestDigest": "sha256:" + "a" * 64,
+        "publisherRevocationProved": True,
+        "publicationEvidenceIntegritySha256": "b" * 64,
     }
 
     result = managed_binding_lifecycle._reconcile_published_api_image(
         ledger=ledger,
-        subscription_id="opaque-subscription",
-        receipt_directory=tmp_path,
+        state=state,
     )
 
     assert result == published
-    assert calls == []
 
 
 def test_image_reconciliation_rejects_missing_immutable_ledger_binding(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    del monkeypatch
+    del tmp_path, monkeypatch
     ledger: dict[str, JsonValue] = {"repositoryHead": AUTHORIZATION_SOURCE_HEAD}
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
@@ -2957,8 +2973,7 @@ def test_image_reconciliation_rejects_missing_immutable_ledger_binding(
     ):
         managed_binding_lifecycle._reconcile_published_api_image(
             ledger=ledger,
-            subscription_id="opaque-subscription",
-            receipt_directory=tmp_path,
+            state={},
         )
 
 
@@ -2970,6 +2985,78 @@ def test_image_reconciliation_has_no_owner_acr_data_plane_path() -> None:
     assert "_run(" not in reconcile
     assert "_private_registry_request(" not in reconcile
     assert "_signed_in_user_object_id" not in reconcile
+
+
+def test_pending_image_ledger_rejects_historical_identity() -> None:
+    with pytest.raises(ContractError, match="pending image identity is invalid"):
+        managed_binding_contracts.pending_image_identity(
+            control_plane_head=TEST_IMAGE_SOURCE_COMMIT,
+            value=_pending_image("948e81b5bf34f5c2f5069ee40568beb09cb997d3"),
+        )
+
+
+def test_publication_is_a_required_lifecycle_transition_before_post_secret() -> None:
+    overlay = load_operation_overlay()
+    lifecycle = cast(list[dict[str, JsonValue]], overlay["lifecycleOperations"])
+    ids = [str(item["id"]) for item in lifecycle]
+    assert ids.index("pre-secret-provisioning") < ids.index("private-path-verification")
+    assert ids.index("private-path-verification") < ids.index("publish-api-image")
+    assert ids.index("publish-api-image") < ids.index("post-secret-provisioning")
+    definition = cast(
+        dict[str, JsonValue],
+        cast(dict[str, JsonValue], overlay["methodDefinitions"])["lifecycle-publish-api-image-v1"],
+    )
+    arguments = cast(list[str], definition["argumentVector"])
+    assert "--prebuilt-image-record" in arguments
+    assert "publish-api-image" in arguments
+
+
+def test_publication_stage_persists_digest_and_revocation_before_post_secret(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ledger = _test_lifecycle_ledger()
+    ledger["publishedImage"] = {
+        "repository": "opencanvas-api",
+        "publicationState": "pending",
+        "imageBuildInputSha256": "a" * 64,
+        "imageSourceCommit": TEST_IMAGE_SOURCE_COMMIT,
+        "localImageId": "sha256:" + "b" * 64,
+        "imageConfigDigest": "sha256:" + "b" * 64,
+        "platform": "linux/amd64",
+        "sourceTag": f"source-{TEST_IMAGE_SOURCE_COMMIT}",
+        "registryManifestDigest": None,
+    }
+    state = _test_preservation_state(ledger)
+    state["privatePathProved"] = True
+    state["resumableCheckpoint"] = "secure-manual-entry"
+    state["temporaryKeyVaultAssignmentId"] = (
+        "/subscriptions/opaque/providers/Microsoft.Authorization/roleAssignments/opaque"
+    )
+    state["temporaryKeyVaultAuthorityLedgerSha256"] = "a" * 64
+    state["temporaryKeyVaultAuthorityProved"] = True
+    state_path = managed_binding_lifecycle._state_path(tmp_path)
+    managed_binding_lifecycle._write_state(state_path, state)
+    digest = "sha256:" + "c" * 64
+    from infra.milestone_7_7 import api_image_publication
+
+    monkeypatch.setattr(
+        api_image_publication,
+        "_publish_api_image",
+        lambda **_kwargs: f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api@{digest}",
+    )
+
+    result = managed_binding_lifecycle._publish_api_image_stage(
+        ledger=ledger,
+        subscription_id="opaque-subscription",
+        receipt_directory=tmp_path,
+        prebuilt_image_record=tmp_path / "prebuilt-image.json",
+    )
+
+    persisted = managed_binding_lifecycle._read_current_transient_state(state_path, ledger=ledger)
+    assert result["status"] == "image-published-and-revoked"
+    assert persisted["publishedManifestDigest"] == digest
+    assert persisted["publisherRevocationProved"] is True
+    assert isinstance(persisted["publicationEvidenceIntegritySha256"], str)
 
 
 def test_lifecycle_uses_supported_cached_azure_cli_bicep_contract() -> None:
@@ -3641,6 +3728,10 @@ def _test_preservation_state(
         "failedStage": None,
         "lastCompletedStage": "cleanup-role-verification",
         "preSecretDeploymentName": managed_binding_lifecycle._deployment_name("pre-secret", ledger),
+        "privatePathProved": False,
+        "publicationEvidenceIntegritySha256": None,
+        "publishedManifestDigest": None,
+        "publisherRevocationProved": False,
         "repositoryHead": ledger["repositoryHead"],
         "resumableCheckpoint": "pre-secret",
         "secretValueAccessed": False,

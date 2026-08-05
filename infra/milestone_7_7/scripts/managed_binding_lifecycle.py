@@ -25,7 +25,7 @@ from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Final, NoReturn, cast
+from typing import Any, Final, NoReturn, cast
 from urllib.parse import urlsplit
 
 from performance.milestone_7_7.framework import (
@@ -145,6 +145,7 @@ CONTAINER_APPS_INFRASTRUCTURE_INPUTS: Final = (
 LIFECYCLE_OPERATIONS: Final = (
     "pre-secret-provisioning",
     "private-path-verification",
+    "publish-api-image",
     "post-secret-provisioning",
     "temporary-authority-revocation",
     "cleanup",
@@ -177,6 +178,9 @@ OPERATION_ID_DOMAIN: Final = (
 )
 LIFECYCLE_PROCESS_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/lifecycle-process/v1\x00"
+)
+PUBLICATION_RESULT_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/published-image-result/v1\x00"
 )
 OPERATION_ATTRIBUTION_LOCK_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/operation-attribution-lock/v1\x00"
@@ -236,6 +240,10 @@ TRANSIENT_STATE_FIELDS: Final = frozenset(
         "failedStage",
         "lastCompletedStage",
         "preSecretDeploymentName",
+        "privatePathProved",
+        "publicationEvidenceIntegritySha256",
+        "publishedManifestDigest",
+        "publisherRevocationProved",
         "repositoryHead",
         "resumableCheckpoint",
         "secretValueAccessed",
@@ -250,6 +258,10 @@ KEY_VAULT_AUTHORITY_REVOKED_STAGE: Final = "key-vault-authority-revoked"
 LEGACY_TRANSIENT_STATE_FIELDS: Final = TRANSIENT_STATE_FIELDS - {
     "temporaryKeyVaultAuthorityLedgerSha256",
     "temporaryKeyVaultAuthorityProved",
+    "publicationEvidenceIntegritySha256",
+    "publishedManifestDigest",
+    "publisherRevocationProved",
+    "privatePathProved",
 }
 SECURITY_CONTAINMENT_ERROR_CODES: Final = frozenset(
     {
@@ -3943,11 +3955,6 @@ def _validate_transient_state(
         _fail("transient-state-repository-head-mismatch")
     if state.get("secretValueAccessed") is not False:
         _fail("transient-state-secret-access-invalid")
-    if state.get("resumableCheckpoint") in {
-        "post-secret-provisioning",
-        "runtime-deployment-handoff",
-    }:
-        _fail("resumable-checkpoint-skips-key-vault-authority")
     assignment_id = state.get("temporaryKeyVaultAssignmentId")
     proved = state.get("temporaryKeyVaultAuthorityProved")
     assignment_ledger = state.get("temporaryKeyVaultAuthorityLedgerSha256")
@@ -3962,23 +3969,65 @@ def _validate_transient_state(
         or HEX_SHA256.fullmatch(assignment_ledger) is None
     ):
         _fail("temporary-key-vault-authority-state-invalid")
+    if (
+        state.get("resumableCheckpoint")
+        in {
+            "post-secret-provisioning",
+            "runtime-deployment-handoff",
+        }
+        and assignment_id is None
+    ):
+        _fail("resumable-checkpoint-skips-key-vault-authority")
     registry_assignment = state.get("temporaryRegistryAssignmentId")
     if registry_assignment is not None and (
         not isinstance(registry_assignment, str)
         or not registry_assignment.startswith("/subscriptions/")
     ):
         _fail("temporary-registry-authority-state-invalid")
+    if not isinstance(state.get("privatePathProved"), bool):
+        _fail("private-path-state-invalid")
+    publication_integrity = state.get("publicationEvidenceIntegritySha256")
+    manifest_digest = state.get("publishedManifestDigest")
+    revoked = state.get("publisherRevocationProved")
+    if manifest_digest is None:
+        if publication_integrity is not None or revoked is not False:
+            _fail("publication-state-invalid")
+    elif (
+        not isinstance(manifest_digest, str)
+        or RAW_IMAGE_DIGEST.fullmatch(manifest_digest) is None
+        or not isinstance(publication_integrity, str)
+        or HEX_SHA256.fullmatch(publication_integrity) is None
+        or revoked is not True
+    ):
+        _fail("publication-state-invalid")
 
 
 def _read_current_transient_state(
     state_path: Path, *, ledger: Mapping[str, JsonValue]
 ) -> dict[str, JsonValue]:
     state = _read_state(state_path)
-    if set(state) == LEGACY_TRANSIENT_STATE_FIELDS:
+    missing_transition_fields = TRANSIENT_STATE_FIELDS - set(state)
+    if (
+        set(state) == TRANSIENT_STATE_FIELDS - missing_transition_fields
+        and bool(missing_transition_fields)
+        and missing_transition_fields
+        <= {
+            "privatePathProved",
+            "publicationEvidenceIntegritySha256",
+            "publishedManifestDigest",
+            "publisherRevocationProved",
+            "temporaryKeyVaultAuthorityLedgerSha256",
+            "temporaryKeyVaultAuthorityProved",
+        }
+    ):
         if state.get("temporaryKeyVaultAssignmentId") is not None:
             _fail("legacy-temporary-key-vault-authority-unreconciled")
-        state["temporaryKeyVaultAuthorityLedgerSha256"] = None
-        state["temporaryKeyVaultAuthorityProved"] = False
+        state.setdefault("privatePathProved", False)
+        state.setdefault("publicationEvidenceIntegritySha256", None)
+        state.setdefault("publishedManifestDigest", None)
+        state.setdefault("publisherRevocationProved", False)
+        state.setdefault("temporaryKeyVaultAuthorityLedgerSha256", None)
+        state.setdefault("temporaryKeyVaultAuthorityProved", False)
         _replace_state(state_path, state)
     _validate_transient_state(state, ledger=ledger)
     return state
@@ -5624,6 +5673,10 @@ def _pre_secret(
         "preSecretDeploymentName": _deployment_name(
             PRE_SECRET_PRESERVABLE_STAGE, ledger
         ),
+        "privatePathProved": False,
+        "publicationEvidenceIntegritySha256": None,
+        "publishedManifestDigest": None,
+        "publisherRevocationProved": False,
         "repositoryHead": str(ledger["repositoryHead"]),
         "resumableCheckpoint": PRE_SECRET_PRESERVABLE_STAGE,
         "secretValueAccessed": False,
@@ -5809,94 +5862,34 @@ def _private_tls_endpoint(hostname: str) -> None:
         _fail("private-endpoint-tls-unproved")
 
 
-def _private_path(subscription_id: str) -> dict[str, JsonValue]:
-    queries: tuple[tuple[str, str, str, str, dict[str, JsonValue]], ...] = (
-        (
-            "Microsoft.KeyVault/vaults",
-            KEY_VAULT,
-            "2026-02-01",
-            "{state:properties.provisioningState,public:properties.publicNetworkAccess}",
-            {"public": "Disabled", "state": "Succeeded"},
-        ),
-        (
-            "Microsoft.ContainerRegistry/registries",
-            REGISTRY,
-            "2025-11-01",
-            "{state:properties.provisioningState,public:properties.publicNetworkAccess}",
-            {"public": "Disabled", "state": "Succeeded"},
-        ),
-        (
-            "Microsoft.Network/privateEndpoints",
-            "pe-mobius77-keyvault",
-            "2026-01-01",
-            "{state:properties.provisioningState,approval:properties.privateLinkServiceConnections[0].properties.privateLinkServiceConnectionState.status}",
-            {"approval": "Approved", "state": "Succeeded"},
-        ),
-        (
-            "Microsoft.Network/privateEndpoints",
-            "pe-mobius77-acr",
-            "2026-01-01",
-            "{state:properties.provisioningState,approval:properties.privateLinkServiceConnections[0].properties.privateLinkServiceConnectionState.status}",
-            {"approval": "Approved", "state": "Succeeded"},
-        ),
-        (
-            "Microsoft.Network/virtualNetworkGateways",
-            "vpngw-mobius77-staging",
-            "2026-01-01",
-            "{state:properties.provisioningState,active:properties.activeActive}",
-            {"active": False, "state": "Succeeded"},
+def _api_image_module() -> Any:
+    from infra.milestone_7_7 import api_image_publication
+
+    if (
+        api_image_publication._LIFECYCLE_MODULE_IDENTITY
+        is not _LIFECYCLE_MODULE_IDENTITY
+    ):
+        _fail("api-image-publication-module-state-mismatch")
+    return api_image_publication
+
+
+def _private_path_stage(
+    *, ledger: Mapping[str, JsonValue], subscription_id: str, receipt_directory: Path
+) -> dict[str, JsonValue]:
+    return cast(
+        dict[str, JsonValue],
+        _api_image_module()._private_path_stage(
+            ledger=ledger,
+            subscription_id=subscription_id,
+            receipt_directory=receipt_directory,
         ),
     )
-    for resource_type, name, api_version, projection, expected in queries:
-        value = _run(
-            (
-                "az",
-                "resource",
-                "show",
-                "--resource-group",
-                TARGET_GROUP,
-                "--resource-type",
-                resource_type,
-                "--name",
-                name,
-                "--api-version",
-                api_version,
-                "--subscription",
-                subscription_id,
-                "--query",
-                projection,
-                "--output",
-                "json",
-                "--only-show-errors",
-            ),
-            require_json=True,
-        )
-        if value != expected:
-            _fail("private-path-resource-state-unproved")
-    _private_tls_endpoint(KEY_VAULT_HOST)
-    _private_tls_endpoint(REGISTRY_HOST)
-    return {
-        "status": "private-entry-path-proved",
-        "private-key-vault": True,
-        "private-registry": True,
-        "private-endpoint-count": 2,
-        "p2s-gateway": True,
-        "client-dns-and-tls-proved": True,
-        "secret-value-accessed": False,
-    }
 
 
 def _verify_publication_path_before_claim(
     *, operation: str, repository_head: str
 ) -> None:
-    if operation in {
-        "pre-secret-provisioning",
-        "private-path-verification",
-        "post-secret-provisioning",
-    }:
-        # The downstream ledger has already bound an immutable published image.
-        # Mutable source tags and local Docker state are intentionally not reused.
-        del repository_head
+    del operation, repository_head
 
 
 def _docker_login_with_refresh_token(
@@ -6058,15 +6051,11 @@ def _assert_source_tag_absent(*, source_tag: str, access_token: bytearray) -> No
 def _prebuild_api_image(
     *, repository_head: str, record_path: Path
 ) -> dict[str, JsonValue]:
-    from infra.milestone_7_7 import api_image_publication
-
-    if (
-        api_image_publication._LIFECYCLE_MODULE_IDENTITY
-        is not _LIFECYCLE_MODULE_IDENTITY
-    ):
-        _fail("api-image-publication-module-state-mismatch")
-    return api_image_publication._prebuild_api_image(
-        repository_head=repository_head, record_path=record_path
+    return cast(
+        dict[str, JsonValue],
+        _api_image_module()._prebuild_api_image(
+            repository_head=repository_head, record_path=record_path
+        ),
     )
 
 
@@ -6077,40 +6066,42 @@ def _publish_api_image(
     receipt_directory: Path,
     prebuilt_image_record: Path,
 ) -> str:
-    from infra.milestone_7_7 import api_image_publication
-
-    if (
-        api_image_publication._LIFECYCLE_MODULE_IDENTITY
-        is not _LIFECYCLE_MODULE_IDENTITY
-    ):
-        _fail("api-image-publication-module-state-mismatch")
-    return api_image_publication._publish_api_image(
-        ledger=ledger,
-        subscription_id=subscription_id,
-        receipt_directory=receipt_directory,
-        prebuilt_image_record=prebuilt_image_record,
+    return cast(
+        str,
+        _api_image_module()._publish_api_image(
+            ledger=ledger,
+            subscription_id=subscription_id,
+            receipt_directory=receipt_directory,
+            prebuilt_image_record=prebuilt_image_record,
+        ),
     )
 
 
-def _reconcile_published_api_image(
+def _publish_api_image_stage(
     *,
     ledger: dict[str, JsonValue],
     subscription_id: str,
     receipt_directory: Path,
+    prebuilt_image_record: Path,
+) -> dict[str, JsonValue]:
+    return cast(
+        dict[str, JsonValue],
+        _api_image_module()._publish_api_image_stage(
+            ledger=ledger,
+            subscription_id=subscription_id,
+            receipt_directory=receipt_directory,
+            prebuilt_image_record=prebuilt_image_record,
+        ),
+    )
+
+
+def _reconcile_published_api_image(
+    *, ledger: Mapping[str, JsonValue], state: Mapping[str, JsonValue]
 ) -> str:
-    del subscription_id, receipt_directory
-    published = ledger.get("publishedImage")
-    if not isinstance(published, dict):
-        _fail("published-image-ledger-binding-missing")
-    digest = published.get("registryManifestDigest")
-    repository = published.get("repository")
-    if (
-        repository != PUBLISHER_REPOSITORY
-        or not isinstance(digest, str)
-        or RAW_IMAGE_DIGEST.fullmatch(digest) is None
-    ):
-        _fail("published-image-ledger-binding-invalid")
-    return f"{REGISTRY_HOST}/{PUBLISHER_REPOSITORY}@{digest}"
+    return cast(
+        str,
+        _api_image_module()._reconcile_published_api_image(ledger=ledger, state=state),
+    )
 
 
 def _container_app_revision_ready(subscription_id: str, app_name: str) -> None:
@@ -6351,11 +6342,7 @@ def _post_secret(
             state=state,
         )
     expected_cost, maximum_cost = _verified_cost()
-    api_image_digest = _reconcile_published_api_image(
-        ledger=ledger,
-        subscription_id=subscription_id,
-        receipt_directory=receipt_directory,
-    )
+    api_image_digest = _reconcile_published_api_image(ledger=ledger, state=state)
     with tempfile.TemporaryDirectory(prefix="mobius77-binding-") as directory:
         template = Path(directory) / "main.json"
         _compile_template(template)
@@ -7046,7 +7033,13 @@ def main() -> int:
         args.operation is None
         or args.ledger is None
         or args.receipt_directory is None
-        or args.prebuilt_image_record is not None
+        or (
+            args.operation == "publish-api-image" and args.prebuilt_image_record is None
+        )
+        or (
+            args.operation != "publish-api-image"
+            and args.prebuilt_image_record is not None
+        )
     ):
         print(
             json.dumps(
@@ -7101,7 +7094,18 @@ def main() -> int:
                     receipt_directory=receipt_directory,
                 )
             elif operation == "private-path-verification":
-                result = _private_path(subscription_id)
+                result = _private_path_stage(
+                    ledger=ledger,
+                    subscription_id=subscription_id,
+                    receipt_directory=receipt_directory,
+                )
+            elif operation == "publish-api-image":
+                result = _publish_api_image_stage(
+                    ledger=ledger,
+                    subscription_id=subscription_id,
+                    receipt_directory=receipt_directory,
+                    prebuilt_image_record=cast(Path, args.prebuilt_image_record),
+                )
             elif operation == "post-secret-provisioning":
                 result = _post_secret(
                     ledger=ledger,

@@ -32,12 +32,16 @@ from infra.milestone_7_7.scripts.managed_binding_lifecycle import (
     HEX_SHA256,
     HEX_SHA40,
     IMAGE_DIGEST,
+    KEY_VAULT,
+    KEY_VAULT_HOST,
     _LIFECYCLE_MODULE_IDENTITY as _LIFECYCLE_MODULE_IDENTITY,
     PREBUILT_IMAGE_RECORD_DOMAIN,
     PREBUILT_IMAGE_RECORD_VERSION,
+    PUBLICATION_RESULT_DOMAIN,
     PUBLISHER_REPOSITORY,
     RAW_IMAGE_DIGEST,
     REGISTRY_HOST,
+    REGISTRY,
     PublisherAccessPending,
     _acr_manifest_digest,
     _assert_source_tag_absent,
@@ -52,11 +56,13 @@ from infra.milestone_7_7.scripts.managed_binding_lifecycle import (
     _finish_process_attribution,
     _outside_repository,
     _private_registry_request,
+    _private_tls_endpoint,
     _prove_initial_publisher_denial,
     _publisher_environment,
     _publisher_login,
     _publisher_role_rows,
     _read_state,
+    _read_current_transient_state,
     _registry_authorization,
     _remove_ephemeral_publisher_directory,
     _replace_state,
@@ -70,6 +76,7 @@ from infra.milestone_7_7.scripts.managed_binding_lifecycle import (
     _scope,
     _secure_ephemeral_directory,
     _state_path,
+    TARGET_GROUP,
     _temporary_publisher_role_assignment,
     _validate_publisher_role_inventory,
     _verify_cleanup_control,
@@ -464,7 +471,10 @@ def _write_prebuilt_api_image_record(path: Path, value: dict[str, JsonValue]) ->
 
 
 def _load_prebuilt_api_image_record(
-    path: Path, *, repository_head: str
+    path: Path,
+    *,
+    image_source_commit: str | None,
+    control_plane_head: str,
 ) -> dict[str, JsonValue]:
     resolved = _outside_repository(path, "prebuilt-api-image-record")
     value = load_json(resolved)
@@ -494,9 +504,36 @@ def _load_prebuilt_api_image_record(
         or value.get("schemaVersion") != PREBUILT_IMAGE_RECORD_VERSION
         or value.get("completionStatus") != "READY"
         or value.get("platform") != API_IMAGE_PLATFORM
-        or value.get("repositoryHead") != repository_head
+        or not isinstance(value.get("repositoryHead"), str)
+        or HEX_SHA40.fullmatch(str(value.get("repositoryHead"))) is None
     ):
         _fail("prebuilt-api-image-record-integrity-invalid")
+    source_commit = str(value["repositoryHead"])
+    if image_source_commit is not None and source_commit != image_source_commit:
+        _fail("prebuilt-api-image-source-commit-mismatch")
+    if HEX_SHA40.fullmatch(control_plane_head) is None:
+        _fail("prebuilt-api-image-control-plane-head-invalid")
+    comparison = subprocess.run(
+        (
+            "git",
+            "diff",
+            "--quiet",
+            source_commit,
+            control_plane_head,
+            "--",
+            *API_IMAGE_BUILD_INPUTS,
+        ),
+        cwd=REPOSITORY_ROOT,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        shell=False,
+        timeout=30,
+    )
+    if comparison.returncode == 1:
+        _fail("prebuilt-api-image-control-plane-input-drift")
+    if comparison.returncode != 0:
+        _fail("prebuilt-api-image-input-comparison-failed")
     build_input_sha256 = value.get("buildInputSha256")
     image_id = value.get("imageId")
     config_digest = value.get("configDigest")
@@ -508,10 +545,10 @@ def _load_prebuilt_api_image_record(
         or config_digest != image_id
     ):
         _fail("prebuilt-api-image-record-malformed")
-    if _api_image_build_input_sha256(repository_head) != build_input_sha256:
+    if _api_image_build_input_sha256(source_commit) != build_input_sha256:
         _fail("prebuilt-api-image-source-drift")
     inspected_id, inspected_config = _inspect_local_api_image(
-        _api_image_reference(repository_head)
+        _api_image_reference(source_commit)
     )
     if inspected_id != image_id or inspected_config != config_digest:
         _fail("prebuilt-api-image-identity-mismatch")
@@ -979,16 +1016,35 @@ def _publish_api_image(
     prebuilt_image_record: Path,
 ) -> str:
     repository_head = str(ledger["repositoryHead"])
-    if HEX_SHA40.fullmatch(repository_head) is None:
+    published = ledger.get("publishedImage")
+    if HEX_SHA40.fullmatch(repository_head) is None or not isinstance(published, dict):
         _fail("repository-head-invalid")
+    image_source_commit = published.get("imageSourceCommit")
+    if (
+        not isinstance(image_source_commit, str)
+        or HEX_SHA40.fullmatch(image_source_commit) is None
+        or published.get("publicationState") != "pending"
+        or published.get("registryManifestDigest") is not None
+    ):
+        _fail("pending-image-ledger-binding-invalid")
     state_path = _state_path(receipt_directory)
     state = _read_state(state_path)
     if state.get("temporaryRegistryAssignmentId") is not None:
         _fail("temporary-registry-authority-already-present")
-    _load_prebuilt_api_image_record(
-        prebuilt_image_record, repository_head=repository_head
+    record = _load_prebuilt_api_image_record(
+        prebuilt_image_record,
+        image_source_commit=image_source_commit,
+        control_plane_head=repository_head,
     )
-    image_by_tag = _api_image_reference(repository_head)
+    if (
+        record.get("buildInputSha256") != published.get("imageBuildInputSha256")
+        or record.get("imageId") != published.get("localImageId")
+        or record.get("configDigest") != published.get("imageConfigDigest")
+        or record.get("platform") != published.get("platform")
+        or published.get("sourceTag") != f"source-{image_source_commit}"
+    ):
+        _fail("pending-image-ledger-record-mismatch")
+    image_by_tag = _api_image_reference(image_source_commit)
     contract = load_managed_binding_contract()
     rbac = contract["rbac"]
     scopes = contract["scopeBinding"]
@@ -1003,7 +1059,7 @@ def _publish_api_image(
     publication_attempted = False
     refresh_token = bytearray()
     access_token = bytearray()
-    source_tag = f"source-{repository_head}"
+    source_tag = f"source-{image_source_commit}"
     push_evidence_path = receipt_directory / DOCKER_PUSH_EVIDENCE_FILE
     publisher_root = receipt_directory / "ephemeral-publisher"
     _secure_ephemeral_directory(publisher_root)
@@ -1095,7 +1151,7 @@ def _publish_api_image(
             ):
                 publication_attempted = True
                 verify_private_registry_publication_path(
-                    repository_head=repository_head
+                    repository_head=image_source_commit
                 )
                 try:
                     pushed_digest = _docker_push_prebuilt_image(
@@ -1108,7 +1164,7 @@ def _publish_api_image(
                 except BaseException as push_error:
                     try:
                         verify_private_registry_publication_path(
-                            repository_head=repository_head
+                            repository_head=image_source_commit
                         )
                     except BaseException as probe_error:
                         raise PublicationAttemptFailure(
@@ -1116,7 +1172,7 @@ def _publish_api_image(
                         ) from probe_error
                     raise
                 verify_private_registry_publication_path(
-                    repository_head=repository_head
+                    repository_head=image_source_commit
                 )
             resolved_digest = _acr_manifest_digest(access_token, reference=source_tag)
             if resolved_digest != pushed_digest:
@@ -1261,3 +1317,183 @@ def _publish_api_image(
             _remove_ephemeral_publisher_directory(publisher_root)
         if denial_proved and not publisher_deleted:
             _fail("publisher-identity-state-malformed")
+
+
+def _private_path(subscription_id: str) -> dict[str, JsonValue]:
+    queries: tuple[tuple[str, str, str, str, dict[str, JsonValue]], ...] = (
+        (
+            "Microsoft.KeyVault/vaults",
+            KEY_VAULT,
+            "2026-02-01",
+            "{state:properties.provisioningState,public:properties.publicNetworkAccess}",
+            {"public": "Disabled", "state": "Succeeded"},
+        ),
+        (
+            "Microsoft.ContainerRegistry/registries",
+            REGISTRY,
+            "2025-11-01",
+            "{state:properties.provisioningState,public:properties.publicNetworkAccess}",
+            {"public": "Disabled", "state": "Succeeded"},
+        ),
+        (
+            "Microsoft.Network/privateEndpoints",
+            "pe-mobius77-keyvault",
+            "2026-01-01",
+            "{state:properties.provisioningState,approval:properties.privateLinkServiceConnections[0].properties.privateLinkServiceConnectionState.status}",
+            {"approval": "Approved", "state": "Succeeded"},
+        ),
+        (
+            "Microsoft.Network/privateEndpoints",
+            "pe-mobius77-acr",
+            "2026-01-01",
+            "{state:properties.provisioningState,approval:properties.privateLinkServiceConnections[0].properties.privateLinkServiceConnectionState.status}",
+            {"approval": "Approved", "state": "Succeeded"},
+        ),
+        (
+            "Microsoft.Network/virtualNetworkGateways",
+            "vpngw-mobius77-staging",
+            "2026-01-01",
+            "{state:properties.provisioningState,active:properties.activeActive}",
+            {"active": False, "state": "Succeeded"},
+        ),
+    )
+    for resource_type, name, api_version, projection, expected in queries:
+        value = _run(
+            (
+                "az",
+                "resource",
+                "show",
+                "--resource-group",
+                TARGET_GROUP,
+                "--resource-type",
+                resource_type,
+                "--name",
+                name,
+                "--api-version",
+                api_version,
+                "--subscription",
+                subscription_id,
+                "--query",
+                projection,
+                "--output",
+                "json",
+                "--only-show-errors",
+            ),
+            require_json=True,
+        )
+        if value != expected:
+            _fail("private-path-resource-state-unproved")
+    _private_tls_endpoint(KEY_VAULT_HOST)
+    _private_tls_endpoint(REGISTRY_HOST)
+    return {
+        "status": "private-entry-path-proved",
+        "private-key-vault": True,
+        "private-registry": True,
+        "private-endpoint-count": 2,
+        "p2s-gateway": True,
+        "client-dns-and-tls-proved": True,
+        "secret-value-accessed": False,
+    }
+
+
+def _private_path_stage(
+    *, ledger: Mapping[str, JsonValue], subscription_id: str, receipt_directory: Path
+) -> dict[str, JsonValue]:
+    state_path = _state_path(receipt_directory)
+    state = _read_current_transient_state(state_path, ledger=ledger)
+    if (
+        state.get("resumableCheckpoint") != "secure-manual-entry"
+        or state.get("privatePathProved") is not False
+    ):
+        _fail("private-path-stage-prerequisite-missing")
+    result = _private_path(subscription_id)
+    state["privatePathProved"] = True
+    state["lastCompletedStage"] = "private-path-verification"
+    _replace_state(state_path, state)
+    return result
+
+
+def _publication_result_integrity(value: Mapping[str, JsonValue]) -> str:
+    return hashlib.sha256(
+        PUBLICATION_RESULT_DOMAIN + canonical_bytes(dict(value))
+    ).hexdigest()
+
+
+def _publish_api_image_stage(
+    *,
+    ledger: dict[str, JsonValue],
+    subscription_id: str,
+    receipt_directory: Path,
+    prebuilt_image_record: Path,
+) -> dict[str, JsonValue]:
+    state_path = _state_path(receipt_directory)
+    state = _read_current_transient_state(state_path, ledger=ledger)
+    if (
+        state.get("resumableCheckpoint") != "secure-manual-entry"
+        or state.get("privatePathProved") is not True
+        or state.get("publishedManifestDigest") is not None
+        or state.get("publisherRevocationProved") is not False
+    ):
+        _fail("publication-stage-prerequisite-missing")
+    with _attribution_scope(
+        lifecycle_substage="immutable-image-publication",
+        expected_authorization="allow",
+    ):
+        immutable_reference = _publish_api_image(
+            ledger=ledger,
+            subscription_id=subscription_id,
+            receipt_directory=receipt_directory,
+            prebuilt_image_record=prebuilt_image_record,
+        )
+    if IMAGE_DIGEST.fullmatch(immutable_reference) is None:
+        _fail("published-image-reference-invalid")
+    manifest_digest = immutable_reference.rsplit("@", 1)[1]
+    published = ledger.get("publishedImage")
+    if not isinstance(published, dict):
+        _fail("pending-image-ledger-binding-missing")
+    result: dict[str, JsonValue] = {
+        "configDigest": published.get("imageConfigDigest"),
+        "imageBuildInputSha256": published.get("imageBuildInputSha256"),
+        "imageSourceCommit": published.get("imageSourceCommit"),
+        "localImageId": published.get("localImageId"),
+        "manifestDigest": manifest_digest,
+        "platform": published.get("platform"),
+        "publisherResidueZero": True,
+        "repository": published.get("repository"),
+        "sourceTagRemoved": True,
+    }
+    integrity = _publication_result_integrity(result)
+    state["publicationEvidenceIntegritySha256"] = integrity
+    state["publishedManifestDigest"] = manifest_digest
+    state["publisherRevocationProved"] = True
+    state["lastCompletedStage"] = "publish-api-image"
+    state["resumableCheckpoint"] = "post-secret-provisioning"
+    _replace_state(state_path, state)
+    return {
+        "evidence-integrity-sha256": integrity,
+        "immutable-image-published": True,
+        "publisher-revoked": True,
+        "secret-value-accessed": False,
+        "status": "image-published-and-revoked",
+    }
+
+
+def _reconcile_published_api_image(
+    *, ledger: Mapping[str, JsonValue], state: Mapping[str, JsonValue]
+) -> str:
+    published = ledger.get("publishedImage")
+    if not isinstance(published, dict):
+        _fail("published-image-ledger-binding-missing")
+    if published.get("publicationState") != "pending":
+        _fail("published-image-ledger-binding-invalid")
+    digest = state.get("publishedManifestDigest")
+    repository = published.get("repository")
+    if (
+        repository != PUBLISHER_REPOSITORY
+        or not isinstance(digest, str)
+        or RAW_IMAGE_DIGEST.fullmatch(digest) is None
+        or state.get("publisherRevocationProved") is not True
+        or not isinstance(state.get("publicationEvidenceIntegritySha256"), str)
+    ):
+        _fail("published-image-ledger-binding-invalid")
+    return f"{REGISTRY_HOST}/{PUBLISHER_REPOSITORY}@{digest}"

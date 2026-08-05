@@ -1479,7 +1479,11 @@ def execute_package_one(
 
 
 def materialize_ledger(
-    *, ledger_path: Path, repository_head: str, now_utc: datetime | None = None
+    *,
+    ledger_path: Path,
+    repository_head: str,
+    prebuilt_image_record: Path,
+    now_utc: datetime | None = None,
 ) -> dict[str, JsonValue]:
     resolved_path = ledger_path.resolve()
     resolved_repository = REPOSITORY_ROOT.resolve()
@@ -1488,9 +1492,27 @@ def materialize_ledger(
         or resolved_repository in resolved_path.parents
     ):
         raise ManagedBindingExecutionError("ledger-path-inside-repository")
+    from infra.milestone_7_7 import api_image_publication
+
+    record = api_image_publication._load_prebuilt_api_image_record(
+        prebuilt_image_record,
+        image_source_commit=None,
+        control_plane_head=repository_head,
+    )
+    pending_image: dict[str, JsonValue] = {
+        "imageSourceCommit": record["repositoryHead"],
+        "imageBuildInputSha256": record["buildInputSha256"],
+        "localImageId": record["imageId"],
+        "configDigest": record["configDigest"],
+        "platform": record["platform"],
+        "repository": "opencanvas-api",
+        "sourceTag": f"source-{record['repositoryHead']}",
+        "registryManifestDigest": None,
+    }
     ledger = build_authorization_ledger(
         issued_at_utc=_utc_now() if now_utc is None else now_utc,
         repository_head=repository_head,
+        pending_image=pending_image,
     )
     _write_exclusive(resolved_path, ledger)
     return {
@@ -1534,6 +1556,7 @@ def _parser() -> argparse.ArgumentParser:
     mode.add_argument("--execute-package-one", action="store_true")
     parser.add_argument("--ledger", type=Path)
     parser.add_argument("--receipt-directory", type=Path)
+    parser.add_argument("--prebuilt-image-record", type=Path)
     parser.add_argument("--repository-head")
     return parser
 
@@ -1547,9 +1570,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.ledger is None or args.repository_head is None:
                 raise ManagedBindingExecutionError("required-execution-binding-missing")
             if args.materialize_ledger:
+                if args.prebuilt_image_record is None:
+                    raise ManagedBindingExecutionError(
+                        "required-execution-binding-missing"
+                    )
                 result = materialize_ledger(
                     ledger_path=args.ledger,
                     repository_head=args.repository_head,
+                    prebuilt_image_record=args.prebuilt_image_record,
                 )
             else:
                 if args.receipt_directory is None:

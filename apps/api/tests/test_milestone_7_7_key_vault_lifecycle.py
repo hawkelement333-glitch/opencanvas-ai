@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 from infra.milestone_7_7.scripts import managed_binding_lifecycle as lifecycle
 from performance.milestone_7_7.framework import JsonValue
 
@@ -25,6 +24,10 @@ def _state(ledger: dict[str, JsonValue]) -> dict[str, JsonValue]:
         "failedStage": None,
         "lastCompletedStage": "pre-secret",
         "preSecretDeploymentName": "opaque-deployment",
+        "privatePathProved": False,
+        "publicationEvidenceIntegritySha256": None,
+        "publishedManifestDigest": None,
+        "publisherRevocationProved": False,
         "repositoryHead": ledger["repositoryHead"],
         "resumableCheckpoint": "secure-manual-entry",
         "secretValueAccessed": False,

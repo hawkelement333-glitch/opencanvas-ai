@@ -292,6 +292,25 @@
       ],
       "controlPlaneOnly": false
     },
+    "lifecycle-publish-api-image-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "-m",
+        "infra.milestone_7_7.scripts.managed_binding_lifecycle",
+        "--operation",
+        "publish-api-image",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--prebuilt-image-record",
+        "{prebuiltImageRecordPath}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
     "lifecycle-post-secret-provisioning-v1": {
       "executable": "{python}",
       "argumentVector": [
@@ -944,11 +963,34 @@
       "replayDecision": "deny"
     },
     {
+      "id": "publish-api-image",
+      "methodDefinition": "lifecycle-publish-api-image-v1",
+      "mutation": true,
+      "authorizationPredicate": [
+        "pre-secret-provisioning-receipt",
+        "private-path-verification-receipt",
+        "valid-unconsumed-one-run-ledger",
+        "exact-current-local-image"
+      ],
+      "scope": [
+        "exact-private-registry-path",
+        "exact-container-registry-resource"
+      ],
+      "terminalStates": [
+        "image-published-and-revoked",
+        "paused-preserved",
+        "contained-preserved"
+      ],
+      "failureDispositionPolicy": "pause-preserved",
+      "replayDecision": "deny"
+    },
+    {
       "id": "post-secret-provisioning",
       "methodDefinition": "lifecycle-post-secret-provisioning-v1",
       "mutation": true,
       "authorizationPredicate": [
         "manual-binding-confirmed",
+        "image-published-and-revoked-receipt",
         "secret-presence-only-proved",
         "valid-unconsumed-one-run-ledger"
       ],
@@ -1016,5 +1058,5 @@
       "replayDecision": "deny"
     }
   ],
-  "contractIntegritySha256": "39d18afaee651f48629d26253dcdc18fdb7d0f9e53b08f1112d9d2112bc32433"
+  "contractIntegritySha256": "be2507c8a12c8f5c4609ad9e208137ddb9e5d99796b80d0438955e8a28caaf81"
 }
