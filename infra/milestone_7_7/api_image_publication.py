@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -96,7 +96,10 @@ DOCKER_PUSH_EVIDENCE_DOMAIN = (
 )
 DOCKER_PUSH_EVIDENCE_VERSION = "mobius.milestone-7.7.docker-push-evidence.v1"
 DOCKER_PUSH_EVIDENCE_FILE = "docker-push-evidence.json"
-ALREADY_PUSHED_RECORD_VERSION = "mobius.milestone-7.7.already-pushed-publication.v1"
+ALREADY_PUSHED_RETAINED_RECORD_VERSION = (
+    "mobius.milestone-7.7.already-pushed-publication.v1"
+)
+ALREADY_PUSHED_RECORD_VERSION = "mobius.milestone-7.7.already-pushed-publication.v2"
 ALREADY_PUSHED_RECORD_DOMAIN = (
     b"solarplexus-mobius/milestone-7.7/already-pushed-publication/v1\x00"
 )
@@ -105,6 +108,43 @@ ALREADY_PUSHED_OBSERVATION_VERSION = (
 )
 ALREADY_PUSHED_OBSERVATION_DOMAIN = (
     b"solarplexus-mobius/milestone-7.7/already-pushed-registry-observation/v1\x00"
+)
+HISTORICAL_PUSH_EVIDENCE_VERSION = "mobius.milestone-7.7.historical-push-evidence.v1"
+HISTORICAL_PUSH_EVIDENCE_DOMAIN = (
+    b"solarplexus-mobius/milestone-7.7/historical-push-evidence/v1\x00"
+)
+LIVE_REGISTRY_OBSERVATION_VERSION = (
+    "mobius.milestone-7.7.live-registry-publication-observation.v1"
+)
+LIVE_REGISTRY_OBSERVATION_DOMAIN = (
+    b"solarplexus-mobius/milestone-7.7/live-registry-publication-observation/v1\x00"
+)
+RECONSTRUCTION_AUTHORIZATION_VERSION = (
+    "mobius.milestone-7.7.already-pushed-reconstruction-authorization.v1"
+)
+RECONSTRUCTION_AUTHORIZATION_DOMAIN = b"solarplexus-mobius/milestone-7.7/already-pushed-reconstruction-authorization/v1\x00"
+RECONCILIATION_RECEIPT_VERSION = (
+    "mobius.milestone-7.7.already-pushed-reconciliation-receipt.v1"
+)
+RECONCILIATION_RECEIPT_DOMAIN = (
+    b"solarplexus-mobius/milestone-7.7/already-pushed-reconciliation-receipt/v1\x00"
+)
+RECONSTRUCTED_FROM_LIVE_READ_ONLY_REGISTRY_PROOF = (
+    "RECONSTRUCTED_FROM_LIVE_READ_ONLY_REGISTRY_PROOF"
+)
+RETAINED_ORIGINAL_PUSH_EVIDENCE = "RETAINED_ORIGINAL_PUSH_EVIDENCE"
+LIVE_READ_ONLY_REGISTRY_PROOF = "LIVE_READ_ONLY_REGISTRY_PROOF"
+RECONSTRUCTION_ALGORITHM_VERSION = "m7.7-already-pushed-reconstruction-v1"
+LIVE_REGISTRY_OBSERVATION_MAXIMUM_AGE = timedelta(minutes=15)
+RECONCILIATION_OPERATION_ID = "reconcile-already-pushed-publication"
+RECONSTRUCTION_PROHIBITED_OPERATIONS = (
+    "build",
+    "push",
+    "retag",
+    "upload-publisher-creation",
+    "acrpush",
+    "manifest-deletion",
+    "repository-deletion",
 )
 DOCKER_PUSH_MAXIMUM_OUTPUT_BYTES = 4 * 1024 * 1024
 SENSITIVE_PUSH_OUTPUT_PATTERNS = (
@@ -172,10 +212,16 @@ class AlreadyPushedPublicationRecord:
     cleanup_deadline_utc: str
     prior_lifecycle_evidence: str
     operation_id: str
+    evidence_provenance: str | None = None
+    historical_evidence_integrity: str | None = None
+    live_observation_integrity: str | None = None
+    reconstruction_authorization_integrity: str | None = None
+    reconstructed_at_utc: str | None = None
+    reconstruction_algorithm_version: str | None = None
 
     def unsigned(self) -> dict[str, JsonValue]:
-        return {
-            "schemaVersion": ALREADY_PUSHED_RECORD_VERSION,
+        value: dict[str, JsonValue] = {
+            "schemaVersion": ALREADY_PUSHED_RETAINED_RECORD_VERSION,
             "controlPlaneHead": self.control_plane_head,
             "imageSourceCommit": self.image_source_commit,
             "imageBuildInputSha256": self.build_input_sha256,
@@ -197,6 +243,36 @@ class AlreadyPushedPublicationRecord:
             "cleanupDeadlineUtc": self.cleanup_deadline_utc,
             "priorLifecycleEvidenceSha256": self.prior_lifecycle_evidence,
             "authorizedOperationId": self.operation_id,
+        }
+        reconstruction = (
+            self.evidence_provenance,
+            self.historical_evidence_integrity,
+            self.live_observation_integrity,
+            self.reconstruction_authorization_integrity,
+            self.reconstructed_at_utc,
+            self.reconstruction_algorithm_version,
+        )
+        if all(item is None for item in reconstruction):
+            return value
+        if any(item is None for item in reconstruction):
+            _fail("already-pushed-record-reconstruction-fields-incomplete")
+        return {
+            **value,
+            "schemaVersion": ALREADY_PUSHED_RECORD_VERSION,
+            "evidenceProvenance": cast(str, self.evidence_provenance),
+            "historicalEvidenceIntegritySha256": cast(
+                str, self.historical_evidence_integrity
+            ),
+            "liveObservationIntegritySha256": cast(
+                str, self.live_observation_integrity
+            ),
+            "reconstructionAuthorizationIntegritySha256": cast(
+                str, self.reconstruction_authorization_integrity
+            ),
+            "reconstructedAtUtc": cast(str, self.reconstructed_at_utc),
+            "reconstructionAlgorithmVersion": cast(
+                str, self.reconstruction_algorithm_version
+            ),
         }
 
     def as_json(self) -> dict[str, JsonValue]:
@@ -250,7 +326,7 @@ class AlreadyPushedRegistryObservation:
 def validate_already_pushed_publication_record(
     value: Mapping[str, JsonValue], *, control_plane_head: str
 ) -> AlreadyPushedPublicationRecord:
-    required = {
+    retained_required = {
         "schemaVersion",
         "controlPlaneHead",
         "imageSourceCommit",
@@ -275,6 +351,21 @@ def validate_already_pushed_publication_record(
         "authorizedOperationId",
         "integritySha256",
     }
+    reconstruction_required = {
+        "evidenceProvenance",
+        "historicalEvidenceIntegritySha256",
+        "liveObservationIntegritySha256",
+        "reconstructionAuthorizationIntegritySha256",
+        "reconstructedAtUtc",
+        "reconstructionAlgorithmVersion",
+    }
+    version = value.get("schemaVersion")
+    if version == ALREADY_PUSHED_RETAINED_RECORD_VERSION:
+        required = retained_required
+    elif version == ALREADY_PUSHED_RECORD_VERSION:
+        required = retained_required | reconstruction_required
+    else:
+        _fail("already-pushed-record-fields-invalid")
     if set(value) != required:
         _fail("already-pushed-record-fields-invalid")
     unsigned = {key: value[key] for key in required - {"integritySha256"}}
@@ -309,8 +400,7 @@ def validate_already_pushed_publication_record(
         "authorizedOperationId",
     )
     if (
-        value.get("schemaVersion") != ALREADY_PUSHED_RECORD_VERSION
-        or value.get("controlPlaneHead") != control_plane_head
+        value.get("controlPlaneHead") != control_plane_head
         or any(not isinstance(value[key], str) for key in strings)
         or any(
             HEX_SHA256.fullmatch(str(value[key])) is None
@@ -354,6 +444,45 @@ def validate_already_pushed_publication_record(
         push_started < push_completed < cleanup_deadline
     ):
         _fail("already-pushed-record-time-invalid")
+    provenance = RETAINED_ORIGINAL_PUSH_EVIDENCE
+    historical_integrity: str | None = None
+    observation_integrity: str | None = None
+    authorization_integrity: str | None = None
+    reconstructed_at: str | None = None
+    algorithm_version: str | None = None
+    if version == ALREADY_PUSHED_RECORD_VERSION:
+        provenance = value.get("evidenceProvenance")  # type: ignore[assignment]
+        reconstruction_values = (
+            value.get("historicalEvidenceIntegritySha256"),
+            value.get("liveObservationIntegritySha256"),
+            value.get("reconstructionAuthorizationIntegritySha256"),
+        )
+        if (
+            provenance != RECONSTRUCTED_FROM_LIVE_READ_ONLY_REGISTRY_PROOF
+            or any(
+                not isinstance(item, str) or HEX_SHA256.fullmatch(item) is None
+                for item in reconstruction_values
+            )
+            or value.get("reconstructionAlgorithmVersion")
+            != RECONSTRUCTION_ALGORITHM_VERSION
+            or not isinstance(value.get("reconstructedAtUtc"), str)
+        ):
+            _fail("already-pushed-record-reconstruction-binding-invalid")
+        try:
+            reconstructed = datetime.strptime(
+                str(value["reconstructedAtUtc"]), "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=UTC)
+        except ValueError:
+            _fail("already-pushed-record-reconstruction-time-invalid")
+        if reconstructed.year < 2026:
+            _fail("already-pushed-record-reconstruction-time-invalid")
+        historical_integrity = str(value["historicalEvidenceIntegritySha256"])
+        observation_integrity = str(value["liveObservationIntegritySha256"])
+        authorization_integrity = str(
+            value["reconstructionAuthorizationIntegritySha256"]
+        )
+        reconstructed_at = str(value["reconstructedAtUtc"])
+        algorithm_version = str(value["reconstructionAlgorithmVersion"])
     return AlreadyPushedPublicationRecord(
         control_plane_head=str(value["controlPlaneHead"]),
         image_source_commit=str(value["imageSourceCommit"]),
@@ -376,12 +505,844 @@ def validate_already_pushed_publication_record(
         cleanup_deadline_utc=str(value["cleanupDeadlineUtc"]),
         prior_lifecycle_evidence=str(value["priorLifecycleEvidenceSha256"]),
         operation_id=str(value["authorizedOperationId"]),
+        evidence_provenance=provenance,
+        historical_evidence_integrity=historical_integrity,
+        live_observation_integrity=observation_integrity,
+        reconstruction_authorization_integrity=authorization_integrity,
+        reconstructed_at_utc=reconstructed_at,
+        reconstruction_algorithm_version=algorithm_version,
     )
+
+
+def _integrity_value(domain: bytes, unsigned: Mapping[str, JsonValue]) -> str:
+    return hashlib.sha256(domain + canonical_bytes(dict(unsigned))).hexdigest()
+
+
+def _parse_evidence_utc(value: object, *, error: str) -> datetime:
+    if not isinstance(value, str):
+        _fail(error)
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        _fail(error)
+    if parsed.year < 2026:
+        _fail(error)
+    return parsed
+
+
+@dataclass(frozen=True)
+class HistoricalPushEvidence:
+    """Immutable facts actually retained by the successful ordinary Docker push."""
+
+    image_source_commit: str
+    build_input_sha256: str
+    local_image_id: str
+    config_digest: str
+    platform: str
+    repository: str
+    source_tag: str
+    push_started_at_utc: str
+    push_completed_at_utc: str
+    docker_exit_code: int
+    docker_timed_out: bool
+    stdout_sha256: str
+    stderr_sha256: str
+    docker_push_evidence_integrity: str
+    prebuilt_image_evidence_integrity: str
+    prior_lifecycle_evidence_integrity: str
+    registry_host_sha256: str
+
+    def unsigned(self) -> dict[str, JsonValue]:
+        return {
+            "schemaVersion": HISTORICAL_PUSH_EVIDENCE_VERSION,
+            "imageSourceCommit": self.image_source_commit,
+            "imageBuildInputSha256": self.build_input_sha256,
+            "localImageId": self.local_image_id,
+            "imageConfigDigest": self.config_digest,
+            "platform": self.platform,
+            "repository": self.repository,
+            "sourceTag": self.source_tag,
+            "pushStartedAtUtc": self.push_started_at_utc,
+            "pushCompletedAtUtc": self.push_completed_at_utc,
+            "dockerExitCode": self.docker_exit_code,
+            "dockerTimedOut": self.docker_timed_out,
+            "stdoutSha256": self.stdout_sha256,
+            "stderrSha256": self.stderr_sha256,
+            "dockerPushEvidenceIntegritySha256": self.docker_push_evidence_integrity,
+            "prebuiltImageEvidenceIntegritySha256": self.prebuilt_image_evidence_integrity,
+            "priorLifecycleEvidenceIntegritySha256": self.prior_lifecycle_evidence_integrity,
+            "registryHostSha256": self.registry_host_sha256,
+        }
+
+    def as_json(self) -> dict[str, JsonValue]:
+        unsigned = self.unsigned()
+        return {
+            **unsigned,
+            "integritySha256": _integrity_value(
+                HISTORICAL_PUSH_EVIDENCE_DOMAIN, unsigned
+            ),
+        }
+
+
+def validate_historical_push_evidence(
+    value: Mapping[str, JsonValue],
+) -> HistoricalPushEvidence:
+    required = {
+        "schemaVersion",
+        "imageSourceCommit",
+        "imageBuildInputSha256",
+        "localImageId",
+        "imageConfigDigest",
+        "platform",
+        "repository",
+        "sourceTag",
+        "pushStartedAtUtc",
+        "pushCompletedAtUtc",
+        "dockerExitCode",
+        "dockerTimedOut",
+        "stdoutSha256",
+        "stderrSha256",
+        "dockerPushEvidenceIntegritySha256",
+        "prebuiltImageEvidenceIntegritySha256",
+        "priorLifecycleEvidenceIntegritySha256",
+        "registryHostSha256",
+        "integritySha256",
+    }
+    if set(value) != required:
+        _fail("historical-push-evidence-fields-invalid")
+    unsigned = {key: value[key] for key in required - {"integritySha256"}}
+    if (
+        value.get("schemaVersion") != HISTORICAL_PUSH_EVIDENCE_VERSION
+        or value.get("integritySha256")
+        != _integrity_value(HISTORICAL_PUSH_EVIDENCE_DOMAIN, unsigned)
+        or HEX_SHA40.fullmatch(str(value.get("imageSourceCommit"))) is None
+        or any(
+            HEX_SHA256.fullmatch(str(value.get(key))) is None
+            for key in (
+                "imageBuildInputSha256",
+                "stdoutSha256",
+                "stderrSha256",
+                "dockerPushEvidenceIntegritySha256",
+                "prebuiltImageEvidenceIntegritySha256",
+                "priorLifecycleEvidenceIntegritySha256",
+                "registryHostSha256",
+            )
+        )
+        or RAW_IMAGE_DIGEST.fullmatch(str(value.get("localImageId"))) is None
+        or RAW_IMAGE_DIGEST.fullmatch(str(value.get("imageConfigDigest"))) is None
+        or value.get("platform") != API_IMAGE_PLATFORM
+        or value.get("repository") != PUBLISHER_REPOSITORY
+        or value.get("sourceTag") != f"source-{value['imageSourceCommit']}"
+        or type(value.get("dockerExitCode")) is not int
+        or value.get("dockerExitCode") != 0
+        or value.get("dockerTimedOut") is not False
+    ):
+        _fail("historical-push-evidence-binding-invalid")
+    started = _parse_evidence_utc(
+        value.get("pushStartedAtUtc"), error="historical-push-evidence-time-invalid"
+    )
+    completed = _parse_evidence_utc(
+        value.get("pushCompletedAtUtc"), error="historical-push-evidence-time-invalid"
+    )
+    if started >= completed:
+        _fail("historical-push-evidence-time-invalid")
+    return HistoricalPushEvidence(
+        image_source_commit=str(value["imageSourceCommit"]),
+        build_input_sha256=str(value["imageBuildInputSha256"]),
+        local_image_id=str(value["localImageId"]),
+        config_digest=str(value["imageConfigDigest"]),
+        platform=str(value["platform"]),
+        repository=str(value["repository"]),
+        source_tag=str(value["sourceTag"]),
+        push_started_at_utc=str(value["pushStartedAtUtc"]),
+        push_completed_at_utc=str(value["pushCompletedAtUtc"]),
+        docker_exit_code=cast(int, value["dockerExitCode"]),
+        docker_timed_out=cast(bool, value["dockerTimedOut"]),
+        stdout_sha256=str(value["stdoutSha256"]),
+        stderr_sha256=str(value["stderrSha256"]),
+        docker_push_evidence_integrity=str(value["dockerPushEvidenceIntegritySha256"]),
+        prebuilt_image_evidence_integrity=str(
+            value["prebuiltImageEvidenceIntegritySha256"]
+        ),
+        prior_lifecycle_evidence_integrity=str(
+            value["priorLifecycleEvidenceIntegritySha256"]
+        ),
+        registry_host_sha256=str(value["registryHostSha256"]),
+    )
+
+
+def historical_push_evidence_from_retained_artifacts(
+    *,
+    docker_push_evidence: Mapping[str, JsonValue],
+    prebuilt_image_evidence: Mapping[str, JsonValue],
+    prior_lifecycle_evidence_integrity: str,
+) -> HistoricalPushEvidence:
+    """Validate immutable retained artifacts without inspecting Docker or Azure."""
+    docker_integrity = docker_push_evidence.get("integritySha256")
+    docker_unsigned = {
+        key: item
+        for key, item in docker_push_evidence.items()
+        if key != "integritySha256"
+    }
+    if (
+        docker_push_evidence.get("schemaVersion") != DOCKER_PUSH_EVIDENCE_VERSION
+        or not isinstance(docker_integrity, str)
+        or HEX_SHA256.fullmatch(docker_integrity) is None
+        or docker_integrity
+        != _integrity_value(DOCKER_PUSH_EVIDENCE_DOMAIN, docker_unsigned)
+        or docker_push_evidence.get("status") != "SUCCEEDED"
+        or docker_push_evidence.get("actualExitCode") != 0
+        or docker_push_evidence.get("timedOut") is not False
+        or docker_push_evidence.get("rawOutputRetained") is not False
+        or docker_push_evidence.get("secretValueRetained") is not False
+        or docker_push_evidence.get("repository") != PUBLISHER_REPOSITORY
+        or not isinstance(docker_push_evidence.get("sourceTag"), str)
+        or not isinstance(docker_push_evidence.get("startedAtUtc"), str)
+        or not isinstance(docker_push_evidence.get("finishedAtUtc"), str)
+        or any(
+            not isinstance(docker_push_evidence.get(key), str)
+            or HEX_SHA256.fullmatch(str(docker_push_evidence[key])) is None
+            for key in (
+                "stdoutSanitizedSha256",
+                "stderrSanitizedSha256",
+                "registryHostSha256",
+            )
+        )
+    ):
+        _fail("historical-push-evidence-artifact-invalid")
+    prebuilt_integrity = prebuilt_image_evidence.get("integritySha256")
+    prebuilt_unsigned = {
+        key: item
+        for key, item in prebuilt_image_evidence.items()
+        if key != "integritySha256"
+    }
+    if (
+        prebuilt_image_evidence.get("schemaVersion") != PREBUILT_IMAGE_RECORD_VERSION
+        or not isinstance(prebuilt_integrity, str)
+        or HEX_SHA256.fullmatch(prebuilt_integrity) is None
+        or prebuilt_integrity
+        != _integrity_value(PREBUILT_IMAGE_RECORD_DOMAIN, prebuilt_unsigned)
+        or prebuilt_image_evidence.get("completionStatus") != "READY"
+        or not isinstance(prebuilt_image_evidence.get("repositoryHead"), str)
+        or HEX_SHA40.fullmatch(str(prebuilt_image_evidence["repositoryHead"])) is None
+        or HEX_SHA256.fullmatch(str(prebuilt_image_evidence.get("buildInputSha256")))
+        is None
+        or RAW_IMAGE_DIGEST.fullmatch(str(prebuilt_image_evidence.get("imageId")))
+        is None
+        or prebuilt_image_evidence.get("configDigest")
+        != prebuilt_image_evidence.get("imageId")
+        or prebuilt_image_evidence.get("platform") != API_IMAGE_PLATFORM
+        or not isinstance(prior_lifecycle_evidence_integrity, str)
+        or HEX_SHA256.fullmatch(prior_lifecycle_evidence_integrity) is None
+    ):
+        _fail("historical-push-evidence-artifact-invalid")
+    source_commit = str(prebuilt_image_evidence["repositoryHead"])
+    if docker_push_evidence["sourceTag"] != f"source-{source_commit}":
+        _fail("historical-push-evidence-artifact-identity-mismatch")
+    historical = HistoricalPushEvidence(
+        image_source_commit=source_commit,
+        build_input_sha256=str(prebuilt_image_evidence["buildInputSha256"]),
+        local_image_id=str(prebuilt_image_evidence["imageId"]),
+        config_digest=str(prebuilt_image_evidence["configDigest"]),
+        platform=API_IMAGE_PLATFORM,
+        repository=PUBLISHER_REPOSITORY,
+        source_tag=str(docker_push_evidence["sourceTag"]),
+        push_started_at_utc=str(docker_push_evidence["startedAtUtc"]),
+        push_completed_at_utc=str(docker_push_evidence["finishedAtUtc"]),
+        docker_exit_code=0,
+        docker_timed_out=False,
+        stdout_sha256=str(docker_push_evidence["stdoutSanitizedSha256"]),
+        stderr_sha256=str(docker_push_evidence["stderrSanitizedSha256"]),
+        docker_push_evidence_integrity=docker_integrity,
+        prebuilt_image_evidence_integrity=prebuilt_integrity,
+        prior_lifecycle_evidence_integrity=prior_lifecycle_evidence_integrity,
+        registry_host_sha256=str(docker_push_evidence["registryHostSha256"]),
+    )
+    return validate_historical_push_evidence(historical.as_json())
+
+
+@dataclass(frozen=True)
+class LiveRegistryPublicationObservation:
+    """Sanitized future read-only registry proof; never a historical claim."""
+
+    observed_at_utc: str
+    registry_host: str
+    repository: str
+    source_tag: str
+    source_tag_present: bool
+    source_tag_digest: str | None
+    registry_manifest_digest: str
+    raw_manifest_body_sha256: str
+    config_digest: str
+    platform: str
+    media_type: str
+    request_sequence: tuple[str, ...]
+    response_statuses: tuple[str, ...]
+    correlation_hashes: tuple[str, ...]
+    mutation_performed: bool
+
+    def unsigned(self) -> dict[str, JsonValue]:
+        return {
+            "schemaVersion": LIVE_REGISTRY_OBSERVATION_VERSION,
+            "observationClassification": LIVE_READ_ONLY_REGISTRY_PROOF,
+            "observedAtUtc": self.observed_at_utc,
+            "registryHost": self.registry_host,
+            "repository": self.repository,
+            "sourceTag": self.source_tag,
+            "sourceTagPresent": self.source_tag_present,
+            "sourceTagDigest": self.source_tag_digest,
+            "registryManifestDigest": self.registry_manifest_digest,
+            "rawManifestBodySha256": self.raw_manifest_body_sha256,
+            "imageConfigDigest": self.config_digest,
+            "platform": self.platform,
+            "mediaType": self.media_type,
+            "readOnlyRequestSequence": list(self.request_sequence),
+            "sanitizedResponseStatuses": list(self.response_statuses),
+            "correlationIdHashes": list(self.correlation_hashes),
+            "mutationPerformed": self.mutation_performed,
+        }
+
+    def as_json(self) -> dict[str, JsonValue]:
+        unsigned = self.unsigned()
+        return {
+            **unsigned,
+            "integritySha256": _integrity_value(
+                LIVE_REGISTRY_OBSERVATION_DOMAIN, unsigned
+            ),
+        }
+
+
+def validate_live_registry_publication_observation(
+    value: Mapping[str, JsonValue], *, now_utc: datetime
+) -> LiveRegistryPublicationObservation:
+    required = {
+        "schemaVersion",
+        "observationClassification",
+        "observedAtUtc",
+        "registryHost",
+        "repository",
+        "sourceTag",
+        "sourceTagPresent",
+        "sourceTagDigest",
+        "registryManifestDigest",
+        "rawManifestBodySha256",
+        "imageConfigDigest",
+        "platform",
+        "mediaType",
+        "readOnlyRequestSequence",
+        "sanitizedResponseStatuses",
+        "correlationIdHashes",
+        "mutationPerformed",
+        "integritySha256",
+    }
+    if set(value) != required:
+        _fail("live-registry-observation-fields-invalid")
+    unsigned = {key: value[key] for key in required - {"integritySha256"}}
+    if (
+        value.get("schemaVersion") != LIVE_REGISTRY_OBSERVATION_VERSION
+        or value.get("observationClassification") != LIVE_READ_ONLY_REGISTRY_PROOF
+        or value.get("integritySha256")
+        != _integrity_value(LIVE_REGISTRY_OBSERVATION_DOMAIN, unsigned)
+        or value.get("registryHost") != REGISTRY_HOST
+        or value.get("repository") != PUBLISHER_REPOSITORY
+        or not isinstance(value.get("sourceTag"), str)
+        or type(value.get("sourceTagPresent")) is not bool
+        or value.get("platform") != API_IMAGE_PLATFORM
+        or not isinstance(value.get("mediaType"), str)
+        or not str(value["mediaType"]).startswith("application/")
+        or RAW_IMAGE_DIGEST.fullmatch(str(value.get("registryManifestDigest"))) is None
+        or RAW_IMAGE_DIGEST.fullmatch(str(value.get("imageConfigDigest"))) is None
+        or HEX_SHA256.fullmatch(str(value.get("rawManifestBodySha256"))) is None
+        or f"sha256:{value['rawManifestBodySha256']}"
+        != value.get("registryManifestDigest")
+        or value.get("mutationPerformed") is not False
+    ):
+        _fail("live-registry-observation-binding-invalid")
+    tag_digest = value.get("sourceTagDigest")
+    if (
+        value["sourceTagPresent"] is True
+        and RAW_IMAGE_DIGEST.fullmatch(str(tag_digest)) is None
+    ) or (value["sourceTagPresent"] is False and tag_digest is not None):
+        _fail("live-registry-observation-source-tag-invalid")
+    request_sequence = value.get("readOnlyRequestSequence")
+    statuses = value.get("sanitizedResponseStatuses")
+    correlations = value.get("correlationIdHashes")
+    if (
+        not isinstance(request_sequence, list)
+        or not request_sequence
+        or not isinstance(statuses, list)
+        or not statuses
+        or not isinstance(correlations, list)
+        or any(
+            not isinstance(item, str)
+            or re.fullmatch(r"[a-z0-9-]{1,96}", item) is None
+            or any(blocked in item for blocked in ("delete", "put", "post", "patch"))
+            for item in request_sequence
+        )
+        or any(
+            not isinstance(item, str) or re.fullmatch(r"[1-5][0-9]{2}", item) is None
+            for item in statuses
+        )
+        or any(
+            not isinstance(item, str) or HEX_SHA256.fullmatch(item) is None
+            for item in correlations
+        )
+    ):
+        _fail("live-registry-observation-sanitization-invalid")
+    observed = _parse_evidence_utc(
+        value.get("observedAtUtc"), error="live-registry-observation-time-invalid"
+    )
+    now = now_utc.astimezone(UTC).replace(microsecond=0)
+    if observed > now or now - observed > LIVE_REGISTRY_OBSERVATION_MAXIMUM_AGE:
+        _fail("live-registry-observation-stale")
+    return LiveRegistryPublicationObservation(
+        observed_at_utc=str(value["observedAtUtc"]),
+        registry_host=str(value["registryHost"]),
+        repository=str(value["repository"]),
+        source_tag=str(value["sourceTag"]),
+        source_tag_present=cast(bool, value["sourceTagPresent"]),
+        source_tag_digest=cast(str | None, value["sourceTagDigest"]),
+        registry_manifest_digest=str(value["registryManifestDigest"]),
+        raw_manifest_body_sha256=str(value["rawManifestBodySha256"]),
+        config_digest=str(value["imageConfigDigest"]),
+        platform=str(value["platform"]),
+        media_type=str(value["mediaType"]),
+        request_sequence=tuple(cast(list[str], request_sequence)),
+        response_statuses=tuple(cast(list[str], statuses)),
+        correlation_hashes=tuple(cast(list[str], correlations)),
+        mutation_performed=False,
+    )
+
+
+@dataclass(frozen=True)
+class AlreadyPushedReconstructionAuthorization:
+    """Current-HEAD local authorization data, not a live reconciliation receipt."""
+
+    control_plane_head: str
+    image_source_commit: str
+    build_input_sha256: str
+    expected_local_image_id: str
+    expected_config_digest: str
+    registry_host: str
+    repository: str
+    source_tag: str
+    platform: str
+    historical_evidence_integrity: str
+    live_observation_integrity: str
+    prior_lifecycle_evidence_integrity: str
+    cleanup_generation: int
+    cleanup_deadline_utc: str
+    cost_ceiling_usd_cents: int
+    issued_at_utc: str
+    expires_at_utc: str
+
+    def unsigned(self) -> dict[str, JsonValue]:
+        return {
+            "schemaVersion": RECONSTRUCTION_AUTHORIZATION_VERSION,
+            "controlPlaneHead": self.control_plane_head,
+            "imageSourceCommit": self.image_source_commit,
+            "imageBuildInputSha256": self.build_input_sha256,
+            "expectedLocalImageId": self.expected_local_image_id,
+            "expectedConfigDigest": self.expected_config_digest,
+            "registryHost": self.registry_host,
+            "repository": self.repository,
+            "sourceTag": self.source_tag,
+            "platform": self.platform,
+            "historicalEvidenceIntegritySha256": self.historical_evidence_integrity,
+            "liveObservationIntegritySha256": self.live_observation_integrity,
+            "priorLifecycleEvidenceIntegritySha256": self.prior_lifecycle_evidence_integrity,
+            "cleanupGeneration": self.cleanup_generation,
+            "cleanupDeadlineUtc": self.cleanup_deadline_utc,
+            "costCeilingUsdCents": self.cost_ceiling_usd_cents,
+            "allowedOperation": RECONCILIATION_OPERATION_ID,
+            "prohibitedOperations": list(RECONSTRUCTION_PROHIBITED_OPERATIONS),
+            "issuedAtUtc": self.issued_at_utc,
+            "expiresAtUtc": self.expires_at_utc,
+        }
+
+    def as_json(self) -> dict[str, JsonValue]:
+        unsigned = self.unsigned()
+        return {
+            **unsigned,
+            "integritySha256": _integrity_value(
+                RECONSTRUCTION_AUTHORIZATION_DOMAIN, unsigned
+            ),
+        }
+
+
+def validate_already_pushed_reconstruction_authorization(
+    value: Mapping[str, JsonValue], *, now_utc: datetime, repository_head: str
+) -> AlreadyPushedReconstructionAuthorization:
+    required = {
+        "schemaVersion",
+        "controlPlaneHead",
+        "imageSourceCommit",
+        "imageBuildInputSha256",
+        "expectedLocalImageId",
+        "expectedConfigDigest",
+        "registryHost",
+        "repository",
+        "sourceTag",
+        "platform",
+        "historicalEvidenceIntegritySha256",
+        "liveObservationIntegritySha256",
+        "priorLifecycleEvidenceIntegritySha256",
+        "cleanupGeneration",
+        "cleanupDeadlineUtc",
+        "costCeilingUsdCents",
+        "allowedOperation",
+        "prohibitedOperations",
+        "issuedAtUtc",
+        "expiresAtUtc",
+        "integritySha256",
+    }
+    if set(value) != required:
+        _fail("already-pushed-reconstruction-authorization-fields-invalid")
+    unsigned = {key: value[key] for key in required - {"integritySha256"}}
+    if (
+        value.get("schemaVersion") != RECONSTRUCTION_AUTHORIZATION_VERSION
+        or value.get("integritySha256")
+        != _integrity_value(RECONSTRUCTION_AUTHORIZATION_DOMAIN, unsigned)
+        or value.get("controlPlaneHead") != repository_head
+        or HEX_SHA40.fullmatch(str(value.get("controlPlaneHead"))) is None
+        or HEX_SHA40.fullmatch(str(value.get("imageSourceCommit"))) is None
+        or any(
+            HEX_SHA256.fullmatch(str(value.get(key))) is None
+            for key in (
+                "imageBuildInputSha256",
+                "historicalEvidenceIntegritySha256",
+                "liveObservationIntegritySha256",
+                "priorLifecycleEvidenceIntegritySha256",
+            )
+        )
+        or RAW_IMAGE_DIGEST.fullmatch(str(value.get("expectedLocalImageId"))) is None
+        or RAW_IMAGE_DIGEST.fullmatch(str(value.get("expectedConfigDigest"))) is None
+        or value.get("registryHost") != REGISTRY_HOST
+        or value.get("repository") != PUBLISHER_REPOSITORY
+        or value.get("sourceTag") != f"source-{value['imageSourceCommit']}"
+        or value.get("platform") != API_IMAGE_PLATFORM
+        or value.get("cleanupGeneration") != 2
+        or value.get("costCeilingUsdCents") != 22500
+        or value.get("allowedOperation") != RECONCILIATION_OPERATION_ID
+        or value.get("prohibitedOperations")
+        != list(RECONSTRUCTION_PROHIBITED_OPERATIONS)
+    ):
+        _fail("already-pushed-reconstruction-authorization-binding-invalid")
+    issued = _parse_evidence_utc(
+        value.get("issuedAtUtc"),
+        error="already-pushed-reconstruction-authorization-time-invalid",
+    )
+    expires = _parse_evidence_utc(
+        value.get("expiresAtUtc"),
+        error="already-pushed-reconstruction-authorization-time-invalid",
+    )
+    deadline = _parse_evidence_utc(
+        value.get("cleanupDeadlineUtc"),
+        error="already-pushed-reconstruction-authorization-time-invalid",
+    )
+    now = now_utc.astimezone(UTC).replace(microsecond=0)
+    if not (issued <= now < expires <= deadline) or expires - issued > timedelta(
+        minutes=30
+    ):
+        _fail("already-pushed-reconstruction-authorization-time-invalid")
+    return AlreadyPushedReconstructionAuthorization(
+        control_plane_head=str(value["controlPlaneHead"]),
+        image_source_commit=str(value["imageSourceCommit"]),
+        build_input_sha256=str(value["imageBuildInputSha256"]),
+        expected_local_image_id=str(value["expectedLocalImageId"]),
+        expected_config_digest=str(value["expectedConfigDigest"]),
+        registry_host=str(value["registryHost"]),
+        repository=str(value["repository"]),
+        source_tag=str(value["sourceTag"]),
+        platform=str(value["platform"]),
+        historical_evidence_integrity=str(value["historicalEvidenceIntegritySha256"]),
+        live_observation_integrity=str(value["liveObservationIntegritySha256"]),
+        prior_lifecycle_evidence_integrity=str(
+            value["priorLifecycleEvidenceIntegritySha256"]
+        ),
+        cleanup_generation=2,
+        cleanup_deadline_utc=str(value["cleanupDeadlineUtc"]),
+        cost_ceiling_usd_cents=22500,
+        issued_at_utc=str(value["issuedAtUtc"]),
+        expires_at_utc=str(value["expiresAtUtc"]),
+    )
+
+
+@dataclass(frozen=True)
+class AlreadyPushedReconciliationReceipt:
+    """Future one-use receipt model; this module never issues it live."""
+
+    control_plane_head: str
+    image_source_commit: str
+    build_input_sha256: str
+    local_image_id: str
+    config_digest: str
+    registry_manifest_digest: str
+    repository: str
+    source_tag: str
+    reconstructed_record_integrity: str
+    historical_evidence_integrity: str
+    live_observation_integrity: str
+    cleanup_generation: int
+    cleanup_deadline_utc: str
+    cost_ceiling_usd_cents: int
+
+    def unsigned(self) -> dict[str, JsonValue]:
+        return {
+            "schemaVersion": RECONCILIATION_RECEIPT_VERSION,
+            "controlPlaneHead": self.control_plane_head,
+            "imageSourceCommit": self.image_source_commit,
+            "imageBuildInputSha256": self.build_input_sha256,
+            "localImageId": self.local_image_id,
+            "imageConfigDigest": self.config_digest,
+            "registryManifestDigest": self.registry_manifest_digest,
+            "repository": self.repository,
+            "sourceTag": self.source_tag,
+            "reconstructedRecordIntegritySha256": self.reconstructed_record_integrity,
+            "historicalEvidenceIntegritySha256": self.historical_evidence_integrity,
+            "liveObservationIntegritySha256": self.live_observation_integrity,
+            "cleanupGeneration": self.cleanup_generation,
+            "cleanupDeadlineUtc": self.cleanup_deadline_utc,
+            "costCeilingUsdCents": self.cost_ceiling_usd_cents,
+            "permittedOperation": RECONCILIATION_OPERATION_ID,
+            "allowedFinalizerRoles": ["AcrPull", "AcrDelete"],
+            "sourceTagDeleteMaximum": 1,
+            "prohibitedOperations": list(RECONSTRUCTION_PROHIBITED_OPERATIONS),
+        }
+
+    def as_json(self) -> dict[str, JsonValue]:
+        unsigned = self.unsigned()
+        return {
+            **unsigned,
+            "integritySha256": _integrity_value(
+                RECONCILIATION_RECEIPT_DOMAIN, unsigned
+            ),
+        }
+
+
+def validate_already_pushed_reconciliation_receipt(
+    value: Mapping[str, JsonValue], *, record: AlreadyPushedPublicationRecord
+) -> AlreadyPushedReconciliationReceipt:
+    required = {
+        "schemaVersion",
+        "controlPlaneHead",
+        "imageSourceCommit",
+        "imageBuildInputSha256",
+        "localImageId",
+        "imageConfigDigest",
+        "registryManifestDigest",
+        "repository",
+        "sourceTag",
+        "reconstructedRecordIntegritySha256",
+        "historicalEvidenceIntegritySha256",
+        "liveObservationIntegritySha256",
+        "cleanupGeneration",
+        "cleanupDeadlineUtc",
+        "costCeilingUsdCents",
+        "permittedOperation",
+        "allowedFinalizerRoles",
+        "sourceTagDeleteMaximum",
+        "prohibitedOperations",
+        "integritySha256",
+    }
+    if set(value) != required:
+        _fail("already-pushed-reconciliation-receipt-fields-invalid")
+    unsigned = {key: value[key] for key in required - {"integritySha256"}}
+    if (
+        value.get("schemaVersion") != RECONCILIATION_RECEIPT_VERSION
+        or value.get("integritySha256")
+        != _integrity_value(RECONCILIATION_RECEIPT_DOMAIN, unsigned)
+        or record.evidence_provenance
+        != RECONSTRUCTED_FROM_LIVE_READ_ONLY_REGISTRY_PROOF
+        or value.get("controlPlaneHead") != record.control_plane_head
+        or value.get("imageSourceCommit") != record.image_source_commit
+        or value.get("imageBuildInputSha256") != record.build_input_sha256
+        or value.get("localImageId") != record.local_image_id
+        or value.get("imageConfigDigest") != record.config_digest
+        or value.get("registryManifestDigest") != record.registry_manifest_digest
+        or value.get("repository") != record.repository
+        or value.get("sourceTag") != record.source_tag
+        or value.get("reconstructedRecordIntegritySha256")
+        != record.as_json()["integritySha256"]
+        or value.get("historicalEvidenceIntegritySha256")
+        != record.historical_evidence_integrity
+        or value.get("liveObservationIntegritySha256")
+        != record.live_observation_integrity
+        or value.get("cleanupGeneration") != record.cleanup_generation
+        or value.get("cleanupDeadlineUtc") != record.cleanup_deadline_utc
+        or value.get("costCeilingUsdCents") != 22500
+        or value.get("permittedOperation") != RECONCILIATION_OPERATION_ID
+        or value.get("allowedFinalizerRoles") != ["AcrPull", "AcrDelete"]
+        or value.get("sourceTagDeleteMaximum") != 1
+        or value.get("prohibitedOperations")
+        != list(RECONSTRUCTION_PROHIBITED_OPERATIONS)
+    ):
+        _fail("already-pushed-reconciliation-receipt-binding-invalid")
+    return AlreadyPushedReconciliationReceipt(
+        control_plane_head=record.control_plane_head,
+        image_source_commit=record.image_source_commit,
+        build_input_sha256=record.build_input_sha256,
+        local_image_id=record.local_image_id,
+        config_digest=record.config_digest,
+        registry_manifest_digest=record.registry_manifest_digest,
+        repository=record.repository,
+        source_tag=record.source_tag,
+        reconstructed_record_integrity=cast(
+            str, value["reconstructedRecordIntegritySha256"]
+        ),
+        historical_evidence_integrity=cast(
+            str, value["historicalEvidenceIntegritySha256"]
+        ),
+        live_observation_integrity=cast(str, value["liveObservationIntegritySha256"]),
+        cleanup_generation=record.cleanup_generation,
+        cleanup_deadline_utc=record.cleanup_deadline_utc,
+        cost_ceiling_usd_cents=22500,
+    )
+
+
+def reconciliation_receipt_from_reconstructed_record(
+    record: AlreadyPushedPublicationRecord,
+) -> AlreadyPushedReconciliationReceipt:
+    """Produce a pure receipt shape; live issuance remains separately authorized."""
+    if (
+        record.evidence_provenance != RECONSTRUCTED_FROM_LIVE_READ_ONLY_REGISTRY_PROOF
+        or record.historical_evidence_integrity is None
+        or record.live_observation_integrity is None
+    ):
+        _fail("already-pushed-reconciliation-receipt-provenance-invalid")
+    return AlreadyPushedReconciliationReceipt(
+        control_plane_head=record.control_plane_head,
+        image_source_commit=record.image_source_commit,
+        build_input_sha256=record.build_input_sha256,
+        local_image_id=record.local_image_id,
+        config_digest=record.config_digest,
+        registry_manifest_digest=record.registry_manifest_digest,
+        repository=record.repository,
+        source_tag=record.source_tag,
+        reconstructed_record_integrity=cast(str, record.as_json()["integritySha256"]),
+        historical_evidence_integrity=record.historical_evidence_integrity,
+        live_observation_integrity=record.live_observation_integrity,
+        cleanup_generation=record.cleanup_generation,
+        cleanup_deadline_utc=record.cleanup_deadline_utc,
+        cost_ceiling_usd_cents=22500,
+    )
+
+
+def reconstruct_already_pushed_publication_record(
+    *,
+    historical: HistoricalPushEvidence,
+    observation: LiveRegistryPublicationObservation,
+    authorization: AlreadyPushedReconstructionAuthorization,
+    repository_head: str,
+    now_utc: datetime,
+) -> AlreadyPushedPublicationRecord:
+    """Join immutable history with future read-only proof without backfilling history."""
+    if repository_head != authorization.control_plane_head:
+        _fail("already-pushed-reconstruction-current-head-mismatch")
+    if (
+        historical.image_source_commit != authorization.image_source_commit
+        or historical.build_input_sha256 != authorization.build_input_sha256
+        or historical.local_image_id != authorization.expected_local_image_id
+        or historical.config_digest != authorization.expected_config_digest
+        or historical.platform != authorization.platform
+        or historical.repository != authorization.repository
+        or historical.source_tag != authorization.source_tag
+        or historical.prior_lifecycle_evidence_integrity
+        != authorization.prior_lifecycle_evidence_integrity
+        or historical.registry_host_sha256
+        != hashlib.sha256(authorization.registry_host.encode("ascii")).hexdigest()
+        or historical.as_json()["integritySha256"]
+        != authorization.historical_evidence_integrity
+        or observation.as_json()["integritySha256"]
+        != authorization.live_observation_integrity
+    ):
+        _fail("already-pushed-reconstruction-historical-identity-mismatch")
+    if _api_image_build_input_sha256(repository_head) != historical.build_input_sha256:
+        _fail("already-pushed-reconstruction-build-input-mismatch")
+    if (
+        observation.registry_host != authorization.registry_host
+        or observation.repository != historical.repository
+        or observation.source_tag != historical.source_tag
+        or observation.config_digest != historical.config_digest
+        or observation.platform != historical.platform
+        or (
+            observation.source_tag_present
+            and observation.source_tag_digest != observation.registry_manifest_digest
+        )
+    ):
+        _fail("already-pushed-reconstruction-live-identity-mismatch")
+    observed = _parse_evidence_utc(
+        observation.observed_at_utc,
+        error="already-pushed-reconstruction-observation-time-invalid",
+    )
+    now = now_utc.astimezone(UTC).replace(microsecond=0)
+    if observed > now or now - observed > LIVE_REGISTRY_OBSERVATION_MAXIMUM_AGE:
+        _fail("already-pushed-reconstruction-observation-stale")
+    reconstructed_at = _format_utc(now)
+    record = AlreadyPushedPublicationRecord(
+        control_plane_head=authorization.control_plane_head,
+        image_source_commit=historical.image_source_commit,
+        build_input_sha256=historical.build_input_sha256,
+        local_image_id=historical.local_image_id,
+        config_digest=historical.config_digest,
+        registry_manifest_digest=observation.registry_manifest_digest,
+        platform=historical.platform,
+        registry_host=authorization.registry_host,
+        repository=historical.repository,
+        source_tag=historical.source_tag,
+        push_started_at_utc=historical.push_started_at_utc,
+        push_completed_at_utc=historical.push_completed_at_utc,
+        docker_exit_code=historical.docker_exit_code,
+        docker_timed_out=historical.docker_timed_out,
+        stdout_sha256=historical.stdout_sha256,
+        stderr_sha256=historical.stderr_sha256,
+        publication_evidence_integrity=historical.docker_push_evidence_integrity,
+        cleanup_generation=authorization.cleanup_generation,
+        cleanup_deadline_utc=authorization.cleanup_deadline_utc,
+        prior_lifecycle_evidence=historical.prior_lifecycle_evidence_integrity,
+        operation_id=RECONCILIATION_OPERATION_ID,
+        evidence_provenance=RECONSTRUCTED_FROM_LIVE_READ_ONLY_REGISTRY_PROOF,
+        historical_evidence_integrity=authorization.historical_evidence_integrity,
+        live_observation_integrity=authorization.live_observation_integrity,
+        reconstruction_authorization_integrity=cast(
+            str, authorization.as_json()["integritySha256"]
+        ),
+        reconstructed_at_utc=reconstructed_at,
+        reconstruction_algorithm_version=RECONSTRUCTION_ALGORITHM_VERSION,
+    )
+    validate_already_pushed_publication_record(
+        record.as_json(), control_plane_head=repository_head
+    )
+    return record
 
 
 def validate_already_pushed_registry_observation(
     value: Mapping[str, JsonValue], *, record: AlreadyPushedPublicationRecord
 ) -> AlreadyPushedRegistryObservation:
+    if value.get("schemaVersion") == LIVE_REGISTRY_OBSERVATION_VERSION:
+        live = validate_live_registry_publication_observation(
+            value, now_utc=datetime.now(UTC).replace(microsecond=0)
+        )
+        if (
+            live.registry_manifest_digest != record.registry_manifest_digest
+            or live.config_digest != record.config_digest
+            or live.platform != record.platform
+            or live.registry_host != record.registry_host
+            or live.repository != record.repository
+            or live.source_tag != record.source_tag
+        ):
+            _fail("already-pushed-reconstructed-observation-mismatch")
+        return AlreadyPushedRegistryObservation(
+            registry_manifest_digest=live.registry_manifest_digest,
+            config_digest=live.config_digest,
+            platform=live.platform,
+            registry_host=live.registry_host,
+            repository=live.repository,
+            source_tag=live.source_tag,
+            source_tag_present=live.source_tag_present,
+            observed_at_utc=live.observed_at_utc,
+            read_evidence_integrity=cast(str, live.as_json()["integritySha256"]),
+        )
     required = {
         "schemaVersion",
         "registryManifestDigest",

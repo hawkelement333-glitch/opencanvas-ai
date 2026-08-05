@@ -66,6 +66,63 @@ This document records local control flow only. It does not constitute live
 Azure publication, finalization, runtime deployment, migration, validation,
 soak, cleanup, or Milestone 7.8 authorization.
 
+## Truthful already-pushed evidence reconstruction
+
+The historical Docker-push evidence is immutable. It retains the successful
+push interval, exit and timeout state, sanitized output hashes, source commit,
+canonical build-input hash, local image/config identity, platform, repository,
+source tag, and its integrity values. It does **not** retain the immutable
+registry-manifest digest. That missing field must never be added to the
+historical artifact or represented as if it had been observed during the push.
+
+| Field | Historical source | State | Future live source | Rule |
+| --- | --- | --- | --- | --- |
+| Image source, build input, local image ID, config digest | Prebuilt image and Docker-push evidence | Retained | None | Must agree exactly. |
+| Repository, source tag, platform, push timestamps, exit state, output hashes | Docker-push evidence | Retained | None | Must agree exactly; never rewritten. |
+| Registry login-server binding | Historical host fingerprint | Retained as fingerprint | Read-only registry observation | The configured private host must hash to the retained value. |
+| Immutable manifest digest and raw manifest-body hash | None | Missing historically | Read-only registry observation | Required; inference is prohibited. |
+| Source-tag presence and source-tag digest | None | Missing historically | Read-only registry observation | If present, it must point to the observed immutable digest. |
+| Current control-plane HEAD authorization | None | Missing historically | Narrow reconstruction authorization | Required and integrity-bound. |
+| Cleanup generation/deadline and cost ceiling | Future authorization | Future binding | Narrow reconstruction authorization | Must be generation 2 and within the authorized cost boundary. |
+
+The local `HistoricalPushEvidence` model contains only the retained fields.
+`LiveRegistryPublicationObservation` is an integrity-bound, sanitized,
+read-only future observation: it includes the raw manifest-body SHA-256,
+manifest/config identities, platform, media type, read-only request classes,
+sanitized statuses/correlation hashes, and an explicit `mutationPerformed=false`
+assertion. It is fresh for at most fifteen minutes.
+
+`AlreadyPushedReconstructionAuthorization` is local data, not a live receipt.
+It binds the current control-plane HEAD, historical and live integrity values,
+cleanup generation/deadline, $225 ceiling, and only
+`reconcile-already-pushed-publication`. It expressly prohibits build, push,
+retag, upload-publisher creation, `AcrPush`, and manifest or repository
+deletion.
+
+Only `reconstruct_already_pushed_publication_record` may join those evidence
+classes. It recomputes the current canonical build-input hash and fails closed
+unless every image identity, registry host binding, source-tag relationship,
+freshness bound, and integrity value agrees. Its output is a new record marked
+exactly `RECONSTRUCTED_FROM_LIVE_READ_ONLY_REGISTRY_PROOF`; the historical
+artifacts remain unchanged. The output can enter only
+`PublicationMode.ALREADY_PUSHED_RECONCILIATION`.
+
+The future `AlreadyPushedReconciliationReceipt` is also modeled locally. Before
+any live issuance it must bind the control-plane and image-source commits,
+build input, local/config/manifest identities, reconstructed/historical/live
+integrities, cleanup generation/deadline, $225 ceiling, the exact
+`AcrPull,AcrDelete` finalizer roles, and one source-tag delete maximum. It
+prohibits a build, push, retag, upload publisher, `AcrPush`, manifest deletion,
+repository deletion, a second receipt, and a second finalizer.
+
+The next live-only continuation must: prove generation-2 cleanup and cost
+safety; capture one read-only registry observation; write its integrity-bound
+observation; create a narrow current-HEAD reconstruction authorization;
+reconstruct and validate the canonical record; issue one narrow reconciliation
+receipt; run `reconcile-already-pushed-publication`; create one finalizer only
+if the source tag is present; and then hand the immutable digest downstream.
+It must not edit this repository while active.
+
 The single future live authorization must name
 `api_image_publication._publish_api_image` with
 `PublicationMode.ALREADY_PUSHED_RECONCILIATION` as the canonical state machine,
