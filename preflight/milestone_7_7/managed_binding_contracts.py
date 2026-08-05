@@ -266,7 +266,7 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "cleanupPrincipalFingerprintSha256": (
             "19a9f97779cd2eb9acfdc04797f1fc5339316ee1a424ca79b70661beffa33260"
         ),
-        "deadlineUtc": "2026-08-05T08:00:00Z",
+        "deadlineUtc": "2026-08-05T11:00:00Z",
         "deletionWaitSeconds": 2700,
         "launchGraceSeconds": 1800,
         "publishedContentSha256": cleanup_runbook_sha256(
