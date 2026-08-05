@@ -142,6 +142,73 @@ def test_nonexact_finalizer_token_scope_fails_closed(actions: list[str]) -> None
         finalization._finalizer_access_is_exact(token, tenant_id=tenant)
 
 
+def test_finalizer_propagation_401_is_pending_in_shared_oauth_exchange(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant = "00000000-0000-0000-0000-000000000001"
+    monkeypatch.setattr(
+        lifecycle,
+        "_private_registry_request",
+        lambda *_args, **_kwargs: (401, {}, bytearray()),
+    )
+    with (
+        lifecycle._attribution_scope(
+            lifecycle_substage="finalizer-role-propagation-verification",
+            expected_authorization="allow",
+        ),
+        pytest.raises(
+            lifecycle.PublisherAccessPending,
+            match="publisher-oauth-exchange-propagation-http-401",
+        ),
+    ):
+        lifecycle._publisher_refresh_token(
+            entra_token=bytearray(b"entra-token"),
+            tenant_id=tenant,
+            service=lifecycle.REGISTRY_HOST,
+        )
+
+
+def test_finalizer_access_poll_reuses_identity_after_multiple_pending_responses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant = "00000000-0000-0000-0000-000000000001"
+    exact = _exact_access_token(actions=["pull", "delete"], tenant=tenant)
+    attempts: list[tuple[str, str]] = []
+
+    def session(*, publisher_app_id: str, tenant_id: str, environment: dict[str, str]):
+        attempts.append((publisher_app_id, tenant_id))
+        if len(attempts) < 3:
+            raise lifecycle.PublisherAccessPending("pending")
+        return bytearray(b"refresh"), bytearray(exact)
+
+    monkeypatch.setattr(finalization, "_finalizer_repository_session", session)
+    monkeypatch.setattr(finalization.time, "sleep", lambda _seconds: None)
+    refresh, access = finalization._wait_for_finalizer_access(
+        publisher_app_id="publisher-alias",
+        tenant_id=tenant,
+        environment={},
+    )
+    assert bytes(refresh) == b"refresh"
+    assert bytes(access) == bytes(exact)
+    assert attempts == [("publisher-alias", tenant)] * 3
+
+
+def test_finalizer_denial_accepts_exchange_denial_without_refresh_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        finalization,
+        "_finalizer_repository_session",
+        lambda **_kwargs: (bytearray(), None),
+    )
+    refresh = finalization._wait_for_finalizer_denial(
+        publisher_app_id="publisher-alias",
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        environment={},
+    )
+    assert refresh == bytearray()
+
+
 @pytest.mark.parametrize(
     ("method", "path"),
     [

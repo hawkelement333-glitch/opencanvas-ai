@@ -5043,9 +5043,10 @@ def _publisher_refresh_token(
     response = bytearray()
     try:
         expected_authorization = _expected_authorization_result()
-        propagation_verification = (
-            _ATTRIBUTION_SUBSTAGE.get() == "acrpush-propagation-verification"
-        )
+        propagation_verification = _ATTRIBUTION_SUBSTAGE.get() in {
+            "acrpush-propagation-verification",
+            "finalizer-role-propagation-verification",
+        }
         with _attribution_scope(
             lifecycle_substage="private-acr-oauth-exchange",
             expected_authorization=expected_authorization,

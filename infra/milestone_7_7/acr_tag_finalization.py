@@ -851,7 +851,7 @@ def _prove_initial_finalizer_denial(
 def _wait_for_finalizer_access(
     *, publisher_app_id: str, tenant_id: str, environment: Mapping[str, str]
 ) -> tuple[bytearray, bytearray]:
-    deadline = time.monotonic() + 600.0
+    deadline = time.monotonic() + 1200.0
     while True:
         try:
             with lifecycle._attribution_scope(
@@ -872,7 +872,7 @@ def _wait_for_finalizer_access(
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             _fail("finalizer-role-propagation-unproved")
-        time.sleep(min(10.0, remaining))
+        time.sleep(min(20.0, remaining))
 
 
 def _wait_for_finalizer_denial(
@@ -893,7 +893,7 @@ def _wait_for_finalizer_denial(
         except lifecycle.PublisherAccessPending:
             refresh_token = bytearray()
             access_token = None
-        if access_token is None and refresh_token:
+        if access_token is None:
             return refresh_token
         refresh_token.clear()
         if access_token is not None:
