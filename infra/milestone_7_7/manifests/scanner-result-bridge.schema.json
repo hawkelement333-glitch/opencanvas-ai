@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.7:scanner-result-bridge:v1",
+  "title": "Milestone 7.7 scanner-result bridge contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "$schema",
+    "resolutionStatus",
+    "provider",
+    "producer",
+    "transport",
+    "consumer",
+    "identities",
+    "network",
+    "resolver",
+    "cleanup",
+    "liveAzurePrerequisites",
+    "provisioningAuthorized"
+  ],
+  "properties": {
+    "$schema": {"const": "scanner-result-bridge.schema.json"},
+    "contractVersion": {"const": "m7.7-scanner-result-bridge-v1"},
+    "resolutionStatus": {"const": "local-contract-complete-live-proof-required"},
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "resourceType", "apiVersion", "resultSource", "supportedVerdicts", "providerRegistration"],
+      "properties": {
+        "name": {"const": "microsoft-defender-for-storage-malware-scanning"},
+        "resourceType": {"const": "Microsoft.Security/defenderForStorageSettings"},
+        "apiVersion": {"const": "2025-06-01"},
+        "resultSource": {"const": "malware-scan-result-event"},
+        "supportedVerdicts": {"type": "array", "minItems": 5, "items": {"type": "string"}},
+        "providerRegistration": {"const": "Microsoft.Security"}
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["storageContainer", "immutableBinding", "correlation", "noFilenameOnlyMatching"],
+      "properties": {
+        "storageContainer": {"const": "quarantine"},
+        "immutableBinding": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+        "correlation": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+        "noFilenameOnlyMatching": {"const": true}
+      }
+    },
+    "transport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "systemTopicResourceType", "subscriptionResourceType", "destinationResourceType", "destination", "deadLetterDestination", "eventSchema", "retry", "publicFallback"],
+      "properties": {
+        "kind": {"const": "event-grid-system-topic-to-private-storage-queue"},
+        "systemTopicResourceType": {"const": "Microsoft.EventGrid/systemTopics"},
+        "subscriptionResourceType": {"const": "Microsoft.EventGrid/systemTopics/eventSubscriptions"},
+        "destinationResourceType": {"const": "Microsoft.Storage/storageAccounts/queueServices/queues"},
+        "destination": {"const": "scanner-results"},
+        "deadLetterDestination": {"const": "scanner-results-deadletter"},
+        "eventSchema": {"const": "mobius.scanner-result-bridge.v1"},
+        "retry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["maxAttempts", "eventTtlMinutes", "deliveryTimeoutSeconds"],
+          "properties": {
+            "maxAttempts": {"const": 8},
+            "eventTtlMinutes": {"const": 1440},
+            "deliveryTimeoutSeconds": {"const": 30}
+          }
+        },
+        "publicFallback": {"const": false}
+      }
+    },
+    "consumer": {"type": "object", "additionalProperties": false, "required": ["entryPoint", "service", "authentication", "legacyHmacCallbackIsNotTransportAuthentication", "idempotency", "replayProtection", "promotion", "nonCleanDisposition"], "properties": {"entryPoint": {"const": "scan-worker-private-queue-adapter"}, "service": {"const": "MalwareScanService"}, "authentication": {"type": "string"}, "legacyHmacCallbackIsNotTransportAuthentication": {"const": true}, "idempotency": {"const": "providerResultId-plus-objectVersionId"}, "replayProtection": {"const": "final-decision-and-event-id-fence"}, "promotion": {"const": "only-clean-exact-immutable-object-version"}, "nonCleanDisposition": {"const": "rejected"}}},
+    "identities": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "object", "additionalProperties": false, "required": ["alias", "role", "scope"], "properties": {"alias": {"type": "string"}, "role": {"type": "string"}, "scope": {"type": "string"}}}},
+    "network": {"type": "object", "additionalProperties": false, "required": ["storageQueuePrivateEndpoint", "privateDnsZone", "containerAppInternalOnly", "tls", "publicNetworkAccess"], "properties": {"storageQueuePrivateEndpoint": {"const": true}, "privateDnsZone": {"const": "privatelink.queue.core.windows.net"}, "containerAppInternalOnly": {"const": true}, "tls": {"const": "TLS1_2-or-later"}, "publicNetworkAccess": {"const": false}}},
+    "resolver": {"type": "object", "additionalProperties": false, "required": ["implementation", "booleanMayBeTrueOnlyWhen", "states"], "properties": {"implementation": {"const": "preflight.milestone_7_7.scanner_result_bridge.resolve_bridge"}, "booleanMayBeTrueOnlyWhen": {"const": "RESOLVED"}, "states": {"type": "array", "minItems": 14, "items": {"type": "string"}}}},
+    "cleanup": {"type": "object", "additionalProperties": false, "required": ["inventory", "zeroResidueRequiresEveryEntryAbsent"], "properties": {"inventory": {"type": "array", "minItems": 8, "items": {"type": "string"}}, "zeroResidueRequiresEveryEntryAbsent": {"const": true}}},
+    "liveAzurePrerequisites": {"type": "array", "minItems": 6, "items": {"type": "string"}},
+    "provisioningAuthorized": {"const": false}
+  }
+}

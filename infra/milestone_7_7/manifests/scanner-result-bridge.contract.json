@@ -1,0 +1,62 @@
+{
+  "$schema": "scanner-result-bridge.schema.json",
+  "contractVersion": "m7.7-scanner-result-bridge-v1",
+  "resolutionStatus": "local-contract-complete-live-proof-required",
+  "provider": {
+    "name": "microsoft-defender-for-storage-malware-scanning",
+    "resourceType": "Microsoft.Security/defenderForStorageSettings",
+    "apiVersion": "2025-06-01",
+    "resultSource": "malware-scan-result-event",
+    "supportedVerdicts": ["clean", "infected", "suspicious", "error", "timeout"],
+    "providerRegistration": "Microsoft.Security"
+  },
+  "producer": {
+    "storageContainer": "quarantine",
+    "immutableBinding": ["blobVersionId", "etag", "contentSha256"],
+    "correlation": ["scanRequestId", "providerResultId", "eventId"],
+    "noFilenameOnlyMatching": true
+  },
+  "transport": {
+    "kind": "event-grid-system-topic-to-private-storage-queue",
+    "systemTopicResourceType": "Microsoft.EventGrid/systemTopics",
+    "subscriptionResourceType": "Microsoft.EventGrid/systemTopics/eventSubscriptions",
+    "destinationResourceType": "Microsoft.Storage/storageAccounts/queueServices/queues",
+    "destination": "scanner-results",
+    "deadLetterDestination": "scanner-results-deadletter",
+    "eventSchema": "mobius.scanner-result-bridge.v1",
+    "retry": {"maxAttempts": 8, "eventTtlMinutes": 1440, "deliveryTimeoutSeconds": 30},
+    "publicFallback": false
+  },
+  "consumer": {
+    "entryPoint": "scan-worker-private-queue-adapter",
+    "service": "MalwareScanService",
+    "authentication": "managed-identity-queue-receive-and-provider-event-provenance",
+    "legacyHmacCallbackIsNotTransportAuthentication": true,
+    "idempotency": "providerResultId-plus-objectVersionId",
+    "replayProtection": "final-decision-and-event-id-fence",
+    "promotion": "only-clean-exact-immutable-object-version",
+    "nonCleanDisposition": "rejected"
+  },
+  "identities": [
+    {"alias": "event-grid-delivery", "role": "Storage Queue Data Message Sender", "scope": "exact-scanner-results-queue"},
+    {"alias": "scan-worker", "role": "Storage Queue Data Message Processor", "scope": "exact-scanner-results-and-deadletter-queues"}
+  ],
+  "network": {
+    "storageQueuePrivateEndpoint": true,
+    "privateDnsZone": "privatelink.queue.core.windows.net",
+    "containerAppInternalOnly": true,
+    "tls": "TLS1_2-or-later",
+    "publicNetworkAccess": false
+  },
+  "resolver": {
+    "implementation": "preflight.milestone_7_7.scanner_result_bridge.resolve_bridge",
+    "booleanMayBeTrueOnlyWhen": "RESOLVED",
+    "states": ["CONTRACT_UNDEFINED", "PROVIDER_UNAVAILABLE", "RESOURCES_UNDEPLOYED", "IDENTITY_UNPROVED", "RBAC_UNPROVED", "PRIVATE_PATH_UNPROVED", "PRODUCER_UNPROVED", "TRANSPORT_UNPROVED", "CONSUMER_UNPROVED", "SCHEMA_UNPROVED", "CORRELATION_UNPROVED", "REVOCATION_UNPROVED", "STALE_EVIDENCE", "RESOLVED"]
+  },
+  "cleanup": {
+    "inventory": ["defenderForStorageSettings", "systemTopics", "eventSubscriptions", "queueServices/queues", "privateEndpoints", "privateDnsZones", "roleAssignments", "diagnosticSettings"],
+    "zeroResidueRequiresEveryEntryAbsent": true
+  },
+  "liveAzurePrerequisites": ["provider-registration-and-capability", "exact-event-shape", "event-grid-delivery-identity-role-definition", "private-queue-reachability", "provider-result-to-object-version-correlation", "revocation-and-zero-residue-proof"],
+  "provisioningAuthorized": false
+}

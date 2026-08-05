@@ -74,6 +74,28 @@ param smtpFromAddress string = 'mobius77-validation@example.invalid'
 @description('Post-secret deployment requires the managed scanner-result bridge to be resolved explicitly.')
 param scannerResultBridgeResolved bool = false
 
+@allowed([
+  'CONTRACT_UNDEFINED'
+  'PROVIDER_UNAVAILABLE'
+  'RESOURCES_UNDEPLOYED'
+  'IDENTITY_UNPROVED'
+  'RBAC_UNPROVED'
+  'PRIVATE_PATH_UNPROVED'
+  'PRODUCER_UNPROVED'
+  'TRANSPORT_UNPROVED'
+  'CONSUMER_UNPROVED'
+  'SCHEMA_UNPROVED'
+  'CORRELATION_UNPROVED'
+  'REVOCATION_UNPROVED'
+  'STALE_EVIDENCE'
+  'RESOLVED'
+])
+param scannerResultBridgeState string = 'CONTRACT_UNDEFINED'
+
+@minLength(0)
+@maxLength(64)
+param scannerResultBridgeEvidenceIntegrity string = ''
+
 param lifecycleTags object = {}
 param cleanupAtUtc string = ''
 
@@ -90,7 +112,7 @@ var cleanupControlEnabled = oneRunEnabled && deploymentStage == 'cleanup-control
 var cleanupJobScheduleEnabled = oneRunEnabled && deploymentStage == 'cleanup-job-binding'
 var cleanupBindingEnabled = oneRunEnabled && deploymentStage == 'cleanup-binding'
 var preSecretEnabled = oneRunEnabled && deploymentStage == 'pre-secret'
-var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret' && scannerResultBridgeResolved
+var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret' && scannerResultBridgeResolved && scannerResultBridgeState == 'RESOLVED' && length(scannerResultBridgeEvidenceIntegrity) == 64
 var workloadEnabled = preSecretEnabled || postSecretEnabled
 var targetEnabled = cleanupBindingEnabled || workloadEnabled
 
@@ -106,6 +128,7 @@ var moduleBoundaries = [
   'postgres'
   'redis'
   'storage-scanner'
+  'scanner-result-bridge'
   'compute'
   'container-apps-dns'
   'observability'
@@ -264,6 +287,26 @@ module storage './modules/storage-scanner.bicep' = if (postSecretEnabled) {
     apiIdentityPrincipalId: identities.outputs.workloadIdentityPrincipalId
     workerIdentityPrincipalId: identities.outputs.workerIdentityPrincipalId
     scannerResultBridgeResolved: scannerResultBridgeResolved
+    lifecycleTags: lifecycleTags
+  }
+}
+
+module scannerResultBridge './modules/scanner-result-bridge.bicep' = if (postSecretEnabled) {
+  name: 'mobius77-managed-binding-scanner-result-bridge'
+  scope: targetResourceGroup
+  params: {
+    checkpointMode: checkpointMode
+    deploymentEnabled: deploymentEnabled
+    managedBindingMode: managedBindingMode
+    managedBindingDeploymentEnabled: true
+    scannerResultBridgeResolved: scannerResultBridgeResolved
+    scannerResultBridgeState: scannerResultBridgeState
+    scannerResultBridgeEvidenceIntegrity: scannerResultBridgeEvidenceIntegrity
+    location: location
+    storageAccountName: storage.outputs.storageAccountUrl == '' ? '' : 'stmobius7711564669'
+    privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
+    virtualNetworkId: network.outputs.virtualNetworkId
+    workerIdentityPrincipalId: identities.outputs.workerIdentityPrincipalId
     lifecycleTags: lifecycleTags
   }
 }

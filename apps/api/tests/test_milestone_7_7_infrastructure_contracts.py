@@ -137,6 +137,7 @@ def test_schema_inventory_is_exact_versioned_and_closed():
         "environment.schema.json",
         "image-digests.schema.json",
         "managed-binding.schema.json",
+        "scanner-result-bridge.schema.json",
     ]
     for path in MANIFESTS.glob("*.schema.json"):
         schema = _json(path)
@@ -250,7 +251,7 @@ def test_verified_environment_requires_exact_bounded_lease():
 
 def test_bicep_preserves_inert_defaults_and_gates_one_run_resources():
     bicep_files = sorted(ROOT.rglob("*.bicep"))
-    assert len(bicep_files) == 13
+    assert len(bicep_files) == 14
     combined = "\n".join(path.read_text(encoding="utf-8") for path in bicep_files)
     assert not re.search(r"\b(?:utcNow|newGuid|uniqueString)\s*\(", combined)
     assert not re.search(r"\b(?:subscription|resourceGroup)\s*\(\s*\)", combined)
@@ -260,7 +261,12 @@ def test_bicep_preserves_inert_defaults_and_gates_one_run_resources():
     for name in ("policy.bicep",):
         text = (ROOT / "modules" / name).read_text(encoding="utf-8")
         assert not re.search(r"(?m)^\s*(?:resource|module)\s+", text)
-    for name in ("postgres.bicep", "redis.bicep", "storage-scanner.bicep"):
+    for name in (
+        "postgres.bicep",
+        "redis.bicep",
+        "storage-scanner.bicep",
+        "scanner-result-bridge.bicep",
+    ):
         text = (ROOT / "modules" / name).read_text(encoding="utf-8")
         declarations = re.findall(r"(?m)^\s*(?:resource|module)\s+[^\n]+", text)
         assert declarations
@@ -284,7 +290,8 @@ def test_post_secret_storage_requires_explicit_resolved_scanner_bridge():
     assert "param scannerResultBridgeResolved bool = false" in main
     assert (
         "var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret' "
-        "&& scannerResultBridgeResolved"
+        "&& scannerResultBridgeResolved && scannerResultBridgeState == 'RESOLVED' "
+        "&& length(scannerResultBridgeEvidenceIntegrity) == 64"
     ) in main
     assert "scannerResultBridgeResolved: scannerResultBridgeResolved" in main
     assert "@allowed([\n  true\n])\nparam scannerResultBridgeResolved bool" in storage
@@ -305,6 +312,7 @@ def test_module_inventory_and_safe_outputs_are_exact():
         "postgres.bicep",
         "redis.bicep",
         "registry.bicep",
+        "scanner-result-bridge.bicep",
         "storage-scanner.bicep",
     ]
     for path in (ROOT / "modules").glob("*.bicep"):
@@ -394,6 +402,14 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "param defenderMonthlyCapGiB int = 1",
             "param scannerExerciseObjectCap int = 25",
             "param totalSyntheticUploadBytesCap int = 134217728",
+        ],
+        "scanner-result-bridge.bicep": [
+            "param scannerResultBridgeState string",
+            "name: 'scanner-results'",
+            "name: 'scanner-results-deadletter'",
+            "privatelink.queue.",
+            "Storage Queue Data Message Sender",
+            "Storage Queue Data Message Processor",
         ],
     }
     for name, tokens in expected_tokens.items():

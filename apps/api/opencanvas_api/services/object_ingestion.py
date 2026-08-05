@@ -1326,6 +1326,7 @@ class MalwareScanService:
         result: TrustedScanResult,
         signature: str,
     ) -> UploadSessionView:
+        """Accept the legacy internal HMAC callback only after verification."""
         if self.settings.object_ingestion_mode == "disabled":
             raise ObjectIngestionError(
                 "Secure object ingestion is disabled.",
@@ -1333,6 +1334,38 @@ class MalwareScanService:
                 status_code=503,
             )
         self.verify_signature(result, signature)
+        return await self._record_authenticated_result(result=result)
+
+    async def record_bridge_result(
+        self,
+        *,
+        result: TrustedScanResult,
+        evidence_integrity_sha256: str,
+    ) -> UploadSessionView:
+        """Accept only a managed-identity transport adapter's proved result.
+
+        The queue adapter validates Azure delivery provenance before it reaches
+        this method.  A legacy shared secret is deliberately not accepted on
+        this path; the retained integrity value connects the final decision to
+        the bridge resolver's sanitized evidence.
+        """
+        if self.settings.object_ingestion_mode == "disabled":
+            raise ObjectIngestionError(
+                "Secure object ingestion is disabled.",
+                code="secure_ingestion_disabled",
+                status_code=503,
+            )
+        if result.scanner_identity != "azure-defender-for-storage" or not re.fullmatch(
+            r"[0-9a-f]{64}", evidence_integrity_sha256
+        ):
+            raise ObjectIngestionNotFoundError()
+        return await self._record_authenticated_result(result=result)
+
+    async def _record_authenticated_result(
+        self,
+        *,
+        result: TrustedScanResult,
+    ) -> UploadSessionView:
         request = await self.session.scalar(
             select(MalwareScanRequest)
             .where(MalwareScanRequest.scan_request_id == result.scan_request_id)
