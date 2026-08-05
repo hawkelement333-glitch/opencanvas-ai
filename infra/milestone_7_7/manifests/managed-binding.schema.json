@@ -85,7 +85,7 @@
           "const": "rg-solarplexus-mobius-77-staging"
         },
         "subscriptionFingerprint": { "$ref": "#/$defs/sha256" },
-        "deadlineUtc": { "const": "2026-08-05T06:45:00Z" },
+        "deadlineUtc": { "const": "2026-08-05T08:00:00Z" },
         "launchGraceSeconds": { "const": 1800 },
         "cleanupContributorRoleDefinitionId": {
           "const": "b24988ac-6180-42a0-ab88-20f7382dd24c"
