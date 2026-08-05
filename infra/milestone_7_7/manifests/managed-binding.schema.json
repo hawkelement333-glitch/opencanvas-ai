@@ -66,6 +66,13 @@
       "required": [
         "authorizationParameter",
         "authorizationValue",
+        "bindingContractVersion",
+        "bindingGeneration",
+        "activeBindingId",
+        "tombstonedBindingIds",
+        "scheduleResourceId",
+        "runbookResourceId",
+        "targetResourceGroupId",
         "targetParameter",
         "targetResourceGroup",
         "subscriptionFingerprint",
@@ -80,6 +87,41 @@
       "properties": {
         "authorizationParameter": { "const": "CleanupAuthorized" },
         "authorizationValue": { "const": true },
+        "bindingContractVersion": { "const": "m7.7-automation-cleanup-binding-v2" },
+        "bindingGeneration": { "const": 2 },
+        "activeBindingId": { "$ref": "#/$defs/guid" },
+        "tombstonedBindingIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "bindingContractVersion",
+              "bindingGeneration",
+              "bindingId",
+              "directGetStatus",
+              "listVisibility",
+              "recreationStatus",
+              "deletionStatus",
+              "evidenceIntegritySha256"
+            ],
+            "properties": {
+              "bindingContractVersion": { "const": "m7.7-automation-cleanup-binding-v1" },
+              "bindingGeneration": { "const": 1 },
+              "bindingId": { "const": "158cac88-5679-5804-9f4d-854520bbb635" },
+              "directGetStatus": { "const": "not-found" },
+              "listVisibility": { "const": "absent" },
+              "recreationStatus": { "const": "conflict" },
+              "deletionStatus": { "const": "accepted" },
+              "evidenceIntegritySha256": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        },
+        "scheduleResourceId": { "const": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/schedules/schedule-mobius77-cleanup" },
+        "runbookResourceId": { "const": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/runbooks/Remove-Mobius77Staging" },
+        "targetResourceGroupId": { "const": "resourceGroups/rg-solarplexus-mobius-77-staging" },
         "targetParameter": { "const": "TargetResourceGroupName" },
         "targetResourceGroup": {
           "const": "rg-solarplexus-mobius-77-staging"
@@ -245,6 +287,10 @@
     "sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "guid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     },
     "stringMap": {
       "type": "object",

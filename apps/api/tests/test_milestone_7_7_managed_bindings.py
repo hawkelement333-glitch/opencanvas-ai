@@ -12,12 +12,11 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-
 from infra.milestone_7_7 import api_image_publication
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
 from performance.milestone_7_7.framework import ContractError, JsonValue, canonical_bytes
 from preflight.milestone_7_7 import framework as topology_framework
-from preflight.milestone_7_7 import managed_binding_execution
+from preflight.milestone_7_7 import managed_binding_contracts, managed_binding_execution
 from preflight.milestone_7_7.execution import _ProcessCapture
 from preflight.milestone_7_7.framework import (
     EXPECTED_ACCOUNT_COMMAND,
@@ -3068,14 +3067,16 @@ def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> No
     )
 
 
-def _job_schedule_list_response() -> dict[str, JsonValue]:
-    job_schedule_id = "00000000-0000-4000-8000-000000000001"
+def _job_schedule_list_response(
+    subscription_id: str = "opaque-subscription",
+) -> dict[str, JsonValue]:
+    job_schedule_id = managed_binding_contracts.cleanup_binding_id_for_subscription(subscription_id)
     return {
         "nextLink": None,
         "value": [
             {
                 "id": (
-                    "/subscriptions/opaque-subscription/resourceGroups/"
+                    f"/subscriptions/{subscription_id}/resourceGroups/"
                     "rg-solarplexus-mobius-77-cleanup-control/providers/"
                     "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
                     f"jobSchedules/{job_schedule_id}"
@@ -3089,8 +3090,10 @@ def _job_schedule_list_response() -> dict[str, JsonValue]:
     }
 
 
-def _job_schedule_get_response() -> dict[str, JsonValue]:
-    row = cast(list[dict[str, JsonValue]], _job_schedule_list_response()["value"])[0]
+def _job_schedule_get_response(
+    subscription_id: str = "opaque-subscription",
+) -> dict[str, JsonValue]:
+    row = cast(list[dict[str, JsonValue]], _job_schedule_list_response(subscription_id)["value"])[0]
     return {
         **row,
         "parameters": {
@@ -3098,6 +3101,122 @@ def _job_schedule_get_response() -> dict[str, JsonValue]:
             "TargetResourceGroupName": "rg-solarplexus-mobius-77-staging",
         },
     }
+
+
+def test_cleanup_binding_generation_two_is_stable_distinct_and_normalized() -> None:
+    account = (
+        "/subscriptions/synthetic/resourceGroups/rg-solarplexus-mobius-77-cleanup-control/"
+        "providers/Microsoft.Automation/automationAccounts/aa-mobius77-cleanup"
+    )
+    kwargs = {
+        "automation_account_id": account,
+        "runbook_resource_id": f"{account}/runbooks/Remove-Mobius77Staging",
+        "schedule_resource_id": f"{account}/schedules/schedule-mobius77-cleanup",
+        "target_resource_group_id": (
+            "/subscriptions/synthetic/resourceGroups/rg-solarplexus-mobius-77-staging"
+        ),
+        "cleanup_authorized": True,
+    }
+    first = managed_binding_contracts.deterministic_cleanup_binding_id(generation=2, **kwargs)
+    normalized = managed_binding_contracts.deterministic_cleanup_binding_id(
+        generation=2,
+        **{
+            key: value.upper() + "/" if isinstance(value, str) else value
+            for key, value in kwargs.items()
+        },
+    )
+    generation_one = managed_binding_contracts.deterministic_cleanup_binding_id(
+        generation=1, **kwargs
+    )
+
+    assert first == normalized
+    assert first != generation_one
+    assert first == managed_binding_contracts.deterministic_cleanup_binding_id(
+        generation=2, **kwargs
+    )
+    source = inspect.getsource(managed_binding_contracts.deterministic_cleanup_binding_id)
+    assert "uuid4" not in source
+    assert "datetime" not in source
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("runbook_resource_id", "DifferentRunbook"),
+        ("schedule_resource_id", "different-schedule"),
+        ("target_resource_group_id", "rg-other"),
+    ],
+)
+def test_cleanup_binding_generation_two_fails_closed_on_identity_input_drift(
+    field: str, replacement: str
+) -> None:
+    account = (
+        "/subscriptions/synthetic/resourceGroups/rg-solarplexus-mobius-77-cleanup-control/"
+        "providers/Microsoft.Automation/automationAccounts/aa-mobius77-cleanup"
+    )
+    kwargs = {
+        "automation_account_id": account,
+        "runbook_resource_id": f"{account}/runbooks/Remove-Mobius77Staging",
+        "schedule_resource_id": f"{account}/schedules/schedule-mobius77-cleanup",
+        "target_resource_group_id": (
+            "/subscriptions/synthetic/resourceGroups/rg-solarplexus-mobius-77-staging"
+        ),
+        "cleanup_authorized": True,
+    }
+    baseline = managed_binding_contracts.deterministic_cleanup_binding_id(generation=2, **kwargs)
+    changed = dict(kwargs)
+    changed[field] = f"{str(changed[field]).rsplit('/', 1)[0]}/{replacement}"
+
+    assert (
+        managed_binding_contracts.deterministic_cleanup_binding_id(generation=2, **changed)
+        != baseline
+    )
+    authorization_changed = {**kwargs, "cleanup_authorized": False}
+    assert (
+        managed_binding_contracts.deterministic_cleanup_binding_id(
+            generation=2, **authorization_changed
+        )
+        != baseline
+    )
+
+
+def test_cleanup_binding_generation_one_preserves_legacy_guid_and_contract_tombstone() -> None:
+    account = (
+        "/subscriptions/synthetic/resourceGroups/rg-solarplexus-mobius-77-cleanup-control/"
+        "providers/Microsoft.Automation/automationAccounts/aa-mobius77-cleanup"
+    )
+    generation_one = managed_binding_contracts.deterministic_cleanup_binding_id(
+        generation=1,
+        automation_account_id=account,
+        runbook_resource_id=f"{account}/runbooks/Remove-Mobius77Staging",
+        schedule_resource_id=f"{account}/schedules/schedule-mobius77-cleanup",
+        target_resource_group_id=(
+            "/subscriptions/synthetic/resourceGroups/rg-solarplexus-mobius-77-staging"
+        ),
+        cleanup_authorized=True,
+    )
+    contract = load_managed_binding_contract()
+    cleanup = cast(dict[str, JsonValue], contract["cleanupExecution"])
+    tombstone = cast(list[dict[str, JsonValue]], cleanup["tombstonedBindingIds"])[0]
+
+    assert generation_one == managed_binding_contracts.cleanup_binding_id_for_subscription(
+        "synthetic", generation=1
+    )
+    assert cleanup["bindingGeneration"] == 2
+    assert cleanup["activeBindingId"] != tombstone["bindingId"]
+    assert tombstone["bindingId"] == managed_binding_contracts.TOMBSTONED_CLEANUP_BINDING_ID
+    body = {key: value for key, value in tombstone.items() if key != "evidenceIntegritySha256"}
+    assert tombstone[
+        "evidenceIntegritySha256"
+    ] == managed_binding_contracts.cleanup_binding_tombstone_integrity(body)
+
+
+@pytest.mark.parametrize("generation", [0, 3, 99])
+def test_cleanup_binding_rejects_unapproved_generation(generation: int) -> None:
+    with pytest.raises(ContractError, match="cleanup binding generation is not authorized"):
+        managed_binding_contracts.cleanup_binding_id_for_subscription(
+            "synthetic", generation=generation
+        )
 
 
 def test_cleanup_job_schedule_verification_discovers_then_gets_exact_resource(
@@ -3132,7 +3251,8 @@ def test_cleanup_job_schedule_verification_discovers_then_gets_exact_resource(
         "https://management.azure.com/subscriptions/opaque-subscription/"
         "resourceGroups/rg-solarplexus-mobius-77-cleanup-control/providers/"
         "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
-        "jobSchedules/00000000-0000-4000-8000-000000000001?api-version=2024-10-23"
+        f"jobSchedules/{managed_binding_contracts.cleanup_binding_id_for_subscription(subscription_id)}"
+        "?api-version=2024-10-23"
     )
     source = inspect.getsource(managed_binding_lifecycle._verify_cleanup_job_schedule)
     assert "uuid5" not in source
@@ -3145,6 +3265,7 @@ def test_cleanup_job_schedule_verification_discovers_then_gets_exact_resource(
         "wrong-prefix",
         "malformed-id",
         "wrong-job-id",
+        "tombstoned-id",
         "wrong-runbook",
         "wrong-schedule",
         "wrong-target",
@@ -3182,6 +3303,11 @@ def test_cleanup_job_schedule_verification_fails_closed_on_drift(
                 row["id"] = str(row["id"]).rsplit("/", 1)[0] + "/not-a-guid"
             elif drift == "wrong-job-id":
                 row["jobScheduleId"] = "00000000-0000-4000-8000-000000000002"
+            elif drift == "tombstoned-id":
+                row["id"] = (
+                    str(row["id"]).rsplit("/", 1)[0] + "/158cac88-5679-5804-9f4d-854520bbb635"
+                )
+                row["jobScheduleId"] = "158cac88-5679-5804-9f4d-854520bbb635"
             elif drift == "wrong-runbook":
                 row["runbook"] = "unexpected-runbook"
             elif drift == "wrong-schedule":

@@ -338,6 +338,13 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "param cleanupLocation string = 'westus'",
             "param cleanupControlDeploymentEnabled bool = false",
             "param cleanupJobScheduleDeploymentEnabled bool = false",
+            "param cleanupBindingGeneration int = 2",
+            "param cleanupBindingContractVersion string = 'm7.7-automation-cleanup-binding-v2'",
+            (
+                "var generationOneBindingId = guid(existingAutomationAccount.id, "
+                "existingCleanupRunbook.name, existingCleanupSchedule.name)"
+            ),
+            "name: generationTwoBindingId",
         ],
         "compute.bicep": [
             "param computeTopology string = 'internal-azure-container-apps'",
@@ -1081,8 +1088,13 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
             "b86a8fe4-44ce-4948-aee5-eccb2c155cd7",
             "c2f4ef07-c644-48eb-af81-4b1b4947fb11",
             "c632b3df-fb67-4d84-bdcf-b95ad541b5c8",
+            "0b4e1b73-5b8f-59be-b5f6-2bd01696523d",
+            "158cac88-5679-5804-9f4d-854520bbb635",
         },
-        "manifests/managed-binding.schema.json": {"b24988ac-6180-42a0-ab88-20f7382dd24c"},
+        "manifests/managed-binding.schema.json": {
+            "b24988ac-6180-42a0-ab88-20f7382dd24c",
+            "158cac88-5679-5804-9f4d-854520bbb635",
+        },
         "modules/identities.bicep": {"b24988ac-6180-42a0-ab88-20f7382dd24c"},
         "modules/key-vault.bicep": {"4633458b-17de-408a-b874-0445c86b69e6"},
         "modules/network.bicep": {"c632b3df-fb67-4d84-bdcf-b95ad541b5c8"},

@@ -77,6 +77,16 @@ param targetResourceGroupName string = 'rg-solarplexus-mobius-77-staging'
 param lifecycleTags object = {}
 param cleanupAtUtc string = ''
 
+@allowed([
+  2
+])
+param cleanupBindingGeneration int = 2
+
+@allowed([
+  'm7.7-automation-cleanup-binding-v2'
+])
+param cleanupBindingContractVersion string = 'm7.7-automation-cleanup-binding-v2'
+
 var contractEnabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled
 var cleanupControlEnabled = contractEnabled && cleanupControlDeploymentEnabled && !cleanupJobScheduleDeploymentEnabled
 var jobScheduleEnabled = contractEnabled && cleanupJobScheduleDeploymentEnabled && !cleanupControlDeploymentEnabled
@@ -136,9 +146,20 @@ resource existingCleanupSchedule 'Microsoft.Automation/automationAccounts/schedu
   name: 'schedule-mobius77-cleanup'
 }
 
+var generationOneBindingId = guid(existingAutomationAccount.id, existingCleanupRunbook.name, existingCleanupSchedule.name)
+var generationTwoBindingId = guid(
+  toLower(existingAutomationAccount.id),
+  toLower(existingCleanupRunbook.id),
+  toLower(existingCleanupSchedule.id),
+  toLower(resourceId('Microsoft.Resources/resourceGroups', targetResourceGroupName)),
+  cleanupBindingContractVersion,
+  'cleanup-binding-generation-${cleanupBindingGeneration}',
+  'cleanupauthorized=true'
+)
+
 resource cleanupJobSchedule 'Microsoft.Automation/automationAccounts/jobSchedules@2024-10-23' = if (jobScheduleEnabled) {
   parent: existingAutomationAccount
-  name: guid(existingAutomationAccount.id, existingCleanupRunbook.name, existingCleanupSchedule.name)
+  name: generationTwoBindingId
   properties: {
     parameters: {
       TargetResourceGroupName: targetResourceGroupName
@@ -173,6 +194,10 @@ output cleanupJobScheduleDeploymentEnabled bool = jobScheduleEnabled
 output automationAccountName string = 'aa-mobius77-cleanup'
 output cleanupRunbookName string = 'Remove-Mobius77Staging'
 output cleanupScheduleName string = 'schedule-mobius77-cleanup'
+output cleanupBindingContractVersion string = cleanupBindingContractVersion
+output cleanupBindingGeneration int = cleanupBindingGeneration
+output tombstonedCleanupBindingId string = jobScheduleEnabled ? generationOneBindingId : ''
+output activeCleanupBindingId string = jobScheduleEnabled ? generationTwoBindingId : ''
 output cleanupPrincipalId string = cleanupControlEnabled ? automationAccount.identity.principalId : ''
 output cleanupLocation string = cleanupLocation
 output publicNetworkAccess bool = false

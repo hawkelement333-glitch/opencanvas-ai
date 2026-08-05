@@ -65,6 +65,24 @@
     "containerAppsInfrastructureResourceGroup": "rg-solarplexus-mobius-77-containerapps-infrastructure"
   },
   "cleanupExecution": {
+    "bindingContractVersion": "m7.7-automation-cleanup-binding-v2",
+    "bindingGeneration": 2,
+    "activeBindingId": "0b4e1b73-5b8f-59be-b5f6-2bd01696523d",
+    "tombstonedBindingIds": [
+      {
+        "bindingContractVersion": "m7.7-automation-cleanup-binding-v1",
+        "bindingGeneration": 1,
+        "bindingId": "158cac88-5679-5804-9f4d-854520bbb635",
+        "directGetStatus": "not-found",
+        "listVisibility": "absent",
+        "recreationStatus": "conflict",
+        "deletionStatus": "accepted",
+        "evidenceIntegritySha256": "1a61c64e7749f4d81864cc3d95463d8ffc0dcc90926289497495750885b4f571"
+      }
+    ],
+    "scheduleResourceId": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/schedules/schedule-mobius77-cleanup",
+    "runbookResourceId": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/runbooks/Remove-Mobius77Staging",
+    "targetResourceGroupId": "resourceGroups/rg-solarplexus-mobius-77-staging",
     "authorizationParameter": "CleanupAuthorized",
     "authorizationValue": true,
     "targetParameter": "TargetResourceGroupName",
