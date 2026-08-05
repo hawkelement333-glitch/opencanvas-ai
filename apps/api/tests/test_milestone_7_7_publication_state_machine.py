@@ -343,3 +343,25 @@ def test_paused_preserved_has_one_reconciliation_entry_and_no_upload_entry() -> 
     assert "_create_ephemeral_publisher" not in source
     assert "_temporary_publisher_role_assignment" not in source
     assert "_docker_push_prebuilt_image" not in source
+
+
+def test_reconciliation_simulation_accepts_transient_oauth_then_one_finalization() -> None:
+    transitions = state_machine.simulate_already_pushed_reconciliation(
+        source_tag_present=True, oauth_responses=(401, 200)
+    )
+    assert transitions == state_machine.ALREADY_PUSHED_RECONCILIATION_ORDER
+
+
+def test_reconciliation_simulation_skips_finalizer_when_the_tag_is_absent() -> None:
+    transitions = state_machine.simulate_already_pushed_reconciliation(source_tag_present=False)
+    assert transitions == state_machine.ALREADY_PUSHED_SOURCE_ABSENT_ORDER
+
+
+def test_reconciliation_oauth_timeout_cannot_reach_tag_deletion() -> None:
+    with pytest.raises(
+        state_machine.PublicationStateError,
+        match="finalizer-oauth-propagation-unproved",
+    ):
+        state_machine.simulate_already_pushed_reconciliation(
+            source_tag_present=True, oauth_responses=(401, 403)
+        )

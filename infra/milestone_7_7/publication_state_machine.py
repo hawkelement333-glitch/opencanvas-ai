@@ -134,3 +134,30 @@ def simulate_current_image_publication(
         machine.advance(state)
     machine.assert_complete()
     return tuple(machine.completed)
+
+
+def simulate_already_pushed_reconciliation(
+    *, source_tag_present: bool, oauth_responses: tuple[int, ...] = ()
+) -> tuple[PublicationState, ...]:
+    """Pure proof that reconciliation cannot skip finalization or cleanup."""
+    machine = PublicationStateMachine(
+        mode=PublicationMode.ALREADY_PUSHED_RECONCILIATION,
+        source_tag_present=source_tag_present,
+    )
+    for state in machine.order[:5]:
+        machine.advance(state)
+    if source_tag_present:
+        if not oauth_responses or oauth_responses[-1] != 200:
+            _fail("finalizer-oauth-propagation-unproved")
+        if any(status not in {200, 401, 403} for status in oauth_responses):
+            _fail("finalizer-oauth-response-invalid")
+        for state in machine.order[5:-1]:
+            machine.advance(state)
+    elif oauth_responses:
+        _fail("source-tag-absent-finalizer-forbidden")
+    else:
+        for state in machine.order[5:-1]:
+            machine.advance(state)
+    machine.advance(PublicationState.PUBLICATION_COMPLETE)
+    machine.assert_complete()
+    return tuple(machine.completed)
