@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+
 from infra.milestone_7_7.scripts import managed_binding_lifecycle as lifecycle
 from performance.milestone_7_7.framework import JsonValue
 
@@ -19,7 +20,7 @@ def _ledger(marker: str = "a") -> dict[str, JsonValue]:
 def _state(ledger: dict[str, JsonValue]) -> dict[str, JsonValue]:
     return {
         "activeStage": None,
-        "cleanupAtUtc": "2026-08-05T11:00:00Z",
+        "cleanupAtUtc": "2026-08-05T04:00:00Z",
         "disposition": "PAUSED_PRESERVED",
         "failedStage": None,
         "lastCompletedStage": "pre-secret",
@@ -158,7 +159,6 @@ def test_post_secret_always_revokes_temporary_authority_after_metadata_failure(
             ledger=ledger,
             subscription_id="opaque-subscription",
             receipt_directory=tmp_path,
-            prebuilt_image_record=tmp_path / "prebuilt-image.json",
         )
 
     assert calls == ["authority-proved", "authority-revoked-and-denied"]

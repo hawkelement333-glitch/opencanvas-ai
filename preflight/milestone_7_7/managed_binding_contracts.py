@@ -34,22 +34,14 @@ from preflight.milestone_7_7.operation_contracts import (
 ROOT: Final = Path(__file__).resolve().parent
 REPOSITORY_ROOT: Final = ROOT.parents[1]
 INFRASTRUCTURE_ROOT: Final = REPOSITORY_ROOT / "infra" / "milestone_7_7"
-MANIFEST_PATH: Final = (
-    INFRASTRUCTURE_ROOT / "manifests" / "managed-binding.contract.json"
-)
-MANIFEST_SCHEMA_PATH: Final = (
-    INFRASTRUCTURE_ROOT / "manifests" / "managed-binding.schema.json"
-)
-CLEANUP_RUNBOOK_PATH: Final = (
-    INFRASTRUCTURE_ROOT / "scripts" / "Remove-Mobius77Staging.ps1"
-)
+MANIFEST_PATH: Final = INFRASTRUCTURE_ROOT / "manifests" / "managed-binding.contract.json"
+MANIFEST_SCHEMA_PATH: Final = INFRASTRUCTURE_ROOT / "manifests" / "managed-binding.schema.json"
+CLEANUP_RUNBOOK_PATH: Final = INFRASTRUCTURE_ROOT / "scripts" / "Remove-Mobius77Staging.ps1"
 OVERLAY_PATH: Final = ROOT / "managed-binding-operation-contracts.json"
 OVERLAY_SCHEMA_PATH: Final = ROOT / "managed-binding-operation-contracts.schema.json"
 
 AUTHORIZATION_SOURCE_HEAD: Final = "11564669bd5b40a88fdbf434c8137b063305eb4b"
-HISTORICAL_MATRIX_SHA256: Final = (
-    "100293931dcc71bb069e4f6fe06228360e0953b3b756544a555941d81bf8d6bc"
-)
+HISTORICAL_MATRIX_SHA256: Final = "100293931dcc71bb069e4f6fe06228360e0953b3b756544a555941d81bf8d6bc"
 MANAGED_BINDING_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/managed-binding-resource-contract/v1\0"
 )
@@ -110,9 +102,7 @@ API_IMAGE_BUILD_INPUTS: Final = (
 
 EXPECTED_RESOURCE_GROUPS: Final = {
     "cleanupControl": "rg-solarplexus-mobius-77-cleanup-control",
-    "containerAppsInfrastructure": (
-        "rg-solarplexus-mobius-77-containerapps-infrastructure"
-    ),
+    "containerAppsInfrastructure": ("rg-solarplexus-mobius-77-containerapps-infrastructure"),
     "target": "rg-solarplexus-mobius-77-staging",
 }
 EXPECTED_SECRET_BINDINGS: Final = (
@@ -256,19 +246,13 @@ def cleanup_runbook_sha256(value: str) -> str:
 
 def operation_overlay_integrity_sha256(value: dict[str, JsonValue]) -> str:
     body = {
-        key: _copy_json(item)
-        for key, item in value.items()
-        if key != "contractIntegritySha256"
+        key: _copy_json(item) for key, item in value.items() if key != "contractIntegritySha256"
     }
     return integrity_sha256(body, OPERATION_OVERLAY_DOMAIN)
 
 
 def authorization_ledger_integrity_sha256(value: dict[str, JsonValue]) -> str:
-    body = {
-        key: _copy_json(item)
-        for key, item in value.items()
-        if key != "ledgerIntegritySha256"
-    }
+    body = {key: _copy_json(item) for key, item in value.items() if key != "ledgerIntegritySha256"}
     return integrity_sha256(body, AUTHORIZATION_LEDGER_DOMAIN)
 
 
@@ -301,7 +285,7 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "cleanupPrincipalFingerprintSha256": (
             "19a9f97779cd2eb9acfdc04797f1fc5339316ee1a424ca79b70661beffa33260"
         ),
-        "deadlineUtc": "2026-08-05T11:00:00Z",
+        "deadlineUtc": "2026-08-05T04:00:00Z",
         "deletionWaitSeconds": 2700,
         "launchGraceSeconds": 1800,
         "publishedContentSha256": cleanup_runbook_sha256(
@@ -344,9 +328,7 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
     for name, relative_id in scope.items():
         if name == "materialization":
             continue
-        if not isinstance(relative_id, str) or not relative_id.startswith(
-            "/resourceGroups/"
-        ):
+        if not isinstance(relative_id, str) or not relative_id.startswith("/resourceGroups/"):
             raise ContractError("managed-binding relative resource scope is invalid")
         if ".." in relative_id or "//" in relative_id or "\\" in relative_id:
             raise ContractError("managed-binding relative resource scope is ambiguous")
@@ -354,9 +336,7 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
             f"/resourceGroups/{resource_group}" in relative_id
             for resource_group in EXPECTED_RESOURCE_GROUPS.values()
         ):
-            raise ContractError(
-                "managed-binding resource scope escapes approved groups"
-            )
+            raise ContractError("managed-binding resource scope escapes approved groups")
 
     provider_registrations = tuple(
         str(item)
@@ -401,9 +381,7 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         if any(left.overlaps(right) for right in children[index + 1 :]):
             raise ContractError("managed-binding subnets overlap")
     resolver_address = ipaddress.ip_address(str(network["dnsResolverInboundAddress"]))
-    resolver_subnet = ipaddress.ip_network(
-        str(network["dnsResolverInboundCidr"]), strict=True
-    )
+    resolver_subnet = ipaddress.ip_network(str(network["dnsResolverInboundCidr"]), strict=True)
     if (
         not isinstance(resolver_address, ipaddress.IPv4Address)
         or not isinstance(resolver_subnet, ipaddress.IPv4Network)
@@ -458,16 +436,10 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "acrDeleteRoleDefinitionId": "c2f4ef07-c644-48eb-af81-4b1b4947fb11",
         "acrPullRoleDefinitionId": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
         "acrPushRoleDefinitionId": "8311e382-0749-4cb8-b61a-304f252e45ec",
-        "acrRepositoryContributorRoleDefinitionId": (
-            "2efddaa5-3f1f-4df3-97df-af3f13818f4c"
-        ),
+        "acrRepositoryContributorRoleDefinitionId": ("2efddaa5-3f1f-4df3-97df-af3f13818f4c"),
         "cleanupContributorRoleDefinitionId": ("b24988ac-6180-42a0-ab88-20f7382dd24c"),
-        "containerAppsNetworkContributorRoleDefinitionId": (
-            "4d97b98b-1d4f-4787-a291-c67834d212e7"
-        ),
-        "keyVaultSecretsOfficerRoleDefinitionId": (
-            "b86a8fe4-44ce-4948-aee5-eccb2c155cd7"
-        ),
+        "containerAppsNetworkContributorRoleDefinitionId": ("4d97b98b-1d4f-4787-a291-c67834d212e7"),
+        "keyVaultSecretsOfficerRoleDefinitionId": ("b86a8fe4-44ce-4948-aee5-eccb2c155cd7"),
         "keyVaultSecretsUserRoleDefinitionId": ("4633458b-17de-408a-b874-0445c86b69e6"),
     }
     for field, expected in expected_role_ids.items():
@@ -482,8 +454,7 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
     if (
         rbac.get("containerAppsInfrastructureRoleScope")
         != "exact-infrastructure-group-or-delegated-subnet"
-        or rbac.get("containerAppsInfrastructureRolePrincipalType")
-        != "ServicePrincipal"
+        or rbac.get("containerAppsInfrastructureRolePrincipalType") != "ServicePrincipal"
     ):
         raise ContractError("Container Apps platform role boundary differs")
     if rbac.get("workloadRegistryRoleScope") != "container-registry-resource":
@@ -539,13 +510,8 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         raise ContractError("managed-binding private ACR source contract differs")
     for relative_path in ("dockerfile", "dockerfileIgnore"):
         candidate = (REPOSITORY_ROOT / str(source[relative_path])).resolve()
-        if (
-            REPOSITORY_ROOT.resolve() not in candidate.parents
-            or not candidate.is_file()
-        ):
-            raise ContractError(
-                "managed-binding private ACR source file is unavailable"
-            )
+        if REPOSITORY_ROOT.resolve() not in candidate.parents or not candidate.is_file():
+            raise ContractError("managed-binding private ACR source file is unavailable")
 
     one_run = _as_object(contract["oneRunPolicy"], "$.oneRunPolicy")
     if one_run != {
@@ -571,10 +537,8 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
     ]:
         raise ContractError("managed-binding failure dispositions differ")
     if (
-        lifecycle.get("preSecretFailureDecision")
-        != "reconcile-resulting-state-and-pause-preserved"
-        or lifecycle.get("rollbackDecision")
-        != "preserve-unless-final-cleanup-authorized"
+        lifecycle.get("preSecretFailureDecision") != "reconcile-resulting-state-and-pause-preserved"
+        or lifecycle.get("rollbackDecision") != "preserve-unless-final-cleanup-authorized"
     ):
         raise ContractError("managed-binding failure decision differs")
     return contract
@@ -619,9 +583,7 @@ def validate_operation_overlay(value: JsonValue) -> dict[str, JsonValue]:
 
     methods = _as_object(overlay["methodDefinitions"], "$.methodDefinitions")
     parsers = _as_object(overlay["parserDefinitions"], "$.parserDefinitions")
-    order = tuple(
-        str(item) for item in _as_array(overlay["operationOrder"], "$.operationOrder")
-    )
+    order = tuple(str(item) for item in _as_array(overlay["operationOrder"], "$.operationOrder"))
     if order != OPERATION_IDS:
         raise ContractError("managed-binding operation order differs")
     operations = _as_array(overlay["operations"], "$.operations")
@@ -639,18 +601,12 @@ def validate_operation_overlay(value: JsonValue) -> dict[str, JsonValue]:
             f"$.operations[{index}].methodDefinitions",
         )
         if any(str(method_id) not in methods for method_id in method_ids):
-            raise ContractError(
-                "managed-binding operation references an unknown method"
-            )
+            raise ContractError("managed-binding operation references an unknown method")
         parser_id = str(operation["parserDefinition"])
         if parser_id not in parsers:
-            raise ContractError(
-                "managed-binding operation references an unknown parser"
-            )
+            raise ContractError("managed-binding operation references an unknown parser")
         if operation.get("cleanupOperation") != "none-read-only":
-            raise ContractError(
-                "read-only prerequisite operation has a mutation cleanup"
-            )
+            raise ContractError("read-only prerequisite operation has a mutation cleanup")
     if tuple(operation_ids) != OPERATION_IDS or len(set(operation_ids)) != 15:
         raise ContractError("managed-binding operation registry differs")
 
@@ -676,10 +632,7 @@ def validate_operation_overlay(value: JsonValue) -> dict[str, JsonValue]:
             not isinstance(state, str) for state in terminal_states
         ):
             raise ContractError("managed-binding terminal states are malformed")
-        if (
-            item["id"] == "pre-secret-provisioning"
-            and "paused-preserved" not in terminal_states
-        ):
+        if item["id"] == "pre-secret-provisioning" and "paused-preserved" not in terminal_states:
             raise ContractError("managed-binding preserved terminal state is missing")
         if item.get("replayDecision") != "deny":
             raise ContractError("managed-binding lifecycle permits replay")
@@ -758,9 +711,7 @@ def build_authorization_ledger(
         "publishedImage": published_image_identity(control_plane_head=repository_head),
         "authorizationSourceHead": AUTHORIZATION_SOURCE_HEAD,
         "historicalMatrixIntegritySha256": HISTORICAL_MATRIX_SHA256,
-        "managedBindingIntegritySha256": managed_binding_integrity_sha256(
-            managed_binding
-        ),
+        "managedBindingIntegritySha256": managed_binding_integrity_sha256(managed_binding),
         "operationOverlayIntegritySha256": overlay["contractIntegritySha256"],
         "accountBinding": {
             "cloud": account["cloud"],
@@ -846,9 +797,7 @@ def validate_authorization_ledger(
 
     managed_binding = load_managed_binding_contract()
     overlay = load_operation_overlay()
-    if ledger["managedBindingIntegritySha256"] != managed_binding_integrity_sha256(
-        managed_binding
-    ):
+    if ledger["managedBindingIntegritySha256"] != managed_binding_integrity_sha256(managed_binding):
         raise ContractError("authorization ledger resource contract binding differs")
     if ledger["operationOverlayIntegritySha256"] != overlay["contractIntegritySha256"]:
         raise ContractError("authorization ledger operation contract binding differs")
@@ -887,9 +836,7 @@ def validate_authorization_ledger(
     issued = _parse_utc(ledger["issuedAtUtc"], "$.issuedAtUtc")
     expires = _parse_utc(ledger["expiresAtUtc"], "$.expiresAtUtc")
     now = now_utc.astimezone(UTC).replace(microsecond=0)
-    if expires <= issued or expires - issued > timedelta(
-        seconds=MAXIMUM_LEDGER_LIFETIME_SECONDS
-    ):
+    if expires <= issued or expires - issued > timedelta(seconds=MAXIMUM_LEDGER_LIFETIME_SECONDS):
         raise ContractError("authorization ledger lifetime differs")
     if now < issued or now >= expires:
         raise ContractError("authorization ledger is not currently valid")
@@ -947,10 +894,7 @@ def claim_operation_receipt(
         now_utc=now_utc,
         expected_repository_head=expected_repository_head,
     )
-    if (
-        operation_id not in OPERATION_IDS
-        and operation_id not in EXPECTED_LIFECYCLE_OPERATIONS
-    ):
+    if operation_id not in OPERATION_IDS and operation_id not in EXPECTED_LIFECYCLE_OPERATIONS:
         raise ContractError("unknown receipt operation")
     resolved_directory = receipt_directory.resolve()
     resolved_repository = REPOSITORY_ROOT.resolve()
@@ -970,9 +914,7 @@ def claim_operation_receipt(
     }
     receipt: dict[str, JsonValue] = {
         **receipt_body,
-        "receiptIntegritySha256": integrity_sha256(
-            receipt_body, AUTHORIZATION_RECEIPT_DOMAIN
-        ),
+        "receiptIntegritySha256": integrity_sha256(receipt_body, AUTHORIZATION_RECEIPT_DOMAIN),
     }
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     try:

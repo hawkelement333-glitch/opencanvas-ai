@@ -1,10 +1,4 @@
-"""Closed, one-run lifecycle executor for the Milestone 7.7 managed binding.
-
-The permanent contract remains deny-all.  This entry point accepts only an
-unexpired integrity-bound ledger, exact operation names, exact resource names,
-and repository-owned templates.  It never accepts or reads provider secret
-values.
-"""
+"""Closed, deny-all one-run lifecycle executor that never reads provider secrets."""
 
 from __future__ import annotations
 
@@ -29,7 +23,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Final, NoReturn, cast
 from urllib.parse import urlsplit
@@ -54,9 +48,7 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     validate_authorization_ledger,
 )
 
-_CANONICAL_LIFECYCLE_MODULE: Final = (
-    "infra.milestone_7_7.scripts.managed_binding_lifecycle"
-)
+_CANONICAL_LIFECYCLE_MODULE: Final = "infra.milestone_7_7.scripts.managed_binding_lifecycle"
 if __name__ == "__main__":
     _existing_lifecycle_module = sys.modules.get(_CANONICAL_LIFECYCLE_MODULE)
     if (
@@ -83,7 +75,7 @@ SCHEDULE: Final = "schedule-mobius77-cleanup"
 STAGING_LOCATION: Final = "southcentralus"
 CLEANUP_LOCATION: Final = "westus"
 REDIS_LOCATION: Final = "australiacentral"
-AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 5, 11, 0, tzinfo=UTC)
+AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 5, 4, 0, tzinfo=UTC)
 MAXIMUM_AUTHORIZED_WINDOW: Final = timedelta(hours=30)
 MINIMUM_CLEANUP_RESERVE: Final = timedelta(minutes=90)
 PROVISIONING_COST_BLOCK_USD_CENTS: Final = 12_000
@@ -109,9 +101,7 @@ API_IMAGE_BUILDER_PREFIX: Final = "mobius77-api-build-"
 API_IMAGE_BUILD_INPUT_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/api-image-build-input/v1\x00"
 )
-PREBUILT_IMAGE_RECORD_DOMAIN: Final = (
-    b"solarplexus-mobius/milestone-7.7/prebuilt-api-image/v1\x00"
-)
+PREBUILT_IMAGE_RECORD_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/prebuilt-api-image/v1\x00"
 PREBUILT_IMAGE_RECORD_VERSION: Final = "mobius.milestone-7.7.prebuilt-api-image.v1"
 DOCKER_PUSH_MAXIMUM_ATTEMPTS: Final = 2
 ACR_TOKEN_RESOURCE: Final = "https://containerregistry.azure.net"
@@ -165,9 +155,7 @@ DEPLOYMENT_STAGES: Final = frozenset(
     }
 )
 PRE_SECRET_PRESERVABLE_STAGE: Final = "pre-secret"
-DISPOSITION_DOMAIN: Final = (
-    b"solarplexus-mobius/milestone-7.7/lifecycle-disposition/v1\x00"
-)
+DISPOSITION_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/lifecycle-disposition/v1\x00"
 CLEANUP_AUTHORIZATION_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/cleanup-authorization/v1\x00"
 )
@@ -177,21 +165,13 @@ OPERATION_ATTRIBUTION_FILE: Final = "managed-binding-operation-attribution.json"
 OPERATION_ATTRIBUTION_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/operation-attribution/v1\x00"
 )
-OPERATION_ID_DOMAIN: Final = (
-    b"solarplexus-mobius/milestone-7.7/protected-operation-id/v1\x00"
-)
-LIFECYCLE_PROCESS_DOMAIN: Final = (
-    b"solarplexus-mobius/milestone-7.7/lifecycle-process/v1\x00"
-)
+OPERATION_ID_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/protected-operation-id/v1\x00"
+LIFECYCLE_PROCESS_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/lifecycle-process/v1\x00"
 OPERATION_ATTRIBUTION_LOCK_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/operation-attribution-lock/v1\x00"
 )
-OPERATION_ATTRIBUTION_LOCK_FILE: Final = (
-    "managed-binding-operation-attribution.lock.json"
-)
-CORRELATION_HASH_DOMAIN: Final = (
-    b"solarplexus-mobius/milestone-7.7/operation-correlation/v1\x00"
-)
+OPERATION_ATTRIBUTION_LOCK_FILE: Final = "managed-binding-operation-attribution.lock.json"
+CORRELATION_HASH_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/operation-correlation/v1\x00"
 PROTECTED_OPERATION_CATALOG: Final = (
     ("pre-secret-provisioning", "key-vault-temporary-authority-creation"),
     ("pre-secret-provisioning", "key-vault-authority-propagation-proof"),
@@ -359,7 +339,7 @@ RECOVERED_CLEANUP_TAG_KEYS: Final = frozenset(
 )
 
 
-class LifecycleDisposition(str, Enum):
+class LifecycleDisposition(StrEnum):
     """Explicit terminal handling for one-run lifecycle execution."""
 
     RUNNING = "RUNNING"
@@ -543,16 +523,10 @@ def _run(
         environment.update(environment_overrides)
     execution_directory = REPOSITORY_ROOT
     if working_directory is not None:
-        execution_directory = _outside_repository(
-            working_directory, "lifecycle-working-directory"
-        )
+        execution_directory = _outside_repository(working_directory, "lifecycle-working-directory")
         if not execution_directory.is_dir():
             _fail("lifecycle-working-directory-invalid")
-    if (
-        attribution is not None
-        and operation_id is not None
-        and attribution_spec is not None
-    ):
+    if attribution is not None and operation_id is not None and attribution_spec is not None:
         attribution.mark_request_attempt_began(
             operation_id,
             cleanup_or_revocation=attribution_spec["cleanupOrRevocation"] is True,
@@ -615,9 +589,7 @@ def _run(
                     status_code=_sanitized_status_code(
                         stdout,
                         stderr,
-                        default="403"
-                        if azure_error_code == "forbidden"
-                        else "not-reported",
+                        default="403" if azure_error_code == "forbidden" else "not-reported",
                     ),
                     azure_error_code=azure_error_code,
                     correlation_hash=_sanitized_correlation_hash(stdout, stderr),
@@ -681,9 +653,7 @@ def _run(
             _finish_process_attribution(
                 attribution,
                 operation_id,
-                status_code=_sanitized_status_code(
-                    stdout, stderr, default="not-reported"
-                ),
+                status_code=_sanitized_status_code(stdout, stderr, default="not-reported"),
                 azure_error_code=_safe_attribution_error(exc),
                 correlation_hash=_sanitized_correlation_hash(stdout, stderr),
                 terminal_disposition="FAILED",
@@ -890,13 +860,10 @@ def _acquire_operation_attribution_lock(
             "schemaVersion",
         }:
             _fail("protected-operation-attribution-lock-invalid")
-        unsigned = {
-            key: value for key, value in observed.items() if key != "integritySha256"
-        }
+        unsigned = {key: value for key, value in observed.items() if key != "integritySha256"}
         owner = observed.get("ownerProcessId")
         if (
-            observed.get("schemaVersion")
-            != "mobius.milestone-7.7.operation-attribution-lock.v1"
+            observed.get("schemaVersion") != "mobius.milestone-7.7.operation-attribution-lock.v1"
             or observed.get("lifecycleProcessId") != lifecycle_process_id
             or not isinstance(owner, int)
             or isinstance(owner, bool)
@@ -917,9 +884,7 @@ def _acquire_operation_attribution_lock(
     _fail("protected-operation-attribution-lock-unavailable")
 
 
-def _release_operation_attribution_lock(
-    path: Path, *, lifecycle_process_id: str
-) -> None:
+def _release_operation_attribution_lock(path: Path, *, lifecycle_process_id: str) -> None:
     observed = _read_state(path)
     if (
         observed.get("lifecycleProcessId") != lifecycle_process_id
@@ -948,9 +913,7 @@ def _safe_attribution_error(error: BaseException) -> str:
     return "failed-closed"
 
 
-def _sanitized_status_code(
-    stdout: bytearray, stderr: bytearray, *, default: str
-) -> str:
+def _sanitized_status_code(stdout: bytearray, stderr: bytearray, *, default: str) -> str:
     for buffer in (stderr, stdout):
         try:
             decoded = bytes(buffer).decode("utf-8", errors="strict")
@@ -1132,9 +1095,7 @@ def _process_attribution_spec(
                 False,
             ),
         }
-        matched_key = next(
-            (key for key in process_map if argv[: len(key)] == key), None
-        )
+        matched_key = next((key for key in process_map if argv[: len(key)] == key), None)
         mapped = process_map.get(matched_key) if matched_key is not None else None
         if mapped is None:
             safe = "-".join(_safe_operation_token(value) for value in argv[:4])
@@ -1214,13 +1175,9 @@ def _process_attribution_spec(
                 False,
             ),
         }
-        docker_matched_key = next(
-            (key for key in docker_map if argv[: len(key)] == key), None
-        )
+        docker_matched_key = next((key for key in docker_map if argv[: len(key)] == key), None)
         docker_mapped = (
-            docker_map.get(docker_matched_key)
-            if docker_matched_key is not None
-            else None
+            docker_map.get(docker_matched_key) if docker_matched_key is not None else None
         )
         if docker_mapped is None:
             safe = "-".join(_safe_operation_token(value) for value in argv[:2])
@@ -1255,8 +1212,7 @@ def _process_attribution_spec(
         _fail("protected-operation-attribution-invalid")
     identity_alias = (
         "ephemeral-acr-publisher"
-        if environment_overrides is not None
-        and "AZURE_CONFIG_DIR" in environment_overrides
+        if environment_overrides is not None and "AZURE_CONFIG_DIR" in environment_overrides
         else "interactive-execution-identity"
     )
     return {
@@ -1265,8 +1221,7 @@ def _process_attribution_spec(
         "serviceClass": service_class,
         "endpointClass": endpoint_class,
         "identityAlias": identity_alias,
-        "expectedAuthorizationResult": expected_authorization
-        or _expected_authorization_result(),
+        "expectedAuthorizationResult": expected_authorization or _expected_authorization_result(),
         "azureMutation": mutation,
         "cleanupOrRevocation": cleanup_or_revocation,
     }
@@ -1392,19 +1347,14 @@ class _OperationAttribution:
             "schemaVersion",
         }:
             _fail("protected-operation-attribution-malformed")
-        unsigned = {
-            key: value for key, value in document.items() if key != "integritySha256"
-        }
+        unsigned = {key: value for key, value in document.items() if key != "integritySha256"}
         if (
-            document.get("schemaVersion")
-            != "mobius.milestone-7.7.operation-attribution.v2"
+            document.get("schemaVersion") != "mobius.milestone-7.7.operation-attribution.v2"
             or document.get("ledgerIntegritySha256") != self.ledger_integrity
             or document.get("repositoryHead") != self.repository_head
             or document.get("lifecycleProcessId") != self.lifecycle_process_id
             or document.get("integritySha256")
-            != hashlib.sha256(
-                OPERATION_ATTRIBUTION_DOMAIN + canonical_bytes(unsigned)
-            ).hexdigest()
+            != hashlib.sha256(OPERATION_ATTRIBUTION_DOMAIN + canonical_bytes(unsigned)).hexdigest()
             or not isinstance(document.get("records"), list)
         ):
             _fail("protected-operation-attribution-binding-invalid")
@@ -1413,11 +1363,7 @@ class _OperationAttribution:
         return document
 
     def _persist(self, *, initial: bool = False) -> None:
-        unsigned = {
-            key: value
-            for key, value in self.document.items()
-            if key != "integritySha256"
-        }
+        unsigned = {key: value for key, value in self.document.items() if key != "integritySha256"}
         self.document["integritySha256"] = hashlib.sha256(
             OPERATION_ATTRIBUTION_DOMAIN + canonical_bytes(unsigned)
         ).hexdigest()
@@ -1467,9 +1413,7 @@ class _OperationAttribution:
                 "retryCount": retry_count,
                 "retryOfOperationId": retry_of_operation_id,
             }
-            record_id = hashlib.sha256(
-                OPERATION_ID_DOMAIN + canonical_bytes(binding)
-            ).hexdigest()
+            record_id = hashlib.sha256(OPERATION_ID_DOMAIN + canonical_bytes(binding)).hexdigest()
             record: dict[str, JsonValue] = {
                 "azureMutationBegan": False,
                 "azureMutationCompleted": False,
@@ -1503,15 +1447,10 @@ class _OperationAttribution:
             self._persist()
             return record_id
 
-    def mark_request_attempt_began(
-        self, operation_id: str, *, cleanup_or_revocation: bool
-    ) -> None:
+    def mark_request_attempt_began(self, operation_id: str, *, cleanup_or_revocation: bool) -> None:
         with self._mutex:
             active = self.document["activeOperation"]
-            if (
-                not isinstance(active, dict)
-                or active.get("operationId") != operation_id
-            ):
+            if not isinstance(active, dict) or active.get("operationId") != operation_id:
                 _fail("protected-operation-attribution-active-operation-mismatch")
             active["requestAttemptBegan"] = True
             active["azureMutationBegan"] = active["azureMutationExpected"] is True
@@ -1525,23 +1464,15 @@ class _OperationAttribution:
     def mark_azure_request_issued(self, operation_id: str) -> None:
         with self._mutex:
             active = self.document["activeOperation"]
-            if (
-                not isinstance(active, dict)
-                or active.get("operationId") != operation_id
-            ):
+            if not isinstance(active, dict) or active.get("operationId") != operation_id:
                 _fail("protected-operation-attribution-active-operation-mismatch")
             active["azureRequestIssued"] = True
             self._persist()
 
-    def mark_local_effect_began(
-        self, operation_id: str, *, cleanup_or_revocation: bool
-    ) -> None:
+    def mark_local_effect_began(self, operation_id: str, *, cleanup_or_revocation: bool) -> None:
         with self._mutex:
             active = self.document["activeOperation"]
-            if (
-                not isinstance(active, dict)
-                or active.get("operationId") != operation_id
-            ):
+            if not isinstance(active, dict) or active.get("operationId") != operation_id:
                 _fail("protected-operation-attribution-active-operation-mismatch")
             active["cleanupOrRevocationRan"] = cleanup_or_revocation
             records = self.document["records"]
@@ -1578,17 +1509,11 @@ class _OperationAttribution:
             and re.fullmatch(r"[a-z0-9-]{1,64}", azure_error_code) is None
         ):
             _fail("protected-operation-attribution-error-invalid")
-        if (
-            correlation_hash is not None
-            and HEX_SHA256.fullmatch(correlation_hash) is None
-        ):
+        if correlation_hash is not None and HEX_SHA256.fullmatch(correlation_hash) is None:
             _fail("protected-operation-attribution-correlation-invalid")
         with self._mutex:
             active = self.document["activeOperation"]
-            if (
-                not isinstance(active, dict)
-                or active.get("operationId") != operation_id
-            ):
+            if not isinstance(active, dict) or active.get("operationId") != operation_id:
                 _fail("protected-operation-attribution-active-operation-mismatch")
             complete = {
                 **active,
@@ -1637,8 +1562,7 @@ class _OperationAttribution:
                 or prior.get("azureRequestIssued") is not False
                 or prior.get("azureMutationBegan") is not False
                 or prior.get("azureMutationCompleted") is not False
-                or prior.get("sanitizedAzureErrorCode")
-                not in LOCAL_PRE_REQUEST_ERROR_CODES
+                or prior.get("sanitizedAzureErrorCode") not in LOCAL_PRE_REQUEST_ERROR_CODES
                 or prior.get("lifecycleProcessId") != self.lifecycle_process_id
                 or prior.get("ledgerIntegritySha256") != self.ledger_integrity
                 or prior.get("repositoryHead") != self.repository_head
@@ -1648,9 +1572,7 @@ class _OperationAttribution:
                 or prior.get("retryCount") != 0
             ):
                 _fail("local-pre-request-retry-not-authorized")
-            return self.start(
-                spec, retry_of_operation_id=failed_operation_id, retry_count=1
-            )
+            return self.start(spec, retry_of_operation_id=failed_operation_id, retry_count=1)
 
 
 @contextmanager
@@ -1676,9 +1598,7 @@ def _operation_attribution_session(
             repository_head=repository_head,
         )
     except BaseException:
-        _release_operation_attribution_lock(
-            lock_path, lifecycle_process_id=lifecycle_process_id
-        )
+        _release_operation_attribution_lock(lock_path, lifecycle_process_id=lifecycle_process_id)
         raise
     token = _ACTIVE_ATTRIBUTION.set(attribution)
     try:
@@ -1691,23 +1611,17 @@ def _operation_attribution_session(
         raise
     finally:
         _ACTIVE_ATTRIBUTION.reset(token)
-        _release_operation_attribution_lock(
-            lock_path, lifecycle_process_id=lifecycle_process_id
-        )
+        _release_operation_attribution_lock(lock_path, lifecycle_process_id=lifecycle_process_id)
 
 
 @contextmanager
-def _attribution_scope(
-    *, lifecycle_substage: str, expected_authorization: str
-) -> Iterator[None]:
+def _attribution_scope(*, lifecycle_substage: str, expected_authorization: str) -> Iterator[None]:
     if re.fullmatch(
         r"[a-z0-9-]{1,96}", lifecycle_substage
     ) is None or expected_authorization not in {"allow", "deny"}:
         _fail("protected-operation-attribution-invalid")
     substage_token = _ATTRIBUTION_SUBSTAGE.set(lifecycle_substage)
-    authorization_token = _ATTRIBUTION_EXPECTED_AUTHORIZATION.set(
-        expected_authorization
-    )
+    authorization_token = _ATTRIBUTION_EXPECTED_AUTHORIZATION.set(expected_authorization)
     try:
         yield
     finally:
@@ -1819,18 +1733,13 @@ def _attributed_failed_stage(receipt_directory: Path) -> str | None:
     }:
         return "protected-attribution-invalid"
     integrity = document.get("integritySha256")
-    unsigned = {
-        key: value for key, value in document.items() if key != "integritySha256"
-    }
+    unsigned = {key: value for key, value in document.items() if key != "integritySha256"}
     if (
         not isinstance(integrity, str)
         or HEX_SHA256.fullmatch(integrity) is None
         or integrity
-        != hashlib.sha256(
-            OPERATION_ATTRIBUTION_DOMAIN + canonical_bytes(unsigned)
-        ).hexdigest()
-        or document.get("schemaVersion")
-        != "mobius.milestone-7.7.operation-attribution.v2"
+        != hashlib.sha256(OPERATION_ATTRIBUTION_DOMAIN + canonical_bytes(unsigned)).hexdigest()
+        or document.get("schemaVersion") != "mobius.milestone-7.7.operation-attribution.v2"
         or not isinstance(document.get("ledgerIntegritySha256"), str)
         or HEX_SHA256.fullmatch(str(document.get("ledgerIntegritySha256"))) is None
         or not isinstance(document.get("lifecycleProcessId"), str)
@@ -1875,8 +1784,7 @@ def _attributed_failed_stage(receipt_directory: Path) -> str | None:
         if (
             not isinstance(stage, str)
             or re.fullmatch(r"[a-z0-9-]{1,96}", stage) is None
-            or value.get("ledgerIntegritySha256")
-            != document.get("ledgerIntegritySha256")
+            or value.get("ledgerIntegritySha256") != document.get("ledgerIntegritySha256")
             or value.get("lifecycleProcessId") != document.get("lifecycleProcessId")
             or value.get("repositoryHead") != document.get("repositoryHead")
         ):
@@ -1946,17 +1854,13 @@ def _write_disposition(
         prior = _read_state(path)
         prior_integrity = prior.get("dispositionIntegritySha256")
         prior_unsigned = {
-            key: value
-            for key, value in prior.items()
-            if key != "dispositionIntegritySha256"
+            key: value for key, value in prior.items() if key != "dispositionIntegritySha256"
         }
         if (
             not isinstance(prior_integrity, str)
             or HEX_SHA256.fullmatch(prior_integrity) is None
             or prior_integrity
-            != hashlib.sha256(
-                DISPOSITION_DOMAIN + canonical_bytes(prior_unsigned)
-            ).hexdigest()
+            != hashlib.sha256(DISPOSITION_DOMAIN + canonical_bytes(prior_unsigned)).hexdigest()
         ):
             _fail("prior-disposition-integrity-invalid")
         archive = receipt_directory / (
@@ -2065,9 +1969,9 @@ def _matches_container_apps_infrastructure_tags(
         if not isinstance(observed_expiry, str):
             return False
         try:
-            normalized_expiry = datetime.strptime(
-                observed_expiry, "%m/%d/%Y %H:%M:%S"
-            ).replace(tzinfo=UTC)
+            normalized_expiry = datetime.strptime(observed_expiry, "%m/%d/%Y %H:%M:%S").replace(
+                tzinfo=UTC
+            )
         except ValueError:
             return False
         if normalized_expiry != cleanup_at.astimezone(UTC).replace(microsecond=0):
@@ -2125,8 +2029,7 @@ def _container_apps_infrastructure_tags_reconcilable(
     if (
         not isinstance(observed, dict)
         or set(observed) != {*expected, managed_environment_key}
-        or str(observed.get(managed_environment_key, "")).casefold()
-        != environment_id.casefold()
+        or str(observed.get(managed_environment_key, "")).casefold() != environment_id.casefold()
     ):
         return False
     variable_keys = {
@@ -2138,14 +2041,11 @@ def _container_apps_infrastructure_tags_reconcilable(
         "mobius-source-commit",
     }
     if any(
-        observed.get(key) != value
-        for key, value in expected.items()
-        if key not in variable_keys
+        observed.get(key) != value for key, value in expected.items() if key not in variable_keys
     ):
         return False
     if any(
-        not isinstance(observed.get(key), str)
-        or HEX_SHA256.fullmatch(str(observed[key])) is None
+        not isinstance(observed.get(key), str) or HEX_SHA256.fullmatch(str(observed[key])) is None
         for key in ("mobius-cleanup-binding-sha256", "mobius-manifest-sha256")
     ):
         return False
@@ -2186,14 +2086,12 @@ def _container_apps_infrastructure_tags_reconcilable(
     if not isinstance(observed_expiry, str):
         return False
     try:
-        parsed_expiry = datetime.strptime(observed_expiry, "%m/%d/%Y %H:%M:%S").replace(
-            tzinfo=UTC
-        )
+        parsed_expiry = datetime.strptime(observed_expiry, "%m/%d/%Y %H:%M:%S").replace(tzinfo=UTC)
     except ValueError:
         try:
-            parsed_expiry = datetime.strptime(
-                observed_expiry, "%Y-%m-%dT%H:%M:%SZ"
-            ).replace(tzinfo=UTC)
+            parsed_expiry = datetime.strptime(observed_expiry, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=UTC
+            )
         except ValueError:
             return False
     return parsed_expiry <= cleanup_at.astimezone(UTC).replace(microsecond=0)
@@ -2243,8 +2141,7 @@ def _reconcile_container_apps_infrastructure_tags(
         or group.get("location") != STAGING_LOCATION
         or not isinstance(observed, dict)
         or set(observed) != set(desired)
-        or str(observed.get(managed_environment_key, "")).casefold()
-        != environment_id.casefold()
+        or str(observed.get(managed_environment_key, "")).casefold() != environment_id.casefold()
     ):
         _fail("container-apps-infrastructure-tag-reconciliation-denied")
     if observed == desired:
@@ -2258,14 +2155,11 @@ def _reconcile_container_apps_infrastructure_tags(
         "mobius-source-commit",
     }
     if any(
-        observed.get(key) != value
-        for key, value in expected.items()
-        if key not in variable_keys
+        observed.get(key) != value for key, value in expected.items() if key not in variable_keys
     ):
         _fail("container-apps-infrastructure-tag-reconciliation-denied")
     if any(
-        not isinstance(observed.get(key), str)
-        or HEX_SHA256.fullmatch(str(observed[key])) is None
+        not isinstance(observed.get(key), str) or HEX_SHA256.fullmatch(str(observed[key])) is None
         for key in ("mobius-cleanup-binding-sha256", "mobius-manifest-sha256")
     ):
         _fail("container-apps-infrastructure-tag-reconciliation-denied")
@@ -2293,14 +2187,12 @@ def _reconcile_container_apps_infrastructure_tags(
     if not isinstance(observed_expiry, str):
         _fail("container-apps-infrastructure-tag-reconciliation-denied")
     try:
-        parsed_expiry = datetime.strptime(observed_expiry, "%m/%d/%Y %H:%M:%S").replace(
-            tzinfo=UTC
-        )
+        parsed_expiry = datetime.strptime(observed_expiry, "%m/%d/%Y %H:%M:%S").replace(tzinfo=UTC)
     except ValueError:
         try:
-            parsed_expiry = datetime.strptime(
-                observed_expiry, "%Y-%m-%dT%H:%M:%SZ"
-            ).replace(tzinfo=UTC)
+            parsed_expiry = datetime.strptime(observed_expiry, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=UTC
+            )
         except ValueError:
             _fail("container-apps-infrastructure-tag-reconciliation-denied")
     if parsed_expiry > cleanup_at.astimezone(UTC).replace(microsecond=0):
@@ -2370,9 +2262,7 @@ def _deploy_stage(
         f"maximumPlausibleUsdCents={maximum_cost}",
         "lifecycleTags="
         + json.dumps(
-            _lifecycle_tags(
-                ledger=ledger, cleanup_at=cleanup_at, maximum_cost=maximum_cost
-            ),
+            _lifecycle_tags(ledger=ledger, cleanup_at=cleanup_at, maximum_cost=maximum_cost),
             separators=(",", ":"),
             sort_keys=True,
         ),
@@ -2592,9 +2482,7 @@ def _verify_cleanup_job_schedule(subscription_id: str) -> None:
         parameters = exact_job_schedule["parameters"]
         if not isinstance(parameters, dict) or len(parameters) != 2:
             _fail("cleanup-job-schedule-not-ready")
-        normalized_parameters = {
-            str(name).casefold(): value for name, value in parameters.items()
-        }
+        normalized_parameters = {str(name).casefold(): value for name, value in parameters.items()}
         if (
             exact_job_schedule["id"] != resource_id
             or exact_job_schedule["jobScheduleId"] != job_schedule_id
@@ -2643,10 +2531,7 @@ def _verify_cleanup_control(subscription_id: str, cleanup_at: datetime) -> str:
     }:
         _fail("cleanup-automation-output-malformed")
     principal_id = account["principalId"]
-    if (
-        not isinstance(principal_id, str)
-        or re.fullmatch(r"[0-9a-fA-F-]{36}", principal_id) is None
-    ):
+    if not isinstance(principal_id, str) or re.fullmatch(r"[0-9a-fA-F-]{36}", principal_id) is None:
         _fail("cleanup-automation-output-malformed")
     if {key: value for key, value in account.items() if key != "principalId"} != {
         "localAuthDisabled": True,
@@ -2684,6 +2569,13 @@ def _verify_cleanup_control(subscription_id: str, cleanup_at: datetime) -> str:
         "state": "Published",
     }:
         _fail("cleanup-runbook-not-ready")
+    runbook_scope = _scope(
+        subscription_id,
+        (
+            f"/resourceGroups/{CLEANUP_GROUP}/providers/Microsoft.Automation/"
+            f"automationAccounts/{AUTOMATION_ACCOUNT}/runbooks/{RUNBOOK}"
+        ),
+    )
     published_content = _run(
         (
             "az",
@@ -2693,7 +2585,7 @@ def _verify_cleanup_control(subscription_id: str, cleanup_at: datetime) -> str:
             "--url",
             (
                 "https://management.azure.com"
-                f"{_scope(subscription_id, f'/resourceGroups/{CLEANUP_GROUP}/providers/Microsoft.Automation/automationAccounts/{AUTOMATION_ACCOUNT}/runbooks/{RUNBOOK}')}/content"
+                f"{runbook_scope}/content"
                 f"?api-version={AUTOMATION_API_VERSION}"
             ),
             "--output",
@@ -2706,8 +2598,7 @@ def _verify_cleanup_control(subscription_id: str, cleanup_at: datetime) -> str:
     cleanup_execution = cast(dict[str, JsonValue], contract["cleanupExecution"])
     if (
         not isinstance(published_content, str)
-        or cleanup_runbook_sha256(published_content)
-        != cleanup_execution["publishedContentSha256"]
+        or cleanup_runbook_sha256(published_content) != cleanup_execution["publishedContentSha256"]
     ):
         _fail("cleanup-runbook-content-drift")
 
@@ -2758,9 +2649,7 @@ def _verify_cleanup_control(subscription_id: str, cleanup_at: datetime) -> str:
     return principal_id
 
 
-def _verify_cleanup_target_role(
-    subscription_id: str, principal_id: str, role_id: str
-) -> None:
+def _verify_cleanup_target_role(subscription_id: str, principal_id: str, role_id: str) -> None:
     if re.fullmatch(r"[0-9a-fA-F-]{36}", role_id) is None:
         _fail("cleanup-role-definition-malformed")
     target_scope = _scope(subscription_id, f"/resourceGroups/{TARGET_GROUP}")
@@ -2976,9 +2865,7 @@ def _resource_group_inventory(
         elif normalized_type == "microsoft.resources/deployments":
             name = relative.rsplit("/", 1)[-1]
             allowed_deployments = (
-                TARGET_DEPLOYMENT_NAMES
-                if group == TARGET_GROUP
-                else CLEANUP_DEPLOYMENT_NAMES
+                TARGET_DEPLOYMENT_NAMES if group == TARGET_GROUP else CLEANUP_DEPLOYMENT_NAMES
             )
             if name not in allowed_deployments:
                 _fail("pre-secret-resource-inventory-drift")
@@ -3043,8 +2930,7 @@ def _exact_scope_role_rows(subscription_id: str, scope: str) -> list[dict[str, s
         role_definition_id = row["roleDefinitionId"]
         observed_scope = row["scope"]
         if not all(
-            isinstance(value, str)
-            for value in (principal_id, role_definition_id, observed_scope)
+            isinstance(value, str) for value in (principal_id, role_definition_id, observed_scope)
         ):
             _fail("pre-secret-role-inventory-malformed")
         assert isinstance(principal_id, str)
@@ -3088,16 +2974,10 @@ def _verify_recovered_cleanup_tags(
         _fail("recovered-cleanup-tags-drift")
     _run_text(("git", "cat-file", "-e", f"{source_commit}^{{commit}}"))
     run_id = tags.get("mobius-run-id")
-    if (
-        not isinstance(run_id, str)
-        or re.fullmatch(r"[A-Za-z0-9._-]{1,128}", run_id) is None
-    ):
+    if not isinstance(run_id, str) or re.fullmatch(r"[A-Za-z0-9._-]{1,128}", run_id) is None:
         _fail("recovered-cleanup-tags-drift")
     cleanup_at = tags.get("mobius-expires-at-utc")
-    if (
-        not isinstance(cleanup_at, str)
-        or re.fullmatch(r"[0-9T:Z+./ -]{1,64}", cleanup_at) is None
-    ):
+    if not isinstance(cleanup_at, str) or re.fullmatch(r"[0-9T:Z+./ -]{1,64}", cleanup_at) is None:
         _fail("recovered-cleanup-tags-drift")
     cost_ceiling = tags.get("mobius-cost-ceiling-usd-cents")
     if (
@@ -3246,10 +3126,7 @@ def _managed_identity_principal(subscription_id: str, identity_name: str) -> str
     if not isinstance(value, dict) or set(value) != {"principalId"}:
         _fail("pre-secret-workload-identity-malformed")
     principal_id = value["principalId"]
-    if (
-        not isinstance(principal_id, str)
-        or re.fullmatch(r"[0-9a-fA-F-]{36}", principal_id) is None
-    ):
+    if not isinstance(principal_id, str) or re.fullmatch(r"[0-9a-fA-F-]{36}", principal_id) is None:
         _fail("pre-secret-workload-identity-malformed")
     return principal_id
 
@@ -3265,7 +3142,9 @@ def _verify_pre_secret_role_inventory(
     if not isinstance(rbac, dict):
         _fail("managed-binding-contract-malformed")
     target_scope = _scope(subscription_id, f"/resourceGroups/{TARGET_GROUP}")
-    role_prefix = f"/subscriptions/{subscription_id}/providers/Microsoft.Authorization/roleDefinitions/"
+    role_prefix = (
+        f"/subscriptions/{subscription_id}/providers/Microsoft.Authorization/roleDefinitions/"
+    )
     target_expected = {
         "principalId": cleanup_principal_id.casefold(),
         "roleDefinitionId": (
@@ -3278,8 +3157,7 @@ def _verify_pre_secret_role_inventory(
 
     cleanup_scope = _scope(subscription_id, f"/resourceGroups/{CLEANUP_GROUP}")
     account_scope = (
-        f"{cleanup_scope}/providers/Microsoft.Automation/automationAccounts/"
-        f"{AUTOMATION_ACCOUNT}"
+        f"{cleanup_scope}/providers/Microsoft.Automation/automationAccounts/{AUTOMATION_ACCOUNT}"
     )
     if _exact_scope_role_rows(subscription_id, cleanup_scope) or _exact_scope_role_rows(
         subscription_id, account_scope
@@ -3517,10 +3395,7 @@ def _verify_pre_secret_security(
         )
         if registry != {"admin": False, "anonymous": False, "public": "Disabled"}:
             _fail("pre-secret-registry-security-drift")
-    if (
-        "microsoft.operationalinsights/workspaces/law-mobius77-staging"
-        in target_resources
-    ):
+    if "microsoft.operationalinsights/workspaces/law-mobius77-staging" in target_resources:
         workspace = _verify_resource_projection(
             subscription_id,
             resource_type="Microsoft.OperationalInsights/workspaces",
@@ -3564,11 +3439,7 @@ def _verify_no_related_group_drift(subscription_id: str) -> None:
         _fail("pre-secret-related-group-inventory-malformed")
     observed: set[str] = set()
     for row in rows:
-        if (
-            not isinstance(row, dict)
-            or set(row) != {"name"}
-            or not isinstance(row["name"], str)
-        ):
+        if not isinstance(row, dict) or set(row) != {"name"} or not isinstance(row["name"], str):
             _fail("pre-secret-related-group-inventory-malformed")
         observed.add(row["name"])
     if not observed.issubset({TARGET_GROUP, CLEANUP_GROUP, INFRASTRUCTURE_GROUP}):
@@ -3723,8 +3594,7 @@ def _verify_container_apps_infrastructure(
             not isinstance(assignment, dict)
             or set(assignment) != {"principalType", "roleDefinitionId", "scope"}
             or assignment.get("principalType") != "ServicePrincipal"
-            or str(assignment.get("roleDefinitionId", "")).casefold()
-            != network_contributor
+            or str(assignment.get("roleDefinitionId", "")).casefold() != network_contributor
             or str(assignment.get("scope", "")).casefold() not in allowed_scopes
         ):
             _fail("container-apps-infrastructure-role-drift")
@@ -3843,10 +3713,7 @@ def _signed_in_user_object_id() -> str:
     if not isinstance(value, dict) or set(value) != {"objectId"}:
         _fail("signed-in-user-output-malformed")
     object_id = value["objectId"]
-    if (
-        not isinstance(object_id, str)
-        or re.fullmatch(r"[0-9a-fA-F-]{36}", object_id) is None
-    ):
+    if not isinstance(object_id, str) or re.fullmatch(r"[0-9a-fA-F-]{36}", object_id) is None:
         _fail("signed-in-user-output-malformed")
     return object_id
 
@@ -3907,9 +3774,7 @@ def _temporary_role_assignment(
     if not isinstance(created, dict) or set(created) != {"id"}:
         _fail("temporary-role-assignment-output-malformed")
     assignment_id = created["id"]
-    if not isinstance(assignment_id, str) or not assignment_id.startswith(
-        "/subscriptions/"
-    ):
+    if not isinstance(assignment_id, str) or not assignment_id.startswith("/subscriptions/"):
         _fail("temporary-role-assignment-output-malformed")
     if not assignment_id.casefold().startswith(
         f"{scope}/providers/microsoft.authorization/roleassignments/".casefold()
@@ -4053,9 +3918,7 @@ def _revoke_temporary_key_vault_authority(
     assignment_id = state.get("temporaryKeyVaultAssignmentId")
     if assignment_id is None:
         return False
-    if not isinstance(assignment_id, str) or not assignment_id.startswith(
-        "/subscriptions/"
-    ):
+    if not isinstance(assignment_id, str) or not assignment_id.startswith("/subscriptions/"):
         _fail("temporary-key-vault-authority-state-invalid")
     _mark_stage(state_path, state, "temporary-key-vault-authority-revocation")
     with _attribution_scope(
@@ -4145,9 +4008,7 @@ def _ensure_temporary_key_vault_authority(
     _replace_state(state_path, state)
 
 
-def _publisher_role_rows(
-    *, subscription_id: str, publisher_app_id: str
-) -> list[dict[str, str]]:
+def _publisher_role_rows(*, subscription_id: str, publisher_app_id: str) -> list[dict[str, str]]:
     rows = _run(
         (
             "az",
@@ -4291,9 +4152,7 @@ def _temporary_publisher_role_assignment(
     if not isinstance(created, dict) or set(created) != {"id"}:
         _fail("publisher-role-assignment-output-malformed")
     assignment_id = created["id"]
-    if not isinstance(assignment_id, str) or not assignment_id.startswith(
-        "/subscriptions/"
-    ):
+    if not isinstance(assignment_id, str) or not assignment_id.startswith("/subscriptions/"):
         _fail("publisher-role-assignment-output-malformed")
     _wait_for_publisher_role_inventory(
         subscription_id=subscription_id,
@@ -4378,10 +4237,7 @@ def _create_ephemeral_publisher(
     identity_prefix: str = "mobius77-acr-publisher",
 ) -> tuple[str, str, str, Path]:
     ledger_integrity = ledger.get("ledgerIntegritySha256")
-    if (
-        not isinstance(ledger_integrity, str)
-        or HEX_SHA256.fullmatch(ledger_integrity) is None
-    ):
+    if not isinstance(ledger_integrity, str) or HEX_SHA256.fullmatch(ledger_integrity) is None:
         _fail("publisher-ledger-binding-invalid")
     if identity_prefix not in {
         "mobius77-acr-publisher",
@@ -4534,9 +4390,7 @@ def _validate_token_time(claims: Mapping[str, JsonValue]) -> None:
         raise PublisherOAuthTransient("publisher-token-not-yet-valid")
 
 
-def _validate_entra_token(
-    token: bytearray, *, publisher_app_id: str, tenant_id: str
-) -> None:
+def _validate_entra_token(token: bytearray, *, publisher_app_id: str, tenant_id: str) -> None:
     claims = _jwt_claims(token)
     try:
         _validate_token_time(claims)
@@ -4578,9 +4432,7 @@ def _publisher_entra_token(
         actual = _resolve_authorized_process_launch(argv).argv
         publisher_environment = _publisher_environment(environment_overrides)
         if attribution is not None and operation_id is not None:
-            attribution.mark_request_attempt_began(
-                operation_id, cleanup_or_revocation=False
-            )
+            attribution.mark_request_attempt_began(operation_id, cleanup_or_revocation=False)
         completed = subprocess.run(
             actual,
             cwd=REPOSITORY_ROOT,
@@ -4638,9 +4490,7 @@ def _publisher_entra_token(
                 status_code=_sanitized_status_code(
                     stdout,
                     stderr,
-                    default="403"
-                    if azure_error_code == "forbidden"
-                    else "not-reported",
+                    default="403" if azure_error_code == "forbidden" else "not-reported",
                 ),
                 azure_error_code=azure_error_code,
                 correlation_hash=_sanitized_correlation_hash(stdout, stderr),
@@ -4653,9 +4503,7 @@ def _publisher_entra_token(
         token.extend(stdout)
         if TOKEN_BYTES.fullmatch(token) is None or bytes(token) in stderr:
             _fail("publisher-entra-token-output-malformed")
-        _validate_entra_token(
-            token, publisher_app_id=publisher_app_id, tenant_id=tenant_id
-        )
+        _validate_entra_token(token, publisher_app_id=publisher_app_id, tenant_id=tenant_id)
         _finish_process_attribution(
             attribution,
             operation_id,
@@ -4672,9 +4520,7 @@ def _publisher_entra_token(
             _finish_process_attribution(
                 attribution,
                 operation_id,
-                status_code=_sanitized_status_code(
-                    stdout, stderr, default="not-reported"
-                ),
+                status_code=_sanitized_status_code(stdout, stderr, default="not-reported"),
                 azure_error_code=_safe_attribution_error(exc),
                 correlation_hash=_sanitized_correlation_hash(stdout, stderr),
                 terminal_disposition="FAILED",
@@ -4794,11 +4640,7 @@ def _private_registry_request(
     correlation_hash: str | None = None
     observed_status = "not-reported"
     try:
-        if (
-            attribution is not None
-            and operation_id is not None
-            and attribution_spec is not None
-        ):
+        if attribution is not None and operation_id is not None and attribution_spec is not None:
             attribution.mark_request_attempt_began(
                 operation_id,
                 cleanup_or_revocation=attribution_spec["cleanupOrRevocation"] is True,
@@ -4826,9 +4668,7 @@ def _private_registry_request(
             retained_headers["www-authenticate"] = challenge
         correlation = response.getheader("x-ms-correlation-request-id")
         correlation_hash = (
-            hashlib.sha256(
-                CORRELATION_HASH_DOMAIN + correlation.encode("ascii")
-            ).hexdigest()
+            hashlib.sha256(CORRELATION_HASH_DOMAIN + correlation.encode("ascii")).hexdigest()
             if correlation is not None
             and re.fullmatch(r"[0-9a-fA-F-]{36}", correlation) is not None
             else None
@@ -4852,17 +4692,13 @@ def _private_registry_request(
             media_type = retained_headers.get("content-type", "").split(";", 1)[0]
             if media_type.casefold() != "application/json":
                 _fail("publisher-oauth-response-content-type-invalid")
-            token_key = (
-                "refresh_token" if path == "/oauth2/exchange" else "access_token"
-            )
+            token_key = "refresh_token" if path == "/oauth2/exchange" else "access_token"
             allowed_keys = (
                 frozenset({"refresh_token"})
                 if path == "/oauth2/exchange"
                 else frozenset({"access_token", "expires_in", "issued_at"})
             )
-            probe = _oauth_secret(
-                response_body, key=token_key, allowed_keys=allowed_keys
-            )
+            probe = _oauth_secret(response_body, key=token_key, allowed_keys=allowed_keys)
             probe.clear()
         if (method, path) == ("GET", "/v2/"):
             response_succeeded = expected_denial
@@ -4895,9 +4731,7 @@ def _private_registry_request(
         )
         attribution_finished = True
         if path in {"/v2/", "/oauth2/exchange", "/oauth2/token"}:
-            raise PublisherOAuthTransient(
-                "publisher-private-registry-request-timed-out"
-            )
+            raise PublisherOAuthTransient("publisher-private-registry-request-timed-out") from exc
         _fail("publisher-private-registry-request-timed-out")
     except KeyboardInterrupt as exc:
         response_body.clear()
@@ -4974,9 +4808,7 @@ def _challenge_service(header: str) -> str:
     ):
         _fail("publisher-registry-challenge-malformed")
     parameters: dict[str, str] = {}
-    for parameter in re.finditer(
-        r'([A-Za-z][A-Za-z0-9_-]*)="([^"\r\n]+)"', raw_parameters
-    ):
+    for parameter in re.finditer(r'([A-Za-z][A-Za-z0-9_-]*)="([^"\r\n]+)"', raw_parameters):
         normalized = parameter.group(1).casefold()
         if normalized in parameters:
             _fail("publisher-registry-challenge-malformed")
@@ -5010,9 +4842,7 @@ def _registry_bearer_challenge() -> str:
             lifecycle_substage="private-acr-bearer-challenge",
             expected_authorization="deny",
         ):
-            status, retained_headers, body = _private_registry_request(
-                "GET", "/v2/", headers={}
-            )
+            status, retained_headers, body = _private_registry_request("GET", "/v2/", headers={})
         if status != 401:
             _fail("publisher-registry-challenge-status-invalid")
         challenge = retained_headers.pop("www-authenticate", None)
@@ -5057,9 +4887,7 @@ def _publisher_refresh_token(
         if status in {401, 403} and expected_authorization == "deny":
             return None
         if status in {401, 403} and propagation_verification:
-            raise PublisherAccessPending(
-                f"publisher-oauth-exchange-propagation-http-{status}"
-            )
+            raise PublisherAccessPending(f"publisher-oauth-exchange-propagation-http-{status}")
         if status in {429, *range(500, 600)}:
             raise PublisherOAuthTransient(f"publisher-oauth-exchange-http-{status}")
         if status != 200:
@@ -5122,9 +4950,7 @@ def _publisher_repository_token(
     response = bytearray()
     try:
         expected_authorization = _expected_authorization_result()
-        propagation_verification = (
-            _ATTRIBUTION_SUBSTAGE.get() == "acrpush-propagation-verification"
-        )
+        propagation_verification = _ATTRIBUTION_SUBSTAGE.get() == "acrpush-propagation-verification"
         with _attribution_scope(
             lifecycle_substage="repository-scoped-acr-token-request",
             expected_authorization=expected_authorization,
@@ -5138,9 +4964,7 @@ def _publisher_repository_token(
         if status in {401, 403} and expected_authorization == "deny":
             return None
         if status in {401, 403} and propagation_verification:
-            raise PublisherAccessPending(
-                f"publisher-oauth-token-propagation-http-{status}"
-            )
+            raise PublisherAccessPending(f"publisher-oauth-token-propagation-http-{status}")
         if status in {429, *range(500, 600)}:
             raise PublisherOAuthTransient(f"publisher-oauth-token-http-{status}")
         if status != 200:
@@ -5302,9 +5126,7 @@ def _wait_for_publisher_denial(
         time.sleep(min(10.0, remaining))
 
 
-def _delete_ephemeral_publisher(
-    *, publisher_app_id: str, publisher_object_id: str
-) -> None:
+def _delete_ephemeral_publisher(*, publisher_app_id: str, publisher_object_id: str) -> None:
     _run(
         (
             "az",
@@ -5484,11 +5306,7 @@ def _denial_probe(
                 if not resolved.is_dir():
                     _fail("lifecycle-environment-override-unapproved")
             environment.update(environment_overrides)
-        if (
-            attribution is not None
-            and operation_id is not None
-            and attribution_spec is not None
-        ):
+        if attribution is not None and operation_id is not None and attribution_spec is not None:
             attribution.mark_request_attempt_began(
                 operation_id,
                 cleanup_or_revocation=attribution_spec["cleanupOrRevocation"] is True,
@@ -5577,9 +5395,7 @@ def _denial_probe(
             _finish_process_attribution(
                 attribution,
                 operation_id,
-                status_code=_sanitized_status_code(
-                    stdout, stderr, default="not-reported"
-                ),
+                status_code=_sanitized_status_code(stdout, stderr, default="not-reported"),
                 azure_error_code=_safe_attribution_error(exc),
                 correlation_hash=_sanitized_correlation_hash(stdout, stderr),
                 terminal_disposition="FAILED",
@@ -5630,9 +5446,7 @@ def _pre_secret(
         "disposition": LifecycleDisposition.RUNNING.value,
         "failedStage": None,
         "lastCompletedStage": None,
-        "preSecretDeploymentName": _deployment_name(
-            PRE_SECRET_PRESERVABLE_STAGE, ledger
-        ),
+        "preSecretDeploymentName": _deployment_name(PRE_SECRET_PRESERVABLE_STAGE, ledger),
         "repositoryHead": str(ledger["repositoryHead"]),
         "resumableCheckpoint": PRE_SECRET_PRESERVABLE_STAGE,
         "secretValueAccessed": False,
@@ -5706,9 +5520,7 @@ def _pre_secret(
 
             _mark_stage(state_path, state, "cleanup-control-verification")
             cleanup_principal_id = _verify_cleanup_control(subscription_id, cleanup_at)
-            _mark_stage(
-                state_path, state, "cleanup-control-verification", completed=True
-            )
+            _mark_stage(state_path, state, "cleanup-control-verification", completed=True)
 
             _mark_stage(state_path, state, "cleanup-binding")
             _deploy_stage(
@@ -5791,9 +5603,7 @@ def _private_tls_endpoint(hostname: str) -> None:
         )
     except socket.gaierror:
         _fail("private-endpoint-dns-unavailable")
-    addresses = {
-        str(item[4][0]) for item in resolved if isinstance(item[4], tuple) and item[4]
-    }
+    addresses = {str(item[4][0]) for item in resolved if isinstance(item[4], tuple) and item[4]}
     if not addresses:
         _fail("private-endpoint-dns-unavailable")
     try:
@@ -5895,9 +5705,7 @@ def _private_path(subscription_id: str) -> dict[str, JsonValue]:
     }
 
 
-def _verify_publication_path_before_claim(
-    *, operation: str, repository_head: str
-) -> None:
+def _verify_publication_path_before_claim(*, operation: str, repository_head: str) -> None:
     if operation in {
         "pre-secret-provisioning",
         "private-path-verification",
@@ -5925,9 +5733,7 @@ def _docker_login_with_refresh_token(
         publisher_environment = _publisher_environment(environment)
         docker_executable = _resolved_executable("docker")
         if attribution is not None and operation_id is not None:
-            attribution.mark_request_attempt_began(
-                operation_id, cleanup_or_revocation=False
-            )
+            attribution.mark_request_attempt_began(operation_id, cleanup_or_revocation=False)
         completed = subprocess.run(
             (
                 docker_executable,
@@ -6002,9 +5808,7 @@ def _docker_login_with_refresh_token(
             _finish_process_attribution(
                 attribution,
                 operation_id,
-                status_code=_sanitized_status_code(
-                    stdout, stderr, default="not-reported"
-                ),
+                status_code=_sanitized_status_code(stdout, stderr, default="not-reported"),
                 azure_error_code=_safe_attribution_error(exc),
                 correlation_hash=_sanitized_correlation_hash(stdout, stderr),
                 terminal_disposition="FAILED",
@@ -6029,8 +5833,7 @@ def _registry_authorization(access_token: bytearray) -> str:
 
 def _acr_manifest_digest(access_token: bytearray, *, reference: str) -> str | None:
     if not (
-        re.fullmatch(r"source-[0-9a-f]{40}", reference)
-        or RAW_IMAGE_DIGEST.fullmatch(reference)
+        re.fullmatch(r"source-[0-9a-f]{40}", reference) or RAW_IMAGE_DIGEST.fullmatch(reference)
     ):
         _fail("registry-manifest-reference-invalid")
     body = bytearray()
@@ -6064,15 +5867,10 @@ def _assert_source_tag_absent(*, source_tag: str, access_token: bytearray) -> No
         _fail("registry-source-tag-already-present")
 
 
-def _prebuild_api_image(
-    *, repository_head: str, record_path: Path
-) -> dict[str, JsonValue]:
+def _prebuild_api_image(*, repository_head: str, record_path: Path) -> dict[str, JsonValue]:
     from infra.milestone_7_7 import api_image_publication
 
-    if (
-        api_image_publication._LIFECYCLE_MODULE_IDENTITY
-        is not _LIFECYCLE_MODULE_IDENTITY
-    ):
+    if api_image_publication._LIFECYCLE_MODULE_IDENTITY is not _LIFECYCLE_MODULE_IDENTITY:
         _fail("api-image-publication-module-state-mismatch")
     return api_image_publication._prebuild_api_image(
         repository_head=repository_head, record_path=record_path
@@ -6088,10 +5886,7 @@ def _publish_api_image(
 ) -> str:
     from infra.milestone_7_7 import api_image_publication
 
-    if (
-        api_image_publication._LIFECYCLE_MODULE_IDENTITY
-        is not _LIFECYCLE_MODULE_IDENTITY
-    ):
+    if api_image_publication._LIFECYCLE_MODULE_IDENTITY is not _LIFECYCLE_MODULE_IDENTITY:
         _fail("api-image-publication-module-state-mismatch")
     return api_image_publication._publish_api_image(
         ledger=ledger,
@@ -6153,12 +5948,7 @@ def _container_app_revision_ready(subscription_id: str, app_name: str) -> None:
         latest = value["latest"]
         ready = value["ready"]
         state = value["state"]
-        if (
-            state == "Succeeded"
-            and isinstance(latest, str)
-            and latest
-            and ready == latest
-        ):
+        if state == "Succeeded" and isinstance(latest, str) and latest and ready == latest:
             revision = _run(
                 (
                     "az",
@@ -6321,9 +6111,7 @@ def _post_secret(
     cleanup_at_raw = state.get("cleanupAtUtc")
     if not isinstance(cleanup_at_raw, str):
         _fail("cleanup-binding-missing")
-    cleanup_at = datetime.strptime(cleanup_at_raw, "%Y-%m-%dT%H:%M:%SZ").replace(
-        tzinfo=UTC
-    )
+    cleanup_at = datetime.strptime(cleanup_at_raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
     if _utc_now() >= cleanup_at - timedelta(minutes=90):
         _fail("cleanup-reserve-active")
     required_secret_names = (
@@ -6520,11 +6308,7 @@ def _validate_cleanup_authorization(
     integrity = value.get("authorizationIntegritySha256")
     if not isinstance(integrity, str) or HEX_SHA256.fullmatch(integrity) is None:
         _fail("cleanup-authorization-malformed")
-    unsigned = {
-        key: item
-        for key, item in value.items()
-        if key != "authorizationIntegritySha256"
-    }
+    unsigned = {key: item for key, item in value.items() if key != "authorizationIntegritySha256"}
     expected_integrity = hashlib.sha256(
         CLEANUP_AUTHORIZATION_DOMAIN + canonical_bytes(unsigned)
     ).hexdigest()
@@ -6536,9 +6320,7 @@ def _validate_cleanup_authorization(
         _fail("cleanup-authorization-time-malformed")
     try:
         issued = datetime.strptime(issued_raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
-        expires = datetime.strptime(expires_raw, "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=UTC
-        )
+        expires = datetime.strptime(expires_raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
     except ValueError:
         _fail("cleanup-authorization-time-malformed")
     now = _utc_now()
@@ -6553,8 +6335,7 @@ def _validate_cleanup_authorization(
         value.get("schemaVersion") != "mobius.milestone-7.7.cleanup-authorization.v1"
         or value.get("authorizationId") != ledger.get("authorizationId")
         or value.get("repositoryHead") != ledger.get("repositoryHead")
-        or value.get("resourceGroups")
-        != [TARGET_GROUP, CLEANUP_GROUP, INFRASTRUCTURE_GROUP]
+        or value.get("resourceGroups") != [TARGET_GROUP, CLEANUP_GROUP, INFRASTRUCTURE_GROUP]
     ):
         _fail("cleanup-authorization-scope-mismatch")
     evidence_sha = value.get("authorizationEvidenceSha256")
@@ -6700,11 +6481,7 @@ def _zero_residue(subscription_id: str) -> dict[str, JsonValue]:
 
 
 def _sanitized_failure(error: BaseException) -> tuple[str, str | None]:
-    azure_code = (
-        error.sanitized_azure_error_code
-        if isinstance(error, AzureCommandError)
-        else None
-    )
+    azure_code = error.sanitized_azure_error_code if isinstance(error, AzureCommandError) else None
     candidate = str(error)
     if re.fullmatch(r"[a-z0-9-]+", candidate) is None:
         candidate = "managed-binding-lifecycle-failed-closed"
@@ -6726,9 +6503,7 @@ def _state_for_pre_secret_preservation(
     if not isinstance(cleanup_at_raw, str):
         _fail("pre-secret-state-malformed")
     try:
-        cleanup_at = datetime.strptime(cleanup_at_raw, "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=UTC
-        )
+        cleanup_at = datetime.strptime(cleanup_at_raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
     except ValueError:
         _fail("pre-secret-state-malformed")
     if (
@@ -7076,9 +6851,7 @@ def main() -> int:
     try:
         if HEX_SHA40.fullmatch(args.repository_head) is None:
             _fail("repository-head-invalid")
-        receipt_directory = _outside_repository(
-            args.receipt_directory, "receipt-directory"
-        )
+        receipt_directory = _outside_repository(args.receipt_directory, "receipt-directory")
         receipt_directory.mkdir(parents=True, exist_ok=True)
         ledger = validate_authorization_ledger(
             load_json(_outside_repository(args.ledger, "ledger")),

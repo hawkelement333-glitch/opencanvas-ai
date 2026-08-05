@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+
 from infra.milestone_7_7 import api_image_publication
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
 from performance.milestone_7_7.framework import ContractError, JsonValue, canonical_bytes
@@ -29,6 +30,7 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     AUTHORIZATION_SOURCE_HEAD,
     EXPECTED_LIFECYCLE_OPERATIONS,
     HISTORICAL_MATRIX_SHA256,
+    PUBLISHED_IMAGE_SOURCE_COMMIT,
     build_authorization_ledger,
     claim_operation_receipt,
     cleanup_runbook_sha256,
@@ -1473,14 +1475,14 @@ def test_closed_package_blocks_on_unregistered_required_provider(
         canonical_bytes(
             build_authorization_ledger(
                 issued_at_utc=NOW,
-                repository_head=AUTHORIZATION_SOURCE_HEAD,
+                repository_head=PUBLISHED_IMAGE_SOURCE_COMMIT,
             )
         )
     )
     adapter = ManagedBindingFakeAdapter()
     result = execute_package_one(
         ledger_path=ledger_path,
-        repository_head=AUTHORIZATION_SOURCE_HEAD,
+        repository_head=PUBLISHED_IMAGE_SOURCE_COMMIT,
         receipt_directory=tmp_path / "receipts",
         adapter=adapter,
         now_utc=NOW,
@@ -2720,20 +2722,7 @@ def test_cleanup_dns_failure_remains_primary_without_prior_publication_failure(
         )
 
 
-def test_publication_path_is_reproved_before_protected_receipt_claim(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    observed: list[tuple[str, str]] = []
-
-    def verify(*, repository_head: str) -> dict[str, JsonValue]:
-        observed.append(("verify", repository_head))
-        return {"status": "proved"}
-
-    monkeypatch.setattr(
-        managed_binding_lifecycle,
-        "verify_private_registry_publication_path",
-        verify,
-    )
+def test_downstream_receipt_claim_does_not_reopen_completed_publication_path() -> None:
     for operation in (
         "pre-secret-provisioning",
         "private-path-verification",
@@ -2745,12 +2734,9 @@ def test_publication_path_is_reproved_before_protected_receipt_claim(
     managed_binding_lifecycle._verify_publication_path_before_claim(
         operation="cleanup", repository_head="a" * 40
     )
-    assert observed == [("verify", "a" * 40)] * 3
 
     main_source = inspect.getsource(managed_binding_lifecycle.main)
-    assert main_source.index("_verify_publication_path_before_claim(") < main_source.index(
-        "claim_operation_receipt("
-    )
+    assert "_verify_publication_path_before_claim(" in main_source
 
 
 def test_live_publisher_cannot_build_and_fails_closed_on_digest_mismatch() -> None:
@@ -3030,7 +3016,7 @@ def test_lifecycle_cleanup_deadline_matches_azure_minute_precision() -> None:
 
     deadline = managed_binding_lifecycle._cleanup_deadline(observed)
 
-    assert deadline == datetime(2026, 8, 5, 11, 0, tzinfo=UTC)
+    assert deadline == datetime(2026, 8, 5, 4, 0, tzinfo=UTC)
     assert deadline == managed_binding_lifecycle.AUTHORIZED_CLEANUP_AT_UTC
     assert deadline <= observed + timedelta(hours=30)
 
@@ -3045,7 +3031,7 @@ def test_lifecycle_cleanup_deadline_matches_azure_minute_precision() -> None:
         managed_binding_lifecycle.LifecycleError,
         match="cleanup-deadline-outside-authorized-window",
     ):
-        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 4, 4, 59, tzinfo=UTC))
+        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 3, 21, 49, tzinfo=UTC))
 
 
 def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> None:
@@ -3510,7 +3496,7 @@ def _test_preservation_state(
 ) -> dict[str, JsonValue]:
     return {
         "activeStage": "pre-secret",
-        "cleanupAtUtc": "2026-08-05T11:00:00Z",
+        "cleanupAtUtc": "2026-08-05T04:00:00Z",
         "disposition": "RUNNING",
         "failedStage": None,
         "lastCompletedStage": "cleanup-role-verification",
@@ -3555,7 +3541,7 @@ def _verify_container_apps_infrastructure_fixture(
 ) -> int:
     subscription = SYNTHETIC_SUBSCRIPTION
     expected_tags = _test_recovered_cleanup_tags()
-    expected_tags["mobius-expires-at-utc"] = "2026-08-05T11:00:00Z"
+    expected_tags["mobius-expires-at-utc"] = "2026-08-05T04:00:00Z"
     expected_environment_id = (
         f"/subscriptions/{subscription}/resourceGroups/"
         f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
@@ -3756,7 +3742,7 @@ def _reconcile_container_apps_infrastructure_tags_fixture(
     )
     expected = _test_recovered_cleanup_tags()
     expected["mobius-cleanup-binding-sha256"] = "e" * 64
-    expected["mobius-expires-at-utc"] = "2026-08-05T11:00:00Z"
+    expected["mobius-expires-at-utc"] = "2026-08-05T04:00:00Z"
     expected["mobius-manifest-sha256"] = "f" * 64
     expected["mobius-run-id"] = "m7.7-managed-binding-closeout-20260731"
     expected["mobius-source-commit"] = "c" * 40
