@@ -1088,7 +1088,7 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
             "b86a8fe4-44ce-4948-aee5-eccb2c155cd7",
             "c2f4ef07-c644-48eb-af81-4b1b4947fb11",
             "c632b3df-fb67-4d84-bdcf-b95ad541b5c8",
-            "0b4e1b73-5b8f-59be-b5f6-2bd01696523d",
+                "b74c6cfe-995e-5107-9e42-4f7f76b76742",
             "158cac88-5679-5804-9f4d-854520bbb635",
         },
         "manifests/managed-binding.schema.json": {

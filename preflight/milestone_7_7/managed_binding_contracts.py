@@ -68,7 +68,7 @@ AUTOMATION_BINDING_NAMESPACE: Final = UUID("11fb06fb-712d-4ddd-98c7-e71bbd588830
 CLEANUP_BINDING_CONTRACT_VERSION: Final = "m7.7-automation-cleanup-binding-v2"
 CLEANUP_BINDING_GENERATION: Final = 2
 TOMBSTONED_CLEANUP_BINDING_ID: Final = "158cac88-5679-5804-9f4d-854520bbb635"
-ACTIVE_CLEANUP_BINDING_ID: Final = "0b4e1b73-5b8f-59be-b5f6-2bd01696523d"
+ACTIVE_CLEANUP_BINDING_ID: Final = "b74c6cfe-995e-5107-9e42-4f7f76b76742"
 CLEANUP_BINDING_TOMBSTONE_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/automation-cleanup-binding-tombstone/v1\0"
 )
@@ -348,7 +348,10 @@ def cleanup_binding_id_for_subscription(
         automation_account_id=account,
         runbook_resource_id=f"{account}/runbooks/Remove-Mobius77Staging",
         schedule_resource_id=f"{account}/schedules/schedule-mobius77-cleanup",
-        target_resource_group_id=f"{root}/rg-solarplexus-mobius-77-staging",
+        target_resource_group_id=(
+            f"{root}/rg-solarplexus-mobius-77-cleanup-control/providers/"
+            "Microsoft.Resources/resourceGroups/rg-solarplexus-mobius-77-staging"
+        ),
         cleanup_authorized=True,
     )
 

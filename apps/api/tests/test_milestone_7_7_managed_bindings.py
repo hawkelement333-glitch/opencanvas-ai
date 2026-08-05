@@ -3137,6 +3137,20 @@ def test_cleanup_binding_generation_two_is_stable_distinct_and_normalized() -> N
     source = inspect.getsource(managed_binding_contracts.deterministic_cleanup_binding_id)
     assert "uuid4" not in source
     assert "datetime" not in source
+    assert managed_binding_contracts.cleanup_binding_id_for_subscription(
+        "synthetic"
+    ) == managed_binding_contracts.deterministic_cleanup_binding_id(
+        generation=2,
+        automation_account_id=account,
+        runbook_resource_id=f"{account}/runbooks/Remove-Mobius77Staging",
+        schedule_resource_id=f"{account}/schedules/schedule-mobius77-cleanup",
+        target_resource_group_id=(
+            "/subscriptions/synthetic/resourceGroups/"
+            "rg-solarplexus-mobius-77-cleanup-control/providers/"
+            "Microsoft.Resources/resourceGroups/rg-solarplexus-mobius-77-staging"
+        ),
+        cleanup_authorized=True,
+    )
 
 
 @pytest.mark.parametrize(

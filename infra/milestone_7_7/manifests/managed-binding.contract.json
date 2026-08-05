@@ -67,7 +67,7 @@
   "cleanupExecution": {
     "bindingContractVersion": "m7.7-automation-cleanup-binding-v2",
     "bindingGeneration": 2,
-    "activeBindingId": "0b4e1b73-5b8f-59be-b5f6-2bd01696523d",
+    "activeBindingId": "b74c6cfe-995e-5107-9e42-4f7f76b76742",
     "tombstonedBindingIds": [
       {
         "bindingContractVersion": "m7.7-automation-cleanup-binding-v1",
