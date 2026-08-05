@@ -173,6 +173,8 @@
   "rbac": {
     "acrPullRoleDefinitionId": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
     "acrPushRoleDefinitionId": "8311e382-0749-4cb8-b61a-304f252e45ec",
+    "acrDeleteRoleDefinitionId": "c2f4ef07-c644-48eb-af81-4b1b4947fb11",
+    "acrRepositoryContributorRoleDefinitionId": "2efddaa5-3f1f-4df3-97df-af3f13818f4c",
     "keyVaultSecretsUserRoleDefinitionId": "4633458b-17de-408a-b874-0445c86b69e6",
     "keyVaultSecretsOfficerRoleDefinitionId": "b86a8fe4-44ce-4948-aee5-eccb2c155cd7",
     "cleanupContributorRoleDefinitionId": "b24988ac-6180-42a0-ab88-20f7382dd24c",
@@ -186,7 +188,9 @@
     "temporaryOperatorAssignmentRequired": true,
     "temporaryOperatorAssignmentRemovedAfterEntry": true,
     "temporaryRegistryOperatorRoleScope": "container-registry-resource",
-    "temporaryRegistryOperatorAssignmentRemovedAfterPublish": true
+    "temporaryRegistryOperatorAssignmentRemovedAfterPublish": true,
+    "temporaryRegistryDeleteRoleScope": "container-registry-resource-or-exact-repository-abac-condition",
+    "temporaryRegistryDeleteAssignmentRemovedAfterUntag": true
   },
   "vpn": {
     "gatewaySku": "VpnGw1AZ",
@@ -217,6 +221,18 @@
     "buildTool": "docker-buildx",
     "pushPath": "local-docker-over-p2s-vpn-to-private-acr",
     "registryAuthentication": "entra-current-user-temporary-acr-push",
+    "uploadRepositoryScope": "repository:opencanvas-api:pull,push",
+    "finalizationRepositoryScope": "repository:opencanvas-api:pull,delete",
+    "classicFinalizerRoles": "AcrPull+AcrDelete",
+    "abacFinalizerRole": "Container Registry Repository Contributor",
+    "abacRepositoryCondition": "StringEqualsIgnoreCase:opencanvas-api",
+    "catalogPermissionAllowed": false,
+    "deleteAuthorityTiming": "after-independent-digest-match-only",
+    "finalizationIdentity": "separate-ephemeral-certificate-finalizer",
+    "finalizationOperation": "exact-source-tag-untag-only",
+    "manifestDeleteAllowed": false,
+    "repositoryDeleteAllowed": false,
+    "controlPlaneAndImageSourceCommitSeparated": true,
     "workloadPullAuthentication": "user-assigned-managed-identity-acr-pull",
     "publicRegistryAccess": false,
     "mutableTagsAllowed": false,

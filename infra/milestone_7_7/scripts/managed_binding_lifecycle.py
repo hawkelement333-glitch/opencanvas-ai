@@ -4355,7 +4355,10 @@ def _wait_for_ephemeral_publisher_principal(app_id: str) -> str:
 
 
 def _create_ephemeral_publisher(
-    *, ledger: dict[str, JsonValue], publisher_directory: Path
+    *,
+    ledger: dict[str, JsonValue],
+    publisher_directory: Path,
+    identity_prefix: str = "mobius77-acr-publisher",
 ) -> tuple[str, str, str, Path]:
     ledger_integrity = ledger.get("ledgerIntegritySha256")
     if (
@@ -4363,7 +4366,12 @@ def _create_ephemeral_publisher(
         or HEX_SHA256.fullmatch(ledger_integrity) is None
     ):
         _fail("publisher-ledger-binding-invalid")
-    display_name = f"mobius77-acr-publisher-{ledger_integrity[:12]}"
+    if identity_prefix not in {
+        "mobius77-acr-publisher",
+        "mobius77-acr-finalizer",
+    }:
+        _fail("publisher-identity-prefix-invalid")
+    display_name = f"{identity_prefix}-{ledger_integrity[:12]}"
     management_azure_config = _management_azure_config_directory()
     created = _run(
         (
@@ -4700,8 +4708,19 @@ def _validate_registry_request(method: str, path: str) -> None:
         r"\?api-version=2021-07-01",
         path,
     )
-    if (method == "HEAD" and manifest is not None) or (
-        method == "DELETE" and tag is not None
+    tag_inventory = re.fullmatch(
+        r"/acr/v1/opencanvas-api/_tags\?api-version=2021-07-01",
+        path,
+    )
+    blob = re.fullmatch(
+        r"/v2/opencanvas-api/blobs/sha256:[0-9a-f]{64}",
+        path,
+    )
+    if (
+        (method in {"GET", "HEAD"} and manifest is not None)
+        or (method == "GET" and blob is not None)
+        or (method == "GET" and tag_inventory is not None)
+        or (method == "DELETE" and tag is not None)
     ):
         return
     _fail("publisher-registry-request-scope-invalid")

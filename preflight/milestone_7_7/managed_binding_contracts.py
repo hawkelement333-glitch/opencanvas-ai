@@ -420,8 +420,12 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
 
     rbac = _as_object(contract["rbac"], "$.rbac")
     expected_role_ids = {
+        "acrDeleteRoleDefinitionId": "c2f4ef07-c644-48eb-af81-4b1b4947fb11",
         "acrPullRoleDefinitionId": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
         "acrPushRoleDefinitionId": "8311e382-0749-4cb8-b61a-304f252e45ec",
+        "acrRepositoryContributorRoleDefinitionId": (
+            "2efddaa5-3f1f-4df3-97df-af3f13818f4c"
+        ),
         "cleanupContributorRoleDefinitionId": ("b24988ac-6180-42a0-ab88-20f7382dd24c"),
         "containerAppsNetworkContributorRoleDefinitionId": (
             "4d97b98b-1d4f-4787-a291-c67834d212e7"
@@ -455,6 +459,12 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         raise ContractError("temporary operator revocation is not mandatory")
     if rbac.get("temporaryRegistryOperatorAssignmentRemovedAfterPublish") is not True:
         raise ContractError("temporary registry operator revocation is not mandatory")
+    if (
+        rbac.get("temporaryRegistryDeleteRoleScope")
+        != "container-registry-resource-or-exact-repository-abac-condition"
+        or rbac.get("temporaryRegistryDeleteAssignmentRemovedAfterUntag") is not True
+    ):
+        raise ContractError("temporary registry delete boundary differs")
 
     source = _as_object(contract["privateAcrSource"], "$.privateAcrSource")
     expected_source: dict[str, JsonValue] = {
@@ -466,6 +476,18 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "buildTool": "docker-buildx",
         "pushPath": "local-docker-over-p2s-vpn-to-private-acr",
         "registryAuthentication": "entra-current-user-temporary-acr-push",
+        "uploadRepositoryScope": "repository:opencanvas-api:pull,push",
+        "finalizationRepositoryScope": "repository:opencanvas-api:pull,delete",
+        "classicFinalizerRoles": "AcrPull+AcrDelete",
+        "abacFinalizerRole": "Container Registry Repository Contributor",
+        "abacRepositoryCondition": "StringEqualsIgnoreCase:opencanvas-api",
+        "catalogPermissionAllowed": False,
+        "deleteAuthorityTiming": "after-independent-digest-match-only",
+        "finalizationIdentity": "separate-ephemeral-certificate-finalizer",
+        "finalizationOperation": "exact-source-tag-untag-only",
+        "manifestDeleteAllowed": False,
+        "repositoryDeleteAllowed": False,
+        "controlPlaneAndImageSourceCommitSeparated": True,
         "workloadPullAuthentication": "user-assigned-managed-identity-acr-pull",
         "publicRegistryAccess": False,
         "mutableTagsAllowed": False,

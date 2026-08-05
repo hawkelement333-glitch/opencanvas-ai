@@ -1056,12 +1056,14 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
     user_path = re.compile(r"(?i)(?:[A-Z]:\\U" r"sers\\|/U" r"sers/|/ho" r"me/)")
     public_guids = {
         "manifests/managed-binding.contract.json": {
+            "2efddaa5-3f1f-4df3-97df-af3f13818f4c",
             "4d97b98b-1d4f-4787-a291-c67834d212e7",
             "4633458b-17de-408a-b874-0445c86b69e6",
             "7f951dda-4ed3-4680-a7ca-43fe172d538d",
             "8311e382-0749-4cb8-b61a-304f252e45ec",
             "b24988ac-6180-42a0-ab88-20f7382dd24c",
             "b86a8fe4-44ce-4948-aee5-eccb2c155cd7",
+            "c2f4ef07-c644-48eb-af81-4b1b4947fb11",
             "c632b3df-fb67-4d84-bdcf-b95ad541b5c8",
         },
         "manifests/managed-binding.schema.json": {"b24988ac-6180-42a0-ab88-20f7382dd24c"},
@@ -1070,6 +1072,11 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
         "modules/network.bicep": {"c632b3df-fb67-4d84-bdcf-b95ad541b5c8"},
         "modules/registry.bicep": {"7f951dda-4ed3-4680-a7ca-43fe172d538d"},
         "modules/storage-scanner.bicep": {"ba92f5b4-2d11-453d-a403-e96b0029c9fe"},
+        "acr_tag_finalization.py": {
+            "2efddaa5-3f1f-4df3-97df-af3f13818f4c",
+            "7f951dda-4ed3-4680-a7ca-43fe172d538d",
+            "c2f4ef07-c644-48eb-af81-4b1b4947fb11",
+        },
         "scripts/managed_binding_lifecycle.py": {
             "00000000-0000-0000-0000-000000000000",
             "4d97b98b-1d4f-4787-a291-c67834d212e7",
