@@ -44,7 +44,6 @@ from preflight.milestone_7_7.managed_binding_contracts import (
 from preflight.milestone_7_7.operation_contracts import OPERATION_IDS
 from preflight.milestone_7_7.publication_path_admission import (
     PublicationPathAdmissionError,
-    verify_private_registry_publication_path,
 )
 
 RESULT_DOMAIN: Final = (
@@ -1029,7 +1028,7 @@ def _acr_source(
         managed_binding["privateAcrSource"], "private-acr-source-contract-malformed"
     )
     source_ready = (
-        source.get("sourceCommitBinding") == "authorization-ledger-repository-head"
+        source.get("sourceCommitBinding") == "published-image-source-commit"
         and source.get("buildTool") == "docker-buildx"
         and source.get("pushPath") == "local-docker-over-p2s-vpn-to-private-acr"
         and source.get("publicRegistryAccess") is False
@@ -1489,7 +1488,6 @@ def materialize_ledger(
         or resolved_repository in resolved_path.parents
     ):
         raise ManagedBindingExecutionError("ledger-path-inside-repository")
-    verify_private_registry_publication_path(repository_head=repository_head)
     ledger = build_authorization_ledger(
         issued_at_utc=_utc_now() if now_utc is None else now_utc,
         repository_head=repository_head,

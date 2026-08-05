@@ -53,9 +53,6 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     load_managed_binding_contract,
     validate_authorization_ledger,
 )
-from preflight.milestone_7_7.publication_path_admission import (
-    verify_private_registry_publication_path,
-)
 
 _CANONICAL_LIFECYCLE_MODULE: Final = (
     "infra.milestone_7_7.scripts.managed_binding_lifecycle"
@@ -5906,7 +5903,9 @@ def _verify_publication_path_before_claim(
         "private-path-verification",
         "post-secret-provisioning",
     }:
-        verify_private_registry_publication_path(repository_head=repository_head)
+        # The downstream ledger has already bound an immutable published image.
+        # Mutable source tags and local Docker state are intentionally not reused.
+        del repository_head
 
 
 def _docker_login_with_refresh_token(
@@ -6107,26 +6106,20 @@ def _reconcile_published_api_image(
     ledger: dict[str, JsonValue],
     subscription_id: str,
     receipt_directory: Path,
-    prebuilt_image_record: Path,
 ) -> str:
-    repository_head = str(ledger["repositoryHead"])
-    if HEX_SHA40.fullmatch(repository_head) is None:
-        _fail("repository-head-invalid")
-    _run(
-        (
-            "git",
-            "merge-base",
-            "--is-ancestor",
-            RECOVERABLE_API_IMAGE_SOURCE_COMMIT,
-            repository_head,
-        )
-    )
-    return _publish_api_image(
-        ledger=ledger,
-        subscription_id=subscription_id,
-        receipt_directory=receipt_directory,
-        prebuilt_image_record=prebuilt_image_record,
-    )
+    del subscription_id, receipt_directory
+    published = ledger.get("publishedImage")
+    if not isinstance(published, dict):
+        _fail("published-image-ledger-binding-missing")
+    digest = published.get("registryManifestDigest")
+    repository = published.get("repository")
+    if (
+        repository != PUBLISHER_REPOSITORY
+        or not isinstance(digest, str)
+        or RAW_IMAGE_DIGEST.fullmatch(digest) is None
+    ):
+        _fail("published-image-ledger-binding-invalid")
+    return f"{REGISTRY_HOST}/{PUBLISHER_REPOSITORY}@{digest}"
 
 
 def _container_app_revision_ready(subscription_id: str, app_name: str) -> None:
@@ -6322,7 +6315,6 @@ def _post_secret(
     ledger: dict[str, JsonValue],
     subscription_id: str,
     receipt_directory: Path,
-    prebuilt_image_record: Path,
 ) -> dict[str, JsonValue]:
     state_path = _state_path(receipt_directory)
     state = _read_current_transient_state(state_path, ledger=ledger)
@@ -6372,7 +6364,6 @@ def _post_secret(
         ledger=ledger,
         subscription_id=subscription_id,
         receipt_directory=receipt_directory,
-        prebuilt_image_record=prebuilt_image_record,
     )
     with tempfile.TemporaryDirectory(prefix="mobius77-binding-") as directory:
         template = Path(directory) / "main.json"
@@ -7064,14 +7055,7 @@ def main() -> int:
         args.operation is None
         or args.ledger is None
         or args.receipt_directory is None
-        or (
-            args.operation == "post-secret-provisioning"
-            and args.prebuilt_image_record is None
-        )
-        or (
-            args.operation != "post-secret-provisioning"
-            and args.prebuilt_image_record is not None
-        )
+        or args.prebuilt_image_record is not None
     ):
         print(
             json.dumps(
@@ -7128,12 +7112,10 @@ def main() -> int:
             elif operation == "private-path-verification":
                 result = _private_path(subscription_id)
             elif operation == "post-secret-provisioning":
-                assert args.prebuilt_image_record is not None
                 result = _post_secret(
                     ledger=ledger,
                     subscription_id=subscription_id,
                     receipt_directory=receipt_directory,
-                    prebuilt_image_record=args.prebuilt_image_record,
                 )
             elif operation == "temporary-authority-revocation":
                 result = _revoke(subscription_id, receipt_directory)

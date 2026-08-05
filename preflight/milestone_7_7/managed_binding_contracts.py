@@ -13,6 +13,7 @@ import hashlib
 import ipaddress
 import os
 import re
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
@@ -72,6 +73,40 @@ MAXIMUM_CONTRACT_BYTES: Final = 524_288
 HEX_SHA40 = re.compile(r"^[0-9a-f]{40}$")
 HEX_SHA64 = re.compile(r"^[0-9a-f]{64}$")
 RFC3339_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+PUBLISHED_IMAGE_SOURCE_COMMIT: Final = "948e81b5bf34f5c2f5069ee40568beb09cb997d3"
+PUBLISHED_IMAGE_BUILD_INPUT_SHA256: Final = (
+    "16758013417d703a9ebe661511ff1fc305653372286909cdbbc6e9c29a6e613c"
+)
+PUBLISHED_REGISTRY_MANIFEST_DIGEST: Final = (
+    "sha256:6aceb88fbf4564c621d8553e461b2e496ec543b48d1a59080958d937eddec99c"
+)
+PUBLISHED_IMAGE_CONFIG_DIGEST: Final = (
+    "sha256:c43be0285f3399d893d796397f9895a552f8504e61ce61dfac3ba95dd64d2b41"
+)
+PUBLISHED_IMAGE_LOCAL_ID: Final = PUBLISHED_REGISTRY_MANIFEST_DIGEST
+PUBLISHED_IMAGE_PLATFORM: Final = "linux/amd64"
+PUBLISHED_IMAGE_REPOSITORY: Final = "opencanvas-api"
+PUBLISHED_PUBLICATION_EVIDENCE_SHA256: Final = (
+    "9e9f93b9e6587b7bd8c2814e424ddbc177e1d4f42d59cde1321ad3872f9c2ef1"
+)
+PUBLISHED_REVOCATION_EVIDENCE_SHA256: Final = (
+    "c634ff8e4f45888d05318682838ebe7c629211a74287ff38c8c7240a676139f6"
+)
+API_IMAGE_BUILD_INPUTS: Final = (
+    "apps/api/Dockerfile",
+    "apps/api/Dockerfile.dockerignore",
+    "apps/api/pyproject.toml",
+    "apps/api/build-requirements.lock",
+    "apps/api/requirements.lock",
+    "apps/api/opencanvas_api",
+    "apps/api/alembic.ini",
+    "apps/api/alembic",
+    "apps/api/scripts",
+    "LICENSE",
+    "COPYRIGHT",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES.md",
+)
 
 EXPECTED_RESOURCE_GROUPS: Final = {
     "cleanupControl": "rg-solarplexus-mobius-77-cleanup-control",
@@ -472,7 +507,7 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "dockerfile": "apps/api/Dockerfile",
         "dockerfileIgnore": "apps/api/Dockerfile.dockerignore",
         "imageRepository": "opencanvas-api",
-        "sourceCommitBinding": "authorization-ledger-repository-head",
+        "sourceCommitBinding": "published-image-source-commit",
         "buildTool": "docker-buildx",
         "pushPath": "local-docker-over-p2s-vpn-to-private-acr",
         "registryAuthentication": "entra-current-user-temporary-acr-push",
@@ -491,7 +526,7 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "workloadPullAuthentication": "user-assigned-managed-identity-acr-pull",
         "publicRegistryAccess": False,
         "mutableTagsAllowed": False,
-        "temporarySourceTagPattern": ("source-{authorization-ledger-repository-head}"),
+        "temporarySourceTagPattern": ("source-{published-image-source-commit}"),
         "temporarySourceTagPreexistenceDecision": "deny",
         "temporarySourceTagRemovedAfterDigestResolution": True,
         "deploymentReference": "digest-only",
@@ -659,6 +694,46 @@ def load_operation_overlay() -> dict[str, JsonValue]:
     return validate_operation_overlay(load_json(OVERLAY_PATH))
 
 
+def published_image_identity(*, control_plane_head: str) -> dict[str, JsonValue]:
+    """Bind a proved immutable image independently from orchestration HEAD."""
+
+    if HEX_SHA40.fullmatch(control_plane_head) is None:
+        raise ContractError("published image control plane HEAD is invalid")
+    completed = subprocess.run(
+        (
+            "git",
+            "diff",
+            "--quiet",
+            PUBLISHED_IMAGE_SOURCE_COMMIT,
+            control_plane_head,
+            "--",
+            *API_IMAGE_BUILD_INPUTS,
+        ),
+        cwd=REPOSITORY_ROOT,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        shell=False,
+        timeout=30,
+    )
+    if completed.returncode == 1:
+        raise ContractError("published image build inputs changed")
+    if completed.returncode != 0:
+        raise ContractError("published image input comparison failed")
+    return {
+        "controlPlaneHead": control_plane_head,
+        "imageSourceCommit": PUBLISHED_IMAGE_SOURCE_COMMIT,
+        "imageBuildInputSha256": PUBLISHED_IMAGE_BUILD_INPUT_SHA256,
+        "registryManifestDigest": PUBLISHED_REGISTRY_MANIFEST_DIGEST,
+        "imageConfigDigest": PUBLISHED_IMAGE_CONFIG_DIGEST,
+        "localImageId": PUBLISHED_IMAGE_LOCAL_ID,
+        "platform": PUBLISHED_IMAGE_PLATFORM,
+        "repository": PUBLISHED_IMAGE_REPOSITORY,
+        "publicationEvidenceIntegritySha256": PUBLISHED_PUBLICATION_EVIDENCE_SHA256,
+        "publisherRevocationEvidenceIntegritySha256": PUBLISHED_REVOCATION_EVIDENCE_SHA256,
+    }
+
+
 def build_authorization_ledger(
     *,
     issued_at_utc: datetime,
@@ -680,6 +755,7 @@ def build_authorization_ledger(
         "issuedAtUtc": _format_utc(issued),
         "expiresAtUtc": _format_utc(expires),
         "repositoryHead": repository_head,
+        "publishedImage": published_image_identity(control_plane_head=repository_head),
         "authorizationSourceHead": AUTHORIZATION_SOURCE_HEAD,
         "historicalMatrixIntegritySha256": HISTORICAL_MATRIX_SHA256,
         "managedBindingIntegritySha256": managed_binding_integrity_sha256(
@@ -745,6 +821,7 @@ def validate_authorization_ledger(
         "managedBindingIntegritySha256",
         "operationOrder",
         "operationOverlayIntegritySha256",
+        "publishedImage",
         "repositoryHead",
         "resourceGroups",
     }
@@ -756,6 +833,10 @@ def validate_authorization_ledger(
         raise ContractError("authorization ledger identity differs")
     if ledger["repositoryHead"] != expected_repository_head:
         raise ContractError("authorization ledger repository binding differs")
+    if ledger["publishedImage"] != published_image_identity(
+        control_plane_head=expected_repository_head
+    ):
+        raise ContractError("authorization ledger published image binding differs")
     if ledger["authorizationSourceHead"] != AUTHORIZATION_SOURCE_HEAD:
         raise ContractError("authorization ledger source binding differs")
     if ledger["historicalMatrixIntegritySha256"] != HISTORICAL_MATRIX_SHA256:

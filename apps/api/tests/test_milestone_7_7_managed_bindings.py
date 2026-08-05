@@ -280,7 +280,7 @@ def test_redis_sku_change_fails_closed() -> None:
 
 
 def test_one_run_ledger_expires_and_receipts_reject_replay(tmp_path: Path) -> None:
-    head = "a" * 40
+    head = "d632516d74ff7cfc65de75e0507c09157f1f2577"
     ledger = build_authorization_ledger(
         issued_at_utc=NOW,
         repository_head=head,
@@ -2932,7 +2932,7 @@ def test_denial_probe_requires_remote_authorization_denial(
         managed_binding_lifecycle._denial_probe(probe)
 
 
-def test_image_reconciliation_always_delegates_to_isolated_publisher(
+def test_image_reconciliation_uses_ledger_bound_immutable_digest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2943,75 +2943,47 @@ def test_image_reconciliation_always_delegates_to_isolated_publisher(
         calls.append(argv)
 
     monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
-    prebuilt_record = tmp_path / "prebuilt-image.json"
-    published_calls: list[tuple[dict[str, JsonValue], str, Path, Path]] = []
-    monkeypatch.setattr(
-        managed_binding_lifecycle,
-        "_publish_api_image",
-        lambda *, ledger, subscription_id, receipt_directory, prebuilt_image_record: (
-            published_calls.append(
-                (ledger, subscription_id, receipt_directory, prebuilt_image_record)
-            )
-            or published
-        ),
-    )
-    ledger: dict[str, JsonValue] = {"repositoryHead": AUTHORIZATION_SOURCE_HEAD}
+    ledger: dict[str, JsonValue] = {
+        "publishedImage": {
+            "repository": "opencanvas-api",
+            "registryManifestDigest": "sha256:" + "a" * 64,
+        }
+    }
 
     result = managed_binding_lifecycle._reconcile_published_api_image(
         ledger=ledger,
         subscription_id="opaque-subscription",
         receipt_directory=tmp_path,
-        prebuilt_image_record=prebuilt_record,
     )
 
     assert result == published
-    assert calls[0][0:3] == ("git", "merge-base", "--is-ancestor")
-    assert published_calls == [(ledger, "opaque-subscription", tmp_path, prebuilt_record)]
+    assert calls == []
 
 
-def test_changed_api_image_inputs_publish_new_immutable_image(
+def test_image_reconciliation_rejects_missing_immutable_ledger_binding(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    published = f"{managed_binding_lifecycle.REGISTRY_HOST}/opencanvas-api@sha256:" + "b" * 64
-    monkeypatch.setattr(managed_binding_lifecycle, "_run", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        managed_binding_lifecycle,
-        "_run_text",
-        lambda _argv: "apps/api/opencanvas_api/main.py",
-    )
-    prebuilt_record = tmp_path / "prebuilt-image.json"
-    calls: list[tuple[dict[str, JsonValue], str, Path, Path]] = []
-    monkeypatch.setattr(
-        managed_binding_lifecycle,
-        "_publish_api_image",
-        lambda *, ledger, subscription_id, receipt_directory, prebuilt_image_record: (
-            calls.append((ledger, subscription_id, receipt_directory, prebuilt_image_record))
-            or published
-        ),
-    )
-
+    del monkeypatch
     ledger: dict[str, JsonValue] = {"repositoryHead": AUTHORIZATION_SOURCE_HEAD}
-    assert (
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="published-image-ledger-binding-missing",
+    ):
         managed_binding_lifecycle._reconcile_published_api_image(
             ledger=ledger,
             subscription_id="opaque-subscription",
             receipt_directory=tmp_path,
-            prebuilt_image_record=prebuilt_record,
         )
-        == published
-    )
-    assert calls == [(ledger, "opaque-subscription", tmp_path, prebuilt_record)]
 
 
 def test_image_reconciliation_has_no_owner_acr_data_plane_path() -> None:
     reconcile = inspect.getsource(managed_binding_lifecycle._reconcile_published_api_image)
 
-    assert "_publish_api_image(" in reconcile
+    assert "_publish_api_image(" not in reconcile
     assert '"acr"' not in reconcile
-    assert '"repository"' not in reconcile
-    assert '"show-tags"' not in reconcile
-    assert '"digest"' not in reconcile
+    assert "_run(" not in reconcile
+    assert "_private_registry_request(" not in reconcile
     assert "_signed_in_user_object_id" not in reconcile
 
 
