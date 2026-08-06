@@ -48,7 +48,13 @@ BRIDGE_PROVENANCE: Final = "defender-blob-tags-plus-storage-malware-scanning-res
 _ACCOUNT_NAME = re.compile(r"^[a-z0-9]{3,24}$")
 _AZURE_ETAG = re.compile(r"^0x[0-9A-Fa-f]+$")
 _BLOB_RESULTS = frozenset({"No threats found", "Malicious", "Error", "Not scanned"})
-_LOG_RESULTS = frozenset({"No Threat Found", "Malicious", "Error", "Not Scanned"})
+_LOG_RESULT_NORMALIZATIONS: Final = {
+    "No Threat Found": "No threats found",
+    "No threats found": "No threats found",
+    "Malicious": "Malicious",
+    "Error": "Error",
+    "Not Scanned": "Not Scanned",
+}
 
 BridgeVerdict = Literal["clean", "infected"]
 AddressResolver = Callable[[str], Awaitable[tuple[str, ...]]]
@@ -355,8 +361,8 @@ class AzureLogAnalyticsScanEvidenceClient:
             ):
                 raise ScannerBridgeEvidenceError("scanner-log-query-response-invalid")
             values = dict(zip(names, row, strict=True))
-            result = values["ScanResultType"]
-            if result not in _LOG_RESULTS or not values["CorrelationId"]:
+            result = _LOG_RESULT_NORMALIZATIONS.get(values["ScanResultType"])
+            if result is None or not values["CorrelationId"]:
                 raise ScannerBridgeEvidenceError("scanner-log-query-response-invalid")
             finished = _parse_utc(values["ScanFinishedTimeUtc"])
             generated = _parse_utc(values["TimeGenerated"])
@@ -406,9 +412,13 @@ def correlate_scan_evidence(
     ):
         return None
     verdict: BridgeVerdict
-    if (blob.scan_result, first.scan_result) == ("No threats found", "No Threat Found"):
+    normalized_log_result = _LOG_RESULT_NORMALIZATIONS.get(first.scan_result)
+    if (blob.scan_result, normalized_log_result) == (
+        "No threats found",
+        "No threats found",
+    ):
         verdict = "clean"
-    elif (blob.scan_result, first.scan_result) == ("Malicious", "Malicious"):
+    elif (blob.scan_result, normalized_log_result) == ("Malicious", "Malicious"):
         verdict = "infected"
     else:
         return None

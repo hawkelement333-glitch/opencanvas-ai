@@ -695,13 +695,65 @@ class AzureBlobVersionedObjectStorage:
         physical_key: str,
         provider_version_id: str,
     ) -> None:
+        exact = await self._request(
+            "HEAD",
+            physical_key,
+            query={"versionid": provider_version_id},
+        )
+        if exact.headers.get("x-ms-version-id") != provider_version_id:
+            raise DocumentStorageError("The exact Azure object version is unavailable.")
+        etag = exact.headers.get("etag")
+        if not etag:
+            raise DocumentStorageError("The exact Azure object version ETag is unavailable.")
+        current = await self._request(
+            "HEAD",
+            physical_key,
+            accepted_statuses=frozenset({404}),
+        )
+        if current.status_code != 404:
+            if (
+                current.headers.get("x-ms-version-id") != provider_version_id
+                or current.headers.get("etag") != etag
+            ):
+                raise DocumentStorageError("A different Azure object version is current.")
+            await self._request(
+                "DELETE",
+                physical_key,
+                extra_headers={"If-Match": etag},
+            )
+            demoted = await self._request(
+                "HEAD",
+                physical_key,
+                accepted_statuses=frozenset({404}),
+            )
+            if demoted.status_code != 404:
+                raise DocumentStorageError(
+                    "The exact Azure object version was not demoted as required."
+                )
+            exact = await self._request(
+                "HEAD",
+                physical_key,
+                query={"versionid": provider_version_id},
+                extra_headers={"If-Match": etag},
+            )
+            if (
+                exact.headers.get("x-ms-version-id") != provider_version_id
+                or exact.headers.get("etag") != etag
+            ):
+                raise DocumentStorageError("The demoted Azure object version identity changed.")
         response = await self._request(
             "DELETE",
             physical_key,
             query={"versionid": provider_version_id},
+            extra_headers={"If-Match": etag},
         )
         if response.headers.get("x-ms-delete-type-permanent") != "false":
             raise DocumentStorageError("The Azure object version was not soft-deleted as required.")
+        if await self.version_exists(
+            physical_key=physical_key,
+            provider_version_id=provider_version_id,
+        ):
+            raise DocumentStorageError("The Azure object version soft deletion is unproved.")
 
     async def permanently_delete_version(
         self,

@@ -452,18 +452,13 @@ async def test_deleted_version_residue_inventory_and_permanent_delete_are_exact(
         calls.append((method, physical_key, query))
         if method == "GET":
             return httpx.Response(200, content=inventory)
-        permanent = query is not None and query.get("deletetype") == "permanent"
         return httpx.Response(
             202,
-            headers={"x-ms-delete-type-permanent": "true" if permanent else "false"},
+            headers={"x-ms-delete-type-permanent": "true"},
         )
 
     monkeypatch.setattr(storage, "_request", request)
     assert await storage.version_residue_exists(
-        physical_key="quarantine/objects/evidence",
-        provider_version_id=VERSION_ID,
-    )
-    await storage.delete_version(
         physical_key="quarantine/objects/evidence",
         provider_version_id=VERSION_ID,
     )
@@ -483,13 +478,169 @@ async def test_deleted_version_residue_inventory_and_permanent_delete_are_exact(
                 "maxresults": "100",
             },
         ),
-        ("DELETE", "quarantine/objects/evidence", {"versionid": VERSION_ID}),
         (
             "DELETE",
             "quarantine/objects/evidence",
             {"versionid": VERSION_ID, "deletetype": "permanent"},
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_current_version_is_demoted_then_soft_deleted_by_exact_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = _azure_storage()
+    current = True
+    version_active = True
+    calls: list[
+        tuple[
+            str,
+            dict[str, str] | None,
+            dict[str, str] | None,
+            frozenset[int],
+        ]
+    ] = []
+
+    async def request(
+        method: str,
+        _physical_key: str,
+        *,
+        query: dict[str, str] | None = None,
+        extra_headers: dict[str, str] | None = None,
+        accepted_statuses: frozenset[int] = frozenset(),
+        **_kwargs: object,
+    ) -> httpx.Response:
+        nonlocal current, version_active
+        calls.append((method, query, extra_headers, accepted_statuses))
+        if method == "HEAD" and query is None:
+            if not current:
+                return httpx.Response(404)
+            return httpx.Response(
+                200,
+                headers={"x-ms-version-id": VERSION_ID, "etag": ETAG},
+            )
+        if method == "HEAD":
+            if not version_active:
+                return httpx.Response(404)
+            return httpx.Response(
+                200,
+                headers={"x-ms-version-id": VERSION_ID, "etag": ETAG},
+            )
+        if query is None:
+            current = False
+            return httpx.Response(202)
+        version_active = False
+        return httpx.Response(
+            202,
+            headers={"x-ms-delete-type-permanent": "false"},
+        )
+
+    monkeypatch.setattr(storage, "_request", request)
+    await storage.delete_version(
+        physical_key="quarantine/objects/evidence",
+        provider_version_id=VERSION_ID,
+    )
+
+    assert calls == [
+        ("HEAD", {"versionid": VERSION_ID}, None, frozenset()),
+        ("HEAD", None, None, frozenset({404})),
+        ("DELETE", None, {"If-Match": ETAG}, frozenset()),
+        ("HEAD", None, None, frozenset({404})),
+        (
+            "HEAD",
+            {"versionid": VERSION_ID},
+            {"If-Match": ETAG},
+            frozenset(),
+        ),
+        (
+            "DELETE",
+            {"versionid": VERSION_ID},
+            {"If-Match": ETAG},
+            frozenset(),
+        ),
+        ("HEAD", {"versionid": VERSION_ID}, None, frozenset({404})),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_demoted_version_retry_never_redeletes_the_blob_wide_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = _azure_storage()
+    version_active = True
+    calls: list[tuple[str, dict[str, str] | None]] = []
+
+    async def request(
+        method: str,
+        _physical_key: str,
+        *,
+        query: dict[str, str] | None = None,
+        **_kwargs: object,
+    ) -> httpx.Response:
+        nonlocal version_active
+        calls.append((method, query))
+        if method == "HEAD" and query is None:
+            return httpx.Response(404)
+        if method == "HEAD":
+            if not version_active:
+                return httpx.Response(404)
+            return httpx.Response(
+                200,
+                headers={"x-ms-version-id": VERSION_ID, "etag": ETAG},
+            )
+        version_active = False
+        return httpx.Response(
+            202,
+            headers={"x-ms-delete-type-permanent": "false"},
+        )
+
+    monkeypatch.setattr(storage, "_request", request)
+    await storage.delete_version(
+        physical_key="quarantine/objects/evidence",
+        provider_version_id=VERSION_ID,
+    )
+
+    assert calls == [
+        ("HEAD", {"versionid": VERSION_ID}),
+        ("HEAD", None),
+        ("DELETE", {"versionid": VERSION_ID}),
+        ("HEAD", {"versionid": VERSION_ID}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_version_rejects_a_different_current_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = _azure_storage()
+    methods: list[str] = []
+
+    async def request(
+        method: str,
+        _physical_key: str,
+        *,
+        query: dict[str, str] | None = None,
+        **_kwargs: object,
+    ) -> httpx.Response:
+        methods.append(method)
+        if query is not None:
+            return httpx.Response(
+                200,
+                headers={"x-ms-version-id": VERSION_ID, "etag": ETAG},
+            )
+        return httpx.Response(
+            200,
+            headers={"x-ms-version-id": "different-version", "etag": '"different"'},
+        )
+
+    monkeypatch.setattr(storage, "_request", request)
+    with pytest.raises(DocumentStorageError, match="different Azure object version"):
+        await storage.delete_version(
+            physical_key="quarantine/objects/evidence",
+            provider_version_id=VERSION_ID,
+        )
+    assert methods == ["HEAD", "HEAD"]
 
 
 class _TokenProvider:
@@ -501,8 +652,11 @@ class _TokenProvider:
         return "bounded-test-token"
 
 
+@pytest.mark.parametrize("scan_result", ["No Threat Found", "No threats found"])
 @pytest.mark.asyncio
-async def test_log_adapter_queries_only_exact_dual_source_identity() -> None:
+async def test_log_adapter_queries_only_exact_dual_source_identity(
+    scan_result: str,
+) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -530,7 +684,7 @@ async def test_log_adapter_queries_only_exact_dual_source_identity() -> None:
                                 ACCOUNT,
                                 URI,
                                 ETAG.strip('"'),
-                                "No Threat Found",
+                                scan_result,
                                 CORRELATION_ID,
                                 FINISHED.isoformat(),
                                 (FINISHED + timedelta(seconds=2)).isoformat(),
@@ -563,10 +717,66 @@ async def test_log_adapter_queries_only_exact_dual_source_identity() -> None:
     assert len(evidence) == 1
     assert evidence[0].correlation_id == CORRELATION_ID
     assert evidence[0].etag == ETAG.strip('"')
+    assert evidence[0].scan_result == "No threats found"
+    decision = _correlate(logs=evidence)
+    assert decision is not None and decision.verdict == "clean"  # type: ignore[union-attr]
     assert token.resources == ["https://api.loganalytics.io/"]
     assert len(requests) == 1
     assert requests[0].method == "POST"
     assert requests[0].url.path.endswith("/query")
+
+
+@pytest.mark.parametrize("scan_result", ["No threats found ", "Clean", None])
+def test_log_parser_rejects_unknown_or_malformed_clean_results(
+    scan_result: object,
+) -> None:
+    client = AzureLogAnalyticsScanEvidenceClient(
+        workspace_id=uuid.UUID("00000000-0000-4000-8000-000000000077"),
+        endpoint="https://api.loganalytics.azure.com",
+        token_provider=cast(AzureManagedIdentityTokenProvider, _TokenProvider()),
+    )
+    payload = {
+        "tables": [
+            {
+                "name": "PrimaryResult",
+                "columns": [
+                    {"name": "StorageAccountName", "type": "string"},
+                    {"name": "ScannedObjectUri", "type": "string"},
+                    {"name": "ScannedObjectEtag", "type": "string"},
+                    {"name": "ScanResultType", "type": "string"},
+                    {"name": "CorrelationId", "type": "string"},
+                    {"name": "ScanFinishedTimeUtc", "type": "datetime"},
+                    {"name": "TimeGenerated", "type": "datetime"},
+                ],
+                "rows": [
+                    [
+                        ACCOUNT,
+                        URI,
+                        ETAG.strip('"'),
+                        scan_result,
+                        CORRELATION_ID,
+                        FINISHED.isoformat(),
+                        FINISHED.isoformat(),
+                    ]
+                ],
+            }
+        ]
+    }
+    with pytest.raises(
+        ScannerBridgeEvidenceError,
+        match="scanner-log-query-response-invalid",
+    ):
+        client._parse_response(payload)
+
+
+def test_malicious_log_result_cannot_normalize_to_clean() -> None:
+    malicious = _log(result="Malicious")
+    infected = _correlate(
+        blob=_blob(result="Malicious"),
+        logs=(malicious,),
+    )
+    assert infected is not None and infected.verdict == "infected"  # type: ignore[union-attr]
+    assert _correlate(logs=(malicious,)) is None
 
 
 @pytest.mark.asyncio
