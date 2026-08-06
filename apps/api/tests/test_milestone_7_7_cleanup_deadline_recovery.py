@@ -18,6 +18,10 @@ from performance.milestone_7_7.framework import JsonValue
 from preflight.milestone_7_7 import cleanup_control_recovery
 from preflight.milestone_7_7.cleanup_control_recovery import (
     CORRUPTED_RUNBOOK_CONTENT_SHA256,
+    DEADLINE_COMPLETION_AUTHORIZATION_VERSION,
+    DEADLINE_COMPLETION_DEADLINE_UTC,
+    DEADLINE_COMPLETION_OBSERVED_AZURE_UTC,
+    DEADLINE_COMPLETION_PRIOR_RUNBOOK_CONTENT_SHA256,
     DEADLINE_CONTINUATION_AUTHORIZATION_VERSION,
     DEADLINE_CONTINUATION_DEADLINE_UTC,
     DEADLINE_CONTINUATION_OBSERVED_AZURE_UTC,
@@ -60,8 +64,9 @@ REPLACEMENT_ASSIGNMENT_ID = (
 OBSERVED = datetime(2026, 8, 6, 12, 23, 26, tzinfo=UTC)
 NOW = datetime(2026, 8, 6, 12, 30, tzinfo=UTC)
 PRIOR_EXTENSION_OBSERVED = datetime(2026, 8, 6, 14, 6, 2, tzinfo=UTC)
-EXTENSION_OBSERVED = datetime(2026, 8, 6, 17, 23, 44, tzinfo=UTC)
-EXTENSION_NOW = datetime(2026, 8, 6, 17, 30, tzinfo=UTC)
+CONTINUATION_OBSERVED = datetime(2026, 8, 6, 17, 23, 44, tzinfo=UTC)
+COMPLETION_OBSERVED = datetime(2026, 8, 6, 23, 39, 5, tzinfo=UTC)
+COMPLETION_NOW = datetime(2026, 8, 6, 23, 40, tzinfo=UTC)
 
 
 def _runbook_sha256() -> str:
@@ -107,7 +112,7 @@ def _prior_extension_authorization() -> CleanupControlDeadlineRecoveryAuthorizat
     )
 
 
-def _extension_authorization() -> CleanupControlDeadlineRecoveryAuthorization:
+def _continuation_authorization() -> CleanupControlDeadlineRecoveryAuthorization:
     return build_cleanup_control_deadline_recovery_authorization(
         repository_head="c" * 40,
         subscription_id=SUBSCRIPTION_ID,
@@ -122,8 +127,28 @@ def _extension_authorization() -> CleanupControlDeadlineRecoveryAuthorization:
         target_resource_group_id=TARGET_GROUP,
         prior_runbook_content_sha256=(DEADLINE_CONTINUATION_PRIOR_RUNBOOK_CONTENT_SHA256),
         runbook_content_sha256=_runbook_sha256(),
-        observed_azure_utc=EXTENSION_OBSERVED,
+        observed_azure_utc=CONTINUATION_OBSERVED,
         authorization_version=DEADLINE_CONTINUATION_AUTHORIZATION_VERSION,
+    )
+
+
+def _completion_authorization() -> CleanupControlDeadlineRecoveryAuthorization:
+    return build_cleanup_control_deadline_recovery_authorization(
+        repository_head="c" * 40,
+        subscription_id=SUBSCRIPTION_ID,
+        cleanup_resource_group_id=CLEANUP_GROUP,
+        corrupted_automation_account_id=f"{AUTOMATION_PREFIX}/aa-mobius77-cleanup",
+        corrupted_principal_id="be0e6b8d-f742-4c8f-8df1-9f302559a6c8",
+        corrupted_role_assignment_id=CORRUPTED_ASSIGNMENT_ID,
+        replacement_automation_account_id=(f"{AUTOMATION_PREFIX}/aa-mobius77-cleanup-recovery"),
+        replacement_principal_id="a47789c6-b8eb-40a1-898a-517a52d60a86",
+        replacement_role_assignment_id=REPLACEMENT_ASSIGNMENT_ID,
+        replacement_location="northeurope",
+        target_resource_group_id=TARGET_GROUP,
+        prior_runbook_content_sha256=(DEADLINE_COMPLETION_PRIOR_RUNBOOK_CONTENT_SHA256),
+        runbook_content_sha256=_runbook_sha256(),
+        observed_azure_utc=COMPLETION_OBSERVED,
+        authorization_version=DEADLINE_COMPLETION_AUTHORIZATION_VERSION,
     )
 
 
@@ -240,7 +265,7 @@ def test_extension_deadline_is_exactly_ten_hours_then_next_quarter() -> None:
 
 def test_continuation_preserves_generation_two_and_uses_one_new_binding() -> None:
     original = _prior_extension_authorization()
-    extension = _extension_authorization()
+    extension = _continuation_authorization()
 
     assert original.authorizationVersion != extension.authorizationVersion
     assert original.bindingId == extension.priorBindingId
@@ -252,10 +277,30 @@ def test_continuation_preserves_generation_two_and_uses_one_new_binding() -> Non
 
 
 def test_continuation_deadline_is_exactly_twelve_hours_then_next_quarter() -> None:
-    derived = derive_cleanup_control_recovery_deadline(EXTENSION_OBSERVED, minimum_lead_hours=12)
+    derived = derive_cleanup_control_recovery_deadline(CONTINUATION_OBSERVED, minimum_lead_hours=12)
     assert derived == datetime(2026, 8, 7, 5, 30, tzinfo=UTC)
     assert DEADLINE_CONTINUATION_OBSERVED_AZURE_UTC == "2026-08-06T17:23:44Z"
     assert DEADLINE_CONTINUATION_DEADLINE_UTC == "2026-08-07T05:30:00Z"
+
+
+def test_completion_preserves_generation_two_and_uses_one_new_binding() -> None:
+    continuation = _continuation_authorization()
+    completion = _completion_authorization()
+
+    assert continuation.authorizationVersion != completion.authorizationVersion
+    assert continuation.bindingId == completion.priorBindingId
+    assert completion.bindingId == "a5429a32-87e3-5963-8c3a-bef85e777ed5"
+    assert completion.deadlineUtc == DEADLINE_COMPLETION_DEADLINE_UTC
+    assert completion.priorRunbookContentSha256 == (
+        DEADLINE_COMPLETION_PRIOR_RUNBOOK_CONTENT_SHA256
+    )
+
+
+def test_completion_deadline_is_exactly_twelve_hours_then_next_quarter() -> None:
+    derived = derive_cleanup_control_recovery_deadline(COMPLETION_OBSERVED, minimum_lead_hours=12)
+    assert derived == datetime(2026, 8, 7, 11, 45, tzinfo=UTC)
+    assert DEADLINE_COMPLETION_OBSERVED_AZURE_UTC == "2026-08-06T23:39:05Z"
+    assert DEADLINE_COMPLETION_DEADLINE_UTC == "2026-08-07T11:45:00Z"
 
 
 def test_deadline_authorization_is_exact_image_free_and_round_trips(
@@ -323,11 +368,11 @@ def test_deadline_authorization_rejects_every_scope_or_deadline_drift(
 def test_production_adapter_consumes_deadline_authorization_and_maps_only_binding(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    authorization = _extension_authorization()
+    authorization = _completion_authorization()
     deployments, calls = _install_execution_fakes(monkeypatch, authorization)
 
     result = ProductionCleanupControlRecoveryAdapter(
-        clock=lambda: EXTENSION_NOW
+        clock=lambda: COMPLETION_NOW
     ).execute_deadline_recovery(
         authorization=authorization,
         receipt_directory=tmp_path,
@@ -335,11 +380,11 @@ def test_production_adapter_consumes_deadline_authorization_and_maps_only_bindin
     )
 
     assert result["marker"] == "CLEANUP_EXECUTABLE_AND_ARMED"
-    assert result["deadline-utc"] == "2026-08-07T05:30:00Z"
-    assert result["binding-id"] == "5ffc55c1-7a88-5231-b0d1-e76ee95d057e"
+    assert result["deadline-utc"] == "2026-08-07T11:45:00Z"
+    assert result["binding-id"] == "a5429a32-87e3-5963-8c3a-bef85e777ed5"
     assert len(deployments) == 1
     assert deployments[0]["stage"] == "cleanup-job-binding"
-    assert deployments[0]["cleanup_at"] == datetime(2026, 8, 7, 5, 30, tzinfo=UTC)
+    assert deployments[0]["cleanup_at"] == datetime(2026, 8, 7, 11, 45, tzinfo=UTC)
     assert deployments[0]["maximum_cost"] == 25_000
     assert calls.index("remove-binding") < calls.index("publish-runbook")
     assert calls.index("remove-binding") < calls.index("replace-schedule")
@@ -356,7 +401,7 @@ def test_production_adapter_consumes_deadline_authorization_and_maps_only_bindin
 def test_deadline_adapter_cannot_reach_application_image_or_lifecycle_operations(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    authorization = _extension_authorization()
+    authorization = _completion_authorization()
     _install_execution_fakes(monkeypatch, authorization)
 
     def prohibited(*_args: object, **_kwargs: object) -> None:
@@ -377,7 +422,7 @@ def test_deadline_adapter_cannot_reach_application_image_or_lifecycle_operations
     )
 
     result = ProductionCleanupControlRecoveryAdapter(
-        clock=lambda: EXTENSION_NOW
+        clock=lambda: COMPLETION_NOW
     ).execute_deadline_recovery(
         authorization=authorization,
         receipt_directory=tmp_path,
@@ -392,7 +437,7 @@ def test_deadline_adapter_cannot_reach_application_image_or_lifecycle_operations
 def test_ambiguous_binding_delete_reconciles_without_second_delete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    authorization = _extension_authorization()
+    authorization = _completion_authorization()
     row: JsonValue = {
         "id": (
             f"{authorization.replacementAutomationAccountId}/jobSchedules/"
@@ -423,7 +468,7 @@ def test_ambiguous_binding_delete_reconciles_without_second_delete(
 def test_binding_readback_lists_identity_then_gets_exact_parameters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    authorization = _extension_authorization()
+    authorization = _completion_authorization()
     resource_id = (
         f"{authorization.replacementAutomationAccountId}/jobSchedules/{authorization.bindingId}"
     )
@@ -530,7 +575,7 @@ def test_duplicate_schedule_or_binding_is_rejected() -> None:
 def test_deadline_authorization_replay_is_denied_before_second_mutation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    authorization = _extension_authorization()
+    authorization = _completion_authorization()
     deployments, calls = _install_execution_fakes(
         monkeypatch, authorization, inventory=_final_inventory(authorization)
     )
@@ -539,7 +584,7 @@ def test_deadline_authorization_replay_is_denied_before_second_mutation(
         "_cleanup_resource_group_inventory",
         lambda _subscription: _final_inventory(authorization),
     )
-    adapter = ProductionCleanupControlRecoveryAdapter(clock=lambda: EXTENSION_NOW)
+    adapter = ProductionCleanupControlRecoveryAdapter(clock=lambda: COMPLETION_NOW)
     adapter.execute_deadline_recovery(
         authorization=authorization,
         receipt_directory=tmp_path,

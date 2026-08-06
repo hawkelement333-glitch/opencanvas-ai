@@ -3010,11 +3010,11 @@ def test_lifecycle_deployment_names_preserve_prior_azure_history() -> None:
 
 
 def test_lifecycle_cleanup_deadline_matches_azure_minute_precision() -> None:
-    observed = datetime(2026, 8, 6, 5, 0, 0, tzinfo=UTC)
+    observed = datetime(2026, 8, 6, 6, 0, 0, tzinfo=UTC)
 
     deadline = managed_binding_lifecycle._cleanup_deadline(observed)
 
-    assert deadline == datetime(2026, 8, 7, 5, 30, tzinfo=UTC)
+    assert deadline == datetime(2026, 8, 7, 11, 45, tzinfo=UTC)
     assert deadline == managed_binding_lifecycle.AUTHORIZED_CLEANUP_AT_UTC
     assert deadline <= observed + timedelta(hours=30)
 
@@ -3024,12 +3024,14 @@ def test_lifecycle_cleanup_deadline_matches_azure_minute_precision() -> None:
         managed_binding_lifecycle.LifecycleError,
         match="cleanup-deadline-expired-or-reserve-active",
     ):
-        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 7, 4, 0, tzinfo=UTC))
+        managed_binding_lifecycle._cleanup_deadline(
+            datetime(2026, 8, 7, 10, 15, tzinfo=UTC)
+        )
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
         match="cleanup-deadline-outside-authorized-window",
     ):
-        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 5, 23, 29, tzinfo=UTC))
+        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 6, 5, 44, tzinfo=UTC))
 
 
 def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> None:
@@ -3164,13 +3166,13 @@ def test_cleanup_deadline_recovery_binding_stays_generation_two_and_tombstones_p
     tombstones = cast(list[dict[str, JsonValue]], cleanup["tombstonedBindingIds"])
 
     assert cleanup["bindingGeneration"] == 2
-    assert cleanup["activeBindingId"] == "5ffc55c1-7a88-5231-b0d1-e76ee95d057e"
+    assert cleanup["activeBindingId"] == "a5429a32-87e3-5963-8c3a-bef85e777ed5"
     assert (
         managed_binding_contracts.cleanup_binding_id_for_subscription(subscription_id)
         == cleanup["activeBindingId"]
     )
     assert tombstones[-1]["bindingId"] == (
-        managed_binding_contracts.TOMBSTONED_THIRD_DEADLINE_RECOVERY_BINDING_ID
+        managed_binding_contracts.TOMBSTONED_FOURTH_DEADLINE_RECOVERY_BINDING_ID
     )
     assert tombstones[-1]["recreationStatus"] == "not-attempted"
     assert tombstones[-1]["bindingGeneration"] == 2
@@ -3658,7 +3660,7 @@ def _test_preservation_state(
 ) -> dict[str, JsonValue]:
     return {
         "activeStage": "pre-secret",
-        "cleanupAtUtc": "2026-08-07T05:30:00Z",
+        "cleanupAtUtc": "2026-08-07T11:45:00Z",
         "disposition": "RUNNING",
         "failedStage": None,
         "lastCompletedStage": "cleanup-role-verification",
@@ -3707,7 +3709,7 @@ def _verify_container_apps_infrastructure_fixture(
 ) -> int:
     subscription = SYNTHETIC_SUBSCRIPTION
     expected_tags = _test_recovered_cleanup_tags()
-    expected_tags["mobius-expires-at-utc"] = "2026-08-07T05:30:00Z"
+    expected_tags["mobius-expires-at-utc"] = "2026-08-07T11:45:00Z"
     expected_environment_id = (
         f"/subscriptions/{subscription}/resourceGroups/"
         f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
@@ -3908,7 +3910,7 @@ def _reconcile_container_apps_infrastructure_tags_fixture(
     )
     expected = _test_recovered_cleanup_tags()
     expected["mobius-cleanup-binding-sha256"] = "e" * 64
-    expected["mobius-expires-at-utc"] = "2026-08-07T05:30:00Z"
+    expected["mobius-expires-at-utc"] = "2026-08-07T11:45:00Z"
     expected["mobius-manifest-sha256"] = "f" * 64
     expected["mobius-run-id"] = "m7.7-managed-binding-closeout-20260731"
     expected["mobius-source-commit"] = "c" * 40

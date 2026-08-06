@@ -20,7 +20,7 @@ def _ledger(marker: str = "a") -> dict[str, JsonValue]:
 def _state(ledger: dict[str, JsonValue]) -> dict[str, JsonValue]:
     return {
         "activeStage": None,
-        "cleanupAtUtc": "2026-08-07T05:30:00Z",
+        "cleanupAtUtc": "2026-08-07T11:45:00Z",
         "disposition": "PAUSED_PRESERVED",
         "failedStage": None,
         "lastCompletedStage": "pre-secret",
