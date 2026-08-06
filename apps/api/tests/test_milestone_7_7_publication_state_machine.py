@@ -57,8 +57,21 @@ def _finalizer_success_mocks(
     )
     identity = {"manifestDigest": manifest, "configDigest": config, "platform": "linux/amd64"}
     monkeypatch.setattr(finalization, "_manifest_identity", lambda *_args, **_kwargs: identity)
-    tag_rows = iter(({source: manifest}, {}))
-    monkeypatch.setattr(finalization, "_repository_tags", lambda *_args: next(tag_rows))
+    tag_rows = iter(
+        (
+            {
+                source: {
+                    "deleteEnabled": True,
+                    "digest": manifest,
+                    "listEnabled": True,
+                    "readEnabled": True,
+                    "writeEnabled": True,
+                }
+            },
+            {},
+        )
+    )
+    monkeypatch.setattr(finalization, "_live_repository_tags", lambda *_args: next(tag_rows))
 
     def request(method: str, path: str, **_kwargs):
         deleted.append((method, path))
@@ -279,6 +292,59 @@ def test_already_pushed_reconciliation_uses_the_canonical_finalizer(
         registry_observation=observation,
     )
     assert result.endswith("@sha256:" + "a" * 64)
+    assert calls == ["path", "finalizer"]
+
+
+def test_descriptor_backed_ledger_identity_uses_live_config_for_finalization(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ledger, record, observation = _already_pushed_inputs(source_tag_present=True)
+    manifest = str(record["registryManifestDigest"])
+    config = str(record["imageConfigDigest"])
+    record["localImageId"] = manifest
+    record["evidenceProvenance"] = publication.RECONSTRUCTED_FROM_LIVE_READ_ONLY_REGISTRY_PROOF
+    record["historicalEvidenceIntegritySha256"] = "7" * 64
+    record["liveObservationIntegritySha256"] = "8" * 64
+    record["reconstructionAuthorizationIntegritySha256"] = "9" * 64
+    record["reconstructedAtUtc"] = "2026-08-05T00:03:00Z"
+    record["reconstructionAlgorithmVersion"] = publication.RECONSTRUCTION_ALGORITHM_VERSION
+    record["schemaVersion"] = publication.ALREADY_PUSHED_RECORD_VERSION
+    record["integritySha256"] = publication._integrity_value(
+        publication.ALREADY_PUSHED_RECORD_DOMAIN,
+        {key: value for key, value in record.items() if key != "integritySha256"},
+    )
+    published = ledger["publishedImage"]
+    assert isinstance(published, dict)
+    published["localImageId"] = manifest
+    published["imageConfigDigest"] = manifest
+    calls = _reconciliation_mocks(monkeypatch)
+
+    def finalize(**kwargs: object) -> dict[str, object]:
+        calls.append("finalizer")
+        assert kwargs["registry_config_digest"] == config
+        machine = kwargs["publication"]
+        assert isinstance(machine, state_machine.PublicationStateMachine)
+        for state in (
+            state_machine.PublicationState.FINALIZER_AUTHORITY_READY,
+            state_machine.PublicationState.FINALIZER_AUTHENTICATION_PROVED,
+            state_machine.PublicationState.SOURCE_TAG_REMOVED,
+            state_machine.PublicationState.IMMUTABLE_MANIFEST_REPROVED,
+            state_machine.PublicationState.PUBLISHER_FINALIZER_REVOKED,
+            state_machine.PublicationState.PUBLICATION_EVIDENCE_PERSISTED,
+        ):
+            machine.advance(state)
+        return {"sourceTagAbsent": True, "immutableManifestRetained": True}
+
+    monkeypatch.setattr(finalization, "finalize_current_publication", finalize)
+    result = publication._publish_api_image(
+        ledger=ledger,
+        subscription_id="opaque-subscription",
+        receipt_directory=tmp_path,
+        mode=state_machine.PublicationMode.ALREADY_PUSHED_RECONCILIATION,
+        already_pushed_record=record,
+        registry_observation=observation,
+    )
+    assert result.endswith(f"@{manifest}")
     assert calls == ["path", "finalizer"]
 
 

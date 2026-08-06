@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -212,6 +213,52 @@ def test_reconstruction_keeps_historical_evidence_immutable(
     )
     assert historical.as_json() == original
     assert "registryManifestDigest" not in original
+
+
+def test_descriptor_backed_image_id_is_reconciled_to_live_config_digest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    historical = replace(_historical(), local_image_id=MANIFEST, config_digest=MANIFEST)
+    observation = _observation()
+    authorization = replace(
+        _authorization(historical, observation),
+        expected_local_image_id=MANIFEST,
+        expected_config_digest=CONFIG,
+    )
+    original = historical.as_json()
+    monkeypatch.setattr(publication, "_api_image_build_input_sha256", lambda _head: BUILD)
+    record = publication.reconstruct_already_pushed_publication_record(
+        historical=publication.validate_historical_push_evidence(original),
+        observation=publication.validate_live_registry_publication_observation(
+            observation.as_json(), now_utc=NOW
+        ),
+        authorization=publication.validate_already_pushed_reconstruction_authorization(
+            authorization.as_json(), now_utc=NOW, repository_head=HEAD
+        ),
+        repository_head=HEAD,
+        now_utc=NOW,
+    )
+    assert record.local_image_id == MANIFEST
+    assert record.registry_manifest_digest == MANIFEST
+    assert record.config_digest == CONFIG
+    assert historical.as_json() == original
+
+
+def test_descriptor_backed_reconciliation_requires_exact_manifest_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    historical = replace(_historical(), local_image_id=LOCAL, config_digest=LOCAL)
+    observation = _observation()
+    authorization = replace(_authorization(historical, observation), expected_config_digest=CONFIG)
+    monkeypatch.setattr(publication, "_api_image_build_input_sha256", lambda _head: BUILD)
+    with pytest.raises(RuntimeError, match="historical-identity-mismatch"):
+        publication.reconstruct_already_pushed_publication_record(
+            historical=historical,
+            observation=observation,
+            authorization=authorization,
+            repository_head=HEAD,
+            now_utc=NOW,
+        )
 
 
 @pytest.mark.parametrize(

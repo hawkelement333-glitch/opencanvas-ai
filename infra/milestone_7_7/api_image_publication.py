@@ -1239,11 +1239,21 @@ def reconstruct_already_pushed_publication_record(
     """Join immutable history with future read-only proof without backfilling history."""
     if repository_head != authorization.control_plane_head:
         _fail("already-pushed-reconstruction-current-head-mismatch")
+    descriptor_backed_local_identity = (
+        historical.local_image_id == historical.config_digest
+        and historical.local_image_id == observation.registry_manifest_digest
+        and historical.config_digest != observation.config_digest
+        and authorization.expected_local_image_id == historical.local_image_id
+        and authorization.expected_config_digest == observation.config_digest
+    )
     if (
         historical.image_source_commit != authorization.image_source_commit
         or historical.build_input_sha256 != authorization.build_input_sha256
         or historical.local_image_id != authorization.expected_local_image_id
-        or historical.config_digest != authorization.expected_config_digest
+        or (
+            historical.config_digest != authorization.expected_config_digest
+            and not descriptor_backed_local_identity
+        )
         or historical.platform != authorization.platform
         or historical.repository != authorization.repository
         or historical.source_tag != authorization.source_tag
@@ -1263,7 +1273,10 @@ def reconstruct_already_pushed_publication_record(
         observation.registry_host != authorization.registry_host
         or observation.repository != historical.repository
         or observation.source_tag != historical.source_tag
-        or observation.config_digest != historical.config_digest
+        or (
+            observation.config_digest != historical.config_digest
+            and not descriptor_backed_local_identity
+        )
         or observation.platform != historical.platform
         or (
             observation.source_tag_present
@@ -1284,7 +1297,7 @@ def reconstruct_already_pushed_publication_record(
         image_source_commit=historical.image_source_commit,
         build_input_sha256=historical.build_input_sha256,
         local_image_id=historical.local_image_id,
-        config_digest=historical.config_digest,
+        config_digest=observation.config_digest,
         registry_manifest_digest=observation.registry_manifest_digest,
         platform=historical.platform,
         registry_host=authorization.registry_host,
@@ -2259,11 +2272,21 @@ def _reconcile_already_pushed_publication(
     observation = validate_already_pushed_registry_observation(
         registry_observation, record=record
     )
+    descriptor_backed_ledger_identity = (
+        record.evidence_provenance == RECONSTRUCTED_FROM_LIVE_READ_ONLY_REGISTRY_PROOF
+        and record.local_image_id == record.registry_manifest_digest
+        and record.local_image_id != record.config_digest
+        and published.get("localImageId") == record.local_image_id
+        and published.get("imageConfigDigest") == record.local_image_id
+    )
     if (
         published.get("imageSourceCommit") != record.image_source_commit
         or published.get("imageBuildInputSha256") != record.build_input_sha256
         or published.get("localImageId") != record.local_image_id
-        or published.get("imageConfigDigest") != record.config_digest
+        or (
+            published.get("imageConfigDigest") != record.config_digest
+            and not descriptor_backed_ledger_identity
+        )
         or published.get("platform") != record.platform
         or published.get("repository") != record.repository
         or published.get("sourceTag") != record.source_tag

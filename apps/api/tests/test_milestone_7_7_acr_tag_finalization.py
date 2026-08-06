@@ -343,6 +343,82 @@ def test_repository_inventory_uses_exact_data_plane_without_catalog(
     assert observed == [("GET", "/acr/v1/opencanvas-api/_tags?api-version=2021-07-01")]
 
 
+def test_authoritative_repository_inventory_does_not_broaden_finalizer_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[tuple[tuple[str, ...], bool]] = []
+    row = {
+        "deleteEnabled": True,
+        "digest": finalization.MANIFEST_DIGEST,
+        "listEnabled": True,
+        "name": finalization.SOURCE_TAG,
+        "readEnabled": True,
+        "writeEnabled": True,
+    }
+
+    def run(argv: tuple[str, ...], *, require_json: bool = False, **_kwargs: object):
+        observed.append((argv, require_json))
+        return [row]
+
+    monkeypatch.setattr(lifecycle, "_run", run)
+    assert finalization._live_repository_tags("subscription-alias") == {
+        finalization.SOURCE_TAG: {key: value for key, value in row.items() if key != "name"}
+    }
+    assert len(observed) == 1
+    argv, require_json = observed[0]
+    assert argv[:4] == ("az", "acr", "repository", "show-tags")
+    assert "--detail" in argv
+    assert require_json is True
+    assert finalization.FINALIZER_SCOPE == "repository:opencanvas-api:pull,delete"
+
+
+def test_authoritative_repository_inventory_rejects_duplicates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = {
+        "deleteEnabled": True,
+        "digest": finalization.MANIFEST_DIGEST,
+        "listEnabled": True,
+        "name": finalization.SOURCE_TAG,
+        "readEnabled": True,
+        "writeEnabled": True,
+    }
+    monkeypatch.setattr(lifecycle, "_run", lambda *_args, **_kwargs: [row, row])
+    with pytest.raises(
+        finalization.TagFinalizationError,
+        match="authoritative-repository-tag-inventory-malformed",
+    ):
+        finalization._live_repository_tags("subscription-alias")
+
+
+def test_authoritative_inventory_poll_reconciles_transient_omission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = {
+        finalization.SOURCE_TAG: {
+            "deleteEnabled": True,
+            "digest": finalization.MANIFEST_DIGEST,
+            "listEnabled": True,
+            "readEnabled": True,
+            "writeEnabled": True,
+        }
+    }
+    observations = iter(({}, expected, expected, {}))
+    monkeypatch.setattr(
+        finalization, "_live_repository_tags", lambda _subscription: next(observations)
+    )
+    monkeypatch.setattr(finalization.time, "sleep", lambda _seconds: None)
+    assert (
+        finalization._wait_for_source_tag_inventory(
+            "subscription-alias",
+            source_tag=finalization.SOURCE_TAG,
+            manifest_digest=finalization.MANIFEST_DIGEST,
+        )
+        == expected
+    )
+    finalization._wait_for_repository_tag_inventory("subscription-alias", expected={})
+
+
 def test_finalization_path_cannot_build_push_or_upload_layers() -> None:
     source = inspect.getsource(finalization.execute_finalization)
     prohibited = (
@@ -445,6 +521,31 @@ def test_acr_tag_properties_uses_nested_tag() -> None:
     assert parsed["digest"] == finalization.MANIFEST_DIGEST
 
 
+def test_acr_tag_properties_binds_the_dynamic_authorized_source_tag() -> None:
+    source_tag = "source-" + "7" * 40
+    payload = {
+        "registry": "registry-alias",
+        "imageName": "opencanvas-api",
+        "tag": {
+            "name": source_tag,
+            "digest": finalization.MANIFEST_DIGEST,
+            "changeableAttributes": {
+                "deleteEnabled": True,
+                "readEnabled": True,
+                "writeEnabled": True,
+                "listEnabled": True,
+            },
+        },
+    }
+    parsed = finalization._parse_tag_properties(
+        200,
+        {},
+        bytearray(json.dumps(payload).encode()),
+        source_tag=source_tag,
+    )
+    assert parsed["digest"] == finalization.MANIFEST_DIGEST
+
+
 def test_acr_manifest_properties_uses_nested_manifest() -> None:
     payload = {
         "registry": "registry-alias",
@@ -520,6 +621,41 @@ def test_pre_delete_null_manifest_tags_fail_closed() -> None:
         match="acr-manifest-tags-missing-before-delete",
     ):
         finalization._normalize_manifest_tags(None, post_delete=False)
+
+
+def test_omitted_manifest_tags_require_independent_exact_tag_proof() -> None:
+    payload = {
+        "registry": "registry-alias",
+        "imageName": "opencanvas-api",
+        "manifest": {
+            "digest": finalization.MANIFEST_DIGEST,
+            "architecture": "amd64",
+            "os": "linux",
+            "changeableAttributes": {
+                "readEnabled": True,
+                "deleteEnabled": True,
+            },
+        },
+    }
+    body = bytearray(json.dumps(payload).encode())
+    with pytest.raises(finalization.TagFinalizationError, match="acr-manifest-tags-missing"):
+        finalization._parse_manifest_properties(
+            200,
+            {},
+            body,
+            expected_digest=finalization.MANIFEST_DIGEST,
+            source_tag_expected=True,
+        )
+    parsed = finalization._parse_manifest_properties(
+        200,
+        {},
+        body,
+        expected_digest=finalization.MANIFEST_DIGEST,
+        source_tag_expected=True,
+        tag_presence_proved=True,
+    )
+    assert parsed["sourceTagPresent"] is True
+    assert parsed["tagCount"] is None
 
 
 def test_post_delete_surviving_tags_are_retained() -> None:

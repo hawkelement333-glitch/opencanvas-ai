@@ -49,6 +49,8 @@ BUILD_INPUT_SHA256: Final = (
     "16758013417d703a9ebe661511ff1fc305653372286909cdbbc6e9c29a6e613c"
 )
 LOCAL_IMAGE_ID: Final = MANIFEST_DIGEST
+REPOSITORY_TAG_PROPAGATION_SECONDS: Final = 120.0
+REPOSITORY_TAG_RETRY_SECONDS: Final = 5.0
 CLASSIC_MODE: Final = "LegacyRegistryPermissions"
 ABAC_MODE: Final = "RBACRegistryAndABACRepositoryPermissions"
 ACR_PULL_ROLE_ID: Final = "7f951dda-4ed3-4680-a7ca-43fe172d538d"
@@ -346,6 +348,105 @@ def _live_tag_metadata(subscription_id: str) -> dict[str, JsonValue]:
     return expected
 
 
+def _live_repository_tags(
+    subscription_id: str,
+) -> dict[str, dict[str, JsonValue]]:
+    """Read the complete tag inventory without broadening finalizer authority."""
+    value = lifecycle._run(
+        (
+            "az",
+            "acr",
+            "repository",
+            "show-tags",
+            "--name",
+            lifecycle.REGISTRY,
+            "--repository",
+            lifecycle.PUBLISHER_REPOSITORY,
+            "--detail",
+            "--subscription",
+            subscription_id,
+            "--query",
+            "[].{name:name,digest:digest,deleteEnabled:changeableAttributes.deleteEnabled,"
+            "listEnabled:changeableAttributes.listEnabled,"
+            "readEnabled:changeableAttributes.readEnabled,"
+            "writeEnabled:changeableAttributes.writeEnabled}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(value, list):
+        _fail("authoritative-repository-tag-inventory-malformed")
+    result: dict[str, dict[str, JsonValue]] = {}
+    expected_fields = {
+        "deleteEnabled",
+        "digest",
+        "listEnabled",
+        "name",
+        "readEnabled",
+        "writeEnabled",
+    }
+    for item in value:
+        if (
+            not isinstance(item, dict)
+            or set(item) != expected_fields
+            or not isinstance(item.get("name"), str)
+            or re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,127}", str(item["name"]))
+            is None
+            or RAW_DIGEST.fullmatch(str(item.get("digest"))) is None
+            or any(
+                not isinstance(item.get(field), bool)
+                for field in (
+                    "deleteEnabled",
+                    "listEnabled",
+                    "readEnabled",
+                    "writeEnabled",
+                )
+            )
+            or item["name"] in result
+        ):
+            _fail("authoritative-repository-tag-inventory-malformed")
+        name = str(item["name"])
+        result[name] = {
+            field: item[field] for field in expected_fields if field != "name"
+        }
+    return result
+
+
+def _wait_for_source_tag_inventory(
+    subscription_id: str, *, source_tag: str, manifest_digest: str
+) -> dict[str, dict[str, JsonValue]]:
+    expected: dict[str, JsonValue] = {
+        "deleteEnabled": True,
+        "digest": manifest_digest,
+        "listEnabled": True,
+        "readEnabled": True,
+        "writeEnabled": True,
+    }
+    deadline = time.monotonic() + REPOSITORY_TAG_PROPAGATION_SECONDS
+    while True:
+        observed = _live_repository_tags(subscription_id)
+        if observed.get(source_tag) == expected:
+            return observed
+        if time.monotonic() >= deadline:
+            _fail("source-tag-properties-mismatch-or-locked")
+        time.sleep(REPOSITORY_TAG_RETRY_SECONDS)
+
+
+def _wait_for_repository_tag_inventory(
+    subscription_id: str, *, expected: Mapping[str, Mapping[str, JsonValue]]
+) -> None:
+    deadline = time.monotonic() + REPOSITORY_TAG_PROPAGATION_SECONDS
+    normalized = {name: dict(properties) for name, properties in expected.items()}
+    while True:
+        if _live_repository_tags(subscription_id) == normalized:
+            return
+        if time.monotonic() >= deadline:
+            _fail("repository-tag-inventory-changed-outside-target")
+        time.sleep(REPOSITORY_TAG_RETRY_SECONDS)
+
+
 def _repository_tags(token: bytearray) -> dict[str, str]:
     body = bytearray()
     try:
@@ -413,9 +514,15 @@ def _descriptor(
 
 
 def _parse_tag_properties(
-    status: int, headers: Mapping[str, str], body: bytearray
+    status: int,
+    headers: Mapping[str, str],
+    body: bytearray,
+    *,
+    source_tag: str = SOURCE_TAG,
 ) -> dict[str, JsonValue]:
     del headers
+    if re.fullmatch(r"source-[0-9a-f]{40}", source_tag) is None:
+        _fail("finalizer-source-tag-invalid")
     if status != 200 or not body:
         _fail("source-tag-properties-unavailable")
     try:
@@ -432,7 +539,7 @@ def _parse_tag_properties(
     tag = cast(dict[str, JsonValue], value["tag"])
     attributes = tag.get("changeableAttributes")
     if (
-        tag.get("name") != SOURCE_TAG
+        tag.get("name") != source_tag
         or not isinstance(tag.get("digest"), str)
         or RAW_DIGEST.fullmatch(str(tag["digest"])) is None
         or not isinstance(attributes, dict)
@@ -557,6 +664,7 @@ def _parse_manifest_properties(
     expected_digest: str,
     source_tag_expected: bool,
     source_tag: str = SOURCE_TAG,
+    tag_presence_proved: bool = False,
 ) -> dict[str, JsonValue]:
     del headers
     if status != 200 or not body:
@@ -574,16 +682,21 @@ def _parse_manifest_properties(
         _fail("acr-manifest-properties-malformed")
     manifest = cast(dict[str, JsonValue], value["manifest"])
     attributes = manifest.get("changeableAttributes")
-    if "tags" not in manifest:
+    tags_omitted = "tags" not in manifest
+    if tags_omitted and not tag_presence_proved:
         _fail("acr-manifest-tags-missing")
-    tags = _normalize_manifest_tags(
-        manifest["tags"], post_delete=not source_tag_expected
+    tags = (
+        ()
+        if tags_omitted
+        else _normalize_manifest_tags(
+            manifest["tags"], post_delete=not source_tag_expected
+        )
     )
     if (
         manifest.get("digest") != expected_digest
         or manifest.get("architecture") != "amd64"
         or manifest.get("os") != "linux"
-        or (source_tag in tags) is not source_tag_expected
+        or (not tags_omitted and (source_tag in tags) is not source_tag_expected)
         or not isinstance(attributes, dict)
         or attributes.get("readEnabled") is not True
         or not isinstance(attributes.get("deleteEnabled"), bool)
@@ -593,7 +706,7 @@ def _parse_manifest_properties(
         "digest": expected_digest,
         "platform": "linux/amd64",
         "sourceTagPresent": source_tag_expected,
-        "tagCount": len(tags),
+        "tagCount": None if tags_omitted else len(tags),
     }
 
 
@@ -631,7 +744,7 @@ def _tag_properties(
             f"/acr/v1/{lifecycle.PUBLISHER_REPOSITORY}/_tags/{source_tag}"
             "?api-version=2021-07-01",
         )
-        return _parse_tag_properties(status, headers, body)
+        return _parse_tag_properties(status, headers, body, source_tag=source_tag)
     finally:
         body.clear()
 
@@ -643,6 +756,7 @@ def _manifest_identity(
     source_tag_expected: bool,
     registry_config_digest: str = REGISTRY_CONFIG_DIGEST,
     source_tag: str = SOURCE_TAG,
+    tag_presence_proved: bool = False,
 ) -> dict[str, JsonValue]:
     if RAW_DIGEST.fullmatch(top_level_digest) is None:
         _fail("immutable-manifest-reference-invalid")
@@ -709,6 +823,7 @@ def _manifest_identity(
             expected_digest=top_level_digest,
             source_tag_expected=source_tag_expected,
             source_tag=source_tag,
+            tag_presence_proved=tag_presence_proved,
         )
         return {
             "manifestDigest": top_level_digest,
@@ -1295,10 +1410,13 @@ def finalize_current_publication(
             source_tag_expected=True,
             registry_config_digest=registry_config_digest,
             source_tag=source_tag,
+            tag_presence_proved=True,
         )
-        tags_before = _repository_tags(access_token)
-        if tags_before.get(source_tag) != manifest_digest:
-            _fail("source-tag-state-mismatch-or-locked")
+        tags_before = _wait_for_source_tag_inventory(
+            subscription_id,
+            source_tag=source_tag,
+            manifest_digest=manifest_digest,
+        )
         body = bytearray()
         try:
             delete_status, _headers, body = lifecycle._private_registry_request(
@@ -1324,12 +1442,13 @@ def finalize_current_publication(
             source_tag_expected=False,
             registry_config_digest=registry_config_digest,
             source_tag=source_tag,
+            tag_presence_proved=True,
         )
-        tags_after = _repository_tags(access_token)
         expected_after = dict(tags_before)
         expected_after.pop(source_tag)
-        if tags_after != expected_after:
-            _fail("repository-tag-inventory-changed-outside-target")
+        # The bounded helper fails closed as
+        # repository-tag-inventory-changed-outside-target if anything else moves.
+        _wait_for_repository_tag_inventory(subscription_id, expected=expected_after)
         publication.advance(PublicationState.IMMUTABLE_MANIFEST_REPROVED)
     except BaseException as exc:
         primary_error = exc

@@ -26,7 +26,9 @@ from preflight.milestone_7_7.managed_binding_contracts import (
 )
 
 AUTHORIZATION_VERSION: Final = "mobius.milestone-7.7.cleanup-control-recovery.v1"
-AUTHORIZATION_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/cleanup-control-recovery/v1\0"
+AUTHORIZATION_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/cleanup-control-recovery/v1\0"
+)
 TARGET_GROUP: Final = "rg-solarplexus-mobius-77-staging"
 CLEANUP_GROUP: Final = "rg-solarplexus-mobius-77-cleanup-control"
 RUNBOOK: Final = "Remove-Mobius77Staging"
@@ -35,9 +37,13 @@ ROLE_DEFINITION_ID: Final = "b24988ac-6180-42a0-ab88-20f7382dd24c"
 DEADLINE_UTC: Final = "2026-08-06T12:00:00Z"
 COST_CEILING_CENTS: Final = 25_000
 CORRUPTED_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup"
+CORRUPTED_PRINCIPAL_ID: Final = "be0e6b8d-f742-4c8f-8df1-9f302559a6c8"
+CORRUPTED_ROLE_ASSIGNMENT_NAME: Final = "5c1b559b-638a-5d58-b77b-b6291747f9d4"
+CORRUPTED_ROLE_ASSIGNMENT_ACTION: Final = "delete-exact-role-assignment"
 TARGET_PARAMETER: Final = "TargetResourceGroupName"
 AUTHORIZATION_PARAMETER: Final = "CleanupAuthorized"
 ALLOWED_OPERATIONS: Final = (
+    "revoke-exact-corrupted-cleanup-role-assignment",
     "create-replacement-automation-account",
     "assign-exact-cleanup-role",
     "publish-guarded-runbook",
@@ -58,6 +64,9 @@ class CleanupControlRecoveryAuthorization:
     subscriptionId: str
     cleanupResourceGroupId: str
     corruptedAutomationAccountId: str
+    corruptedPrincipalId: str
+    corruptedRoleAssignmentId: str
+    corruptedRoleAssignmentAction: str
     replacementAutomationAccount: str
     replacementAutomationAccountId: str
     targetResourceGroupId: str
@@ -80,7 +89,9 @@ class CleanupControlRecoveryAuthorization:
 
 
 def _utc(value: datetime) -> str:
-    return value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (
+        value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    )
 
 
 def _parse_utc(value: str, error_code: str) -> datetime:
@@ -91,7 +102,7 @@ def _parse_utc(value: str, error_code: str) -> datetime:
     return parsed
 
 
-def _expected_resource_ids(subscription_id: str) -> tuple[str, str, str, str]:
+def _expected_resource_ids(subscription_id: str) -> tuple[str, str, str, str, str]:
     if (
         not isinstance(subscription_id, str)
         or not subscription_id
@@ -102,22 +113,26 @@ def _expected_resource_ids(subscription_id: str) -> tuple[str, str, str, str]:
         raise CleanupControlRecoveryError("cleanup-recovery-subscription-invalid")
     root = f"/subscriptions/{subscription_id}/resourceGroups"
     cleanup_group = f"{root}/{CLEANUP_GROUP}"
-    account_prefix = f"{cleanup_group}/providers/Microsoft.Automation/automationAccounts"
+    account_prefix = (
+        f"{cleanup_group}/providers/Microsoft.Automation/automationAccounts"
+    )
+    target_group = f"{root}/{TARGET_GROUP}"
     return (
         cleanup_group,
         f"{account_prefix}/{CORRUPTED_AUTOMATION_ACCOUNT}",
         f"{account_prefix}/{CLEANUP_AUTOMATION_ACCOUNT}",
-        f"{root}/{TARGET_GROUP}",
+        target_group,
+        (
+            f"{target_group}/providers/Microsoft.Authorization/roleAssignments/"
+            f"{CORRUPTED_ROLE_ASSIGNMENT_NAME}"
+        ),
     )
 
 
 def cleanup_control_recovery_authorization_integrity(
     authorization: CleanupControlRecoveryAuthorization,
 ) -> str:
-    return cast(
-        str,
-        integrity_sha256(_authorization_body(authorization), AUTHORIZATION_DOMAIN),
-    )
+    return integrity_sha256(_authorization_body(authorization), AUTHORIZATION_DOMAIN)
 
 
 def _authorization_body(
@@ -129,6 +144,9 @@ def _authorization_body(
         "subscriptionId": authorization.subscriptionId,
         "cleanupResourceGroupId": authorization.cleanupResourceGroupId,
         "corruptedAutomationAccountId": authorization.corruptedAutomationAccountId,
+        "corruptedPrincipalId": authorization.corruptedPrincipalId,
+        "corruptedRoleAssignmentId": authorization.corruptedRoleAssignmentId,
+        "corruptedRoleAssignmentAction": authorization.corruptedRoleAssignmentAction,
         "replacementAutomationAccount": authorization.replacementAutomationAccount,
         "replacementAutomationAccountId": authorization.replacementAutomationAccountId,
         "targetResourceGroupId": authorization.targetResourceGroupId,
@@ -156,22 +174,43 @@ def build_cleanup_control_recovery_authorization(
     subscription_id: str,
     cleanup_resource_group_id: str,
     corrupted_automation_account_id: str,
+    corrupted_principal_id: str,
+    corrupted_role_assignment_id: str,
     replacement_automation_account_id: str,
     target_resource_group_id: str,
     runbook_content_sha256: str,
     now_utc: datetime,
 ) -> CleanupControlRecoveryAuthorization:
-    if len(repository_head) != 40 or any(c not in "0123456789abcdef" for c in repository_head):
+    if len(repository_head) != 40 or any(
+        c not in "0123456789abcdef" for c in repository_head
+    ):
         raise CleanupControlRecoveryError("cleanup-recovery-repository-head-invalid")
-    expected_cleanup, expected_corrupted, expected_replacement, expected_target = (
-        _expected_resource_ids(subscription_id)
-    )
+    (
+        expected_cleanup,
+        expected_corrupted,
+        expected_replacement,
+        expected_target,
+        expected_corrupted_assignment,
+    ) = _expected_resource_ids(subscription_id)
     if cleanup_resource_group_id != expected_cleanup:
         raise CleanupControlRecoveryError("cleanup-recovery-cleanup-scope-invalid")
     if corrupted_automation_account_id != expected_corrupted:
         raise CleanupControlRecoveryError("cleanup-recovery-corrupted-account-invalid")
+    if corrupted_principal_id != CORRUPTED_PRINCIPAL_ID:
+        raise CleanupControlRecoveryError(
+            "cleanup-recovery-corrupted-principal-invalid"
+        )
+    if (
+        corrupted_role_assignment_id.casefold()
+        != expected_corrupted_assignment.casefold()
+    ):
+        raise CleanupControlRecoveryError(
+            "cleanup-recovery-corrupted-assignment-invalid"
+        )
     if replacement_automation_account_id != expected_replacement:
-        raise CleanupControlRecoveryError("cleanup-recovery-replacement-account-scope-invalid")
+        raise CleanupControlRecoveryError(
+            "cleanup-recovery-replacement-account-scope-invalid"
+        )
     if target_resource_group_id != expected_target:
         raise CleanupControlRecoveryError("cleanup-recovery-target-scope-invalid")
     if not isinstance(
@@ -190,6 +229,9 @@ def build_cleanup_control_recovery_authorization(
         subscriptionId=subscription_id,
         cleanupResourceGroupId=cleanup_resource_group_id,
         corruptedAutomationAccountId=corrupted_automation_account_id,
+        corruptedPrincipalId=corrupted_principal_id,
+        corruptedRoleAssignmentId=expected_corrupted_assignment,
+        corruptedRoleAssignmentAction=CORRUPTED_ROLE_ASSIGNMENT_ACTION,
         replacementAutomationAccount=CLEANUP_AUTOMATION_ACCOUNT,
         replacementAutomationAccountId=replacement_automation_account_id,
         targetResourceGroupId=target_resource_group_id,
@@ -216,6 +258,9 @@ def build_cleanup_control_recovery_authorization(
         subscriptionId=unsigned.subscriptionId,
         cleanupResourceGroupId=unsigned.cleanupResourceGroupId,
         corruptedAutomationAccountId=unsigned.corruptedAutomationAccountId,
+        corruptedPrincipalId=unsigned.corruptedPrincipalId,
+        corruptedRoleAssignmentId=unsigned.corruptedRoleAssignmentId,
+        corruptedRoleAssignmentAction=unsigned.corruptedRoleAssignmentAction,
         replacementAutomationAccount=unsigned.replacementAutomationAccount,
         replacementAutomationAccountId=unsigned.replacementAutomationAccountId,
         targetResourceGroupId=unsigned.targetResourceGroupId,
@@ -234,7 +279,9 @@ def build_cleanup_control_recovery_authorization(
         runbookContentSha256=unsigned.runbookContentSha256,
         costCeilingUsdCents=unsigned.costCeilingUsdCents,
         allowedOperations=unsigned.allowedOperations,
-        authorizationIntegritySha256=(cleanup_control_recovery_authorization_integrity(unsigned)),
+        authorizationIntegritySha256=(
+            cleanup_control_recovery_authorization_integrity(unsigned)
+        ),
     )
 
 
@@ -244,14 +291,21 @@ def validate_cleanup_control_recovery_authorization(
     expected_repository_head: str,
     now_utc: datetime,
 ) -> CleanupControlRecoveryAuthorization:
-    expected_cleanup, expected_corrupted, expected_replacement, expected_target = (
-        _expected_resource_ids(authorization.subscriptionId)
-    )
+    (
+        expected_cleanup,
+        expected_corrupted,
+        expected_replacement,
+        expected_target,
+        expected_corrupted_assignment,
+    ) = _expected_resource_ids(authorization.subscriptionId)
     exact_values = {
         "authorizationVersion": AUTHORIZATION_VERSION,
         "repositoryHead": expected_repository_head,
         "cleanupResourceGroupId": expected_cleanup,
         "corruptedAutomationAccountId": expected_corrupted,
+        "corruptedPrincipalId": CORRUPTED_PRINCIPAL_ID,
+        "corruptedRoleAssignmentId": expected_corrupted_assignment,
+        "corruptedRoleAssignmentAction": CORRUPTED_ROLE_ASSIGNMENT_ACTION,
         "replacementAutomationAccount": CLEANUP_AUTOMATION_ACCOUNT,
         "replacementAutomationAccountId": expected_replacement,
         "targetResourceGroupId": expected_target,
@@ -271,7 +325,9 @@ def validate_cleanup_control_recovery_authorization(
     }
     observed = asdict(authorization)
     if any(observed.get(key) != value for key, value in exact_values.items()):
-        raise CleanupControlRecoveryError("cleanup-recovery-authorization-scope-invalid")
+        raise CleanupControlRecoveryError(
+            "cleanup-recovery-authorization-scope-invalid"
+        )
     if len(authorization.repositoryHead) != 40 or any(
         c not in "0123456789abcdef" for c in authorization.repositoryHead
     ):
@@ -283,14 +339,18 @@ def validate_cleanup_control_recovery_authorization(
     authorized_at = _parse_utc(
         authorization.authorizedAtUtc, "cleanup-recovery-authorized-at-invalid"
     )
-    deadline = _parse_utc(authorization.deadlineUtc, "cleanup-recovery-deadline-invalid")
+    deadline = _parse_utc(
+        authorization.deadlineUtc, "cleanup-recovery-deadline-invalid"
+    )
     current = now_utc.astimezone(UTC).replace(microsecond=0)
     if authorized_at > current or current > deadline or authorized_at > deadline:
         raise CleanupControlRecoveryError("cleanup-recovery-authorization-expired")
     if authorization.authorizationIntegritySha256 != (
         cleanup_control_recovery_authorization_integrity(authorization)
     ):
-        raise CleanupControlRecoveryError("cleanup-recovery-authorization-integrity-invalid")
+        raise CleanupControlRecoveryError(
+            "cleanup-recovery-authorization-integrity-invalid"
+        )
     return authorization
 
 
@@ -303,7 +363,9 @@ def cleanup_control_recovery_authorization_from_mapping(
     if set(value) != fields:
         raise CleanupControlRecoveryError("cleanup-recovery-authorization-malformed")
     operations = value.get("allowedOperations")
-    if not isinstance(operations, list) or any(not isinstance(item, str) for item in operations):
+    if not isinstance(operations, list) or any(
+        not isinstance(item, str) for item in operations
+    ):
         raise CleanupControlRecoveryError("cleanup-recovery-authorization-malformed")
     string_fields = fields - {
         "allowedOperations",
@@ -324,8 +386,13 @@ def cleanup_control_recovery_authorization_from_mapping(
         subscriptionId=cast(str, value["subscriptionId"]),
         cleanupResourceGroupId=cast(str, value["cleanupResourceGroupId"]),
         corruptedAutomationAccountId=cast(str, value["corruptedAutomationAccountId"]),
+        corruptedPrincipalId=cast(str, value["corruptedPrincipalId"]),
+        corruptedRoleAssignmentId=cast(str, value["corruptedRoleAssignmentId"]),
+        corruptedRoleAssignmentAction=cast(str, value["corruptedRoleAssignmentAction"]),
         replacementAutomationAccount=cast(str, value["replacementAutomationAccount"]),
-        replacementAutomationAccountId=cast(str, value["replacementAutomationAccountId"]),
+        replacementAutomationAccountId=cast(
+            str, value["replacementAutomationAccountId"]
+        ),
         targetResourceGroupId=cast(str, value["targetResourceGroupId"]),
         roleDefinitionId=cast(str, value["roleDefinitionId"]),
         roleScope=cast(str, value["roleScope"]),
@@ -352,7 +419,9 @@ def load_cleanup_control_recovery_authorization(
     resolved = path.resolve()
     repository = REPOSITORY_ROOT.resolve()
     if resolved == repository or repository in resolved.parents:
-        raise CleanupControlRecoveryError("cleanup-recovery-authorization-inside-repository")
+        raise CleanupControlRecoveryError(
+            "cleanup-recovery-authorization-inside-repository"
+        )
     return cleanup_control_recovery_authorization_from_mapping(load_json(resolved))
 
 
@@ -361,7 +430,9 @@ def write_cleanup_control_recovery_authorization(
 ) -> None:
     repository = REPOSITORY_ROOT.resolve()
     if path.resolve() == repository or repository in path.resolve().parents:
-        raise CleanupControlRecoveryError("cleanup-recovery-authorization-inside-repository")
+        raise CleanupControlRecoveryError(
+            "cleanup-recovery-authorization-inside-repository"
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     body = {
         **_authorization_body(authorization),
