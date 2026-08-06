@@ -1022,7 +1022,7 @@ def validate_already_pushed_reconstruction_authorization(
         or value.get("sourceTag") != f"source-{value['imageSourceCommit']}"
         or value.get("platform") != API_IMAGE_PLATFORM
         or value.get("cleanupGeneration") != 2
-        or value.get("costCeilingUsdCents") != 22500
+        or value.get("costCeilingUsdCents") != 25000
         or value.get("allowedOperation") != RECONCILIATION_OPERATION_ID
         or value.get("prohibitedOperations")
         != list(RECONSTRUCTION_PROHIBITED_OPERATIONS)
@@ -1062,7 +1062,7 @@ def validate_already_pushed_reconstruction_authorization(
         ),
         cleanup_generation=2,
         cleanup_deadline_utc=str(value["cleanupDeadlineUtc"]),
-        cost_ceiling_usd_cents=22500,
+        cost_ceiling_usd_cents=25000,
         issued_at_utc=str(value["issuedAtUtc"]),
         expires_at_utc=str(value["expiresAtUtc"]),
     )
@@ -1170,7 +1170,7 @@ def validate_already_pushed_reconciliation_receipt(
         != record.live_observation_integrity
         or value.get("cleanupGeneration") != record.cleanup_generation
         or value.get("cleanupDeadlineUtc") != record.cleanup_deadline_utc
-        or value.get("costCeilingUsdCents") != 22500
+        or value.get("costCeilingUsdCents") != 25000
         or value.get("permittedOperation") != RECONCILIATION_OPERATION_ID
         or value.get("allowedFinalizerRoles") != ["AcrPull", "AcrDelete"]
         or value.get("sourceTagDeleteMaximum") != 1
@@ -1196,7 +1196,7 @@ def validate_already_pushed_reconciliation_receipt(
         live_observation_integrity=cast(str, value["liveObservationIntegritySha256"]),
         cleanup_generation=record.cleanup_generation,
         cleanup_deadline_utc=record.cleanup_deadline_utc,
-        cost_ceiling_usd_cents=22500,
+        cost_ceiling_usd_cents=25000,
     )
 
 
@@ -1224,7 +1224,7 @@ def reconciliation_receipt_from_reconstructed_record(
         live_observation_integrity=record.live_observation_integrity,
         cleanup_generation=record.cleanup_generation,
         cleanup_deadline_utc=record.cleanup_deadline_utc,
-        cost_ceiling_usd_cents=22500,
+        cost_ceiling_usd_cents=25000,
     )
 
 

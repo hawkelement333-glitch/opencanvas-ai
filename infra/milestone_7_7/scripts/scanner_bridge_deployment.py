@@ -6,7 +6,7 @@ envelope and produces explicit Bicep parameters for the post-secret executor.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Set as AbstractSet
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
@@ -74,7 +74,10 @@ def load_deployment_evidence(
 
 
 def bicep_parameters(
-    evidence: ScannerResultBridgeDeploymentEvidence, *, repository_head: str, now: datetime
+    evidence: ScannerResultBridgeDeploymentEvidence,
+    *,
+    repository_head: str,
+    now: datetime,
 ) -> list[str]:
     """Return explicit parameters; callers cannot pass a bridge-resolution flag."""
 
@@ -129,7 +132,8 @@ def deployment_parameters(
         f"cleanupAtUtc={cleanup_at_utc}",
         f"expectedUsdCents={expected_cost}",
         f"maximumPlausibleUsdCents={maximum_cost}",
-        "lifecycleTags=" + json.dumps(lifecycle_tags, separators=(",", ":"), sort_keys=True),
+        "lifecycleTags="
+        + json.dumps(lifecycle_tags, separators=(",", ":"), sort_keys=True),
     ]
     if runtime_config is None:
         return parameters
@@ -145,7 +149,9 @@ def deployment_parameters(
     )
 
 
-def deployment_name(stage: str, ledger_integrity: str, *, allowed_stages: set[str]) -> str:
+def deployment_name(
+    stage: str, ledger_integrity: str, *, allowed_stages: AbstractSet[str]
+) -> str:
     """Bind each deployment name to its validated one-run ledger."""
 
     if stage not in allowed_stages or len(ledger_integrity) != 64:
@@ -173,7 +179,9 @@ def parse_post_secret_outputs(
     def value(name: str) -> object:
         output = outputs.get(name)
         if not isinstance(output, Mapping) or set(output) - {"type", "value"}:
-            raise ScannerBridgeDeploymentError("post-secret-deployment-output-malformed")
+            raise ScannerBridgeDeploymentError(
+                "post-secret-deployment-output-malformed"
+            )
         return output.get("value")
 
     integrity = value("scannerResultBridgeEvidenceIntegrity")
@@ -184,6 +192,7 @@ def parse_post_secret_outputs(
     job_id = value("migrationJobResourceId")
     if (
         integrity != evidence.integrity_sha256()
+        or not isinstance(integrity, str)
         or state != "RESOLVED"
         or resolved is not True
         or enabled is not True
@@ -192,7 +201,9 @@ def parse_post_secret_outputs(
         or not isinstance(job_id, str)
         or not job_id
     ):
-        raise ScannerBridgeDeploymentError("post-secret-deployment-bridge-output-invalid")
+        raise ScannerBridgeDeploymentError(
+            "post-secret-deployment-bridge-output-invalid"
+        )
     return {
         "scanner-result-bridge-evidence-integrity": integrity,
         "migration-job-name": job_name,

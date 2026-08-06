@@ -27,7 +27,7 @@ param cleanupJobScheduleDeploymentEnabled bool = false
 param expectedUsdCents int
 
 @minValue(1)
-@maxValue(22500)
+@maxValue(25000)
 param maximumPlausibleUsdCents int
 
 @minValue(2500)
@@ -178,7 +178,7 @@ output moduleName string = 'cleanup-supervisor'
 output checkpointMode string = checkpointMode
 output deploymentEnabled bool = deploymentEnabled
 output expectedWithinBlock bool = expectedUsdCents <= 12000
-output maximumBelowCeiling bool = maximumPlausibleUsdCents <= 22500
+output maximumBelowCeiling bool = maximumPlausibleUsdCents <= 25000
 output uncertaintyContingencyBasisPoints int = uncertaintyContingencyBasisPoints
 output defaultPlannedHours int = defaultPlannedHours
 output hardMaximumHours int = hardMaximumHours

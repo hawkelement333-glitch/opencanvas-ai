@@ -19,7 +19,7 @@ def _ledger(marker: str = "a") -> dict[str, JsonValue]:
 def _state(ledger: dict[str, JsonValue]) -> dict[str, JsonValue]:
     return {
         "activeStage": None,
-        "cleanupAtUtc": "2026-08-06T04:00:00Z",
+        "cleanupAtUtc": "2026-08-06T12:00:00Z",
         "disposition": "PAUSED_PRESERVED",
         "failedStage": None,
         "lastCompletedStage": "pre-secret",
@@ -156,12 +156,16 @@ def test_post_secret_always_revokes_temporary_authority_after_metadata_failure(
     monkeypatch.setattr(lifecycle, "_ensure_temporary_key_vault_authority", ensure)
     monkeypatch.setattr(lifecycle, "_managed_secret_states", lambda _subscription: {})
     monkeypatch.setattr(lifecycle, "_revoke_temporary_key_vault_authority", revoke)
+    monkeypatch.setattr(
+        lifecycle, "load_scanner_bridge_deployment_evidence", lambda *_args, **_kwargs: object()
+    )
 
     with pytest.raises(lifecycle.LifecycleError, match="managed-secret-presence-or-state-unproved"):
         lifecycle._post_secret(
             ledger=ledger,
             subscription_id="opaque-subscription",
             receipt_directory=tmp_path,
+            scanner_bridge_evidence_path=tmp_path / "scanner-bridge-evidence.json",
         )
 
     assert calls == ["authority-proved", "authority-revoked-and-denied"]

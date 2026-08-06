@@ -16,7 +16,7 @@ import re
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Final, Mapping
+from typing import Final, Mapping, cast
 from uuid import UUID, uuid5
 
 from performance.milestone_7_7.framework import (
@@ -241,7 +241,7 @@ def _assert_no_private_material(value: JsonValue) -> None:
 
 
 def managed_binding_integrity_sha256(value: JsonValue) -> str:
-    return integrity_sha256(value, MANAGED_BINDING_DOMAIN)
+    return cast(str, integrity_sha256(value, MANAGED_BINDING_DOMAIN))
 
 
 def cleanup_runbook_sha256(value: str) -> str:
@@ -343,7 +343,7 @@ def cleanup_binding_id_for_subscription(
 
 
 def cleanup_binding_tombstone_integrity(value: dict[str, JsonValue]) -> str:
-    return integrity_sha256(value, CLEANUP_BINDING_TOMBSTONE_DOMAIN)
+    return cast(str, integrity_sha256(value, CLEANUP_BINDING_TOMBSTONE_DOMAIN))
 
 
 def operation_overlay_integrity_sha256(value: dict[str, JsonValue]) -> str:
@@ -352,7 +352,7 @@ def operation_overlay_integrity_sha256(value: dict[str, JsonValue]) -> str:
         for key, item in value.items()
         if key != "contractIntegritySha256"
     }
-    return integrity_sha256(body, OPERATION_OVERLAY_DOMAIN)
+    return cast(str, integrity_sha256(body, OPERATION_OVERLAY_DOMAIN))
 
 
 def authorization_ledger_integrity_sha256(value: dict[str, JsonValue]) -> str:
@@ -361,7 +361,7 @@ def authorization_ledger_integrity_sha256(value: dict[str, JsonValue]) -> str:
         for key, item in value.items()
         if key != "ledgerIntegritySha256"
     }
-    return integrity_sha256(body, AUTHORIZATION_LEDGER_DOMAIN)
+    return cast(str, integrity_sha256(body, AUTHORIZATION_LEDGER_DOMAIN))
 
 
 def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
@@ -396,7 +396,7 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "cleanupPrincipalFingerprintSha256": (
             "19a9f97779cd2eb9acfdc04797f1fc5339316ee1a424ca79b70661beffa33260"
         ),
-        "deadlineUtc": "2026-08-06T04:00:00Z",
+        "deadlineUtc": "2026-08-06T12:00:00Z",
         "deletionWaitSeconds": 2700,
         "launchGraceSeconds": 1800,
         "publishedContentSha256": cleanup_runbook_sha256(

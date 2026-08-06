@@ -140,8 +140,8 @@ def _authorization(
         live_observation_integrity=observation.as_json()["integritySha256"],  # type: ignore[arg-type]
         prior_lifecycle_evidence_integrity="5" * 64,
         cleanup_generation=2,
-        cleanup_deadline_utc="2026-08-06T04:00:00Z",
-        cost_ceiling_usd_cents=22500,
+        cleanup_deadline_utc="2026-08-06T12:00:00Z",
+        cost_ceiling_usd_cents=25000,
         issued_at_utc="2026-08-05T15:59:00Z",
         expires_at_utc="2026-08-05T16:14:00Z",
     )
@@ -376,7 +376,7 @@ def test_legacy_original_record_remains_valid_and_reconstructed_record_requires_
         stderr_sha256="2" * 64,
         publication_evidence_integrity="3" * 64,
         cleanup_generation=2,
-        cleanup_deadline_utc="2026-08-06T04:00:00Z",
+        cleanup_deadline_utc="2026-08-06T12:00:00Z",
         prior_lifecycle_evidence="5" * 64,
         operation_id="reconcile-already-pushed-publication",
     )

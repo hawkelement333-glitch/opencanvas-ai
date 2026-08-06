@@ -6,7 +6,7 @@
   "currency": "USD",
   "targetUsdCents": 10000,
   "provisioningBlockAboveUsdCents": 12000,
-  "absoluteCeilingUsdCents": 22500,
+  "absoluteCeilingUsdCents": 25000,
   "expectedUsdCents": 3110,
   "baseMaximumUsdCents": 16485,
   "uncertaintyContingencyBasisPoints": 2500,

@@ -11,7 +11,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final
+from typing import Final, cast
 
 from performance.milestone_7_7.framework import (
     ContractError,
@@ -977,7 +977,7 @@ def _cost_contract() -> tuple[str, str, dict[str, JsonValue]]:
         or isinstance(maximum, bool)
     ):
         raise ManagedBindingExecutionError("cost-envelope-malformed")
-    within = expected <= 12_000 and maximum <= 22_500
+    within = expected <= 12_000 and maximum <= 25_000
     return (
         ("proved" if within else "blocked"),
         ("cost-envelope-bounded" if within else "cost-envelope-exceeds-ceiling"),
@@ -1248,7 +1248,7 @@ def _evaluate_operation(
 
 def _result_integrity(value: dict[str, JsonValue]) -> str:
     body = {key: item for key, item in value.items() if key != "resultIntegritySha256"}
-    return integrity_sha256(body, RESULT_DOMAIN)
+    return cast(str, integrity_sha256(body, RESULT_DOMAIN))
 
 
 def _build_result(

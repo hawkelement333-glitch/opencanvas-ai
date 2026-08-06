@@ -582,7 +582,7 @@ def scenario_catalog() -> dict[str, JsonValue]:
 
 
 def scenario_catalog_sha256() -> str:
-    return integrity_sha256(scenario_catalog(), CATALOG_DOMAIN)
+    return cast(str, integrity_sha256(scenario_catalog(), CATALOG_DOMAIN))
 
 
 def _normalized_plan(value: dict[str, JsonValue]) -> dict[str, JsonValue]:
@@ -638,7 +638,7 @@ def _deepcopy_json(value: JsonValue) -> JsonValue:
 def plan_integrity_sha256(value: dict[str, JsonValue]) -> str:
     """Hash normalized semantic plan content using the Checkpoint 4 domain."""
 
-    return integrity_sha256(_normalized_plan(value), PLAN_DOMAIN)
+    return cast(str, integrity_sha256(_normalized_plan(value), PLAN_DOMAIN))
 
 
 def _current_bindings() -> dict[str, str]:
@@ -726,7 +726,7 @@ def build_local_plan(
             "maximumScannerBytes": 26_214_400,
             "maximumEvidenceBytes": 104_857_600,
             "provisioningBlockAboveUsdCents": 12_000,
-            "absoluteCostCeilingUsdCents": 22_500,
+            "absoluteCostCeilingUsdCents": 25_000,
             "minimumCleanupReserveSeconds": 5_400,
             "maximumEnvironmentLifetimeSeconds": 86_400,
         },
@@ -927,7 +927,7 @@ def report_bytes(report: dict[str, JsonValue]) -> bytes:
     encoded = canonical_bytes(report)
     if len(encoded) > MAX_VERIFIER_OUTPUT_BYTES:
         raise ContractError("verifier output exceeds the hard ceiling")
-    return encoded
+    return cast(bytes, encoded)
 
 
 def verify_plan(path: Path) -> dict[str, JsonValue]:

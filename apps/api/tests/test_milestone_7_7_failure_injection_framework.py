@@ -227,7 +227,7 @@ def test_plan_limits_do_not_exceed_prior_checkpoint_boundaries() -> None:
     assert limits["maximumRetriesPerRequest"] == 2
     assert limits["maximumSyntheticUploadBytes"] == 134_217_728
     assert limits["provisioningBlockAboveUsdCents"] == 12_000
-    assert limits["absoluteCostCeilingUsdCents"] == 22_500
+    assert limits["absoluteCostCeilingUsdCents"] == 25_000
     assert limits["provisioningBlockAboveUsdCents"] < limits["absoluteCostCeilingUsdCents"]
 
 

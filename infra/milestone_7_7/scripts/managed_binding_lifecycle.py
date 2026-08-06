@@ -59,7 +59,9 @@ from infra.milestone_7_7.scripts.scanner_bridge_deployment import (
     load_deployment_evidence as load_scanner_bridge_deployment_evidence,
 )
 
-_CANONICAL_LIFECYCLE_MODULE: Final = "infra.milestone_7_7.scripts.managed_binding_lifecycle"
+_CANONICAL_LIFECYCLE_MODULE: Final = (
+    "infra.milestone_7_7.scripts.managed_binding_lifecycle"
+)
 if __name__ == "__main__":
     _existing_lifecycle_module = sys.modules.get(_CANONICAL_LIFECYCLE_MODULE)
     if (
@@ -86,11 +88,11 @@ SCHEDULE: Final = "schedule-mobius77-cleanup"
 STAGING_LOCATION: Final = "southcentralus"
 CLEANUP_LOCATION: Final = "westus"
 REDIS_LOCATION: Final = "australiacentral"
-AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 6, 4, 0, tzinfo=UTC)
+AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
 MAXIMUM_AUTHORIZED_WINDOW: Final = timedelta(hours=30)
 MINIMUM_CLEANUP_RESERVE: Final = timedelta(minutes=90)
 PROVISIONING_COST_BLOCK_USD_CENTS: Final = 12_000
-ABSOLUTE_COST_CEILING_USD_CENTS: Final = 22_500
+ABSOLUTE_COST_CEILING_USD_CENTS: Final = 25_000
 MAXIMUM_OUTPUT_BYTES: Final = 65_536
 DEPLOYMENT_TIMEOUT_SECONDS: Final = 1_800
 OPERATION_TIMEOUT_SECONDS: Final = 120
@@ -397,8 +399,11 @@ class PublisherAccessPending(_PublisherAccessPending, LifecycleError):
 class PublisherOAuthTransient(_PublisherOAuthTransient, LifecycleError):
     pass
 
+
 def _utc_now() -> datetime:
     return datetime.now(UTC).replace(microsecond=0)
+
+
 def _cleanup_deadline(now: datetime) -> datetime:
     if now.tzinfo is None or now.utcoffset() != timedelta(0):
         _fail("cleanup-time-invalid")
@@ -418,6 +423,8 @@ def _cleanup_deadline(now: datetime) -> datetime:
     if remaining > MAXIMUM_AUTHORIZED_WINDOW:
         _fail("cleanup-deadline-outside-authorized-window")
     return AUTHORIZED_CLEANUP_AT_UTC
+
+
 def _fail(code: str) -> NoReturn:
     raise LifecycleError(code)
 
@@ -694,7 +701,7 @@ def _account_binding(now: datetime) -> str:
     adapter = _PopenProcessAdapter()
     account = _BoundedAzureRunner(adapter=adapter, clock=lambda: now).run_account()
     try:
-        return account.subscription_id_for_materialization()
+        return cast(str, account.subscription_id_for_materialization())
     finally:
         account.release()
 
@@ -2327,7 +2334,11 @@ def _reconcile_container_apps_infrastructure_tags(
 
 def _deployment_name(stage: str, ledger: Mapping[str, JsonValue]) -> str:
     try:
-        return scanner_bridge_deployment_name(stage, str(ledger["ledgerIntegritySha256"]), allowed_stages=DEPLOYMENT_STAGES)
+        return scanner_bridge_deployment_name(
+            stage,
+            str(ledger["ledgerIntegritySha256"]),
+            allowed_stages=DEPLOYMENT_STAGES,
+        )
     except ScannerBridgeDeploymentError as exc:
         _fail(str(exc))
 
@@ -2344,12 +2355,7 @@ def _deploy_stage(
     runtime_config: dict[str, JsonValue] | None = None,
     scanner_bridge_evidence: ScannerResultBridgeDeploymentEvidence | None = None,
 ) -> None:
-    try:
-        deployment_name = scanner_bridge_deployment_name(
-            stage, str(ledger["ledgerIntegritySha256"]), allowed_stages=DEPLOYMENT_STAGES
-        )
-    except ScannerBridgeDeploymentError as exc:
-        _fail(str(exc))
+    deployment_name = _deployment_name(stage, ledger)
     try:
         parameters = scanner_bridge_deployment_parameters(
             stage=stage,
