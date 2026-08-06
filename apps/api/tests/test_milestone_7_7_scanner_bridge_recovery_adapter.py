@@ -205,6 +205,11 @@ def _install_common_fakes(
         "_verify_foundation",
         lambda _authorization: calls.append("foundation") or _readback(),
     )
+    monkeypatch.setattr(
+        adapter_module,
+        "_wait_for_proof_rbac_propagation",
+        lambda *_args, **_kwargs: calls.append("rbac-propagation") or "7" * 64,
+    )
     return deployments
 
 
@@ -503,7 +508,8 @@ def test_proof_executes_once_then_removes_residue_and_writes_typed_evidence(
     assert deployments[0]["stage"] == PROOF_STAGE
     assert deployments[0]["runtime_config"] == {"apiImageDigest": IMAGE}
     assert calls.index("deploy") < calls.index("proof-graph")
-    assert calls.index("proof-graph") < calls.index("start")
+    assert calls.index("proof-graph") < calls.index("rbac-propagation")
+    assert calls.index("rbac-propagation") < calls.index("start")
     assert calls.index("start") < calls.index("marker")
     assert calls.index("marker") < calls.index("residue")
     decoded = json.loads(evidence_path.read_text(encoding="utf-8"))
@@ -641,6 +647,7 @@ def test_proof_graph_accepts_only_resource_id_casing_differences(
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read",
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/add/action",
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write",
+                "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/delete",
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/deleteBlobVersion/action",
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/permanentDelete/action",
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/read",
@@ -821,6 +828,37 @@ def test_proof_graph_retries_only_ambiguous_or_absent_azure_readback(
             workspace_customer_id="workspace",
         )
     assert error.value.sanitized_azure_error_code == "authorizationfailed"
+
+
+def test_proof_execution_waits_for_bounded_rbac_propagation_while_graph_stays_exact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _authorization(PROOF_STAGE)
+    readback = _readback()
+    assignment_id = _outputs(authorization)["scannerBridgeTemporaryRoleAssignmentId"]
+    assert isinstance(assignment_id, str)
+    monotonic = iter((0.0, 0.0, 0.0, 900.0, 900.0))
+    graph_calls: list[str] = []
+    sleeps: list[float] = []
+    monkeypatch.setattr(adapter_module.time, "monotonic", lambda: next(monotonic))
+    monkeypatch.setattr(adapter_module.time, "sleep", sleeps.append)
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_graph",
+        lambda *_args, **_kwargs: graph_calls.append("readback") or "7" * 64,
+    )
+
+    integrity = adapter_module._wait_for_proof_rbac_propagation(
+        authorization,
+        assignment_id=assignment_id,
+        worker_principal_id=readback.worker_principal_id,
+        worker_client_id=readback.worker_client_id,
+        workspace_customer_id=readback.workspace_customer_id,
+    )
+
+    assert integrity == "7" * 64
+    assert graph_calls == ["readback", "readback"]
+    assert sleeps == [adapter_module.PROOF_RBAC_POLL_SECONDS]
 
 
 def test_prohibited_lifecycle_image_application_migration_and_cleanup_operations_unreachable(

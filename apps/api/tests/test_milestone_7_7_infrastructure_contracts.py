@@ -463,6 +463,7 @@ def test_private_pull_scanner_has_no_push_transport_or_tag_write_authority() -> 
     assert "queueServices/queues" not in combined
     assert "publicNetworkAccess: 'Disabled'" in storage
     assert "allowPermanentDelete: true" in storage
+    assert "/blobs/delete'" in bridge
     assert "/blobs/deleteBlobVersion/action" in bridge
     assert "/blobs/permanentDelete/action" in bridge
     main = (ROOT / "main.bicep").read_text(encoding="utf-8")

@@ -88,6 +88,8 @@ EXECUTION_POLL_SECONDS: Final = 15.0
 EXECUTION_PROPAGATION_SECONDS: Final = 3_900.0
 PROOF_GRAPH_POLL_SECONDS: Final = 5.0
 PROOF_GRAPH_PROPAGATION_SECONDS: Final = 300.0
+PROOF_RBAC_POLL_SECONDS: Final = 15.0
+PROOF_RBAC_PROPAGATION_SECONDS: Final = 900.0
 DELETION_POLL_SECONDS: Final = 5.0
 DELETION_PROPAGATION_SECONDS: Final = 180.0
 
@@ -1230,6 +1232,7 @@ def _proof_graph(
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read",
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/add/action",
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write",
+                "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/delete",
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/deleteBlobVersion/action",
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/permanentDelete/action",
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/read",
@@ -1538,6 +1541,31 @@ def _verify_proof_graph(
             if time.monotonic() >= deadline:
                 _fail("scanner-proof-graph-propagation-timeout")
             time.sleep(PROOF_GRAPH_POLL_SECONDS)
+
+
+def _wait_for_proof_rbac_propagation(
+    authorization: ScannerBridgeRecoveryAuthorization,
+    *,
+    assignment_id: str,
+    worker_principal_id: str,
+    worker_client_id: str,
+    workspace_customer_id: str,
+) -> str:
+    """Hold the exact graph stable while Azure Storage's RBAC cache converges."""
+
+    deadline = time.monotonic() + PROOF_RBAC_PROPAGATION_SECONDS
+    while True:
+        integrity = _verify_proof_graph(
+            authorization,
+            assignment_id=assignment_id,
+            worker_principal_id=worker_principal_id,
+            worker_client_id=worker_client_id,
+            workspace_customer_id=workspace_customer_id,
+        )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return integrity
+        time.sleep(min(PROOF_RBAC_POLL_SECONDS, remaining))
 
 
 def _resource_absent(resource_id: str, api_version: str) -> bool:
@@ -1889,6 +1917,13 @@ class ProductionScannerBridgeRecoveryAdapter:
         try:
             try:
                 proof_graph = _verify_proof_graph(
+                    authorization,
+                    assignment_id=assignment_id,
+                    worker_principal_id=readback.worker_principal_id,
+                    worker_client_id=readback.worker_client_id,
+                    workspace_customer_id=readback.workspace_customer_id,
+                )
+                proof_graph = _wait_for_proof_rbac_propagation(
                     authorization,
                     assignment_id=assignment_id,
                     worker_principal_id=readback.worker_principal_id,

@@ -219,6 +219,7 @@ resource proofRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = if (pr
           'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read'
           'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/add/action'
           'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write'
+          'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/delete'
           'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/deleteBlobVersion/action'
           'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/permanentDelete/action'
           'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/read'
