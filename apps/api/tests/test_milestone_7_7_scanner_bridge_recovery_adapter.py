@@ -946,6 +946,12 @@ def test_embedded_role_assignment_not_found_is_authoritative_absence() -> None:
     role_code = managed_binding_lifecycle._sanitized_azure_error_code(bytearray(), role_stderr)
     assert role_code == "roledefinitiondoesnotexist"
     assert adapter_module._not_found(managed_binding_lifecycle.AzureCommandError(role_code))
+    job_stderr = bytearray(
+        b'ERROR: Not Found({"error":{"code":"ContainerAppsJobNotFound","message":"absent"}})'
+    )
+    job_code = managed_binding_lifecycle._sanitized_azure_error_code(bytearray(), job_stderr)
+    assert job_code == "containerappsjobnotfound"
+    assert adapter_module._not_found(managed_binding_lifecycle.AzureCommandError(job_code))
     assert not adapter_module._not_found(
         managed_binding_lifecycle.AzureCommandError("authorizationfailed")
     )

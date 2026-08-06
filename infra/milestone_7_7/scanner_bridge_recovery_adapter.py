@@ -1466,6 +1466,8 @@ def _not_found(exc: lifecycle.AzureCommandError) -> bool:
     return exc.sanitized_azure_error_code in {
         "notfound",
         "not-found",
+        "containerappsjobnotfound",
+        "container-apps-job-not-found",
         "roleassignmentnotfound",
         "role-assignment-not-found",
         "roledefinitiondoesnotexist",
