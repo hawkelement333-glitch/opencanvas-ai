@@ -86,6 +86,8 @@ FOUNDATION_POLL_SECONDS: Final = 15.0
 FOUNDATION_PROPAGATION_SECONDS: Final = 900.0
 EXECUTION_POLL_SECONDS: Final = 15.0
 EXECUTION_PROPAGATION_SECONDS: Final = 3_900.0
+PROOF_GRAPH_POLL_SECONDS: Final = 5.0
+PROOF_GRAPH_PROPAGATION_SECONDS: Final = 300.0
 DELETION_POLL_SECONDS: Final = 5.0
 DELETION_PROPAGATION_SECONDS: Final = 180.0
 
@@ -1473,6 +1475,35 @@ def _not_found(exc: lifecycle.AzureCommandError) -> bool:
     }
 
 
+def _verify_proof_graph(
+    authorization: ScannerBridgeRecoveryAuthorization,
+    *,
+    assignment_id: str,
+    worker_principal_id: str,
+    worker_client_id: str,
+    workspace_customer_id: str,
+) -> str:
+    deadline = time.monotonic() + PROOF_GRAPH_PROPAGATION_SECONDS
+    while True:
+        try:
+            return _proof_graph(
+                authorization,
+                assignment_id=assignment_id,
+                worker_principal_id=worker_principal_id,
+                worker_client_id=worker_client_id,
+                workspace_customer_id=workspace_customer_id,
+            )
+        except lifecycle.AzureCommandError as exc:
+            if not (
+                _not_found(exc)
+                or exc.sanitized_azure_error_code == "azure-command-nonzero"
+            ):
+                raise
+            if time.monotonic() >= deadline:
+                _fail("scanner-proof-graph-propagation-timeout")
+            time.sleep(PROOF_GRAPH_POLL_SECONDS)
+
+
 def _resource_absent(resource_id: str, api_version: str) -> bool:
     try:
         _rest_get(resource_id, api_version, "{id:id}")
@@ -1814,7 +1845,7 @@ class ProductionScannerBridgeRecoveryAdapter:
         if assignment_id is None or evidence_output is None:
             _fail("scanner-proof-authorization-incomplete")
         try:
-            proof_graph = _proof_graph(
+            proof_graph = _verify_proof_graph(
                 authorization,
                 assignment_id=assignment_id,
                 worker_principal_id=readback.worker_principal_id,

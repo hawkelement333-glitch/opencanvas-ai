@@ -567,7 +567,7 @@ def test_failed_proof_graph_still_revokes_all_temporary_authority(
     def graph_failure(*_args: object, **_kwargs: object) -> str:
         raise ScannerBridgeRecoveryExecutionError("scanner-proof-job-readback-unproved")
 
-    monkeypatch.setattr(adapter_module, "_proof_graph", graph_failure)
+    monkeypatch.setattr(adapter_module, "_verify_proof_graph", graph_failure)
     monkeypatch.setattr(
         adapter_module,
         "_start_one_execution",
@@ -722,6 +722,51 @@ def test_proof_graph_accepts_only_resource_id_casing_differences(
             worker_client_id=readback.worker_client_id,
             workspace_customer_id=readback.workspace_customer_id,
         )
+
+
+def test_proof_graph_retries_only_ambiguous_or_absent_azure_readback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _authorization(PROOF_STAGE)
+    attempts = 0
+
+    def read_graph(*_args: object, **_kwargs: object) -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise managed_binding_lifecycle.AzureCommandError("roledefinitiondoesnotexist")
+        return "7" * 64
+
+    monkeypatch.setattr(adapter_module, "_proof_graph", read_graph)
+    monkeypatch.setattr(adapter_module.time, "sleep", lambda _delay: None)
+    assert (
+        adapter_module._verify_proof_graph(
+            authorization,
+            assignment_id="assignment",
+            worker_principal_id=WORKER_PRINCIPAL,
+            worker_client_id="client",
+            workspace_customer_id="workspace",
+        )
+        == "7" * 64
+    )
+    assert attempts == 2
+
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_graph",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            managed_binding_lifecycle.AzureCommandError("authorizationfailed")
+        ),
+    )
+    with pytest.raises(managed_binding_lifecycle.AzureCommandError) as error:
+        adapter_module._verify_proof_graph(
+            authorization,
+            assignment_id="assignment",
+            worker_principal_id=WORKER_PRINCIPAL,
+            worker_client_id="client",
+            workspace_customer_id="workspace",
+        )
+    assert error.value.sanitized_azure_error_code == "authorizationfailed"
 
 
 def test_prohibited_lifecycle_image_application_migration_and_cleanup_operations_unreachable(
