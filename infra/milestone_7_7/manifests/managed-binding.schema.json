@@ -94,8 +94,8 @@
         "corruptedAutomationAccount": { "const": "aa-mobius77-cleanup" },
         "tombstonedBindingIds": {
           "type": "array",
-          "minItems": 3,
-          "maxItems": 3,
+          "minItems": 4,
+          "maxItems": 4,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -112,10 +112,10 @@
             "properties": {
               "bindingContractVersion": { "enum": ["m7.7-automation-cleanup-binding-v1", "m7.7-automation-cleanup-binding-v2"] },
               "bindingGeneration": { "enum": [1, 2] },
-              "bindingId": { "enum": ["158cac88-5679-5804-9f4d-854520bbb635", "b74c6cfe-995e-5107-9e42-4f7f76b76742", "f61544fe-cd79-5247-ac8b-ee9697b6ffd6"] },
+              "bindingId": { "enum": ["158cac88-5679-5804-9f4d-854520bbb635", "b74c6cfe-995e-5107-9e42-4f7f76b76742", "f61544fe-cd79-5247-ac8b-ee9697b6ffd6", "ecdbb32f-9134-5697-85f9-d569ba57454b"] },
               "directGetStatus": { "const": "not-found" },
               "listVisibility": { "const": "absent" },
-              "recreationStatus": { "const": "conflict" },
+              "recreationStatus": { "enum": ["conflict", "not-attempted"] },
               "deletionStatus": { "enum": ["accepted", "not-attempted"] },
               "evidenceIntegritySha256": { "$ref": "#/$defs/sha256" }
             }
@@ -129,7 +129,7 @@
           "const": "rg-solarplexus-mobius-77-staging"
         },
         "subscriptionFingerprint": { "$ref": "#/$defs/sha256" },
-        "deadlineUtc": { "const": "2026-08-06T18:30:00Z" },
+        "deadlineUtc": { "const": "2026-08-07T00:15:00Z" },
         "launchGraceSeconds": { "const": 1800 },
         "cleanupContributorRoleDefinitionId": {
           "const": "b24988ac-6180-42a0-ab88-20f7382dd24c"

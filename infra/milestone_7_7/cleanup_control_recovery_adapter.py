@@ -21,6 +21,8 @@ from performance.milestone_7_7.framework import (
 from preflight.milestone_7_7.cleanup_control_recovery import (
     CLEANUP_GROUP,
     CORRUPTED_AUTOMATION_ACCOUNT,
+    CORRUPTED_RUNBOOK_CONTENT_SHA256,
+    DEADLINE_EXTENSION_AUTHORIZATION_VERSION,
     CleanupControlDeadlineRecoveryAuthorization,
     CleanupControlRecoveryAuthorization,
     validate_cleanup_control_deadline_recovery_authorization,
@@ -44,6 +46,12 @@ DEADLINE_RECOVERY_RECEIPT_VERSION: Final = (
 DEADLINE_RECOVERY_RECEIPT_FILE: Final = "cleanup-control-deadline-recovery.receipt.json"
 DEADLINE_RECOVERY_RECEIPT_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery-receipt/v1\0"
+)
+DEADLINE_EXTENSION_RECEIPT_VERSION: Final = (
+    "mobius.milestone-7.7.cleanup-control-deadline-recovery-receipt.v2"
+)
+DEADLINE_EXTENSION_RECEIPT_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery-receipt/v2\0"
 )
 EXPECTED_COST_USD_CENTS: Final = 1
 CORRUPTED_ROLE_PROPAGATION_SECONDS: Final = 120.0
@@ -127,6 +135,12 @@ def _claim_deadline_recovery_authorization(
     directory = _outside_repository(receipt_directory)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / DEADLINE_RECOVERY_RECEIPT_FILE
+    receipt_version, receipt_domain = (
+        (DEADLINE_EXTENSION_RECEIPT_VERSION, DEADLINE_EXTENSION_RECEIPT_DOMAIN)
+        if authorization.authorizationVersion
+        == DEADLINE_EXTENSION_AUTHORIZATION_VERSION
+        else (DEADLINE_RECOVERY_RECEIPT_VERSION, DEADLINE_RECOVERY_RECEIPT_DOMAIN)
+    )
     body: dict[str, JsonValue] = {
         "authorizationIntegritySha256": authorization.authorizationIntegritySha256,
         "bindingId": authorization.bindingId,
@@ -136,15 +150,13 @@ def _claim_deadline_recovery_authorization(
         "deadlineUtc": authorization.deadlineUtc,
         "priorBindingId": authorization.priorBindingId,
         "priorDeadlineUtc": authorization.priorDeadlineUtc,
-        "receiptVersion": DEADLINE_RECOVERY_RECEIPT_VERSION,
+        "receiptVersion": receipt_version,
         "replayDecision": "deny",
         "repositoryHead": authorization.repositoryHead,
     }
     receipt: dict[str, JsonValue] = {
         **body,
-        "receiptIntegritySha256": integrity_sha256(
-            body, DEADLINE_RECOVERY_RECEIPT_DOMAIN
-        ),
+        "receiptIntegritySha256": integrity_sha256(body, receipt_domain),
     }
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -1426,7 +1438,7 @@ class ProductionCleanupControlRecoveryAdapter:
             authorization,
             subscription_id,
             assignment_required=False,
-            expected_runbook_hash=authorization.priorRunbookContentSha256,
+            expected_runbook_hash=CORRUPTED_RUNBOOK_CONTENT_SHA256,
         )
         prior_or_recovered_deadlines = frozenset(
             {authorization.priorDeadlineUtc, authorization.deadlineUtc}
@@ -1506,7 +1518,7 @@ class ProductionCleanupControlRecoveryAdapter:
             authorization,
             subscription_id,
             assignment_required=False,
-            expected_runbook_hash=authorization.priorRunbookContentSha256,
+            expected_runbook_hash=CORRUPTED_RUNBOOK_CONTENT_SHA256,
         )
         final_resources = _cleanup_resource_group_inventory(subscription_id)
         _validate_cleanup_inventory(

@@ -23,6 +23,7 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     CLEANUP_RUNBOOK_PATH,
     REPOSITORY_ROOT,
     TOMBSTONED_DEADLINE_RECOVERY_BINDING_ID,
+    TOMBSTONED_SECOND_DEADLINE_RECOVERY_BINDING_ID,
     cleanup_runbook_sha256,
 )
 
@@ -58,12 +59,26 @@ DEADLINE_RECOVERY_AUTHORIZATION_VERSION: Final = (
 DEADLINE_RECOVERY_AUTHORIZATION_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery/v1\0"
 )
+DEADLINE_EXTENSION_AUTHORIZATION_VERSION: Final = (
+    "mobius.milestone-7.7.cleanup-control-deadline-recovery.v2"
+)
+DEADLINE_EXTENSION_AUTHORIZATION_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery/v2\0"
+)
 DEADLINE_RECOVERY_OBSERVED_AZURE_UTC: Final = "2026-08-06T12:23:26Z"
 DEADLINE_RECOVERY_DEADLINE_UTC: Final = "2026-08-06T18:30:00Z"
 DEADLINE_RECOVERY_DERIVATION_RULE: Final = (
     "next-15-minute-utc-boundary-at-least-6-hours-after-observed"
 )
 DEADLINE_RECOVERY_ACTION: Final = "recover-expired-cleanup-deadline"
+DEADLINE_EXTENSION_OBSERVED_AZURE_UTC: Final = "2026-08-06T14:06:02Z"
+DEADLINE_EXTENSION_DEADLINE_UTC: Final = "2026-08-07T00:15:00Z"
+DEADLINE_EXTENSION_DERIVATION_RULE: Final = (
+    "next-15-minute-utc-boundary-at-least-10-hours-after-observed"
+)
+DEADLINE_EXTENSION_ACTION: Final = (
+    "extend-cleanup-deadline-for-private-scanner-bridge-proof"
+)
 DEADLINE_RECOVERY_CORRUPTED_ROLE_ACTION: Final = "verify-exact-assignment-absent"
 DEADLINE_RECOVERY_SCHEDULE_ACTION: Final = "replace-same-name-one-time-schedule"
 DEADLINE_RECOVERY_BINDING_ACTION: Final = "reconcile-remove-and-recreate-exact-binding"
@@ -76,6 +91,10 @@ DEADLINE_RECOVERY_REPLACEMENT_ROLE_ASSIGNMENT_NAME: Final = (
 DEADLINE_RECOVERY_REPLACEMENT_LOCATION: Final = "northeurope"
 DEADLINE_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256: Final = (
     "23d074e8508ca0cbc7b56634f70c5b3cd9d59bfe0d274d47d9aaa340941b9fd9"
+)
+CORRUPTED_RUNBOOK_CONTENT_SHA256: Final = DEADLINE_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256
+DEADLINE_EXTENSION_PRIOR_RUNBOOK_CONTENT_SHA256: Final = (
+    "5283fef0c32b1fdc63e0aef00e9d488b8113848cd0ea7edb18bd4231c83b2a7d"
 )
 DEADLINE_RECOVERY_ALLOWED_OPERATIONS: Final = (
     "verify-preserved-cleanup-control",
@@ -139,6 +158,57 @@ class CleanupControlDeadlineRecoveryAuthorization(CleanupControlRecoveryAuthoriz
     bindingAction: str
 
 
+@dataclass(frozen=True)
+class _DeadlineRecoveryProfile:
+    authorization_version: str
+    authorization_domain: bytes
+    observed_azure_utc: str
+    deadline_utc: str
+    derivation_rule: str
+    minimum_lead_hours: int
+    recovery_action: str
+    prior_deadline_utc: str
+    prior_binding_id: str
+    binding_id: str
+    prior_runbook_content_sha256: str
+
+
+def _deadline_recovery_profile(authorization_version: str) -> _DeadlineRecoveryProfile:
+    if authorization_version == DEADLINE_RECOVERY_AUTHORIZATION_VERSION:
+        return _DeadlineRecoveryProfile(
+            authorization_version=authorization_version,
+            authorization_domain=DEADLINE_RECOVERY_AUTHORIZATION_DOMAIN,
+            observed_azure_utc=DEADLINE_RECOVERY_OBSERVED_AZURE_UTC,
+            deadline_utc=DEADLINE_RECOVERY_DEADLINE_UTC,
+            derivation_rule=DEADLINE_RECOVERY_DERIVATION_RULE,
+            minimum_lead_hours=6,
+            recovery_action=DEADLINE_RECOVERY_ACTION,
+            prior_deadline_utc=DEADLINE_UTC,
+            prior_binding_id=TOMBSTONED_DEADLINE_RECOVERY_BINDING_ID,
+            binding_id=TOMBSTONED_SECOND_DEADLINE_RECOVERY_BINDING_ID,
+            prior_runbook_content_sha256=DEADLINE_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256,
+        )
+    if authorization_version == DEADLINE_EXTENSION_AUTHORIZATION_VERSION:
+        return _DeadlineRecoveryProfile(
+            authorization_version=authorization_version,
+            authorization_domain=DEADLINE_EXTENSION_AUTHORIZATION_DOMAIN,
+            observed_azure_utc=DEADLINE_EXTENSION_OBSERVED_AZURE_UTC,
+            deadline_utc=DEADLINE_EXTENSION_DEADLINE_UTC,
+            derivation_rule=DEADLINE_EXTENSION_DERIVATION_RULE,
+            minimum_lead_hours=10,
+            recovery_action=DEADLINE_EXTENSION_ACTION,
+            prior_deadline_utc=DEADLINE_RECOVERY_DEADLINE_UTC,
+            prior_binding_id=TOMBSTONED_SECOND_DEADLINE_RECOVERY_BINDING_ID,
+            binding_id=ACTIVE_CLEANUP_BINDING_ID,
+            prior_runbook_content_sha256=(
+                DEADLINE_EXTENSION_PRIOR_RUNBOOK_CONTENT_SHA256
+            ),
+        )
+    raise CleanupControlRecoveryError(
+        "cleanup-deadline-recovery-authorization-version-invalid"
+    )
+
+
 def _utc(value: datetime) -> str:
     return (
         value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -153,14 +223,20 @@ def _parse_utc(value: str, error_code: str) -> datetime:
     return parsed
 
 
-def derive_cleanup_control_recovery_deadline(observed_azure_utc: datetime) -> datetime:
-    """Return the first quarter-hour boundary at least six hours after Azure UTC."""
+def derive_cleanup_control_recovery_deadline(
+    observed_azure_utc: datetime, *, minimum_lead_hours: int = 6
+) -> datetime:
+    """Return the first quarter-hour boundary after the authorized lead time."""
 
     if observed_azure_utc.tzinfo is None or observed_azure_utc.utcoffset() is None:
         raise CleanupControlRecoveryError(
             "cleanup-deadline-recovery-observed-at-invalid"
         )
-    threshold = observed_azure_utc.astimezone(UTC) + timedelta(hours=6)
+    if minimum_lead_hours not in {6, 10}:
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-minimum-lead-invalid"
+        )
+    threshold = observed_azure_utc.astimezone(UTC) + timedelta(hours=minimum_lead_hours)
     candidate = threshold.replace(second=0, microsecond=0)
     remainder = candidate.minute % 15
     if remainder:
@@ -271,9 +347,10 @@ def _deadline_recovery_authorization_body(
 def cleanup_control_deadline_recovery_authorization_integrity(
     authorization: CleanupControlDeadlineRecoveryAuthorization,
 ) -> str:
+    profile = _deadline_recovery_profile(authorization.authorizationVersion)
     digest = integrity_sha256(
         _deadline_recovery_authorization_body(authorization),
-        DEADLINE_RECOVERY_AUTHORIZATION_DOMAIN,
+        profile.authorization_domain,
     )
     if not isinstance(digest, str):
         raise CleanupControlRecoveryError(
@@ -298,7 +375,9 @@ def build_cleanup_control_deadline_recovery_authorization(
     prior_runbook_content_sha256: str,
     runbook_content_sha256: str,
     observed_azure_utc: datetime,
+    authorization_version: str = DEADLINE_RECOVERY_AUTHORIZATION_VERSION,
 ) -> CleanupControlDeadlineRecoveryAuthorization:
+    profile = _deadline_recovery_profile(authorization_version)
     if len(repository_head) != 40 or any(
         character not in "0123456789abcdef" for character in repository_head
     ):
@@ -349,7 +428,7 @@ def build_cleanup_control_deadline_recovery_authorization(
         raise CleanupControlRecoveryError(
             "cleanup-deadline-recovery-replacement-location-invalid"
         )
-    if prior_runbook_content_sha256 != DEADLINE_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256:
+    if prior_runbook_content_sha256 != profile.prior_runbook_content_sha256:
         raise CleanupControlRecoveryError(
             "cleanup-deadline-recovery-prior-runbook-content-invalid"
         )
@@ -365,17 +444,19 @@ def build_cleanup_control_deadline_recovery_authorization(
             "cleanup-deadline-recovery-observed-at-invalid"
         )
     observed = observed_azure_utc.astimezone(UTC).replace(microsecond=0)
-    if _utc(observed) != DEADLINE_RECOVERY_OBSERVED_AZURE_UTC:
+    if _utc(observed) != profile.observed_azure_utc:
         raise CleanupControlRecoveryError(
             "cleanup-deadline-recovery-observed-at-invalid"
         )
-    deadline = derive_cleanup_control_recovery_deadline(observed)
-    if _utc(deadline) != DEADLINE_RECOVERY_DEADLINE_UTC:
+    deadline = derive_cleanup_control_recovery_deadline(
+        observed, minimum_lead_hours=profile.minimum_lead_hours
+    )
+    if _utc(deadline) != profile.deadline_utc:
         raise CleanupControlRecoveryError(
             "cleanup-deadline-recovery-derived-deadline-invalid"
         )
     unsigned = CleanupControlDeadlineRecoveryAuthorization(
-        authorizationVersion=DEADLINE_RECOVERY_AUTHORIZATION_VERSION,
+        authorizationVersion=profile.authorization_version,
         repositoryHead=repository_head,
         subscriptionId=subscription_id,
         cleanupResourceGroupId=expected_cleanup,
@@ -396,17 +477,17 @@ def build_cleanup_control_deadline_recovery_authorization(
         authorizationParameterValue=True,
         authorizedAtUtc=_utc(observed),
         deadlineUtc=_utc(deadline),
-        bindingId=ACTIVE_CLEANUP_BINDING_ID,
+        bindingId=profile.binding_id,
         bindingContractVersion=CLEANUP_BINDING_CONTRACT_VERSION,
         runbookContentSha256=runbook_content_sha256,
         costCeilingUsdCents=COST_CEILING_CENTS,
         allowedOperations=DEADLINE_RECOVERY_ALLOWED_OPERATIONS,
         authorizationIntegritySha256="",
-        recoveryAction=DEADLINE_RECOVERY_ACTION,
+        recoveryAction=profile.recovery_action,
         deadlineObservedAtUtc=_utc(observed),
-        deadlineDerivationRule=DEADLINE_RECOVERY_DERIVATION_RULE,
-        priorDeadlineUtc=DEADLINE_UTC,
-        priorBindingId=TOMBSTONED_DEADLINE_RECOVERY_BINDING_ID,
+        deadlineDerivationRule=profile.derivation_rule,
+        priorDeadlineUtc=profile.prior_deadline_utc,
+        priorBindingId=profile.prior_binding_id,
         priorRunbookContentSha256=prior_runbook_content_sha256,
         replacementPrincipalId=DEADLINE_RECOVERY_REPLACEMENT_PRINCIPAL_ID,
         replacementRoleAssignmentId=expected_replacement_assignment,
@@ -499,7 +580,7 @@ def build_cleanup_control_recovery_authorization(
         authorizationParameterValue=True,
         authorizedAtUtc=_utc(authorized_at),
         deadlineUtc=DEADLINE_UTC,
-        bindingId=ACTIVE_CLEANUP_BINDING_ID,
+        bindingId=TOMBSTONED_SECOND_DEADLINE_RECOVERY_BINDING_ID,
         bindingContractVersion=CLEANUP_BINDING_CONTRACT_VERSION,
         runbookContentSha256=runbook_content_sha256,
         costCeilingUsdCents=COST_CEILING_CENTS,
@@ -572,7 +653,7 @@ def validate_cleanup_control_recovery_authorization(
         "authorizationParameter": AUTHORIZATION_PARAMETER,
         "authorizationParameterValue": True,
         "deadlineUtc": DEADLINE_UTC,
-        "bindingId": ACTIVE_CLEANUP_BINDING_ID,
+        "bindingId": TOMBSTONED_SECOND_DEADLINE_RECOVERY_BINDING_ID,
         "bindingContractVersion": CLEANUP_BINDING_CONTRACT_VERSION,
         "costCeilingUsdCents": COST_CEILING_CENTS,
         "allowedOperations": ALLOWED_OPERATIONS,
@@ -614,6 +695,7 @@ def validate_cleanup_control_deadline_recovery_authorization(
     expected_repository_head: str,
     now_utc: datetime,
 ) -> CleanupControlDeadlineRecoveryAuthorization:
+    profile = _deadline_recovery_profile(authorization.authorizationVersion)
     (
         expected_cleanup,
         expected_corrupted,
@@ -625,7 +707,7 @@ def validate_cleanup_control_deadline_recovery_authorization(
         authorization.subscriptionId
     )
     exact_values = {
-        "authorizationVersion": DEADLINE_RECOVERY_AUTHORIZATION_VERSION,
+        "authorizationVersion": profile.authorization_version,
         "repositoryHead": expected_repository_head,
         "cleanupResourceGroupId": expected_cleanup,
         "corruptedAutomationAccountId": expected_corrupted,
@@ -643,18 +725,18 @@ def validate_cleanup_control_deadline_recovery_authorization(
         "targetParameterValue": TARGET_GROUP,
         "authorizationParameter": AUTHORIZATION_PARAMETER,
         "authorizationParameterValue": True,
-        "authorizedAtUtc": DEADLINE_RECOVERY_OBSERVED_AZURE_UTC,
-        "deadlineUtc": DEADLINE_RECOVERY_DEADLINE_UTC,
-        "bindingId": ACTIVE_CLEANUP_BINDING_ID,
+        "authorizedAtUtc": profile.observed_azure_utc,
+        "deadlineUtc": profile.deadline_utc,
+        "bindingId": profile.binding_id,
         "bindingContractVersion": CLEANUP_BINDING_CONTRACT_VERSION,
         "costCeilingUsdCents": COST_CEILING_CENTS,
         "allowedOperations": DEADLINE_RECOVERY_ALLOWED_OPERATIONS,
-        "recoveryAction": DEADLINE_RECOVERY_ACTION,
-        "deadlineObservedAtUtc": DEADLINE_RECOVERY_OBSERVED_AZURE_UTC,
-        "deadlineDerivationRule": DEADLINE_RECOVERY_DERIVATION_RULE,
-        "priorDeadlineUtc": DEADLINE_UTC,
-        "priorBindingId": TOMBSTONED_DEADLINE_RECOVERY_BINDING_ID,
-        "priorRunbookContentSha256": (DEADLINE_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256),
+        "recoveryAction": profile.recovery_action,
+        "deadlineObservedAtUtc": profile.observed_azure_utc,
+        "deadlineDerivationRule": profile.derivation_rule,
+        "priorDeadlineUtc": profile.prior_deadline_utc,
+        "priorBindingId": profile.prior_binding_id,
+        "priorRunbookContentSha256": profile.prior_runbook_content_sha256,
         "replacementPrincipalId": DEADLINE_RECOVERY_REPLACEMENT_PRINCIPAL_ID,
         "replacementRoleAssignmentId": expected_replacement_assignment,
         "replacementLocation": DEADLINE_RECOVERY_REPLACEMENT_LOCATION,
@@ -695,7 +777,11 @@ def validate_cleanup_control_deadline_recovery_authorization(
     )
     if (
         authorized_at != deadline_observed_at
-        or derive_cleanup_control_recovery_deadline(deadline_observed_at) != deadline
+        or derive_cleanup_control_recovery_deadline(
+            deadline_observed_at,
+            minimum_lead_hours=profile.minimum_lead_hours,
+        )
+        != deadline
         or prior_deadline >= deadline
     ):
         raise CleanupControlRecoveryError(
@@ -802,10 +888,10 @@ def cleanup_control_deadline_recovery_authorization_from_mapping(
 def cleanup_control_recovery_authorization_from_mapping(
     value: JsonValue,
 ) -> CleanupControlRecoveryAuthorization:
-    if (
-        isinstance(value, dict)
-        and value.get("authorizationVersion") == DEADLINE_RECOVERY_AUTHORIZATION_VERSION
-    ):
+    if isinstance(value, dict) and value.get("authorizationVersion") in {
+        DEADLINE_RECOVERY_AUTHORIZATION_VERSION,
+        DEADLINE_EXTENSION_AUTHORIZATION_VERSION,
+    }:
         return cleanup_control_deadline_recovery_authorization_from_mapping(value)
     if not isinstance(value, dict):
         raise CleanupControlRecoveryError("cleanup-recovery-authorization-malformed")

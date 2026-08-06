@@ -67,7 +67,7 @@
   "cleanupExecution": {
     "bindingContractVersion": "m7.7-automation-cleanup-binding-v2",
     "bindingGeneration": 2,
-    "activeBindingId": "ecdbb32f-9134-5697-85f9-d569ba57454b",
+    "activeBindingId": "d83b4107-54e0-57a4-b650-fe0b556132d2",
     "corruptedAutomationAccount": "aa-mobius77-cleanup",
     "tombstonedBindingIds": [
       {
@@ -99,6 +99,16 @@
         "recreationStatus": "conflict",
         "deletionStatus": "accepted",
         "evidenceIntegritySha256": "212f44df4720ead2b84e7e2b1aa2928a5eae0eb81ad8ebc51779cf1cc85a2ad5"
+      },
+      {
+        "bindingContractVersion": "m7.7-automation-cleanup-binding-v2",
+        "bindingGeneration": 2,
+        "bindingId": "ecdbb32f-9134-5697-85f9-d569ba57454b",
+        "directGetStatus": "not-found",
+        "listVisibility": "absent",
+        "recreationStatus": "not-attempted",
+        "deletionStatus": "accepted",
+        "evidenceIntegritySha256": "cba08cf83343cb652faaee768f82ab7bc9079ae1588b3d74d9d0b1a71162e6e5"
       }
     ],
     "scheduleResourceId": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/schedules/schedule-mobius77-cleanup",
@@ -109,13 +119,13 @@
     "targetParameter": "TargetResourceGroupName",
     "targetResourceGroup": "rg-solarplexus-mobius-77-staging",
     "subscriptionFingerprint": "f4493115ce6375cf0e5d0616bede57126075fdb27ac78ea0ba7e0085252a7028",
-    "deadlineUtc": "2026-08-06T18:30:00Z",
+    "deadlineUtc": "2026-08-07T00:15:00Z",
     "launchGraceSeconds": 1800,
     "cleanupContributorRoleDefinitionId": "b24988ac-6180-42a0-ab88-20f7382dd24c",
     "cleanupPrincipalFingerprintSha256": "19a9f97779cd2eb9acfdc04797f1fc5339316ee1a424ca79b70661beffa33260",
     "deletionWaitSeconds": 2700,
     "absenceVerificationSeconds": 300,
-    "publishedContentSha256": "5283fef0c32b1fdc63e0aef00e9d488b8113848cd0ea7edb18bd4231c83b2a7d"
+    "publishedContentSha256": "36da98c94fb213bd279792ef828da50522d081365b6c30190058c250688a81fd"
   },
   "fixedSkus": {
     "keyVault": "standard",

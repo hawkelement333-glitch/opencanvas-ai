@@ -72,8 +72,11 @@ TOMBSTONED_GENERATION_TWO_CLEANUP_BINDING_ID: Final = (
     "b74c6cfe-995e-5107-9e42-4f7f76b76742"
 )
 TOMBSTONED_DEADLINE_RECOVERY_BINDING_ID: Final = "f61544fe-cd79-5247-ac8b-ee9697b6ffd6"
-ACTIVE_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-06T18:30:00Z"
-ACTIVE_CLEANUP_BINDING_ID: Final = "ecdbb32f-9134-5697-85f9-d569ba57454b"
+TOMBSTONED_SECOND_DEADLINE_RECOVERY_BINDING_ID: Final = (
+    "ecdbb32f-9134-5697-85f9-d569ba57454b"
+)
+ACTIVE_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-07T00:15:00Z"
+ACTIVE_CLEANUP_BINDING_ID: Final = "d83b4107-54e0-57a4-b650-fe0b556132d2"
 CLEANUP_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup-recovery"
 CORRUPTED_CLEANUP_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup"
 CLEANUP_BINDING_TOMBSTONE_DOMAIN: Final = (
@@ -438,7 +441,7 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "cleanupPrincipalFingerprintSha256": (
             "19a9f97779cd2eb9acfdc04797f1fc5339316ee1a424ca79b70661beffa33260"
         ),
-        "deadlineUtc": "2026-08-06T18:30:00Z",
+        "deadlineUtc": ACTIVE_CLEANUP_BINDING_EPOCH_UTC,
         "deletionWaitSeconds": 2700,
         "launchGraceSeconds": 1800,
         "publishedContentSha256": cleanup_runbook_sha256(
@@ -493,6 +496,18 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
                 "deletionStatus": "accepted",
                 "evidenceIntegritySha256": (
                     "212f44df4720ead2b84e7e2b1aa2928a5eae0eb81ad8ebc51779cf1cc85a2ad5"
+                ),
+            },
+            {
+                "bindingContractVersion": "m7.7-automation-cleanup-binding-v2",
+                "bindingGeneration": 2,
+                "bindingId": TOMBSTONED_SECOND_DEADLINE_RECOVERY_BINDING_ID,
+                "directGetStatus": "not-found",
+                "listVisibility": "absent",
+                "recreationStatus": "not-attempted",
+                "deletionStatus": "accepted",
+                "evidenceIntegritySha256": (
+                    "cba08cf83343cb652faaee768f82ab7bc9079ae1588b3d74d9d0b1a71162e6e5"
                 ),
             },
         ],
