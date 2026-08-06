@@ -27,6 +27,8 @@ param managedBindingDeploymentEnabled bool = false
   'cleanup-job-binding'
   'cleanup-binding'
   'pre-secret'
+  'scanner-foundation'
+  'scanner-proof'
   'post-secret'
 ])
 param deploymentStage string = 'none'
@@ -94,9 +96,9 @@ param scannerResultBridgeState string = 'CONTRACT_UNDEFINED'
 param scannerResultBridgeEvidenceIntegrity string = ''
 
 @allowed([
-  'mobius.scanner-result-bridge.v1'
+  'mobius.scanner-result-bridge.v2'
 ])
-param scannerResultBridgeContractVersion string = 'mobius.scanner-result-bridge.v1'
+param scannerResultBridgeContractVersion string = 'mobius.scanner-result-bridge.v2'
 
 param scannerResultBridgeObservedAtUtc string = ''
 param scannerResultBridgeProviderProofIntegrity string = ''
@@ -128,9 +130,12 @@ var cleanupControlEnabled = oneRunEnabled && deploymentStage == 'cleanup-control
 var cleanupJobScheduleEnabled = oneRunEnabled && deploymentStage == 'cleanup-job-binding'
 var cleanupBindingEnabled = oneRunEnabled && deploymentStage == 'cleanup-binding'
 var preSecretEnabled = oneRunEnabled && deploymentStage == 'pre-secret'
-var scannerResultBridgeResolved = scannerResultBridgeContractVersion == 'mobius.scanner-result-bridge.v1' && scannerResultBridgeState == 'RESOLVED' && scannerResultBridgeUnresolvedReasonCount == 0 && length(scannerResultBridgeEvidenceIntegrity) == 64 && length(scannerResultBridgeProviderProofIntegrity) == 64 && length(scannerResultBridgeProducerProofIntegrity) == 64 && length(scannerResultBridgeTransportProofIntegrity) == 64 && length(scannerResultBridgeConsumerProofIntegrity) == 64 && length(scannerResultBridgeIdentityRbacProofIntegrity) == 64 && length(scannerResultBridgePrivatePathProofIntegrity) == 64 && length(scannerResultBridgeCorrelationProofIntegrity) == 64 && length(scannerResultBridgeRevocationProofIntegrity) == 64 && length(scannerResultBridgeCleanupInventoryIntegrity) == 64 && !empty(scannerResultBridgeObservedAtUtc)
+var scannerFoundationStageEnabled = oneRunEnabled && deploymentStage == 'scanner-foundation'
+var scannerProofEnabled = oneRunEnabled && deploymentStage == 'scanner-proof'
+var scannerResultBridgeResolved = scannerResultBridgeContractVersion == 'mobius.scanner-result-bridge.v2' && scannerResultBridgeState == 'RESOLVED' && scannerResultBridgeUnresolvedReasonCount == 0 && length(scannerResultBridgeEvidenceIntegrity) == 64 && length(scannerResultBridgeProviderProofIntegrity) == 64 && length(scannerResultBridgeProducerProofIntegrity) == 64 && length(scannerResultBridgeTransportProofIntegrity) == 64 && length(scannerResultBridgeConsumerProofIntegrity) == 64 && length(scannerResultBridgeIdentityRbacProofIntegrity) == 64 && length(scannerResultBridgePrivatePathProofIntegrity) == 64 && length(scannerResultBridgeCorrelationProofIntegrity) == 64 && length(scannerResultBridgeRevocationProofIntegrity) == 64 && length(scannerResultBridgeCleanupInventoryIntegrity) == 64 && !empty(scannerResultBridgeObservedAtUtc)
 var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret' && scannerResultBridgeResolved
-var workloadEnabled = preSecretEnabled || postSecretEnabled
+var scannerFoundationEnabled = scannerFoundationStageEnabled || scannerProofEnabled || postSecretEnabled
+var workloadEnabled = preSecretEnabled || scannerFoundationEnabled || postSecretEnabled
 var targetEnabled = cleanupBindingEnabled || workloadEnabled
 
 var targetResourceGroupName = 'rg-solarplexus-mobius-77-staging'
@@ -290,7 +295,7 @@ module redis './modules/redis.bicep' = if (postSecretEnabled) {
   }
 }
 
-module storage './modules/storage-scanner.bicep' = if (postSecretEnabled) {
+module storage './modules/storage-scanner.bicep' = if (scannerFoundationEnabled) {
   name: 'mobius77-managed-binding-storage'
   scope: targetResourceGroup
   params: {
@@ -299,16 +304,21 @@ module storage './modules/storage-scanner.bicep' = if (postSecretEnabled) {
     managedBindingMode: managedBindingMode
     managedBindingDeploymentEnabled: true
     location: location
+    targetResourceGroupId: targetResourceGroup.id
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     virtualNetworkId: network.outputs.virtualNetworkId
+    logAnalyticsWorkspaceId: observability.outputs.workspaceId
+    storageDataScannerResourceId: subscriptionResourceId(
+      'Microsoft.Security/dataScanners',
+      'StorageDataScanner'
+    )
     apiIdentityPrincipalId: identities.outputs.workloadIdentityPrincipalId
     workerIdentityPrincipalId: identities.outputs.workerIdentityPrincipalId
-    scannerResultBridgeResolved: scannerResultBridgeResolved
     lifecycleTags: lifecycleTags
   }
 }
 
-module scannerResultBridge './modules/scanner-result-bridge.bicep' = if (postSecretEnabled) {
+module scannerResultBridge './modules/scanner-result-bridge.bicep' = if (scannerFoundationEnabled) {
   name: 'mobius77-managed-binding-scanner-result-bridge'
   scope: targetResourceGroup
   params: {
@@ -316,14 +326,22 @@ module scannerResultBridge './modules/scanner-result-bridge.bicep' = if (postSec
     deploymentEnabled: deploymentEnabled
     managedBindingMode: managedBindingMode
     managedBindingDeploymentEnabled: true
-    scannerResultBridgeResolved: scannerResultBridgeResolved
-    scannerResultBridgeState: scannerResultBridgeState
-    scannerResultBridgeEvidenceIntegrity: scannerResultBridgeEvidenceIntegrity
+    scannerProofDeploymentEnabled: scannerProofEnabled
     location: location
-    storageAccountName: storage.outputs.storageAccountUrl == '' ? '' : 'stmobius7711564669'
+    targetResourceGroupId: targetResourceGroup.id
+    storageAccountName: storage.outputs.storageAccountName
+    storageAccountUrl: storage.outputs.storageAccountUrl
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     virtualNetworkId: network.outputs.virtualNetworkId
+    logAnalyticsWorkspaceName: 'law-mobius77-staging'
+    logAnalyticsWorkspaceCustomerId: observability.outputs.workspaceCustomerId
+    workerIdentityId: identities.outputs.workerIdentityId
+    workerIdentityClientId: identities.outputs.workerIdentityClientId
     workerIdentityPrincipalId: identities.outputs.workerIdentityPrincipalId
+    managedEnvironmentId: compute.outputs.managedEnvironmentId
+    registryLoginServer: registry.outputs.registryLoginServer
+    apiImageDigest: apiImageDigest
+    proofCanarySeed: authorizationLedgerSha256
     lifecycleTags: lifecycleTags
   }
 }
@@ -396,7 +414,8 @@ module compute './modules/compute.bicep' = if (workloadEnabled) {
     redisPort: postSecretEnabled ? redis.outputs.port : 10000
     redisApiUsername: postSecretEnabled ? redis.outputs.apiUsername : ''
     redisWorkerUsername: postSecretEnabled ? redis.outputs.workerUsername : ''
-    storageAccountUrl: postSecretEnabled ? storage.outputs.storageAccountUrl : ''
+    storageAccountUrl: scannerFoundationEnabled ? storage.outputs.storageAccountUrl : ''
+    logAnalyticsWorkspaceCustomerId: observability.outputs.workspaceCustomerId
     smtpHost: smtpHost
     smtpFromAddress: smtpFromAddress
     lifecycleTags: lifecycleTags
@@ -437,14 +456,29 @@ output redisLocation string = redisLocation
 output postgresServerFqdn string = postSecretEnabled ? postgres.outputs.serverFqdn : ''
 output redisHostName string = postSecretEnabled ? redis.outputs.hostName : ''
 output redisPort int = postSecretEnabled ? redis.outputs.port : 10000
-output storageAccountUrl string = postSecretEnabled ? storage.outputs.storageAccountUrl : ''
+output storageAccountUrl string = scannerFoundationEnabled ? storage.outputs.storageAccountUrl : ''
 output telemetryContainerAppId string = postSecretEnabled ? compute.outputs.telemetryContainerAppId : ''
 output migrationJobName string = postSecretEnabled ? compute.outputs.migrationJobName : ''
 output migrationJobResourceId string = postSecretEnabled && !empty(compute.outputs.migrationJobName) ? resourceId(targetResourceGroupName, 'Microsoft.App/jobs', compute.outputs.migrationJobName) : ''
 output scannerResultBridgeResolved bool = scannerResultBridgeResolved
 output scannerResultBridgeState string = scannerResultBridgeState
 output scannerResultBridgeEvidenceIntegrity string = scannerResultBridgeEvidenceIntegrity
-output scannerResultBridgeOutputVersion string = 'm7.7-scanner-result-bridge-output-v1'
+output scannerResultBridgeOutputVersion string = 'm7.7-scanner-result-bridge-output-v2'
+output scannerBridgeFoundationDeployed bool = scannerFoundationEnabled
+output scannerBridgeTransport string = scannerFoundationEnabled ? scannerResultBridge.outputs.transport : ''
+output scannerBridgeStorageAccountId string = scannerFoundationEnabled ? storage.outputs.storageAccountId : ''
+output scannerBridgeDefenderForStorageId string = scannerFoundationEnabled ? storage.outputs.defenderForStorageId : ''
+output scannerBridgeDiagnosticSettingId string = scannerFoundationEnabled ? storage.outputs.scanResultsDiagnosticId : ''
+output scannerBridgePrivateLinkScopeId string = scannerFoundationEnabled ? scannerResultBridge.outputs.privateLinkScopeId : ''
+output scannerBridgePrivateEndpointId string = scannerFoundationEnabled ? scannerResultBridge.outputs.privateEndpointId : ''
+output scannerBridgeWorkerIdentityId string = scannerFoundationEnabled ? identities.outputs.workerIdentityId : ''
+output scannerBridgeWorkerPrincipalId string = scannerFoundationEnabled ? identities.outputs.workerIdentityPrincipalId : ''
+output scannerBridgeWorkerTagWriteAuthorized bool = scannerFoundationEnabled ? scannerResultBridge.outputs.workerTagWriteAuthorized : false
+output scannerBridgeProofJobName string = scannerProofEnabled ? scannerResultBridge.outputs.proofJobName : ''
+output scannerBridgeProofJobId string = scannerProofEnabled ? scannerResultBridge.outputs.proofJobId : ''
+output scannerBridgeTemporaryRoleId string = scannerProofEnabled ? scannerResultBridge.outputs.temporaryProofRoleId : ''
+output scannerBridgeTemporaryRoleAssignmentId string = scannerProofEnabled ? scannerResultBridge.outputs.temporaryProofRoleAssignmentId : ''
+output scannerBridgeProofImageDigest string = scannerProofEnabled ? apiImageDigest : ''
 output apiImageDigest string = postSecretEnabled ? apiImageDigest : ''
 output workloadIdentityClientId string = workloadEnabled ? identities.outputs.workloadIdentityClientId : ''
 output defaultProvisioningAuthorized bool = false

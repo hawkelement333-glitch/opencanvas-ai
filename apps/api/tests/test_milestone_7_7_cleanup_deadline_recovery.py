@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from infra.milestone_7_7 import cleanup_control_recovery_adapter as adapter_module
 from infra.milestone_7_7.cleanup_control_recovery_adapter import (
     CleanupControlRecoveryExecutionError,
@@ -17,6 +18,10 @@ from performance.milestone_7_7.framework import JsonValue
 from preflight.milestone_7_7 import cleanup_control_recovery
 from preflight.milestone_7_7.cleanup_control_recovery import (
     CORRUPTED_RUNBOOK_CONTENT_SHA256,
+    DEADLINE_CONTINUATION_AUTHORIZATION_VERSION,
+    DEADLINE_CONTINUATION_DEADLINE_UTC,
+    DEADLINE_CONTINUATION_OBSERVED_AZURE_UTC,
+    DEADLINE_CONTINUATION_PRIOR_RUNBOOK_CONTENT_SHA256,
     DEADLINE_EXTENSION_AUTHORIZATION_VERSION,
     DEADLINE_EXTENSION_DEADLINE_UTC,
     DEADLINE_EXTENSION_OBSERVED_AZURE_UTC,
@@ -54,8 +59,9 @@ REPLACEMENT_ASSIGNMENT_ID = (
 )
 OBSERVED = datetime(2026, 8, 6, 12, 23, 26, tzinfo=UTC)
 NOW = datetime(2026, 8, 6, 12, 30, tzinfo=UTC)
-EXTENSION_OBSERVED = datetime(2026, 8, 6, 14, 6, 2, tzinfo=UTC)
-EXTENSION_NOW = datetime(2026, 8, 6, 14, 10, tzinfo=UTC)
+PRIOR_EXTENSION_OBSERVED = datetime(2026, 8, 6, 14, 6, 2, tzinfo=UTC)
+EXTENSION_OBSERVED = datetime(2026, 8, 6, 17, 23, 44, tzinfo=UTC)
+EXTENSION_NOW = datetime(2026, 8, 6, 17, 30, tzinfo=UTC)
 
 
 def _runbook_sha256() -> str:
@@ -81,7 +87,7 @@ def _authorization() -> CleanupControlDeadlineRecoveryAuthorization:
     )
 
 
-def _extension_authorization() -> CleanupControlDeadlineRecoveryAuthorization:
+def _prior_extension_authorization() -> CleanupControlDeadlineRecoveryAuthorization:
     return build_cleanup_control_deadline_recovery_authorization(
         repository_head="c" * 40,
         subscription_id=SUBSCRIPTION_ID,
@@ -96,8 +102,28 @@ def _extension_authorization() -> CleanupControlDeadlineRecoveryAuthorization:
         target_resource_group_id=TARGET_GROUP,
         prior_runbook_content_sha256=(DEADLINE_EXTENSION_PRIOR_RUNBOOK_CONTENT_SHA256),
         runbook_content_sha256=_runbook_sha256(),
-        observed_azure_utc=EXTENSION_OBSERVED,
+        observed_azure_utc=PRIOR_EXTENSION_OBSERVED,
         authorization_version=DEADLINE_EXTENSION_AUTHORIZATION_VERSION,
+    )
+
+
+def _extension_authorization() -> CleanupControlDeadlineRecoveryAuthorization:
+    return build_cleanup_control_deadline_recovery_authorization(
+        repository_head="c" * 40,
+        subscription_id=SUBSCRIPTION_ID,
+        cleanup_resource_group_id=CLEANUP_GROUP,
+        corrupted_automation_account_id=f"{AUTOMATION_PREFIX}/aa-mobius77-cleanup",
+        corrupted_principal_id="be0e6b8d-f742-4c8f-8df1-9f302559a6c8",
+        corrupted_role_assignment_id=CORRUPTED_ASSIGNMENT_ID,
+        replacement_automation_account_id=(f"{AUTOMATION_PREFIX}/aa-mobius77-cleanup-recovery"),
+        replacement_principal_id="a47789c6-b8eb-40a1-898a-517a52d60a86",
+        replacement_role_assignment_id=REPLACEMENT_ASSIGNMENT_ID,
+        replacement_location="northeurope",
+        target_resource_group_id=TARGET_GROUP,
+        prior_runbook_content_sha256=(DEADLINE_CONTINUATION_PRIOR_RUNBOOK_CONTENT_SHA256),
+        runbook_content_sha256=_runbook_sha256(),
+        observed_azure_utc=EXTENSION_OBSERVED,
+        authorization_version=DEADLINE_CONTINUATION_AUTHORIZATION_VERSION,
     )
 
 
@@ -204,21 +230,32 @@ def test_deadline_is_the_exact_next_quarter_hour_after_six_hours() -> None:
 
 
 def test_extension_deadline_is_exactly_ten_hours_then_next_quarter() -> None:
-    derived = derive_cleanup_control_recovery_deadline(EXTENSION_OBSERVED, minimum_lead_hours=10)
+    derived = derive_cleanup_control_recovery_deadline(
+        PRIOR_EXTENSION_OBSERVED, minimum_lead_hours=10
+    )
     assert derived == datetime(2026, 8, 7, 0, 15, tzinfo=UTC)
     assert DEADLINE_EXTENSION_OBSERVED_AZURE_UTC == "2026-08-06T14:06:02Z"
     assert DEADLINE_EXTENSION_DEADLINE_UTC == "2026-08-07T00:15:00Z"
 
 
-def test_extension_preserves_v1_authorization_and_uses_one_new_binding() -> None:
-    original = _authorization()
+def test_continuation_preserves_generation_two_and_uses_one_new_binding() -> None:
+    original = _prior_extension_authorization()
     extension = _extension_authorization()
 
     assert original.authorizationVersion != extension.authorizationVersion
     assert original.bindingId == extension.priorBindingId
-    assert extension.bindingId == "d83b4107-54e0-57a4-b650-fe0b556132d2"
-    assert extension.deadlineUtc == DEADLINE_EXTENSION_DEADLINE_UTC
-    assert extension.priorRunbookContentSha256 == (DEADLINE_EXTENSION_PRIOR_RUNBOOK_CONTENT_SHA256)
+    assert extension.bindingId == "5ffc55c1-7a88-5231-b0d1-e76ee95d057e"
+    assert extension.deadlineUtc == DEADLINE_CONTINUATION_DEADLINE_UTC
+    assert extension.priorRunbookContentSha256 == (
+        DEADLINE_CONTINUATION_PRIOR_RUNBOOK_CONTENT_SHA256
+    )
+
+
+def test_continuation_deadline_is_exactly_twelve_hours_then_next_quarter() -> None:
+    derived = derive_cleanup_control_recovery_deadline(EXTENSION_OBSERVED, minimum_lead_hours=12)
+    assert derived == datetime(2026, 8, 7, 5, 30, tzinfo=UTC)
+    assert DEADLINE_CONTINUATION_OBSERVED_AZURE_UTC == "2026-08-06T17:23:44Z"
+    assert DEADLINE_CONTINUATION_DEADLINE_UTC == "2026-08-07T05:30:00Z"
 
 
 def test_deadline_authorization_is_exact_image_free_and_round_trips(
@@ -298,11 +335,11 @@ def test_production_adapter_consumes_deadline_authorization_and_maps_only_bindin
     )
 
     assert result["marker"] == "CLEANUP_EXECUTABLE_AND_ARMED"
-    assert result["deadline-utc"] == "2026-08-07T00:15:00Z"
-    assert result["binding-id"] == "d83b4107-54e0-57a4-b650-fe0b556132d2"
+    assert result["deadline-utc"] == "2026-08-07T05:30:00Z"
+    assert result["binding-id"] == "5ffc55c1-7a88-5231-b0d1-e76ee95d057e"
     assert len(deployments) == 1
     assert deployments[0]["stage"] == "cleanup-job-binding"
-    assert deployments[0]["cleanup_at"] == datetime(2026, 8, 7, 0, 15, tzinfo=UTC)
+    assert deployments[0]["cleanup_at"] == datetime(2026, 8, 7, 5, 30, tzinfo=UTC)
     assert deployments[0]["maximum_cost"] == 25_000
     assert calls.index("remove-binding") < calls.index("publish-runbook")
     assert calls.index("remove-binding") < calls.index("replace-schedule")

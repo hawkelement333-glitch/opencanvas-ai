@@ -24,6 +24,7 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     REPOSITORY_ROOT,
     TOMBSTONED_DEADLINE_RECOVERY_BINDING_ID,
     TOMBSTONED_SECOND_DEADLINE_RECOVERY_BINDING_ID,
+    TOMBSTONED_THIRD_DEADLINE_RECOVERY_BINDING_ID,
     cleanup_runbook_sha256,
 )
 
@@ -65,6 +66,12 @@ DEADLINE_EXTENSION_AUTHORIZATION_VERSION: Final = (
 DEADLINE_EXTENSION_AUTHORIZATION_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery/v2\0"
 )
+DEADLINE_CONTINUATION_AUTHORIZATION_VERSION: Final = (
+    "mobius.milestone-7.7.cleanup-control-deadline-recovery.v3"
+)
+DEADLINE_CONTINUATION_AUTHORIZATION_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery/v3\0"
+)
 DEADLINE_RECOVERY_OBSERVED_AZURE_UTC: Final = "2026-08-06T12:23:26Z"
 DEADLINE_RECOVERY_DEADLINE_UTC: Final = "2026-08-06T18:30:00Z"
 DEADLINE_RECOVERY_DERIVATION_RULE: Final = (
@@ -78,6 +85,14 @@ DEADLINE_EXTENSION_DERIVATION_RULE: Final = (
 )
 DEADLINE_EXTENSION_ACTION: Final = (
     "extend-cleanup-deadline-for-private-scanner-bridge-proof"
+)
+DEADLINE_CONTINUATION_OBSERVED_AZURE_UTC: Final = "2026-08-06T17:23:44Z"
+DEADLINE_CONTINUATION_DEADLINE_UTC: Final = "2026-08-07T05:30:00Z"
+DEADLINE_CONTINUATION_DERIVATION_RULE: Final = (
+    "next-15-minute-utc-boundary-at-least-12-hours-after-observed"
+)
+DEADLINE_CONTINUATION_ACTION: Final = (
+    "extend-cleanup-deadline-for-private-scanner-bridge-execution"
 )
 DEADLINE_RECOVERY_CORRUPTED_ROLE_ACTION: Final = "verify-exact-assignment-absent"
 DEADLINE_RECOVERY_SCHEDULE_ACTION: Final = "replace-same-name-one-time-schedule"
@@ -95,6 +110,9 @@ DEADLINE_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256: Final = (
 CORRUPTED_RUNBOOK_CONTENT_SHA256: Final = DEADLINE_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256
 DEADLINE_EXTENSION_PRIOR_RUNBOOK_CONTENT_SHA256: Final = (
     "5283fef0c32b1fdc63e0aef00e9d488b8113848cd0ea7edb18bd4231c83b2a7d"
+)
+DEADLINE_CONTINUATION_PRIOR_RUNBOOK_CONTENT_SHA256: Final = (
+    "36da98c94fb213bd279792ef828da50522d081365b6c30190058c250688a81fd"
 )
 DEADLINE_RECOVERY_ALLOWED_OPERATIONS: Final = (
     "verify-preserved-cleanup-control",
@@ -199,9 +217,25 @@ def _deadline_recovery_profile(authorization_version: str) -> _DeadlineRecoveryP
             recovery_action=DEADLINE_EXTENSION_ACTION,
             prior_deadline_utc=DEADLINE_RECOVERY_DEADLINE_UTC,
             prior_binding_id=TOMBSTONED_SECOND_DEADLINE_RECOVERY_BINDING_ID,
-            binding_id=ACTIVE_CLEANUP_BINDING_ID,
+            binding_id=TOMBSTONED_THIRD_DEADLINE_RECOVERY_BINDING_ID,
             prior_runbook_content_sha256=(
                 DEADLINE_EXTENSION_PRIOR_RUNBOOK_CONTENT_SHA256
+            ),
+        )
+    if authorization_version == DEADLINE_CONTINUATION_AUTHORIZATION_VERSION:
+        return _DeadlineRecoveryProfile(
+            authorization_version=authorization_version,
+            authorization_domain=DEADLINE_CONTINUATION_AUTHORIZATION_DOMAIN,
+            observed_azure_utc=DEADLINE_CONTINUATION_OBSERVED_AZURE_UTC,
+            deadline_utc=DEADLINE_CONTINUATION_DEADLINE_UTC,
+            derivation_rule=DEADLINE_CONTINUATION_DERIVATION_RULE,
+            minimum_lead_hours=12,
+            recovery_action=DEADLINE_CONTINUATION_ACTION,
+            prior_deadline_utc=DEADLINE_EXTENSION_DEADLINE_UTC,
+            prior_binding_id=TOMBSTONED_THIRD_DEADLINE_RECOVERY_BINDING_ID,
+            binding_id=ACTIVE_CLEANUP_BINDING_ID,
+            prior_runbook_content_sha256=(
+                DEADLINE_CONTINUATION_PRIOR_RUNBOOK_CONTENT_SHA256
             ),
         )
     raise CleanupControlRecoveryError(
@@ -232,7 +266,7 @@ def derive_cleanup_control_recovery_deadline(
         raise CleanupControlRecoveryError(
             "cleanup-deadline-recovery-observed-at-invalid"
         )
-    if minimum_lead_hours not in {6, 10}:
+    if minimum_lead_hours not in {6, 10, 12}:
         raise CleanupControlRecoveryError(
             "cleanup-deadline-recovery-minimum-lead-invalid"
         )
@@ -891,6 +925,7 @@ def cleanup_control_recovery_authorization_from_mapping(
     if isinstance(value, dict) and value.get("authorizationVersion") in {
         DEADLINE_RECOVERY_AUTHORIZATION_VERSION,
         DEADLINE_EXTENSION_AUTHORIZATION_VERSION,
+        DEADLINE_CONTINUATION_AUTHORIZATION_VERSION,
     }:
         return cleanup_control_deadline_recovery_authorization_from_mapping(value)
     if not isinstance(value, dict):

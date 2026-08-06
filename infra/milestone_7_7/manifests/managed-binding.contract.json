@@ -67,7 +67,7 @@
   "cleanupExecution": {
     "bindingContractVersion": "m7.7-automation-cleanup-binding-v2",
     "bindingGeneration": 2,
-    "activeBindingId": "d83b4107-54e0-57a4-b650-fe0b556132d2",
+    "activeBindingId": "5ffc55c1-7a88-5231-b0d1-e76ee95d057e",
     "corruptedAutomationAccount": "aa-mobius77-cleanup",
     "tombstonedBindingIds": [
       {
@@ -109,6 +109,16 @@
         "recreationStatus": "not-attempted",
         "deletionStatus": "accepted",
         "evidenceIntegritySha256": "cba08cf83343cb652faaee768f82ab7bc9079ae1588b3d74d9d0b1a71162e6e5"
+      },
+      {
+        "bindingContractVersion": "m7.7-automation-cleanup-binding-v2",
+        "bindingGeneration": 2,
+        "bindingId": "d83b4107-54e0-57a4-b650-fe0b556132d2",
+        "directGetStatus": "not-found",
+        "listVisibility": "absent",
+        "recreationStatus": "not-attempted",
+        "deletionStatus": "accepted",
+        "evidenceIntegritySha256": "edea930642c944d73add7d9c33d2810cc504821dbd473175655de32330d70718"
       }
     ],
     "scheduleResourceId": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/schedules/schedule-mobius77-cleanup",
@@ -119,13 +129,13 @@
     "targetParameter": "TargetResourceGroupName",
     "targetResourceGroup": "rg-solarplexus-mobius-77-staging",
     "subscriptionFingerprint": "f4493115ce6375cf0e5d0616bede57126075fdb27ac78ea0ba7e0085252a7028",
-    "deadlineUtc": "2026-08-07T00:15:00Z",
+    "deadlineUtc": "2026-08-07T05:30:00Z",
     "launchGraceSeconds": 1800,
     "cleanupContributorRoleDefinitionId": "b24988ac-6180-42a0-ab88-20f7382dd24c",
     "cleanupPrincipalFingerprintSha256": "19a9f97779cd2eb9acfdc04797f1fc5339316ee1a424ca79b70661beffa33260",
     "deletionWaitSeconds": 2700,
     "absenceVerificationSeconds": 300,
-    "publishedContentSha256": "36da98c94fb213bd279792ef828da50522d081365b6c30190058c250688a81fd"
+    "publishedContentSha256": "0879e15468b475bb623f68b66d7e2b1d094f2f37c1a2ac92176ad7ce21f70b6f"
   },
   "fixedSkus": {
     "keyVault": "standard",

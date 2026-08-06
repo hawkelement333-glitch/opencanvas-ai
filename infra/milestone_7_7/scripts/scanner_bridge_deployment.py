@@ -6,7 +6,8 @@ envelope and produces explicit Bicep parameters for the post-secret executor.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Set as AbstractSet
+from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
@@ -19,7 +20,7 @@ from preflight.milestone_7_7.scanner_result_bridge import (
     deployment_evidence_from_mapping,
 )
 
-_CONTRACT_VERSION: Final = "mobius.scanner-result-bridge.v1"
+_CONTRACT_VERSION: Final = "mobius.scanner-result-bridge.v2"
 
 
 class ScannerBridgeDeploymentError(ValueError):
@@ -91,7 +92,7 @@ def bicep_parameters(
         f"scannerResultBridgeObservedAtUtc={validated.observed_at_utc}",
         f"scannerResultBridgeProviderProofIntegrity={validated.provider_capability_proof_integrity}",
         f"scannerResultBridgeProducerProofIntegrity={validated.producer_proof_integrity}",
-        f"scannerResultBridgeTransportProofIntegrity={validated.transport_proof_integrity}",
+        f"scannerResultBridgeTransportProofIntegrity={validated.dual_source_proof_integrity}",
         f"scannerResultBridgeConsumerProofIntegrity={validated.consumer_proof_integrity}",
         f"scannerResultBridgeIdentityRbacProofIntegrity={validated.assignment_proof_integrity}",
         f"scannerResultBridgePrivatePathProofIntegrity={validated.private_path_proof_integrity}",
@@ -137,6 +138,15 @@ def deployment_parameters(
     ]
     if runtime_config is None:
         return parameters
+    if stage == "scanner-proof":
+        if set(runtime_config) != {"apiImageDigest"}:
+            raise ScannerBridgeDeploymentError("scanner-proof-runtime-config-invalid")
+        image = runtime_config.get("apiImageDigest")
+        if not isinstance(image, str) or "@sha256:" not in image:
+            raise ScannerBridgeDeploymentError("scanner-proof-runtime-config-invalid")
+        return [*parameters, f"apiImageDigest={image}"]
+    if stage != "post-secret":
+        raise ScannerBridgeDeploymentError("deployment-runtime-config-stage-invalid")
     if scanner_bridge_evidence is None:
         raise ScannerBridgeDeploymentError("scanner-bridge-evidence-absent")
     for key in ("apiImageDigest", "smtpHost", "smtpFromAddress"):

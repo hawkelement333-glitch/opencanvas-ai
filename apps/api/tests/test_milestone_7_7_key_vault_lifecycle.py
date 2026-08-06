@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+
 from infra.milestone_7_7.scripts import managed_binding_lifecycle as lifecycle
 from performance.milestone_7_7.framework import JsonValue
 
@@ -19,7 +20,7 @@ def _ledger(marker: str = "a") -> dict[str, JsonValue]:
 def _state(ledger: dict[str, JsonValue]) -> dict[str, JsonValue]:
     return {
         "activeStage": None,
-        "cleanupAtUtc": "2026-08-07T00:15:00Z",
+        "cleanupAtUtc": "2026-08-07T05:30:00Z",
         "disposition": "PAUSED_PRESERVED",
         "failedStage": None,
         "lastCompletedStage": "pre-secret",

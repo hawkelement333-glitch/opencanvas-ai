@@ -172,6 +172,14 @@ class Settings(BaseSettings):
         min_length=3,
         max_length=120,
     )
+    scanner_result_bridge_mode: Literal["disabled", "private_pull"] = "disabled"
+    azure_log_analytics_workspace_id: uuid.UUID | None = None
+    azure_log_analytics_endpoint: str = "https://api.loganalytics.azure.com"
+    scanner_result_bridge_batch_size: int = Field(default=10, ge=1, le=100)
+    scanner_result_bridge_max_log_rows: int = Field(default=4, ge=1, le=8)
+    scanner_result_bridge_query_timeout_seconds: float = Field(default=20.0, ge=1.0, le=30.0)
+    scanner_result_bridge_retry_base_seconds: int = Field(default=5, ge=1, le=300)
+    scanner_result_bridge_retry_max_seconds: int = Field(default=300, ge=1, le=3_600)
     object_promotion_service_identity: str = Field(
         default="mobius-object-promotion",
         min_length=3,
@@ -374,6 +382,20 @@ class Settings(BaseSettings):
             raise ValueError("Azure storage account URL must be an HTTPS origin")
         return value.rstrip("/")
 
+    @field_validator("azure_log_analytics_endpoint")
+    @classmethod
+    def validate_azure_log_analytics_endpoint(cls, value: str) -> str:
+        parsed = urlparse(value.rstrip("/"))
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "api.loganalytics.azure.com"
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("Log Analytics requires the exact private-query endpoint")
+        return value.rstrip("/")
+
     @field_validator("shared_rate_limit_redis_url")
     @classmethod
     def validate_shared_rate_limit_redis_url(cls, value: str | None) -> str | None:
@@ -458,6 +480,11 @@ class Settings(BaseSettings):
             raise ValueError("document chunk overlap must be smaller than chunk size")
         if self.processing_retry_base_seconds > self.processing_retry_max_seconds:
             raise ValueError("processing retry base cannot exceed the retry maximum")
+        if (
+            self.scanner_result_bridge_retry_base_seconds
+            > self.scanner_result_bridge_retry_max_seconds
+        ):
+            raise ValueError("scanner bridge retry base cannot exceed the retry maximum")
         if self.telemetry_batch_size > self.telemetry_buffer_size:
             raise ValueError("telemetry batch size cannot exceed the bounded buffer")
         if len(set(self.telemetry_baggage_allowlist)) != len(
@@ -647,8 +674,13 @@ class Settings(BaseSettings):
             raise ValueError(f"{label} requires distinct storage security-class containers")
         if self.object_ingestion_mode != "trusted":
             raise ValueError(f"{label} requires the trusted clean-object ingestion gate")
-        if self.malware_scanner_identity == "deterministic-test-scanner":
-            raise ValueError(f"{label} refuses the deterministic test scanner identity")
+        if (
+            self.scanner_result_bridge_mode != "private_pull"
+            or self.azure_log_analytics_workspace_id is None
+            or self.malware_scanner_identity != "azure-defender-for-storage"
+            or self.malware_scanner_version != "defender-storage-dual-source-v1"
+        ):
+            raise ValueError(f"{label} requires the private dual-source scanner bridge")
         if (
             self.upload_capability_secret == DEVELOPMENT_UPLOAD_CAPABILITY_SECRET
             or self.scanner_result_secret == DEVELOPMENT_SCANNER_RESULT_SECRET

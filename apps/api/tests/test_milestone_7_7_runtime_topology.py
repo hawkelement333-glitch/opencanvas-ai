@@ -27,7 +27,7 @@ def test_root_reaches_every_runtime_module_and_compute_binding() -> None:
         "module compute './modules/compute.bicep'",
         "postgresHost: postSecretEnabled ? postgres.outputs.serverFqdn",
         "redisHost: postSecretEnabled ? redis.outputs.hostName",
-        "storageAccountUrl: postSecretEnabled ? storage.outputs.storageAccountUrl",
+        "storageAccountUrl: scannerFoundationEnabled ? storage.outputs.storageAccountUrl",
     ):
         assert token in main
     for token in (
@@ -59,13 +59,15 @@ def test_private_storage_is_identity_only_versioned_and_security_classed() -> No
         "name: 'clean'",
         "name: 'rejected'",
         "name: 'retained'",
-        "Storage Blob Data Contributor",
+        "Mobius77 API Quarantine Writer",
+        "Mobius77 API Clean Reader",
+        "Mobius77 Worker Quarantine Evidence Reader",
+        "Mobius77 Worker Clean Promoter",
         "privateDnsZoneGroups",
     ):
-        if token == "Storage Blob Data Contributor":
-            assert "ba92f5b4-2d11-453d-a403-e96b0029c9fe" in storage
-        else:
-            assert token in storage
+        assert token in storage
+    assert "ba92f5b4-2d11-453d-a403-e96b0029c9fe" not in storage
+    assert "containers/blobs/tags/write" not in storage
 
 
 def test_telemetry_gateway_is_bounded_authenticated_and_payload_blind(

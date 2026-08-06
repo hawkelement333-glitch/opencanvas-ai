@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -16,6 +17,7 @@ from opencanvas_api.core.config import Settings, get_settings
 from opencanvas_api.db.models import (
     SYSTEM_USER_ID,
     DocumentChunk,
+    DomainEventRecord,
     MalwareScanRequest,
     MalwareScanResult,
     ObjectDeletionRequest,
@@ -89,6 +91,7 @@ async def _completed_upload(
     tmp_path: Path,
     *,
     content: bytes = b"bounded secure upload evidence",
+    settings_changes: dict[str, object] | None = None,
 ) -> tuple[
     Settings,
     MemoryVersionedObjectStorage,
@@ -96,7 +99,7 @@ async def _completed_upload(
     uuid.UUID,
     UploadSessionView,
 ]:
-    settings = _settings(tmp_path)
+    settings = _settings(tmp_path, **(settings_changes or {}))
     storage = MemoryVersionedObjectStorage()
     workspace_id, canvas_id = await _create_isolated_workspace_canvas(
         database,
@@ -206,6 +209,89 @@ async def test_clean_verdict_promotes_exact_bytes_once(database: Database, tmp_p
         assert await session.scalar(select(func.count()).select_from(MalwareScanResult)) == 1
         assert await session.scalar(select(func.count()).select_from(ObjectPromotion)) == 1
         assert await session.scalar(select(func.count()).select_from(StorageObjectVersion)) == 2
+
+
+@pytest.mark.asyncio
+async def test_private_bridge_records_sanitized_dual_source_evidence(
+    database: Database,
+    tmp_path: Path,
+) -> None:
+    settings, storage, _workspace_id, _canvas_id, completed = await _completed_upload(
+        database,
+        tmp_path,
+        settings_changes={
+            "scanner_result_bridge_mode": "private_pull",
+            "malware_scanner_identity": "azure-defender-for-storage",
+            "malware_scanner_version": "defender-storage-dual-source-v1",
+        },
+    )
+    result = await _bind_result(database, completed, _scan_result(completed))
+    result = replace(
+        result,
+        scanner_identity="azure-defender-for-storage",
+        scanner_version="defender-storage-dual-source-v1",
+        provider_result_id="00000000-0000-4000-8000-000000000077",
+    )
+    integrity = "a" * 64
+    evidence = {
+        "scannerEvidenceIntegrity": integrity,
+        "scannerCorrelationSha256": "b" * 64,
+        "scannerBlobTagEvidenceSha256": "c" * 64,
+        "scannerLogAnalyticsEvidenceSha256": "d" * 64,
+        "scannerBlobUriSha256": "e" * 64,
+        "scannerEtagSha256": "f" * 64,
+        "scannerCompletionAtUtc": result.scanned_at.isoformat().replace("+00:00", "Z"),
+        "scannerProvenance": ("defender-blob-tags-plus-storage-malware-scanning-results"),
+    }
+
+    async with database.sessions() as session:
+        view = await MalwareScanService(
+            session,
+            settings=settings,
+            storage=storage,
+        ).record_bridge_result(
+            result=result,
+            evidence_integrity_sha256=integrity,
+            event_evidence=evidence,
+        )
+        event = await session.scalar(
+            select(DomainEventRecord)
+            .where(DomainEventRecord.event_type == "scan.passed")
+            .order_by(DomainEventRecord.created_at.desc())
+            .limit(1)
+        )
+        assert view.promotion is not None
+        assert event is not None
+        assert event.payload["scannerEvidenceIntegrity"] == integrity
+        assert event.payload["scannerCorrelationSha256"] == "b" * 64
+        assert "blob.core.windows.net" not in json.dumps(event.payload)
+
+
+@pytest.mark.asyncio
+async def test_private_bridge_makes_legacy_push_callback_unreachable(
+    database: Database,
+    tmp_path: Path,
+) -> None:
+    settings, storage, _workspace_id, _canvas_id, completed = await _completed_upload(
+        database,
+        tmp_path,
+        settings_changes={
+            "scanner_result_bridge_mode": "private_pull",
+            "malware_scanner_identity": "azure-defender-for-storage",
+            "malware_scanner_version": "defender-storage-dual-source-v1",
+        },
+    )
+    result = await _bind_result(database, completed, _scan_result(completed))
+    async with database.sessions() as session:
+        with pytest.raises(ObjectIngestionNotFoundError):
+            await MalwareScanService(
+                session,
+                settings=settings,
+                storage=storage,
+            ).record_result(
+                result=result,
+                signature=scanner_result_signature(result, settings.scanner_result_secret),
+            )
 
 
 @pytest.mark.asyncio

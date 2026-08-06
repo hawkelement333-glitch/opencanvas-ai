@@ -70,6 +70,7 @@ param redisPort int = 10000
 param redisApiUsername string = ''
 param redisWorkerUsername string = ''
 param storageAccountUrl string = ''
+param logAnalyticsWorkspaceCustomerId string = ''
 @allowed([
   'sandbox.smtp.mailtrap.io'
 ])
@@ -124,6 +125,13 @@ var commonSettings = [
   { name: 'OPENCANVAS_AZURE_STORAGE_ACCOUNT_URL', value: storageAccountUrl }
   { name: 'OPENCANVAS_OBJECT_INGESTION_MODE', value: 'trusted' }
   { name: 'OPENCANVAS_MALWARE_SCANNER_IDENTITY', value: 'azure-defender-for-storage' }
+  { name: 'OPENCANVAS_MALWARE_SCANNER_VERSION', value: 'defender-storage-dual-source-v1' }
+  { name: 'OPENCANVAS_MALWARE_SCAN_TIMEOUT_SECONDS', value: '3600' }
+  { name: 'OPENCANVAS_SCANNER_RESULT_BRIDGE_MODE', value: 'private_pull' }
+  { name: 'OPENCANVAS_AZURE_LOG_ANALYTICS_WORKSPACE_ID', value: logAnalyticsWorkspaceCustomerId }
+  { name: 'OPENCANVAS_AZURE_LOG_ANALYTICS_ENDPOINT', value: 'https://api.loganalytics.azure.com' }
+  { name: 'OPENCANVAS_SCANNER_RESULT_BRIDGE_RETRY_BASE_SECONDS', value: '5' }
+  { name: 'OPENCANVAS_SCANNER_RESULT_BRIDGE_RETRY_MAX_SECONDS', value: '300' }
   { name: 'OPENCANVAS_JOB_PROVIDER', value: 'database' }
   { name: 'OPENCANVAS_SHARED_RATE_LIMIT_PROVIDER', value: 'redis' }
   { name: 'OPENCANVAS_SHARED_RATE_LIMIT_AUTH_MODE', value: 'entra' }

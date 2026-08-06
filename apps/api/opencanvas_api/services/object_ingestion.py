@@ -6,6 +6,7 @@ import hmac
 import json
 import re
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal, cast
@@ -55,6 +56,18 @@ from opencanvas_api.services.trace import (
 
 _IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
 _SAFE_REASON_CODE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+_BRIDGE_EVENT_EVIDENCE_KEYS = frozenset(
+    {
+        "scannerEvidenceIntegrity",
+        "scannerCorrelationSha256",
+        "scannerBlobTagEvidenceSha256",
+        "scannerLogAnalyticsEvidenceSha256",
+        "scannerBlobUriSha256",
+        "scannerEtagSha256",
+        "scannerCompletionAtUtc",
+        "scannerProvenance",
+    }
+)
 _TERMINAL_UPLOAD_STATES = frozenset({"canceled", "expired", "error"})
 _ACTIVE_UPLOAD_STATES = frozenset({"requested", "uploaded"})
 _TERMINAL_OBJECT_STATES = frozenset(
@@ -1333,6 +1346,8 @@ class MalwareScanService:
                 code="secure_ingestion_disabled",
                 status_code=503,
             )
+        if self.settings.scanner_result_bridge_mode == "private_pull":
+            raise ObjectIngestionNotFoundError()
         self.verify_signature(result, signature)
         return await self._record_authenticated_result(result=result)
 
@@ -1341,13 +1356,13 @@ class MalwareScanService:
         *,
         result: TrustedScanResult,
         evidence_integrity_sha256: str,
+        event_evidence: Mapping[str, JsonValue],
     ) -> UploadSessionView:
-        """Accept only a managed-identity transport adapter's proved result.
+        """Accept only the managed-identity private-pull adapter's proved result.
 
-        The queue adapter validates Azure delivery provenance before it reaches
-        this method.  A legacy shared secret is deliberately not accepted on
-        this path; the retained integrity value connects the final decision to
-        the bridge resolver's sanitized evidence.
+        The adapter validates two authoritative Azure sources before it reaches
+        this method. A legacy shared secret is deliberately not accepted here;
+        retained hashes bind the decision to Blob-tag and Log Analytics evidence.
         """
         if self.settings.object_ingestion_mode == "disabled":
             raise ObjectIngestionError(
@@ -1355,16 +1370,46 @@ class MalwareScanService:
                 code="secure_ingestion_disabled",
                 status_code=503,
             )
-        if result.scanner_identity != "azure-defender-for-storage" or not re.fullmatch(
-            r"[0-9a-f]{64}", evidence_integrity_sha256
+        evidence = dict(event_evidence)
+        hash_keys = _BRIDGE_EVENT_EVIDENCE_KEYS - {
+            "scannerCompletionAtUtc",
+            "scannerProvenance",
+        }
+        if (
+            self.settings.scanner_result_bridge_mode != "private_pull"
+            or result.scanner_identity != "azure-defender-for-storage"
+            or result.scanner_version != "defender-storage-dual-source-v1"
+            or not re.fullmatch(r"[0-9a-f]{64}", evidence_integrity_sha256)
+            or set(evidence) != _BRIDGE_EVENT_EVIDENCE_KEYS
+            or evidence.get("scannerEvidenceIntegrity") != evidence_integrity_sha256
+            or evidence.get("scannerProvenance")
+            != "defender-blob-tags-plus-storage-malware-scanning-results"
+            or any(
+                not isinstance(evidence.get(key), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", cast(str, evidence.get(key)))
+                for key in hash_keys
+            )
+            or not isinstance(evidence.get("scannerCompletionAtUtc"), str)
         ):
             raise ObjectIngestionNotFoundError()
-        return await self._record_authenticated_result(result=result)
+        try:
+            completed = datetime.fromisoformat(
+                cast(str, evidence["scannerCompletionAtUtc"]).replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise ObjectIngestionNotFoundError() from exc
+        if completed.tzinfo is None or _aware_utc(completed) != _aware_utc(result.scanned_at):
+            raise ObjectIngestionNotFoundError()
+        return await self._record_authenticated_result(
+            result=result,
+            bridge_event_evidence=evidence,
+        )
 
     async def _record_authenticated_result(
         self,
         *,
         result: TrustedScanResult,
+        bridge_event_evidence: Mapping[str, JsonValue] | None = None,
     ) -> UploadSessionView:
         request = await self.session.scalar(
             select(MalwareScanRequest)
@@ -1543,6 +1588,7 @@ class MalwareScanService:
                 "scanResultId": str(scan_result.scan_result_id),
                 "outcome": result.outcome,
                 "policyVersion": result.policy_version,
+                **(dict(bridge_event_evidence) if bridge_event_evidence is not None else {}),
             },
             audit_event_id=audit.audit_event_id,
             actor_user_id=upload.user_id,

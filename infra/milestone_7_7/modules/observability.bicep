@@ -87,6 +87,7 @@ output telemetryGatewayResolved bool = telemetryGatewayResolved
 output managedBindingMode string = managedBindingMode
 output managedBindingDeploymentEnabled bool = enabled
 output workspaceId string = enabled ? workspace.id : ''
+output workspaceCustomerId string = enabled ? workspace.properties.customerId : ''
 output publicIngestionAllowed bool = false
 output publicQueryAllowed bool = false
 output retentionDays int = 30

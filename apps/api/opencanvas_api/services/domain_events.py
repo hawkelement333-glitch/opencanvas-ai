@@ -340,6 +340,14 @@ _OBJECT_INGESTION_PAYLOAD = frozenset(
         "promotionId",
         "outcome",
         "policyVersion",
+        "scannerEvidenceIntegrity",
+        "scannerCorrelationSha256",
+        "scannerBlobTagEvidenceSha256",
+        "scannerLogAnalyticsEvidenceSha256",
+        "scannerBlobUriSha256",
+        "scannerEtagSha256",
+        "scannerCompletionAtUtc",
+        "scannerProvenance",
     }
 )
 _DURABLE_JOB_PAYLOAD = frozenset(

@@ -265,12 +265,18 @@ def test_bicep_preserves_inert_defaults_and_gates_one_run_resources():
         "postgres.bicep",
         "redis.bicep",
         "storage-scanner.bicep",
-        "scanner-result-bridge.bicep",
     ):
         text = (ROOT / "modules" / name).read_text(encoding="utf-8")
         declarations = re.findall(r"(?m)^\s*(?:resource|module)\s+[^\n]+", text)
         assert declarations
         assert all("= if (enabled)" in declaration for declaration in declarations)
+    scanner_bridge = (ROOT / "modules" / "scanner-result-bridge.bicep").read_text(encoding="utf-8")
+    scanner_declarations = re.findall(r"(?m)^\s*(?:resource|module)\s+[^\n]+", scanner_bridge)
+    assert scanner_declarations
+    assert all(
+        "= if (enabled)" in declaration or "= if (proofEnabled)" in declaration
+        for declaration in scanner_declarations
+    )
     main = (ROOT / "main.bicep").read_text(encoding="utf-8")
     assert "param checkpointMode string = 'contract-only'" in main
     assert "param deploymentEnabled bool = false" in main
@@ -283,20 +289,28 @@ def test_bicep_preserves_inert_defaults_and_gates_one_run_resources():
     assert "@maxValue(25000)\nparam maximumPlausibleUsdCents int = 1" in main
 
 
-def test_post_secret_storage_requires_explicit_resolved_scanner_bridge():
+def test_scanner_foundation_precedes_resolution_and_post_secret_stays_gated():
     main = (ROOT / "main.bicep").read_text(encoding="utf-8")
     storage = (ROOT / "modules" / "storage-scanner.bicep").read_text(encoding="utf-8")
 
     assert "param scannerResultBridgeResolved bool = false" not in main
     assert "param scannerResultBridgeProviderProofIntegrity string = ''" in main
     assert "param scannerResultBridgeUnresolvedReasonCount int = 32" in main
+    assert "deploymentStage == 'scanner-foundation'" in main
+    assert "deploymentStage == 'scanner-proof'" in main
+    assert (
+        "module storage './modules/storage-scanner.bicep' = if (scannerFoundationEnabled)" in main
+    )
+    assert (
+        "module scannerResultBridge './modules/scanner-result-bridge.bicep' "
+        "= if (scannerFoundationEnabled)"
+    ) in main
     assert (
         "var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret' "
         "&& scannerResultBridgeResolved"
     ) in main
-    assert "scannerResultBridgeResolved: scannerResultBridgeResolved" in main
-    assert "param scannerResultBridgeResolved bool" in storage
-    assert "param scannerResultBridgeResolved bool = false" not in storage
+    assert "applicationDeploymentEnabled: postSecretEnabled" in main
+    assert "scannerResultBridgeResolved" not in storage
 
 
 def test_module_inventory_and_safe_outputs_are_exact():
@@ -384,6 +398,8 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "param absoluteExerciseIngestionCapMiB int = 2560",
             "param sanitizedEvidenceCapMiB int = 100",
             "param retentionResolved bool = false",
+            "publicNetworkAccessForIngestion: 'Disabled'",
+            "publicNetworkAccessForQuery: 'Disabled'",
         ],
         "postgres.bicep": [
             "param majorVersion int = 17",
@@ -412,12 +428,13 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "param totalSyntheticUploadBytesCap int = 134217728",
         ],
         "scanner-result-bridge.bicep": [
-            "param scannerResultBridgeState string",
-            "name: 'scanner-results'",
-            "name: 'scanner-results-deadletter'",
-            "privatelink.queue.",
-            "Storage Queue Data Message Sender",
-            "Storage Queue Data Message Processor",
+            "Microsoft.Insights/privateLinkScopes@2021-09-01",
+            "queryAccessMode: 'PrivateOnly'",
+            "ingestionAccessMode: 'PrivateOnly'",
+            "privatelink.monitor.azure.com",
+            "privatelink.oms.opinsights.azure.com",
+            "privatelink.ods.opinsights.azure.com",
+            "caj-mobius77-scanner-bridge-proof",
         ],
     }
     for name, tokens in expected_tokens.items():
@@ -428,6 +445,31 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
     assert "enablePurgeProtection:" not in key_vault_text
     assert "enableSoftDelete: true" in key_vault_text
     assert "softDeleteRetentionInDays: 7" in key_vault_text
+
+
+def test_private_pull_scanner_has_no_push_transport_or_tag_write_authority() -> None:
+    storage = (ROOT / "modules" / "storage-scanner.bicep").read_text(encoding="utf-8")
+    bridge = (ROOT / "modules" / "scanner-result-bridge.bicep").read_text(encoding="utf-8")
+    combined = storage + bridge
+    assert "defenderForStorageSettings" in storage
+    assert "Microsoft.Security/defenderForStorageSettings@2025-06-01" in storage
+    assert "blobScanResultsOptions: 'BlobIndexTags'" in storage
+    assert "category: 'ScanResults'" in storage
+    assert "Storage Blob Data Contributor" not in storage
+    assert "/blobs/tags/read" in combined
+    assert "/blobs/tags/write" not in combined
+    assert "Microsoft.EventGrid/topics" not in combined
+    assert "eventSubscriptions" not in combined
+    assert "queueServices/queues" not in combined
+    assert "publicNetworkAccess: 'Disabled'" in storage
+    assert "allowPermanentDelete: true" in storage
+    assert "/blobs/deleteBlobVersion/action" in bridge
+    assert "/blobs/permanentDelete/action" in bridge
+    main = (ROOT / "main.bicep").read_text(encoding="utf-8")
+    assert "'Microsoft.Security/dataScanners'" in main
+    assert "'Microsoft.Security/storageDataScanners'" not in main
+    assert "proofCanarySeed: authorizationLedgerSha256" in main
+    assert "OPENCANVAS_SCANNER_BRIDGE_PROOF_SEED" in bridge
 
 
 def test_container_apps_subnet_has_exact_exclusive_delegation() -> None:
@@ -1091,6 +1133,7 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
             "c632b3df-fb67-4d84-bdcf-b95ad541b5c8",
             "b74c6cfe-995e-5107-9e42-4f7f76b76742",
             "f61544fe-cd79-5247-ac8b-ee9697b6ffd6",
+            "5ffc55c1-7a88-5231-b0d1-e76ee95d057e",
             "d83b4107-54e0-57a4-b650-fe0b556132d2",
             "ecdbb32f-9134-5697-85f9-d569ba57454b",
             "158cac88-5679-5804-9f4d-854520bbb635",
@@ -1099,6 +1142,7 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
             "b24988ac-6180-42a0-ab88-20f7382dd24c",
             "b74c6cfe-995e-5107-9e42-4f7f76b76742",
             "f61544fe-cd79-5247-ac8b-ee9697b6ffd6",
+            "d83b4107-54e0-57a4-b650-fe0b556132d2",
             "ecdbb32f-9134-5697-85f9-d569ba57454b",
             "158cac88-5679-5804-9f4d-854520bbb635",
         },
@@ -1106,11 +1150,28 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
         "modules/key-vault.bicep": {"4633458b-17de-408a-b874-0445c86b69e6"},
         "modules/network.bicep": {"c632b3df-fb67-4d84-bdcf-b95ad541b5c8"},
         "modules/registry.bicep": {"7f951dda-4ed3-4680-a7ca-43fe172d538d"},
-        "modules/storage-scanner.bicep": {"ba92f5b4-2d11-453d-a403-e96b0029c9fe"},
+        "modules/storage-scanner.bicep": {
+            "43c7bdad-b8f9-4d4b-9881-ae8af70cf269",
+            "a59d0f11-7f62-4699-97d9-6c8565ba77a4",
+            "292f18b2-0b41-4a86-a4af-46cd22d2e52e",
+            "6ecfca2a-29a1-4802-a236-706d77995e21",
+        },
+        "modules/scanner-result-bridge.bicep": {
+            "73c42c96-874c-492b-b04d-ab87d138a893",
+            "7d78ed8f-4b48-4e74-bb95-f0fcfe811897",
+        },
         "acr_tag_finalization.py": {
             "2efddaa5-3f1f-4df3-97df-af3f13818f4c",
             "7f951dda-4ed3-4680-a7ca-43fe172d538d",
             "c2f4ef07-c644-48eb-af81-4b1b4947fb11",
+        },
+        "scanner_bridge_recovery_adapter.py": {
+            "cd50fd1f-0421-46f2-8cce-afc587dbcc77",
+            "43c7bdad-b8f9-4d4b-9881-ae8af70cf269",
+            "a59d0f11-7f62-4699-97d9-6c8565ba77a4",
+            "292f18b2-0b41-4a86-a4af-46cd22d2e52e",
+            "6ecfca2a-29a1-4802-a236-706d77995e21",
+            "73c42c96-874c-492b-b04d-ab87d138a893",
         },
         "scripts/managed_binding_lifecycle.py": {
             "00000000-0000-0000-0000-000000000000",

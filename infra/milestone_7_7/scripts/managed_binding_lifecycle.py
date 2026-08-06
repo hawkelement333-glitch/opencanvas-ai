@@ -89,7 +89,7 @@ SCHEDULE: Final = "schedule-mobius77-cleanup"
 STAGING_LOCATION: Final = "southcentralus"
 CLEANUP_LOCATION: Final = "westus"
 REDIS_LOCATION: Final = "australiacentral"
-AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 7, 0, 15, tzinfo=UTC)
+AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 7, 5, 30, tzinfo=UTC)
 MAXIMUM_AUTHORIZED_WINDOW: Final = timedelta(hours=30)
 MINIMUM_CLEANUP_RESERVE: Final = timedelta(minutes=90)
 PROVISIONING_COST_BLOCK_USD_CENTS: Final = 12_000
@@ -164,11 +164,8 @@ LIFECYCLE_OPERATIONS: Final = (
 )
 DEPLOYMENT_STAGES: Final = frozenset(
     {
-        "cleanup-control",
-        "cleanup-job-binding",
-        "cleanup-binding",
-        "pre-secret",
-        "post-secret",
+        "cleanup-control", "cleanup-job-binding", "cleanup-binding", "pre-secret",
+        "scanner-foundation", "scanner-proof", "post-secret",
     }
 )
 PRE_SECRET_PRESERVABLE_STAGE: Final = "pre-secret"
@@ -2631,7 +2628,7 @@ def _verify_cleanup_control(subscription_id: str, cleanup_at: datetime) -> str:
         _fail("cleanup-automation-output-malformed")
     if {key: value for key, value in account.items() if key != "principalId"} != {
         "localAuthDisabled": True,
-        "location": CLEANUP_LOCATION,
+        "location": "northeurope",
         "publicNetworkAccess": False,
         "state": "Ok",
     }:
@@ -2660,7 +2657,7 @@ def _verify_cleanup_control(subscription_id: str, cleanup_at: datetime) -> str:
         require_json=True,
     )
     if runbook != {
-        "location": CLEANUP_LOCATION,
+        "location": "northeurope",
         "runbookType": "PowerShell72",
         "state": "Published",
     }:

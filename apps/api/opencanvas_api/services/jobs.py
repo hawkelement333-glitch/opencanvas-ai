@@ -32,6 +32,7 @@ from opencanvas_api.services.durable_jobs import (
     RetryClassification,
 )
 from opencanvas_api.services.observability import OperationalTelemetry, Severity
+from opencanvas_api.services.scanner_bridge import build_private_scanner_result_bridge
 
 ACTIVE_JOB_STATUSES = (
     "queued",
@@ -310,6 +311,7 @@ class DocumentWorker:
         self.worker_id = worker_id or f"{socket.gethostname()}-{uuid.uuid4().hex[:12]}"
         self.metrics = DurableJobMetrics()
         self.telemetry = telemetry
+        self.scanner_bridge = build_private_scanner_result_bridge(settings)
         self.processor = DocumentProcessor(
             settings=settings,
             storage=build_document_storage(settings),
@@ -319,6 +321,9 @@ class DocumentWorker:
     async def run_once(self) -> bool:
         async with self.sessions() as session:
             await self._heartbeat(session, "ready")
+            if self.scanner_bridge is not None and await self.scanner_bridge.consume_once(session):
+                await session.commit()
+                return True
             service = _durable_service(session, self.settings, metrics=self.metrics)
             await service.refresh_backlog_metrics()
             self._observe_metrics()

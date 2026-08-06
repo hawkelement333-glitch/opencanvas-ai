@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import os
 import uuid
+import xml.etree.ElementTree as ET
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -398,7 +399,14 @@ class LocalVersionedObjectStorage:
 
 
 class AzureManagedIdentityTokenProvider:
-    """Fetches short-lived Azure Storage tokens from the hosting workload identity."""
+    """Fetch short-lived, allowlisted data-plane tokens from the workload identity."""
+
+    _allowed_resources = frozenset(
+        {
+            "https://storage.azure.com/",
+            "https://api.loganalytics.io/",
+        }
+    )
 
     def __init__(
         self, *, endpoint: str, identity_header: str, client_id: str | None = None
@@ -410,10 +418,12 @@ class AzureManagedIdentityTokenProvider:
         self._identity_header = identity_header
         self._client_id = client_id
 
-    async def get_token(self) -> str:
+    async def get_token(self, resource: str = "https://storage.azure.com/") -> str:
+        if resource not in self._allowed_resources:
+            raise DocumentStorageError("The requested Azure token audience is not allowed.")
         parameters = {
             "api-version": "2019-08-01",
-            "resource": "https://storage.azure.com/",
+            "resource": resource,
         }
         if self._client_id:
             parameters["client_id"] = self._client_id
@@ -428,9 +438,9 @@ class AzureManagedIdentityTokenProvider:
             response.raise_for_status()
             token = response.json().get("access_token")
         except (httpx.HTTPError, ValueError) as exc:
-            raise DocumentStorageError("The storage workload identity is unavailable.") from exc
+            raise DocumentStorageError("The Azure workload identity is unavailable.") from exc
         if not isinstance(token, str) or not token:
-            raise DocumentStorageError("The storage workload identity returned no token.")
+            raise DocumentStorageError("The Azure workload identity returned no token.")
         return token
 
 
@@ -477,19 +487,29 @@ class AzureBlobVersionedObjectStorage:
         if not hmac.compare_digest(digest, expected_sha256):
             raise DocumentStorageError("The object checksum does not match the upload contract.")
         key = _object_key(security_class, object_id, object_version_id)
-        response = await self._request(
-            "PUT",
-            key,
-            content=content,
-            extra_headers={
-                "If-None-Match": "*",
-                "X-Ms-Blob-Type": "BlockBlob",
-                "X-Ms-Meta-Sha256": digest,
-            },
-            accepted_statuses=frozenset({409, 412}),
-        )
+        reconciled = False
+        try:
+            response = await self._request(
+                "PUT",
+                key,
+                content=content,
+                extra_headers={
+                    "If-None-Match": "*",
+                    "X-Ms-Blob-Type": "BlockBlob",
+                    "X-Ms-Meta-Sha256": digest,
+                },
+                accepted_statuses=frozenset({409, 412}),
+            )
+        except DocumentStorageError as put_error:
+            try:
+                response = await self._request("HEAD", key)
+            except DocumentStorageError:
+                raise put_error from None
+            reconciled = True
         if response.status_code in {409, 412}:
             response = await self._request("HEAD", key)
+            reconciled = True
+        if reconciled:
             recorded_digest = response.headers.get("x-ms-meta-sha256")
             recorded_size = response.headers.get("content-length")
             if (
@@ -524,6 +544,121 @@ class AzureBlobVersionedObjectStorage:
         )
         return response.content
 
+    def object_url(self, physical_key: str) -> str:
+        """Return the canonical data-plane URI for one validated physical key."""
+
+        return self._object_url(physical_key)
+
+    async def read_version_properties(
+        self,
+        *,
+        physical_key: str,
+        provider_version_id: str,
+        expected_etag: str,
+    ) -> tuple[str, str]:
+        """Authoritatively bind a stored version ID and ETag without reading content."""
+
+        response = await self._request(
+            "HEAD",
+            physical_key,
+            query={"versionid": provider_version_id},
+            extra_headers={"If-Match": expected_etag},
+        )
+        version_id = response.headers.get("x-ms-version-id")
+        etag = response.headers.get("etag")
+        if version_id != provider_version_id or etag != expected_etag:
+            raise DocumentStorageError("The immutable Azure object identity changed.")
+        current = await self._request(
+            "HEAD",
+            physical_key,
+            extra_headers={"If-Match": expected_etag},
+        )
+        if (
+            current.headers.get("x-ms-version-id") != provider_version_id
+            or current.headers.get("etag") != expected_etag
+        ):
+            raise DocumentStorageError("The scanned Azure object version is no longer current.")
+        return version_id, etag
+
+    async def read_version_tags_xml(
+        self,
+        *,
+        physical_key: str,
+        provider_version_id: str,
+        expected_etag: str,
+    ) -> bytes:
+        """Read, but never write, the blob-index tags for one immutable version."""
+
+        response = await self._request(
+            "GET",
+            physical_key,
+            query={"comp": "tags", "versionid": provider_version_id},
+            extra_headers={"If-Match": expected_etag},
+        )
+        if len(response.content) > 32_768:
+            raise DocumentStorageError("The Azure blob-tag response is too large.")
+        return response.content
+
+    async def version_exists(
+        self,
+        *,
+        physical_key: str,
+        provider_version_id: str,
+    ) -> bool:
+        """Authoritatively test one exact version without accepting access failures."""
+
+        response = await self._request(
+            "HEAD",
+            physical_key,
+            query={"versionid": provider_version_id},
+            accepted_statuses=frozenset({404}),
+        )
+        return response.status_code != 404
+
+    async def version_residue_exists(
+        self,
+        *,
+        physical_key: str,
+        provider_version_id: str,
+    ) -> bool:
+        """List active and soft-deleted versions to prove exact canary residue absence."""
+
+        pure = _validate_key(physical_key)
+        blob_name = "/".join(pure.parts[1:])
+        if not blob_name:
+            raise DocumentStorageError("The Azure object key is invalid.")
+        response = await self._request(
+            "GET",
+            pure.parts[0],
+            query={
+                "restype": "container",
+                "comp": "list",
+                "prefix": blob_name,
+                "include": "versions,deleted",
+                "maxresults": "100",
+            },
+        )
+        if len(response.content) > 131_072:
+            raise DocumentStorageError("The Azure version inventory is too large.")
+        try:
+            root = ET.fromstring(response.content)
+        except ET.ParseError as exc:
+            raise DocumentStorageError("The Azure version inventory is malformed.") from exc
+        next_markers = [
+            element.text or ""
+            for element in root.iter()
+            if element.tag.rsplit("}", 1)[-1] == "NextMarker"
+        ]
+        if any(value for value in next_markers):
+            raise DocumentStorageError("The Azure version inventory is incomplete.")
+        for element in root.iter():
+            if element.tag.rsplit("}", 1)[-1] != "Blob":
+                continue
+            values = {child.tag.rsplit("}", 1)[-1]: child.text or "" for child in element}
+            if values.get("Name") == blob_name and values.get("VersionId") == provider_version_id:
+                return True
+        return False
+
     async def copy_immutable(
         self,
         *,
@@ -532,10 +667,18 @@ class AzureBlobVersionedObjectStorage:
         object_id: uuid.UUID,
         target_object_version_id: uuid.UUID,
     ) -> ProviderObjectVersion:
-        content = await self.read_version(
-            physical_key=source.physical_key,
-            provider_version_id=source.provider_version_id,
+        response = await self._request(
+            "GET",
+            source.physical_key,
+            query={"versionid": source.provider_version_id},
+            extra_headers={"If-Match": source.etag},
         )
+        content = response.content
+        if (
+            response.headers.get("x-ms-version-id") != source.provider_version_id
+            or response.headers.get("etag") != source.etag
+        ):
+            raise DocumentStorageError("The quarantine object identity changed.")
         if not hmac.compare_digest(hashlib.sha256(content).hexdigest(), source.content_sha256):
             raise DocumentStorageError("The quarantine object changed before promotion.")
         return await self.put_immutable(
@@ -552,11 +695,29 @@ class AzureBlobVersionedObjectStorage:
         physical_key: str,
         provider_version_id: str,
     ) -> None:
-        await self._request(
+        response = await self._request(
             "DELETE",
             physical_key,
             query={"versionid": provider_version_id},
         )
+        if response.headers.get("x-ms-delete-type-permanent") != "false":
+            raise DocumentStorageError("The Azure object version was not soft-deleted as required.")
+
+    async def permanently_delete_version(
+        self,
+        *,
+        physical_key: str,
+        provider_version_id: str,
+    ) -> None:
+        """Permanently delete one already-soft-deleted proof version."""
+
+        response = await self._request(
+            "DELETE",
+            physical_key,
+            query={"versionid": provider_version_id, "deletetype": "permanent"},
+        )
+        if response.headers.get("x-ms-delete-type-permanent") != "true":
+            raise DocumentStorageError("The Azure proof version permanent deletion is unproved.")
 
     async def healthcheck(self) -> None:
         container = self.containers["quarantine"]
@@ -591,12 +752,7 @@ class AzureBlobVersionedObjectStorage:
         extra_headers: dict[str, str] | None = None,
         accepted_statuses: frozenset[int] = frozenset(),
     ) -> httpx.Response:
-        pure = _validate_key(physical_key)
-        security_class = pure.parts[0]
-        if security_class not in self.containers:
-            raise DocumentStorageError("The object security class is invalid.")
-        blob = "/".join(quote(part, safe="-_.~") for part in pure.parts[1:])
-        url = f"{self.account_url}/{self.containers[security_class]}/{blob}"
+        url = self._object_url(physical_key)
         if query:
             url = f"{url}?{urlencode(query)}"
         headers = {
@@ -617,6 +773,14 @@ class AzureBlobVersionedObjectStorage:
             raise
         except httpx.HTTPError as exc:
             raise DocumentStorageError("The private Azure object store is unavailable.") from exc
+
+    def _object_url(self, physical_key: str) -> str:
+        pure = _validate_key(physical_key)
+        security_class = pure.parts[0]
+        if security_class not in self.containers:
+            raise DocumentStorageError("The object security class is invalid.")
+        blob = "/".join(quote(part, safe="-_.~") for part in pure.parts[1:])
+        return f"{self.account_url}/{self.containers[security_class]}/{blob}"
 
 
 class AzureDocumentStorage:

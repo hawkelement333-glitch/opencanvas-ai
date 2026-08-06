@@ -35,11 +35,11 @@ def _evidence(**changes: object) -> ScannerResultBridgeEvidence:
             "revocation": True,
         },
         "correlation_id_sha256": "a" * 64,
-        "event_id_sha256": "b" * 64,
-        "provider_result_id_sha256": "c" * 64,
+        "blob_tag_evidence_sha256": "b" * 64,
+        "log_analytics_evidence_sha256": "c" * 64,
         "object_version_or_etag_sha256": "d" * 64,
         "storage_resource_sha256": "e" * 64,
-        "delivery_attempt_sha256": "f" * 64,
+        "completion_time_sha256": "f" * 64,
         "decision": "clean",
     }
     values.update(changes)
@@ -83,9 +83,11 @@ def test_stale_or_incomplete_correlation_never_resolves() -> None:
     stale = _evidence(observed_at_utc="2026-08-01T00:00:00Z")
     assert resolve_bridge(stale, now=datetime(2026, 8, 5, tzinfo=UTC))[0] == "STALE_EVIDENCE"
     assert (
-        resolve_bridge(_evidence(event_id_sha256="not-a-hash"), now=datetime.now(UTC))[0]
+        resolve_bridge(_evidence(blob_tag_evidence_sha256="not-a-hash"), now=datetime.now(UTC))[0]
         == "CORRELATION_UNPROVED"
     )
+    future = _evidence(observed_at_utc="2026-08-05T05:00:00Z")
+    assert resolve_bridge(future, now=datetime(2026, 8, 5, 4, 1, tzinfo=UTC))[0] == "STALE_EVIDENCE"
 
 
 def test_unknown_decision_never_resolves() -> None:
@@ -106,7 +108,7 @@ def _deployment_evidence(**changes: object) -> ScannerResultBridgeDeploymentEvid
         "observed_at_utc": "2026-08-05T04:00:00Z",
         "legacy_evidence": _evidence(),
         "provider_resource_id_sha256": hash_value,
-        "provider_api_version": "2024-01-01",
+        "provider_api_version": "2025-06-01",
         "provider_enabled": True,
         "provider_capability_proof_integrity": hash_value,
         "storage_resource_id_sha256": hash_value,
@@ -115,33 +117,35 @@ def _deployment_evidence(**changes: object) -> ScannerResultBridgeDeploymentEvid
         "content_sha256": hash_value,
         "scan_request_id_sha256": hash_value,
         "producer_proof_integrity": hash_value,
-        "system_topic_resource_id_sha256": hash_value,
-        "event_subscription_resource_id_sha256": hash_value,
-        "event_type": "Microsoft.Security.MalwareScanningResult",
-        "event_schema_version": SCHEMA_VERSION,
-        "filter_integrity": hash_value,
-        "private_queue_resource_id_sha256": hash_value,
-        "dead_letter_queue_resource_id_sha256": hash_value,
-        "transport_proof_integrity": hash_value,
+        "diagnostic_setting_resource_id_sha256": hash_value,
+        "blob_tag_result_sha256": hash_value,
+        "log_analytics_workspace_id_sha256": hash_value,
+        "log_analytics_table": "StorageMalwareScanningResults",
+        "log_query_sha256": hash_value,
+        "dual_source_proof_integrity": hash_value,
         "consumer_identity_sha256": hash_value,
-        "queue_adapter_identity_sha256": hash_value,
-        "malware_scan_receipt_id_sha256": hash_value,
-        "idempotency_key_sha256": hash_value,
+        "consumer_entry_point": "scripts.worker.DocumentWorker",
         "consumer_proof_integrity": hash_value,
-        "sender_identity_sha256": hash_value,
-        "processor_identity_sha256": hash_value,
-        "sender_role_definition_sha256": hash_value,
-        "processor_role_definition_sha256": hash_value,
-        "sender_scope_sha256": hash_value,
-        "processor_scope_sha256": hash_value,
+        "blob_reader_role_definition_sha256": hash_value,
+        "log_reader_role_definition_sha256": hash_value,
+        "blob_reader_scope_sha256": hash_value,
+        "log_reader_scope_sha256": hash_value,
+        "worker_tag_write_denied": True,
+        "tag_write_denial_proof_integrity": hash_value,
         "assignment_proof_integrity": hash_value,
-        "revocation_proof_integrity": hash_value,
+        "ampls_resource_id_sha256": hash_value,
         "private_endpoint_resource_id_sha256": hash_value,
-        "private_dns_resource_id_sha256": hash_value,
+        "private_dns_zone_set_sha256": hash_value,
         "private_address_sha256": hash_value,
         "tls_hostname_sha256": hash_value,
         "tls_version": "TLS1_2",
         "private_path_proof_integrity": hash_value,
+        "proof_job_resource_id_sha256": hash_value,
+        "proof_execution_id_sha256": hash_value,
+        "clean_decision_proof_integrity": hash_value,
+        "malicious_decision_proof_integrity": hash_value,
+        "provider_owned_system_topic_preserved": True,
+        "revocation_proof_integrity": hash_value,
         "cleanup_inventory_integrity": hash_value,
         "unresolved_reasons": (),
     }
@@ -174,7 +178,8 @@ def test_deployment_evidence_fails_closed_for_unresolved_or_incomplete_proof() -
     for evidence in (
         _deployment_evidence(unresolved_reasons=("transport-unproved",)),
         _deployment_evidence(provider_enabled=False),
-        _deployment_evidence(event_type="wrong"),
+        _deployment_evidence(provider_api_version="2025-07-01-preview"),
+        _deployment_evidence(log_analytics_table="wrong"),
         _deployment_evidence(tls_version="TLS1_0"),
     ):
         try:
