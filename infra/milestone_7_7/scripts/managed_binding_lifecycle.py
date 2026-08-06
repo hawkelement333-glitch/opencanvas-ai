@@ -82,7 +82,8 @@ INFRASTRUCTURE_GROUP: Final = "rg-solarplexus-mobius-77-containerapps-infrastruc
 CONTAINER_APPS_DNS_LINK: Final = "link-mobius77-containerapps"
 KEY_VAULT: Final = "kv-mobius77-11564669"
 REGISTRY: Final = "acrmobius7711564669"
-AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup"
+AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup-recovery"
+RETIRED_ACCOUNT: Final = "aa-mobius77-cleanup"
 RUNBOOK: Final = "Remove-Mobius77Staging"
 SCHEDULE: Final = "schedule-mobius77-cleanup"
 STAGING_LOCATION: Final = "southcentralus"
@@ -2978,6 +2979,7 @@ def _resource_group_inventory(
                 f"microsoft.automation/automationaccounts/{AUTOMATION_ACCOUNT.casefold()}",
                 f"microsoft.automation/automationaccounts/{AUTOMATION_ACCOUNT.casefold()}/runbooks/{RUNBOOK.casefold()}",
                 f"microsoft.automation/automationaccounts/{AUTOMATION_ACCOUNT.casefold()}/schedules/{SCHEDULE.casefold()}",
+                "microsoft.automation/automationaccounts/aa-mobius77-cleanup",
             }
             job_prefix = (
                 f"microsoft.automation/automationaccounts/{AUTOMATION_ACCOUNT.casefold()}"
@@ -3128,7 +3130,7 @@ def _verify_recovered_cleanup_seed_state(subscription_id: str) -> None:
     account_scope = _scope(
         subscription_id,
         f"/resourceGroups/{CLEANUP_GROUP}/providers/"
-        f"Microsoft.Automation/automationAccounts/{AUTOMATION_ACCOUNT}",
+        f"Microsoft.Automation/automationAccounts/{RETIRED_ACCOUNT}",
     )
     account = _run(
         (
@@ -3139,7 +3141,7 @@ def _verify_recovered_cleanup_seed_state(subscription_id: str) -> None:
             "--resource-group",
             CLEANUP_GROUP,
             "--automation-account-name",
-            AUTOMATION_ACCOUNT,
+            RETIRED_ACCOUNT,
             "--subscription",
             subscription_id,
             "--query",
@@ -3189,7 +3191,7 @@ def _verify_recovered_cleanup_seed_state(subscription_id: str) -> None:
         group=CLEANUP_GROUP,
     )
     if resources != frozenset(
-        {f"microsoft.automation/automationaccounts/{AUTOMATION_ACCOUNT.casefold()}"}
+        {f"microsoft.automation/automationaccounts/{RETIRED_ACCOUNT}"}
     ):
         _fail("recovered-cleanup-resource-drift")
     if _exact_scope_role_rows(subscription_id, group_scope) or _exact_scope_role_rows(

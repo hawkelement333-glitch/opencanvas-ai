@@ -92,7 +92,7 @@ var cleanupControlEnabled = contractEnabled && cleanupControlDeploymentEnabled &
 var jobScheduleEnabled = contractEnabled && cleanupJobScheduleDeploymentEnabled && !cleanupControlDeploymentEnabled
 
 resource automationAccount 'Microsoft.Automation/automationAccounts@2024-10-23' = if (cleanupControlEnabled) {
-  name: 'aa-mobius77-cleanup'
+  name: 'aa-mobius77-cleanup-recovery'
   location: cleanupLocation
   tags: lifecycleTags
   identity: {
@@ -133,7 +133,7 @@ resource cleanupSchedule 'Microsoft.Automation/automationAccounts/schedules@2024
 }
 
 resource existingAutomationAccount 'Microsoft.Automation/automationAccounts@2024-10-23' existing = if (jobScheduleEnabled) {
-  name: 'aa-mobius77-cleanup'
+  name: 'aa-mobius77-cleanup-recovery'
 }
 
 resource existingCleanupRunbook 'Microsoft.Automation/automationAccounts/runbooks@2024-10-23' existing = if (jobScheduleEnabled) {
@@ -191,7 +191,7 @@ output managedBindingMode string = managedBindingMode
 output managedBindingDeploymentEnabled bool = cleanupControlEnabled || jobScheduleEnabled
 output cleanupControlDeploymentEnabled bool = cleanupControlEnabled
 output cleanupJobScheduleDeploymentEnabled bool = jobScheduleEnabled
-output automationAccountName string = 'aa-mobius77-cleanup'
+output automationAccountName string = 'aa-mobius77-cleanup-recovery'
 output cleanupRunbookName string = 'Remove-Mobius77Staging'
 output cleanupScheduleName string = 'schedule-mobius77-cleanup'
 output cleanupBindingContractVersion string = cleanupBindingContractVersion

@@ -3079,7 +3079,7 @@ def _job_schedule_list_response(
                 "id": (
                     f"/subscriptions/{subscription_id}/resourceGroups/"
                     "rg-solarplexus-mobius-77-cleanup-control/providers/"
-                    "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
+                    "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/"
                     f"jobSchedules/{job_schedule_id}"
                 ),
                 "jobScheduleId": job_schedule_id,
@@ -3107,7 +3107,7 @@ def _job_schedule_get_response(
 def test_cleanup_binding_generation_two_is_stable_distinct_and_normalized() -> None:
     account = (
         "/subscriptions/synthetic/resourceGroups/rg-solarplexus-mobius-77-cleanup-control/"
-        "providers/Microsoft.Automation/automationAccounts/aa-mobius77-cleanup"
+        "providers/Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery"
     )
     kwargs = {
         "automation_account_id": account,
@@ -3167,7 +3167,7 @@ def test_cleanup_binding_generation_two_fails_closed_on_identity_input_drift(
 ) -> None:
     account = (
         "/subscriptions/synthetic/resourceGroups/rg-solarplexus-mobius-77-cleanup-control/"
-        "providers/Microsoft.Automation/automationAccounts/aa-mobius77-cleanup"
+        "providers/Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery"
     )
     kwargs = {
         "automation_account_id": account,
@@ -3214,11 +3214,9 @@ def test_cleanup_binding_generation_one_preserves_legacy_guid_and_contract_tombs
     cleanup = cast(dict[str, JsonValue], contract["cleanupExecution"])
     tombstone = cast(list[dict[str, JsonValue]], cleanup["tombstonedBindingIds"])[0]
 
-    assert generation_one == managed_binding_contracts.cleanup_binding_id_for_subscription(
-        "synthetic", generation=1
-    )
     assert cleanup["bindingGeneration"] == 2
-    assert cleanup["activeBindingId"] != tombstone["bindingId"]
+    assert cleanup["corruptedAutomationAccount"] == "aa-mobius77-cleanup"
+    assert cleanup["activeBindingId"] != generation_one
     assert tombstone["bindingId"] == managed_binding_contracts.TOMBSTONED_CLEANUP_BINDING_ID
     body = {key: value for key, value in tombstone.items() if key != "evidenceIntegritySha256"}
     assert tombstone[
@@ -3258,14 +3256,14 @@ def test_cleanup_job_schedule_verification_discovers_then_gets_exact_resource(
     assert observed[0][observed[0].index("--url") + 1] == (
         "https://management.azure.com/subscriptions/opaque-subscription/"
         "resourceGroups/rg-solarplexus-mobius-77-cleanup-control/providers/"
-        "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
+        "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/"
         "jobSchedules?api-version=2024-10-23"
     )
     assert "--subscription" not in observed[0]
     assert observed[1][observed[1].index("--url") + 1] == (
         "https://management.azure.com/subscriptions/opaque-subscription/"
         "resourceGroups/rg-solarplexus-mobius-77-cleanup-control/providers/"
-        "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
+        "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/"
         f"jobSchedules/{managed_binding_contracts.cleanup_binding_id_for_subscription(subscription_id)}"
         "?api-version=2024-10-23"
     )

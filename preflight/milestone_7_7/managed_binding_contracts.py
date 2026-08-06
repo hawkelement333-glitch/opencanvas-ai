@@ -68,7 +68,12 @@ AUTOMATION_BINDING_NAMESPACE: Final = UUID("11fb06fb-712d-4ddd-98c7-e71bbd588830
 CLEANUP_BINDING_CONTRACT_VERSION: Final = "m7.7-automation-cleanup-binding-v2"
 CLEANUP_BINDING_GENERATION: Final = 2
 TOMBSTONED_CLEANUP_BINDING_ID: Final = "158cac88-5679-5804-9f4d-854520bbb635"
-ACTIVE_CLEANUP_BINDING_ID: Final = "b74c6cfe-995e-5107-9e42-4f7f76b76742"
+TOMBSTONED_GENERATION_TWO_CLEANUP_BINDING_ID: Final = (
+    "b74c6cfe-995e-5107-9e42-4f7f76b76742"
+)
+ACTIVE_CLEANUP_BINDING_ID: Final = "f61544fe-cd79-5247-ac8b-ee9697b6ffd6"
+CLEANUP_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup-recovery"
+CORRUPTED_CLEANUP_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup"
 CLEANUP_BINDING_TOMBSTONE_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/automation-cleanup-binding-tombstone/v1\0"
 )
@@ -327,7 +332,7 @@ def cleanup_binding_id_for_subscription(
     root = f"/subscriptions/{subscription_id.strip()}/resourceGroups"
     account = (
         f"{root}/rg-solarplexus-mobius-77-cleanup-control/providers/"
-        "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup"
+        f"Microsoft.Automation/automationAccounts/{CLEANUP_AUTOMATION_ACCOUNT}"
     )
     return deterministic_cleanup_binding_id(
         generation=generation,
@@ -392,6 +397,7 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "authorizationValue": True,
         "bindingContractVersion": CLEANUP_BINDING_CONTRACT_VERSION,
         "bindingGeneration": CLEANUP_BINDING_GENERATION,
+        "corruptedAutomationAccount": CORRUPTED_CLEANUP_AUTOMATION_ACCOUNT,
         "cleanupContributorRoleDefinitionId": ("b24988ac-6180-42a0-ab88-20f7382dd24c"),
         "cleanupPrincipalFingerprintSha256": (
             "19a9f97779cd2eb9acfdc04797f1fc5339316ee1a424ca79b70661beffa33260"
@@ -409,11 +415,11 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "targetResourceGroup": "rg-solarplexus-mobius-77-staging",
         "targetResourceGroupId": "resourceGroups/rg-solarplexus-mobius-77-staging",
         "runbookResourceId": (
-            "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
+            f"Microsoft.Automation/automationAccounts/{CLEANUP_AUTOMATION_ACCOUNT}/"
             "runbooks/Remove-Mobius77Staging"
         ),
         "scheduleResourceId": (
-            "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/"
+            f"Microsoft.Automation/automationAccounts/{CLEANUP_AUTOMATION_ACCOUNT}/"
             "schedules/schedule-mobius77-cleanup"
         ),
         "tombstonedBindingIds": [
@@ -428,29 +434,43 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
                 "evidenceIntegritySha256": (
                     "1a61c64e7749f4d81864cc3d95463d8ffc0dcc90926289497495750885b4f571"
                 ),
-            }
+            },
+            {
+                "bindingContractVersion": "m7.7-automation-cleanup-binding-v2",
+                "bindingGeneration": 2,
+                "bindingId": TOMBSTONED_GENERATION_TWO_CLEANUP_BINDING_ID,
+                "directGetStatus": "not-found",
+                "listVisibility": "absent",
+                "recreationStatus": "conflict",
+                "deletionStatus": "not-attempted",
+                "evidenceIntegritySha256": (
+                    "935e9e40975eb5bb23c59e41d4d56ff6609e685884b3bfa18b8f604231be202c"
+                ),
+            },
         ],
     }
     if cleanup_execution != expected_cleanup_execution:
         raise ContractError("managed-binding cleanup execution contract differs")
-    tombstone = _as_object(
+    for index, item in enumerate(
         _as_array(
             cleanup_execution["tombstonedBindingIds"],
             "$.cleanupExecution.tombstonedBindingIds",
-        )[0],
-        "$.cleanupExecution.tombstonedBindingIds[0]",
-    )
-    tombstone_body = {
-        key: _copy_json(item)
-        for key, item in tombstone.items()
-        if key != "evidenceIntegritySha256"
-    }
-    if tombstone["evidenceIntegritySha256"] != cleanup_binding_tombstone_integrity(
-        tombstone_body
-    ):
-        raise ContractError(
-            "managed-binding cleanup tombstone evidence integrity differs"
         )
+    ):
+        tombstone = _as_object(
+            item, f"$.cleanupExecution.tombstonedBindingIds[{index}]"
+        )
+        tombstone_body = {
+            key: _copy_json(value)
+            for key, value in tombstone.items()
+            if key != "evidenceIntegritySha256"
+        }
+        if tombstone["evidenceIntegritySha256"] != cleanup_binding_tombstone_integrity(
+            tombstone_body
+        ):
+            raise ContractError(
+                "managed-binding cleanup tombstone evidence integrity differs"
+            )
     authority = _as_object(contract["defaultAuthority"], "$.defaultAuthority")
     if authority != {
         "executionAuthorized": False,

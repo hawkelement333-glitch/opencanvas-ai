@@ -174,7 +174,7 @@ resource existingCleanupResourceGroup 'Microsoft.Resources/resourceGroups@2023-0
 }
 
 resource existingCleanupAutomation 'Microsoft.Automation/automationAccounts@2024-10-23' existing = if (targetEnabled) {
-  name: 'aa-mobius77-cleanup'
+  name: 'aa-mobius77-cleanup-recovery'
   scope: existingCleanupResourceGroup
 }
 

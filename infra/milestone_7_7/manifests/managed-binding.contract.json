@@ -59,7 +59,7 @@
     "privateDnsInboundEndpoint": "dnsin-mobius77-staging",
     "vpnGatewayPublicIp": "pip-mobius77-vpn",
     "vpnGateway": "vpngw-mobius77-staging",
-    "cleanupAutomationAccount": "aa-mobius77-cleanup",
+    "cleanupAutomationAccount": "aa-mobius77-cleanup-recovery",
     "cleanupRunbook": "Remove-Mobius77Staging",
     "cleanupSchedule": "schedule-mobius77-cleanup",
     "containerAppsInfrastructureResourceGroup": "rg-solarplexus-mobius-77-containerapps-infrastructure"
@@ -67,7 +67,8 @@
   "cleanupExecution": {
     "bindingContractVersion": "m7.7-automation-cleanup-binding-v2",
     "bindingGeneration": 2,
-    "activeBindingId": "b74c6cfe-995e-5107-9e42-4f7f76b76742",
+    "activeBindingId": "f61544fe-cd79-5247-ac8b-ee9697b6ffd6",
+    "corruptedAutomationAccount": "aa-mobius77-cleanup",
     "tombstonedBindingIds": [
       {
         "bindingContractVersion": "m7.7-automation-cleanup-binding-v1",
@@ -78,10 +79,20 @@
         "recreationStatus": "conflict",
         "deletionStatus": "accepted",
         "evidenceIntegritySha256": "1a61c64e7749f4d81864cc3d95463d8ffc0dcc90926289497495750885b4f571"
+      },
+      {
+        "bindingContractVersion": "m7.7-automation-cleanup-binding-v2",
+        "bindingGeneration": 2,
+        "bindingId": "b74c6cfe-995e-5107-9e42-4f7f76b76742",
+        "directGetStatus": "not-found",
+        "listVisibility": "absent",
+        "recreationStatus": "conflict",
+        "deletionStatus": "not-attempted",
+        "evidenceIntegritySha256": "935e9e40975eb5bb23c59e41d4d56ff6609e685884b3bfa18b8f604231be202c"
       }
     ],
-    "scheduleResourceId": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/schedules/schedule-mobius77-cleanup",
-    "runbookResourceId": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup/runbooks/Remove-Mobius77Staging",
+    "scheduleResourceId": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/schedules/schedule-mobius77-cleanup",
+    "runbookResourceId": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/runbooks/Remove-Mobius77Staging",
     "targetResourceGroupId": "resourceGroups/rg-solarplexus-mobius-77-staging",
     "authorizationParameter": "CleanupAuthorized",
     "authorizationValue": true,
