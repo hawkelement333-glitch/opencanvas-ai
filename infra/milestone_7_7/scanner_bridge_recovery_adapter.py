@@ -1145,26 +1145,37 @@ def _proof_graph(
             "value": authorization.authorizationIntegritySha256,
         },
     ]
-    if job != {
-        "id": authorization.proofJobId,
-        "triggerType": "Manual",
-        "retryLimit": 0,
-        "parallelism": 1,
-        "completionCount": 1,
-        "image": authorization.apiImageDigest,
-        "container": PROOF_CONTAINER,
-        "command": ["python"],
-        "args": [
-            "-m",
-            "scripts.scanner_bridge_probe",
-            "--max-attempts",
-            "60",
-            "--delay-seconds",
-            "30",
-        ],
-        "environment": expected_environment,
-        "identityIds": [authorization.workerIdentityId],
-    }:
+    job_projection = {
+        key: value for key, value in job.items() if key not in {"id", "identityIds"}
+    }
+    identity_ids = job.get("identityIds")
+    if (
+        job_projection
+        != {
+            "triggerType": "Manual",
+            "retryLimit": 0,
+            "parallelism": 1,
+            "completionCount": 1,
+            "image": authorization.apiImageDigest,
+            "container": PROOF_CONTAINER,
+            "command": ["python"],
+            "args": [
+                "-m",
+                "scripts.scanner_bridge_probe",
+                "--max-attempts",
+                "60",
+                "--delay-seconds",
+                "30",
+            ],
+            "environment": expected_environment,
+        }
+        or not _same_resource_id(job.get("id"), authorization.proofJobId)
+        or not (
+            isinstance(identity_ids, list)
+            and len(identity_ids) == 1
+            and _same_resource_id(identity_ids[0], authorization.workerIdentityId)
+        )
+    ):
         _fail("scanner-proof-job-readback-unproved")
     role = _rest_get(
         authorization.proofRoleDefinitionId,
@@ -1173,6 +1184,7 @@ def _proof_graph(
         "permissions:properties.permissions}",
     )
     permissions = role.get("permissions")
+    assignable_scopes = role.get("assignableScopes")
     exact_permissions: list[JsonValue] = [
         {
             "actions": [
@@ -1191,9 +1203,15 @@ def _proof_graph(
         }
     ]
     if (
-        role.get("id") != authorization.proofRoleDefinitionId
+        not _same_resource_id(role.get("id"), authorization.proofRoleDefinitionId)
         or role.get("roleName") != "Mobius77 Temporary Scanner Bridge Probe"
-        or role.get("assignableScopes") != [authorization.targetResourceGroupId]
+        or not (
+            isinstance(assignable_scopes, list)
+            and len(assignable_scopes) == 1
+            and _same_resource_id(
+                assignable_scopes[0], authorization.targetResourceGroupId
+            )
+        )
         or permissions != exact_permissions
         or _grants_tag_write(authorization.proofRoleDefinitionId)
     ):
@@ -1206,9 +1224,11 @@ def _proof_graph(
     quarantine_scope = (
         f"{authorization.storageAccountId}/blobServices/default/containers/quarantine"
     )
+    assignment_principal = assignment.get("principalId")
     if (
-        assignment.get("id") != assignment_id
-        or assignment.get("principalId") != worker_principal_id
+        not _same_resource_id(assignment.get("id"), assignment_id)
+        or not isinstance(assignment_principal, str)
+        or assignment_principal.casefold() != worker_principal_id.casefold()
         or not isinstance(assignment.get("roleDefinitionId"), str)
         or cast(str, assignment["roleDefinitionId"]).casefold()
         != authorization.proofRoleDefinitionId.casefold()
@@ -1444,6 +1464,10 @@ def _not_found(exc: lifecycle.AzureCommandError) -> bool:
     return exc.sanitized_azure_error_code in {
         "notfound",
         "not-found",
+        "roleassignmentnotfound",
+        "role-assignment-not-found",
+        "roledefinitiondoesnotexist",
+        "role-definition-does-not-exist",
         "resourcenotfound",
         "resource-not-found",
     }
@@ -1789,14 +1813,14 @@ class ProductionScannerBridgeRecoveryAdapter:
 
         if assignment_id is None or evidence_output is None:
             _fail("scanner-proof-authorization-incomplete")
-        proof_graph = _proof_graph(
-            authorization,
-            assignment_id=assignment_id,
-            worker_principal_id=readback.worker_principal_id,
-            worker_client_id=readback.worker_client_id,
-            workspace_customer_id=readback.workspace_customer_id,
-        )
         try:
+            proof_graph = _proof_graph(
+                authorization,
+                assignment_id=assignment_id,
+                worker_principal_id=readback.worker_principal_id,
+                worker_client_id=readback.worker_client_id,
+                workspace_customer_id=readback.workspace_customer_id,
+            )
             execution_name = _start_one_execution(authorization)
             execution = _wait_for_execution(authorization, execution_name)
             marker = _proof_marker(authorization, execution_name)

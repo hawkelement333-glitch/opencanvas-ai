@@ -72,7 +72,6 @@ if __name__ == "__main__":
     sys.modules[_CANONICAL_LIFECYCLE_MODULE] = sys.modules[__name__]
 
 _LIFECYCLE_MODULE_IDENTITY: Final = object()
-
 INFRASTRUCTURE_ROOT: Final = REPOSITORY_ROOT / "infra" / "milestone_7_7"
 MAIN_TEMPLATE: Final = INFRASTRUCTURE_ROOT / "main.bicep"
 CLEANUP_RUNBOOK: Final = INFRASTRUCTURE_ROOT / "scripts" / "Remove-Mobius77Staging.ps1"
@@ -164,8 +163,13 @@ LIFECYCLE_OPERATIONS: Final = (
 )
 DEPLOYMENT_STAGES: Final = frozenset(
     {
-        "cleanup-control", "cleanup-job-binding", "cleanup-binding", "pre-secret",
-        "scanner-foundation", "scanner-proof", "post-secret",
+        "cleanup-control",
+        "cleanup-job-binding",
+        "cleanup-binding",
+        "pre-secret",
+        "scanner-foundation",
+        "scanner-proof",
+        "post-secret",
     }
 )
 PRE_SECRET_PRESERVABLE_STAGE: Final = "pre-secret"
@@ -495,7 +499,7 @@ def _sanitized_azure_error_code(stdout: bytearray, stderr: bytearray) -> str:
             visit(cast(JsonValue, json.loads(decoded)))
         except json.JSONDecodeError:
             for match in re.finditer(
-                r"(?i)\bcode\b\s*[:=]\s*['\"]?([A-Za-z][A-Za-z0-9._-]{0,63})",
+                r"(?i)\bcode\W?\s*[:=]\s*\W?([\w.-]+)",
                 decoded,
             ):
                 normalized = _normalize_azure_error_code(match.group(1))

@@ -557,6 +557,173 @@ def test_failed_proof_still_revokes_all_temporary_authority(
     assert calls.count("residue") == 1
 
 
+def test_failed_proof_graph_still_revokes_all_temporary_authority(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    authorization = _authorization(PROOF_STAGE)
+    calls: list[str] = []
+    _install_common_fakes(monkeypatch, authorization, calls)
+
+    def graph_failure(*_args: object, **_kwargs: object) -> str:
+        raise ScannerBridgeRecoveryExecutionError("scanner-proof-job-readback-unproved")
+
+    monkeypatch.setattr(adapter_module, "_proof_graph", graph_failure)
+    monkeypatch.setattr(
+        adapter_module,
+        "_start_one_execution",
+        lambda _authorization: pytest.fail("proof execution must remain unreachable"),
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_remove_proof_residue",
+        lambda *_args: calls.append("residue") or "8" * 64,
+    )
+
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-job-readback-unproved",
+    ):
+        ProductionScannerBridgeRecoveryAdapter(clock=lambda: NOW).execute(
+            authorization=authorization,
+            receipt_directory=tmp_path,
+            expected_repository_head=HEAD,
+            evidence_output=tmp_path.parent / f"{tmp_path.name}-evidence.json",
+        )
+
+    assert calls.count("residue") == 1
+
+
+def test_proof_graph_accepts_only_resource_id_casing_differences(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _authorization(PROOF_STAGE)
+    readback = _readback()
+    assignment_id = _outputs(authorization)["scannerBridgeTemporaryRoleAssignmentId"]
+    assert isinstance(assignment_id, str)
+    expected_permissions: list[JsonValue] = [
+        {
+            "actions": ["Microsoft.Storage/storageAccounts/blobServices/containers/read"],
+            "dataActions": [
+                "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read",
+                "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/add/action",
+                "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write",
+                "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/deleteBlobVersion/action",
+                "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/permanentDelete/action",
+                "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/read",
+            ],
+            "notActions": [],
+            "notDataActions": [],
+        }
+    ]
+    job: dict[str, JsonValue] = {
+        "id": str(authorization.proofJobId).replace("/resourceGroups/", "/resourcegroups/"),
+        "triggerType": "Manual",
+        "retryLimit": 0,
+        "parallelism": 1,
+        "completionCount": 1,
+        "image": authorization.apiImageDigest,
+        "container": adapter_module.PROOF_CONTAINER,
+        "command": ["python"],
+        "args": [
+            "-m",
+            "scripts.scanner_bridge_probe",
+            "--max-attempts",
+            "60",
+            "--delay-seconds",
+            "30",
+        ],
+        "environment": [
+            {
+                "name": "OPENCANVAS_AZURE_STORAGE_ACCOUNT_URL",
+                "value": "https://stmobius7711564669.blob.core.windows.net/",
+            },
+            {
+                "name": "OPENCANVAS_AZURE_QUARANTINE_CONTAINER",
+                "value": "quarantine",
+            },
+            {"name": "OPENCANVAS_AZURE_CLEAN_CONTAINER", "value": "clean"},
+            {
+                "name": "OPENCANVAS_AZURE_REJECTED_CONTAINER",
+                "value": "rejected",
+            },
+            {
+                "name": "OPENCANVAS_AZURE_RETAINED_CONTAINER",
+                "value": "retained",
+            },
+            {
+                "name": "OPENCANVAS_AZURE_MANAGED_IDENTITY_CLIENT_ID",
+                "value": readback.worker_client_id,
+            },
+            {
+                "name": "OPENCANVAS_AZURE_LOG_ANALYTICS_WORKSPACE_ID",
+                "value": readback.workspace_customer_id,
+            },
+            {
+                "name": "OPENCANVAS_AZURE_LOG_ANALYTICS_ENDPOINT",
+                "value": "https://api.loganalytics.azure.com",
+            },
+            {
+                "name": "OPENCANVAS_SCANNER_BRIDGE_PROOF_SEED",
+                "value": authorization.authorizationIntegritySha256,
+            },
+        ],
+        "identityIds": [
+            authorization.workerIdentityId.replace("/resourceGroups/", "/resourcegroups/")
+        ],
+    }
+    role: dict[str, JsonValue] = {
+        "id": str(authorization.proofRoleDefinitionId).replace(
+            "/resourceGroups/", "/resourcegroups/"
+        ),
+        "roleName": "Mobius77 Temporary Scanner Bridge Probe",
+        "assignableScopes": [
+            authorization.targetResourceGroupId.replace("/resourceGroups/", "/resourcegroups/")
+        ],
+        "permissions": expected_permissions,
+    }
+    assignment: dict[str, JsonValue] = {
+        "id": assignment_id.replace("/resourceGroups/", "/resourcegroups/"),
+        "principalId": readback.worker_principal_id.upper(),
+        "roleDefinitionId": str(authorization.proofRoleDefinitionId).replace(
+            "/resourceGroups/", "/resourcegroups/"
+        ),
+    }
+
+    def read_resource(resource_id: str, *_args: object) -> dict[str, JsonValue]:
+        if resource_id.casefold() == str(authorization.proofJobId).casefold():
+            return job
+        if resource_id.casefold() == str(authorization.proofRoleDefinitionId).casefold():
+            return role
+        if resource_id.casefold() == assignment_id.casefold():
+            return assignment
+        pytest.fail("unexpected proof resource readback")
+
+    monkeypatch.setattr(adapter_module, "_rest_get", read_resource)
+    monkeypatch.setattr(adapter_module, "_grants_tag_write", lambda _role: False)
+
+    integrity = adapter_module._proof_graph(
+        authorization,
+        assignment_id=assignment_id,
+        worker_principal_id=readback.worker_principal_id,
+        worker_client_id=readback.worker_client_id,
+        workspace_customer_id=readback.workspace_customer_id,
+    )
+    assert len(integrity) == 64
+
+    job["identityIds"] = [f"{TARGET}/providers/Microsoft.ManagedIdentity/other"]
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-job-readback-unproved",
+    ):
+        adapter_module._proof_graph(
+            authorization,
+            assignment_id=assignment_id,
+            worker_principal_id=readback.worker_principal_id,
+            worker_client_id=readback.worker_client_id,
+            workspace_customer_id=readback.workspace_customer_id,
+        )
+
+
 def test_prohibited_lifecycle_image_application_migration_and_cleanup_operations_unreachable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -668,6 +835,24 @@ def test_proof_residue_removal_never_deletes_role_definition_as_assignment(
         ("resource", authorization.proofRoleDefinitionId),
     ]
     assert "/roleDefinitions/" not in calls[0][1]
+
+
+def test_embedded_role_assignment_not_found_is_authoritative_absence() -> None:
+    stderr = bytearray(
+        b'ERROR: Not Found({"error":{"code":"RoleAssignmentNotFound","message":"absent"}})'
+    )
+    code = managed_binding_lifecycle._sanitized_azure_error_code(bytearray(), stderr)
+    assert code == "roleassignmentnotfound"
+    assert adapter_module._not_found(managed_binding_lifecycle.AzureCommandError(code))
+    role_stderr = bytearray(
+        b'ERROR: Bad Request({"error":{"code":"RoleDefinitionDoesNotExist","message":"absent"}})'
+    )
+    role_code = managed_binding_lifecycle._sanitized_azure_error_code(bytearray(), role_stderr)
+    assert role_code == "roledefinitiondoesnotexist"
+    assert adapter_module._not_found(managed_binding_lifecycle.AzureCommandError(role_code))
+    assert not adapter_module._not_found(
+        managed_binding_lifecycle.AzureCommandError("authorizationfailed")
+    )
 
 
 def test_log_parser_accepts_only_one_complete_sanitized_marker() -> None:
