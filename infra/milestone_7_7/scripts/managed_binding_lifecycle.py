@@ -1,7 +1,4 @@
-"""Closed, deny-all one-run lifecycle executor that never reads provider secrets."""
-
 from __future__ import annotations
-
 import argparse
 import base64
 import binascii
@@ -48,10 +45,21 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     load_managed_binding_contract,
     validate_authorization_ledger,
 )
-
-_CANONICAL_LIFECYCLE_MODULE: Final = (
-    "infra.milestone_7_7.scripts.managed_binding_lifecycle"
+from preflight.milestone_7_7.scanner_result_bridge import (
+    ScannerResultBridgeDeploymentEvidence,
 )
+from infra.milestone_7_7.scripts.scanner_bridge_deployment import (
+    AzureCommandError as _AzureCommandError,
+    PublisherAccessPending as _PublisherAccessPending,
+    PublisherOAuthTransient as _PublisherOAuthTransient,
+    ScannerBridgeDeploymentError,
+    deployment_parameters as scanner_bridge_deployment_parameters,
+    deployment_name as scanner_bridge_deployment_name,
+    format_utc as _format_utc,
+    load_deployment_evidence as load_scanner_bridge_deployment_evidence,
+)
+
+_CANONICAL_LIFECYCLE_MODULE: Final = "infra.milestone_7_7.scripts.managed_binding_lifecycle"
 if __name__ == "__main__":
     _existing_lifecycle_module = sys.modules.get(_CANONICAL_LIFECYCLE_MODULE)
     if (
@@ -367,8 +375,6 @@ RECOVERED_CLEANUP_TAG_KEYS: Final = frozenset(
 
 
 class LifecycleDisposition(StrEnum):
-    """Explicit terminal handling for one-run lifecycle execution."""
-
     RUNNING = "RUNNING"
     PAUSED_PRESERVED = "PAUSED_PRESERVED"
     CONTAINED_PRESERVED = "CONTAINED_PRESERVED"
@@ -377,37 +383,22 @@ class LifecycleDisposition(StrEnum):
 
 
 class LifecycleError(RuntimeError):
-    """Sanitized fail-closed lifecycle error."""
+    pass
 
 
-class AzureCommandError(LifecycleError):
-    """A failed Azure command with only a bounded sanitized error code."""
-
-    def __init__(self, sanitized_azure_error_code: str) -> None:
-        super().__init__("lifecycle-command-nonzero")
-        self.sanitized_azure_error_code = sanitized_azure_error_code
+class AzureCommandError(_AzureCommandError, LifecycleError):
+    pass
 
 
-class PublisherAccessPending(LifecycleError):
-    """The exact repository scope has not propagated to ACR yet."""
+class PublisherAccessPending(_PublisherAccessPending, LifecycleError):
+    pass
 
 
-class PublisherOAuthTransient(LifecycleError):
-    """One explicitly recognized, non-mutating OAuth condition may be retried once."""
-
-
-class DockerPushTransient(LifecycleError):
-    """One recognized ordinary-push transport rejection may be retried once."""
-
+class PublisherOAuthTransient(_PublisherOAuthTransient, LifecycleError):
+    pass
 
 def _utc_now() -> datetime:
     return datetime.now(UTC).replace(microsecond=0)
-
-
-def _format_utc(value: datetime) -> str:
-    return value.astimezone(UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def _cleanup_deadline(now: datetime) -> datetime:
     if now.tzinfo is None or now.utcoffset() != timedelta(0):
         _fail("cleanup-time-invalid")
@@ -427,8 +418,6 @@ def _cleanup_deadline(now: datetime) -> datetime:
     if remaining > MAXIMUM_AUTHORIZED_WINDOW:
         _fail("cleanup-deadline-outside-authorized-window")
     return AUTHORIZED_CLEANUP_AT_UTC
-
-
 def _fail(code: str) -> NoReturn:
     raise LifecycleError(code)
 
@@ -2337,17 +2326,10 @@ def _reconcile_container_apps_infrastructure_tags(
 
 
 def _deployment_name(stage: str, ledger: Mapping[str, JsonValue]) -> str:
-    ledger_integrity = ledger.get("ledgerIntegritySha256")
-    if (
-        stage not in DEPLOYMENT_STAGES
-        or not isinstance(ledger_integrity, str)
-        or HEX_SHA256.fullmatch(ledger_integrity) is None
-    ):
-        _fail("deployment-history-binding-invalid")
-    deployment_name = f"mobius77-managed-binding-{stage}-{ledger_integrity[:16]}"
-    if len(deployment_name) > 64:
-        _fail("deployment-history-binding-invalid")
-    return deployment_name
+    try:
+        return scanner_bridge_deployment_name(stage, str(ledger["ledgerIntegritySha256"]), allowed_stages=DEPLOYMENT_STAGES)
+    except ScannerBridgeDeploymentError as exc:
+        _fail(str(exc))
 
 
 def _deploy_stage(
@@ -2360,38 +2342,31 @@ def _deploy_stage(
     expected_cost: int,
     maximum_cost: int,
     runtime_config: dict[str, JsonValue] | None = None,
+    scanner_bridge_evidence: ScannerResultBridgeDeploymentEvidence | None = None,
 ) -> None:
-    deployment_name = _deployment_name(stage, ledger)
-    parameters = [
-        "checkpointMode=contract-only",
-        "deploymentEnabled=false",
-        "managedBindingMode=managed-binding-one-run",
-        "managedBindingDeploymentEnabled=true",
-        f"deploymentStage={stage}",
-        f"location={STAGING_LOCATION}",
-        f"cleanupLocation={CLEANUP_LOCATION}",
-        f"redisLocation={REDIS_LOCATION}",
-        f"authorizationLedgerSha256={ledger['ledgerIntegritySha256']}",
-        f"cleanupAtUtc={_format_utc(cleanup_at)}",
-        f"expectedUsdCents={expected_cost}",
-        f"maximumPlausibleUsdCents={maximum_cost}",
-        "lifecycleTags="
-        + json.dumps(
-            _lifecycle_tags(
+    try:
+        deployment_name = scanner_bridge_deployment_name(
+            stage, str(ledger["ledgerIntegritySha256"]), allowed_stages=DEPLOYMENT_STAGES
+        )
+    except ScannerBridgeDeploymentError as exc:
+        _fail(str(exc))
+    try:
+        parameters = scanner_bridge_deployment_parameters(
+            stage=stage,
+            ledger_integrity=str(ledger["ledgerIntegritySha256"]),
+            repository_head=str(ledger["repositoryHead"]),
+            cleanup_at_utc=_format_utc(cleanup_at),
+            expected_cost=expected_cost,
+            maximum_cost=maximum_cost,
+            lifecycle_tags=_lifecycle_tags(
                 ledger=ledger, cleanup_at=cleanup_at, maximum_cost=maximum_cost
             ),
-            separators=(",", ":"),
-            sort_keys=True,
-        ),
-    ]
-    if runtime_config is not None:
-        parameters.extend(
-            (
-                f"apiImageDigest={runtime_config['apiImageDigest']}",
-                f"smtpHost={runtime_config['smtpHost']}",
-                f"smtpFromAddress={runtime_config['smtpFromAddress']}",
-            )
+            runtime_config=runtime_config,
+            scanner_bridge_evidence=scanner_bridge_evidence,
+            now=_utc_now(),
         )
+    except ScannerBridgeDeploymentError as exc:
+        _fail(str(exc))
     _run(
         (
             "az",
@@ -6297,6 +6272,7 @@ def _post_secret(
     ledger: dict[str, JsonValue],
     subscription_id: str,
     receipt_directory: Path,
+    scanner_bridge_evidence_path: Path | None = None,
 ) -> dict[str, JsonValue]:
     state_path = _state_path(receipt_directory)
     state = _read_current_transient_state(state_path, ledger=ledger)
@@ -6308,6 +6284,16 @@ def _post_secret(
     )
     if _utc_now() >= cleanup_at - timedelta(minutes=90):
         _fail("cleanup-reserve-active")
+    if scanner_bridge_evidence_path is None:
+        _fail("scanner-bridge-evidence-absent")
+    try:
+        scanner_bridge_evidence = load_scanner_bridge_deployment_evidence(
+            scanner_bridge_evidence_path,
+            repository_head=str(ledger["repositoryHead"]),
+            now=_utc_now(),
+        )
+    except ScannerBridgeDeploymentError as exc:
+        _fail(str(exc))
     required_secret_names = (
         "openai-api-key",
         "opencanvas-smtp-username",
@@ -6359,6 +6345,7 @@ def _post_secret(
                 "smtpHost": SMTP_HOST,
                 "smtpFromAddress": SMTP_FROM_ADDRESS,
             },
+            scanner_bridge_evidence=scanner_bridge_evidence,
         )
     _migration_job_ready(subscription_id)
     _private_revision_ready(subscription_id)
@@ -6367,6 +6354,8 @@ def _post_secret(
         "managed-secret-count": len(required_secret_names),
         "migration-job-succeeded": True,
         "immutable-image-digest-bound": True,
+        "scanner-result-bridge-resolved": True,
+        "scanner-result-bridge-evidence-integrity": scanner_bridge_evidence.integrity_sha256(),
         "canonical-openai-alias-only": True,
         "secret-value-accessed": False,
     }
@@ -6942,8 +6931,6 @@ def _handle_failure(
                 state["resumableCheckpoint"] = durable_checkpoint
                 _replace_state(state_path, state)
             except (ContractError, LifecycleError, OSError, ValueError):
-                # A malformed transient state cannot safely identify a role to revoke.
-                # Preserve it fail-closed; a verified assignment is revoked above.
                 pass
     record = _failure_record(
         disposition=failure_disposition,
@@ -6983,6 +6970,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--ledger", type=Path)
     parser.add_argument("--receipt-directory", type=Path)
     parser.add_argument("--prebuilt-image-record", type=Path)
+    parser.add_argument("--scanner-bridge-evidence", type=Path)
     parser.add_argument("--repository-head", required=True)
     return parser
 
@@ -7039,6 +7027,14 @@ def main() -> int:
         or (
             args.operation != "publish-api-image"
             and args.prebuilt_image_record is not None
+        )
+        or (
+            args.operation == "post-secret-provisioning"
+            and args.scanner_bridge_evidence is None
+        )
+        or (
+            args.operation != "post-secret-provisioning"
+            and args.scanner_bridge_evidence is not None
         )
     ):
         print(
@@ -7111,6 +7107,7 @@ def main() -> int:
                     ledger=ledger,
                     subscription_id=subscription_id,
                     receipt_directory=receipt_directory,
+                    scanner_bridge_evidence_path=args.scanner_bridge_evidence,
                 )
             elif operation == "temporary-authority-revocation":
                 result = _revoke(subscription_id, receipt_directory)

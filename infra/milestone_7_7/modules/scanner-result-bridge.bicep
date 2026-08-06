@@ -18,9 +18,6 @@ param managedBindingMode string = 'contract-only'
 
 param managedBindingDeploymentEnabled bool = false
 
-@allowed([
-  true
-])
 param scannerResultBridgeResolved bool
 
 param scannerResultBridgeState string

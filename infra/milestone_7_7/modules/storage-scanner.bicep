@@ -75,9 +75,6 @@ param scannerExerciseBytesCap int = 26214400
 @maxValue(134217728)
 param totalSyntheticUploadBytesCap int = 134217728
 
-@allowed([
-  true
-])
 param scannerResultBridgeResolved bool
 
 var enabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled

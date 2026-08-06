@@ -278,7 +278,7 @@ def test_bicep_preserves_inert_defaults_and_gates_one_run_resources():
     assert "var oneRunEnabled = managedBindingMode == 'managed-binding-one-run'" in main
     assert "output defaultProvisioningAuthorized bool = false" in main
     assert "output secretValueAccessAuthorized bool = false" in main
-    assert "output deploymentEnabled bool = deploymentEnabled" in main
+    assert "output deploymentEnabled bool = postSecretEnabled" in main
     assert "output moduleCount int = length(moduleBoundaries)" in main
     assert "@maxValue(22500)\nparam maximumPlausibleUsdCents int = 1" in main
 
@@ -287,14 +287,15 @@ def test_post_secret_storage_requires_explicit_resolved_scanner_bridge():
     main = (ROOT / "main.bicep").read_text(encoding="utf-8")
     storage = (ROOT / "modules" / "storage-scanner.bicep").read_text(encoding="utf-8")
 
-    assert "param scannerResultBridgeResolved bool = false" in main
+    assert "param scannerResultBridgeResolved bool = false" not in main
+    assert "param scannerResultBridgeProviderProofIntegrity string = ''" in main
+    assert "param scannerResultBridgeUnresolvedReasonCount int = 32" in main
     assert (
         "var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret' "
-        "&& scannerResultBridgeResolved && scannerResultBridgeState == 'RESOLVED' "
-        "&& length(scannerResultBridgeEvidenceIntegrity) == 64"
+        "&& scannerResultBridgeResolved"
     ) in main
     assert "scannerResultBridgeResolved: scannerResultBridgeResolved" in main
-    assert "@allowed([\n  true\n])\nparam scannerResultBridgeResolved bool" in storage
+    assert "param scannerResultBridgeResolved bool" in storage
     assert "param scannerResultBridgeResolved bool = false" not in storage
 
 

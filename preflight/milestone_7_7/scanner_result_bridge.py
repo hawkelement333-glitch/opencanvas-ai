@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, fields
 from datetime import UTC, datetime, timedelta
 from typing import Final, Literal
 
@@ -47,6 +48,8 @@ _REQUIRED_PROOFS: Final = (
     "correlation",
     "revocation",
 )
+DEPLOYMENT_EVIDENCE_VERSION: Final = "mobius.scanner-result-bridge.deployment-evidence.v1"
+DEPLOYMENT_EVIDENCE_DOMAIN: Final = b"mobius.scanner-result-bridge.deployment-evidence.v1\0"
 
 
 class ScannerResultBridgeError(ValueError):
@@ -145,3 +148,169 @@ def resolve_bridge(
     if evidence.decision not in {"clean", "rejected"}:
         return "CONSUMER_UNPROVED", None
     return "RESOLVED", evidence.integrity_sha256()
+
+
+@dataclass(frozen=True, slots=True)
+class ScannerResultBridgeDeploymentEvidence:
+    """Operation-bound, sanitized bridge evidence for post-secret admission.
+
+    Resource identifiers are SHA-256 aliases.  Live collection may compare raw
+    IDs in memory, but neither the executor nor its persisted evidence retains
+    them.  The legacy resolver evidence remains a component of this envelope;
+    it is never replaced by a caller-supplied resolution boolean.
+    """
+
+    control_plane_head: str
+    environment_sha256: str
+    operation_id_sha256: str
+    observed_at_utc: str
+    legacy_evidence: ScannerResultBridgeEvidence
+    provider_resource_id_sha256: str
+    provider_api_version: str
+    provider_enabled: bool
+    provider_capability_proof_integrity: str
+    storage_resource_id_sha256: str
+    quarantine_container: str
+    blob_identity_sha256: str
+    content_sha256: str
+    scan_request_id_sha256: str
+    producer_proof_integrity: str
+    system_topic_resource_id_sha256: str
+    event_subscription_resource_id_sha256: str
+    event_type: str
+    event_schema_version: str
+    filter_integrity: str
+    private_queue_resource_id_sha256: str
+    dead_letter_queue_resource_id_sha256: str
+    transport_proof_integrity: str
+    consumer_identity_sha256: str
+    queue_adapter_identity_sha256: str
+    malware_scan_receipt_id_sha256: str
+    idempotency_key_sha256: str
+    consumer_proof_integrity: str
+    sender_identity_sha256: str
+    processor_identity_sha256: str
+    sender_role_definition_sha256: str
+    processor_role_definition_sha256: str
+    sender_scope_sha256: str
+    processor_scope_sha256: str
+    assignment_proof_integrity: str
+    revocation_proof_integrity: str
+    private_endpoint_resource_id_sha256: str
+    private_dns_resource_id_sha256: str
+    private_address_sha256: str
+    tls_hostname_sha256: str
+    tls_version: str
+    private_path_proof_integrity: str
+    cleanup_inventory_integrity: str
+    unresolved_reasons: tuple[str, ...]
+
+    def canonical(self) -> dict[str, object]:
+        value = asdict(self)
+        value["unresolved_reasons"] = list(self.unresolved_reasons)
+        return value
+
+    def integrity_sha256(self) -> str:
+        canonical = json.dumps(self.canonical(), separators=(",", ":"), sort_keys=True).encode(
+            "utf-8"
+        )
+        return hashlib.sha256(DEPLOYMENT_EVIDENCE_DOMAIN + canonical).hexdigest()
+
+
+def build_scanner_result_bridge_deployment_evidence(
+    evidence: ScannerResultBridgeDeploymentEvidence, *, now: datetime
+) -> ScannerResultBridgeDeploymentEvidence:
+    """Validate a complete typed proof envelope and return it canonically.
+
+    This local builder does not contact Azure or make deployment decisions. It
+    preserves every unresolved reason so callers cannot collapse an incomplete
+    live proof into a successful boolean.
+    """
+
+    if len(evidence.control_plane_head) != 40 or not all(
+        character in "0123456789abcdef" for character in evidence.control_plane_head
+    ):
+        raise ScannerResultBridgeError("bridge control-plane head is invalid")
+    if evidence.provider_enabled is not True:
+        raise ScannerResultBridgeError("bridge provider is unproved")
+    if evidence.quarantine_container != "quarantine":
+        raise ScannerResultBridgeError("bridge producer is unproved")
+    if evidence.event_type != "Microsoft.Security.MalwareScanningResult":
+        raise ScannerResultBridgeError("bridge transport is unproved")
+    if evidence.event_schema_version != SCHEMA_VERSION:
+        raise ScannerResultBridgeError("bridge schema is unproved")
+    if evidence.tls_version not in {"TLS1_2", "TLS1_3"}:
+        raise ScannerResultBridgeError("bridge private path is unproved")
+    if evidence.unresolved_reasons:
+        raise ScannerResultBridgeError("bridge evidence has unresolved reasons")
+    sha_values = (
+        evidence.environment_sha256,
+        evidence.operation_id_sha256,
+        evidence.provider_resource_id_sha256,
+        evidence.provider_capability_proof_integrity,
+        evidence.storage_resource_id_sha256,
+        evidence.blob_identity_sha256,
+        evidence.content_sha256,
+        evidence.scan_request_id_sha256,
+        evidence.producer_proof_integrity,
+        evidence.system_topic_resource_id_sha256,
+        evidence.event_subscription_resource_id_sha256,
+        evidence.filter_integrity,
+        evidence.private_queue_resource_id_sha256,
+        evidence.dead_letter_queue_resource_id_sha256,
+        evidence.transport_proof_integrity,
+        evidence.consumer_identity_sha256,
+        evidence.queue_adapter_identity_sha256,
+        evidence.malware_scan_receipt_id_sha256,
+        evidence.idempotency_key_sha256,
+        evidence.consumer_proof_integrity,
+        evidence.sender_identity_sha256,
+        evidence.processor_identity_sha256,
+        evidence.sender_role_definition_sha256,
+        evidence.processor_role_definition_sha256,
+        evidence.sender_scope_sha256,
+        evidence.processor_scope_sha256,
+        evidence.assignment_proof_integrity,
+        evidence.revocation_proof_integrity,
+        evidence.private_endpoint_resource_id_sha256,
+        evidence.private_dns_resource_id_sha256,
+        evidence.private_address_sha256,
+        evidence.tls_hostname_sha256,
+        evidence.private_path_proof_integrity,
+        evidence.cleanup_inventory_integrity,
+    )
+    if not all(_sha256(value) for value in sha_values):
+        raise ScannerResultBridgeError("bridge evidence integrity is invalid")
+    state, _ = resolve_bridge(evidence.legacy_evidence, now=now)
+    if state != "RESOLVED":
+        raise ScannerResultBridgeError(f"bridge resolver is {state.casefold()}")
+    observed = _timestamp(evidence.observed_at_utc)
+    if now.tzinfo is None or now.astimezone(UTC) - observed > MAXIMUM_EVIDENCE_AGE:
+        raise ScannerResultBridgeError("bridge deployment evidence is stale")
+    if observed > now.astimezone(UTC) + timedelta(minutes=5):
+        raise ScannerResultBridgeError("bridge deployment evidence is future")
+    return evidence
+
+
+def deployment_evidence_from_mapping(
+    value: Mapping[str, object], *, now: datetime
+) -> ScannerResultBridgeDeploymentEvidence:
+    """Decode a canonical external evidence artifact without retaining raw IDs."""
+
+    expected = {field.name for field in fields(ScannerResultBridgeDeploymentEvidence)}
+    if set(value) != expected:
+        raise ScannerResultBridgeError("bridge deployment evidence fields are invalid")
+    legacy_raw = value.get("legacy_evidence")
+    if not isinstance(legacy_raw, Mapping):
+        raise ScannerResultBridgeError("bridge legacy evidence is malformed")
+    legacy_expected = {field.name for field in fields(ScannerResultBridgeEvidence)}
+    if set(legacy_raw) != legacy_expected:
+        raise ScannerResultBridgeError("bridge legacy evidence fields are invalid")
+    try:
+        legacy = ScannerResultBridgeEvidence(**dict(legacy_raw))
+        decoded = ScannerResultBridgeDeploymentEvidence(
+            **{**dict(value), "legacy_evidence": legacy, "unresolved_reasons": tuple(value["unresolved_reasons"])}
+        )
+    except (TypeError, KeyError) as exc:
+        raise ScannerResultBridgeError("bridge deployment evidence is malformed") from exc
+    return build_scanner_result_bridge_deployment_evidence(decoded, now=now)

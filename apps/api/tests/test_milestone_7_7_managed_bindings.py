@@ -3035,9 +3035,12 @@ def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> No
     text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
     assert 'STAGING_LOCATION: Final = "southcentralus"' in text
     assert 'CLEANUP_LOCATION: Final = "westus"' in text
-    assert 'f"location={STAGING_LOCATION}"' in text
-    assert 'f"redisLocation={REDIS_LOCATION}"' in text
-    assert 'f"cleanupLocation={CLEANUP_LOCATION}"' in text
+    bridge_parameters = (
+        LIFECYCLE_SCRIPT.parent / "scanner_bridge_deployment.py"
+    ).read_text(encoding="utf-8")
+    assert '"location=southcentralus"' in bridge_parameters
+    assert '"redisLocation=australiacentral"' in bridge_parameters
+    assert '"cleanupLocation=westus"' in bridge_parameters
     assert '"state": "Ok"' in text
     assert '"runbookType": "PowerShell72"' in text
     assert 'schedule["timeZone"] != "Etc/UTC"' in text

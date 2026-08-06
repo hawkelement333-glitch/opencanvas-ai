@@ -71,9 +71,6 @@ param smtpHost string = 'sandbox.smtp.mailtrap.io'
 ])
 param smtpFromAddress string = 'mobius77-validation@example.invalid'
 
-@description('Post-secret deployment requires the managed scanner-result bridge to be resolved explicitly.')
-param scannerResultBridgeResolved bool = false
-
 @allowed([
   'CONTRACT_UNDEFINED'
   'PROVIDER_UNAVAILABLE'
@@ -96,6 +93,25 @@ param scannerResultBridgeState string = 'CONTRACT_UNDEFINED'
 @maxLength(64)
 param scannerResultBridgeEvidenceIntegrity string = ''
 
+@allowed([
+  'mobius.scanner-result-bridge.v1'
+])
+param scannerResultBridgeContractVersion string = 'mobius.scanner-result-bridge.v1'
+
+param scannerResultBridgeObservedAtUtc string = ''
+param scannerResultBridgeProviderProofIntegrity string = ''
+param scannerResultBridgeProducerProofIntegrity string = ''
+param scannerResultBridgeTransportProofIntegrity string = ''
+param scannerResultBridgeConsumerProofIntegrity string = ''
+param scannerResultBridgeIdentityRbacProofIntegrity string = ''
+param scannerResultBridgePrivatePathProofIntegrity string = ''
+param scannerResultBridgeCorrelationProofIntegrity string = ''
+param scannerResultBridgeRevocationProofIntegrity string = ''
+param scannerResultBridgeCleanupInventoryIntegrity string = ''
+@minValue(0)
+@maxValue(32)
+param scannerResultBridgeUnresolvedReasonCount int = 32
+
 param lifecycleTags object = {}
 param cleanupAtUtc string = ''
 
@@ -112,7 +128,8 @@ var cleanupControlEnabled = oneRunEnabled && deploymentStage == 'cleanup-control
 var cleanupJobScheduleEnabled = oneRunEnabled && deploymentStage == 'cleanup-job-binding'
 var cleanupBindingEnabled = oneRunEnabled && deploymentStage == 'cleanup-binding'
 var preSecretEnabled = oneRunEnabled && deploymentStage == 'pre-secret'
-var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret' && scannerResultBridgeResolved && scannerResultBridgeState == 'RESOLVED' && length(scannerResultBridgeEvidenceIntegrity) == 64
+var scannerResultBridgeResolved = scannerResultBridgeContractVersion == 'mobius.scanner-result-bridge.v1' && scannerResultBridgeState == 'RESOLVED' && scannerResultBridgeUnresolvedReasonCount == 0 && length(scannerResultBridgeEvidenceIntegrity) == 64 && length(scannerResultBridgeProviderProofIntegrity) == 64 && length(scannerResultBridgeProducerProofIntegrity) == 64 && length(scannerResultBridgeTransportProofIntegrity) == 64 && length(scannerResultBridgeConsumerProofIntegrity) == 64 && length(scannerResultBridgeIdentityRbacProofIntegrity) == 64 && length(scannerResultBridgePrivatePathProofIntegrity) == 64 && length(scannerResultBridgeCorrelationProofIntegrity) == 64 && length(scannerResultBridgeRevocationProofIntegrity) == 64 && length(scannerResultBridgeCleanupInventoryIntegrity) == 64 && !empty(scannerResultBridgeObservedAtUtc)
+var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret' && scannerResultBridgeResolved
 var workloadEnabled = preSecretEnabled || postSecretEnabled
 var targetEnabled = cleanupBindingEnabled || workloadEnabled
 
@@ -403,7 +420,7 @@ module containerAppsDns './modules/container-apps-dns.bicep' = if (workloadEnabl
 
 output contractVersion string = 'm7.7-infrastructure-contract-v1'
 output checkpointMode string = checkpointMode
-output deploymentEnabled bool = deploymentEnabled
+output deploymentEnabled bool = postSecretEnabled
 output moduleCount int = length(moduleBoundaries)
 output unresolvedGateCount int = length(unresolvedGates)
 output managedBindingContractVersion string = 'm7.7-managed-binding-deployment-v1'
@@ -423,6 +440,12 @@ output redisPort int = postSecretEnabled ? redis.outputs.port : 10000
 output storageAccountUrl string = postSecretEnabled ? storage.outputs.storageAccountUrl : ''
 output telemetryContainerAppId string = postSecretEnabled ? compute.outputs.telemetryContainerAppId : ''
 output migrationJobName string = postSecretEnabled ? compute.outputs.migrationJobName : ''
+output migrationJobResourceId string = postSecretEnabled && !empty(compute.outputs.migrationJobName) ? resourceId(targetResourceGroupName, 'Microsoft.App/jobs', compute.outputs.migrationJobName) : ''
+output scannerResultBridgeResolved bool = scannerResultBridgeResolved
+output scannerResultBridgeState string = scannerResultBridgeState
+output scannerResultBridgeEvidenceIntegrity string = scannerResultBridgeEvidenceIntegrity
+output scannerResultBridgeOutputVersion string = 'm7.7-scanner-result-bridge-output-v1'
+output apiImageDigest string = postSecretEnabled ? apiImageDigest : ''
 output workloadIdentityClientId string = workloadEnabled ? identities.outputs.workloadIdentityClientId : ''
 output defaultProvisioningAuthorized bool = false
 output secretValueAccessAuthorized bool = false
