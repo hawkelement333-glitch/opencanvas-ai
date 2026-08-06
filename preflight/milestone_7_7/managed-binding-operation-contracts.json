@@ -5,7 +5,7 @@
   "integrityDomain": "solarplexus-mobius/milestone-7.7/managed-binding-operation-overlay/v1",
   "authorizationSourceHead": "11564669bd5b40a88fdbf434c8137b063305eb4b",
   "historicalMatrixIntegritySha256": "100293931dcc71bb069e4f6fe06228360e0953b3b756544a555941d81bf8d6bc",
-  "managedBindingIntegritySha256": "742e490974b5acd8a2ab20d2a6f1171746784164eda6330695d04f4454222be1",
+  "managedBindingIntegritySha256": "dc8dcbe457cf95075c7b9c6f4b573f8d446720d94e7a3ed0c0ea255f61faaacd",
   "defaultAuthority": {
     "executionAuthorized": false,
     "mutationAuthorized": false,
@@ -1099,5 +1099,5 @@
       "replayDecision": "deny"
     }
   ],
-  "contractIntegritySha256": "cdbeb8e912c755b4ef43149adbf09eb5e0b86d2be2d6b43a85bc67a69e3499ab"
+  "contractIntegritySha256": "0e449acb724e04a7d83a31b424d6e155d2fd420bc933600202007d8f86824cd5"
 }

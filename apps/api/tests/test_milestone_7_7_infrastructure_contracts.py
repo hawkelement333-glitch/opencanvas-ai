@@ -1091,11 +1091,13 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
             "c632b3df-fb67-4d84-bdcf-b95ad541b5c8",
             "b74c6cfe-995e-5107-9e42-4f7f76b76742",
             "f61544fe-cd79-5247-ac8b-ee9697b6ffd6",
+            "ecdbb32f-9134-5697-85f9-d569ba57454b",
             "158cac88-5679-5804-9f4d-854520bbb635",
         },
         "manifests/managed-binding.schema.json": {
             "b24988ac-6180-42a0-ab88-20f7382dd24c",
             "b74c6cfe-995e-5107-9e42-4f7f76b76742",
+            "f61544fe-cd79-5247-ac8b-ee9697b6ffd6",
             "158cac88-5679-5804-9f4d-854520bbb635",
         },
         "modules/identities.bicep": {"b24988ac-6180-42a0-ab88-20f7382dd24c"},

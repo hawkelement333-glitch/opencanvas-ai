@@ -110,6 +110,25 @@ def _install_execution_fakes(
     inventories = iter((initial, _final_inventory(authorization)))
     deployments: list[dict[str, Any]] = []
     calls: list[tuple[str, tuple[Any, ...]]] = []
+    historical_contract: dict[str, JsonValue] = {
+        "cleanupExecution": {
+            "activeBindingId": authorization.bindingId,
+            "authorizationParameter": authorization.authorizationParameter,
+            "authorizationValue": authorization.authorizationParameterValue,
+            "bindingContractVersion": authorization.bindingContractVersion,
+            "cleanupContributorRoleDefinitionId": authorization.roleDefinitionId,
+            "deadlineUtc": authorization.deadlineUtc,
+            "publishedContentSha256": authorization.runbookContentSha256,
+            "targetParameter": authorization.targetParameter,
+            "targetResourceGroup": authorization.targetParameterValue,
+        },
+        "rbac": {"cleanupContributorRoleDefinitionId": authorization.roleDefinitionId},
+    }
+    monkeypatch.setattr(
+        adapter_module,
+        "load_managed_binding_contract",
+        lambda: historical_contract,
+    )
     monkeypatch.setattr(
         managed_binding_lifecycle,
         "_verify_repository_state",
@@ -482,7 +501,7 @@ def test_cleanup_recovery_authorization_is_image_free_and_exact() -> None:
     assert authorization.corruptedPrincipalId == CORRUPTED_PRINCIPAL_ID
     assert authorization.corruptedRoleAssignmentId == CORRUPTED_ASSIGNMENT_ID
     assert authorization.corruptedRoleAssignmentAction == "delete-exact-role-assignment"
-    assert authorization.bindingId == "f61544fe-cd79-5247-ac8b-ee9697b6ffd6"
+    assert authorization.bindingId == "ecdbb32f-9134-5697-85f9-d569ba57454b"
     assert authorization.roleScope == TARGET_GROUP
     assert authorization.targetParameter == "TargetResourceGroupName"
     assert authorization.targetParameterValue == "rg-solarplexus-mobius-77-staging"

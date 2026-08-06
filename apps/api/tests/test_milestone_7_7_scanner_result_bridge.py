@@ -89,7 +89,10 @@ def test_stale_or_incomplete_correlation_never_resolves() -> None:
 
 
 def test_unknown_decision_never_resolves() -> None:
-    state, _integrity = resolve_bridge(_evidence(decision="unknown"), now=datetime.now(UTC))
+    state, _integrity = resolve_bridge(
+        _evidence(decision="unknown"),
+        now=datetime(2026, 8, 5, 4, 1, tzinfo=UTC),
+    )
 
     assert state == "CONSUMER_UNPROVED"
 

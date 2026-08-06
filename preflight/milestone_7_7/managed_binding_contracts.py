@@ -16,7 +16,7 @@ import re
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Final, Mapping, cast
+from typing import Final, Mapping
 from uuid import UUID, uuid5
 
 from performance.milestone_7_7.framework import (
@@ -71,7 +71,9 @@ TOMBSTONED_CLEANUP_BINDING_ID: Final = "158cac88-5679-5804-9f4d-854520bbb635"
 TOMBSTONED_GENERATION_TWO_CLEANUP_BINDING_ID: Final = (
     "b74c6cfe-995e-5107-9e42-4f7f76b76742"
 )
-ACTIVE_CLEANUP_BINDING_ID: Final = "f61544fe-cd79-5247-ac8b-ee9697b6ffd6"
+TOMBSTONED_DEADLINE_RECOVERY_BINDING_ID: Final = "f61544fe-cd79-5247-ac8b-ee9697b6ffd6"
+ACTIVE_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-06T18:30:00Z"
+ACTIVE_CLEANUP_BINDING_ID: Final = "ecdbb32f-9134-5697-85f9-d569ba57454b"
 CLEANUP_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup-recovery"
 CORRUPTED_CLEANUP_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup"
 CLEANUP_BINDING_TOMBSTONE_DOMAIN: Final = (
@@ -246,7 +248,10 @@ def _assert_no_private_material(value: JsonValue) -> None:
 
 
 def managed_binding_integrity_sha256(value: JsonValue) -> str:
-    return cast(str, integrity_sha256(value, MANAGED_BINDING_DOMAIN))
+    digest = integrity_sha256(value, MANAGED_BINDING_DOMAIN)
+    if not isinstance(digest, str):
+        raise ContractError("managed-binding integrity is malformed")
+    return digest
 
 
 def cleanup_runbook_sha256(value: str) -> str:
@@ -268,6 +273,16 @@ def normalize_azure_resource_id(value: str) -> str:
     return normalized
 
 
+def _normalize_cleanup_binding_epoch(value: str) -> str:
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except (TypeError, ValueError):
+        raise ContractError("cleanup binding epoch is malformed") from None
+    if parsed.isoformat().replace("+00:00", "Z") != value:
+        raise ContractError("cleanup binding epoch is malformed")
+    return value.casefold()
+
+
 def deterministic_cleanup_binding_id(
     *,
     generation: int,
@@ -276,12 +291,14 @@ def deterministic_cleanup_binding_id(
     schedule_resource_id: str,
     target_resource_group_id: str,
     cleanup_authorized: bool,
+    binding_epoch_utc: str | None = None,
 ) -> str:
     """Return the closed, versioned Azure Automation job-schedule ID.
 
     Generation one intentionally preserves the historical Bicep ``guid`` input.
     Generation two normalizes every resource identifier and binds the complete
-    cleanup contract so the tombstoned generation-one child is never retried.
+    cleanup contract so tombstoned children are never retried. A deadline
+    recovery adds its fixed UTC epoch while remaining generation two.
     """
     historical_account = automation_account_id.strip().replace("\\", "/").rstrip("/")
     historical_runbook = runbook_resource_id.strip().replace("\\", "/").rstrip("/")
@@ -291,6 +308,8 @@ def deterministic_cleanup_binding_id(
     schedule = normalize_azure_resource_id(schedule_resource_id)
     target = normalize_azure_resource_id(target_resource_group_id)
     if generation == 1:
+        if binding_epoch_utc is not None:
+            raise ContractError("cleanup binding generation one rejects an epoch")
         return str(
             uuid5(
                 AUTOMATION_BINDING_NAMESPACE,
@@ -305,20 +324,23 @@ def deterministic_cleanup_binding_id(
         )
     if generation != CLEANUP_BINDING_GENERATION:
         raise ContractError("cleanup binding generation is not authorized")
+    components = [
+        account,
+        runbook,
+        schedule,
+        target,
+        CLEANUP_BINDING_CONTRACT_VERSION,
+        f"cleanup-binding-generation-{generation}",
+        f"cleanupauthorized={str(cleanup_authorized).casefold()}",
+    ]
+    if binding_epoch_utc is not None:
+        components.append(
+            f"bindingepoch={_normalize_cleanup_binding_epoch(binding_epoch_utc)}"
+        )
     return str(
         uuid5(
             AUTOMATION_BINDING_NAMESPACE,
-            "-".join(
-                (
-                    account,
-                    runbook,
-                    schedule,
-                    target,
-                    CLEANUP_BINDING_CONTRACT_VERSION,
-                    f"cleanup-binding-generation-{generation}",
-                    f"cleanupauthorized={str(cleanup_authorized).casefold()}",
-                )
-            ),
+            "-".join(components),
         )
     )
 
@@ -344,11 +366,19 @@ def cleanup_binding_id_for_subscription(
             "Microsoft.Resources/resourceGroups/rg-solarplexus-mobius-77-staging"
         ),
         cleanup_authorized=True,
+        binding_epoch_utc=(
+            ACTIVE_CLEANUP_BINDING_EPOCH_UTC
+            if generation == CLEANUP_BINDING_GENERATION
+            else None
+        ),
     )
 
 
 def cleanup_binding_tombstone_integrity(value: dict[str, JsonValue]) -> str:
-    return cast(str, integrity_sha256(value, CLEANUP_BINDING_TOMBSTONE_DOMAIN))
+    digest = integrity_sha256(value, CLEANUP_BINDING_TOMBSTONE_DOMAIN)
+    if not isinstance(digest, str):
+        raise ContractError("cleanup binding tombstone integrity is malformed")
+    return digest
 
 
 def operation_overlay_integrity_sha256(value: dict[str, JsonValue]) -> str:
@@ -357,7 +387,10 @@ def operation_overlay_integrity_sha256(value: dict[str, JsonValue]) -> str:
         for key, item in value.items()
         if key != "contractIntegritySha256"
     }
-    return cast(str, integrity_sha256(body, OPERATION_OVERLAY_DOMAIN))
+    digest = integrity_sha256(body, OPERATION_OVERLAY_DOMAIN)
+    if not isinstance(digest, str):
+        raise ContractError("operation overlay integrity is malformed")
+    return digest
 
 
 def authorization_ledger_integrity_sha256(value: dict[str, JsonValue]) -> str:
@@ -366,7 +399,10 @@ def authorization_ledger_integrity_sha256(value: dict[str, JsonValue]) -> str:
         for key, item in value.items()
         if key != "ledgerIntegritySha256"
     }
-    return cast(str, integrity_sha256(body, AUTHORIZATION_LEDGER_DOMAIN))
+    digest = integrity_sha256(body, AUTHORIZATION_LEDGER_DOMAIN)
+    if not isinstance(digest, str):
+        raise ContractError("authorization ledger integrity is malformed")
+    return digest
 
 
 def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
@@ -402,7 +438,7 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "cleanupPrincipalFingerprintSha256": (
             "19a9f97779cd2eb9acfdc04797f1fc5339316ee1a424ca79b70661beffa33260"
         ),
-        "deadlineUtc": "2026-08-06T12:00:00Z",
+        "deadlineUtc": "2026-08-06T18:30:00Z",
         "deletionWaitSeconds": 2700,
         "launchGraceSeconds": 1800,
         "publishedContentSha256": cleanup_runbook_sha256(
@@ -445,6 +481,18 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
                 "deletionStatus": "not-attempted",
                 "evidenceIntegritySha256": (
                     "935e9e40975eb5bb23c59e41d4d56ff6609e685884b3bfa18b8f604231be202c"
+                ),
+            },
+            {
+                "bindingContractVersion": "m7.7-automation-cleanup-binding-v2",
+                "bindingGeneration": 2,
+                "bindingId": TOMBSTONED_DEADLINE_RECOVERY_BINDING_ID,
+                "directGetStatus": "not-found",
+                "listVisibility": "absent",
+                "recreationStatus": "conflict",
+                "deletionStatus": "accepted",
+                "evidenceIntegritySha256": (
+                    "212f44df4720ead2b84e7e2b1aa2928a5eae0eb81ad8ebc51779cf1cc85a2ad5"
                 ),
             },
         ],

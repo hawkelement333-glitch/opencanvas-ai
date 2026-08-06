@@ -154,7 +154,8 @@ var generationTwoBindingId = guid(
   toLower(resourceId('Microsoft.Resources/resourceGroups', targetResourceGroupName)),
   cleanupBindingContractVersion,
   'cleanup-binding-generation-${cleanupBindingGeneration}',
-  'cleanupauthorized=true'
+  'cleanupauthorized=true',
+  'bindingepoch=${toLower(cleanupAtUtc)}'
 )
 
 resource cleanupJobSchedule 'Microsoft.Automation/automationAccounts/jobSchedules@2024-10-23' = if (jobScheduleEnabled) {

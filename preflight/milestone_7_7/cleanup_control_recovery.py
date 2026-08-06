@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from dataclasses import asdict, dataclass, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final, cast
 
@@ -22,6 +22,7 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     CLEANUP_BINDING_CONTRACT_VERSION,
     CLEANUP_RUNBOOK_PATH,
     REPOSITORY_ROOT,
+    TOMBSTONED_DEADLINE_RECOVERY_BINDING_ID,
     cleanup_runbook_sha256,
 )
 
@@ -48,6 +49,39 @@ ALLOWED_OPERATIONS: Final = (
     "assign-exact-cleanup-role",
     "publish-guarded-runbook",
     "create-one-time-schedule",
+    "create-exact-job-schedule-binding",
+    "verify-cleanup-executable",
+)
+DEADLINE_RECOVERY_AUTHORIZATION_VERSION: Final = (
+    "mobius.milestone-7.7.cleanup-control-deadline-recovery.v1"
+)
+DEADLINE_RECOVERY_AUTHORIZATION_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery/v1\0"
+)
+DEADLINE_RECOVERY_OBSERVED_AZURE_UTC: Final = "2026-08-06T12:23:26Z"
+DEADLINE_RECOVERY_DEADLINE_UTC: Final = "2026-08-06T18:30:00Z"
+DEADLINE_RECOVERY_DERIVATION_RULE: Final = (
+    "next-15-minute-utc-boundary-at-least-6-hours-after-observed"
+)
+DEADLINE_RECOVERY_ACTION: Final = "recover-expired-cleanup-deadline"
+DEADLINE_RECOVERY_CORRUPTED_ROLE_ACTION: Final = "verify-exact-assignment-absent"
+DEADLINE_RECOVERY_SCHEDULE_ACTION: Final = "replace-same-name-one-time-schedule"
+DEADLINE_RECOVERY_BINDING_ACTION: Final = "reconcile-remove-and-recreate-exact-binding"
+DEADLINE_RECOVERY_REPLACEMENT_PRINCIPAL_ID: Final = (
+    "a47789c6-b8eb-40a1-898a-517a52d60a86"
+)
+DEADLINE_RECOVERY_REPLACEMENT_ROLE_ASSIGNMENT_NAME: Final = (
+    "b4acad78-f3f0-59d4-8e36-901644af1ff6"
+)
+DEADLINE_RECOVERY_REPLACEMENT_LOCATION: Final = "northeurope"
+DEADLINE_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256: Final = (
+    "23d074e8508ca0cbc7b56634f70c5b3cd9d59bfe0d274d47d9aaa340941b9fd9"
+)
+DEADLINE_RECOVERY_ALLOWED_OPERATIONS: Final = (
+    "verify-preserved-cleanup-control",
+    "remove-exact-prior-job-schedule-binding",
+    "publish-deadline-adjusted-guarded-runbook",
+    "replace-same-name-one-time-schedule",
     "create-exact-job-schedule-binding",
     "verify-cleanup-executable",
 )
@@ -88,6 +122,23 @@ class CleanupControlRecoveryAuthorization:
     authorizationIntegritySha256: str
 
 
+@dataclass(frozen=True)
+class CleanupControlDeadlineRecoveryAuthorization(CleanupControlRecoveryAuthorization):
+    """One replay-denying grant to replace only the expired cleanup deadline."""
+
+    recoveryAction: str
+    deadlineObservedAtUtc: str
+    deadlineDerivationRule: str
+    priorDeadlineUtc: str
+    priorBindingId: str
+    priorRunbookContentSha256: str
+    replacementPrincipalId: str
+    replacementRoleAssignmentId: str
+    replacementLocation: str
+    scheduleAction: str
+    bindingAction: str
+
+
 def _utc(value: datetime) -> str:
     return (
         value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -100,6 +151,23 @@ def _parse_utc(value: str, error_code: str) -> datetime:
     except (TypeError, ValueError):
         raise CleanupControlRecoveryError(error_code) from None
     return parsed
+
+
+def derive_cleanup_control_recovery_deadline(observed_azure_utc: datetime) -> datetime:
+    """Return the first quarter-hour boundary at least six hours after Azure UTC."""
+
+    if observed_azure_utc.tzinfo is None or observed_azure_utc.utcoffset() is None:
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-observed-at-invalid"
+        )
+    threshold = observed_azure_utc.astimezone(UTC) + timedelta(hours=6)
+    candidate = threshold.replace(second=0, microsecond=0)
+    remainder = candidate.minute % 15
+    if remainder:
+        candidate += timedelta(minutes=15 - remainder)
+    if candidate < threshold:
+        candidate += timedelta(minutes=15)
+    return candidate
 
 
 def _expected_resource_ids(subscription_id: str) -> tuple[str, str, str, str, str]:
@@ -132,7 +200,12 @@ def _expected_resource_ids(subscription_id: str) -> tuple[str, str, str, str, st
 def cleanup_control_recovery_authorization_integrity(
     authorization: CleanupControlRecoveryAuthorization,
 ) -> str:
-    return integrity_sha256(_authorization_body(authorization), AUTHORIZATION_DOMAIN)
+    digest = integrity_sha256(_authorization_body(authorization), AUTHORIZATION_DOMAIN)
+    if not isinstance(digest, str):
+        raise CleanupControlRecoveryError(
+            "cleanup-recovery-authorization-integrity-malformed"
+        )
+    return digest
 
 
 def _authorization_body(
@@ -166,6 +239,187 @@ def _authorization_body(
         "costCeilingUsdCents": authorization.costCeilingUsdCents,
         "allowedOperations": list(authorization.allowedOperations),
     }
+
+
+def _expected_replacement_role_assignment_id(subscription_id: str) -> str:
+    _, _, _, target_group, _ = _expected_resource_ids(subscription_id)
+    return (
+        f"{target_group}/providers/Microsoft.Authorization/roleAssignments/"
+        f"{DEADLINE_RECOVERY_REPLACEMENT_ROLE_ASSIGNMENT_NAME}"
+    )
+
+
+def _deadline_recovery_authorization_body(
+    authorization: CleanupControlDeadlineRecoveryAuthorization,
+) -> dict[str, JsonValue]:
+    return {
+        **_authorization_body(authorization),
+        "recoveryAction": authorization.recoveryAction,
+        "deadlineObservedAtUtc": authorization.deadlineObservedAtUtc,
+        "deadlineDerivationRule": authorization.deadlineDerivationRule,
+        "priorDeadlineUtc": authorization.priorDeadlineUtc,
+        "priorBindingId": authorization.priorBindingId,
+        "priorRunbookContentSha256": authorization.priorRunbookContentSha256,
+        "replacementPrincipalId": authorization.replacementPrincipalId,
+        "replacementRoleAssignmentId": authorization.replacementRoleAssignmentId,
+        "replacementLocation": authorization.replacementLocation,
+        "scheduleAction": authorization.scheduleAction,
+        "bindingAction": authorization.bindingAction,
+    }
+
+
+def cleanup_control_deadline_recovery_authorization_integrity(
+    authorization: CleanupControlDeadlineRecoveryAuthorization,
+) -> str:
+    digest = integrity_sha256(
+        _deadline_recovery_authorization_body(authorization),
+        DEADLINE_RECOVERY_AUTHORIZATION_DOMAIN,
+    )
+    if not isinstance(digest, str):
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-authorization-integrity-malformed"
+        )
+    return digest
+
+
+def build_cleanup_control_deadline_recovery_authorization(
+    *,
+    repository_head: str,
+    subscription_id: str,
+    cleanup_resource_group_id: str,
+    corrupted_automation_account_id: str,
+    corrupted_principal_id: str,
+    corrupted_role_assignment_id: str,
+    replacement_automation_account_id: str,
+    replacement_principal_id: str,
+    replacement_role_assignment_id: str,
+    replacement_location: str,
+    target_resource_group_id: str,
+    prior_runbook_content_sha256: str,
+    runbook_content_sha256: str,
+    observed_azure_utc: datetime,
+) -> CleanupControlDeadlineRecoveryAuthorization:
+    if len(repository_head) != 40 or any(
+        character not in "0123456789abcdef" for character in repository_head
+    ):
+        raise CleanupControlRecoveryError("cleanup-recovery-repository-head-invalid")
+    (
+        expected_cleanup,
+        expected_corrupted,
+        expected_replacement,
+        expected_target,
+        expected_corrupted_assignment,
+    ) = _expected_resource_ids(subscription_id)
+    expected_replacement_assignment = _expected_replacement_role_assignment_id(
+        subscription_id
+    )
+    exact_resource_values = (
+        (cleanup_resource_group_id, expected_cleanup),
+        (corrupted_automation_account_id, expected_corrupted),
+        (replacement_automation_account_id, expected_replacement),
+        (target_resource_group_id, expected_target),
+    )
+    if any(observed != expected for observed, expected in exact_resource_values):
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-resource-scope-invalid"
+        )
+    if corrupted_principal_id != CORRUPTED_PRINCIPAL_ID:
+        raise CleanupControlRecoveryError(
+            "cleanup-recovery-corrupted-principal-invalid"
+        )
+    if (
+        corrupted_role_assignment_id.casefold()
+        != expected_corrupted_assignment.casefold()
+    ):
+        raise CleanupControlRecoveryError(
+            "cleanup-recovery-corrupted-assignment-invalid"
+        )
+    if replacement_principal_id != DEADLINE_RECOVERY_REPLACEMENT_PRINCIPAL_ID:
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-replacement-principal-invalid"
+        )
+    if (
+        replacement_role_assignment_id.casefold()
+        != expected_replacement_assignment.casefold()
+    ):
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-replacement-assignment-invalid"
+        )
+    if replacement_location != DEADLINE_RECOVERY_REPLACEMENT_LOCATION:
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-replacement-location-invalid"
+        )
+    if prior_runbook_content_sha256 != DEADLINE_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256:
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-prior-runbook-content-invalid"
+        )
+    expected_runbook_hash = cleanup_runbook_sha256(
+        CLEANUP_RUNBOOK_PATH.read_text(encoding="utf-8")
+    )
+    if runbook_content_sha256 != expected_runbook_hash:
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-runbook-content-invalid"
+        )
+    if observed_azure_utc.tzinfo is None or observed_azure_utc.utcoffset() is None:
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-observed-at-invalid"
+        )
+    observed = observed_azure_utc.astimezone(UTC).replace(microsecond=0)
+    if _utc(observed) != DEADLINE_RECOVERY_OBSERVED_AZURE_UTC:
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-observed-at-invalid"
+        )
+    deadline = derive_cleanup_control_recovery_deadline(observed)
+    if _utc(deadline) != DEADLINE_RECOVERY_DEADLINE_UTC:
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-derived-deadline-invalid"
+        )
+    unsigned = CleanupControlDeadlineRecoveryAuthorization(
+        authorizationVersion=DEADLINE_RECOVERY_AUTHORIZATION_VERSION,
+        repositoryHead=repository_head,
+        subscriptionId=subscription_id,
+        cleanupResourceGroupId=expected_cleanup,
+        corruptedAutomationAccountId=expected_corrupted,
+        corruptedPrincipalId=CORRUPTED_PRINCIPAL_ID,
+        corruptedRoleAssignmentId=expected_corrupted_assignment,
+        corruptedRoleAssignmentAction=DEADLINE_RECOVERY_CORRUPTED_ROLE_ACTION,
+        replacementAutomationAccount=CLEANUP_AUTOMATION_ACCOUNT,
+        replacementAutomationAccountId=expected_replacement,
+        targetResourceGroupId=expected_target,
+        roleDefinitionId=ROLE_DEFINITION_ID,
+        roleScope=expected_target,
+        runbook=RUNBOOK,
+        schedule=SCHEDULE,
+        targetParameter=TARGET_PARAMETER,
+        targetParameterValue=TARGET_GROUP,
+        authorizationParameter=AUTHORIZATION_PARAMETER,
+        authorizationParameterValue=True,
+        authorizedAtUtc=_utc(observed),
+        deadlineUtc=_utc(deadline),
+        bindingId=ACTIVE_CLEANUP_BINDING_ID,
+        bindingContractVersion=CLEANUP_BINDING_CONTRACT_VERSION,
+        runbookContentSha256=runbook_content_sha256,
+        costCeilingUsdCents=COST_CEILING_CENTS,
+        allowedOperations=DEADLINE_RECOVERY_ALLOWED_OPERATIONS,
+        authorizationIntegritySha256="",
+        recoveryAction=DEADLINE_RECOVERY_ACTION,
+        deadlineObservedAtUtc=_utc(observed),
+        deadlineDerivationRule=DEADLINE_RECOVERY_DERIVATION_RULE,
+        priorDeadlineUtc=DEADLINE_UTC,
+        priorBindingId=TOMBSTONED_DEADLINE_RECOVERY_BINDING_ID,
+        priorRunbookContentSha256=prior_runbook_content_sha256,
+        replacementPrincipalId=DEADLINE_RECOVERY_REPLACEMENT_PRINCIPAL_ID,
+        replacementRoleAssignmentId=expected_replacement_assignment,
+        replacementLocation=DEADLINE_RECOVERY_REPLACEMENT_LOCATION,
+        scheduleAction=DEADLINE_RECOVERY_SCHEDULE_ACTION,
+        bindingAction=DEADLINE_RECOVERY_BINDING_ACTION,
+    )
+    return replace(
+        unsigned,
+        authorizationIntegritySha256=(
+            cleanup_control_deadline_recovery_authorization_integrity(unsigned)
+        ),
+    )
 
 
 def build_cleanup_control_recovery_authorization(
@@ -354,9 +608,205 @@ def validate_cleanup_control_recovery_authorization(
     return authorization
 
 
+def validate_cleanup_control_deadline_recovery_authorization(
+    authorization: CleanupControlDeadlineRecoveryAuthorization,
+    *,
+    expected_repository_head: str,
+    now_utc: datetime,
+) -> CleanupControlDeadlineRecoveryAuthorization:
+    (
+        expected_cleanup,
+        expected_corrupted,
+        expected_replacement,
+        expected_target,
+        expected_corrupted_assignment,
+    ) = _expected_resource_ids(authorization.subscriptionId)
+    expected_replacement_assignment = _expected_replacement_role_assignment_id(
+        authorization.subscriptionId
+    )
+    exact_values = {
+        "authorizationVersion": DEADLINE_RECOVERY_AUTHORIZATION_VERSION,
+        "repositoryHead": expected_repository_head,
+        "cleanupResourceGroupId": expected_cleanup,
+        "corruptedAutomationAccountId": expected_corrupted,
+        "corruptedPrincipalId": CORRUPTED_PRINCIPAL_ID,
+        "corruptedRoleAssignmentId": expected_corrupted_assignment,
+        "corruptedRoleAssignmentAction": DEADLINE_RECOVERY_CORRUPTED_ROLE_ACTION,
+        "replacementAutomationAccount": CLEANUP_AUTOMATION_ACCOUNT,
+        "replacementAutomationAccountId": expected_replacement,
+        "targetResourceGroupId": expected_target,
+        "roleDefinitionId": ROLE_DEFINITION_ID,
+        "roleScope": expected_target,
+        "runbook": RUNBOOK,
+        "schedule": SCHEDULE,
+        "targetParameter": TARGET_PARAMETER,
+        "targetParameterValue": TARGET_GROUP,
+        "authorizationParameter": AUTHORIZATION_PARAMETER,
+        "authorizationParameterValue": True,
+        "authorizedAtUtc": DEADLINE_RECOVERY_OBSERVED_AZURE_UTC,
+        "deadlineUtc": DEADLINE_RECOVERY_DEADLINE_UTC,
+        "bindingId": ACTIVE_CLEANUP_BINDING_ID,
+        "bindingContractVersion": CLEANUP_BINDING_CONTRACT_VERSION,
+        "costCeilingUsdCents": COST_CEILING_CENTS,
+        "allowedOperations": DEADLINE_RECOVERY_ALLOWED_OPERATIONS,
+        "recoveryAction": DEADLINE_RECOVERY_ACTION,
+        "deadlineObservedAtUtc": DEADLINE_RECOVERY_OBSERVED_AZURE_UTC,
+        "deadlineDerivationRule": DEADLINE_RECOVERY_DERIVATION_RULE,
+        "priorDeadlineUtc": DEADLINE_UTC,
+        "priorBindingId": TOMBSTONED_DEADLINE_RECOVERY_BINDING_ID,
+        "priorRunbookContentSha256": (DEADLINE_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256),
+        "replacementPrincipalId": DEADLINE_RECOVERY_REPLACEMENT_PRINCIPAL_ID,
+        "replacementRoleAssignmentId": expected_replacement_assignment,
+        "replacementLocation": DEADLINE_RECOVERY_REPLACEMENT_LOCATION,
+        "scheduleAction": DEADLINE_RECOVERY_SCHEDULE_ACTION,
+        "bindingAction": DEADLINE_RECOVERY_BINDING_ACTION,
+    }
+    observed = asdict(authorization)
+    if any(observed.get(key) != value for key, value in exact_values.items()):
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-authorization-scope-invalid"
+        )
+    if len(authorization.repositoryHead) != 40 or any(
+        character not in "0123456789abcdef"
+        for character in authorization.repositoryHead
+    ):
+        raise CleanupControlRecoveryError("cleanup-recovery-repository-head-invalid")
+    if authorization.runbookContentSha256 != cleanup_runbook_sha256(
+        CLEANUP_RUNBOOK_PATH.read_text(encoding="utf-8")
+    ):
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-runbook-content-invalid"
+        )
+    authorized_at = _parse_utc(
+        authorization.authorizedAtUtc,
+        "cleanup-deadline-recovery-authorized-at-invalid",
+    )
+    deadline_observed_at = _parse_utc(
+        authorization.deadlineObservedAtUtc,
+        "cleanup-deadline-recovery-observed-at-invalid",
+    )
+    deadline = _parse_utc(
+        authorization.deadlineUtc,
+        "cleanup-deadline-recovery-deadline-invalid",
+    )
+    prior_deadline = _parse_utc(
+        authorization.priorDeadlineUtc,
+        "cleanup-deadline-recovery-prior-deadline-invalid",
+    )
+    if (
+        authorized_at != deadline_observed_at
+        or derive_cleanup_control_recovery_deadline(deadline_observed_at) != deadline
+        or prior_deadline >= deadline
+    ):
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-derivation-invalid"
+        )
+    if now_utc.tzinfo is None or now_utc.utcoffset() is None:
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-current-time-invalid"
+        )
+    current = now_utc.astimezone(UTC).replace(microsecond=0)
+    if current < authorized_at or current > deadline:
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-authorization-expired"
+        )
+    if authorization.authorizationIntegritySha256 != (
+        cleanup_control_deadline_recovery_authorization_integrity(authorization)
+    ):
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-authorization-integrity-invalid"
+        )
+    return authorization
+
+
+def cleanup_control_deadline_recovery_authorization_from_mapping(
+    value: JsonValue,
+) -> CleanupControlDeadlineRecoveryAuthorization:
+    if not isinstance(value, dict):
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-authorization-malformed"
+        )
+    fields = set(CleanupControlDeadlineRecoveryAuthorization.__dataclass_fields__)
+    if set(value) != fields:
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-authorization-malformed"
+        )
+    operations = value.get("allowedOperations")
+    if not isinstance(operations, list) or any(
+        not isinstance(item, str) for item in operations
+    ):
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-authorization-malformed"
+        )
+    string_fields = fields - {
+        "allowedOperations",
+        "authorizationParameterValue",
+        "costCeilingUsdCents",
+    }
+    if any(not isinstance(value.get(field), str) for field in string_fields):
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-authorization-malformed"
+        )
+    authorization_value = value.get("authorizationParameterValue")
+    cost_ceiling = value.get("costCeilingUsdCents")
+    if not isinstance(authorization_value, bool) or (
+        not isinstance(cost_ceiling, int) or isinstance(cost_ceiling, bool)
+    ):
+        raise CleanupControlRecoveryError(
+            "cleanup-deadline-recovery-authorization-malformed"
+        )
+    return CleanupControlDeadlineRecoveryAuthorization(
+        authorizationVersion=cast(str, value["authorizationVersion"]),
+        repositoryHead=cast(str, value["repositoryHead"]),
+        subscriptionId=cast(str, value["subscriptionId"]),
+        cleanupResourceGroupId=cast(str, value["cleanupResourceGroupId"]),
+        corruptedAutomationAccountId=cast(str, value["corruptedAutomationAccountId"]),
+        corruptedPrincipalId=cast(str, value["corruptedPrincipalId"]),
+        corruptedRoleAssignmentId=cast(str, value["corruptedRoleAssignmentId"]),
+        corruptedRoleAssignmentAction=cast(str, value["corruptedRoleAssignmentAction"]),
+        replacementAutomationAccount=cast(str, value["replacementAutomationAccount"]),
+        replacementAutomationAccountId=cast(
+            str, value["replacementAutomationAccountId"]
+        ),
+        targetResourceGroupId=cast(str, value["targetResourceGroupId"]),
+        roleDefinitionId=cast(str, value["roleDefinitionId"]),
+        roleScope=cast(str, value["roleScope"]),
+        runbook=cast(str, value["runbook"]),
+        schedule=cast(str, value["schedule"]),
+        targetParameter=cast(str, value["targetParameter"]),
+        targetParameterValue=cast(str, value["targetParameterValue"]),
+        authorizationParameter=cast(str, value["authorizationParameter"]),
+        authorizationParameterValue=authorization_value,
+        authorizedAtUtc=cast(str, value["authorizedAtUtc"]),
+        deadlineUtc=cast(str, value["deadlineUtc"]),
+        bindingId=cast(str, value["bindingId"]),
+        bindingContractVersion=cast(str, value["bindingContractVersion"]),
+        runbookContentSha256=cast(str, value["runbookContentSha256"]),
+        costCeilingUsdCents=cost_ceiling,
+        allowedOperations=tuple(cast(list[str], operations)),
+        authorizationIntegritySha256=cast(str, value["authorizationIntegritySha256"]),
+        recoveryAction=cast(str, value["recoveryAction"]),
+        deadlineObservedAtUtc=cast(str, value["deadlineObservedAtUtc"]),
+        deadlineDerivationRule=cast(str, value["deadlineDerivationRule"]),
+        priorDeadlineUtc=cast(str, value["priorDeadlineUtc"]),
+        priorBindingId=cast(str, value["priorBindingId"]),
+        priorRunbookContentSha256=cast(str, value["priorRunbookContentSha256"]),
+        replacementPrincipalId=cast(str, value["replacementPrincipalId"]),
+        replacementRoleAssignmentId=cast(str, value["replacementRoleAssignmentId"]),
+        replacementLocation=cast(str, value["replacementLocation"]),
+        scheduleAction=cast(str, value["scheduleAction"]),
+        bindingAction=cast(str, value["bindingAction"]),
+    )
+
+
 def cleanup_control_recovery_authorization_from_mapping(
     value: JsonValue,
 ) -> CleanupControlRecoveryAuthorization:
+    if (
+        isinstance(value, dict)
+        and value.get("authorizationVersion") == DEADLINE_RECOVERY_AUTHORIZATION_VERSION
+    ):
+        return cleanup_control_deadline_recovery_authorization_from_mapping(value)
     if not isinstance(value, dict):
         raise CleanupControlRecoveryError("cleanup-recovery-authorization-malformed")
     fields = set(CleanupControlRecoveryAuthorization.__dataclass_fields__)
@@ -434,8 +884,13 @@ def write_cleanup_control_recovery_authorization(
             "cleanup-recovery-authorization-inside-repository"
         )
     path.parent.mkdir(parents=True, exist_ok=True)
+    authorization_body = (
+        _deadline_recovery_authorization_body(authorization)
+        if isinstance(authorization, CleanupControlDeadlineRecoveryAuthorization)
+        else _authorization_body(authorization)
+    )
     body = {
-        **_authorization_body(authorization),
+        **authorization_body,
         "authorizationIntegritySha256": authorization.authorizationIntegritySha256,
     }
     path.write_bytes(canonical_bytes(body))
@@ -453,7 +908,14 @@ def execute_cleanup_control_recovery(
         ProductionCleanupControlRecoveryAdapter,
     )
 
-    return ProductionCleanupControlRecoveryAdapter().execute(
+    adapter = ProductionCleanupControlRecoveryAdapter()
+    if isinstance(authorization, CleanupControlDeadlineRecoveryAuthorization):
+        return adapter.execute_deadline_recovery(
+            authorization=authorization,
+            receipt_directory=receipt_directory,
+            expected_repository_head=expected_repository_head,
+        )
+    return adapter.execute(
         authorization=authorization,
         receipt_directory=receipt_directory,
         expected_repository_head=expected_repository_head,

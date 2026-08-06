@@ -3013,7 +3013,7 @@ def test_lifecycle_cleanup_deadline_matches_azure_minute_precision() -> None:
 
     deadline = managed_binding_lifecycle._cleanup_deadline(observed)
 
-    assert deadline == datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
+    assert deadline == datetime(2026, 8, 6, 18, 30, tzinfo=UTC)
     assert deadline == managed_binding_lifecycle.AUTHORIZED_CLEANUP_AT_UTC
     assert deadline <= observed + timedelta(hours=30)
 
@@ -3023,12 +3023,12 @@ def test_lifecycle_cleanup_deadline_matches_azure_minute_precision() -> None:
         managed_binding_lifecycle.LifecycleError,
         match="cleanup-deadline-expired-or-reserve-active",
     ):
-        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 6, 10, 30, tzinfo=UTC))
+        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 6, 17, 0, tzinfo=UTC))
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
         match="cleanup-deadline-outside-authorized-window",
     ):
-        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 3, 21, 49, tzinfo=UTC))
+        managed_binding_lifecycle._cleanup_deadline(datetime(2026, 8, 5, 12, 29, tzinfo=UTC))
 
 
 def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> None:
@@ -3151,7 +3151,27 @@ def test_cleanup_binding_generation_two_is_stable_distinct_and_normalized() -> N
             "Microsoft.Resources/resourceGroups/rg-solarplexus-mobius-77-staging"
         ),
         cleanup_authorized=True,
+        binding_epoch_utc=managed_binding_contracts.ACTIVE_CLEANUP_BINDING_EPOCH_UTC,
     )
+
+
+def test_cleanup_deadline_recovery_binding_stays_generation_two_and_tombstones_prior() -> None:
+    subscription_id = "9f7f5a53-95a6-469e-9b95-e4072f0fd226"
+    contract = load_managed_binding_contract()
+    cleanup = cast(dict[str, JsonValue], contract["cleanupExecution"])
+    tombstones = cast(list[dict[str, JsonValue]], cleanup["tombstonedBindingIds"])
+
+    assert cleanup["bindingGeneration"] == 2
+    assert cleanup["activeBindingId"] == "ecdbb32f-9134-5697-85f9-d569ba57454b"
+    assert (
+        managed_binding_contracts.cleanup_binding_id_for_subscription(subscription_id)
+        == cleanup["activeBindingId"]
+    )
+    assert tombstones[-1]["bindingId"] == (
+        managed_binding_contracts.TOMBSTONED_DEADLINE_RECOVERY_BINDING_ID
+    )
+    assert tombstones[-1]["recreationStatus"] == "conflict"
+    assert tombstones[-1]["bindingGeneration"] == 2
 
 
 @pytest.mark.parametrize(
@@ -3636,7 +3656,7 @@ def _test_preservation_state(
 ) -> dict[str, JsonValue]:
     return {
         "activeStage": "pre-secret",
-        "cleanupAtUtc": "2026-08-06T12:00:00Z",
+        "cleanupAtUtc": "2026-08-06T18:30:00Z",
         "disposition": "RUNNING",
         "failedStage": None,
         "lastCompletedStage": "cleanup-role-verification",
@@ -3685,7 +3705,7 @@ def _verify_container_apps_infrastructure_fixture(
 ) -> int:
     subscription = SYNTHETIC_SUBSCRIPTION
     expected_tags = _test_recovered_cleanup_tags()
-    expected_tags["mobius-expires-at-utc"] = "2026-08-06T12:00:00Z"
+    expected_tags["mobius-expires-at-utc"] = "2026-08-06T18:30:00Z"
     expected_environment_id = (
         f"/subscriptions/{subscription}/resourceGroups/"
         f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
@@ -3886,7 +3906,7 @@ def _reconcile_container_apps_infrastructure_tags_fixture(
     )
     expected = _test_recovered_cleanup_tags()
     expected["mobius-cleanup-binding-sha256"] = "e" * 64
-    expected["mobius-expires-at-utc"] = "2026-08-06T12:00:00Z"
+    expected["mobius-expires-at-utc"] = "2026-08-06T18:30:00Z"
     expected["mobius-manifest-sha256"] = "f" * 64
     expected["mobius-run-id"] = "m7.7-managed-binding-closeout-20260731"
     expected["mobius-source-commit"] = "c" * 40
