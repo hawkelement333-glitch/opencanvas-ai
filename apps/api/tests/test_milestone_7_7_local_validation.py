@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from performance.milestone_7_7.framework import (
     ContractError,
     canonical_bytes,
@@ -73,7 +72,7 @@ def test_example_is_valid_and_bound_to_checkpoint_4() -> None:
     }
     assert report["bindings"] == EXPECTED_BINDINGS
     assert report["reportIntegritySha256"] == (
-        "d437fb6c2f15ad680af8af352f2a44d01727a1ff7440a144757cf73501e1243f"
+        "a58092979612e6e41432a7fca5850669eaff2dc0bb9842f26ef93281a5286452"
     )
 
 

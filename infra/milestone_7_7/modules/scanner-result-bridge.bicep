@@ -243,7 +243,7 @@ resource proofRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01
 }
 
 resource proofJob 'Microsoft.App/jobs@2025-01-01' = if (proofEnabled) {
-  name: 'caj-mobius77-scanner-bridge-proof'
+  name: 'caj-mobius77-scanner-proof'
   location: location
   tags: lifecycleTags
   identity: {

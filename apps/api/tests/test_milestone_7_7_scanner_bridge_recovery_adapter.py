@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 from infra.milestone_7_7 import scanner_bridge_recovery_adapter as adapter_module
 from infra.milestone_7_7.scanner_bridge_recovery_adapter import (
     ProductionScannerBridgeRecoveryAdapter,
@@ -20,6 +19,7 @@ from preflight.milestone_7_7.scanner_bridge_recovery import (
     FOUNDATION_ALLOWED_OPERATIONS,
     FOUNDATION_STAGE,
     PROOF_ALLOWED_OPERATIONS,
+    PROOF_JOB,
     PROOF_STAGE,
     ScannerBridgeRecoveryAuthorization,
     ScannerBridgeRecoveryError,
@@ -122,7 +122,7 @@ def _outputs(authorization: ScannerBridgeRecoveryAuthorization) -> dict[str, Jso
     )
     return {
         **base,
-        "scannerBridgeProofJobName": "caj-mobius77-scanner-bridge-proof",
+        "scannerBridgeProofJobName": PROOF_JOB,
         "scannerBridgeProofJobId": authorization.proofJobId,
         "scannerBridgeTemporaryRoleId": authorization.proofRoleDefinitionId,
         "scannerBridgeTemporaryRoleAssignmentId": assignment,
@@ -289,13 +289,13 @@ def test_foundation_authorization_is_image_free_and_denies_broader_authority() -
 
 def test_proof_authorization_binds_one_exact_immutable_image_and_execution() -> None:
     authorization = _authorization(PROOF_STAGE)
+    assert PROOF_JOB == "caj-mobius77-scanner-proof"
+    assert len(PROOF_JOB) <= 32
     assert authorization.allowedOperations == PROOF_ALLOWED_OPERATIONS
     assert authorization.apiImageDigest == IMAGE
     assert authorization.buildInputSha256 == BUILD_INPUT
     assert authorization.maximumProofExecutions == 1
-    assert authorization.proofJobId == (
-        f"{TARGET}/providers/Microsoft.App/jobs/caj-mobius77-scanner-bridge-proof"
-    )
+    assert authorization.proofJobId == f"{TARGET}/providers/Microsoft.App/jobs/{PROOF_JOB}"
     assert authorization.proofRoleDefinitionId == (
         f"{TARGET}/providers/Microsoft.Authorization/roleDefinitions/"
         "7d78ed8f-4b48-4e74-bb95-f0fcfe811897"

@@ -434,7 +434,7 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "privatelink.monitor.azure.com",
             "privatelink.oms.opinsights.azure.com",
             "privatelink.ods.opinsights.azure.com",
-            "caj-mobius77-scanner-bridge-proof",
+            "caj-mobius77-scanner-proof",
         ],
     }
     for name, tokens in expected_tokens.items():

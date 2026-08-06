@@ -32,7 +32,7 @@ LOG_ANALYTICS_WORKSPACE: Final = "law-mobius77-staging"
 WORKER_IDENTITY: Final = "id-mobius77-worker"
 PRIVATE_LINK_SCOPE: Final = "ampls-mobius77-staging"
 MONITOR_PRIVATE_ENDPOINT: Final = "pe-mobius77-azure-monitor"
-PROOF_JOB: Final = "caj-mobius77-scanner-bridge-proof"
+PROOF_JOB: Final = "caj-mobius77-scanner-proof"
 PROOF_ROLE_DEFINITION_NAME: Final = "7d78ed8f-4b48-4e74-bb95-f0fcfe811897"
 REGISTRY_HOST: Final = "acrmobius7711564669.azurecr.io"
 IMAGE_REPOSITORY: Final = "opencanvas-api"
@@ -152,7 +152,7 @@ def scanner_bridge_recovery_authorization_integrity(
     body = asdict(authorization)
     body.pop("authorizationIntegritySha256", None)
     body["allowedOperations"] = list(authorization.allowedOperations)
-    return cast(str, integrity_sha256(cast(JsonValue, body), AUTHORIZATION_DOMAIN))
+    return integrity_sha256(cast(JsonValue, body), AUTHORIZATION_DOMAIN)
 
 
 def build_scanner_bridge_recovery_authorization(
@@ -384,14 +384,11 @@ def execute_scanner_bridge_recovery(
         ProductionScannerBridgeRecoveryAdapter,
     )
 
-    return cast(
-        dict[str, JsonValue],
-        ProductionScannerBridgeRecoveryAdapter().execute(
-            authorization=authorization,
-            receipt_directory=receipt_directory,
-            expected_repository_head=expected_repository_head,
-            evidence_output=evidence_output,
-        ),
+    return ProductionScannerBridgeRecoveryAdapter().execute(
+        authorization=authorization,
+        receipt_directory=receipt_directory,
+        expected_repository_head=expected_repository_head,
+        evidence_output=evidence_output,
     )
 
 
