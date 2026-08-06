@@ -1525,23 +1525,29 @@ def _wait_absent(resource_id: str, api_version: str, code: str) -> None:
 
 
 def _delete_rest_resource(resource_id: str, api_version: str) -> None:
-    try:
-        lifecycle._run(
-            (
-                "az",
-                "rest",
-                "--method",
-                "delete",
-                "--url",
-                f"https://management.azure.com{resource_id}?api-version={api_version}",
-                "--output",
-                "none",
-                "--only-show-errors",
+    deadline = time.monotonic() + DELETION_PROPAGATION_SECONDS
+    while True:
+        try:
+            lifecycle._run(
+                (
+                    "az",
+                    "rest",
+                    "--method",
+                    "delete",
+                    "--url",
+                    f"https://management.azure.com{resource_id}?api-version={api_version}",
+                    "--output",
+                    "none",
+                    "--only-show-errors",
+                )
             )
-        )
-    except lifecycle.AzureCommandError:
-        if not _resource_absent(resource_id, api_version):
-            raise
+            return
+        except lifecycle.AzureCommandError:
+            if _resource_absent(resource_id, api_version):
+                return
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(DELETION_POLL_SECONDS)
 
 
 def _remove_proof_residue(
@@ -1845,18 +1851,33 @@ class ProductionScannerBridgeRecoveryAdapter:
         if assignment_id is None or evidence_output is None:
             _fail("scanner-proof-authorization-incomplete")
         try:
-            proof_graph = _verify_proof_graph(
-                authorization,
-                assignment_id=assignment_id,
-                worker_principal_id=readback.worker_principal_id,
-                worker_client_id=readback.worker_client_id,
-                workspace_customer_id=readback.workspace_customer_id,
-            )
-            execution_name = _start_one_execution(authorization)
-            execution = _wait_for_execution(authorization, execution_name)
-            marker = _proof_marker(authorization, execution_name)
+            try:
+                proof_graph = _verify_proof_graph(
+                    authorization,
+                    assignment_id=assignment_id,
+                    worker_principal_id=readback.worker_principal_id,
+                    worker_client_id=readback.worker_client_id,
+                    workspace_customer_id=readback.workspace_customer_id,
+                )
+            except lifecycle.AzureCommandError as exc:
+                _fail(f"scanner-proof-graph-azure-{exc.sanitized_azure_error_code}")
+            try:
+                execution_name = _start_one_execution(authorization)
+            except lifecycle.AzureCommandError as exc:
+                _fail(f"scanner-proof-start-azure-{exc.sanitized_azure_error_code}")
+            try:
+                execution = _wait_for_execution(authorization, execution_name)
+            except lifecycle.AzureCommandError as exc:
+                _fail(f"scanner-proof-wait-azure-{exc.sanitized_azure_error_code}")
+            try:
+                marker = _proof_marker(authorization, execution_name)
+            except lifecycle.AzureCommandError as exc:
+                _fail(f"scanner-proof-marker-azure-{exc.sanitized_azure_error_code}")
         finally:
-            revocation = _remove_proof_residue(authorization, assignment_id)
+            try:
+                revocation = _remove_proof_residue(authorization, assignment_id)
+            except lifecycle.AzureCommandError as exc:
+                _fail(f"scanner-proof-cleanup-azure-{exc.sanitized_azure_error_code}")
         final_readback = _verify_foundation(authorization)
         observed = self._clock().astimezone(UTC).replace(microsecond=0)
         evidence = _build_live_evidence(

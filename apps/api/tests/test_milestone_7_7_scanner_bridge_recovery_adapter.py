@@ -593,6 +593,39 @@ def test_failed_proof_graph_still_revokes_all_temporary_authority(
     assert calls.count("residue") == 1
 
 
+def test_graph_azure_error_is_attributed_after_temporary_authority_revocation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    authorization = _authorization(PROOF_STAGE)
+    calls: list[str] = []
+    _install_common_fakes(monkeypatch, authorization, calls)
+    monkeypatch.setattr(
+        adapter_module,
+        "_verify_proof_graph",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            managed_binding_lifecycle.AzureCommandError("authorizationfailed")
+        ),
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_remove_proof_residue",
+        lambda *_args: calls.append("residue") or "8" * 64,
+    )
+
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-graph-azure-authorizationfailed",
+    ):
+        ProductionScannerBridgeRecoveryAdapter(clock=lambda: NOW).execute(
+            authorization=authorization,
+            receipt_directory=tmp_path,
+            expected_repository_head=HEAD,
+            evidence_output=tmp_path.parent / f"{tmp_path.name}-evidence.json",
+        )
+
+    assert calls.count("residue") == 1
+
+
 def test_proof_graph_accepts_only_resource_id_casing_differences(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -880,6 +913,24 @@ def test_proof_residue_removal_never_deletes_role_definition_as_assignment(
         ("resource", authorization.proofRoleDefinitionId),
     ]
     assert "/roleDefinitions/" not in calls[0][1]
+
+
+def test_exact_resource_delete_retries_after_ambiguous_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    def delete(_argv: tuple[str, ...], **_kwargs: object) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise managed_binding_lifecycle.AzureCommandError("roledefinitionhasassignments")
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", delete)
+    monkeypatch.setattr(adapter_module, "_resource_absent", lambda *_args: False)
+    monkeypatch.setattr(adapter_module.time, "sleep", lambda _delay: None)
+    adapter_module._delete_rest_resource("exact-resource", adapter_module.ROLE_API_VERSION)
+    assert attempts == 2
 
 
 def test_embedded_role_assignment_not_found_is_authoritative_absence() -> None:
