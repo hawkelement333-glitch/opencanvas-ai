@@ -633,6 +633,7 @@ def test_proof_graph_accepts_only_resource_id_casing_differences(
     readback = _readback()
     assignment_id = _outputs(authorization)["scannerBridgeTemporaryRoleAssignmentId"]
     assert isinstance(assignment_id, str)
+    role_definition_name = str(authorization.proofRoleDefinitionId).rsplit("/", 1)[-1]
     expected_permissions: list[JsonValue] = [
         {
             "actions": ["Microsoft.Storage/storageAccounts/blobServices/containers/read"],
@@ -644,6 +645,8 @@ def test_proof_graph_accepts_only_resource_id_casing_differences(
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/permanentDelete/action",
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/read",
             ],
+            "condition": None,
+            "conditionVersion": None,
             "notActions": [],
             "notDataActions": [],
         }
@@ -705,8 +708,9 @@ def test_proof_graph_accepts_only_resource_id_casing_differences(
         ],
     }
     role: dict[str, JsonValue] = {
-        "id": str(authorization.proofRoleDefinitionId).replace(
-            "/resourceGroups/", "/resourcegroups/"
+        "id": (
+            f"{SUBSCRIPTION}/providers/Microsoft.Authorization/roleDefinitions/"
+            f"{role_definition_name}"
         ),
         "roleName": "Mobius77 Temporary Scanner Bridge Probe",
         "assignableScopes": [
@@ -717,8 +721,9 @@ def test_proof_graph_accepts_only_resource_id_casing_differences(
     assignment: dict[str, JsonValue] = {
         "id": assignment_id.replace("/resourceGroups/", "/resourcegroups/"),
         "principalId": readback.worker_principal_id.upper(),
-        "roleDefinitionId": str(authorization.proofRoleDefinitionId).replace(
-            "/resourceGroups/", "/resourcegroups/"
+        "roleDefinitionId": (
+            f"{SUBSCRIPTION}/providers/Microsoft.Authorization/roleDefinitions/"
+            f"{role_definition_name}"
         ),
     }
 
@@ -742,6 +747,22 @@ def test_proof_graph_accepts_only_resource_id_casing_differences(
         workspace_customer_id=readback.workspace_customer_id,
     )
     assert len(integrity) == 64
+
+    permission = role["permissions"]
+    assert isinstance(permission, list) and isinstance(permission[0], dict)
+    permission[0]["condition"] = "@Resource[Microsoft.Storage/storageAccounts:name]"
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-role-definition-readback-unproved",
+    ):
+        adapter_module._proof_graph(
+            authorization,
+            assignment_id=assignment_id,
+            worker_principal_id=readback.worker_principal_id,
+            worker_client_id=readback.worker_client_id,
+            workspace_customer_id=readback.workspace_customer_id,
+        )
+    permission[0]["condition"] = None
 
     job["identityIds"] = [f"{TARGET}/providers/Microsoft.ManagedIdentity/other"]
     with pytest.raises(

@@ -598,6 +598,39 @@ def _role_name(role_definition_id: str) -> str:
     return role_definition_id.rstrip("/").rsplit("/", 1)[-1].casefold()
 
 
+def _canonical_role_definition_id(
+    authorization: ScannerBridgeRecoveryAuthorization,
+) -> str:
+    return (
+        f"/subscriptions/{authorization.subscriptionId}/providers/"
+        "Microsoft.Authorization/roleDefinitions/"
+        f"{_role_name(cast(str, authorization.proofRoleDefinitionId))}"
+    )
+
+
+def _normalized_proof_role_permissions(value: JsonValue | None) -> list[JsonValue]:
+    if not isinstance(value, list) or len(value) != 1 or not isinstance(value[0], dict):
+        _fail("scanner-proof-role-definition-readback-unproved")
+    permission = dict(value[0])
+    allowed = {
+        "actions",
+        "condition",
+        "conditionVersion",
+        "dataActions",
+        "notActions",
+        "notDataActions",
+    }
+    if (
+        set(permission) - allowed
+        or permission.get("condition") is not None
+        or permission.get("conditionVersion") is not None
+    ):
+        _fail("scanner-proof-role-definition-readback-unproved")
+    permission.pop("condition", None)
+    permission.pop("conditionVersion", None)
+    return [cast(JsonValue, permission)]
+
+
 def _verify_ordinary_identity_roles(
     *,
     subscription_id: str,
@@ -1185,8 +1218,9 @@ def _proof_graph(
         "{id:id,roleName:properties.roleName,assignableScopes:properties.assignableScopes,"
         "permissions:properties.permissions}",
     )
-    permissions = role.get("permissions")
+    permissions = _normalized_proof_role_permissions(role.get("permissions"))
     assignable_scopes = role.get("assignableScopes")
+    canonical_role_id = _canonical_role_definition_id(authorization)
     exact_permissions: list[JsonValue] = [
         {
             "actions": [
@@ -1205,7 +1239,7 @@ def _proof_graph(
         }
     ]
     if (
-        not _same_resource_id(role.get("id"), authorization.proofRoleDefinitionId)
+        not _same_resource_id(role.get("id"), canonical_role_id)
         or role.get("roleName") != "Mobius77 Temporary Scanner Bridge Probe"
         or not (
             isinstance(assignable_scopes, list)
@@ -1233,7 +1267,7 @@ def _proof_graph(
         or assignment_principal.casefold() != worker_principal_id.casefold()
         or not isinstance(assignment.get("roleDefinitionId"), str)
         or cast(str, assignment["roleDefinitionId"]).casefold()
-        != authorization.proofRoleDefinitionId.casefold()
+        != canonical_role_id.casefold()
         or not assignment_id.casefold().startswith(
             f"{quarantine_scope}/providers/Microsoft.Authorization/roleAssignments/".casefold()
         )
