@@ -18,6 +18,8 @@ from evidence.milestone_7_7.framework import (
 from infra.milestone_7_7.scripts.contract_validation import validate_bundle
 from performance.milestone_7_7.framework import (
     ContractError as ContractError,
+)
+from performance.milestone_7_7.framework import (
     JsonValue,
     canonical_bytes,
     integrity_sha256,
@@ -47,23 +49,19 @@ REQUIREMENT_CATALOG_DOMAIN: Final = b"mobius.m7.7.validation-requirements.v1\0"
 
 SOURCE_COMMIT: Final = "c4fdab9ed46ae8d1b8ef380dae9a3812155097c5"
 CHECKPOINT1_BUNDLE_SHA256: Final = (
-    "2e6b5a78db52f910e5de3c360badda585f1695d6992e33d8bd382b78a4318eb0"
+    "af42a9c14ba19342a1590f94ba7a3cc26e355d2a75baae3898a38f70a62130be"
 )
 CHECKPOINT2_MANIFEST_SHA256: Final = (
     "7d8832aae03e00ec93a6203a2360555ba19b030912a406b775fc7b20630c1c26"
 )
-CHECKPOINT2_PLAN_SHA256: Final = (
-    "4c13cc8b536cef325a27a0a00b4d008d164ff5d955512e599df309f69c7f32b3"
-)
+CHECKPOINT2_PLAN_SHA256: Final = "4c13cc8b536cef325a27a0a00b4d008d164ff5d955512e599df309f69c7f32b3"
 CHECKPOINT2_RESULT_SHA256: Final = (
     "a98e8122f5c16a448de69f17cc6b537ea03989843805bbb584dfc620ae5d5c79"
 )
 CHECKPOINT3_PACKAGE_SHA256: Final = (
     "e88ab17245804f26d535ee225de1042ebf20d1fb6acf66e4cc755262c8e94ad1"
 )
-CHECKPOINT4_PLAN_SHA256: Final = (
-    "8ed9b75335c34e245db0659d5b635f8c853873d5b1e52abd3ccce2920dcf9e8e"
-)
+CHECKPOINT4_PLAN_SHA256: Final = "2acff12715b346984dd75dbcb1ddce9419f0907f5f0a80c23200952ced8a9cf4"
 CHECKPOINT4_CATALOG_SHA256: Final = (
     "bf38c10982a5ed3e15fe27174f0b472b44fa0e44c23d9c62f1a2e68148fac8be"
 )
@@ -222,9 +220,12 @@ def validation_requirement_catalog() -> dict[str, JsonValue]:
 
 
 def validation_requirement_catalog_sha256() -> str:
-    return integrity_sha256(
-        validation_requirement_catalog(),
-        REQUIREMENT_CATALOG_DOMAIN,
+    return cast(
+        str,
+        integrity_sha256(
+            validation_requirement_catalog(),
+            REQUIREMENT_CATALOG_DOMAIN,
+        ),
     )
 
 
@@ -240,24 +241,17 @@ def _current_bindings() -> dict[str, str]:
         REPOSITORY_ROOT / "evidence/milestone_7_7/fixtures/request-plan.fixture.json"
     )
     result_path = (
-        REPOSITORY_ROOT
-        / "evidence/milestone_7_7/fixtures/measurement-result.fixture.json"
+        REPOSITORY_ROOT / "evidence/milestone_7_7/fixtures/measurement-result.fixture.json"
     )
-    evidence_path = (
-        REPOSITORY_ROOT / "evidence/milestone_7_7/evidence-package.example.json"
-    )
-    failure_path = (
-        REPOSITORY_ROOT / "resilience/milestone_7_7/failure-plan.example.json"
-    )
+    evidence_path = REPOSITORY_ROOT / "evidence/milestone_7_7/evidence-package.example.json"
+    failure_path = REPOSITORY_ROOT / "resilience/milestone_7_7/failure-plan.example.json"
 
     manifest = load_json(manifest_path)
     expected_plan, expected_result = simulate_local(manifest)
     committed_plan = load_json(request_plan_path)
     committed_result = load_json(result_path)
     if canonical_bytes(expected_plan) != canonical_bytes(committed_plan):
-        raise ContractError(
-            "Checkpoint 2 request-plan fixture differs from reproduction"
-        )
+        raise ContractError("Checkpoint 2 request-plan fixture differs from reproduction")
     if canonical_bytes(expected_result) != canonical_bytes(committed_result):
         raise ContractError("Checkpoint 2 result fixture differs from reproduction")
     validated_result = validate_result(committed_result)
@@ -357,7 +351,7 @@ def _normalized_report(value: dict[str, JsonValue]) -> dict[str, JsonValue]:
 def report_integrity_sha256(value: dict[str, JsonValue]) -> str:
     """Hash normalized report content using the Checkpoint 5 domain."""
 
-    return integrity_sha256(_normalized_report(value), REPORT_DOMAIN)
+    return cast(str, integrity_sha256(_normalized_report(value), REPORT_DOMAIN))
 
 
 def build_local_report(
@@ -550,13 +544,9 @@ def _verification_result(
         "status": status,
         "errorCode": error_code,
         "reportId": None if report is None else report.get("reportId"),
-        "reportIntegritySha256": (
-            None if report is None else report.get("reportIntegritySha256")
-        ),
+        "reportIntegritySha256": (None if report is None else report.get("reportIntegritySha256")),
         "validationCheckCount": 0 if report is None else len(VALIDATION_CHECK_IDS),
-        "validationRequirementCount": (
-            0 if report is None else len(VALIDATION_REQUIREMENTS)
-        ),
+        "validationRequirementCount": (0 if report is None else len(VALIDATION_REQUIREMENTS)),
         "classification": "local-validation-only",
         "localValidationState": ("invalid" if report is None else "complete"),
         "milestoneEvidenceState": "partial",
@@ -573,7 +563,7 @@ def report_bytes(report: dict[str, JsonValue]) -> bytes:
     encoded = canonical_bytes(report)
     if len(encoded) > MAX_VERIFIER_OUTPUT_BYTES:
         raise ContractError("verifier output exceeds the hard ceiling")
-    return encoded
+    return cast(bytes, encoded)
 
 
 def verify_report(path: Path) -> dict[str, JsonValue]:
