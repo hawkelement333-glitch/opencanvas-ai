@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from performance.milestone_7_7.framework import (
     ContractError,
     canonical_bytes,
