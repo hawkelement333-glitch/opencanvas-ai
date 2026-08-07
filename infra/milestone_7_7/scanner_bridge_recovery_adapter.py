@@ -1477,7 +1477,11 @@ def _wait_for_execution(
         row = matching[0]
         status = row["status"]
         terminal = status in {"Succeeded", "Failed", "Degraded", "Stopped", "Cancelled"}
-        if terminal and row["startTime"] is not None and row["endTime"] is not None:
+        # Azure may omit the non-security-sensitive completion timestamp from a
+        # terminal execution list row.  The terminal status and canonical start
+        # timestamp are sufficient here; the proof or failure marker remains the
+        # authoritative execution result and correlation evidence.
+        if terminal and row["startTime"] is not None:
             return row
         if time.monotonic() >= deadline:
             if terminal:

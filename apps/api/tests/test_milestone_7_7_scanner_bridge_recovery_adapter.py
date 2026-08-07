@@ -1276,41 +1276,32 @@ def test_proof_console_diagnostic_rejects_semantic_drift(
         )
 
 
-def test_wait_for_execution_reconciles_delayed_terminal_timestamp(
+def test_wait_for_execution_accepts_omitted_terminal_timestamp(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     authorization = _authorization(PROOF_STAGE)
-    rows = iter(
-        [
-            [
-                {
-                    "name": "proof",
-                    "status": "Failed",
-                    "startTime": "2026-08-07T04:34:41Z",
-                    "endTime": None,
-                }
-            ],
-            [
-                {
-                    "name": "proof",
-                    "status": "Failed",
-                    "startTime": "2026-08-07T04:34:41Z",
-                    "endTime": "2026-08-07T05:04:53Z",
-                }
-            ],
-        ]
+    monkeypatch.setattr(
+        adapter_module,
+        "_job_execution_rows",
+        lambda _authorization: [
+            {
+                "name": "proof",
+                "status": "Failed",
+                "startTime": "2026-08-07T04:34:41Z",
+                "endTime": None,
+            }
+        ],
     )
-    monkeypatch.setattr(adapter_module, "_job_execution_rows", lambda _authorization: next(rows))
     monkeypatch.setattr(adapter_module.time, "monotonic", lambda: 0.0)
-    monkeypatch.setattr(adapter_module.time, "sleep", lambda _seconds: None)
 
     result = adapter_module._wait_for_execution(authorization, "proof")
 
     assert result["status"] == "Failed"
-    assert result["endTime"] == "2026-08-07T05:04:53Z"
+    assert result["startTime"] == "2026-08-07T04:34:41Z"
+    assert result["endTime"] is None
 
 
-def test_wait_for_execution_fails_closed_when_terminal_timestamp_never_converges(
+def test_wait_for_execution_fails_closed_without_terminal_start_timestamp(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     authorization = _authorization(PROOF_STAGE)
@@ -1322,7 +1313,7 @@ def test_wait_for_execution_fails_closed_when_terminal_timestamp_never_converges
             {
                 "name": "proof",
                 "status": "Failed",
-                "startTime": "2026-08-07T04:34:41Z",
+                "startTime": None,
                 "endTime": None,
             }
         ],
