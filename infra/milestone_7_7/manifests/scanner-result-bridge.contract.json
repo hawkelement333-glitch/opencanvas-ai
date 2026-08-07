@@ -60,8 +60,11 @@
   },
   "proof": {
     "jobKind": "bounded-container-apps-job",
+    "failureMarkerSchema": "mobius.scanner-result-bridge.proof-failure.v1",
     "requiredDecisions": ["clean", "malicious", "missing", "error", "not-scanned", "conflict", "stale"],
     "privateDnsReadback": true,
+    "retainedConsoleDiagnosticCategory": "ContainerAppConsoleLogs",
+    "retainedConsoleDiagnosticScope": "managed-environment",
     "temporaryProbeAuthorityRevoked": true,
     "sanitizedEvidenceOnly": true
   },

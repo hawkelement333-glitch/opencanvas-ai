@@ -364,6 +364,9 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
         "compute.bicep": [
             "param computeTopology string = 'internal-azure-container-apps'",
             "param workloadProfile string = 'Consumption'",
+            "param logAnalyticsWorkspaceId string = ''",
+            "Microsoft.Insights/diagnosticSettings@2021-05-01-preview",
+            "category: 'ContainerAppConsoleLogs'",
             "sharedWorkerPool:",
             "cpuMilli: 500",
             "maxReplicas: 4",
@@ -445,6 +448,23 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
     assert "enablePurgeProtection:" not in key_vault_text
     assert "enableSoftDelete: true" in key_vault_text
     assert "softDeleteRetentionInDays: 7" in key_vault_text
+
+
+def test_scanner_proof_console_diagnostic_is_narrow_and_private() -> None:
+    compute = (ROOT / "modules" / "compute.bicep").read_text(encoding="utf-8")
+    main = (ROOT / "main.bicep").read_text(encoding="utf-8")
+    diagnostic = compute[compute.index("resource proofConsoleDiagnostic") :]
+    diagnostic = diagnostic[: diagnostic.index("resource telemetryContainerApp")]
+
+    assert "scope: managedEnvironment" in diagnostic
+    assert "name: 'mobius77-scanner-proof-console'" in diagnostic
+    assert "logAnalyticsDestinationType: 'Dedicated'" in diagnostic
+    assert diagnostic.count("category: 'ContainerAppConsoleLogs'") == 1
+    assert "ContainerAppSystemLogs" not in diagnostic
+    assert "metrics: []" in diagnostic
+    assert "workspaceId: logAnalyticsWorkspaceId" in diagnostic
+    assert "logAnalyticsWorkspaceId: observability.outputs.workspaceId" in main
+    assert "publicNetworkAccess: 'Disabled'" in compute
 
 
 def test_private_pull_scanner_has_no_push_transport_or_tag_write_authority() -> None:
@@ -1140,12 +1160,12 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
             "ecdbb32f-9134-5697-85f9-d569ba57454b",
             "158cac88-5679-5804-9f4d-854520bbb635",
         },
-            "manifests/managed-binding.schema.json": {
-                "b24988ac-6180-42a0-ab88-20f7382dd24c",
-                "b74c6cfe-995e-5107-9e42-4f7f76b76742",
-                "f61544fe-cd79-5247-ac8b-ee9697b6ffd6",
-                "5ffc55c1-7a88-5231-b0d1-e76ee95d057e",
-                "d83b4107-54e0-57a4-b650-fe0b556132d2",
+        "manifests/managed-binding.schema.json": {
+            "b24988ac-6180-42a0-ab88-20f7382dd24c",
+            "b74c6cfe-995e-5107-9e42-4f7f76b76742",
+            "f61544fe-cd79-5247-ac8b-ee9697b6ffd6",
+            "5ffc55c1-7a88-5231-b0d1-e76ee95d057e",
+            "d83b4107-54e0-57a4-b650-fe0b556132d2",
             "ecdbb32f-9134-5697-85f9-d569ba57454b",
             "158cac88-5679-5804-9f4d-854520bbb635",
         },

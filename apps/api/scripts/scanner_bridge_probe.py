@@ -9,7 +9,9 @@ import re
 import socket
 import ssl
 import uuid
+from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 
@@ -23,8 +25,12 @@ from opencanvas_api.services.documents import (
 from opencanvas_api.services.scanner_bridge import (
     AzureBlobScanEvidenceClient,
     AzureLogAnalyticsScanEvidenceClient,
+    BlobScanEvidence,
+    BlobScanEvidenceReader,
+    LogAnalyticsScanEvidenceReader,
     PrivateDnsVerifier,
-    correlate_scan_evidence,
+    ScannerBridgeDecision,
+    diagnose_scan_evidence,
     log_analytics_query_sha256,
 )
 
@@ -33,6 +39,23 @@ _OBJECT_NAMESPACE = uuid.UUID("ddff9e14-5c8c-5e20-a610-1fcc4e1f44cb")
 _WORKSPACE_ID = uuid.UUID("2b5f8ed5-725f-5b10-ab10-ad255bf42bb2")
 _USER_ID = uuid.UUID("f9c06d27-29bf-59be-b236-fee627452a5f")
 _TRACE_ID = uuid.UUID("9070a5fc-688a-5587-a3d4-69cf3bb767cd")
+_FAILURE_CODE = re.compile(r"^scanner-[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+class ScannerBridgeProbeFailure(RuntimeError):
+    """A sanitized terminal proof failure retained before canary cleanup."""
+
+    def __init__(self, failure_code: str, attempt_count: int) -> None:
+        super().__init__(failure_code)
+        self.failure_code = failure_code
+        self.attempt_count = attempt_count
+
+
+@dataclass(frozen=True, slots=True)
+class _ProofMatch:
+    decision: ScannerBridgeDecision
+    blob: BlobScanEvidence
+    attempt_count: int
 
 
 def _required_environment(name: str) -> str:
@@ -145,6 +168,74 @@ async def _put_exact_canary(
     raise RuntimeError("scanner-bridge-probe-upload-reconciliation-exhausted")
 
 
+def _safe_failure_code(exc: RuntimeError, fallback: str) -> str:
+    value = str(exc)
+    if len(value) <= 128 and _FAILURE_CODE.fullmatch(value) is not None:
+        return value
+    return fallback
+
+
+async def _poll_dual_source_evidence(
+    *,
+    version: StorageObjectVersion,
+    request: MalwareScanRequest,
+    blob_reader: BlobScanEvidenceReader,
+    log_reader: LogAnalyticsScanEvidenceReader,
+    max_attempts: int,
+    delay_seconds: float,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> _ProofMatch:
+    if max_attempts < 1:
+        raise RuntimeError("scanner-bridge-probe-bounds-invalid")
+    latest_failure = "scanner-correlation-log-evidence-missing"
+    for attempt in range(max_attempts):
+        observed_at = clock()
+        try:
+            blob = await blob_reader.read(version, observed_at=observed_at)
+        except RuntimeError as exc:
+            latest_failure = _safe_failure_code(exc, "scanner-blob-evidence-unavailable")
+        else:
+            try:
+                logs = await log_reader.read(
+                    account_name=blob.account_name,
+                    object_uri=blob.object_uri,
+                    etag=blob.etag,
+                    requested_at=request.requested_at,
+                    observed_at=observed_at,
+                )
+            except RuntimeError as exc:
+                latest_failure = _safe_failure_code(exc, "scanner-log-query-unavailable")
+            else:
+                try:
+                    correlation = diagnose_scan_evidence(
+                        version=version,
+                        request=request,
+                        blob=blob,
+                        logs=logs,
+                        observed_at=observed_at,
+                        maximum_age=timedelta(hours=24),
+                    )
+                except RuntimeError as exc:
+                    latest_failure = _safe_failure_code(
+                        exc, "scanner-correlation-validation-failed"
+                    )
+                else:
+                    if correlation.decision is not None:
+                        if not logs:
+                            raise RuntimeError("scanner-correlation-log-evidence-missing")
+                        return _ProofMatch(
+                            decision=correlation.decision,
+                            blob=blob,
+                            attempt_count=attempt + 1,
+                        )
+                    latest_failure = (
+                        correlation.failure_code or "scanner-correlation-validation-failed"
+                    )
+        if attempt + 1 < max_attempts:
+            await asyncio.sleep(delay_seconds)
+    raise ScannerBridgeProbeFailure(latest_failure, max_attempts)
+
+
 async def run(*, max_attempts: int, delay_seconds: float) -> int:
     account_url = _required_environment("OPENCANVAS_AZURE_STORAGE_ACCOUNT_URL")
     workspace_customer_id = uuid.UUID(
@@ -232,46 +323,37 @@ async def run(*, max_attempts: int, delay_seconds: float) -> int:
         requested_at=requested_at,
         deadline_at=requested_at + timedelta(hours=1),
     )
-    decision = None
-    matched_blob = None
-    matched_log = None
     try:
-        for attempt in range(max_attempts):
-            observed_at = datetime.now(UTC)
-            try:
-                blob = await blob_reader.read(version, observed_at=observed_at)
-                logs = await log_reader.read(
-                    account_name=blob.account_name,
-                    object_uri=blob.object_uri,
-                    etag=blob.etag,
-                    requested_at=requested_at,
-                    observed_at=observed_at,
-                )
-                decision = correlate_scan_evidence(
-                    version=version,
-                    request=request,
-                    blob=blob,
-                    logs=logs,
-                    observed_at=observed_at,
-                    maximum_age=timedelta(hours=24),
-                )
-            except RuntimeError:
-                decision = None
-            if decision is not None:
-                matched_blob = blob
-                matched_log = logs[0]
-                break
-            if attempt + 1 < max_attempts:
-                await asyncio.sleep(delay_seconds)
-        if (
-            decision is None
-            or decision.verdict != "clean"
-            or matched_blob is None
-            or matched_log is None
-        ):
-            raise RuntimeError("scanner-bridge-probe-dual-source-proof-incomplete")
+        try:
+            match = await _poll_dual_source_evidence(
+                version=version,
+                request=request,
+                blob_reader=blob_reader,
+                log_reader=log_reader,
+                max_attempts=max_attempts,
+                delay_seconds=delay_seconds,
+            )
+        except ScannerBridgeProbeFailure as exc:
+            print(
+                json.dumps(
+                    {
+                        "attemptCount": exc.attempt_count,
+                        "failureCode": exc.failure_code,
+                        "marker": "SCANNER_RESULT_BRIDGE_FAILED",
+                        "schemaVersion": "mobius.scanner-result-bridge.proof-failure.v1",
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+            raise
     finally:
         await _remove_exact_canary(storage, provider)
+    decision = match.decision
+    matched_blob = match.blob
+    if decision.verdict != "clean":
+        raise RuntimeError("scanner-correlation-scan-result-mismatch")
     dns_integrity = hashlib.sha256(
         json.dumps(resolved, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
@@ -317,7 +399,8 @@ async def run(*, max_attempts: int, delay_seconds: float) -> int:
             },
             separators=(",", ":"),
             sort_keys=True,
-        )
+        ),
+        flush=True,
     )
     return 0
 

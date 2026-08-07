@@ -416,6 +416,7 @@ module compute './modules/compute.bicep' = if (workloadEnabled) {
     redisWorkerUsername: postSecretEnabled ? redis.outputs.workerUsername : ''
     storageAccountUrl: scannerFoundationEnabled ? storage.outputs.storageAccountUrl : ''
     logAnalyticsWorkspaceCustomerId: observability.outputs.workspaceCustomerId
+    logAnalyticsWorkspaceId: observability.outputs.workspaceId
     smtpHost: smtpHost
     smtpFromAddress: smtpFromAddress
     lifecycleTags: lifecycleTags

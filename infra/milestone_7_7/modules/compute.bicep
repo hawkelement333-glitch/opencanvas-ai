@@ -71,6 +71,7 @@ param redisApiUsername string = ''
 param redisWorkerUsername string = ''
 param storageAccountUrl string = ''
 param logAnalyticsWorkspaceCustomerId string = ''
+param logAnalyticsWorkspaceId string = ''
 @allowed([
   'sandbox.smtp.mailtrap.io'
 ])
@@ -195,6 +196,22 @@ resource managedEnvironment 'Microsoft.App/managedEnvironments@2026-01-01' = if 
     infrastructureResourceGroup: infrastructureResourceGroupName
     vnetConfiguration: { infrastructureSubnetId: containerAppsSubnetId, internal: true }
     zoneRedundant: false
+  }
+}
+
+resource proofConsoleDiagnostic 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (enabled) {
+  scope: managedEnvironment
+  name: 'mobius77-scanner-proof-console'
+  properties: {
+    logAnalyticsDestinationType: 'Dedicated'
+    logs: [
+      {
+        category: 'ContainerAppConsoleLogs'
+        enabled: true
+      }
+    ]
+    metrics: []
+    workspaceId: logAnalyticsWorkspaceId
   }
 }
 
@@ -450,6 +467,7 @@ output managedBindingMode string = managedBindingMode
 output managedBindingDeploymentEnabled bool = enabled
 output applicationDeploymentEnabled bool = appEnabled
 output managedEnvironmentId string = enabled ? managedEnvironment.id : ''
+output proofConsoleDiagnosticId string = enabled ? proofConsoleDiagnostic.id : ''
 output infrastructureResourceGroupName string = infrastructureResourceGroupName
 output apiContainerAppId string = appEnabled ? apiContainerApp.id : ''
 output workerContainerAppId string = appEnabled ? workerContainerApp.id : ''

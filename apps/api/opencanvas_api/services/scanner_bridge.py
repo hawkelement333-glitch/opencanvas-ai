@@ -133,6 +133,14 @@ class ScannerBridgeDecision:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class ScanEvidenceCorrelation:
+    """Exact proof-only diagnostics without changing consumer fail-closed behavior."""
+
+    decision: ScannerBridgeDecision | None
+    failure_code: str | None
+
+
 class BlobScanEvidenceReader(Protocol):
     async def read(
         self, version: StorageObjectVersion, *, observed_at: datetime
@@ -202,23 +210,50 @@ class AzureBlobScanEvidenceClient:
         if version.provider_name != "azure" or version.security_class != "quarantine":
             raise ScannerBridgeEvidenceError("scanner-object-identity-invalid")
         await self.dns.verify(self.hostname)
-        await self.storage.read_version_properties(
-            physical_key=version.physical_key,
-            provider_version_id=version.provider_version_id,
-            expected_etag=version.etag,
-        )
-        xml = await self.storage.read_version_tags_xml(
-            physical_key=version.physical_key,
-            provider_version_id=version.provider_version_id,
-            expected_etag=version.etag,
-        )
+        try:
+            await self.storage.read_version_properties(
+                physical_key=version.physical_key,
+                provider_version_id=version.provider_version_id,
+                expected_etag=version.etag,
+            )
+        except DocumentStorageError as exc:
+            code = (
+                "scanner-blob-authorization-unavailable"
+                if exc.code
+                in {
+                    "managed_identity_authorization_failed",
+                    "storage_authorization_failed",
+                }
+                else "scanner-blob-evidence-unavailable"
+            )
+            raise ScannerBridgeEvidenceError(code) from exc
+        try:
+            xml = await self.storage.read_version_tags_xml(
+                physical_key=version.physical_key,
+                provider_version_id=version.provider_version_id,
+                expected_etag=version.etag,
+            )
+        except DocumentStorageError as exc:
+            code = (
+                "scanner-blob-authorization-unavailable"
+                if exc.code
+                in {
+                    "managed_identity_authorization_failed",
+                    "storage_authorization_failed",
+                }
+                else "scanner-blob-tag-evidence-unavailable"
+            )
+            raise ScannerBridgeEvidenceError(code) from exc
         tags = _parse_blob_tags(xml)
         if set(tags) != {BLOB_RESULT_TAG, BLOB_SCAN_TIME_TAG}:
             raise ScannerBridgeEvidenceError("scanner-blob-tag-evidence-incomplete")
         result = tags[BLOB_RESULT_TAG]
         if result not in _BLOB_RESULTS:
             raise ScannerBridgeEvidenceError("scanner-blob-tag-result-invalid")
-        finished = _parse_utc(tags[BLOB_SCAN_TIME_TAG])
+        try:
+            finished = _parse_utc(tags[BLOB_SCAN_TIME_TAG])
+        except ScannerBridgeEvidenceError as exc:
+            raise ScannerBridgeEvidenceError("scanner-blob-tag-scan-time-invalid") from exc
         uri = self.storage.object_url(version.physical_key)
         etag = _normalize_azure_etag(version.etag)
         integrity = _canonical_sha256(
@@ -308,7 +343,10 @@ class AzureLogAnalyticsScanEvidenceClient:
         )
         start = _aware_utc(requested_at) - timedelta(minutes=5)
         end = _aware_utc(observed_at) + timedelta(minutes=1)
-        token = await self.token_provider.get_token(LOG_ANALYTICS_TOKEN_RESOURCE)
+        try:
+            token = await self.token_provider.get_token(LOG_ANALYTICS_TOKEN_RESOURCE)
+        except DocumentStorageError as exc:
+            raise ScannerBridgeEvidenceError("scanner-log-query-authorization-unavailable") from exc
         try:
             async with httpx.AsyncClient(
                 timeout=self.timeout_seconds,
@@ -320,6 +358,8 @@ class AzureLogAnalyticsScanEvidenceClient:
                     headers={"Authorization": f"Bearer {token}"},
                     json={"query": query, "timespan": f"{_format_utc(start)}/{_format_utc(end)}"},
                 )
+            if response.status_code in {401, 403}:
+                raise ScannerBridgeEvidenceError("scanner-log-query-authorization-unavailable")
             if not 200 <= response.status_code < 300 or len(response.content) > 262_144:
                 raise ScannerBridgeEvidenceError("scanner-log-query-unavailable")
             payload = response.json()
@@ -393,24 +433,46 @@ def correlate_scan_evidence(
 ) -> ScannerBridgeDecision | None:
     """Resolve only exact dual-source agreement; every uncertainty remains pending."""
 
-    if (
-        version.provider_name != "azure"
-        or version.security_class != "quarantine"
-        or blob.provider_version_id != version.provider_version_id
-        or not _azure_etags_equal(blob.etag, version.etag)
-        or not logs
-    ):
-        return None
+    return diagnose_scan_evidence(
+        version=version,
+        request=request,
+        blob=blob,
+        logs=logs,
+        observed_at=observed_at,
+        maximum_age=maximum_age,
+    ).decision
+
+
+def diagnose_scan_evidence(
+    *,
+    version: StorageObjectVersion,
+    request: MalwareScanRequest,
+    blob: BlobScanEvidence,
+    logs: Sequence[LogAnalyticsScanEvidence],
+    observed_at: datetime,
+    maximum_age: timedelta,
+) -> ScanEvidenceCorrelation:
+    """Return one sanitized proof failure code while preserving pending semantics."""
+
+    if version.provider_name != "azure" or version.security_class != "quarantine":
+        return ScanEvidenceCorrelation(None, "scanner-correlation-object-identity-mismatch")
+    if blob.provider_version_id != version.provider_version_id:
+        return ScanEvidenceCorrelation(None, "scanner-correlation-blob-version-mismatch")
+    if not _azure_etags_equal(blob.etag, version.etag):
+        return ScanEvidenceCorrelation(None, "scanner-correlation-blob-etag-mismatch")
+    if not logs:
+        return ScanEvidenceCorrelation(None, "scanner-correlation-log-evidence-missing")
     first = logs[0]
     if any(item.correlation_tuple() != first.correlation_tuple() for item in logs[1:]):
-        return None
-    if (
-        first.account_name != blob.account_name
-        or first.object_uri != blob.object_uri
-        or not _azure_etags_equal(first.etag, blob.etag)
-        or first.scan_finished_at != blob.scan_finished_at
-    ):
-        return None
+        return ScanEvidenceCorrelation(None, "scanner-correlation-log-evidence-ambiguous")
+    if first.account_name != blob.account_name:
+        return ScanEvidenceCorrelation(None, "scanner-correlation-account-mismatch")
+    if first.object_uri != blob.object_uri:
+        return ScanEvidenceCorrelation(None, "scanner-correlation-uri-mismatch")
+    if not _azure_etags_equal(first.etag, blob.etag):
+        return ScanEvidenceCorrelation(None, "scanner-correlation-etag-mismatch")
+    if first.scan_finished_at != blob.scan_finished_at:
+        return ScanEvidenceCorrelation(None, "scanner-correlation-scan-finished-mismatch")
     verdict: BridgeVerdict
     normalized_log_result = _LOG_RESULT_NORMALIZATIONS.get(first.scan_result)
     if (blob.scan_result, normalized_log_result) == (
@@ -421,7 +483,7 @@ def correlate_scan_evidence(
     elif (blob.scan_result, normalized_log_result) == ("Malicious", "Malicious"):
         verdict = "infected"
     else:
-        return None
+        return ScanEvidenceCorrelation(None, "scanner-correlation-scan-result-mismatch")
     finished = _aware_utc(blob.scan_finished_at)
     now = _aware_utc(observed_at)
     if (
@@ -430,7 +492,7 @@ def correlate_scan_evidence(
         or finished > now + timedelta(seconds=60)
         or now - finished > maximum_age
     ):
-        return None
+        return ScanEvidenceCorrelation(None, "scanner-correlation-scan-finished-outside-window")
     integrity = _canonical_sha256(
         {
             "objectVersionId": str(version.object_version_id),
@@ -445,15 +507,18 @@ def correlate_scan_evidence(
         },
         domain="mobius.scanner-bridge.dual-source.v1",
     )
-    return ScannerBridgeDecision(
-        verdict=verdict,
-        correlation_id=first.correlation_id,
-        scan_finished_at=finished,
-        blob_evidence_sha256=blob.evidence_sha256,
-        log_analytics_evidence_sha256=first.evidence_sha256,
-        object_uri_sha256=_sha256_text(blob.object_uri),
-        etag_sha256=_sha256_text(_normalize_azure_etag(blob.etag)),
-        evidence_integrity_sha256=integrity,
+    return ScanEvidenceCorrelation(
+        ScannerBridgeDecision(
+            verdict=verdict,
+            correlation_id=first.correlation_id,
+            scan_finished_at=finished,
+            blob_evidence_sha256=blob.evidence_sha256,
+            log_analytics_evidence_sha256=first.evidence_sha256,
+            object_uri_sha256=_sha256_text(blob.object_uri),
+            etag_sha256=_sha256_text(_normalize_azure_etag(blob.etag)),
+            evidence_integrity_sha256=integrity,
+        ),
+        None,
     )
 
 
@@ -766,9 +831,11 @@ __all__ = [
     "LogAnalyticsScanEvidence",
     "PrivateDnsVerifier",
     "PrivateScannerResultBridgeConsumer",
+    "ScanEvidenceCorrelation",
     "ScannerBridgeDecision",
     "ScannerBridgeEvidenceError",
     "build_private_scanner_result_bridge",
     "correlate_scan_evidence",
+    "diagnose_scan_evidence",
     "log_analytics_query_sha256",
 ]

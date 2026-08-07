@@ -34,6 +34,7 @@ from opencanvas_api.services.scanner_bridge import (
     ScannerBridgeEvidenceError,
     bounded_scanner_retry_delay,
     correlate_scan_evidence,
+    diagnose_scan_evidence,
 )
 
 NOW = datetime(2026, 8, 6, 15, 0, tzinfo=UTC)
@@ -122,6 +123,23 @@ def _correlate(
     )
 
 
+def _diagnose(
+    *,
+    blob: BlobScanEvidence | None = None,
+    logs: tuple[LogAnalyticsScanEvidence, ...] | None = None,
+    observed_at: datetime = NOW,
+) -> object:
+    version = _version()
+    return diagnose_scan_evidence(
+        version=version,
+        request=_request(version),
+        blob=blob or _blob(),
+        logs=logs if logs is not None else (_log(),),
+        observed_at=observed_at,
+        maximum_age=timedelta(hours=24),
+    )
+
+
 def test_exact_dual_source_clean_and_malicious_results_resolve() -> None:
     clean = _correlate()
     malicious = _correlate(
@@ -173,6 +191,36 @@ def test_missing_stale_ambiguous_or_mismatched_evidence_stays_pending() -> None:
         is None
     )
     assert _correlate(blob=replace(_blob(), provider_version_id="different-version")) is None
+
+
+@pytest.mark.parametrize(
+    ("logs", "expected"),
+    [
+        ((), "scanner-correlation-log-evidence-missing"),
+        (
+            (replace(_log(), object_uri=f"{URI}-wrong"),),
+            "scanner-correlation-uri-mismatch",
+        ),
+        (
+            (replace(_log(), etag='"different"'),),
+            "scanner-correlation-etag-mismatch",
+        ),
+        (
+            (replace(_log(), scan_result="Malicious"),),
+            "scanner-correlation-scan-result-mismatch",
+        ),
+        (
+            (replace(_log(), scan_finished_at=FINISHED + timedelta(seconds=1)),),
+            "scanner-correlation-scan-finished-mismatch",
+        ),
+    ],
+)
+def test_proof_diagnostics_distinguish_exact_correlation_gate(
+    logs: tuple[LogAnalyticsScanEvidence, ...], expected: str
+) -> None:
+    diagnosis = _diagnose(logs=logs)
+    assert diagnosis.decision is None  # type: ignore[union-attr]
+    assert diagnosis.failure_code == expected  # type: ignore[union-attr]
 
 
 def test_identical_duplicate_log_rows_reconcile_without_a_duplicate_decision() -> None:
@@ -238,6 +286,57 @@ async def test_blob_adapter_has_only_read_operations_and_binds_exact_version() -
     assert evidence.provider_version_id == VERSION_ID
     assert evidence.etag == ETAG.strip('"')
     assert evidence.object_uri == URI
+
+
+@pytest.mark.parametrize(
+    ("error_code", "expected"),
+    [
+        ("storage_authorization_failed", "scanner-blob-authorization-unavailable"),
+        ("storage_transport_failed", "scanner-blob-evidence-unavailable"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_blob_adapter_distinguishes_authorization_from_source_failure(
+    error_code: str, expected: str
+) -> None:
+    async def private(_hostname: str) -> tuple[str, ...]:
+        return ("10.77.0.9",)
+
+    class FailingStorage(_BlobStorage):
+        async def read_version_properties(self, **_kwargs: str) -> tuple[str, str]:
+            raise DocumentStorageError("safe", code=error_code)
+
+    client = AzureBlobScanEvidenceClient(
+        cast(AzureBlobVersionedObjectStorage, FailingStorage()),
+        dns=PrivateDnsVerifier(private),
+    )
+    with pytest.raises(ScannerBridgeEvidenceError, match=expected):
+        await client.read(_version(), observed_at=NOW)
+
+
+@pytest.mark.asyncio
+async def test_blob_adapter_distinguishes_tag_timestamp_failure() -> None:
+    async def private(_hostname: str) -> tuple[str, ...]:
+        return ("10.77.0.9",)
+
+    class InvalidTimestampStorage(_BlobStorage):
+        async def read_version_tags_xml(self, **_kwargs: str) -> bytes:
+            return (
+                "<?xml version='1.0' encoding='utf-8'?><Tags><TagSet>"
+                f"<Tag><Key>{BLOB_RESULT_TAG}</Key><Value>No threats found</Value></Tag>"
+                f"<Tag><Key>{BLOB_SCAN_TIME_TAG}</Key><Value>not-a-time</Value></Tag>"
+                "</TagSet></Tags>"
+            ).encode()
+
+    client = AzureBlobScanEvidenceClient(
+        cast(AzureBlobVersionedObjectStorage, InvalidTimestampStorage()),
+        dns=PrivateDnsVerifier(private),
+    )
+    with pytest.raises(
+        ScannerBridgeEvidenceError,
+        match="scanner-blob-tag-scan-time-invalid",
+    ):
+        await client.read(_version(), observed_at=NOW)
 
 
 def test_scanner_retry_backoff_is_exponential_capped_and_rejects_invalid_policy() -> None:
@@ -805,6 +904,34 @@ async def test_log_analytics_outage_fails_closed_without_evidence() -> None:
 
 
 @pytest.mark.asyncio
+async def test_log_analytics_authorization_failure_is_not_reported_as_transport() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"error": "redacted"})
+
+    async def private(_hostname: str) -> tuple[str, ...]:
+        return ("10.77.0.10",)
+
+    client = AzureLogAnalyticsScanEvidenceClient(
+        workspace_id=uuid.UUID("00000000-0000-4000-8000-000000000077"),
+        endpoint="https://api.loganalytics.azure.com",
+        token_provider=cast(AzureManagedIdentityTokenProvider, _TokenProvider()),
+        dns=PrivateDnsVerifier(private),
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(
+        ScannerBridgeEvidenceError,
+        match="scanner-log-query-authorization-unavailable",
+    ):
+        await client.read(
+            account_name=ACCOUNT,
+            object_uri=URI,
+            etag=ETAG,
+            requested_at=NOW - timedelta(minutes=2),
+            observed_at=NOW,
+        )
+
+
+@pytest.mark.asyncio
 async def test_managed_identity_adapter_refuses_unrelated_token_audiences() -> None:
     provider = AzureManagedIdentityTokenProvider(
         endpoint="http://127.0.0.1/metadata/identity/oauth2/token",
@@ -826,8 +953,10 @@ def test_live_probe_is_bounded_sanitized_and_deletes_its_exact_version() -> None
     from scripts import scanner_bridge_probe
 
     source = inspect.getsource(scanner_bridge_probe.run)
+    poll_source = inspect.getsource(scanner_bridge_probe._poll_dual_source_evidence)
     cleanup_source = inspect.getsource(scanner_bridge_probe._remove_exact_canary)
-    assert "for attempt in range(max_attempts)" in source
+    assert "for attempt in range(max_attempts)" in poll_source
+    assert "latest_failure" in poll_source
     assert "finally:" in source
     assert "_remove_exact_canary(storage, provider)" in source
     assert "storage.delete_version" in cleanup_source
@@ -838,6 +967,110 @@ def test_live_probe_is_bounded_sanitized_and_deletes_its_exact_version() -> None
     assert "SCANNER_RESULT_BRIDGE_PROVED" in source
     assert "provider.provider_version_id" in source
     assert "print(" in source
+
+
+@pytest.mark.asyncio
+async def test_probe_retains_source_failure_across_bounded_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    class FailingBlobReader:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def read(self, *_args: object, **_kwargs: object) -> BlobScanEvidence:
+            self.calls += 1
+            raise RuntimeError("scanner-blob-tag-evidence-incomplete")
+
+    class UnreachableLogReader:
+        async def read(self, **_kwargs: object) -> tuple[LogAnalyticsScanEvidence, ...]:
+            pytest.fail("Log Analytics must remain unreachable after Blob failure")
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    blob_reader = FailingBlobReader()
+    version = _version()
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "sleep", no_sleep)
+    with pytest.raises(
+        scanner_bridge_probe.ScannerBridgeProbeFailure,
+        match="scanner-blob-tag-evidence-incomplete",
+    ) as failure:
+        await scanner_bridge_probe._poll_dual_source_evidence(
+            version=version,
+            request=_request(version),
+            blob_reader=cast(BlobScanEvidenceReader, blob_reader),
+            log_reader=cast(LogAnalyticsScanEvidenceReader, UnreachableLogReader()),
+            max_attempts=3,
+            delay_seconds=1.0,
+            clock=lambda: NOW,
+        )
+    assert failure.value.failure_code == "scanner-blob-tag-evidence-incomplete"
+    assert failure.value.attempt_count == 3
+    assert blob_reader.calls == 3
+
+
+@pytest.mark.asyncio
+async def test_probe_allows_later_success_after_source_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    class BlobReader:
+        async def read(self, *_args: object, **_kwargs: object) -> BlobScanEvidence:
+            return _blob()
+
+    class RecoveringLogReader:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def read(self, **_kwargs: object) -> tuple[LogAnalyticsScanEvidence, ...]:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("scanner-log-query-unavailable")
+            return (_log(),)
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    log_reader = RecoveringLogReader()
+    version = _version()
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "sleep", no_sleep)
+    match = await scanner_bridge_probe._poll_dual_source_evidence(
+        version=version,
+        request=_request(version),
+        blob_reader=cast(BlobScanEvidenceReader, BlobReader()),
+        log_reader=cast(LogAnalyticsScanEvidenceReader, log_reader),
+        max_attempts=3,
+        delay_seconds=1.0,
+        clock=lambda: NOW,
+    )
+    assert match.decision.verdict == "clean"
+    assert match.attempt_count == 2
+    assert log_reader.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_probe_sanitizes_unknown_runtime_failure_and_stays_fail_closed() -> None:
+    from scripts import scanner_bridge_probe
+
+    class UnknownBlobReader:
+        async def read(self, *_args: object, **_kwargs: object) -> BlobScanEvidence:
+            raise RuntimeError("secret-bearing unknown failure")
+
+    version = _version()
+    with pytest.raises(scanner_bridge_probe.ScannerBridgeProbeFailure) as failure:
+        await scanner_bridge_probe._poll_dual_source_evidence(
+            version=version,
+            request=_request(version),
+            blob_reader=cast(BlobScanEvidenceReader, UnknownBlobReader()),
+            log_reader=cast(LogAnalyticsScanEvidenceReader, object()),
+            max_attempts=1,
+            delay_seconds=1.0,
+            clock=lambda: NOW,
+        )
+    assert failure.value.failure_code == "scanner-blob-evidence-unavailable"
 
 
 @pytest.mark.asyncio
@@ -934,3 +1167,45 @@ async def test_live_probe_reconciles_ambiguous_canary_deletion(
     assert storage.soft_delete_calls == 1
     assert storage.permanent_delete_calls == 1
     assert storage.residue == []
+
+
+@pytest.mark.asyncio
+async def test_live_probe_canary_cleanup_failure_remains_visible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    provider = ProviderObjectVersion(
+        physical_key="quarantine/objects/proof",
+        provider_name="azure",
+        provider_version_id=VERSION_ID,
+        etag=ETAG,
+        byte_size=1,
+        content_sha256="a" * 64,
+    )
+
+    class ResidualStorage:
+        async def delete_version(self, **_kwargs: object) -> None:
+            return None
+
+        async def version_exists(self, **_kwargs: object) -> bool:
+            return False
+
+        async def version_residue_exists(self, **_kwargs: object) -> bool:
+            return True
+
+        async def permanently_delete_version(self, **_kwargs: object) -> None:
+            raise DocumentStorageError("ambiguous permanent delete")
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "sleep", no_sleep)
+    with pytest.raises(
+        RuntimeError,
+        match="scanner-bridge-probe-canary-residue-present",
+    ):
+        await scanner_bridge_probe._remove_exact_canary(
+            cast(AzureBlobVersionedObjectStorage, ResidualStorage()),
+            provider,
+        )

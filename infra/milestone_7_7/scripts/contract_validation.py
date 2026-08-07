@@ -138,7 +138,7 @@ EXPECTED_SCHEMA_DIGESTS = {
         "96cd11b19f621e726075943b3bcf03790255930d6d15ba19b67ac21865eb5d80"
     ),
     "scanner-result-bridge.schema.json": (
-        "4f062127388a640b057c416d92dde1cf83eda0e069934e203835c85317d633b4"
+        "66ba3e36b3e507ed04b957b3fef572a00a9f0540504c83eb06afb3c045993cce"
     ),
 }
 FORBIDDEN_KEY = re.compile(

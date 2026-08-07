@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+
 from infra.milestone_7_7 import scanner_bridge_recovery_adapter as adapter_module
 from infra.milestone_7_7.scanner_bridge_recovery_adapter import (
     ProductionScannerBridgeRecoveryAdapter,
@@ -160,6 +161,17 @@ def _marker() -> dict[str, str]:
     }
 
 
+def _failure_marker(
+    code: str = "scanner-correlation-uri-mismatch",
+) -> dict[str, JsonValue]:
+    return {
+        "attemptCount": 60,
+        "failureCode": code,
+        "marker": "SCANNER_RESULT_BRIDGE_FAILED",
+        "schemaVersion": "mobius.scanner-result-bridge.proof-failure.v1",
+    }
+
+
 def _install_common_fakes(
     monkeypatch: pytest.MonkeyPatch,
     authorization: ScannerBridgeRecoveryAuthorization,
@@ -200,11 +212,16 @@ def _install_common_fakes(
         "_read_deployment_outputs",
         lambda **_kwargs: _outputs(authorization),
     )
-    monkeypatch.setattr(
-        adapter_module,
-        "_verify_foundation",
-        lambda _authorization: calls.append("foundation") or _readback(),
-    )
+
+    def verify_foundation(
+        _authorization: ScannerBridgeRecoveryAuthorization,
+        *,
+        require_proof_console_diagnostic: bool = False,
+    ) -> adapter_module._FoundationReadback:
+        calls.append(f"foundation:{require_proof_console_diagnostic}")
+        return _readback()
+
+    monkeypatch.setattr(adapter_module, "_verify_foundation", verify_foundation)
     monkeypatch.setattr(
         adapter_module,
         "_wait_for_proof_rbac_propagation",
@@ -512,12 +529,68 @@ def test_proof_executes_once_then_removes_residue_and_writes_typed_evidence(
     assert calls.index("rbac-propagation") < calls.index("start")
     assert calls.index("start") < calls.index("marker")
     assert calls.index("marker") < calls.index("residue")
+    assert calls.count("foundation:False") == 1
+    assert calls.count("foundation:True") == 2
     decoded = json.loads(evidence_path.read_text(encoding="utf-8"))
     evidence = deployment_evidence_from_mapping(decoded, now=NOW)
     assert evidence.control_plane_head == HEAD
     assert evidence.worker_tag_write_denied is True
     assert evidence.provider_owned_system_topic_preserved is True
     assert evidence.legacy_evidence.decision == "clean"
+
+
+def test_failed_execution_preserves_exact_marker_before_residue_removal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    authorization = _authorization(PROOF_STAGE)
+    calls: list[str] = []
+    _install_common_fakes(monkeypatch, authorization, calls)
+    monkeypatch.setattr(adapter_module, "_proof_graph", lambda *_args, **_kwargs: "7" * 64)
+    monkeypatch.setattr(adapter_module, "_start_one_execution", lambda _authorization: "proof")
+    monkeypatch.setattr(
+        adapter_module,
+        "_wait_for_execution",
+        lambda *_args: {
+            "name": "proof",
+            "status": "Failed",
+            "startTime": "2026-08-06T14:20:00Z",
+            "endTime": "2026-08-06T14:25:00Z",
+        },
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_failure_marker",
+        lambda *_args: calls.append("failure-marker") or _failure_marker(),
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_marker",
+        lambda *_args: pytest.fail("success marker must remain unreachable"),
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_remove_proof_residue",
+        lambda *_args: calls.append("residue") or "8" * 64,
+    )
+    evidence_path = tmp_path.parent / f"{tmp_path.name}-failure-evidence.json"
+
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-correlation-uri-mismatch",
+    ):
+        ProductionScannerBridgeRecoveryAdapter(clock=lambda: NOW).execute(
+            authorization=authorization,
+            receipt_directory=tmp_path,
+            expected_repository_head=HEAD,
+            evidence_output=evidence_path,
+        )
+
+    assert calls.index("failure-marker") < calls.index("residue")
+    decoded = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert decoded["failureCode"] == "scanner-correlation-uri-mismatch"
+    assert decoded["executionStatus"] == "Failed"
+    assert decoded["marker"] == "SCANNER_RESULT_BRIDGE_FAILED"
+    assert decoded["failureEvidenceIntegritySha256"]
 
 
 def test_failed_proof_still_revokes_all_temporary_authority(
@@ -1019,8 +1092,29 @@ def test_embedded_role_assignment_not_found_is_authoritative_absence() -> None:
 def test_log_parser_accepts_only_one_complete_sanitized_marker() -> None:
     marker = _marker()
     payload = json.dumps([{"TimeStamp": "redacted", "Log": json.dumps(marker)}])
-    assert adapter_module._find_marker(payload) == marker
-    assert adapter_module._find_marker('{"marker":"wrong"}') is None
+    assert adapter_module._find_marker(payload, "SCANNER_RESULT_BRIDGE_PROVED") == marker
+    assert adapter_module._find_marker('{"marker":"wrong"}', "SCANNER_RESULT_BRIDGE_PROVED") is None
+
+
+def test_failure_log_parser_accepts_only_sanitized_exact_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = _failure_marker("scanner-blob-tag-scan-time-invalid")
+    payload = json.dumps([{"TimeStamp": "redacted", "Log": json.dumps(marker)}])
+    monkeypatch.setattr(adapter_module, "_proof_log_output", lambda *_args: payload)
+    assert adapter_module._proof_failure_marker(_authorization(PROOF_STAGE), "proof") == marker
+
+    malformed = {**marker, "failureCode": "secret bearing failure"}
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_log_output",
+        lambda *_args: json.dumps(malformed),
+    )
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-failure-marker-malformed",
+    ):
+        adapter_module._proof_failure_marker(_authorization(PROOF_STAGE), "proof")
 
 
 def test_private_dns_zone_group_requires_the_exact_authorized_set(
@@ -1109,6 +1203,15 @@ def test_authoritative_readback_uses_the_provider_data_scanner_resource_type() -
     source = inspect.getsource(adapter_module._foundation_readback_once)
     assert "dataScanners/{DEFENDER_SCANNER}" in source
     assert "storageDataScanners" not in source
+
+
+def test_authoritative_readback_requires_exact_proof_console_diagnostic() -> None:
+    source = inspect.getsource(adapter_module._foundation_readback_once)
+    assert "require_proof_console_diagnostic" in source
+    assert "ContainerAppConsoleLogs" in source
+    assert "scanner-proof-console-diagnostic-unproved" in source
+    assert "authorization.logAnalyticsWorkspaceId" in source
+    assert 'proof_console_diagnostic.get("destinationType") != "Dedicated"' in source
 
 
 def test_storage_tag_writer_inventory_includes_inherited_and_nested_assignments(

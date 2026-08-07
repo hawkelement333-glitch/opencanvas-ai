@@ -435,10 +435,20 @@ class AzureManagedIdentityTokenProvider:
                     f"{self.endpoint}{separator}{query}",
                     headers={"X-IDENTITY-HEADER": self._identity_header},
                 )
+            if response.status_code in {401, 403}:
+                raise DocumentStorageError(
+                    "The Azure workload identity is unauthorized.",
+                    code="managed_identity_authorization_failed",
+                )
             response.raise_for_status()
             token = response.json().get("access_token")
+        except DocumentStorageError:
+            raise
         except (httpx.HTTPError, ValueError) as exc:
-            raise DocumentStorageError("The Azure workload identity is unavailable.") from exc
+            raise DocumentStorageError(
+                "The Azure workload identity is unavailable.",
+                code="managed_identity_unavailable",
+            ) from exc
         if not isinstance(token, str) or not token:
             raise DocumentStorageError("The Azure workload identity returned no token.")
         return token
@@ -816,15 +826,26 @@ class AzureBlobVersionedObjectStorage:
         try:
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
                 response = await client.request(method, url, headers=headers, content=content)
+            if response.status_code in {401, 403}:
+                raise DocumentStorageError(
+                    "The private Azure object store denied authorization.",
+                    code="storage_authorization_failed",
+                )
             if not 200 <= response.status_code < 300 and (
                 response.status_code not in accepted_statuses
             ):
-                raise DocumentStorageError("The private Azure object store rejected the operation.")
+                raise DocumentStorageError(
+                    "The private Azure object store rejected the operation.",
+                    code="storage_operation_rejected",
+                )
             return response
         except DocumentStorageError:
             raise
         except httpx.HTTPError as exc:
-            raise DocumentStorageError("The private Azure object store is unavailable.") from exc
+            raise DocumentStorageError(
+                "The private Azure object store is unavailable.",
+                code="storage_transport_failed",
+            ) from exc
 
     def _object_url(self, physical_key: str) -> str:
         pure = _validate_key(physical_key)
