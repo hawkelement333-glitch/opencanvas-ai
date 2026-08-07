@@ -38,7 +38,7 @@
       "required": ["kind", "blobTagKeys", "logAnalyticsTable", "logAnalyticsColumns", "privateLinkScopeResourceType", "queryAccessMode", "ingestionAccessMode", "noCustomEventGridTopic", "noEventSubscription", "noQueue", "publicFallback"],
       "properties": {
         "kind": {"const": "private-blob-tags-plus-ampls-log-analytics-pull"},
-        "blobTagKeys": {"const": ["Malware scanning scan result", "Malware scanning scan time"]},
+        "blobTagKeys": {"const": ["Malware scanning scan result", "Malware scanning scan time UTC"]},
         "logAnalyticsTable": {"const": "StorageMalwareScanningResults"},
         "logAnalyticsColumns": {"type": "array", "minItems": 7, "uniqueItems": true, "items": {"type": "string"}},
         "privateLinkScopeResourceType": {"const": "Microsoft.Insights/privateLinkScopes"},

@@ -123,22 +123,34 @@ FORBIDDEN_BUNDLE_PARTS = {
     "out",
 }
 EXPECTED_POLICY_DIGESTS = {
-    "dependency-order.json": ("036a369242182e52018f98e0b27d2944492c977e82475edd8a9209fecd1afce2"),
-    "lifecycle-policy.json": ("0554ff8155f704252c31604fef02565d84e638da446c938779077572cc6fda0c"),
-    "network-policy.json": ("67fe0f29d7a69c78a08a213764da7498a6a83293c3e8838c7d3f971da15a851b"),
-    "resource-policy.json": ("83e0bc9952184edf9d41e37d3b0d5b94d330e49488a7fab7e211ca27cacd3516"),
-    "unresolved-gates.json": ("c6b039152023b53b339b42dd88f6622ca369d7d912476a8f656355b847c6256c"),
+    "dependency-order.json": (
+        "036a369242182e52018f98e0b27d2944492c977e82475edd8a9209fecd1afce2"
+    ),
+    "lifecycle-policy.json": (
+        "0554ff8155f704252c31604fef02565d84e638da446c938779077572cc6fda0c"
+    ),
+    "network-policy.json": (
+        "67fe0f29d7a69c78a08a213764da7498a6a83293c3e8838c7d3f971da15a851b"
+    ),
+    "resource-policy.json": (
+        "83e0bc9952184edf9d41e37d3b0d5b94d330e49488a7fab7e211ca27cacd3516"
+    ),
+    "unresolved-gates.json": (
+        "c6b039152023b53b339b42dd88f6622ca369d7d912476a8f656355b847c6256c"
+    ),
 }
 EXPECTED_SCHEMA_DIGESTS = {
     "cost-envelope.schema.json": (
         "1bf046d404541d4fec76673264255e941406ad6a7edbaec9dbe9f4573654452a"
     ),
-    "environment.schema.json": ("27e038b925ccd66b1172942dd7bf1963bd681fd1e92769f6d46a34d720187076"),
+    "environment.schema.json": (
+        "27e038b925ccd66b1172942dd7bf1963bd681fd1e92769f6d46a34d720187076"
+    ),
     "image-digests.schema.json": (
         "96cd11b19f621e726075943b3bcf03790255930d6d15ba19b67ac21865eb5d80"
     ),
     "scanner-result-bridge.schema.json": (
-        "66ba3e36b3e507ed04b957b3fef572a00a9f0540504c83eb06afb3c045993cce"
+        "f74bde20bfb1a2c689b6b1d4abc6e7634905264c0a8939a697b50c5d5a8a922b"
     ),
 }
 FORBIDDEN_KEY = re.compile(
@@ -175,7 +187,9 @@ GUID_PATTERN = re.compile(
 HEX_SHA40 = re.compile(r"^[0-9a-f]{40}$")
 HEX_SHA64 = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-RESOURCE_GROUP_NAME = re.compile(r"^[A-Za-z0-9_()\-](?:[A-Za-z0-9._()\-]{0,88}[A-Za-z0-9_()\-])?$")
+RESOURCE_GROUP_NAME = re.compile(
+    r"^[A-Za-z0-9_()\-](?:[A-Za-z0-9._()\-]{0,88}[A-Za-z0-9_()\-])?$"
+)
 
 
 class ContractError(ValueError):
@@ -205,7 +219,9 @@ def loads_json(text: str) -> Any:
             parse_constant=_reject_nonfinite_constant,
         )
     except json.JSONDecodeError as exc:
-        raise ContractError(f"invalid JSON at line {exc.lineno}, column {exc.colno}") from exc
+        raise ContractError(
+            f"invalid JSON at line {exc.lineno}, column {exc.colno}"
+        ) from exc
 
 
 def load_json(path: Path) -> Any:
@@ -214,7 +230,9 @@ def load_json(path: Path) -> Any:
     except ContractError:
         raise
     except (OSError, UnicodeError) as exc:
-        raise ContractError(f"JSON input is unavailable ({type(exc).__name__})") from None
+        raise ContractError(
+            f"JSON input is unavailable ({type(exc).__name__})"
+        ) from None
 
 
 def _normalise_json(value: Any, path: str = "$") -> Any:
@@ -227,7 +245,10 @@ def _normalise_json(value: Any, path: str = "$") -> Any:
     if isinstance(value, str):
         return unicodedata.normalize("NFC", value)
     if isinstance(value, list):
-        return [_normalise_json(item, f"{path}[{index}]") for index, item in enumerate(value)]
+        return [
+            _normalise_json(item, f"{path}[{index}]")
+            for index, item in enumerate(value)
+        ]
     if isinstance(value, Mapping):
         normalised: dict[str, Any] = {}
         for key, item in value.items():
@@ -236,7 +257,9 @@ def _normalise_json(value: Any, path: str = "$") -> Any:
             normalised_key = unicodedata.normalize("NFC", key)
             if normalised_key in normalised:
                 raise ContractError(f"normalization creates duplicate key at {path}")
-            normalised[normalised_key] = _normalise_json(item, f"{path}.{normalised_key}")
+            normalised[normalised_key] = _normalise_json(
+                item, f"{path}.{normalised_key}"
+            )
         return {key: normalised[key] for key in sorted(normalised)}
     raise ContractError(f"unsupported JSON value at {path}")
 
@@ -260,7 +283,9 @@ def manifest_sha256(kind: str, version: str, value: Any) -> str:
         raise ContractError("manifest kind is invalid")
     if not re.fullmatch(r"v[1-9][0-9]{0,7}", version):
         raise ContractError("manifest version is invalid")
-    payload = f"{CONTRACT_DOMAIN}:{kind}:{version}\n".encode() + canonical_json_bytes(value)
+    payload = f"{CONTRACT_DOMAIN}:{kind}:{version}\n".encode() + canonical_json_bytes(
+        value
+    )
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -349,7 +374,9 @@ def validate_schema_subset(
 
     expected_type = schema.get("type")
     if expected_type is not None:
-        expected_types = [expected_type] if isinstance(expected_type, str) else expected_type
+        expected_types = (
+            [expected_type] if isinstance(expected_type, str) else expected_type
+        )
         if not any(_json_type_matches(instance, item) for item in expected_types):
             raise ContractError(f"type mismatch at {path}")
 
@@ -369,7 +396,9 @@ def validate_schema_subset(
         for key, value in instance.items():
             child_schema = properties.get(key)
             if child_schema is not None:
-                validate_schema_subset(value, child_schema, f"{path}.{key}", root_schema)
+                validate_schema_subset(
+                    value, child_schema, f"{path}.{key}", root_schema
+                )
         return
 
     if isinstance(instance, list):
@@ -396,7 +425,9 @@ def validate_schema_subset(
         if item_schema is not None:
             start = len(prefix_items) if prefix_items else 0
             for index, value in enumerate(instance[start:], start=start):
-                validate_schema_subset(value, item_schema, f"{path}[{index}]", root_schema)
+                validate_schema_subset(
+                    value, item_schema, f"{path}[{index}]", root_schema
+                )
         return
 
     if isinstance(instance, str):
@@ -428,7 +459,10 @@ def scan_private_material(value: Any, path: str = "$") -> None:
     if isinstance(value, Mapping):
         for key, child in value.items():
             normalised_key = re.sub(r"[^a-z0-9]", "", key.lower())
-            if FORBIDDEN_KEY.search(normalised_key) and normalised_key not in SAFE_CONTROL_KEYS:
+            if (
+                FORBIDDEN_KEY.search(normalised_key)
+                and normalised_key not in SAFE_CONTROL_KEYS
+            ):
                 raise ContractError(f"forbidden private field name at {path}.{key}")
             scan_private_material(child, f"{path}.{key}")
         return
@@ -447,7 +481,9 @@ def scan_private_material(value: Any, path: str = "$") -> None:
 def _validate_environment(value: Mapping[str, Any]) -> None:
     if value["resolutionStatus"] == "unresolved" and value["location"] is not None:
         raise ContractError("unresolved environment must not select a location")
-    if value["resolutionStatus"] == "verified" and not isinstance(value["location"], str):
+    if value["resolutionStatus"] == "verified" and not isinstance(
+        value["location"], str
+    ):
         raise ContractError("verified environment requires one explicit location")
     if value["provisioningAuthorized"] is not False:
         raise ContractError("Checkpoint 1 cannot authorize provisioning")
@@ -516,7 +552,9 @@ def _validate_environment(value: Mapping[str, Any]) -> None:
         raise ContractError("verified environment requires a cleanup binding")
     start = _parse_utc(lifecycle["provisioningStartedAtUtc"], "provisioning start")
     expiry = _parse_utc(lifecycle["leaseExpiresAtUtc"], "lease expiry")
-    reserve = _parse_utc(lifecycle["cleanupReserveStartsAtUtc"], "cleanup reserve start")
+    reserve = _parse_utc(
+        lifecycle["cleanupReserveStartsAtUtc"], "cleanup reserve start"
+    )
     timer_verified = _parse_utc(
         lifecycle["cleanupTimerVerifiedAtUtc"], "cleanup timer verification"
     )
@@ -547,7 +585,10 @@ def _validate_images(value: Mapping[str, Any]) -> None:
     if roles != EXPECTED_IMAGE_ROLES:
         raise ContractError("image role inventory or order differs")
     if value["resolutionStatus"] == "unresolved":
-        if value["buildManifestSha256"] is not None or value["registryBindingSha256"] is not None:
+        if (
+            value["buildManifestSha256"] is not None
+            or value["registryBindingSha256"] is not None
+        ):
             raise ContractError("unresolved images must not bind build or registry")
         if any(item["digest"] is not None for item in value["images"]):
             raise ContractError("unresolved images must not contain image digests")
@@ -556,7 +597,9 @@ def _validate_images(value: Mapping[str, Any]) -> None:
         registry_binding = value["registryBindingSha256"]
         if not isinstance(build_digest, str) or not HEX_SHA64.fullmatch(build_digest):
             raise ContractError("verified images require a build manifest digest")
-        if not isinstance(registry_binding, str) or not HEX_SHA64.fullmatch(registry_binding):
+        if not isinstance(registry_binding, str) or not HEX_SHA64.fullmatch(
+            registry_binding
+        ):
             raise ContractError("verified images require an exact registry binding")
         for item in value["images"]:
             digest = item["digest"]
@@ -572,7 +615,10 @@ def _validate_cost(value: Mapping[str, Any]) -> None:
     lines = value["lineItems"]
     if value["resolutionStatus"] == "unresolved":
         if (
-            any(item is not None for item in (expected, base_maximum, contingency, maximum))
+            any(
+                item is not None
+                for item in (expected, base_maximum, contingency, maximum)
+            )
             or lines
         ):
             raise ContractError("unresolved cost envelope contains a price")
@@ -658,7 +704,9 @@ def validate_manifest(root: Path, value: Any) -> tuple[str, str]:
         UnicodeError,
         ValueError,
     ) as exc:
-        raise ContractError(f"manifest validation failed closed ({type(exc).__name__})") from None
+        raise ContractError(
+            f"manifest validation failed closed ({type(exc).__name__})"
+        ) from None
 
 
 def _validate_policies(root: Path, environment: Mapping[str, Any]) -> None:
@@ -697,7 +745,9 @@ def _validate_policies(root: Path, environment: Mapping[str, Any]) -> None:
     if network["publicNetworkAccessAllowed"] is not False:
         raise ContractError("public network access is forbidden")
     network_address_plan = {
-        key: value for key, value in network["addressPlan"].items() if key != "selectionStatus"
+        key: value
+        for key, value in network["addressPlan"].items()
+        if key != "selectionStatus"
     }
     if network_address_plan != EXPECTED_ADDRESS_PLAN:
         raise ContractError("network policy address plan differs")
@@ -708,7 +758,9 @@ def _validate_policies(root: Path, environment: Mapping[str, Any]) -> None:
         "managementCleanup": environment["network"]["managementCleanupCidr"],
         "gateway": environment["network"]["gatewayCidr"],
         "azureFirewall": environment["network"]["azureFirewallCidr"],
-        "azureFirewallManagement": environment["network"]["azureFirewallManagementCidr"],
+        "azureFirewallManagement": environment["network"][
+            "azureFirewallManagementCidr"
+        ],
     }
     if network_address_plan != environment_address_plan:
         raise ContractError("environment and network policy address plans differ")
@@ -784,7 +836,9 @@ def validate_bundle(root: Path) -> dict[str, Any]:
         UnicodeError,
         ValueError,
     ) as exc:
-        raise ContractError(f"bundle validation failed closed ({type(exc).__name__})") from None
+        raise ContractError(
+            f"bundle validation failed closed ({type(exc).__name__})"
+        ) from None
 
 
 def _bundle_paths(root: Path) -> list[Path]:
@@ -861,7 +915,9 @@ def _normalise_arm_root(value: str) -> str:
     return trimmed.lower()
 
 
-def assert_exact_resource_group_roots(target: str, cleanup_control: str) -> tuple[str, str]:
+def assert_exact_resource_group_roots(
+    target: str, cleanup_control: str
+) -> tuple[str, str]:
     normal_target = _normalise_arm_root(target)
     normal_cleanup = _normalise_arm_root(cleanup_control)
     if normal_target == normal_cleanup:
@@ -928,7 +984,9 @@ def assert_within_exact_root(candidate: str, approved_root: str) -> str:
 
 
 def scope_binding_sha256(target: str, cleanup_control: str) -> str:
-    normal_target, normal_cleanup = assert_exact_resource_group_roots(target, cleanup_control)
+    normal_target, normal_cleanup = assert_exact_resource_group_roots(
+        target, cleanup_control
+    )
     return manifest_sha256(
         "scope-binding",
         "v1",

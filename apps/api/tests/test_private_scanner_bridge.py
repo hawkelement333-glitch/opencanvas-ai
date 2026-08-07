@@ -44,6 +44,8 @@ URI = f"https://{ACCOUNT}.blob.core.windows.net/quarantine/objects/evidence"
 ETAG = '"0x8DEFACED"'
 VERSION_ID = "2026-08-06T14:58:00.0000000Z"
 CORRELATION_ID = "00000000-0000-4000-8000-000000000077"
+AUTHORITATIVE_BLOB_SCAN_TIME_TAG = "Malware scanning scan time UTC"
+LIVE_SCAN_FINISHED_AT = "2026-08-07T05:56:36.0054421Z"
 
 
 def _version() -> StorageObjectVersion:
@@ -268,6 +270,113 @@ class _BlobStorage:
 
     def object_url(self, _physical_key: str) -> str:
         return URI
+
+
+async def _read_blob_tag_fixture(xml: bytes) -> BlobScanEvidence:
+    async def private(_hostname: str) -> tuple[str, ...]:
+        return ("10.77.0.9",)
+
+    class FixtureStorage(_BlobStorage):
+        async def read_version_tags_xml(self, **_kwargs: str) -> bytes:
+            self.operations.append("GET_TAGS")
+            return xml
+
+    return await AzureBlobScanEvidenceClient(
+        cast(AzureBlobVersionedObjectStorage, FixtureStorage()),
+        dns=PrivateDnsVerifier(private),
+    ).read(_version(), observed_at=NOW)
+
+
+@pytest.mark.asyncio
+async def test_blob_adapter_accepts_exact_authoritative_utc_scan_time_fixture() -> None:
+    assert BLOB_SCAN_TIME_TAG == AUTHORITATIVE_BLOB_SCAN_TIME_TAG
+    evidence = await _read_blob_tag_fixture(
+        (
+            "<?xml version='1.0' encoding='utf-8'?><Tags><TagSet>"
+            "<Tag><Key>Malware scanning scan result</Key>"
+            "<Value>No threats found</Value></Tag>"
+            "<Tag><Key>Malware scanning scan time UTC</Key>"
+            f"<Value>{LIVE_SCAN_FINISHED_AT}</Value></Tag>"
+            "</TagSet></Tags>"
+        ).encode()
+    )
+
+    assert evidence.scan_result == "No threats found"
+    assert evidence.scan_finished_at == datetime(
+        2026,
+        8,
+        7,
+        5,
+        56,
+        36,
+        5_442,
+        tzinfo=UTC,
+    )
+
+
+@pytest.mark.parametrize(
+    "scan_time_tag",
+    [
+        "Malware scanning scan time",
+        "malware scanning scan time UTC",
+        "Malware scanning scan time UTC ",
+        " Malware scanning scan time UTC",
+    ],
+)
+@pytest.mark.asyncio
+async def test_blob_adapter_rejects_non_authoritative_scan_time_tag_aliases(
+    scan_time_tag: str,
+) -> None:
+    xml = (
+        "<?xml version='1.0' encoding='utf-8'?><Tags><TagSet>"
+        "<Tag><Key>Malware scanning scan result</Key>"
+        "<Value>No threats found</Value></Tag>"
+        f"<Tag><Key>{scan_time_tag}</Key><Value>{LIVE_SCAN_FINISHED_AT}</Value></Tag>"
+        "</TagSet></Tags>"
+    ).encode()
+    with pytest.raises(
+        ScannerBridgeEvidenceError,
+        match="scanner-blob-tag-evidence-incomplete",
+    ):
+        await _read_blob_tag_fixture(xml)
+
+
+@pytest.mark.parametrize("scan_result", ["No Threat Found", "No threats found ", "Clean"])
+@pytest.mark.asyncio
+async def test_blob_adapter_rejects_unknown_or_malformed_clean_results(
+    scan_result: str,
+) -> None:
+    xml = (
+        "<?xml version='1.0' encoding='utf-8'?><Tags><TagSet>"
+        "<Tag><Key>Malware scanning scan result</Key>"
+        f"<Value>{scan_result}</Value></Tag>"
+        "<Tag><Key>Malware scanning scan time UTC</Key>"
+        f"<Value>{LIVE_SCAN_FINISHED_AT}</Value></Tag>"
+        "</TagSet></Tags>"
+    ).encode()
+    with pytest.raises(
+        ScannerBridgeEvidenceError,
+        match="scanner-blob-tag-result-invalid",
+    ):
+        await _read_blob_tag_fixture(xml)
+
+
+@pytest.mark.asyncio
+async def test_blob_adapter_rejects_an_excess_blob_tag() -> None:
+    xml = (
+        "<?xml version='1.0' encoding='utf-8'?><Tags><TagSet>"
+        "<Tag><Key>Malware scanning scan result</Key>"
+        "<Value>No threats found</Value></Tag>"
+        "<Tag><Key>Malware scanning scan time UTC</Key>"
+        f"<Value>{LIVE_SCAN_FINISHED_AT}</Value></Tag>"
+        "<Tag><Key>unexpected</Key><Value>unsafe</Value></Tag>"
+        "</TagSet></Tags>"
+    ).encode()
+    with pytest.raises(
+        ScannerBridgeEvidenceError,
+        match="scanner-blob-tag-evidence-incomplete",
+    ):
+        await _read_blob_tag_fixture(xml)
 
 
 @pytest.mark.asyncio
@@ -751,6 +860,58 @@ class _TokenProvider:
         return "bounded-test-token"
 
 
+def test_log_parser_accepts_exact_live_storage_malware_scanning_row() -> None:
+    client = AzureLogAnalyticsScanEvidenceClient(
+        workspace_id=uuid.UUID("00000000-0000-4000-8000-000000000077"),
+        endpoint="https://api.loganalytics.azure.com",
+        token_provider=cast(AzureManagedIdentityTokenProvider, _TokenProvider()),
+    )
+    payload = {
+        "tables": [
+            {
+                "name": "PrimaryResult",
+                "columns": [
+                    {"name": "StorageAccountName", "type": "string"},
+                    {"name": "ScannedObjectUri", "type": "string"},
+                    {"name": "ScannedObjectEtag", "type": "string"},
+                    {"name": "ScanResultType", "type": "string"},
+                    {"name": "CorrelationId", "type": "string"},
+                    {"name": "ScanFinishedTimeUtc", "type": "datetime"},
+                    {"name": "TimeGenerated", "type": "datetime"},
+                ],
+                "rows": [
+                    [
+                        "stmobius7711564669",
+                        "https://stmobius7711564669.blob.core.windows.net/quarantine/"
+                        "1c3345ce9a115d3991842de85508077f/81a7a943f77f56b991abceadf34b7dc1",
+                        "0x8DEF448A36B3B8A",
+                        "No threats found",
+                        "0cd1258d-1a19-4132-aea9-87fac5ae55c3",
+                        "2026-08-07T05:56:36.0054421Z",
+                        "2026-08-07T05:56:36.005484Z",
+                    ]
+                ],
+            }
+        ]
+    }
+
+    evidence = client._parse_response(payload)
+
+    assert len(evidence) == 1
+    assert evidence[0].scan_result == "No threats found"
+    assert evidence[0].etag == "0x8DEF448A36B3B8A"
+    assert evidence[0].scan_finished_at == datetime(
+        2026,
+        8,
+        7,
+        5,
+        56,
+        36,
+        5_442,
+        tzinfo=UTC,
+    )
+
+
 @pytest.mark.parametrize("scan_result", ["No Threat Found", "No threats found"])
 @pytest.mark.asyncio
 async def test_log_adapter_queries_only_exact_dual_source_identity(
@@ -965,8 +1126,70 @@ def test_live_probe_is_bounded_sanitized_and_deletes_its_exact_version() -> None
     assert "OPENCANVAS_SCANNER_BRIDGE_PROOF_SEED" in source
     assert "uuid.uuid5" in source
     assert "SCANNER_RESULT_BRIDGE_PROVED" in source
+    assert "SCANNER_RESULT_BRIDGE_FAILED" in inspect.getsource(
+        scanner_bridge_probe._emit_failure_marker
+    )
     assert "provider.provider_version_id" in source
     assert "print(" in source
+
+
+def test_probe_rejects_a_malicious_match_with_the_exact_poll_count() -> None:
+    from scripts import scanner_bridge_probe
+
+    decision = _correlate(
+        blob=_blob(result="Malicious"),
+        logs=(_log(result="Malicious"),),
+    )
+    assert decision is not None
+    match = scanner_bridge_probe._ProofMatch(
+        decision=decision,  # type: ignore[arg-type]
+        blob=_blob(result="Malicious"),
+        attempt_count=17,
+    )
+
+    with pytest.raises(scanner_bridge_probe.ScannerBridgeProbeFailure) as failure:
+        scanner_bridge_probe._require_clean_match(match)
+
+    assert failure.value.failure_code == "scanner-correlation-scan-result-mismatch"
+    assert failure.value.attempt_count == 17
+
+
+def test_probe_main_retains_a_specific_post_poll_failure_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    monkeypatch.setattr(
+        scanner_bridge_probe.argparse.ArgumentParser,
+        "parse_args",
+        lambda _self: scanner_bridge_probe.argparse.Namespace(
+            max_attempts=120,
+            delay_seconds=30.0,
+        ),
+    )
+
+    def fail(coroutine: object) -> int:
+        coroutine.close()  # type: ignore[attr-defined]
+        raise scanner_bridge_probe.ScannerBridgeProbeFailure(
+            "scanner-bridge-probe-private-tls-unproved",
+            73,
+        )
+
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "run", fail)
+    with pytest.raises(
+        scanner_bridge_probe.ScannerBridgeProbeFailure,
+        match="scanner-bridge-probe-private-tls-unproved",
+    ):
+        scanner_bridge_probe.main()
+
+    marker = json.loads(capsys.readouterr().out)
+    assert marker == {
+        "attemptCount": 73,
+        "failureCode": "scanner-bridge-probe-private-tls-unproved",
+        "marker": "SCANNER_RESULT_BRIDGE_FAILED",
+        "schemaVersion": "mobius.scanner-result-bridge.proof-failure.v1",
+    }
 
 
 @pytest.mark.asyncio

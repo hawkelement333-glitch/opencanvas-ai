@@ -147,6 +147,18 @@ def test_schema_inventory_is_exact_versioned_and_closed():
         assert schema["additionalProperties"] is False
 
 
+def test_scanner_contract_uses_only_the_authoritative_utc_scan_time_tag() -> None:
+    contract_value = _json(MANIFESTS / "scanner-result-bridge.contract.json")
+    schema = _json(MANIFESTS / "scanner-result-bridge.schema.json")
+    expected = [
+        "Malware scanning scan result",
+        "Malware scanning scan time UTC",
+    ]
+
+    assert contract_value["transport"]["blobTagKeys"] == expected
+    assert schema["properties"]["transport"]["properties"]["blobTagKeys"]["const"] == expected
+
+
 @pytest.mark.parametrize(
     "schema_name",
     [

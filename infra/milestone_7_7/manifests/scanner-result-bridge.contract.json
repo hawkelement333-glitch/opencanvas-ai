@@ -19,7 +19,7 @@
   },
   "transport": {
     "kind": "private-blob-tags-plus-ampls-log-analytics-pull",
-    "blobTagKeys": ["Malware scanning scan result", "Malware scanning scan time"],
+    "blobTagKeys": ["Malware scanning scan result", "Malware scanning scan time UTC"],
     "logAnalyticsTable": "StorageMalwareScanningResults",
     "logAnalyticsColumns": ["StorageAccountName", "ScannedObjectUri", "ScannedObjectEtag", "ScanResultType", "CorrelationId", "ScanFinishedTimeUtc", "TimeGenerated"],
     "privateLinkScopeResourceType": "Microsoft.Insights/privateLinkScopes",

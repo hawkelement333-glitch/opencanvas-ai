@@ -40,7 +40,7 @@ from opencanvas_api.services.object_ingestion import (
 )
 
 BLOB_RESULT_TAG: Final = "Malware scanning scan result"
-BLOB_SCAN_TIME_TAG: Final = "Malware scanning scan time"
+BLOB_SCAN_TIME_TAG: Final = "Malware scanning scan time UTC"
 LOG_ANALYTICS_TOKEN_RESOURCE: Final = "https://api.loganalytics.io/"
 SCANNER_IDENTITY: Final = "azure-defender-for-storage"
 SCANNER_VERSION: Final = "defender-storage-dual-source-v1"

@@ -163,7 +163,7 @@ async def _put_exact_canary(
             )
         except DocumentStorageError:
             if attempt == 29:
-                raise
+                raise RuntimeError("scanner-bridge-probe-upload-reconciliation-exhausted") from None
             await asyncio.sleep(10.0)
     raise RuntimeError("scanner-bridge-probe-upload-reconciliation-exhausted")
 
@@ -173,6 +173,30 @@ def _safe_failure_code(exc: RuntimeError, fallback: str) -> str:
     if len(value) <= 128 and _FAILURE_CODE.fullmatch(value) is not None:
         return value
     return fallback
+
+
+def _emit_failure_marker(failure: ScannerBridgeProbeFailure) -> None:
+    print(
+        json.dumps(
+            {
+                "attemptCount": failure.attempt_count,
+                "failureCode": failure.failure_code,
+                "marker": "SCANNER_RESULT_BRIDGE_FAILED",
+                "schemaVersion": "mobius.scanner-result-bridge.proof-failure.v1",
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
+def _require_clean_match(match: _ProofMatch) -> None:
+    if match.decision.verdict != "clean":
+        raise ScannerBridgeProbeFailure(
+            "scanner-correlation-scan-result-mismatch",
+            match.attempt_count,
+        )
 
 
 async def _poll_dual_source_evidence(
@@ -323,6 +347,7 @@ async def run(*, max_attempts: int, delay_seconds: float) -> int:
         requested_at=requested_at,
         deadline_at=requested_at + timedelta(hours=1),
     )
+    attempt_count = 1
     try:
         try:
             match = await _poll_dual_source_evidence(
@@ -333,36 +358,39 @@ async def run(*, max_attempts: int, delay_seconds: float) -> int:
                 max_attempts=max_attempts,
                 delay_seconds=delay_seconds,
             )
+            attempt_count = match.attempt_count
         except ScannerBridgeProbeFailure as exc:
-            print(
-                json.dumps(
-                    {
-                        "attemptCount": exc.attempt_count,
-                        "failureCode": exc.failure_code,
-                        "marker": "SCANNER_RESULT_BRIDGE_FAILED",
-                        "schemaVersion": "mobius.scanner-result-bridge.proof-failure.v1",
-                    },
-                    separators=(",", ":"),
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
+            attempt_count = exc.attempt_count
             raise
     finally:
-        await _remove_exact_canary(storage, provider)
+        try:
+            await _remove_exact_canary(storage, provider)
+        except RuntimeError as exc:
+            raise ScannerBridgeProbeFailure(
+                _safe_failure_code(exc, "scanner-bridge-probe-canary-cleanup-failed"),
+                attempt_count,
+            ) from None
     decision = match.decision
     matched_blob = match.blob
-    if decision.verdict != "clean":
-        raise RuntimeError("scanner-correlation-scan-result-mismatch")
+    _require_clean_match(match)
     dns_integrity = hashlib.sha256(
         json.dumps(resolved, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
     storage_hostname = urlparse(account_url).hostname
     if storage_hostname is None:
-        raise RuntimeError("scanner-bridge-probe-configuration-incomplete")
-    tls_version, tls_integrity = await _prove_private_tls(
-        (storage_hostname, "api.loganalytics.azure.com")
-    )
+        raise ScannerBridgeProbeFailure(
+            "scanner-bridge-probe-configuration-incomplete",
+            match.attempt_count,
+        )
+    try:
+        tls_version, tls_integrity = await _prove_private_tls(
+            (storage_hostname, "api.loganalytics.azure.com")
+        )
+    except RuntimeError as exc:
+        raise ScannerBridgeProbeFailure(
+            _safe_failure_code(exc, "scanner-bridge-probe-private-tls-unproved"),
+            match.attempt_count,
+        ) from None
     completion = decision.scan_finished_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
     print(
         json.dumps(
@@ -410,14 +438,32 @@ def main() -> int:
     parser.add_argument("--max-attempts", type=int, default=60)
     parser.add_argument("--delay-seconds", type=float, default=30.0)
     arguments = parser.parse_args()
-    if not 1 <= arguments.max_attempts <= 120 or not 1.0 <= arguments.delay_seconds <= 60.0:
-        raise RuntimeError("scanner-bridge-probe-bounds-invalid")
-    return asyncio.run(
-        run(
-            max_attempts=arguments.max_attempts,
-            delay_seconds=arguments.delay_seconds,
+    try:
+        if not 1 <= arguments.max_attempts <= 120 or not 1.0 <= arguments.delay_seconds <= 60.0:
+            raise RuntimeError("scanner-bridge-probe-bounds-invalid")
+        return asyncio.run(
+            run(
+                max_attempts=arguments.max_attempts,
+                delay_seconds=arguments.delay_seconds,
+            )
         )
-    )
+    except ScannerBridgeProbeFailure as exc:
+        _emit_failure_marker(exc)
+        raise
+    except RuntimeError as exc:
+        failure = ScannerBridgeProbeFailure(
+            _safe_failure_code(exc, "scanner-bridge-probe-terminal-failure"),
+            1,
+        )
+        _emit_failure_marker(failure)
+        raise failure from None
+    except ValueError:
+        failure = ScannerBridgeProbeFailure(
+            "scanner-bridge-probe-configuration-incomplete",
+            1,
+        )
+        _emit_failure_marker(failure)
+        raise failure from None
 
 
 if __name__ == "__main__":
