@@ -165,7 +165,7 @@ def _failure_marker(
     code: str = "scanner-correlation-uri-mismatch",
 ) -> dict[str, JsonValue]:
     return {
-        "attemptCount": 60,
+        "attemptCount": 120,
         "failureCode": code,
         "marker": "SCANNER_RESULT_BRIDGE_FAILED",
         "schemaVersion": "mobius.scanner-result-bridge.proof-failure.v1",
@@ -735,6 +735,7 @@ def test_proof_graph_accepts_only_resource_id_casing_differences(
         "id": str(authorization.proofJobId).replace("/resourceGroups/", "/resourcegroups/"),
         "triggerType": "Manual",
         "retryLimit": 0,
+        "replicaTimeout": adapter_module.PROOF_REPLICA_TIMEOUT_SECONDS,
         "parallelism": 1,
         "completionCount": 1,
         "image": authorization.apiImageDigest,
@@ -744,7 +745,7 @@ def test_proof_graph_accepts_only_resource_id_casing_differences(
             "-m",
             "scripts.scanner_bridge_probe",
             "--max-attempts",
-            "60",
+            "120",
             "--delay-seconds",
             "30",
         ],
@@ -1208,10 +1209,143 @@ def test_authoritative_readback_uses_the_provider_data_scanner_resource_type() -
 def test_authoritative_readback_requires_exact_proof_console_diagnostic() -> None:
     source = inspect.getsource(adapter_module._foundation_readback_once)
     assert "require_proof_console_diagnostic" in source
-    assert "ContainerAppConsoleLogs" in source
-    assert "scanner-proof-console-diagnostic-unproved" in source
     assert "authorization.logAnalyticsWorkspaceId" in source
-    assert 'proof_console_diagnostic.get("destinationType") != "Dedicated"' in source
+    assert "_validate_proof_console_diagnostic" in source
+
+
+def test_proof_console_diagnostic_accepts_azure_canonical_readback() -> None:
+    diagnostic_id = f"{TARGET}/providers/Microsoft.Insights/diagnosticSettings/proof"
+    adapter_module._validate_proof_console_diagnostic(
+        {
+            "id": diagnostic_id.upper(),
+            "workspaceId": f"{TARGET}/providers/Microsoft.OperationalInsights/workspaces/law",
+            "destinationType": None,
+            "logs": [
+                {"category": "ContainerAppConsoleLogs", "enabled": True},
+                {"category": "ContainerAppSystemLogs", "enabled": False},
+            ],
+        },
+        diagnostic_id=diagnostic_id,
+        workspace_id=f"{TARGET}/providers/Microsoft.OperationalInsights/workspaces/law",
+    )
+
+
+@pytest.mark.parametrize(
+    ("destination_type", "logs"),
+    [
+        (
+            "AzureDiagnostics",
+            [{"category": "ContainerAppConsoleLogs", "enabled": True}],
+        ),
+        (
+            None,
+            [
+                {"category": "ContainerAppConsoleLogs", "enabled": True},
+                {"category": "ContainerAppSystemLogs", "enabled": True},
+            ],
+        ),
+        (
+            None,
+            [
+                {"category": "ContainerAppConsoleLogs", "enabled": True},
+                {"category": "ContainerAppConsoleLogs", "enabled": False},
+            ],
+        ),
+        (None, [{"category": "ContainerAppConsoleLogs", "enabled": "true"}]),
+    ],
+    ids=("wrong-destination", "extra-enabled", "duplicate-category", "malformed-row"),
+)
+def test_proof_console_diagnostic_rejects_semantic_drift(
+    destination_type: JsonValue,
+    logs: list[JsonValue],
+) -> None:
+    diagnostic_id = f"{TARGET}/providers/Microsoft.Insights/diagnosticSettings/proof"
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-console-diagnostic-unproved",
+    ):
+        adapter_module._validate_proof_console_diagnostic(
+            {
+                "id": diagnostic_id,
+                "workspaceId": (f"{TARGET}/providers/Microsoft.OperationalInsights/workspaces/law"),
+                "destinationType": destination_type,
+                "logs": logs,
+            },
+            diagnostic_id=diagnostic_id,
+            workspace_id=f"{TARGET}/providers/Microsoft.OperationalInsights/workspaces/law",
+        )
+
+
+def test_wait_for_execution_reconciles_delayed_terminal_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _authorization(PROOF_STAGE)
+    rows = iter(
+        [
+            [
+                {
+                    "name": "proof",
+                    "status": "Failed",
+                    "startTime": "2026-08-07T04:34:41Z",
+                    "endTime": None,
+                }
+            ],
+            [
+                {
+                    "name": "proof",
+                    "status": "Failed",
+                    "startTime": "2026-08-07T04:34:41Z",
+                    "endTime": "2026-08-07T05:04:53Z",
+                }
+            ],
+        ]
+    )
+    monkeypatch.setattr(adapter_module, "_job_execution_rows", lambda _authorization: next(rows))
+    monkeypatch.setattr(adapter_module.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(adapter_module.time, "sleep", lambda _seconds: None)
+
+    result = adapter_module._wait_for_execution(authorization, "proof")
+
+    assert result["status"] == "Failed"
+    assert result["endTime"] == "2026-08-07T05:04:53Z"
+
+
+def test_wait_for_execution_fails_closed_when_terminal_timestamp_never_converges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _authorization(PROOF_STAGE)
+    monotonic = iter([0.0, adapter_module.EXECUTION_PROPAGATION_SECONDS + 1.0])
+    monkeypatch.setattr(
+        adapter_module,
+        "_job_execution_rows",
+        lambda _authorization: [
+            {
+                "name": "proof",
+                "status": "Failed",
+                "startTime": "2026-08-07T04:34:41Z",
+                "endTime": None,
+            }
+        ],
+    )
+    monkeypatch.setattr(adapter_module.time, "monotonic", lambda: next(monotonic))
+
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-execution-terminal-time-unproved",
+    ):
+        adapter_module._wait_for_execution(authorization, "proof")
+
+
+def test_proof_job_bounds_match_the_extended_service_window() -> None:
+    module = Path("infra/milestone_7_7/modules/scanner-result-bridge.bicep").read_text(
+        encoding="utf-8"
+    )
+    assert "replicaTimeout: 4200" in module
+    assert "            '120'" in module
+    assert adapter_module.PROOF_MAX_ATTEMPTS == 120
+    assert adapter_module.PROOF_DELAY_SECONDS == 30
+    assert adapter_module.PROOF_REPLICA_TIMEOUT_SECONDS == 4_200
+    assert adapter_module.EXECUTION_PROPAGATION_SECONDS == 4_500.0
 
 
 def test_storage_tag_writer_inventory_includes_inherited_and_nested_assignments(

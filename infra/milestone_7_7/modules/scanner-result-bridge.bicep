@@ -266,7 +266,7 @@ resource proofJob 'Microsoft.App/jobs@2025-01-01' = if (proofEnabled) {
         }
       ]
       replicaRetryLimit: 0
-      replicaTimeout: 3600
+      replicaTimeout: 4200
       triggerType: 'Manual'
     }
     environmentId: managedEnvironmentId
@@ -277,7 +277,7 @@ resource proofJob 'Microsoft.App/jobs@2025-01-01' = if (proofEnabled) {
             '-m'
             'scripts.scanner_bridge_probe'
             '--max-attempts'
-            '60'
+            '120'
             '--delay-seconds'
             '30'
           ]

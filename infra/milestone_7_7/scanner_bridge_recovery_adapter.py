@@ -85,7 +85,10 @@ PROOF_CONTAINER: Final = "scanner-bridge-proof"
 FOUNDATION_POLL_SECONDS: Final = 15.0
 FOUNDATION_PROPAGATION_SECONDS: Final = 900.0
 EXECUTION_POLL_SECONDS: Final = 15.0
-EXECUTION_PROPAGATION_SECONDS: Final = 3_900.0
+EXECUTION_PROPAGATION_SECONDS: Final = 4_500.0
+PROOF_MAX_ATTEMPTS: Final = 120
+PROOF_DELAY_SECONDS: Final = 30
+PROOF_REPLICA_TIMEOUT_SECONDS: Final = 4_200
 PROOF_GRAPH_POLL_SECONDS: Final = 5.0
 PROOF_GRAPH_PROPAGATION_SECONDS: Final = 300.0
 PROOF_RBAC_POLL_SECONDS: Final = 15.0
@@ -733,6 +736,38 @@ def _verify_private_dns_zone_group(
     return row
 
 
+def _validate_proof_console_diagnostic(
+    diagnostic: Mapping[str, JsonValue],
+    *,
+    diagnostic_id: str,
+    workspace_id: str,
+) -> None:
+    logs = diagnostic.get("logs")
+    if (
+        not _same_resource_id(diagnostic.get("id"), diagnostic_id)
+        or not _same_resource_id(diagnostic.get("workspaceId"), workspace_id)
+        or diagnostic.get("destinationType") not in {None, "Dedicated"}
+        or not isinstance(logs, list)
+    ):
+        _fail("scanner-proof-console-diagnostic-unproved")
+    categories: set[str] = set()
+    enabled: list[dict[str, JsonValue]] = []
+    for row in logs:
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"category", "enabled"}
+            or not isinstance(row.get("category"), str)
+            or not isinstance(row.get("enabled"), bool)
+            or cast(str, row["category"]) in categories
+        ):
+            _fail("scanner-proof-console-diagnostic-unproved")
+        categories.add(cast(str, row["category"]))
+        if row["enabled"] is True:
+            enabled.append(row)
+    if enabled != [{"category": "ContainerAppConsoleLogs", "enabled": True}]:
+        _fail("scanner-proof-console-diagnostic-unproved")
+
+
 def _foundation_readback_once(
     authorization: ScannerBridgeRecoveryAuthorization,
     *,
@@ -893,17 +928,11 @@ def _foundation_readback_once(
             "destinationType:properties.logAnalyticsDestinationType,"
             "logs:properties.logs[].{category:category,enabled:enabled}}",
         )
-        proof_logs = proof_console_diagnostic.get("logs")
-        if (
-            not _same_resource_id(proof_console_diagnostic.get("id"), proof_console_diagnostic_id)
-            or not _same_resource_id(
-                proof_console_diagnostic.get("workspaceId"),
-                authorization.logAnalyticsWorkspaceId,
-            )
-            or proof_console_diagnostic.get("destinationType") != "Dedicated"
-            or proof_logs != [{"category": "ContainerAppConsoleLogs", "enabled": True}]
-        ):
-            _fail("scanner-proof-console-diagnostic-unproved")
+        _validate_proof_console_diagnostic(
+            proof_console_diagnostic,
+            diagnostic_id=proof_console_diagnostic_id,
+            workspace_id=authorization.logAnalyticsWorkspaceId,
+        )
 
     workspace = _rest_get(
         authorization.logAnalyticsWorkspaceId,
@@ -1215,6 +1244,7 @@ def _proof_graph(
         JOB_API_VERSION,
         "{id:id,triggerType:properties.configuration.triggerType,"
         "retryLimit:properties.configuration.replicaRetryLimit,"
+        "replicaTimeout:properties.configuration.replicaTimeout,"
         "parallelism:properties.configuration.manualTriggerConfig.parallelism,"
         "completionCount:properties.configuration.manualTriggerConfig.replicaCompletionCount,"
         "image:properties.template.containers[0].image,"
@@ -1257,6 +1287,7 @@ def _proof_graph(
         != {
             "triggerType": "Manual",
             "retryLimit": 0,
+            "replicaTimeout": PROOF_REPLICA_TIMEOUT_SECONDS,
             "parallelism": 1,
             "completionCount": 1,
             "image": authorization.apiImageDigest,
@@ -1266,9 +1297,9 @@ def _proof_graph(
                 "-m",
                 "scripts.scanner_bridge_probe",
                 "--max-attempts",
-                "60",
+                str(PROOF_MAX_ATTEMPTS),
                 "--delay-seconds",
-                "30",
+                str(PROOF_DELAY_SECONDS),
             ],
             "environment": expected_environment,
         }
@@ -1445,11 +1476,12 @@ def _wait_for_execution(
             _fail("scanner-proof-execution-reconciliation-drift")
         row = matching[0]
         status = row["status"]
-        if status in {"Succeeded", "Failed", "Degraded", "Stopped", "Cancelled"}:
-            if row["startTime"] is None or row["endTime"] is None:
-                _fail("scanner-proof-execution-terminal-time-unproved")
+        terminal = status in {"Succeeded", "Failed", "Degraded", "Stopped", "Cancelled"}
+        if terminal and row["startTime"] is not None and row["endTime"] is not None:
             return row
         if time.monotonic() >= deadline:
+            if terminal:
+                _fail("scanner-proof-execution-terminal-time-unproved")
             _fail("scanner-proof-execution-timeout")
         time.sleep(EXECUTION_POLL_SECONDS)
 
