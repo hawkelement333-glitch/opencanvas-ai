@@ -2603,29 +2603,30 @@ def _publish_api_image(
             tenant_id=tenant_id,
             environment=publisher_environment,
         )
-        try:
-            _docker_login_with_refresh_token(
-                denial_refresh_token, environment=publisher_environment
-            )
-        finally:
-            denial_refresh_token.clear()
-        try:
-            for probe in (
-                ("docker", "manifest", "inspect", immutable_reference),
-                ("docker", "pull", immutable_reference),
-                ("docker", "push", revocation_probe),
-            ):
-                _wait_for_denial(
-                    probe,
-                    endpoint_host=REGISTRY_HOST,
+        if denial_refresh_token:
+            try:
+                _docker_login_with_refresh_token(
+                    denial_refresh_token, environment=publisher_environment
+                )
+            finally:
+                denial_refresh_token.clear()
+            try:
+                for probe in (
+                    ("docker", "manifest", "inspect", immutable_reference),
+                    ("docker", "pull", immutable_reference),
+                    ("docker", "push", revocation_probe),
+                ):
+                    _wait_for_denial(
+                        probe,
+                        endpoint_host=REGISTRY_HOST,
+                        environment_overrides=publisher_environment,
+                    )
+            finally:
+                _run(
+                    ("docker", "logout", REGISTRY_HOST),
                     environment_overrides=publisher_environment,
                 )
-        finally:
-            _run(
-                ("docker", "logout", REGISTRY_HOST),
-                environment_overrides=publisher_environment,
-            )
-            _reset_ephemeral_directory(docker_config)
+                _reset_ephemeral_directory(docker_config)
         denial_proved = True
         _verify_cleanup_control(subscription_id, cleanup_at)
         _delete_ephemeral_publisher(

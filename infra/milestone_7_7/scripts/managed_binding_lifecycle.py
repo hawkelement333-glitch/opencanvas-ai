@@ -5300,7 +5300,7 @@ def _wait_for_publisher_denial(
     tenant_id: str,
     environment: Mapping[str, str],
 ) -> bytearray:
-    deadline = time.monotonic() + 600.0
+    end = time.monotonic() + 600.0
     while True:
         try:
             with _attribution_scope(
@@ -5315,12 +5315,13 @@ def _wait_for_publisher_denial(
         except PublisherAccessPending:
             refresh_token = bytearray()
             access_token = None
-        if access_token is None and refresh_token:
-            return refresh_token
+        else:
+            if access_token is None:
+                return refresh_token
         refresh_token.clear()
         if access_token is not None:
             access_token.clear()
-        remaining = deadline - time.monotonic()
+        remaining = end - time.monotonic()
         if remaining <= 0:
             _fail("temporary-authority-revocation-unproved")
         time.sleep(min(10.0, remaining))

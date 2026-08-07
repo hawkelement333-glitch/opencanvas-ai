@@ -525,6 +525,68 @@ def test_acrpush_propagation_pending_retries_with_fresh_session(
     access.clear()
 
 
+def test_post_revocation_exchange_denial_is_authoritative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def session(**_kwargs: object) -> tuple[bytearray, bytearray | None]:
+        nonlocal calls
+        calls += 1
+        return bytearray(), None
+
+    monkeypatch.setattr(lifecycle, "_publisher_repository_session", session)
+    monkeypatch.setattr(lifecycle.time, "monotonic", lambda: 0.0)
+
+    assert not lifecycle._wait_for_publisher_denial(
+        publisher_app_id="app", tenant_id="tenant", environment={}
+    )
+    assert calls == 1
+
+
+def test_post_revocation_pending_is_not_misclassified_as_exchange_denial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    sleeps: list[float] = []
+
+    def session(**_kwargs: object) -> tuple[bytearray, bytearray | None]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise lifecycle.PublisherAccessPending("publisher-access-pending")
+        return bytearray(), None
+
+    monotonic = iter((0.0, 1.0))
+    monkeypatch.setattr(lifecycle, "_publisher_repository_session", session)
+    monkeypatch.setattr(lifecycle.time, "monotonic", lambda: next(monotonic))
+    monkeypatch.setattr(lifecycle.time, "sleep", sleeps.append)
+
+    assert not lifecycle._wait_for_publisher_denial(
+        publisher_app_id="app", tenant_id="tenant", environment={}
+    )
+    assert calls == 2
+    assert sleeps == [10.0]
+
+
+def test_post_revocation_repository_token_denial_preserves_docker_probe_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    refresh = bytearray(b"refresh-token-value")
+    monkeypatch.setattr(
+        lifecycle,
+        "_publisher_repository_session",
+        lambda **_kwargs: (refresh, None),
+    )
+    monkeypatch.setattr(lifecycle.time, "monotonic", lambda: 0.0)
+
+    observed = lifecycle._wait_for_publisher_denial(
+        publisher_app_id="app", tenant_id="tenant", environment={}
+    )
+    assert observed is refresh
+    observed.clear()
+
+
 @pytest.mark.parametrize(
     "error",
     [
