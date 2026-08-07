@@ -18,12 +18,12 @@ $ProtectedResourceGroups = @(
 )
 $ExpectedSubscriptionFingerprint = "f4493115ce6375cf0e5d0616bede57126075fdb27ac78ea0ba7e0085252a7028"
 $SubscriptionFingerprintDomain = "mobius.azure.subscription-context.v1"
-$ExpectedCleanupPrincipalFingerprint = "19a9f97779cd2eb9acfdc04797f1fc5339316ee1a424ca79b70661beffa33260"
+$ExpectedCleanupPrincipalFingerprint = "7bae422a2ef6a418379af13fc19f53a195ccc80be0504c531391e6e46f048be3"
 $CleanupPrincipalFingerprintDomain = "mobius.azure.cleanup-principal.v1"
 $ExpectedRoleDefinitionId = "b24988ac-6180-42a0-ab88-20f7382dd24c"
 $CleanupLaunchGrace = [TimeSpan]::FromMinutes(30)
 $ScheduledCleanupAtUtc = [DateTimeOffset]::ParseExact(
-    "2026-08-07T11:45:00Z",
+    "2026-08-08T12:15:00Z",
     "yyyy-MM-ddTHH:mm:ssZ",
     [Globalization.CultureInfo]::InvariantCulture,
     [Globalization.DateTimeStyles]::AssumeUniversal

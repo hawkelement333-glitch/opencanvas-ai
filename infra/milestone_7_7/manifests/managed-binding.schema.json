@@ -88,14 +88,16 @@
       "properties": {
         "authorizationParameter": { "const": "CleanupAuthorized" },
         "authorizationValue": { "const": true },
-        "bindingContractVersion": { "const": "m7.7-automation-cleanup-binding-v2" },
+        "bindingContractVersion": {
+          "const": "m7.7-automation-cleanup-binding-v2"
+        },
         "bindingGeneration": { "const": 2 },
         "activeBindingId": { "$ref": "#/$defs/guid" },
         "corruptedAutomationAccount": { "const": "aa-mobius77-cleanup" },
         "tombstonedBindingIds": {
           "type": "array",
-          "minItems": 6,
-          "maxItems": 6,
+          "minItems": 7,
+          "maxItems": 7,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -110,9 +112,24 @@
               "evidenceIntegritySha256"
             ],
             "properties": {
-              "bindingContractVersion": { "enum": ["m7.7-automation-cleanup-binding-v1", "m7.7-automation-cleanup-binding-v2"] },
+              "bindingContractVersion": {
+                "enum": [
+                  "m7.7-automation-cleanup-binding-v1",
+                  "m7.7-automation-cleanup-binding-v2"
+                ]
+              },
               "bindingGeneration": { "enum": [1, 2] },
-              "bindingId": { "enum": ["158cac88-5679-5804-9f4d-854520bbb635", "b74c6cfe-995e-5107-9e42-4f7f76b76742", "f61544fe-cd79-5247-ac8b-ee9697b6ffd6", "ecdbb32f-9134-5697-85f9-d569ba57454b", "d83b4107-54e0-57a4-b650-fe0b556132d2", "5ffc55c1-7a88-5231-b0d1-e76ee95d057e"] },
+              "bindingId": {
+                "enum": [
+                  "158cac88-5679-5804-9f4d-854520bbb635",
+                  "b74c6cfe-995e-5107-9e42-4f7f76b76742",
+                  "f61544fe-cd79-5247-ac8b-ee9697b6ffd6",
+                  "ecdbb32f-9134-5697-85f9-d569ba57454b",
+                  "d83b4107-54e0-57a4-b650-fe0b556132d2",
+                  "5ffc55c1-7a88-5231-b0d1-e76ee95d057e",
+                  "a5429a32-87e3-5963-8c3a-bef85e777ed5"
+                ]
+              },
               "directGetStatus": { "const": "not-found" },
               "listVisibility": { "const": "absent" },
               "recreationStatus": { "enum": ["conflict", "not-attempted"] },
@@ -121,15 +138,21 @@
             }
           }
         },
-        "scheduleResourceId": { "const": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/schedules/schedule-mobius77-cleanup" },
-        "runbookResourceId": { "const": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/runbooks/Remove-Mobius77Staging" },
-        "targetResourceGroupId": { "const": "resourceGroups/rg-solarplexus-mobius-77-staging" },
+        "scheduleResourceId": {
+          "const": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/schedules/schedule-mobius77-cleanup"
+        },
+        "runbookResourceId": {
+          "const": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/runbooks/Remove-Mobius77Staging"
+        },
+        "targetResourceGroupId": {
+          "const": "resourceGroups/rg-solarplexus-mobius-77-staging"
+        },
         "targetParameter": { "const": "TargetResourceGroupName" },
         "targetResourceGroup": {
           "const": "rg-solarplexus-mobius-77-staging"
         },
         "subscriptionFingerprint": { "$ref": "#/$defs/sha256" },
-        "deadlineUtc": { "const": "2026-08-07T11:45:00Z" },
+        "deadlineUtc": { "const": "2026-08-08T12:15:00Z" },
         "launchGraceSeconds": { "const": 1800 },
         "cleanupContributorRoleDefinitionId": {
           "const": "b24988ac-6180-42a0-ab88-20f7382dd24c"

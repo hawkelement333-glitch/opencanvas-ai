@@ -124,7 +124,7 @@ FORBIDDEN_BUNDLE_PARTS = {
 }
 EXPECTED_POLICY_DIGESTS = {
     "dependency-order.json": ("036a369242182e52018f98e0b27d2944492c977e82475edd8a9209fecd1afce2"),
-    "lifecycle-policy.json": ("73c2e5b368d5151e89bf14211d05d91dea306240047f0db6a404c3f455f52bfb"),
+    "lifecycle-policy.json": ("0554ff8155f704252c31604fef02565d84e638da446c938779077572cc6fda0c"),
     "network-policy.json": ("67fe0f29d7a69c78a08a213764da7498a6a83293c3e8838c7d3f971da15a851b"),
     "resource-policy.json": ("83e0bc9952184edf9d41e37d3b0d5b94d330e49488a7fab7e211ca27cacd3516"),
     "unresolved-gates.json": ("c6b039152023b53b339b42dd88f6622ca369d7d912476a8f656355b847c6256c"),
@@ -720,7 +720,7 @@ def _validate_policies(root: Path, environment: Mapping[str, Any]) -> None:
         "targetUsdCents": 10000,
     }:
         raise ContractError("fixed cost controls differ")
-    if lifecycle["lease"].get("authorizedCleanupAtUtc") != "2026-08-07T11:45:00Z":
+    if lifecycle["lease"].get("authorizedCleanupAtUtc") != "2026-08-08T12:15:00Z":
         raise ContractError("authorized cleanup deadline differs")
     if tuple(lifecycle["requiredTags"]) != EXPECTED_TAG_KEYS:
         raise ContractError("lifecycle policy tags differ")

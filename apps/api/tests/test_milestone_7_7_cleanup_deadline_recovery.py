@@ -33,6 +33,14 @@ from preflight.milestone_7_7.cleanup_control_recovery import (
     DEADLINE_RECOVERY_DEADLINE_UTC,
     DEADLINE_RECOVERY_OBSERVED_AZURE_UTC,
     DEADLINE_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256,
+    POST_FIRED_EXPECTED_TARGET_RESOURCE_COUNT,
+    POST_FIRED_PRIOR_JOB_EXCEPTION,
+    POST_FIRED_PRIOR_JOB_NAME,
+    POST_FIRED_RECOVERY_AUTHORIZATION_VERSION,
+    POST_FIRED_RECOVERY_DEADLINE_UTC,
+    POST_FIRED_RECOVERY_OBSERVED_AZURE_UTC,
+    POST_FIRED_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256,
+    POST_FIRED_RECOVERY_PURPOSE,
     CleanupControlDeadlineRecoveryAuthorization,
     CleanupControlRecoveryError,
     build_cleanup_control_deadline_recovery_authorization,
@@ -67,6 +75,8 @@ PRIOR_EXTENSION_OBSERVED = datetime(2026, 8, 6, 14, 6, 2, tzinfo=UTC)
 CONTINUATION_OBSERVED = datetime(2026, 8, 6, 17, 23, 44, tzinfo=UTC)
 COMPLETION_OBSERVED = datetime(2026, 8, 6, 23, 39, 5, tzinfo=UTC)
 COMPLETION_NOW = datetime(2026, 8, 6, 23, 40, tzinfo=UTC)
+POST_FIRED_OBSERVED = datetime(2026, 8, 7, 18, 14, 28, tzinfo=UTC)
+POST_FIRED_NOW = datetime(2026, 8, 7, 18, 20, tzinfo=UTC)
 
 
 def _runbook_sha256() -> str:
@@ -152,6 +162,35 @@ def _completion_authorization() -> CleanupControlDeadlineRecoveryAuthorization:
     )
 
 
+def _post_fired_authorization() -> CleanupControlDeadlineRecoveryAuthorization:
+    prior_job_id = (
+        f"{AUTOMATION_PREFIX}/aa-mobius77-cleanup-recovery/jobs/{POST_FIRED_PRIOR_JOB_NAME}"
+    )
+    return build_cleanup_control_deadline_recovery_authorization(
+        repository_head="d" * 40,
+        subscription_id=SUBSCRIPTION_ID,
+        cleanup_resource_group_id=CLEANUP_GROUP,
+        corrupted_automation_account_id=f"{AUTOMATION_PREFIX}/aa-mobius77-cleanup",
+        corrupted_principal_id="be0e6b8d-f742-4c8f-8df1-9f302559a6c8",
+        corrupted_role_assignment_id=CORRUPTED_ASSIGNMENT_ID,
+        replacement_automation_account_id=(f"{AUTOMATION_PREFIX}/aa-mobius77-cleanup-recovery"),
+        replacement_principal_id="a47789c6-b8eb-40a1-898a-517a52d60a86",
+        replacement_role_assignment_id=REPLACEMENT_ASSIGNMENT_ID,
+        replacement_location="northeurope",
+        target_resource_group_id=TARGET_GROUP,
+        prior_runbook_content_sha256=(POST_FIRED_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256),
+        runbook_content_sha256=_runbook_sha256(),
+        observed_azure_utc=POST_FIRED_OBSERVED,
+        authorization_version=POST_FIRED_RECOVERY_AUTHORIZATION_VERSION,
+        prior_cleanup_job_id=prior_job_id,
+        prior_cleanup_job_status="Failed",
+        prior_cleanup_job_exception=POST_FIRED_PRIOR_JOB_EXCEPTION,
+        target_resource_count=41,
+        delete_activity_count=0,
+        nonterminal_cleanup_job_count=0,
+    )
+
+
 def _resign(
     authorization: CleanupControlDeadlineRecoveryAuthorization,
 ) -> CleanupControlDeadlineRecoveryAuthorization:
@@ -222,6 +261,21 @@ def _install_execution_fakes(
         return authorization.replacementPrincipalId
 
     monkeypatch.setattr(adapter_module, "_verify_replacement_cleanup_graph", verify_replacement)
+    monkeypatch.setattr(
+        adapter_module,
+        "_verify_post_fired_cleanup_state",
+        lambda *_args, **_kwargs: calls.append("post-fired-state") or 41,
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_verify_post_fired_target_preservation",
+        lambda *_args, **_kwargs: calls.append("post-fired-preservation") or 41,
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_verify_post_fired_rearmed_target_tags",
+        lambda *_args, **_kwargs: calls.append("post-fired-tags"),
+    )
     monkeypatch.setattr(
         adapter_module,
         "_remove_prior_binding",
@@ -303,6 +357,70 @@ def test_completion_deadline_is_exactly_twelve_hours_then_next_quarter() -> None
     assert DEADLINE_COMPLETION_DEADLINE_UTC == "2026-08-07T11:45:00Z"
 
 
+def test_post_fired_deadline_is_exactly_eighteen_hours_then_next_quarter() -> None:
+    derived = derive_cleanup_control_recovery_deadline(POST_FIRED_OBSERVED, minimum_lead_hours=18)
+    assert derived == datetime(2026, 8, 8, 12, 15, tzinfo=UTC)
+    assert POST_FIRED_RECOVERY_OBSERVED_AZURE_UTC == "2026-08-07T18:14:28Z"
+    assert POST_FIRED_RECOVERY_DEADLINE_UTC == "2026-08-08T12:15:00Z"
+
+
+def test_post_fired_authorization_binds_exact_failed_preserved_state_and_round_trips(
+    tmp_path: Path,
+) -> None:
+    authorization = _post_fired_authorization()
+    path = tmp_path / "post-fired-authorization.json"
+    write_cleanup_control_recovery_authorization(path, authorization)
+
+    loaded = load_cleanup_control_recovery_authorization(path)
+
+    assert loaded == authorization
+    assert authorization.postFiredRecoveryPurpose == POST_FIRED_RECOVERY_PURPOSE
+    assert authorization.priorCleanupJobId is not None
+    assert authorization.priorCleanupJobId.endswith(POST_FIRED_PRIOR_JOB_NAME)
+    assert authorization.priorCleanupJobStatus == "Failed"
+    assert authorization.priorCleanupJobException == POST_FIRED_PRIOR_JOB_EXCEPTION
+    assert authorization.priorScheduleState == "fired-expired"
+    assert authorization.priorBindingState == "stale-expired"
+    assert authorization.targetPreservationState == "present-no-delete-activity"
+    assert authorization.replacementIdentityState == "present"
+    assert authorization.replacementAuthorityState == ("exact-direct-contributor-at-target-scope")
+    assert authorization.expectedTargetResourceCount == (POST_FIRED_EXPECTED_TARGET_RESOURCE_COUNT)
+    assert authorization.expectedDeleteActivityCount == 0
+    assert authorization.expectedNonterminalCleanupJobCount == 0
+    assert authorization.priorBindingId == "a5429a32-87e3-5963-8c3a-bef85e777ed5"
+    assert authorization.bindingId == "f29ca20d-cd14-57d9-b99b-fd6b04406166"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("priorCleanupJobId", f"{AUTOMATION_PREFIX}/other/jobs/{POST_FIRED_PRIOR_JOB_NAME}"),
+        ("priorCleanupJobStatus", "Completed"),
+        ("priorCleanupJobException", "other-failure"),
+        ("priorScheduleState", "future"),
+        ("priorBindingState", "active"),
+        ("targetPreservationState", "unknown"),
+        ("replacementIdentityState", "absent"),
+        ("replacementAuthorityState", "subscription-contributor"),
+        ("expectedTargetResourceCount", 40),
+        ("expectedDeleteActivityCount", 1),
+        ("expectedNonterminalCleanupJobCount", 1),
+        ("replacementPrincipalId", "00000000-0000-0000-0000-000000000000"),
+        ("roleScope", f"{SUBSCRIPTION}/resourceGroups/other"),
+    ],
+)
+def test_post_fired_authorization_rejects_any_failed_state_or_scope_drift(
+    field: str, value: object
+) -> None:
+    authorization = _resign(replace(_post_fired_authorization(), **{field: value}))
+    with pytest.raises(CleanupControlRecoveryError):
+        validate_cleanup_control_deadline_recovery_authorization(
+            authorization,
+            expected_repository_head="d" * 40,
+            now_utc=POST_FIRED_NOW,
+        )
+
+
 def test_deadline_authorization_is_exact_image_free_and_round_trips(
     tmp_path: Path,
 ) -> None:
@@ -368,27 +486,32 @@ def test_deadline_authorization_rejects_every_scope_or_deadline_drift(
 def test_production_adapter_consumes_deadline_authorization_and_maps_only_binding(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    authorization = _completion_authorization()
+    authorization = _post_fired_authorization()
     deployments, calls = _install_execution_fakes(monkeypatch, authorization)
 
     result = ProductionCleanupControlRecoveryAdapter(
-        clock=lambda: COMPLETION_NOW
+        clock=lambda: POST_FIRED_NOW
     ).execute_deadline_recovery(
         authorization=authorization,
         receipt_directory=tmp_path,
-        expected_repository_head="c" * 40,
+        expected_repository_head="d" * 40,
     )
 
     assert result["marker"] == "CLEANUP_EXECUTABLE_AND_ARMED"
-    assert result["deadline-utc"] == "2026-08-07T11:45:00Z"
-    assert result["binding-id"] == "a5429a32-87e3-5963-8c3a-bef85e777ed5"
-    assert len(deployments) == 1
+    assert result["deadline-utc"] == "2026-08-08T12:15:00Z"
+    assert result["binding-id"] == "f29ca20d-cd14-57d9-b99b-fd6b04406166"
+    assert result["post-fired-recovery"] is True
+    assert result["post-fired-target-resource-count"] == 41
+    assert len(deployments) == 2
     assert deployments[0]["stage"] == "cleanup-job-binding"
-    assert deployments[0]["cleanup_at"] == datetime(2026, 8, 7, 11, 45, tzinfo=UTC)
+    assert deployments[0]["cleanup_at"] == datetime(2026, 8, 8, 12, 15, tzinfo=UTC)
+    assert deployments[1]["stage"] == "cleanup-binding"
     assert deployments[0]["maximum_cost"] == 25_000
+    assert calls.index("post-fired-state") < calls.index("remove-binding")
     assert calls.index("remove-binding") < calls.index("publish-runbook")
     assert calls.index("remove-binding") < calls.index("replace-schedule")
     assert calls.index("replace-schedule") < calls.index("deploy-binding")
+    assert calls.index("deploy-binding") < calls.index("post-fired-tags")
     assert calls.count(f"corrupted-graph:{CORRUPTED_RUNBOOK_CONTENT_SHA256}") == 2
     receipt = json.loads(
         (tmp_path / adapter_module.DEADLINE_RECOVERY_RECEIPT_FILE).read_text(encoding="utf-8")
@@ -401,7 +524,7 @@ def test_production_adapter_consumes_deadline_authorization_and_maps_only_bindin
 def test_deadline_adapter_cannot_reach_application_image_or_lifecycle_operations(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    authorization = _completion_authorization()
+    authorization = _post_fired_authorization()
     _install_execution_fakes(monkeypatch, authorization)
 
     def prohibited(*_args: object, **_kwargs: object) -> None:
@@ -422,11 +545,11 @@ def test_deadline_adapter_cannot_reach_application_image_or_lifecycle_operations
     )
 
     result = ProductionCleanupControlRecoveryAdapter(
-        clock=lambda: COMPLETION_NOW
+        clock=lambda: POST_FIRED_NOW
     ).execute_deadline_recovery(
         authorization=authorization,
         receipt_directory=tmp_path,
-        expected_repository_head="c" * 40,
+        expected_repository_head="d" * 40,
     )
 
     assert result["cleanup-executable"] is True
@@ -505,6 +628,136 @@ def test_binding_readback_lists_identity_then_gets_exact_parameters(
     )
 
 
+def test_post_fired_state_requires_exact_failed_job_expired_schedule_and_stale_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _post_fired_authorization()
+    monkeypatch.setattr(
+        adapter_module,
+        "_verify_post_fired_target_preservation",
+        lambda *_args, **_kwargs: 41,
+    )
+    job: JsonValue = {
+        "creationTime": "2026-08-07T06:45:01.0790464-05:00",
+        "endTime": "2026-08-07T06:45:58.562934-05:00",
+        "exception": POST_FIRED_PRIOR_JOB_EXCEPTION,
+        "id": authorization.priorCleanupJobId,
+        "provisioningState": "Failed",
+        "runbook": authorization.runbook,
+        "startTime": "2026-08-07T06:45:58.5629339-05:00",
+        "status": "Failed",
+    }
+    schedule: JsonValue = {
+        "expiryTime": "2026-08-07T06:45:00-05:00",
+        "frequency": "OneTime",
+        "id": (
+            f"{authorization.replacementAutomationAccountId}/schedules/{authorization.schedule}"
+        ),
+        "isEnabled": True,
+        "name": authorization.schedule,
+        "nextRun": None,
+        "startTime": "2026-08-07T06:45:00-05:00",
+        "timeZone": "Etc/UTC",
+    }
+
+    def collection(
+        _authorization: CleanupControlDeadlineRecoveryAuthorization,
+        *,
+        collection: str,
+        query: str,
+    ) -> list[JsonValue]:
+        del query
+        if collection == "jobs":
+            return [job]
+        if collection == "schedules":
+            return [schedule]
+        raise AssertionError(collection)
+
+    monkeypatch.setattr(adapter_module, "_replacement_collection", collection)
+    monkeypatch.setattr(
+        adapter_module,
+        "_job_schedule_rows",
+        lambda _authorization: [
+            {
+                "id": (
+                    f"{authorization.replacementAutomationAccountId}/jobSchedules/"
+                    f"{authorization.priorBindingId}"
+                ),
+                "jobScheduleId": authorization.priorBindingId,
+                "parameters": {
+                    "CleanupAuthorized": "true",
+                    "TargetResourceGroupName": "rg-solarplexus-mobius-77-staging",
+                },
+                "runbook": authorization.runbook,
+                "schedule": authorization.schedule,
+            }
+        ],
+    )
+
+    assert (
+        adapter_module._verify_post_fired_cleanup_state(
+            authorization,
+            SUBSCRIPTION_ID,
+            now_utc=POST_FIRED_NOW,
+        )
+        == 41
+    )
+
+    assert isinstance(job, dict)
+    job["status"] = "Running"
+    with pytest.raises(
+        CleanupControlRecoveryExecutionError,
+        match="cleanup-post-fired-job-not-terminal",
+    ):
+        adapter_module._verify_post_fired_cleanup_state(
+            authorization,
+            SUBSCRIPTION_ID,
+            now_utc=POST_FIRED_NOW,
+        )
+
+
+def test_post_fired_target_preservation_rejects_resource_loss_or_delete_activity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _post_fired_authorization()
+    resources: list[JsonValue] = [
+        {"id": f"{TARGET_GROUP}/providers/Example.Type/items/{index}"} for index in range(41)
+    ]
+    delete_activity: list[JsonValue] = [
+        {
+            "operationName": "Microsoft.Example/items/delete",
+            "resourceId": f"{TARGET_GROUP}/providers/Example.Type/items/0",
+            "status": "Succeeded",
+        }
+    ]
+    responses = iter((resources, delete_activity))
+    monkeypatch.setattr(
+        lifecycle,
+        "_run",
+        lambda *_args, **_kwargs: next(responses),
+    )
+    with pytest.raises(
+        CleanupControlRecoveryExecutionError,
+        match="cleanup-post-fired-delete-activity-present",
+    ):
+        adapter_module._verify_post_fired_target_preservation(
+            authorization,
+            SUBSCRIPTION_ID,
+            now_utc=POST_FIRED_NOW,
+        )
+
+    responses = iter((resources[:-1], []))
+    with pytest.raises(
+        CleanupControlRecoveryExecutionError,
+        match="cleanup-post-fired-target-preservation-unproved",
+    ):
+        adapter_module._verify_post_fired_target_preservation(
+            authorization,
+            SUBSCRIPTION_ID,
+            now_utc=POST_FIRED_NOW,
+        )
+
+
 def test_ambiguous_schedule_mutations_reconcile_without_duplicates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -572,10 +825,121 @@ def test_duplicate_schedule_or_binding_is_rejected() -> None:
         )
 
 
+@pytest.mark.parametrize("drift", ["duplicate", "scope"])
+def test_replacement_graph_rejects_duplicate_or_non_target_contributor_assignment(
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+) -> None:
+    authorization = _post_fired_authorization()
+    monkeypatch.setattr(
+        lifecycle,
+        "_run",
+        lambda *_args, **_kwargs: {
+            "id": authorization.replacementAutomationAccountId,
+            "identityType": "SystemAssigned",
+            "localAuthDisabled": True,
+            "location": "northeurope",
+            "principalId": authorization.replacementPrincipalId,
+            "publicNetworkAccess": False,
+            "state": "Ok",
+        },
+    )
+
+    def collection(
+        _authorization: CleanupControlDeadlineRecoveryAuthorization,
+        *,
+        collection: str,
+        query: str,
+    ) -> list[JsonValue]:
+        del query
+        if collection == "runbooks":
+            return [
+                {
+                    "id": (
+                        f"{authorization.replacementAutomationAccountId}/runbooks/"
+                        f"{authorization.runbook}"
+                    ),
+                    "location": "northeurope",
+                    "name": authorization.runbook,
+                    "runbookType": "PowerShell72",
+                    "state": "Published",
+                }
+            ]
+        if collection == "jobs":
+            return []
+        return []
+
+    monkeypatch.setattr(adapter_module, "_replacement_collection", collection)
+    monkeypatch.setattr(
+        adapter_module,
+        "_published_runbook_hash",
+        lambda _authorization: authorization.runbookContentSha256,
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_schedule_rows",
+        lambda _authorization: [
+            {
+                "frequency": "OneTime",
+                "id": (
+                    f"{authorization.replacementAutomationAccountId}/schedules/"
+                    f"{authorization.schedule}"
+                ),
+                "isEnabled": True,
+                "name": authorization.schedule,
+                "startTime": authorization.deadlineUtc,
+                "timeZone": "Etc/UTC",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_job_schedule_rows",
+        lambda _authorization: [
+            {
+                "id": (
+                    f"{authorization.replacementAutomationAccountId}/jobSchedules/"
+                    f"{authorization.bindingId}"
+                ),
+                "jobScheduleId": authorization.bindingId,
+                "parameters": {
+                    "CleanupAuthorized": "true",
+                    "TargetResourceGroupName": "rg-solarplexus-mobius-77-staging",
+                },
+                "runbook": authorization.runbook,
+                "schedule": authorization.schedule,
+            }
+        ],
+    )
+    expected = adapter_module._expected_replacement_role_row(authorization)
+    observed_roles = (
+        [expected, expected]
+        if drift == "duplicate"
+        else [{**expected, "scope": SUBSCRIPTION.casefold()}]
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_replacement_role_rows",
+        lambda *_args: observed_roles,
+    )
+
+    with pytest.raises(
+        CleanupControlRecoveryExecutionError,
+        match="cleanup-deadline-recovery-role-drift",
+    ):
+        adapter_module._verify_replacement_cleanup_graph(
+            authorization,
+            SUBSCRIPTION_ID,
+            allowed_deadlines=frozenset({authorization.deadlineUtc}),
+            allowed_runbook_hashes=frozenset({authorization.runbookContentSha256}),
+            binding_required=True,
+        )
+
+
 def test_deadline_authorization_replay_is_denied_before_second_mutation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    authorization = _completion_authorization()
+    authorization = _post_fired_authorization()
     deployments, calls = _install_execution_fakes(
         monkeypatch, authorization, inventory=_final_inventory(authorization)
     )
@@ -584,11 +948,11 @@ def test_deadline_authorization_replay_is_denied_before_second_mutation(
         "_cleanup_resource_group_inventory",
         lambda _subscription: _final_inventory(authorization),
     )
-    adapter = ProductionCleanupControlRecoveryAdapter(clock=lambda: COMPLETION_NOW)
+    adapter = ProductionCleanupControlRecoveryAdapter(clock=lambda: POST_FIRED_NOW)
     adapter.execute_deadline_recovery(
         authorization=authorization,
         receipt_directory=tmp_path,
-        expected_repository_head="c" * 40,
+        expected_repository_head="d" * 40,
     )
     with pytest.raises(
         CleanupControlRecoveryExecutionError,
@@ -597,9 +961,9 @@ def test_deadline_authorization_replay_is_denied_before_second_mutation(
         adapter.execute_deadline_recovery(
             authorization=authorization,
             receipt_directory=tmp_path,
-            expected_repository_head="c" * 40,
+            expected_repository_head="d" * 40,
         )
-    assert len(deployments) == 1
+    assert len(deployments) == 2
     assert calls.count("remove-binding") == 1
     assert calls.count("replace-schedule") == 1
 
@@ -607,7 +971,7 @@ def test_deadline_authorization_replay_is_denied_before_second_mutation(
 def test_existing_cleanup_recovery_entry_point_dispatches_deadline_authorization(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    authorization = _authorization()
+    authorization = _post_fired_authorization()
     observed: dict[str, object] = {}
 
     def execute_deadline_recovery(self: object, **kwargs: object) -> dict[str, JsonValue]:
@@ -623,7 +987,7 @@ def test_existing_cleanup_recovery_entry_point_dispatches_deadline_authorization
     result = execute_cleanup_control_recovery(
         authorization=authorization,
         receipt_directory=tmp_path,
-        expected_repository_head="b" * 40,
+        expected_repository_head="d" * 40,
     )
     assert result["status"] == "cleanup-control-deadline-recovery-executable"
     assert observed["authorization"] is authorization

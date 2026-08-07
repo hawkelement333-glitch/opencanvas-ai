@@ -41,7 +41,7 @@ CLEANUP_ACCOUNT = (
     "providers/Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery"
 )
 NOW = datetime(2026, 8, 6, 17, 30, tzinfo=UTC)
-DEADLINE = datetime(2026, 8, 7, 11, 45, tzinfo=UTC)
+DEADLINE = datetime(2026, 8, 8, 12, 15, tzinfo=UTC)
 HEAD = "a" * 40
 IMAGE = "acrmobius7711564669.azurecr.io/opencanvas-api@sha256:" + "b" * 64
 BUILD_INPUT = "c" * 64
@@ -56,7 +56,7 @@ def _authorization(stage: str = FOUNDATION_STAGE) -> ScannerBridgeRecoveryAuthor
         subscription_id=SUBSCRIPTION_ID,
         target_resource_group_id=TARGET,
         cleanup_automation_account_id=CLEANUP_ACCOUNT,
-        cleanup_deadline_utc="2026-08-07T11:45:00Z",
+        cleanup_deadline_utc="2026-08-08T12:15:00Z",
         now_utc=NOW,
         api_image_digest=IMAGE if stage == PROOF_STAGE else None,
         build_input_sha256=BUILD_INPUT if stage == PROOF_STAGE else None,
@@ -373,7 +373,7 @@ def test_foundation_rejects_any_image_binding() -> None:
             subscription_id=SUBSCRIPTION_ID,
             target_resource_group_id=TARGET,
             cleanup_automation_account_id=CLEANUP_ACCOUNT,
-            cleanup_deadline_utc="2026-08-07T11:45:00Z",
+            cleanup_deadline_utc="2026-08-08T12:15:00Z",
             now_utc=NOW,
             api_image_digest=IMAGE,
         )

@@ -66,8 +66,9 @@ TOMBSTONED_DEADLINE_RECOVERY_BINDING_ID: Final = "f61544fe-cd79-5247-ac8b-ee9697
 TOMBSTONED_SECOND_DEADLINE_RECOVERY_BINDING_ID: Final = "ecdbb32f-9134-5697-85f9-d569ba57454b"
 TOMBSTONED_THIRD_DEADLINE_RECOVERY_BINDING_ID: Final = "d83b4107-54e0-57a4-b650-fe0b556132d2"
 TOMBSTONED_FOURTH_DEADLINE_RECOVERY_BINDING_ID: Final = "5ffc55c1-7a88-5231-b0d1-e76ee95d057e"
-ACTIVE_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-07T11:45:00Z"
-ACTIVE_CLEANUP_BINDING_ID: Final = "a5429a32-87e3-5963-8c3a-bef85e777ed5"
+TOMBSTONED_FIFTH_DEADLINE_RECOVERY_BINDING_ID: Final = "a5429a32-87e3-5963-8c3a-bef85e777ed5"
+ACTIVE_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-08T12:15:00Z"
+ACTIVE_CLEANUP_BINDING_ID: Final = "f29ca20d-cd14-57d9-b99b-fd6b04406166"
 CLEANUP_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup-recovery"
 CORRUPTED_CLEANUP_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup"
 CLEANUP_BINDING_TOMBSTONE_DOMAIN: Final = (
@@ -416,7 +417,7 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
         "corruptedAutomationAccount": CORRUPTED_CLEANUP_AUTOMATION_ACCOUNT,
         "cleanupContributorRoleDefinitionId": ("b24988ac-6180-42a0-ab88-20f7382dd24c"),
         "cleanupPrincipalFingerprintSha256": (
-            "19a9f97779cd2eb9acfdc04797f1fc5339316ee1a424ca79b70661beffa33260"
+            "7bae422a2ef6a418379af13fc19f53a195ccc80be0504c531391e6e46f048be3"
         ),
         "deadlineUtc": ACTIVE_CLEANUP_BINDING_EPOCH_UTC,
         "deletionWaitSeconds": 2700,
@@ -509,6 +510,18 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
                 "deletionStatus": "accepted",
                 "evidenceIntegritySha256": (
                     "6b6289dbfd6e5093cfe96706fcb036b08233c50a7fb81c97f002f1ac5ca02f11"
+                ),
+            },
+            {
+                "bindingContractVersion": "m7.7-automation-cleanup-binding-v2",
+                "bindingGeneration": 2,
+                "bindingId": TOMBSTONED_FIFTH_DEADLINE_RECOVERY_BINDING_ID,
+                "directGetStatus": "not-found",
+                "listVisibility": "absent",
+                "recreationStatus": "not-attempted",
+                "deletionStatus": "accepted",
+                "evidenceIntegritySha256": (
+                    "9b0c06bd9b63c892e16c724ad64e5ae1bbdb14f14a3d00c3353f6fd6b1810dbb"
                 ),
             },
         ],
