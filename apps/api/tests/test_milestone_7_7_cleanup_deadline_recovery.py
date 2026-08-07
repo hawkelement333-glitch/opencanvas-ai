@@ -637,11 +637,20 @@ def test_post_fired_state_requires_exact_failed_job_expired_schedule_and_stale_b
         "_verify_post_fired_target_preservation",
         lambda *_args, **_kwargs: 41,
     )
+    list_job: JsonValue = {
+        "id": (
+            f"{authorization.replacementAutomationAccountId}/jobs/"
+            f"SCH_{authorization.priorBindingId}_live-scheduled-name"
+        ),
+        "jobId": POST_FIRED_PRIOR_JOB_NAME,
+        "status": "Failed",
+    }
     job: JsonValue = {
         "creationTime": "2026-08-07T06:45:01.0790464-05:00",
         "endTime": "2026-08-07T06:45:58.562934-05:00",
         "exception": POST_FIRED_PRIOR_JOB_EXCEPTION,
         "id": authorization.priorCleanupJobId,
+        "jobId": POST_FIRED_PRIOR_JOB_NAME,
         "provisioningState": "Failed",
         "runbook": authorization.runbook,
         "startTime": "2026-08-07T06:45:58.5629339-05:00",
@@ -668,12 +677,19 @@ def test_post_fired_state_requires_exact_failed_job_expired_schedule_and_stale_b
     ) -> list[JsonValue]:
         del query
         if collection == "jobs":
-            return [job]
+            return [list_job]
         if collection == "schedules":
             return [schedule]
         raise AssertionError(collection)
 
     monkeypatch.setattr(adapter_module, "_replacement_collection", collection)
+    direct_get_calls: list[tuple[str, ...]] = []
+
+    def direct_get(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        direct_get_calls.append(argv)
+        return job
+
+    monkeypatch.setattr(lifecycle, "_run", direct_get)
     monkeypatch.setattr(
         adapter_module,
         "_job_schedule_rows",
@@ -702,12 +718,29 @@ def test_post_fired_state_requires_exact_failed_job_expired_schedule_and_stale_b
         )
         == 41
     )
+    assert direct_get_calls[0][direct_get_calls[0].index("--url") + 1] == (
+        f"https://management.azure.com{authorization.priorCleanupJobId}"
+        f"?api-version={lifecycle.AUTOMATION_API_VERSION}"
+    )
 
-    assert isinstance(job, dict)
-    job["status"] = "Running"
+    assert isinstance(list_job, dict)
+    list_job["status"] = "Running"
     with pytest.raises(
         CleanupControlRecoveryExecutionError,
         match="cleanup-post-fired-job-not-terminal",
+    ):
+        adapter_module._verify_post_fired_cleanup_state(
+            authorization,
+            SUBSCRIPTION_ID,
+            now_utc=POST_FIRED_NOW,
+        )
+
+    list_job["status"] = "Failed"
+    assert isinstance(job, dict)
+    job["exception"] = "different-live-failure"
+    with pytest.raises(
+        CleanupControlRecoveryExecutionError,
+        match="cleanup-post-fired-failed-job-drift",
     ):
         adapter_module._verify_post_fired_cleanup_state(
             authorization,

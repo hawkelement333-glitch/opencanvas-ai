@@ -1193,49 +1193,79 @@ def _verify_post_fired_cleanup_state(
     jobs = _replacement_collection(
         authorization,
         collection="jobs",
-        query=(
-            "value[].{creationTime:properties.creationTime,endTime:properties.endTime,"
-            "exception:properties.exception,id:id,"
-            "provisioningState:properties.provisioningState,"
-            "runbook:properties.runbook.name,startTime:properties.startTime,"
-            "status:properties.status}"
-        ),
+        query="value[].{id:id,jobId:properties.jobId,status:properties.status}",
     )
     expected_job_id = authorization.priorCleanupJobId
     expected_nonterminal = authorization.expectedNonterminalCleanupJobCount
     if not isinstance(expected_job_id, str) or expected_nonterminal != 0:
         _fail("cleanup-post-fired-recovery-state-malformed")
-    matching_jobs: list[dict[str, JsonValue]] = []
+    expected_job_name = expected_job_id.rsplit("/", maxsplit=1)[-1]
+    matching_jobs = 0
     nonterminal_count = 0
-    expected_job_fields = {
-        "creationTime",
-        "endTime",
-        "exception",
-        "id",
-        "provisioningState",
-        "runbook",
-        "startTime",
-        "status",
-    }
     for job in jobs:
         if (
             not isinstance(job, dict)
-            or set(job) != expected_job_fields
+            or set(job) != {"id", "jobId", "status"}
             or not isinstance(job.get("id"), str)
+            or not str(job["id"])
+            .casefold()
+            .startswith(f"{authorization.replacementAutomationAccountId}/jobs/".casefold())
+            or not isinstance(job.get("jobId"), str)
             or not isinstance(job.get("status"), str)
         ):
             _fail("cleanup-post-fired-job-output-malformed")
         if job["status"] not in TERMINAL_AUTOMATION_JOB_STATES:
             nonterminal_count += 1
-        if str(job["id"]).casefold() == expected_job_id.casefold():
-            matching_jobs.append(job)
+        if str(job["jobId"]).casefold() == expected_job_name.casefold():
+            matching_jobs += 1
     if nonterminal_count != expected_nonterminal:
         _fail("cleanup-post-fired-job-not-terminal")
-    if len(matching_jobs) != 1:
+    if matching_jobs != 1:
         _fail("cleanup-post-fired-failed-job-unproved")
-    failed_job = matching_jobs[0]
+    failed_job = lifecycle._run(
+        (
+            "az",
+            "rest",
+            "--method",
+            "get",
+            "--url",
+            (
+                f"https://management.azure.com{expected_job_id}"
+                f"?api-version={lifecycle.AUTOMATION_API_VERSION}"
+            ),
+            "--query",
+            (
+                "{creationTime:properties.creationTime,endTime:properties.endTime,"
+                "exception:properties.exception,id:id,jobId:properties.jobId,"
+                "provisioningState:properties.provisioningState,"
+                "runbook:properties.runbook.name,startTime:properties.startTime,"
+                "status:properties.status}"
+            ),
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
     if (
-        failed_job.get("status") != authorization.priorCleanupJobStatus
+        not isinstance(failed_job, dict)
+        or set(failed_job)
+        != {
+            "creationTime",
+            "endTime",
+            "exception",
+            "id",
+            "jobId",
+            "provisioningState",
+            "runbook",
+            "startTime",
+            "status",
+        }
+        or not isinstance(failed_job.get("id"), str)
+        or str(failed_job["id"]).casefold() != expected_job_id.casefold()
+        or not isinstance(failed_job.get("jobId"), str)
+        or str(failed_job["jobId"]).casefold() != expected_job_name.casefold()
+        or failed_job.get("status") != authorization.priorCleanupJobStatus
         or failed_job.get("provisioningState") != "Failed"
         or failed_job.get("exception") != authorization.priorCleanupJobException
         or failed_job.get("runbook") != authorization.runbook
