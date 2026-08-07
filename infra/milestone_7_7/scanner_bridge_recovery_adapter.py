@@ -70,6 +70,11 @@ PRIVATE_ENDPOINT_SUBNET: Final = "snet-mobius77-private-endpoints"
 STORAGE_PRIVATE_ENDPOINT: Final = "pe-mobius77-storage"
 MANAGED_ENVIRONMENT: Final = "cae-mobius77-staging"
 PROOF_CONSOLE_DIAGNOSTIC: Final = "mobius77-scanner-proof-console"
+BLOB_TAG_OBSERVATION_MARKER: Final = "SCANNER_BLOB_TAG_OBSERVATION"
+BLOB_TAG_OBSERVATION_SCHEMA: Final = "mobius.scanner-result-bridge.blob-tags-observation.v1"
+BLOB_TAG_NORMALIZATION_PATH: Final = "azure-blob-tags-xml-local-name-v1"
+BLOB_RESULT_TAG: Final = "Malware scanning scan result"
+BLOB_SCAN_TIME_TAG: Final = "Malware scanning scan time UTC"
 API_IDENTITY: Final = "id-mobius77-api"
 DEFENDER_SCANNER: Final = "StorageDataScanner"
 DEFENDER_SCANNER_ROLE: Final = "cd50fd1f-0421-46f2-8cce-afc587dbcc77"
@@ -102,6 +107,36 @@ _UUID = re.compile(
 )
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _FAILURE_CODE = re.compile(r"^scanner-[a-z0-9]+(?:-[a-z0-9]+)*$")
+_BLOB_TAG_DECISIONS: Final = frozenset(
+    {
+        "accepted",
+        "rejected-empty",
+        "rejected-http-status",
+        "rejected-observability-gap",
+        "rejected-parser-normalization",
+        "rejected-required-key-missing",
+        "rejected-unexpected-key",
+        "rejected-version-mismatch",
+    }
+)
+_BLOB_TAG_VERSION_PATHS: Final = frozenset(
+    {
+        "request-version-id-plus-if-match",
+        "response-etag",
+        "response-unavailable",
+        "response-version-id",
+        "response-version-id-and-etag",
+    }
+)
+_BLOB_TAG_FAILURE_DECISIONS: Final = {
+    "scanner-blob-tags-empty": "rejected-empty",
+    "scanner-blob-tags-http-status": "rejected-http-status",
+    "scanner-blob-tags-key-missing": "rejected-required-key-missing",
+    "scanner-blob-tags-key-unexpected": "rejected-unexpected-key",
+    "scanner-blob-tags-observability-gap": "rejected-observability-gap",
+    "scanner-blob-tags-parser-normalization-failed": "rejected-parser-normalization",
+    "scanner-blob-tags-version-mismatch": "rejected-version-mismatch",
+}
 _PROVIDER_REQUIREMENTS: Final = (
     ("Microsoft.Storage", "storageAccounts", STORAGE_API_VERSION, True),
     ("Microsoft.Security", "defenderForStorageSettings", DEFENDER_API_VERSION, False),
@@ -240,6 +275,7 @@ def _write_failure_evidence(
     execution_name: str,
     execution: Mapping[str, str | None],
     marker: Mapping[str, JsonValue],
+    blob_tag_observation: Mapping[str, JsonValue] | None,
     observed_at: datetime,
 ) -> None:
     resolved = _outside_repository(path, "scanner-bridge-evidence-inside-repository")
@@ -249,18 +285,21 @@ def _write_failure_evidence(
         {
             "attemptCount": marker["attemptCount"],
             "authorizationIntegritySha256": authorization.authorizationIntegritySha256,
+            "blobTagObservation": (
+                dict(blob_tag_observation) if blob_tag_observation is not None else None
+            ),
             "executionNameSha256": _hash_text(execution_name),
             "executionStatus": execution["status"],
             "failureCode": marker["failureCode"],
             "marker": marker["marker"],
             "observedAtUtc": _format_utc(observed_at),
-            "schemaVersion": "mobius.scanner-result-bridge.failure-evidence.v1",
+            "schemaVersion": "mobius.scanner-result-bridge.failure-evidence.v2",
         },
     )
     value: dict[str, JsonValue] = {
         **body,
         "failureEvidenceIntegritySha256": _canonical_hash(
-            cast(JsonValue, body), "mobius.scanner-bridge.failure-evidence.v1"
+            cast(JsonValue, body), "mobius.scanner-bridge.failure-evidence.v2"
         ),
     }
     try:
@@ -1490,27 +1529,28 @@ def _wait_for_execution(
         time.sleep(EXECUTION_POLL_SECONDS)
 
 
-def _find_marker(value: object, marker_name: str) -> dict[str, object] | None:
+def _find_markers(value: object, marker_name: str) -> tuple[dict[str, object], ...]:
+    found: list[dict[str, object]] = []
     if isinstance(value, Mapping):
         if value.get("marker") == marker_name:
-            return dict(value)
-        for child in value.values():
-            found = _find_marker(child, marker_name)
-            if found is not None:
-                return found
+            found.append(dict(value))
+        else:
+            for child in value.values():
+                found.extend(_find_markers(child, marker_name))
     elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         for child in value:
-            found = _find_marker(child, marker_name)
-            if found is not None:
-                return found
+            found.extend(_find_markers(child, marker_name))
     elif isinstance(value, str):
         stripped = value.strip()
         if stripped.startswith(("{", "[")):
-            try:
-                return _find_marker(json.loads(stripped), marker_name)
-            except json.JSONDecodeError:
-                return None
-    return None
+            with suppress(json.JSONDecodeError):
+                found.extend(_find_markers(json.loads(stripped), marker_name))
+    return tuple(found)
+
+
+def _find_marker(value: object, marker_name: str) -> dict[str, object] | None:
+    markers = _find_markers(value, marker_name)
+    return markers[0] if markers else None
 
 
 def _proof_log_output(
@@ -1541,7 +1581,7 @@ def _proof_log_output(
         ),
         require_text=True,
     )
-    if not isinstance(value, str) or len(value.encode()) > 65_536:
+    if not isinstance(value, str) or len(value.encode()) > 1_048_576:
         _fail("scanner-proof-log-output-malformed")
     return value
 
@@ -1620,6 +1660,186 @@ def _proof_failure_marker(
         or marker.get("schemaVersion") != "mobius.scanner-result-bridge.proof-failure.v1"
     ):
         _fail("scanner-proof-failure-marker-malformed")
+    return cast(dict[str, JsonValue], marker)
+
+
+def _marker_string_tuple(
+    marker: Mapping[str, object],
+    key: str,
+) -> tuple[str, ...]:
+    value = marker.get(key)
+    if not isinstance(value, list) or any(
+        not isinstance(item, str)
+        or not item
+        or len(item.encode()) > 256
+        or any(ord(character) < 32 for character in item)
+        for item in value
+    ):
+        _fail("scanner-proof-blob-tag-observation-malformed")
+    return tuple(cast(list[str], value))
+
+
+def _proof_blob_tag_observation(
+    authorization: ScannerBridgeRecoveryAuthorization,
+    execution_name: str,
+    *,
+    failure_code: str,
+) -> dict[str, JsonValue] | None:
+    markers = _find_markers(
+        _proof_log_output(authorization, execution_name),
+        BLOB_TAG_OBSERVATION_MARKER,
+    )
+    required_for_failure = failure_code in _BLOB_TAG_FAILURE_DECISIONS
+    if not markers:
+        if required_for_failure:
+            _fail("scanner-proof-blob-tag-observation-missing")
+        return None
+    marker = markers[-1]
+    required = {
+        "differentBlobVersion",
+        "exactComparisonDecision",
+        "httpStatus",
+        "integritySha256",
+        "marker",
+        "parserNormalizationPath",
+        "queriedBlobUriSha256",
+        "queriedBlobVersionIdSha256",
+        "queriedEtagSha256",
+        "requestCorrelationId",
+        "requiredKeysFound",
+        "requiredKeysMissing",
+        "responseEmpty",
+        "responseEtagSha256",
+        "responseVersionIdSha256",
+        "returnedTagKeys",
+        "schemaVersion",
+        "tagCount",
+        "unexpectedKeys",
+        "versionIdentityPath",
+    }
+    if set(marker) != required:
+        _fail("scanner-proof-blob-tag-observation-malformed")
+    integrity = marker.get("integritySha256")
+    if not isinstance(integrity, str) or _SHA256.fullmatch(integrity) is None:
+        _fail("scanner-proof-blob-tag-observation-malformed")
+    body = {
+        key: cast(JsonValue, value) for key, value in marker.items() if key != "integritySha256"
+    }
+    if (
+        _canonical_hash(
+            cast(JsonValue, body),
+            "mobius.scanner-bridge.blob-tag-observation.v1",
+        )
+        != integrity
+    ):
+        _fail("scanner-proof-blob-tag-observation-integrity-unproved")
+    hashes = (
+        "queriedBlobUriSha256",
+        "queriedBlobVersionIdSha256",
+        "queriedEtagSha256",
+    )
+    if any(
+        not isinstance(marker.get(key), str) or _SHA256.fullmatch(cast(str, marker[key])) is None
+        for key in hashes
+    ):
+        _fail("scanner-proof-blob-tag-observation-malformed")
+    for key in ("responseEtagSha256", "responseVersionIdSha256"):
+        value = marker.get(key)
+        if value is not None and (not isinstance(value, str) or _SHA256.fullmatch(value) is None):
+            _fail("scanner-proof-blob-tag-observation-malformed")
+    request_id = marker.get("requestCorrelationId")
+    if request_id is not None and (
+        not isinstance(request_id, str) or _UUID.fullmatch(request_id) is None
+    ):
+        _fail("scanner-proof-blob-tag-observation-malformed")
+    http_status = marker.get("httpStatus")
+    if http_status is not None and (
+        not isinstance(http_status, int)
+        or isinstance(http_status, bool)
+        or not 100 <= http_status <= 599
+    ):
+        _fail("scanner-proof-blob-tag-observation-malformed")
+    tag_count = marker.get("tagCount")
+    different_version = marker.get("differentBlobVersion")
+    response_empty = marker.get("responseEmpty")
+    if (
+        not isinstance(tag_count, int)
+        or isinstance(tag_count, bool)
+        or not 0 <= tag_count <= 10
+        or not isinstance(different_version, bool)
+        or not isinstance(response_empty, bool)
+    ):
+        _fail("scanner-proof-blob-tag-observation-malformed")
+    returned = _marker_string_tuple(marker, "returnedTagKeys")
+    found = _marker_string_tuple(marker, "requiredKeysFound")
+    missing = _marker_string_tuple(marker, "requiredKeysMissing")
+    unexpected = _marker_string_tuple(marker, "unexpectedKeys")
+    expected_keys = (BLOB_RESULT_TAG, BLOB_SCAN_TIME_TAG)
+    if (
+        tag_count != len(returned)
+        or response_empty != (not returned)
+        or found != tuple(key for key in expected_keys if key in returned)
+        or missing != tuple(key for key in expected_keys if key not in returned)
+        or unexpected != tuple(key for key in returned if key not in expected_keys)
+    ):
+        _fail("scanner-proof-blob-tag-observation-comparison-unproved")
+    decision = marker.get("exactComparisonDecision")
+    normalization = marker.get("parserNormalizationPath")
+    version_path = marker.get("versionIdentityPath")
+    if (
+        not isinstance(decision, str)
+        or decision not in _BLOB_TAG_DECISIONS
+        or normalization
+        not in {
+            "not-run",
+            BLOB_TAG_NORMALIZATION_PATH,
+            f"{BLOB_TAG_NORMALIZATION_PATH}:failed",
+        }
+        or version_path not in _BLOB_TAG_VERSION_PATHS
+        or marker.get("marker") != BLOB_TAG_OBSERVATION_MARKER
+        or marker.get("schemaVersion") != BLOB_TAG_OBSERVATION_SCHEMA
+    ):
+        _fail("scanner-proof-blob-tag-observation-malformed")
+    response_version = marker.get("responseVersionIdSha256")
+    response_etag = marker.get("responseEtagSha256")
+    expected_header_presence = {
+        "request-version-id-plus-if-match": (False, False),
+        "response-etag": (False, True),
+        "response-unavailable": (False, False),
+        "response-version-id": (True, False),
+        "response-version-id-and-etag": (True, True),
+    }
+    if expected_header_presence[version_path] != (
+        response_version is not None,
+        response_etag is not None,
+    ):
+        _fail("scanner-proof-blob-tag-observation-version-unproved")
+    if decision == "rejected-http-status":
+        if http_status is None or 200 <= http_status < 300 or normalization != "not-run":
+            _fail("scanner-proof-blob-tag-observation-comparison-unproved")
+    elif decision == "rejected-observability-gap":
+        if http_status is not None or normalization != "not-run":
+            _fail("scanner-proof-blob-tag-observation-comparison-unproved")
+    elif http_status is None or not 200 <= http_status < 300:
+        _fail("scanner-proof-blob-tag-observation-comparison-unproved")
+    if decision == "rejected-parser-normalization" and normalization != (
+        f"{BLOB_TAG_NORMALIZATION_PATH}:failed"
+    ):
+        _fail("scanner-proof-blob-tag-observation-comparison-unproved")
+    if decision == "rejected-version-mismatch" and not different_version:
+        _fail("scanner-proof-blob-tag-observation-comparison-unproved")
+    if decision == "rejected-empty" and not response_empty:
+        _fail("scanner-proof-blob-tag-observation-comparison-unproved")
+    if decision == "rejected-required-key-missing" and (not missing or response_empty):
+        _fail("scanner-proof-blob-tag-observation-comparison-unproved")
+    if decision == "rejected-unexpected-key" and (not unexpected or missing):
+        _fail("scanner-proof-blob-tag-observation-comparison-unproved")
+    if decision == "accepted" and (
+        missing or unexpected or different_version or normalization != BLOB_TAG_NORMALIZATION_PATH
+    ):
+        _fail("scanner-proof-blob-tag-observation-comparison-unproved")
+    if required_for_failure and _BLOB_TAG_FAILURE_DECISIONS[failure_code] != decision:
+        _fail("scanner-proof-blob-tag-observation-failure-mismatch")
     return cast(dict[str, JsonValue], marker)
 
 
@@ -2060,15 +2280,27 @@ class ProductionScannerBridgeRecoveryAdapter:
                     failure_marker = _proof_failure_marker(authorization, execution_name)
                 except lifecycle.AzureCommandError as exc:
                     _fail(f"scanner-proof-failure-marker-azure-{exc.sanitized_azure_error_code}")
+                failure_code = cast(str, failure_marker["failureCode"])
+                try:
+                    blob_tag_observation = _proof_blob_tag_observation(
+                        authorization,
+                        execution_name,
+                        failure_code=failure_code,
+                    )
+                except lifecycle.AzureCommandError as exc:
+                    _fail(
+                        f"scanner-proof-blob-tag-observation-azure-{exc.sanitized_azure_error_code}"
+                    )
                 _write_failure_evidence(
                     evidence_output,
                     authorization=authorization,
                     execution_name=execution_name,
                     execution=execution,
                     marker=failure_marker,
+                    blob_tag_observation=blob_tag_observation,
                     observed_at=self._clock().astimezone(UTC).replace(microsecond=0),
                 )
-                _fail(cast(str, failure_marker["failureCode"]))
+                _fail(failure_code)
             try:
                 marker = _proof_marker(authorization, execution_name)
             except lifecycle.AzureCommandError as exc:

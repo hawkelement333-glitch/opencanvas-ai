@@ -61,6 +61,9 @@
   "proof": {
     "jobKind": "bounded-container-apps-job",
     "failureMarkerSchema": "mobius.scanner-result-bridge.proof-failure.v1",
+    "blobTagObservationSchema": "mobius.scanner-result-bridge.blob-tags-observation.v1",
+    "blobTagObservationMarker": "SCANNER_BLOB_TAG_OBSERVATION",
+    "blobTagObservationSink": "retained-console-diagnostic",
     "requiredDecisions": ["clean", "malicious", "missing", "error", "not-scanned", "conflict", "stale"],
     "privateDnsReadback": true,
     "retainedConsoleDiagnosticCategory": "ContainerAppConsoleLogs",

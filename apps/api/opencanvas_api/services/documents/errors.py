@@ -13,11 +13,15 @@ class DocumentServiceError(RuntimeError):
         *,
         code: str | None = None,
         status_code: int | None = None,
+        provider_status_code: int | None = None,
+        provider_request_id: str | None = None,
     ) -> None:
         super().__init__(message)
         self.safe_message = message
         self.code = code or type(self).code
         self.status_code = status_code or type(self).status_code
+        self.provider_status_code = provider_status_code
+        self.provider_request_id = provider_request_id
 
 
 class DocumentValidationError(DocumentServiceError):

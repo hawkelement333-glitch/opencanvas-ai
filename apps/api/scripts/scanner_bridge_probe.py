@@ -27,6 +27,7 @@ from opencanvas_api.services.scanner_bridge import (
     AzureLogAnalyticsScanEvidenceClient,
     BlobScanEvidence,
     BlobScanEvidenceReader,
+    BlobTagReadObservation,
     LogAnalyticsScanEvidenceReader,
     PrivateDnsVerifier,
     ScannerBridgeDecision,
@@ -191,6 +192,17 @@ def _emit_failure_marker(failure: ScannerBridgeProbeFailure) -> None:
     )
 
 
+def _emit_blob_tag_observation(observation: BlobTagReadObservation) -> None:
+    print(
+        json.dumps(
+            observation.canonical(),
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
 def _require_clean_match(match: _ProofMatch) -> None:
     if match.decision.verdict != "clean":
         raise ScannerBridgeProbeFailure(
@@ -296,7 +308,11 @@ async def run(*, max_attempts: int, delay_seconds: float) -> int:
         return addresses
 
     dns = PrivateDnsVerifier(recording_resolver)
-    blob_reader = AzureBlobScanEvidenceClient(storage, dns=dns)
+    blob_reader = AzureBlobScanEvidenceClient(
+        storage,
+        dns=dns,
+        observation_sink=_emit_blob_tag_observation,
+    )
     log_reader = AzureLogAnalyticsScanEvidenceClient(
         workspace_id=workspace_customer_id,
         endpoint="https://api.loganalytics.azure.com",

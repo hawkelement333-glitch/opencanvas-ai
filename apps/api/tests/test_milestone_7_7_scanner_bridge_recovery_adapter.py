@@ -172,6 +172,45 @@ def _failure_marker(
     }
 
 
+def _blob_tag_observation(
+    *,
+    decision: str = "rejected-required-key-missing",
+    returned: tuple[str, ...] = ("Malware scanning scan result",),
+) -> dict[str, JsonValue]:
+    required = (
+        "Malware scanning scan result",
+        "Malware scanning scan time UTC",
+    )
+    body: dict[str, JsonValue] = {
+        "differentBlobVersion": decision == "rejected-version-mismatch",
+        "exactComparisonDecision": decision,
+        "httpStatus": 200,
+        "marker": "SCANNER_BLOB_TAG_OBSERVATION",
+        "parserNormalizationPath": "azure-blob-tags-xml-local-name-v1",
+        "queriedBlobUriSha256": "1" * 64,
+        "queriedBlobVersionIdSha256": "2" * 64,
+        "queriedEtagSha256": "3" * 64,
+        "requestCorrelationId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        "requiredKeysFound": [key for key in required if key in returned],
+        "requiredKeysMissing": [key for key in required if key not in returned],
+        "responseEmpty": not returned,
+        "responseEtagSha256": "4" * 64,
+        "responseVersionIdSha256": "5" * 64,
+        "returnedTagKeys": list(returned),
+        "schemaVersion": "mobius.scanner-result-bridge.blob-tags-observation.v1",
+        "tagCount": len(returned),
+        "unexpectedKeys": [key for key in returned if key not in required],
+        "versionIdentityPath": "response-version-id-and-etag",
+    }
+    return {
+        **body,
+        "integritySha256": adapter_module._canonical_hash(
+            body,
+            "mobius.scanner-bridge.blob-tag-observation.v1",
+        ),
+    }
+
+
 def _install_common_fakes(
     monkeypatch: pytest.MonkeyPatch,
     authorization: ScannerBridgeRecoveryAuthorization,
@@ -560,7 +599,15 @@ def test_failed_execution_preserves_exact_marker_before_residue_removal(
     monkeypatch.setattr(
         adapter_module,
         "_proof_failure_marker",
-        lambda *_args: calls.append("failure-marker") or _failure_marker(),
+        lambda *_args: (
+            calls.append("failure-marker") or _failure_marker("scanner-blob-tags-key-missing")
+        ),
+    )
+    observation = _blob_tag_observation()
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_blob_tag_observation",
+        lambda *_args, **_kwargs: calls.append("blob-tag-observation") or observation,
     )
     monkeypatch.setattr(
         adapter_module,
@@ -576,7 +623,7 @@ def test_failed_execution_preserves_exact_marker_before_residue_removal(
 
     with pytest.raises(
         ScannerBridgeRecoveryExecutionError,
-        match="scanner-correlation-uri-mismatch",
+        match="scanner-blob-tags-key-missing",
     ):
         ProductionScannerBridgeRecoveryAdapter(clock=lambda: NOW).execute(
             authorization=authorization,
@@ -586,10 +633,13 @@ def test_failed_execution_preserves_exact_marker_before_residue_removal(
         )
 
     assert calls.index("failure-marker") < calls.index("residue")
+    assert calls.index("blob-tag-observation") < calls.index("residue")
     decoded = json.loads(evidence_path.read_text(encoding="utf-8"))
-    assert decoded["failureCode"] == "scanner-correlation-uri-mismatch"
+    assert decoded["failureCode"] == "scanner-blob-tags-key-missing"
     assert decoded["executionStatus"] == "Failed"
     assert decoded["marker"] == "SCANNER_RESULT_BRIDGE_FAILED"
+    assert decoded["blobTagObservation"] == observation
+    assert decoded["schemaVersion"] == "mobius.scanner-result-bridge.failure-evidence.v2"
     assert decoded["failureEvidenceIntegritySha256"]
 
 
@@ -1116,6 +1166,97 @@ def test_failure_log_parser_accepts_only_sanitized_exact_marker(
         match="scanner-proof-failure-marker-malformed",
     ):
         adapter_module._proof_failure_marker(_authorization(PROOF_STAGE), "proof")
+
+
+def test_blob_tag_observation_parser_retains_latest_integrity_bound_comparison(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    accepted = _blob_tag_observation(
+        decision="accepted",
+        returned=(
+            "Malware scanning scan result",
+            "Malware scanning scan time UTC",
+        ),
+    )
+    failed = _blob_tag_observation()
+    payload = json.dumps(
+        [
+            {"TimeStamp": "redacted", "Log": json.dumps(accepted)},
+            {"TimeStamp": "redacted", "Log": json.dumps(failed)},
+        ]
+    )
+    monkeypatch.setattr(adapter_module, "_proof_log_output", lambda *_args: payload)
+
+    assert (
+        adapter_module._proof_blob_tag_observation(
+            _authorization(PROOF_STAGE),
+            "proof",
+            failure_code="scanner-blob-tags-key-missing",
+        )
+        == failed
+    )
+
+
+def test_blob_tag_observation_parser_rejects_missing_tampered_or_mismatched_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _authorization(PROOF_STAGE)
+    monkeypatch.setattr(adapter_module, "_proof_log_output", lambda *_args: "[]")
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-blob-tag-observation-missing",
+    ):
+        adapter_module._proof_blob_tag_observation(
+            authorization,
+            "proof",
+            failure_code="scanner-blob-tags-key-missing",
+        )
+
+    tampered = {**_blob_tag_observation(), "tagCount": 2}
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_log_output",
+        lambda *_args: json.dumps(tampered),
+    )
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-blob-tag-observation-integrity-unproved",
+    ):
+        adapter_module._proof_blob_tag_observation(
+            authorization,
+            "proof",
+            failure_code="scanner-blob-tags-key-missing",
+        )
+
+    mismatch = _blob_tag_observation()
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_log_output",
+        lambda *_args: json.dumps(mismatch),
+    )
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-blob-tag-observation-failure-mismatch",
+    ):
+        adapter_module._proof_blob_tag_observation(
+            authorization,
+            "proof",
+            failure_code="scanner-blob-tags-version-mismatch",
+        )
+
+
+def test_non_blob_failure_does_not_invent_blob_tag_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(adapter_module, "_proof_log_output", lambda *_args: "[]")
+    assert (
+        adapter_module._proof_blob_tag_observation(
+            _authorization(PROOF_STAGE),
+            "proof",
+            failure_code="scanner-correlation-uri-mismatch",
+        )
+        is None
+    )
 
 
 def test_private_dns_zone_group_requires_the_exact_authorized_set(

@@ -28,6 +28,7 @@ from opencanvas_api.db.models import (
     StorageObjectVersion,
 )
 from opencanvas_api.services.documents import (
+    AzureBlobTagReadResult,
     AzureBlobVersionedObjectStorage,
     AzureManagedIdentityTokenProvider,
     build_versioned_object_storage,
@@ -41,6 +42,9 @@ from opencanvas_api.services.object_ingestion import (
 
 BLOB_RESULT_TAG: Final = "Malware scanning scan result"
 BLOB_SCAN_TIME_TAG: Final = "Malware scanning scan time UTC"
+BLOB_TAG_OBSERVATION_MARKER: Final = "SCANNER_BLOB_TAG_OBSERVATION"
+BLOB_TAG_OBSERVATION_SCHEMA: Final = "mobius.scanner-result-bridge.blob-tags-observation.v1"
+BLOB_TAG_NORMALIZATION_PATH: Final = "azure-blob-tags-xml-local-name-v1"
 LOG_ANALYTICS_TOKEN_RESOURCE: Final = "https://api.loganalytics.io/"
 SCANNER_IDENTITY: Final = "azure-defender-for-storage"
 SCANNER_VERSION: Final = "defender-storage-dual-source-v1"
@@ -85,6 +89,66 @@ class BlobScanEvidence:
             "scanFinishedAtUtc": _format_utc(self.scan_finished_at),
             "evidenceSha256": self.evidence_sha256,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class BlobTagReadObservation:
+    queried_blob_version_id_sha256: str
+    queried_blob_uri_sha256: str
+    queried_etag_sha256: str
+    http_status: int | None
+    request_correlation_id: str | None
+    returned_tag_keys: tuple[str, ...]
+    required_keys_found: tuple[str, ...]
+    required_keys_missing: tuple[str, ...]
+    unexpected_keys: tuple[str, ...]
+    parser_normalization_path: str
+    exact_comparison_decision: str
+    response_empty: bool
+    different_blob_version: bool
+    response_version_id_sha256: str | None
+    response_etag_sha256: str | None
+    version_identity_path: str
+
+    def canonical(self) -> dict[str, JsonValue]:
+        body: dict[str, JsonValue] = {
+            "differentBlobVersion": self.different_blob_version,
+            "exactComparisonDecision": self.exact_comparison_decision,
+            "httpStatus": self.http_status,
+            "marker": BLOB_TAG_OBSERVATION_MARKER,
+            "parserNormalizationPath": self.parser_normalization_path,
+            "queriedBlobUriSha256": self.queried_blob_uri_sha256,
+            "queriedBlobVersionIdSha256": self.queried_blob_version_id_sha256,
+            "queriedEtagSha256": self.queried_etag_sha256,
+            "requestCorrelationId": self.request_correlation_id,
+            "requiredKeysFound": list(self.required_keys_found),
+            "requiredKeysMissing": list(self.required_keys_missing),
+            "responseEmpty": self.response_empty,
+            "responseEtagSha256": self.response_etag_sha256,
+            "responseVersionIdSha256": self.response_version_id_sha256,
+            "returnedTagKeys": list(self.returned_tag_keys),
+            "schemaVersion": BLOB_TAG_OBSERVATION_SCHEMA,
+            "tagCount": len(self.returned_tag_keys),
+            "unexpectedKeys": list(self.unexpected_keys),
+            "versionIdentityPath": self.version_identity_path,
+        }
+        return {
+            **body,
+            "integritySha256": _canonical_sha256(
+                body,
+                domain="mobius.scanner-bridge.blob-tag-observation.v1",
+            ),
+        }
+
+
+BlobTagObservationSink = Callable[[BlobTagReadObservation], None]
+
+
+@dataclass(frozen=True, slots=True)
+class _NormalizedBlobTags:
+    tags: dict[str, str] | None
+    returned_keys: tuple[str, ...]
+    succeeded: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +258,7 @@ class AzureBlobScanEvidenceClient:
         storage: AzureBlobVersionedObjectStorage,
         *,
         dns: PrivateDnsVerifier | None = None,
+        observation_sink: BlobTagObservationSink | None = None,
     ) -> None:
         self.storage = storage
         parsed = urlparse(storage.account_url)
@@ -202,6 +267,7 @@ class AzureBlobScanEvidenceClient:
         if not _ACCOUNT_NAME.fullmatch(self.account_name):
             raise ScannerBridgeEvidenceError("scanner-storage-account-invalid")
         self.dns = dns or PrivateDnsVerifier()
+        self.observation_sink = observation_sink
 
     async def read(
         self, version: StorageObjectVersion, *, observed_at: datetime
@@ -227,26 +293,90 @@ class AzureBlobScanEvidenceClient:
                 else "scanner-blob-evidence-unavailable"
             )
             raise ScannerBridgeEvidenceError(code) from exc
+        uri = self.storage.object_url(version.physical_key)
         try:
-            xml = await self.storage.read_version_tags_xml(
+            response = await self.storage.read_version_tags_xml(
                 physical_key=version.physical_key,
                 provider_version_id=version.provider_version_id,
                 expected_etag=version.etag,
             )
         except DocumentStorageError as exc:
-            code = (
-                "scanner-blob-authorization-unavailable"
-                if exc.code
-                in {
-                    "managed_identity_authorization_failed",
-                    "storage_authorization_failed",
-                }
-                else "scanner-blob-tag-evidence-unavailable"
+            decision = (
+                "rejected-http-status"
+                if exc.provider_status_code is not None
+                else "rejected-observability-gap"
             )
+            self._persist_observation(
+                _blob_tag_observation(
+                    version=version,
+                    uri=uri,
+                    response=None,
+                    http_status=exc.provider_status_code,
+                    request_correlation_id=exc.provider_request_id,
+                    returned_keys=(),
+                    normalization_succeeded=False,
+                    comparison_decision=decision,
+                )
+            )
+            if exc.provider_status_code is not None:
+                code = "scanner-blob-tags-http-status"
+            elif exc.code in {
+                "managed_identity_authorization_failed",
+                "storage_authorization_failed",
+            }:
+                code = "scanner-blob-authorization-unavailable"
+            else:
+                code = "scanner-blob-tags-observability-gap"
             raise ScannerBridgeEvidenceError(code) from exc
-        tags = _parse_blob_tags(xml)
-        if set(tags) != {BLOB_RESULT_TAG, BLOB_SCAN_TIME_TAG}:
-            raise ScannerBridgeEvidenceError("scanner-blob-tag-evidence-incomplete")
+        normalized = _normalize_blob_tags(response.content)
+        returned_keys = normalized.returned_keys
+        required = (BLOB_RESULT_TAG, BLOB_SCAN_TIME_TAG)
+        found = tuple(key for key in required if key in returned_keys)
+        missing = tuple(key for key in required if key not in returned_keys)
+        unexpected = tuple(key for key in returned_keys if key not in required)
+        different_version = _different_blob_version(response, version)
+        if not 200 <= response.status_code < 300:
+            decision = "rejected-http-status"
+            failure_code = "scanner-blob-tags-http-status"
+        elif not normalized.succeeded:
+            decision = "rejected-parser-normalization"
+            failure_code = "scanner-blob-tags-parser-normalization-failed"
+        elif different_version:
+            decision = "rejected-version-mismatch"
+            failure_code = "scanner-blob-tags-version-mismatch"
+        elif not returned_keys:
+            decision = "rejected-empty"
+            failure_code = "scanner-blob-tags-empty"
+        elif missing:
+            decision = "rejected-required-key-missing"
+            failure_code = "scanner-blob-tags-key-missing"
+        elif unexpected:
+            decision = "rejected-unexpected-key"
+            failure_code = "scanner-blob-tags-key-unexpected"
+        else:
+            decision = "accepted"
+            failure_code = None
+        self._persist_observation(
+            _blob_tag_observation(
+                version=version,
+                uri=uri,
+                response=response,
+                http_status=response.status_code,
+                request_correlation_id=response.request_id,
+                returned_keys=returned_keys,
+                normalization_succeeded=normalized.succeeded,
+                comparison_decision=decision,
+                different_blob_version=different_version,
+                required_keys_found=found,
+                required_keys_missing=missing,
+                unexpected_keys=unexpected,
+            )
+        )
+        if failure_code is not None:
+            raise ScannerBridgeEvidenceError(failure_code)
+        if normalized.tags is None:
+            raise ScannerBridgeEvidenceError("scanner-blob-tags-observability-gap")
+        tags = normalized.tags
         result = tags[BLOB_RESULT_TAG]
         if result not in _BLOB_RESULTS:
             raise ScannerBridgeEvidenceError("scanner-blob-tag-result-invalid")
@@ -254,7 +384,6 @@ class AzureBlobScanEvidenceClient:
             finished = _parse_utc(tags[BLOB_SCAN_TIME_TAG])
         except ScannerBridgeEvidenceError as exc:
             raise ScannerBridgeEvidenceError("scanner-blob-tag-scan-time-invalid") from exc
-        uri = self.storage.object_url(version.physical_key)
         etag = _normalize_azure_etag(version.etag)
         integrity = _canonical_sha256(
             {
@@ -276,6 +405,14 @@ class AzureBlobScanEvidenceClient:
             scan_finished_at=finished,
             evidence_sha256=integrity,
         )
+
+    def _persist_observation(self, observation: BlobTagReadObservation) -> None:
+        if self.observation_sink is None:
+            return
+        try:
+            self.observation_sink(observation)
+        except Exception as exc:
+            raise ScannerBridgeEvidenceError("scanner-blob-tags-observability-gap") from exc
 
 
 class AzureLogAnalyticsScanEvidenceClient:
@@ -712,19 +849,118 @@ async def _resolve_addresses(hostname: str) -> tuple[str, ...]:
 
 
 def _parse_blob_tags(value: bytes) -> dict[str, str]:
+    normalized = _normalize_blob_tags(value)
+    if not normalized.succeeded or normalized.tags is None:
+        raise ScannerBridgeEvidenceError("scanner-blob-tag-evidence-invalid")
+    return normalized.tags
+
+
+def _normalize_blob_tags(value: bytes) -> _NormalizedBlobTags:
     try:
         root = ET.fromstring(value)
-    except ET.ParseError as exc:
-        raise ScannerBridgeEvidenceError("scanner-blob-tag-evidence-invalid") from exc
+    except ET.ParseError:
+        return _NormalizedBlobTags(tags=None, returned_keys=(), succeeded=False)
     result: dict[str, str] = {}
+    returned_keys: list[str] = []
     for element in root.iter():
         if element.tag.rsplit("}", 1)[-1] != "Tag":
             continue
         children = {child.tag.rsplit("}", 1)[-1]: child.text or "" for child in element}
+        key = children.get("Key")
+        if key is not None:
+            returned_keys.append(key)
         if set(children) != {"Key", "Value"} or children["Key"] in result:
-            raise ScannerBridgeEvidenceError("scanner-blob-tag-evidence-invalid")
+            return _NormalizedBlobTags(
+                tags=None,
+                returned_keys=tuple(returned_keys),
+                succeeded=False,
+            )
         result[children["Key"]] = children["Value"]
-    return result
+    return _NormalizedBlobTags(
+        tags=result,
+        returned_keys=tuple(returned_keys),
+        succeeded=True,
+    )
+
+
+def _different_blob_version(
+    response: AzureBlobTagReadResult,
+    version: StorageObjectVersion,
+) -> bool:
+    if (
+        response.response_version_id is not None
+        and response.response_version_id != version.provider_version_id
+    ):
+        return True
+    return response.response_etag is not None and not _azure_etags_equal(
+        response.response_etag,
+        version.etag,
+    )
+
+
+def _blob_tag_observation(
+    *,
+    version: StorageObjectVersion,
+    uri: str,
+    response: AzureBlobTagReadResult | None,
+    http_status: int | None,
+    request_correlation_id: str | None,
+    returned_keys: tuple[str, ...],
+    normalization_succeeded: bool,
+    comparison_decision: str,
+    different_blob_version: bool = False,
+    required_keys_found: tuple[str, ...] | None = None,
+    required_keys_missing: tuple[str, ...] | None = None,
+    unexpected_keys: tuple[str, ...] | None = None,
+) -> BlobTagReadObservation:
+    required = (BLOB_RESULT_TAG, BLOB_SCAN_TIME_TAG)
+    found = required_keys_found or tuple(key for key in required if key in returned_keys)
+    missing = required_keys_missing or tuple(key for key in required if key not in returned_keys)
+    unexpected = unexpected_keys or tuple(key for key in returned_keys if key not in required)
+    if response is None:
+        version_identity_path = "response-unavailable"
+    elif response.response_version_id is not None and response.response_etag is not None:
+        version_identity_path = "response-version-id-and-etag"
+    elif response.response_version_id is not None:
+        version_identity_path = "response-version-id"
+    elif response.response_etag is not None:
+        version_identity_path = "response-etag"
+    else:
+        version_identity_path = "request-version-id-plus-if-match"
+    return BlobTagReadObservation(
+        queried_blob_version_id_sha256=_sha256_text(version.provider_version_id),
+        queried_blob_uri_sha256=_sha256_text(uri),
+        queried_etag_sha256=_sha256_text(_normalize_azure_etag(version.etag)),
+        http_status=http_status,
+        request_correlation_id=request_correlation_id,
+        returned_tag_keys=returned_keys,
+        required_keys_found=found,
+        required_keys_missing=missing,
+        unexpected_keys=unexpected,
+        parser_normalization_path=(
+            "not-run"
+            if response is None
+            else (
+                BLOB_TAG_NORMALIZATION_PATH
+                if normalization_succeeded
+                else f"{BLOB_TAG_NORMALIZATION_PATH}:failed"
+            )
+        ),
+        exact_comparison_decision=comparison_decision,
+        response_empty=not returned_keys,
+        different_blob_version=different_blob_version,
+        response_version_id_sha256=(
+            _sha256_text(response.response_version_id)
+            if response is not None and response.response_version_id is not None
+            else None
+        ),
+        response_etag_sha256=(
+            _sha256_text(response.response_etag)
+            if response is not None and response.response_etag is not None
+            else None
+        ),
+        version_identity_path=version_identity_path,
+    )
 
 
 def _log_analytics_query(*, account_name: str, object_uri: str, etag: str, max_rows: int) -> str:
@@ -824,10 +1060,13 @@ def _canonical_sha256(value: object, *, domain: str) -> str:
 __all__ = [
     "BLOB_RESULT_TAG",
     "BLOB_SCAN_TIME_TAG",
+    "BLOB_TAG_OBSERVATION_MARKER",
+    "BLOB_TAG_OBSERVATION_SCHEMA",
     "BRIDGE_PROVENANCE",
     "AzureBlobScanEvidenceClient",
     "AzureLogAnalyticsScanEvidenceClient",
     "BlobScanEvidence",
+    "BlobTagReadObservation",
     "LogAnalyticsScanEvidence",
     "PrivateDnsVerifier",
     "PrivateScannerResultBridgeConsumer",

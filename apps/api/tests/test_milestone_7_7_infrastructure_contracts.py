@@ -159,6 +159,20 @@ def test_scanner_contract_uses_only_the_authoritative_utc_scan_time_tag() -> Non
     assert schema["properties"]["transport"]["properties"]["blobTagKeys"]["const"] == expected
 
 
+def test_scanner_proof_contract_retains_sanitized_blob_tag_observations() -> None:
+    contract_value = _json(MANIFESTS / "scanner-result-bridge.contract.json")
+    schema = _json(MANIFESTS / "scanner-result-bridge.schema.json")
+    expected = {
+        "blobTagObservationSchema": "mobius.scanner-result-bridge.blob-tags-observation.v1",
+        "blobTagObservationMarker": "SCANNER_BLOB_TAG_OBSERVATION",
+        "blobTagObservationSink": "retained-console-diagnostic",
+    }
+
+    assert {key: contract_value["proof"][key] for key in expected} == expected
+    proof_properties = schema["properties"]["proof"]["properties"]
+    assert {key: proof_properties[key]["const"] for key in expected} == expected
+
+
 @pytest.mark.parametrize(
     "schema_name",
     [

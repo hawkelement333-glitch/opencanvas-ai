@@ -29,6 +29,7 @@ from opencanvas_api.services.documents.processing import (
 )
 from opencanvas_api.services.documents.retrieval import RetrievedChunk, search_documents
 from opencanvas_api.services.documents.storage import (
+    AzureBlobTagReadResult,
     AzureBlobVersionedObjectStorage,
     AzureDocumentStorage,
     AzureManagedIdentityTokenProvider,
@@ -58,6 +59,7 @@ from opencanvas_api.services.documents.validation import (
 __all__ = [
     "DOCX_MEDIA_TYPE",
     "SUPPORTED_EXTENSIONS",
+    "AzureBlobTagReadResult",
     "AzureBlobVersionedObjectStorage",
     "AzureDocumentStorage",
     "AzureManagedIdentityTokenProvider",

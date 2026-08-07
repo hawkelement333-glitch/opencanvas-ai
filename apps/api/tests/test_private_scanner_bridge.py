@@ -14,6 +14,7 @@ import pytest
 from opencanvas_api.core.config import Settings
 from opencanvas_api.db.models import MalwareScanRequest, StorageObjectVersion
 from opencanvas_api.services.documents import (
+    AzureBlobTagReadResult,
     AzureBlobVersionedObjectStorage,
     AzureManagedIdentityTokenProvider,
     ProviderObjectVersion,
@@ -27,6 +28,7 @@ from opencanvas_api.services.scanner_bridge import (
     AzureLogAnalyticsScanEvidenceClient,
     BlobScanEvidence,
     BlobScanEvidenceReader,
+    BlobTagReadObservation,
     LogAnalyticsScanEvidence,
     LogAnalyticsScanEvidenceReader,
     PrivateDnsVerifier,
@@ -254,37 +256,68 @@ class _BlobStorage:
 
     def __init__(self) -> None:
         self.operations: list[str] = []
+        self.tag_arguments: dict[str, str] | None = None
 
     async def read_version_properties(self, **_kwargs: str) -> tuple[str, str]:
         self.operations.append("HEAD")
         return VERSION_ID, ETAG
 
-    async def read_version_tags_xml(self, **_kwargs: str) -> bytes:
+    async def read_version_tags_xml(self, **kwargs: str) -> AzureBlobTagReadResult:
         self.operations.append("GET_TAGS")
-        return (
-            "<?xml version='1.0' encoding='utf-8'?><Tags><TagSet>"
-            f"<Tag><Key>{BLOB_RESULT_TAG}</Key><Value>No threats found</Value></Tag>"
-            f"<Tag><Key>{BLOB_SCAN_TIME_TAG}</Key><Value>"
-            f"{FINISHED.isoformat()}</Value></Tag></TagSet></Tags>"
-        ).encode()
+        self.tag_arguments = kwargs
+        return AzureBlobTagReadResult(
+            content=(
+                "<?xml version='1.0' encoding='utf-8'?><Tags><TagSet>"
+                f"<Tag><Key>{BLOB_RESULT_TAG}</Key><Value>No threats found</Value></Tag>"
+                f"<Tag><Key>{BLOB_SCAN_TIME_TAG}</Key><Value>"
+                f"{FINISHED.isoformat()}</Value></Tag></TagSet></Tags>"
+            ).encode(),
+            status_code=200,
+            request_id=CORRELATION_ID,
+            response_version_id=VERSION_ID,
+            response_etag=ETAG,
+        )
 
     def object_url(self, _physical_key: str) -> str:
         return URI
 
 
-async def _read_blob_tag_fixture(xml: bytes) -> BlobScanEvidence:
+async def _read_blob_tag_fixture(
+    xml: bytes,
+    *,
+    response_version_id: str | None = VERSION_ID,
+    response_etag: str | None = ETAG,
+    observations: list[BlobTagReadObservation] | None = None,
+) -> BlobScanEvidence:
     async def private(_hostname: str) -> tuple[str, ...]:
         return ("10.77.0.9",)
 
     class FixtureStorage(_BlobStorage):
-        async def read_version_tags_xml(self, **_kwargs: str) -> bytes:
+        async def read_version_tags_xml(self, **kwargs: str) -> AzureBlobTagReadResult:
             self.operations.append("GET_TAGS")
-            return xml
+            self.tag_arguments = kwargs
+            return AzureBlobTagReadResult(
+                content=xml,
+                status_code=200,
+                request_id=CORRELATION_ID,
+                response_version_id=response_version_id,
+                response_etag=response_etag,
+            )
 
     return await AzureBlobScanEvidenceClient(
         cast(AzureBlobVersionedObjectStorage, FixtureStorage()),
         dns=PrivateDnsVerifier(private),
+        observation_sink=observations.append if observations is not None else None,
     ).read(_version(), observed_at=NOW)
+
+
+def _blob_tags_xml(*tags: tuple[str, str]) -> bytes:
+    serialized = "".join(
+        f"<Tag><Key>{key}</Key><Value>{value}</Value></Tag>" for key, value in tags
+    )
+    return (
+        f"<?xml version='1.0' encoding='utf-8'?><Tags><TagSet>{serialized}</TagSet></Tags>"
+    ).encode()
 
 
 @pytest.mark.asyncio
@@ -314,6 +347,204 @@ async def test_blob_adapter_accepts_exact_authoritative_utc_scan_time_fixture() 
     )
 
 
+@pytest.mark.asyncio
+async def test_blob_adapter_persists_deterministic_sanitized_documented_tag_observation() -> None:
+    observations: list[BlobTagReadObservation] = []
+    evidence = await _read_blob_tag_fixture(
+        _blob_tags_xml(
+            (BLOB_RESULT_TAG, "No threats found"),
+            (BLOB_SCAN_TIME_TAG, LIVE_SCAN_FINISHED_AT),
+        ),
+        observations=observations,
+    )
+
+    assert evidence.scan_result == "No threats found"
+    assert len(observations) == 1
+    canonical = observations[0].canonical()
+    assert canonical["returnedTagKeys"] == [BLOB_RESULT_TAG, BLOB_SCAN_TIME_TAG]
+    assert canonical["requiredKeysFound"] == [BLOB_RESULT_TAG, BLOB_SCAN_TIME_TAG]
+    assert canonical["requiredKeysMissing"] == []
+    assert canonical["unexpectedKeys"] == []
+    assert canonical["tagCount"] == 2
+    assert canonical["exactComparisonDecision"] == "accepted"
+    assert canonical["httpStatus"] == 200
+    assert canonical["requestCorrelationId"] == CORRELATION_ID
+    assert canonical["differentBlobVersion"] is False
+    assert canonical["versionIdentityPath"] == "response-version-id-and-etag"
+    body = {key: value for key, value in canonical.items() if key != "integritySha256"}
+    expected_integrity = hashlib.sha256(
+        b"mobius.scanner-bridge.blob-tag-observation.v1\0"
+        + json.dumps(body, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+    assert canonical["integritySha256"] == expected_integrity
+    assert observations[0].canonical() == canonical
+    serialized = json.dumps(canonical, separators=(",", ":"), sort_keys=True)
+    assert "No threats found" not in serialized
+    assert LIVE_SCAN_FINISHED_AT not in serialized
+    assert URI not in serialized
+    assert VERSION_ID not in serialized
+    assert ETAG not in serialized
+    assert BLOB_RESULT_TAG in serialized
+    assert BLOB_SCAN_TIME_TAG in serialized
+
+
+@pytest.mark.parametrize(
+    ("tags", "failure_code", "decision", "missing", "unexpected"),
+    [
+        (
+            (),
+            "scanner-blob-tags-empty",
+            "rejected-empty",
+            (BLOB_RESULT_TAG, BLOB_SCAN_TIME_TAG),
+            (),
+        ),
+        (
+            ((BLOB_RESULT_TAG, "No threats found"),),
+            "scanner-blob-tags-key-missing",
+            "rejected-required-key-missing",
+            (BLOB_SCAN_TIME_TAG,),
+            (),
+        ),
+        (
+            (("unexpected", "sanitized-value"),),
+            "scanner-blob-tags-key-missing",
+            "rejected-required-key-missing",
+            (BLOB_RESULT_TAG, BLOB_SCAN_TIME_TAG),
+            ("unexpected",),
+        ),
+        (
+            (
+                (BLOB_RESULT_TAG, "No threats found"),
+                (BLOB_SCAN_TIME_TAG, LIVE_SCAN_FINISHED_AT),
+                ("unexpected", "sanitized-value"),
+            ),
+            "scanner-blob-tags-key-unexpected",
+            "rejected-unexpected-key",
+            (),
+            ("unexpected",),
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_blob_adapter_emits_exact_key_comparison_subcodes(
+    tags: tuple[tuple[str, str], ...],
+    failure_code: str,
+    decision: str,
+    missing: tuple[str, ...],
+    unexpected: tuple[str, ...],
+) -> None:
+    observations: list[BlobTagReadObservation] = []
+    with pytest.raises(ScannerBridgeEvidenceError, match=failure_code):
+        await _read_blob_tag_fixture(
+            _blob_tags_xml(*tags),
+            observations=observations,
+        )
+
+    assert len(observations) == 1
+    canonical = observations[0].canonical()
+    assert canonical["exactComparisonDecision"] == decision
+    assert canonical["requiredKeysMissing"] == list(missing)
+    assert canonical["unexpectedKeys"] == list(unexpected)
+    assert canonical["responseEmpty"] is (not tags)
+    assert "sanitized-value" not in json.dumps(canonical)
+
+
+@pytest.mark.asyncio
+async def test_blob_adapter_rejects_a_different_response_version_before_acceptance() -> None:
+    observations: list[BlobTagReadObservation] = []
+    with pytest.raises(
+        ScannerBridgeEvidenceError,
+        match="scanner-blob-tags-version-mismatch",
+    ):
+        await _read_blob_tag_fixture(
+            _blob_tags_xml(
+                (BLOB_RESULT_TAG, "No threats found"),
+                (BLOB_SCAN_TIME_TAG, LIVE_SCAN_FINISHED_AT),
+            ),
+            response_version_id="different-version",
+            observations=observations,
+        )
+
+    canonical = observations[0].canonical()
+    assert canonical["differentBlobVersion"] is True
+    assert canonical["exactComparisonDecision"] == "rejected-version-mismatch"
+    assert canonical["responseVersionIdSha256"] == hashlib.sha256(b"different-version").hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_blob_adapter_retains_parser_normalization_failure_without_values() -> None:
+    observations: list[BlobTagReadObservation] = []
+    with pytest.raises(
+        ScannerBridgeEvidenceError,
+        match="scanner-blob-tags-parser-normalization-failed",
+    ):
+        await _read_blob_tag_fixture(
+            b"<Tags><TagSet><Tag><Key>unsafe-key</Key>",
+            observations=observations,
+        )
+
+    canonical = observations[0].canonical()
+    assert canonical["exactComparisonDecision"] == "rejected-parser-normalization"
+    assert canonical["parserNormalizationPath"].endswith(":failed")  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_blob_adapter_retains_http_status_before_status_subcode() -> None:
+    async def private(_hostname: str) -> tuple[str, ...]:
+        return ("10.77.0.9",)
+
+    class HttpFailureStorage(_BlobStorage):
+        async def read_version_tags_xml(self, **_kwargs: str) -> AzureBlobTagReadResult:
+            raise DocumentStorageError(
+                "safe",
+                code="storage_operation_rejected",
+                provider_status_code=409,
+                provider_request_id=CORRELATION_ID,
+            )
+
+    observations: list[BlobTagReadObservation] = []
+    client = AzureBlobScanEvidenceClient(
+        cast(AzureBlobVersionedObjectStorage, HttpFailureStorage()),
+        dns=PrivateDnsVerifier(private),
+        observation_sink=observations.append,
+    )
+    with pytest.raises(ScannerBridgeEvidenceError, match="scanner-blob-tags-http-status"):
+        await client.read(_version(), observed_at=NOW)
+
+    canonical = observations[0].canonical()
+    assert canonical["httpStatus"] == 409
+    assert canonical["requestCorrelationId"] == CORRELATION_ID
+    assert canonical["exactComparisonDecision"] == "rejected-http-status"
+    assert canonical["parserNormalizationPath"] == "not-run"
+
+
+@pytest.mark.asyncio
+async def test_blob_adapter_retains_an_explicit_observability_gap_subcode() -> None:
+    async def private(_hostname: str) -> tuple[str, ...]:
+        return ("10.77.0.9",)
+
+    class TransportFailureStorage(_BlobStorage):
+        async def read_version_tags_xml(self, **_kwargs: str) -> AzureBlobTagReadResult:
+            raise DocumentStorageError("safe", code="storage_transport_failed")
+
+    observations: list[BlobTagReadObservation] = []
+    client = AzureBlobScanEvidenceClient(
+        cast(AzureBlobVersionedObjectStorage, TransportFailureStorage()),
+        dns=PrivateDnsVerifier(private),
+        observation_sink=observations.append,
+    )
+    with pytest.raises(
+        ScannerBridgeEvidenceError,
+        match="scanner-blob-tags-observability-gap",
+    ):
+        await client.read(_version(), observed_at=NOW)
+
+    canonical = observations[0].canonical()
+    assert canonical["httpStatus"] is None
+    assert canonical["exactComparisonDecision"] == "rejected-observability-gap"
+    assert canonical["versionIdentityPath"] == "response-unavailable"
+
+
 @pytest.mark.parametrize(
     "scan_time_tag",
     [
@@ -336,7 +567,7 @@ async def test_blob_adapter_rejects_non_authoritative_scan_time_tag_aliases(
     ).encode()
     with pytest.raises(
         ScannerBridgeEvidenceError,
-        match="scanner-blob-tag-evidence-incomplete",
+        match="scanner-blob-tags-key-missing",
     ):
         await _read_blob_tag_fixture(xml)
 
@@ -374,7 +605,7 @@ async def test_blob_adapter_rejects_an_excess_blob_tag() -> None:
     ).encode()
     with pytest.raises(
         ScannerBridgeEvidenceError,
-        match="scanner-blob-tag-evidence-incomplete",
+        match="scanner-blob-tags-key-unexpected",
     ):
         await _read_blob_tag_fixture(xml)
 
@@ -395,6 +626,11 @@ async def test_blob_adapter_has_only_read_operations_and_binds_exact_version() -
     assert evidence.provider_version_id == VERSION_ID
     assert evidence.etag == ETAG.strip('"')
     assert evidence.object_uri == URI
+    assert storage.tag_arguments == {
+        "physical_key": "quarantine/objects/evidence",
+        "provider_version_id": VERSION_ID,
+        "expected_etag": ETAG,
+    }
 
 
 @pytest.mark.parametrize(
@@ -429,13 +665,19 @@ async def test_blob_adapter_distinguishes_tag_timestamp_failure() -> None:
         return ("10.77.0.9",)
 
     class InvalidTimestampStorage(_BlobStorage):
-        async def read_version_tags_xml(self, **_kwargs: str) -> bytes:
-            return (
-                "<?xml version='1.0' encoding='utf-8'?><Tags><TagSet>"
-                f"<Tag><Key>{BLOB_RESULT_TAG}</Key><Value>No threats found</Value></Tag>"
-                f"<Tag><Key>{BLOB_SCAN_TIME_TAG}</Key><Value>not-a-time</Value></Tag>"
-                "</TagSet></Tags>"
-            ).encode()
+        async def read_version_tags_xml(self, **_kwargs: str) -> AzureBlobTagReadResult:
+            return AzureBlobTagReadResult(
+                content=(
+                    "<?xml version='1.0' encoding='utf-8'?><Tags><TagSet>"
+                    f"<Tag><Key>{BLOB_RESULT_TAG}</Key><Value>No threats found</Value></Tag>"
+                    f"<Tag><Key>{BLOB_SCAN_TIME_TAG}</Key><Value>not-a-time</Value></Tag>"
+                    "</TagSet></Tags>"
+                ).encode(),
+                status_code=200,
+                request_id=CORRELATION_ID,
+                response_version_id=VERSION_ID,
+                response_etag=ETAG,
+            )
 
     client = AzureBlobScanEvidenceClient(
         cast(AzureBlobVersionedObjectStorage, InvalidTimestampStorage()),
@@ -1192,6 +1434,18 @@ def test_probe_main_retains_a_specific_post_poll_failure_marker(
     }
 
 
+def test_probe_wires_blob_tag_observation_to_retained_console_before_polling() -> None:
+    from scripts import scanner_bridge_probe
+
+    source = inspect.getsource(scanner_bridge_probe.run)
+    emit = inspect.getsource(scanner_bridge_probe._emit_blob_tag_observation)
+    assert source.index("observation_sink=_emit_blob_tag_observation") < source.index(
+        "_poll_dual_source_evidence("
+    )
+    assert "observation.canonical()" in emit
+    assert "flush=True" in emit
+
+
 @pytest.mark.asyncio
 async def test_probe_retains_source_failure_across_bounded_retries(
     monkeypatch: pytest.MonkeyPatch,
@@ -1204,7 +1458,7 @@ async def test_probe_retains_source_failure_across_bounded_retries(
 
         async def read(self, *_args: object, **_kwargs: object) -> BlobScanEvidence:
             self.calls += 1
-            raise RuntimeError("scanner-blob-tag-evidence-incomplete")
+            raise RuntimeError("scanner-blob-tags-key-missing")
 
     class UnreachableLogReader:
         async def read(self, **_kwargs: object) -> tuple[LogAnalyticsScanEvidence, ...]:
@@ -1218,7 +1472,7 @@ async def test_probe_retains_source_failure_across_bounded_retries(
     monkeypatch.setattr(scanner_bridge_probe.asyncio, "sleep", no_sleep)
     with pytest.raises(
         scanner_bridge_probe.ScannerBridgeProbeFailure,
-        match="scanner-blob-tag-evidence-incomplete",
+        match="scanner-blob-tags-key-missing",
     ) as failure:
         await scanner_bridge_probe._poll_dual_source_evidence(
             version=version,
@@ -1229,7 +1483,7 @@ async def test_probe_retains_source_failure_across_bounded_retries(
             delay_seconds=1.0,
             clock=lambda: NOW,
         )
-    assert failure.value.failure_code == "scanner-blob-tag-evidence-incomplete"
+    assert failure.value.failure_code == "scanner-blob-tags-key-missing"
     assert failure.value.attempt_count == 3
     assert blob_reader.calls == 3
 

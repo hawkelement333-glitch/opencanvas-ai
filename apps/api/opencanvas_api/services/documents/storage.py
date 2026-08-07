@@ -41,6 +41,15 @@ class ProviderObjectVersion:
     content_sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class AzureBlobTagReadResult:
+    content: bytes
+    status_code: int
+    request_id: str | None
+    response_version_id: str | None
+    response_etag: str | None
+
+
 class VersionedObjectStorage(Protocol):
     name: str
 
@@ -596,7 +605,7 @@ class AzureBlobVersionedObjectStorage:
         physical_key: str,
         provider_version_id: str,
         expected_etag: str,
-    ) -> bytes:
+    ) -> AzureBlobTagReadResult:
         """Read, but never write, the blob-index tags for one immutable version."""
 
         response = await self._request(
@@ -607,7 +616,13 @@ class AzureBlobVersionedObjectStorage:
         )
         if len(response.content) > 32_768:
             raise DocumentStorageError("The Azure blob-tag response is too large.")
-        return response.content
+        return AzureBlobTagReadResult(
+            content=response.content,
+            status_code=response.status_code,
+            request_id=response.headers.get("x-ms-request-id"),
+            response_version_id=response.headers.get("x-ms-version-id"),
+            response_etag=response.headers.get("etag"),
+        )
 
     async def version_exists(
         self,
@@ -830,6 +845,8 @@ class AzureBlobVersionedObjectStorage:
                 raise DocumentStorageError(
                     "The private Azure object store denied authorization.",
                     code="storage_authorization_failed",
+                    provider_status_code=response.status_code,
+                    provider_request_id=response.headers.get("x-ms-request-id"),
                 )
             if not 200 <= response.status_code < 300 and (
                 response.status_code not in accepted_statuses
@@ -837,6 +854,8 @@ class AzureBlobVersionedObjectStorage:
                 raise DocumentStorageError(
                     "The private Azure object store rejected the operation.",
                     code="storage_operation_rejected",
+                    provider_status_code=response.status_code,
+                    provider_request_id=response.headers.get("x-ms-request-id"),
                 )
             return response
         except DocumentStorageError:
@@ -1104,6 +1123,7 @@ def build_versioned_object_storage(settings: Settings) -> VersionedObjectStorage
 
 
 __all__ = [
+    "AzureBlobTagReadResult",
     "AzureBlobVersionedObjectStorage",
     "AzureDocumentStorage",
     "AzureManagedIdentityTokenProvider",
