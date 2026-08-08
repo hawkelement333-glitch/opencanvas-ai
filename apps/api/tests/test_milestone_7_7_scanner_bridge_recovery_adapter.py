@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 from infra.milestone_7_7 import scanner_bridge_recovery_adapter as adapter_module
 from infra.milestone_7_7.scanner_bridge_recovery_adapter import (
     ProductionScannerBridgeRecoveryAdapter,
@@ -32,6 +31,8 @@ from preflight.milestone_7_7.scanner_bridge_recovery import (
 from preflight.milestone_7_7.scanner_result_bridge import (
     deployment_evidence_from_mapping,
 )
+
+from opencanvas_api.services.scanner_bridge import BlobTagReadObservation
 
 SUBSCRIPTION_ID = "11111111-2222-4333-8444-555555555555"
 SUBSCRIPTION = f"/subscriptions/{SUBSCRIPTION_ID}"
@@ -175,11 +176,11 @@ def _failure_marker(
 def _blob_tag_observation(
     *,
     decision: str = "rejected-required-key-missing",
-    returned: tuple[str, ...] = ("Malware scanning scan result",),
+    returned: tuple[str, ...] = (adapter_module.BLOB_RESULT_TAG,),
 ) -> dict[str, JsonValue]:
     required = (
-        "Malware scanning scan result",
-        "Malware scanning scan time UTC",
+        adapter_module.BLOB_RESULT_TAG,
+        adapter_module.BLOB_SCAN_TIME_TAG,
     )
     body: dict[str, JsonValue] = {
         "differentBlobVersion": decision == "rejected-version-mismatch",
@@ -204,10 +205,7 @@ def _blob_tag_observation(
     }
     return {
         **body,
-        "integritySha256": adapter_module._canonical_hash(
-            body,
-            "mobius.scanner-bridge.blob-tag-observation.v1",
-        ),
+        "integritySha256": adapter_module._blob_tag_observation_hash(body),
     }
 
 
@@ -1174,8 +1172,8 @@ def test_blob_tag_observation_parser_retains_latest_integrity_bound_comparison(
     accepted = _blob_tag_observation(
         decision="accepted",
         returned=(
-            "Malware scanning scan result",
-            "Malware scanning scan time UTC",
+            adapter_module.BLOB_RESULT_TAG,
+            adapter_module.BLOB_SCAN_TIME_TAG,
         ),
     )
     failed = _blob_tag_observation()
@@ -1195,6 +1193,73 @@ def test_blob_tag_observation_parser_retains_latest_integrity_bound_comparison(
         )
         == failed
     )
+
+
+def test_blob_tag_observation_parser_accepts_exact_producer_integrity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_keys = (
+        adapter_module.BLOB_RESULT_TAG,
+        adapter_module.BLOB_SCAN_TIME_TAG,
+    )
+    marker = BlobTagReadObservation(
+        queried_blob_version_id_sha256="2" * 64,
+        queried_blob_uri_sha256="1" * 64,
+        queried_etag_sha256="3" * 64,
+        http_status=200,
+        request_correlation_id="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        returned_tag_keys=expected_keys,
+        required_keys_found=expected_keys,
+        required_keys_missing=(),
+        unexpected_keys=(),
+        parser_normalization_path=adapter_module.BLOB_TAG_NORMALIZATION_PATH,
+        exact_comparison_decision="accepted",
+        response_empty=False,
+        different_blob_version=False,
+        response_version_id_sha256="5" * 64,
+        response_etag_sha256="4" * 64,
+        version_identity_path="response-version-id-and-etag",
+    ).canonical()
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_log_output",
+        lambda *_args: json.dumps(marker),
+    )
+
+    assert (
+        adapter_module._proof_blob_tag_observation(
+            _authorization(PROOF_STAGE),
+            "proof",
+            failure_code="scanner-correlation-uri-mismatch",
+        )
+        == marker
+    )
+
+
+def test_blob_tag_observation_parser_rejects_newline_canonical_integrity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = _blob_tag_observation()
+    body = {key: value for key, value in marker.items() if key != "integritySha256"}
+    marker["integritySha256"] = adapter_module._canonical_hash(
+        body,
+        "mobius.scanner-bridge.blob-tag-observation.v1",
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_log_output",
+        lambda *_args: json.dumps(marker),
+    )
+
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-blob-tag-observation-integrity-unproved",
+    ):
+        adapter_module._proof_blob_tag_observation(
+            _authorization(PROOF_STAGE),
+            "proof",
+            failure_code="scanner-blob-tags-key-missing",
+        )
 
 
 def test_blob_tag_observation_parser_rejects_missing_tampered_or_mismatched_evidence(

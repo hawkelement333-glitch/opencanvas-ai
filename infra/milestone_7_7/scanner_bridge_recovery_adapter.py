@@ -73,8 +73,8 @@ PROOF_CONSOLE_DIAGNOSTIC: Final = "mobius77-scanner-proof-console"
 BLOB_TAG_OBSERVATION_MARKER: Final = "SCANNER_BLOB_TAG_OBSERVATION"
 BLOB_TAG_OBSERVATION_SCHEMA: Final = "mobius.scanner-result-bridge.blob-tags-observation.v1"
 BLOB_TAG_NORMALIZATION_PATH: Final = "azure-blob-tags-xml-local-name-v1"
-BLOB_RESULT_TAG: Final = "Malware scanning scan result"
-BLOB_SCAN_TIME_TAG: Final = "Malware scanning scan time UTC"
+BLOB_RESULT_TAG: Final = "Malware Scanning scan result"
+BLOB_SCAN_TIME_TAG: Final = "Malware Scanning scan time UTC"
 API_IDENTITY: Final = "id-mobius77-api"
 DEFENDER_SCANNER: Final = "StorageDataScanner"
 DEFENDER_SCANNER_ROLE: Final = "cd50fd1f-0421-46f2-8cce-afc587dbcc77"
@@ -201,6 +201,13 @@ def _json_object(value: JsonValue | None, code: str) -> dict[str, JsonValue]:
 
 def _canonical_hash(value: JsonValue, domain: str) -> str:
     return integrity_sha256(value, domain.encode() + b"\0")
+
+
+def _blob_tag_observation_hash(value: JsonValue) -> str:
+    canonical = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(
+        b"mobius.scanner-bridge.blob-tag-observation.v1\0" + canonical
+    ).hexdigest()
 
 
 def _hash_text(value: str) -> str:
@@ -1725,13 +1732,7 @@ def _proof_blob_tag_observation(
     body = {
         key: cast(JsonValue, value) for key, value in marker.items() if key != "integritySha256"
     }
-    if (
-        _canonical_hash(
-            cast(JsonValue, body),
-            "mobius.scanner-bridge.blob-tag-observation.v1",
-        )
-        != integrity
-    ):
+    if _blob_tag_observation_hash(cast(JsonValue, body)) != integrity:
         _fail("scanner-proof-blob-tag-observation-integrity-unproved")
     hashes = (
         "queriedBlobUriSha256",

@@ -46,7 +46,7 @@ URI = f"https://{ACCOUNT}.blob.core.windows.net/quarantine/objects/evidence"
 ETAG = '"0x8DEFACED"'
 VERSION_ID = "2026-08-06T14:58:00.0000000Z"
 CORRELATION_ID = "00000000-0000-4000-8000-000000000077"
-AUTHORITATIVE_BLOB_SCAN_TIME_TAG = "Malware scanning scan time UTC"
+AUTHORITATIVE_BLOB_SCAN_TIME_TAG = "Malware Scanning scan time UTC"
 LIVE_SCAN_FINISHED_AT = "2026-08-07T05:56:36.0054421Z"
 
 
@@ -326,9 +326,9 @@ async def test_blob_adapter_accepts_exact_authoritative_utc_scan_time_fixture() 
     evidence = await _read_blob_tag_fixture(
         (
             "<?xml version='1.0' encoding='utf-8'?><Tags><TagSet>"
-            "<Tag><Key>Malware scanning scan result</Key>"
+            "<Tag><Key>Malware Scanning scan result</Key>"
             "<Value>No threats found</Value></Tag>"
-            "<Tag><Key>Malware scanning scan time UTC</Key>"
+            "<Tag><Key>Malware Scanning scan time UTC</Key>"
             f"<Value>{LIVE_SCAN_FINISHED_AT}</Value></Tag>"
             "</TagSet></Tags>"
         ).encode()
@@ -549,9 +549,10 @@ async def test_blob_adapter_retains_an_explicit_observability_gap_subcode() -> N
     "scan_time_tag",
     [
         "Malware scanning scan time",
+        "Malware scanning scan time UTC",
         "malware scanning scan time UTC",
-        "Malware scanning scan time UTC ",
-        " Malware scanning scan time UTC",
+        "Malware Scanning scan time UTC ",
+        " Malware Scanning scan time UTC",
     ],
 )
 @pytest.mark.asyncio
@@ -560,11 +561,24 @@ async def test_blob_adapter_rejects_non_authoritative_scan_time_tag_aliases(
 ) -> None:
     xml = (
         "<?xml version='1.0' encoding='utf-8'?><Tags><TagSet>"
-        "<Tag><Key>Malware scanning scan result</Key>"
+        f"<Tag><Key>{BLOB_RESULT_TAG}</Key>"
         "<Value>No threats found</Value></Tag>"
         f"<Tag><Key>{scan_time_tag}</Key><Value>{LIVE_SCAN_FINISHED_AT}</Value></Tag>"
         "</TagSet></Tags>"
     ).encode()
+    with pytest.raises(
+        ScannerBridgeEvidenceError,
+        match="scanner-blob-tags-key-missing",
+    ):
+        await _read_blob_tag_fixture(xml)
+
+
+@pytest.mark.asyncio
+async def test_blob_adapter_rejects_the_stale_result_tag_case() -> None:
+    xml = _blob_tags_xml(
+        ("Malware scanning scan result", "No threats found"),
+        (BLOB_SCAN_TIME_TAG, LIVE_SCAN_FINISHED_AT),
+    )
     with pytest.raises(
         ScannerBridgeEvidenceError,
         match="scanner-blob-tags-key-missing",
@@ -579,9 +593,9 @@ async def test_blob_adapter_rejects_unknown_or_malformed_clean_results(
 ) -> None:
     xml = (
         "<?xml version='1.0' encoding='utf-8'?><Tags><TagSet>"
-        "<Tag><Key>Malware scanning scan result</Key>"
+        f"<Tag><Key>{BLOB_RESULT_TAG}</Key>"
         f"<Value>{scan_result}</Value></Tag>"
-        "<Tag><Key>Malware scanning scan time UTC</Key>"
+        f"<Tag><Key>{BLOB_SCAN_TIME_TAG}</Key>"
         f"<Value>{LIVE_SCAN_FINISHED_AT}</Value></Tag>"
         "</TagSet></Tags>"
     ).encode()
@@ -596,9 +610,9 @@ async def test_blob_adapter_rejects_unknown_or_malformed_clean_results(
 async def test_blob_adapter_rejects_an_excess_blob_tag() -> None:
     xml = (
         "<?xml version='1.0' encoding='utf-8'?><Tags><TagSet>"
-        "<Tag><Key>Malware scanning scan result</Key>"
+        f"<Tag><Key>{BLOB_RESULT_TAG}</Key>"
         "<Value>No threats found</Value></Tag>"
-        "<Tag><Key>Malware scanning scan time UTC</Key>"
+        f"<Tag><Key>{BLOB_SCAN_TIME_TAG}</Key>"
         f"<Value>{LIVE_SCAN_FINISHED_AT}</Value></Tag>"
         "<Tag><Key>unexpected</Key><Value>unsafe</Value></Tag>"
         "</TagSet></Tags>"

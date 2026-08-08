@@ -40,8 +40,8 @@ from opencanvas_api.services.object_ingestion import (
     TrustedScanResult,
 )
 
-BLOB_RESULT_TAG: Final = "Malware scanning scan result"
-BLOB_SCAN_TIME_TAG: Final = "Malware scanning scan time UTC"
+BLOB_RESULT_TAG: Final = "Malware Scanning scan result"
+BLOB_SCAN_TIME_TAG: Final = "Malware Scanning scan time UTC"
 BLOB_TAG_OBSERVATION_MARKER: Final = "SCANNER_BLOB_TAG_OBSERVATION"
 BLOB_TAG_OBSERVATION_SCHEMA: Final = "mobius.scanner-result-bridge.blob-tags-observation.v1"
 BLOB_TAG_NORMALIZATION_PATH: Final = "azure-blob-tags-xml-local-name-v1"

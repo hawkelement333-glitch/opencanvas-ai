@@ -151,8 +151,8 @@ def test_scanner_contract_uses_only_the_authoritative_utc_scan_time_tag() -> Non
     contract_value = _json(MANIFESTS / "scanner-result-bridge.contract.json")
     schema = _json(MANIFESTS / "scanner-result-bridge.schema.json")
     expected = [
-        "Malware scanning scan result",
-        "Malware scanning scan time UTC",
+        "Malware Scanning scan result",
+        "Malware Scanning scan time UTC",
     ]
 
     assert contract_value["transport"]["blobTagKeys"] == expected
