@@ -195,7 +195,7 @@ def _already_pushed_inputs(
         stdout_sha256="1" * 64,
         stderr_sha256="2" * 64,
         publication_evidence_integrity="3" * 64,
-        cleanup_generation=2,
+        cleanup_generation=publication.CLEANUP_BINDING_GENERATION,
         cleanup_deadline_utc="2026-08-06T00:00:00Z",
         prior_lifecycle_evidence="4" * 64,
         operation_id="reconcile-already-pushed-publication",

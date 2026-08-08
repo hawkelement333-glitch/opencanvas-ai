@@ -140,7 +140,7 @@ def _authorization(
         historical_evidence_integrity=historical.as_json()["integritySha256"],  # type: ignore[arg-type]
         live_observation_integrity=observation.as_json()["integritySha256"],  # type: ignore[arg-type]
         prior_lifecycle_evidence_integrity="5" * 64,
-        cleanup_generation=2,
+        cleanup_generation=publication.CLEANUP_BINDING_GENERATION,
         cleanup_deadline_utc="2026-08-06T12:00:00Z",
         cost_ceiling_usd_cents=25000,
         issued_at_utc="2026-08-05T15:59:00Z",
@@ -368,6 +368,20 @@ def test_reconstruction_authorization_rejects_missing_integrity_or_forbidden_sco
         )
 
 
+def test_reconstruction_authorization_rejects_tombstoned_cleanup_generation() -> None:
+    _historical, _observation_value, authorization = _validated_inputs()
+    raw = authorization.as_json()
+    raw["cleanupGeneration"] = publication.CLEANUP_BINDING_GENERATION - 1
+    raw["integritySha256"] = publication._integrity_value(
+        publication.RECONSTRUCTION_AUTHORIZATION_DOMAIN,
+        {key: raw[key] for key in raw if key != "integritySha256"},
+    )
+    with pytest.raises(RuntimeError, match="authorization-binding-invalid"):
+        publication.validate_already_pushed_reconstruction_authorization(
+            raw, now_utc=NOW, repository_head=HEAD
+        )
+
+
 def test_reconstructed_record_only_enters_reconciliation_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -422,7 +436,7 @@ def test_legacy_original_record_remains_valid_and_reconstructed_record_requires_
         stdout_sha256="1" * 64,
         stderr_sha256="2" * 64,
         publication_evidence_integrity="3" * 64,
-        cleanup_generation=2,
+        cleanup_generation=publication.CLEANUP_BINDING_GENERATION,
         cleanup_deadline_utc="2026-08-06T12:00:00Z",
         prior_lifecycle_evidence="5" * 64,
         operation_id="reconcile-already-pushed-publication",

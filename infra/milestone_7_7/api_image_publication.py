@@ -17,6 +17,7 @@ from typing import cast
 
 from performance.milestone_7_7.framework import JsonValue, canonical_bytes, load_json
 from preflight.milestone_7_7.managed_binding_contracts import (
+    CLEANUP_BINDING_GENERATION,
     REPOSITORY_ROOT,
     load_managed_binding_contract,
 )
@@ -424,7 +425,7 @@ def validate_already_pushed_publication_record(
         or value.get("dockerExitCode") != 0
         or value.get("dockerTimedOut") is not False
         or type(value.get("cleanupGeneration")) is not int
-        or value.get("cleanupGeneration") != 2
+        or value.get("cleanupGeneration") != CLEANUP_BINDING_GENERATION
         or value.get("authorizedOperationId") != "reconcile-already-pushed-publication"
     ):
         _fail("already-pushed-record-binding-invalid")
@@ -1021,7 +1022,7 @@ def validate_already_pushed_reconstruction_authorization(
         or value.get("repository") != PUBLISHER_REPOSITORY
         or value.get("sourceTag") != f"source-{value['imageSourceCommit']}"
         or value.get("platform") != API_IMAGE_PLATFORM
-        or value.get("cleanupGeneration") != 2
+        or value.get("cleanupGeneration") != CLEANUP_BINDING_GENERATION
         or value.get("costCeilingUsdCents") != 25000
         or value.get("allowedOperation") != RECONCILIATION_OPERATION_ID
         or value.get("prohibitedOperations")
@@ -1060,7 +1061,7 @@ def validate_already_pushed_reconstruction_authorization(
         prior_lifecycle_evidence_integrity=str(
             value["priorLifecycleEvidenceIntegritySha256"]
         ),
-        cleanup_generation=2,
+        cleanup_generation=CLEANUP_BINDING_GENERATION,
         cleanup_deadline_utc=str(value["cleanupDeadlineUtc"]),
         cost_ceiling_usd_cents=25000,
         issued_at_utc=str(value["issuedAtUtc"]),
