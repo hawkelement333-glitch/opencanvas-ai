@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
@@ -18,9 +19,13 @@ from preflight.milestone_7_7 import cleanup_control_recovery
 from preflight.milestone_7_7.cleanup_control_recovery import (
     CleanupControlRecoveryAuthorization,
     CleanupControlRecoveryError,
+    CleanupControlReprovisionAuthorization,
     build_cleanup_control_recovery_authorization,
+    build_cleanup_control_reprovision_authorization,
     cleanup_control_recovery_authorization_integrity,
+    cleanup_control_reprovision_authorization_integrity,
     validate_cleanup_control_recovery_authorization,
+    validate_cleanup_control_reprovision_authorization,
     write_cleanup_control_recovery_authorization,
 )
 from preflight.milestone_7_7.managed_binding_contracts import (
@@ -35,11 +40,16 @@ TARGET_GROUP = f"{SUBSCRIPTION}/resourceGroups/rg-solarplexus-mobius-77-staging"
 AUTOMATION_PREFIX = f"{CLEANUP_GROUP}/providers/Microsoft.Automation/automationAccounts"
 NOW = datetime(2026, 8, 6, tzinfo=UTC)
 DEADLINE = datetime(2026, 8, 6, 12, tzinfo=UTC)
+REPROVISION_NOW = datetime(2026, 8, 8, 14, tzinfo=UTC)
 PRINCIPAL_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 CORRUPTED_PRINCIPAL_ID = "be0e6b8d-f742-4c8f-8df1-9f302559a6c8"
 CORRUPTED_ASSIGNMENT_ID = (
     f"{TARGET_GROUP}/providers/Microsoft.Authorization/roleAssignments/"
     "5c1b559b-638a-5d58-b77b-b6291747f9d4"
+)
+REPLACEMENT_ASSIGNMENT_ID = (
+    f"{TARGET_GROUP}/providers/Microsoft.Authorization/roleAssignments/"
+    "b4acad78-f3f0-59d4-8e36-901644af1ff6"
 )
 
 
@@ -59,6 +69,26 @@ def _authorization() -> CleanupControlRecoveryAuthorization:
         target_resource_group_id=TARGET_GROUP,
         runbook_content_sha256=_runbook_sha256(),
         now_utc=NOW,
+    )
+
+
+def _reprovision_authorization() -> CleanupControlReprovisionAuthorization:
+    return build_cleanup_control_reprovision_authorization(
+        repository_head="a" * 40,
+        subscription_id=SUBSCRIPTION_ID,
+        cleanup_resource_group_id=CLEANUP_GROUP,
+        corrupted_automation_account_id=f"{AUTOMATION_PREFIX}/aa-mobius77-cleanup",
+        corrupted_principal_id=CORRUPTED_PRINCIPAL_ID,
+        corrupted_role_assignment_id=CORRUPTED_ASSIGNMENT_ID,
+        replacement_automation_account_id=(f"{AUTOMATION_PREFIX}/aa-mobius77-cleanup-recovery"),
+        replacement_principal_id=(
+            cleanup_control_recovery.DEADLINE_RECOVERY_REPLACEMENT_PRINCIPAL_ID
+        ),
+        replacement_role_assignment_id=REPLACEMENT_ASSIGNMENT_ID,
+        replacement_location=(cleanup_control_recovery.DEADLINE_RECOVERY_REPLACEMENT_LOCATION),
+        target_resource_group_id=TARGET_GROUP,
+        runbook_content_sha256=_runbook_sha256(),
+        now_utc=REPROVISION_NOW,
     )
 
 
@@ -807,3 +837,298 @@ def test_cleanup_recovery_entry_point_invokes_production_consumer(
     assert isinstance(observed["authorization"], CleanupControlRecoveryAuthorization)
     assert observed["receipt_directory"] == receipt_directory
     assert json.loads(capsys.readouterr().out) == {"status": "cleanup-control-recovery-executable"}
+
+
+def test_post_cleanup_reprovision_authorization_is_exact_and_image_free() -> None:
+    authorization = _reprovision_authorization()
+    assert authorization.schedule == "schedule-mobius77-cleanup-g3"
+    assert authorization.priorSchedule == "schedule-mobius77-cleanup"
+    assert authorization.bindingGeneration == 3
+    assert authorization.bindingContractVersion == ("m7.7-automation-cleanup-binding-v3")
+    assert authorization.priorBindingId == "f29ca20d-cd14-57d9-b99b-fd6b04406166"
+    assert authorization.deadlineUtc == "2026-08-09T08:00:00Z"
+    assert authorization.roleScope == TARGET_GROUP
+    assert authorization.authorizationParameterValue is True
+    assert "image" not in " ".join(authorization.allowedOperations).casefold()
+    assert "migration" not in " ".join(authorization.allowedOperations).casefold()
+    assert "build_authorization_ledger" not in (
+        build_cleanup_control_reprovision_authorization.__code__.co_names
+    )
+    assert (
+        validate_cleanup_control_reprovision_authorization(
+            authorization,
+            expected_repository_head="a" * 40,
+            now_utc=REPROVISION_NOW,
+        )
+        is authorization
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schedule", "schedule-mobius77-cleanup"),
+        ("priorSchedule", "schedule-other"),
+        ("roleDefinitionId", "00000000-0000-0000-0000-000000000000"),
+        ("roleScope", CLEANUP_GROUP),
+        ("targetParameterValue", "rg-other"),
+        ("authorizationParameterValue", False),
+        ("bindingGeneration", 2),
+        ("priorBindingId", "00000000-0000-0000-0000-000000000000"),
+    ],
+)
+def test_post_cleanup_reprovision_authorization_rejects_scope_drift(
+    field: str, value: object
+) -> None:
+    authorization = replace(_reprovision_authorization(), **{field: value})
+    authorization = replace(
+        authorization,
+        authorizationIntegritySha256=(
+            cleanup_control_reprovision_authorization_integrity(authorization)
+        ),
+    )
+    with pytest.raises(
+        CleanupControlRecoveryError,
+        match="cleanup-reprovision-authorization-scope-invalid",
+    ):
+        validate_cleanup_control_reprovision_authorization(
+            authorization,
+            expected_repository_head="a" * 40,
+            now_utc=REPROVISION_NOW,
+        )
+
+
+def _install_reprovision_execution_fakes(
+    monkeypatch: pytest.MonkeyPatch,
+    authorization: CleanupControlReprovisionAuthorization,
+) -> list[str]:
+    events: list[str] = []
+    principal_fingerprint = hashlib.sha256(
+        b"mobius.azure.cleanup-principal.v1\0"
+        + authorization.replacementPrincipalId.casefold().encode("ascii")
+    ).hexdigest()
+    contract: dict[str, JsonValue] = {
+        "cleanupExecution": {
+            "activeBindingId": authorization.bindingId,
+            "authorizationParameter": authorization.authorizationParameter,
+            "authorizationValue": authorization.authorizationParameterValue,
+            "bindingContractVersion": authorization.bindingContractVersion,
+            "cleanupContributorRoleDefinitionId": authorization.roleDefinitionId,
+            "cleanupPrincipalFingerprintSha256": principal_fingerprint,
+            "deadlineUtc": authorization.deadlineUtc,
+            "publishedContentSha256": authorization.runbookContentSha256,
+            "targetParameter": authorization.targetParameter,
+            "targetResourceGroup": authorization.targetParameterValue,
+        },
+        "rbac": {"cleanupContributorRoleDefinitionId": authorization.roleDefinitionId},
+    }
+    monkeypatch.setattr(adapter_module, "load_managed_binding_contract", lambda: contract)
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_repository_state",
+        lambda _head: events.append("repository"),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_account_binding",
+        lambda _now: SUBSCRIPTION_ID,
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_group_exists",
+        lambda _subscription, _group: True,
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_verify_completed_prior_generation",
+        lambda *_args: events.append("prior-proved"),
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_remove_prior_binding",
+        lambda *_args, **_kwargs: events.append("prior-binding-removed") or True,
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_remove_prior_schedule",
+        lambda *_args: events.append("prior-schedule-removed") or True,
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_create_reprovision_schedule",
+        lambda *_args: events.append("new-schedule-created") or True,
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_cleanup_resource_group_inventory",
+        lambda _subscription: frozenset(),
+    )
+    monkeypatch.setattr(adapter_module, "_validate_cleanup_inventory", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verified_cost",
+        lambda: (3_110, 20_607),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_compile_template",
+        lambda _template: events.append("compiled"),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_deploy_stage",
+        lambda **kwargs: events.append(f"deploy-{kwargs['stage']}"),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_configure_cleanup_runbook",
+        lambda _subscription: events.append("runbook-published"),
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_verify_replacement_cleanup_graph",
+        lambda *_args, **_kwargs: authorization.replacementPrincipalId,
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_cleanup_target_role",
+        lambda *_args: events.append("cleanup-role-proved"),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_reconcile_container_apps_infrastructure_tags",
+        lambda **_kwargs: events.append("infrastructure-tags-reconciled"),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verify_preservable_pre_secret_state",
+        lambda **_kwargs: {
+            "cleanup-backstop-armed": True,
+            "private-boundaries-preserved": True,
+        },
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_verify_corrupted_evidence_graph",
+        lambda *_args, **_kwargs: events.append("corrupted-inert"),
+    )
+    return events
+
+
+def test_reprovision_adapter_consumes_once_and_orders_generation_before_foundation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    authorization = _reprovision_authorization()
+    events = _install_reprovision_execution_fakes(monkeypatch, authorization)
+    adapter = ProductionCleanupControlRecoveryAdapter(clock=lambda: REPROVISION_NOW)
+    result = adapter.execute_reprovision(
+        authorization=authorization,
+        receipt_directory=tmp_path,
+        expected_repository_head="a" * 40,
+    )
+    assert result["cleanup-marker"] == "CLEANUP_EXECUTABLE_AND_ARMED"
+    assert result["staging-marker"] == "NEW_STAGING_READY"
+    assert events.index("prior-binding-removed") < events.index("prior-schedule-removed")
+    assert events.index("prior-schedule-removed") < events.index("runbook-published")
+    assert events.index("runbook-published") < events.index("new-schedule-created")
+    assert events.index("new-schedule-created") < events.index("deploy-cleanup-job-binding")
+    assert events.index("deploy-cleanup-job-binding") < events.index("deploy-cleanup-binding")
+    assert events.index("deploy-cleanup-binding") < events.index("deploy-pre-secret")
+    assert (tmp_path / adapter_module.POST_CLEANUP_REPROVISION_RECEIPT_FILE).is_file()
+    with pytest.raises(
+        CleanupControlRecoveryExecutionError,
+        match="cleanup-reprovision-authorization-already-consumed",
+    ):
+        adapter.execute_reprovision(
+            authorization=authorization,
+            receipt_directory=tmp_path,
+            expected_repository_head="a" * 40,
+        )
+    assert events.count("prior-binding-removed") == 1
+    assert events.count("prior-schedule-removed") == 1
+
+
+def test_reprovision_adapter_has_no_image_or_complete_ledger_path() -> None:
+    names = ProductionCleanupControlRecoveryAdapter.execute_reprovision.__code__.co_names
+    assert "build_authorization_ledger" not in names
+    assert "docker" not in " ".join(names).casefold()
+    assert "image" not in " ".join(names).casefold()
+
+
+def test_reprovision_authorization_round_trips_and_entry_point_uses_adapter(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    authorization = _reprovision_authorization()
+    path = tmp_path / "reprovision-authorization.json"
+    write_cleanup_control_recovery_authorization(path, authorization)
+    loaded = cleanup_control_recovery.load_cleanup_control_recovery_authorization(path)
+    assert loaded == authorization
+    assert isinstance(loaded, CleanupControlReprovisionAuthorization)
+    observed: dict[str, object] = {}
+
+    def execute_reprovision(self: object, **kwargs: object) -> dict[str, JsonValue]:
+        observed.update(kwargs)
+        return {"status": "post-cleanup-reprovision-complete"}
+
+    monkeypatch.setattr(
+        ProductionCleanupControlRecoveryAdapter,
+        "execute_reprovision",
+        execute_reprovision,
+    )
+    result = cleanup_control_recovery.execute_cleanup_control_recovery(
+        authorization=loaded,
+        receipt_directory=tmp_path / "receipts",
+        expected_repository_head="a" * 40,
+    )
+    assert result == {"status": "post-cleanup-reprovision-complete"}
+    assert observed["authorization"] == authorization
+
+
+def _reprovision_schedule_row(
+    authorization: CleanupControlReprovisionAuthorization,
+) -> dict[str, JsonValue]:
+    return {
+        "frequency": "OneTime",
+        "id": (
+            f"{authorization.replacementAutomationAccountId}/schedules/{authorization.schedule}"
+        ),
+        "isEnabled": True,
+        "name": authorization.schedule,
+        "startTime": authorization.deadlineUtc,
+        "timeZone": "Etc/UTC",
+    }
+
+
+def test_reprovision_schedule_ambiguous_create_is_adopted_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _reprovision_authorization()
+    rows = iter(([], [_reprovision_schedule_row(authorization)]))
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(adapter_module, "_schedule_rows", lambda _authorization: next(rows))
+
+    def ambiguous(argv: tuple[str, ...], **_kwargs: object) -> None:
+        calls.append(argv)
+        raise managed_binding_lifecycle.AzureCommandError("request-timeout")
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", ambiguous)
+    assert adapter_module._create_reprovision_schedule(authorization) is True
+    assert len(calls) == 1
+    assert calls[0][calls[0].index("--method") + 1] == "put"
+
+
+def test_reprovision_schedule_rejects_duplicate_authoritative_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _reprovision_authorization()
+    row = _reprovision_schedule_row(authorization)
+    monkeypatch.setattr(
+        adapter_module,
+        "_schedule_rows",
+        lambda _authorization: [row, row],
+    )
+    with pytest.raises(
+        CleanupControlRecoveryExecutionError,
+        match="cleanup-deadline-recovery-duplicate-schedule",
+    ):
+        adapter_module._create_reprovision_schedule(authorization)

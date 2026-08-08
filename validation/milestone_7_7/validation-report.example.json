@@ -1,6 +1,6 @@
 {
   "bindings": {
-    "checkpoint1BundleSha256": "1264f803d6a602339211f86daf5074b00447a3fcce461d9623833b5863428f75",
+    "checkpoint1BundleSha256": "46819fbed971bbdce1ee7de168192790ecbc55a153a6375746c9bd3c7a33c26f",
     "checkpoint2ManifestSha256": "7d8832aae03e00ec93a6203a2360555ba19b030912a406b775fc7b20630c1c26",
     "checkpoint2PlanSha256": "4c13cc8b536cef325a27a0a00b4d008d164ff5d955512e599df309f69c7f32b3",
     "checkpoint2ResultSha256": "a98e8122f5c16a448de69f17cc6b537ea03989843805bbb584dfc620ae5d5c79",
@@ -156,7 +156,7 @@
   ],
   "purpose": "aggregate-local-validation",
   "reportId": "m7.7-cp5-local-validation",
-  "reportIntegritySha256": "05c2dfa965d8396d78ef41baf7782260f85b99f9c312f73fa5f6906b2d481130",
+  "reportIntegritySha256": "6511289a404148bc73f71987fcc3f30f2ac1808b80fb048bf86121bc26487f04",
   "schemaVersion": "2020-12",
   "source": {
     "commitSha": "c4fdab9ed46ae8d1b8ef380dae9a3812155097c5",

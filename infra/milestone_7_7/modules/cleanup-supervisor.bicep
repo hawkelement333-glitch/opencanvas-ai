@@ -78,14 +78,14 @@ param lifecycleTags object = {}
 param cleanupAtUtc string = ''
 
 @allowed([
-  2
+  3
 ])
-param cleanupBindingGeneration int = 2
+param cleanupBindingGeneration int = 3
 
 @allowed([
-  'm7.7-automation-cleanup-binding-v2'
+  'm7.7-automation-cleanup-binding-v3'
 ])
-param cleanupBindingContractVersion string = 'm7.7-automation-cleanup-binding-v2'
+param cleanupBindingContractVersion string = 'm7.7-automation-cleanup-binding-v3'
 
 var contractEnabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled
 var cleanupControlEnabled = contractEnabled && cleanupControlDeploymentEnabled && !cleanupJobScheduleDeploymentEnabled
@@ -122,7 +122,7 @@ resource cleanupRunbook 'Microsoft.Automation/automationAccounts/runbooks@2024-1
 
 resource cleanupSchedule 'Microsoft.Automation/automationAccounts/schedules@2024-10-23' = if (cleanupControlEnabled) {
   parent: automationAccount
-  name: 'schedule-mobius77-cleanup'
+  name: 'schedule-mobius77-cleanup-g3'
   properties: {
     description: 'One-time Milestone 7.7 hard cleanup failsafe.'
     frequency: 'OneTime'
@@ -143,11 +143,11 @@ resource existingCleanupRunbook 'Microsoft.Automation/automationAccounts/runbook
 
 resource existingCleanupSchedule 'Microsoft.Automation/automationAccounts/schedules@2024-10-23' existing = if (jobScheduleEnabled) {
   parent: existingAutomationAccount
-  name: 'schedule-mobius77-cleanup'
+  name: 'schedule-mobius77-cleanup-g3'
 }
 
 var generationOneBindingId = guid(existingAutomationAccount.id, existingCleanupRunbook.name, existingCleanupSchedule.name)
-var generationTwoBindingId = guid(
+var activeBindingId = guid(
   toLower(existingAutomationAccount.id),
   toLower(existingCleanupRunbook.id),
   toLower(existingCleanupSchedule.id),
@@ -160,7 +160,7 @@ var generationTwoBindingId = guid(
 
 resource cleanupJobSchedule 'Microsoft.Automation/automationAccounts/jobSchedules@2024-10-23' = if (jobScheduleEnabled) {
   parent: existingAutomationAccount
-  name: generationTwoBindingId
+  name: activeBindingId
   properties: {
     parameters: {
       TargetResourceGroupName: targetResourceGroupName
@@ -194,11 +194,11 @@ output cleanupControlDeploymentEnabled bool = cleanupControlEnabled
 output cleanupJobScheduleDeploymentEnabled bool = jobScheduleEnabled
 output automationAccountName string = 'aa-mobius77-cleanup-recovery'
 output cleanupRunbookName string = 'Remove-Mobius77Staging'
-output cleanupScheduleName string = 'schedule-mobius77-cleanup'
+output cleanupScheduleName string = 'schedule-mobius77-cleanup-g3'
 output cleanupBindingContractVersion string = cleanupBindingContractVersion
 output cleanupBindingGeneration int = cleanupBindingGeneration
 output tombstonedCleanupBindingId string = jobScheduleEnabled ? generationOneBindingId : ''
-output activeCleanupBindingId string = jobScheduleEnabled ? generationTwoBindingId : ''
+output activeCleanupBindingId string = jobScheduleEnabled ? activeBindingId : ''
 output cleanupPrincipalId string = cleanupControlEnabled ? automationAccount.identity.principalId : ''
 output cleanupLocation string = cleanupLocation
 output publicNetworkAccess bool = false

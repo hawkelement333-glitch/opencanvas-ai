@@ -8,6 +8,7 @@ import os
 import tempfile
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, NoReturn
@@ -26,10 +27,13 @@ from preflight.milestone_7_7.cleanup_control_recovery import (
     POST_FIRED_RECOVERY_AUTHORIZATION_VERSION,
     CleanupControlDeadlineRecoveryAuthorization,
     CleanupControlRecoveryAuthorization,
+    CleanupControlReprovisionAuthorization,
     validate_cleanup_control_deadline_recovery_authorization,
     validate_cleanup_control_recovery_authorization,
+    validate_cleanup_control_reprovision_authorization,
 )
 from preflight.milestone_7_7.managed_binding_contracts import (
+    AUTHORIZATION_ID,
     REPOSITORY_ROOT,
     cleanup_runbook_sha256,
     load_managed_binding_contract,
@@ -38,7 +42,9 @@ from preflight.milestone_7_7.managed_binding_contracts import (
 
 RECEIPT_VERSION: Final = "mobius.milestone-7.7.cleanup-control-recovery-receipt.v1"
 RECEIPT_FILE: Final = "cleanup-control-recovery.receipt.json"
-RECEIPT_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/cleanup-control-recovery-receipt/v1\0"
+RECEIPT_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/cleanup-control-recovery-receipt/v1\0"
+)
 DEADLINE_RECOVERY_RECEIPT_VERSION: Final = (
     "mobius.milestone-7.7.cleanup-control-deadline-recovery-receipt.v1"
 )
@@ -57,6 +63,15 @@ POST_FIRED_RECOVERY_RECEIPT_VERSION: Final = (
 )
 POST_FIRED_RECOVERY_RECEIPT_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery-receipt/v3\0"
+)
+POST_CLEANUP_REPROVISION_RECEIPT_VERSION: Final = (
+    "mobius.milestone-7.7.cleanup-control-reprovision-receipt.v1"
+)
+POST_CLEANUP_REPROVISION_RECEIPT_FILE: Final = (
+    "cleanup-control-reprovision.receipt.json"
+)
+POST_CLEANUP_REPROVISION_RECEIPT_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/cleanup-control-reprovision-receipt/v1\0"
 )
 EXPECTED_COST_USD_CENTS: Final = 1
 CORRUPTED_ROLE_PROPAGATION_SECONDS: Final = 120.0
@@ -81,9 +96,9 @@ def _format_utc(value: datetime) -> str:
 
 def _deadline(authorization: CleanupControlRecoveryAuthorization) -> datetime:
     try:
-        return datetime.strptime(authorization.deadlineUtc, "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=UTC
-        )
+        return datetime.strptime(
+            authorization.deadlineUtc, "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=UTC)
     except ValueError:
         _fail("cleanup-recovery-deadline-invalid")
 
@@ -197,6 +212,49 @@ def _claim_deadline_recovery_authorization(
     return path
 
 
+def _claim_reprovision_authorization(
+    *,
+    authorization: CleanupControlReprovisionAuthorization,
+    receipt_directory: Path,
+    now_utc: datetime,
+) -> Path:
+    directory = _outside_repository(receipt_directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / POST_CLEANUP_REPROVISION_RECEIPT_FILE
+    body: dict[str, JsonValue] = {
+        "authorizationIntegritySha256": authorization.authorizationIntegritySha256,
+        "bindingGeneration": authorization.bindingGeneration,
+        "bindingId": authorization.bindingId,
+        "claimedAtUtc": _format_utc(now_utc),
+        "deadlineUtc": authorization.deadlineUtc,
+        "priorBindingId": authorization.priorBindingId,
+        "priorSchedule": authorization.priorSchedule,
+        "receiptVersion": POST_CLEANUP_REPROVISION_RECEIPT_VERSION,
+        "replayDecision": "deny",
+        "repositoryHead": authorization.repositoryHead,
+        "schedule": authorization.schedule,
+    }
+    receipt: dict[str, JsonValue] = {
+        **body,
+        "receiptIntegritySha256": integrity_sha256(
+            body, POST_CLEANUP_REPROVISION_RECEIPT_DOMAIN
+        ),
+    }
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        _fail("cleanup-reprovision-authorization-already-consumed")
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(canonical_bytes(receipt))
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError:
+        path.unlink(missing_ok=True)
+        _fail("cleanup-reprovision-receipt-write-failed")
+    return path
+
+
 def _validate_contract_mapping(
     authorization: CleanupControlRecoveryAuthorization,
     contract: Mapping[str, JsonValue],
@@ -215,7 +273,13 @@ def _validate_contract_mapping(
             b"mobius.azure.cleanup-principal.v1\0"
             + authorization.replacementPrincipalId.casefold().encode("ascii")
         ).hexdigest()
-        if isinstance(authorization, CleanupControlDeadlineRecoveryAuthorization)
+        if isinstance(
+            authorization,
+            (
+                CleanupControlDeadlineRecoveryAuthorization,
+                CleanupControlReprovisionAuthorization,
+            ),
+        )
         else cleanup.get("cleanupPrincipalFingerprintSha256"),
         "deadlineUtc": authorization.deadlineUtc,
         "publishedContentSha256": authorization.runbookContentSha256,
@@ -234,7 +298,9 @@ def _deployment_binding(
 ) -> dict[str, JsonValue]:
     return {
         "authorizationId": (
-            f"cleanup-control-recovery-{authorization.authorizationIntegritySha256[:32]}"
+            AUTHORIZATION_ID
+            if isinstance(authorization, CleanupControlReprovisionAuthorization)
+            else f"cleanup-control-recovery-{authorization.authorizationIntegritySha256[:32]}"
         ),
         "ledgerIntegritySha256": authorization.authorizationIntegritySha256,
         "managedBindingIntegritySha256": managed_binding_integrity_sha256(contract),
@@ -263,7 +329,9 @@ def _automation_account_collection(
     query: str,
 ) -> list[JsonValue]:
     api_version = (
-        WEBHOOK_API_VERSION if collection == "webhooks" else lifecycle.AUTOMATION_API_VERSION
+        WEBHOOK_API_VERSION
+        if collection == "webhooks"
+        else lifecycle.AUTOMATION_API_VERSION
     )
     value = lifecycle._run(
         (
@@ -272,7 +340,9 @@ def _automation_account_collection(
             "--method",
             "get",
             "--url",
-            (f"https://management.azure.com{account_id}/{collection}?api-version={api_version}"),
+            (
+                f"https://management.azure.com{account_id}/{collection}?api-version={api_version}"
+            ),
             "--query",
             f"{{nextLink:nextLink,value:{query}}}",
             "--output",
@@ -307,7 +377,9 @@ def _corrupted_role_rows(
             "--subscription",
             subscription_id,
             "--query",
-            ("[].{id:id,principalId:principalId,roleDefinitionId:roleDefinitionId,scope:scope}"),
+            (
+                "[].{id:id,principalId:principalId,roleDefinitionId:roleDefinitionId,scope:scope}"
+            ),
             "--output",
             "json",
             "--only-show-errors",
@@ -397,7 +469,9 @@ def _verify_corrupted_evidence_graph(
     }:
         _fail("cleanup-recovery-corrupted-account-drift")
 
-    runbook_id = f"{authorization.corruptedAutomationAccountId}/runbooks/{authorization.runbook}"
+    runbook_id = (
+        f"{authorization.corruptedAutomationAccountId}/runbooks/{authorization.runbook}"
+    )
     runbooks = _automation_collection(
         authorization=authorization,
         subscription_id=subscription_id,
@@ -500,7 +574,9 @@ def _verify_corrupted_evidence_graph(
             _fail("cleanup-recovery-corrupted-job-not-terminal")
 
     role_rows = _corrupted_role_rows(authorization, subscription_id)
-    expected_roles = [_expected_corrupted_role_row(authorization)] if assignment_required else []
+    expected_roles = (
+        [_expected_corrupted_role_row(authorization)] if assignment_required else []
+    )
     if role_rows != expected_roles:
         _fail("cleanup-recovery-corrupted-role-drift")
 
@@ -584,12 +660,8 @@ def _cleanup_resource_group_inventory(subscription_id: str) -> frozenset[str]:
             _fail("cleanup-recovery-resource-inventory-type-drift")
         resources.add(relative)
 
-    account_root = (
-        f"microsoft.automation/automationaccounts/{CORRUPTED_AUTOMATION_ACCOUNT.casefold()}"
-    )
-    replacement_root = (
-        f"microsoft.automation/automationaccounts/{lifecycle.AUTOMATION_ACCOUNT.casefold()}"
-    )
+    account_root = f"microsoft.automation/automationaccounts/{CORRUPTED_AUTOMATION_ACCOUNT.casefold()}"
+    replacement_root = f"microsoft.automation/automationaccounts/{lifecycle.AUTOMATION_ACCOUNT.casefold()}"
     for relative_account in (account_root, replacement_root):
         if relative_account not in resources:
             continue
@@ -634,20 +706,26 @@ def _validate_cleanup_inventory(
     authorization: CleanupControlRecoveryAuthorization,
     require_complete: bool,
     permitted_binding_ids: frozenset[str] | None = None,
+    corrupted_schedule_name: str | None = None,
 ) -> None:
     account = (
         "microsoft.automation/automationaccounts/"
         f"{authorization.replacementAutomationAccount.casefold()}"
     )
-    corrupted_account = (
-        f"microsoft.automation/automationaccounts/{CORRUPTED_AUTOMATION_ACCOUNT.casefold()}"
+    corrupted_account = f"microsoft.automation/automationaccounts/{CORRUPTED_AUTOMATION_ACCOUNT.casefold()}"
+    corrupted_runbook = (
+        f"{corrupted_account}/runbooks/{authorization.runbook.casefold()}"
     )
-    corrupted_runbook = f"{corrupted_account}/runbooks/{authorization.runbook.casefold()}"
-    corrupted_schedule = f"{corrupted_account}/schedules/{authorization.schedule.casefold()}"
+    corrupted_schedule = (
+        f"{corrupted_account}/schedules/"
+        f"{(corrupted_schedule_name or authorization.schedule).casefold()}"
+    )
     runbook = f"{account}/runbooks/{authorization.runbook.casefold()}"
     schedule = f"{account}/schedules/{authorization.schedule.casefold()}"
     binding_ids = permitted_binding_ids or frozenset({authorization.bindingId})
-    bindings = {f"{account}/jobschedules/{binding_id.casefold()}" for binding_id in binding_ids}
+    bindings = {
+        f"{account}/jobschedules/{binding_id.casefold()}" for binding_id in binding_ids
+    }
     active_binding = f"{account}/jobschedules/{authorization.bindingId.casefold()}"
     deployments = {
         "microsoft.resources/deployments/mobius77-cleanup-control",
@@ -672,16 +750,25 @@ def _validate_cleanup_inventory(
         and item.count("/") == 2
         and item != corrupted_account
     }
-    schedule_rows = {item for item in resources if item.startswith(f"{account}/schedules/")}
-    binding_rows = {item for item in resources if item.startswith(f"{account}/jobschedules/")}
+    schedule_rows = {
+        item for item in resources if item.startswith(f"{account}/schedules/")
+    }
+    binding_rows = {
+        item for item in resources if item.startswith(f"{account}/jobschedules/")
+    }
     if len(account_rows) > 1 or len(schedule_rows) > 1 or len(binding_rows) > 1:
         _fail("cleanup-recovery-duplicate-resource")
-    if require_complete and not {account, runbook, schedule, active_binding}.issubset(resources):
+    if require_complete and not {account, runbook, schedule, active_binding}.issubset(
+        resources
+    ):
         _fail("cleanup-recovery-resource-proof-incomplete")
 
 
 def _replacement_collection(
-    authorization: CleanupControlDeadlineRecoveryAuthorization,
+    authorization: (
+        CleanupControlDeadlineRecoveryAuthorization
+        | CleanupControlReprovisionAuthorization
+    ),
     *,
     collection: str,
     query: str,
@@ -694,7 +781,10 @@ def _replacement_collection(
 
 
 def _replacement_role_rows(
-    authorization: CleanupControlDeadlineRecoveryAuthorization,
+    authorization: (
+        CleanupControlDeadlineRecoveryAuthorization
+        | CleanupControlReprovisionAuthorization
+    ),
     subscription_id: str,
 ) -> list[dict[str, str]]:
     value = lifecycle._run(
@@ -734,7 +824,10 @@ def _replacement_role_rows(
 
 
 def _expected_replacement_role_row(
-    authorization: CleanupControlDeadlineRecoveryAuthorization,
+    authorization: (
+        CleanupControlDeadlineRecoveryAuthorization
+        | CleanupControlReprovisionAuthorization
+    ),
 ) -> dict[str, str]:
     role_definition_id = (
         f"/subscriptions/{authorization.subscriptionId}/providers/"
@@ -750,7 +843,10 @@ def _expected_replacement_role_row(
 
 
 def _published_runbook_hash(
-    authorization: CleanupControlDeadlineRecoveryAuthorization,
+    authorization: (
+        CleanupControlDeadlineRecoveryAuthorization
+        | CleanupControlReprovisionAuthorization
+    ),
 ) -> str:
     runbook_id = f"{authorization.replacementAutomationAccountId}/runbooks/{authorization.runbook}"
     content = lifecycle._run(
@@ -776,7 +872,10 @@ def _published_runbook_hash(
 
 
 def _schedule_rows(
-    authorization: CleanupControlDeadlineRecoveryAuthorization,
+    authorization: (
+        CleanupControlDeadlineRecoveryAuthorization
+        | CleanupControlReprovisionAuthorization
+    ),
 ) -> list[JsonValue]:
     return _replacement_collection(
         authorization,
@@ -790,7 +889,10 @@ def _schedule_rows(
 
 
 def _validated_schedule_deadline(
-    authorization: CleanupControlDeadlineRecoveryAuthorization,
+    authorization: (
+        CleanupControlDeadlineRecoveryAuthorization
+        | CleanupControlReprovisionAuthorization
+    ),
     rows: list[JsonValue],
     *,
     allowed_deadlines: frozenset[str],
@@ -813,11 +915,11 @@ def _validated_schedule_deadline(
     }
     if set(row) != expected_fields or not isinstance(row.get("startTime"), str):
         _fail("cleanup-deadline-recovery-schedule-output-malformed")
-    expected_id = (
-        f"{authorization.replacementAutomationAccountId}/schedules/{authorization.schedule}"
-    )
+    expected_id = f"{authorization.replacementAutomationAccountId}/schedules/{authorization.schedule}"
     try:
-        observed_start = datetime.fromisoformat(str(row["startTime"]).replace("Z", "+00:00"))
+        observed_start = datetime.fromisoformat(
+            str(row["startTime"]).replace("Z", "+00:00")
+        )
     except ValueError:
         _fail("cleanup-deadline-recovery-schedule-output-malformed")
     if observed_start.tzinfo is None or observed_start.utcoffset() is None:
@@ -837,7 +939,10 @@ def _validated_schedule_deadline(
 
 
 def _job_schedule_rows(
-    authorization: CleanupControlDeadlineRecoveryAuthorization,
+    authorization: (
+        CleanupControlDeadlineRecoveryAuthorization
+        | CleanupControlReprovisionAuthorization
+    ),
 ) -> list[JsonValue]:
     listed = _replacement_collection(
         authorization,
@@ -861,11 +966,12 @@ def _job_schedule_rows(
         }:
             _fail("cleanup-deadline-recovery-binding-output-malformed")
         job_schedule_id = row.get("jobScheduleId")
-        if not isinstance(job_schedule_id, str) or job_schedule_id.casefold() not in permitted_ids:
+        if (
+            not isinstance(job_schedule_id, str)
+            or job_schedule_id.casefold() not in permitted_ids
+        ):
             _fail("cleanup-deadline-recovery-binding-drift")
-        expected_id = (
-            f"{authorization.replacementAutomationAccountId}/jobSchedules/{job_schedule_id}"
-        )
+        expected_id = f"{authorization.replacementAutomationAccountId}/jobSchedules/{job_schedule_id}"
         if (
             not isinstance(row.get("id"), str)
             or str(row["id"]).casefold() != expected_id.casefold()
@@ -900,11 +1006,15 @@ def _job_schedule_rows(
 
 
 def _validate_job_schedule_rows(
-    authorization: CleanupControlDeadlineRecoveryAuthorization,
+    authorization: (
+        CleanupControlDeadlineRecoveryAuthorization
+        | CleanupControlReprovisionAuthorization
+    ),
     rows: list[JsonValue],
     *,
     required: bool | None,
     allowed_binding_ids: frozenset[str] | None = None,
+    allow_fired_parameters_absent: bool = False,
 ) -> bool:
     if not rows:
         if required is True:
@@ -918,17 +1028,20 @@ def _validate_job_schedule_rows(
     if set(row) != {"id", "jobScheduleId", "parameters", "runbook", "schedule"}:
         _fail("cleanup-deadline-recovery-binding-output-malformed")
     parameters = row.get("parameters")
-    if not isinstance(parameters, dict) or len(parameters) != 2:
+    if parameters is None and allow_fired_parameters_absent:
+        normalized_parameters: dict[str, JsonValue] | None = None
+    elif isinstance(parameters, dict) and len(parameters) == 2:
+        normalized_parameters = {
+            str(name).casefold(): value for name, value in parameters.items()
+        }
+    else:
         _fail("cleanup-deadline-recovery-binding-drift")
-    normalized_parameters = {str(name).casefold(): value for name, value in parameters.items()}
     permitted_ids = {
         binding_id.casefold()
         for binding_id in (allowed_binding_ids or frozenset({authorization.bindingId}))
     }
     observed_job_schedule_id = row.get("jobScheduleId")
-    expected_id = (
-        f"{authorization.replacementAutomationAccountId}/jobSchedules/{observed_job_schedule_id}"
-    )
+    expected_id = f"{authorization.replacementAutomationAccountId}/jobSchedules/{observed_job_schedule_id}"
     if (
         not isinstance(row.get("id"), str)
         or str(row["id"]).casefold() != expected_id.casefold()
@@ -936,24 +1049,34 @@ def _validate_job_schedule_rows(
         or observed_job_schedule_id.casefold() not in permitted_ids
         or row.get("runbook") != authorization.runbook
         or row.get("schedule") != authorization.schedule
-        or normalized_parameters
-        != {
-            authorization.authorizationParameter.casefold(): "true",
-            authorization.targetParameter.casefold(): (authorization.targetParameterValue),
-        }
+        or (
+            normalized_parameters is not None
+            and normalized_parameters
+            != {
+                authorization.authorizationParameter.casefold(): "true",
+                authorization.targetParameter.casefold(): (
+                    authorization.targetParameterValue
+                ),
+            }
+        )
     ):
         _fail("cleanup-deadline-recovery-binding-drift")
     return True
 
 
 def _verify_replacement_cleanup_graph(
-    authorization: CleanupControlDeadlineRecoveryAuthorization,
+    authorization: (
+        CleanupControlDeadlineRecoveryAuthorization
+        | CleanupControlReprovisionAuthorization
+    ),
     subscription_id: str,
     *,
     allowed_deadlines: frozenset[str],
     allowed_runbook_hashes: frozenset[str],
     binding_required: bool | None,
     allowed_binding_ids: frozenset[str] | None = None,
+    role_required: bool = True,
+    allow_fired_parameters_absent: bool = False,
 ) -> str:
     account = lifecycle._run(
         (
@@ -1033,6 +1156,7 @@ def _verify_replacement_cleanup_graph(
         _job_schedule_rows(authorization),
         required=binding_required,
         allowed_binding_ids=allowed_binding_ids,
+        allow_fired_parameters_absent=allow_fired_parameters_absent,
     )
 
     empty_collections = {
@@ -1065,9 +1189,10 @@ def _verify_replacement_cleanup_graph(
         ):
             _fail("cleanup-deadline-recovery-job-not-terminal")
 
-    if _replacement_role_rows(authorization, subscription_id) != [
-        _expected_replacement_role_row(authorization)
-    ]:
+    expected_roles = (
+        [_expected_replacement_role_row(authorization)] if role_required else []
+    )
+    if _replacement_role_rows(authorization, subscription_id) != expected_roles:
         _fail("cleanup-deadline-recovery-role-drift")
     return authorization.replacementPrincipalId
 
@@ -1149,7 +1274,9 @@ def _verify_post_fired_target_preservation(
             "--max-events",
             "1000",
             "--query",
-            ("[].{operationName:operationName.value,resourceId:resourceId,status:status.value}"),
+            (
+                "[].{operationName:operationName.value,resourceId:resourceId,status:status.value}"
+            ),
             "--output",
             "json",
             "--only-show-errors",
@@ -1209,7 +1336,9 @@ def _verify_post_fired_cleanup_state(
             or not isinstance(job.get("id"), str)
             or not str(job["id"])
             .casefold()
-            .startswith(f"{authorization.replacementAutomationAccountId}/jobs/".casefold())
+            .startswith(
+                f"{authorization.replacementAutomationAccountId}/jobs/".casefold()
+            )
             or not isinstance(job.get("jobId"), str)
             or not isinstance(job.get("status"), str)
         ):
@@ -1292,9 +1421,7 @@ def _verify_post_fired_cleanup_state(
     if len(schedules) != 1 or not isinstance(schedules[0], dict):
         _fail("cleanup-post-fired-expired-schedule-unproved")
     schedule = schedules[0]
-    expected_schedule_id = (
-        f"{authorization.replacementAutomationAccountId}/schedules/{authorization.schedule}"
-    )
+    expected_schedule_id = f"{authorization.replacementAutomationAccountId}/schedules/{authorization.schedule}"
     if (
         set(schedule)
         != {
@@ -1370,14 +1497,20 @@ def _verify_post_fired_rearmed_target_tags(
         not isinstance(observed, dict)
         or set(observed) != {"id", "tags"}
         or not isinstance(observed.get("id"), str)
-        or str(observed["id"]).casefold() != authorization.targetResourceGroupId.casefold()
+        or str(observed["id"]).casefold()
+        != authorization.targetResourceGroupId.casefold()
         or observed.get("tags") != expected["tags"]
     ):
         _fail("cleanup-post-fired-target-lease-rearm-unproved")
 
 
 def _remove_prior_binding(
-    authorization: CleanupControlDeadlineRecoveryAuthorization,
+    authorization: (
+        CleanupControlDeadlineRecoveryAuthorization
+        | CleanupControlReprovisionAuthorization
+    ),
+    *,
+    allow_fired_parameters_absent: bool = False,
 ) -> bool:
     rows = _job_schedule_rows(authorization)
     if not _validate_job_schedule_rows(
@@ -1385,6 +1518,7 @@ def _remove_prior_binding(
         rows,
         required=None,
         allowed_binding_ids=frozenset({authorization.priorBindingId}),
+        allow_fired_parameters_absent=allow_fired_parameters_absent,
     ):
         return False
     endpoint = (
@@ -1416,7 +1550,12 @@ def _remove_prior_binding(
         rows = _job_schedule_rows(authorization)
         if not rows:
             return True
-        _validate_job_schedule_rows(authorization, rows, required=None)
+        _validate_job_schedule_rows(
+            authorization,
+            rows,
+            required=None,
+            allow_fired_parameters_absent=allow_fired_parameters_absent,
+        )
         if time.monotonic() >= deadline:
             _fail("cleanup-deadline-recovery-binding-removal-unproved")
         time.sleep(DEADLINE_RECOVERY_POLL_SECONDS)
@@ -1456,7 +1595,9 @@ def _replace_cleanup_schedule(
     observed_deadline = _validated_schedule_deadline(
         authorization,
         rows,
-        allowed_deadlines=frozenset({authorization.priorDeadlineUtc, authorization.deadlineUtc}),
+        allowed_deadlines=frozenset(
+            {authorization.priorDeadlineUtc, authorization.deadlineUtc}
+        ),
         required=False,
     )
     if observed_deadline == authorization.deadlineUtc:
@@ -1551,6 +1692,205 @@ def _replace_cleanup_schedule(
         time.sleep(DEADLINE_RECOVERY_POLL_SECONDS)
 
 
+def _prior_reprovision_view(
+    authorization: CleanupControlReprovisionAuthorization,
+) -> CleanupControlReprovisionAuthorization:
+    return replace(
+        authorization,
+        bindingId=authorization.priorBindingId,
+        deadlineUtc=authorization.priorDeadlineUtc,
+        runbookContentSha256=authorization.priorRunbookContentSha256,
+        schedule=authorization.priorSchedule,
+    )
+
+
+def _verify_completed_cleanup_job(
+    authorization: CleanupControlReprovisionAuthorization,
+) -> None:
+    jobs = _replacement_collection(
+        authorization,
+        collection="jobs",
+        query=(
+            "value[].{id:id,jobId:properties.jobId,"
+            "runbook:properties.runbook.name,status:properties.status}"
+        ),
+    )
+    expected_id = authorization.completedCleanupJobId.casefold()
+    expected_resource_prefix = (
+        f"{authorization.replacementAutomationAccountId}/jobs/"
+        f"SCH_{authorization.priorBindingId}_"
+    ).casefold()
+    job_prefix = f"{authorization.replacementAutomationAccountId}/jobs/".casefold()
+    matching = []
+    for job in jobs:
+        if (
+            not isinstance(job, dict)
+            or set(job) != {"id", "jobId", "runbook", "status"}
+            or not isinstance(job.get("id"), str)
+            or not str(job["id"]).casefold().startswith(job_prefix)
+            or not isinstance(job.get("jobId"), str)
+            or job.get("runbook") != authorization.runbook
+            or job.get("status") not in TERMINAL_AUTOMATION_JOB_STATES
+        ):
+            _fail("cleanup-reprovision-prior-job-drift")
+        if str(job["jobId"]).casefold() == expected_id:
+            if not str(job["id"]).casefold().startswith(expected_resource_prefix):
+                _fail("cleanup-reprovision-completed-job-resource-drift")
+            matching.append(job)
+    if len(matching) != 1 or matching[0].get("status") != (
+        authorization.completedCleanupJobStatus
+    ):
+        _fail("cleanup-reprovision-completed-job-unproved")
+
+
+def _verify_completed_prior_generation(
+    authorization: CleanupControlReprovisionAuthorization,
+    subscription_id: str,
+) -> None:
+    if lifecycle._group_exists(subscription_id, lifecycle.TARGET_GROUP):
+        _fail("cleanup-reprovision-target-resource-group-still-present")
+    if lifecycle._group_exists(subscription_id, lifecycle.INFRASTRUCTURE_GROUP):
+        _fail("cleanup-reprovision-infrastructure-resource-group-still-present")
+    if lifecycle._deleted_vault_present(subscription_id):
+        _fail("cleanup-reprovision-soft-deleted-key-vault-present")
+    prior = _prior_reprovision_view(authorization)
+    _verify_corrupted_evidence_graph(
+        prior,
+        subscription_id,
+        assignment_required=False,
+        expected_runbook_hash=CORRUPTED_RUNBOOK_CONTENT_SHA256,
+    )
+    _verify_replacement_cleanup_graph(
+        prior,
+        subscription_id,
+        allowed_deadlines=frozenset({authorization.priorDeadlineUtc}),
+        allowed_runbook_hashes=frozenset({authorization.priorRunbookContentSha256}),
+        binding_required=True,
+        allowed_binding_ids=frozenset({authorization.priorBindingId}),
+        role_required=False,
+        allow_fired_parameters_absent=True,
+    )
+    _verify_completed_cleanup_job(authorization)
+    _validate_cleanup_inventory(
+        _cleanup_resource_group_inventory(subscription_id),
+        authorization=prior,
+        require_complete=True,
+    )
+
+
+def _remove_prior_schedule(
+    authorization: CleanupControlReprovisionAuthorization,
+) -> bool:
+    prior = _prior_reprovision_view(authorization)
+    rows = _schedule_rows(prior)
+    _validated_schedule_deadline(
+        prior,
+        rows,
+        allowed_deadlines=frozenset({authorization.priorDeadlineUtc}),
+        required=True,
+    )
+    endpoint = (
+        "https://management.azure.com"
+        f"{authorization.replacementAutomationAccountId}/schedules/"
+        f"{authorization.priorSchedule}"
+        f"?api-version={lifecycle.AUTOMATION_API_VERSION}"
+    )
+    try:
+        lifecycle._run(
+            (
+                "az",
+                "rest",
+                "--method",
+                "delete",
+                "--url",
+                endpoint,
+                "--output",
+                "none",
+                "--only-show-errors",
+            )
+        )
+    except lifecycle.AzureCommandError:
+        pass
+    deadline = time.monotonic() + DEADLINE_RECOVERY_PROPAGATION_SECONDS
+    while True:
+        rows = _schedule_rows(prior)
+        if not rows:
+            return True
+        _validated_schedule_deadline(
+            prior,
+            rows,
+            allowed_deadlines=frozenset({authorization.priorDeadlineUtc}),
+            required=True,
+        )
+        if time.monotonic() >= deadline:
+            _fail("cleanup-reprovision-prior-schedule-removal-unproved")
+        time.sleep(DEADLINE_RECOVERY_POLL_SECONDS)
+
+
+def _create_reprovision_schedule(
+    authorization: CleanupControlReprovisionAuthorization,
+) -> bool:
+    rows = _schedule_rows(authorization)
+    if rows:
+        observed = _validated_schedule_deadline(
+            authorization,
+            rows,
+            allowed_deadlines=frozenset({authorization.deadlineUtc}),
+            required=True,
+        )
+        return observed == authorization.deadlineUtc
+    endpoint = (
+        "https://management.azure.com"
+        f"{authorization.replacementAutomationAccountId}/schedules/"
+        f"{authorization.schedule}"
+        f"?api-version={lifecycle.AUTOMATION_API_VERSION}"
+    )
+    body = {
+        "properties": {
+            "description": "One-time Milestone 7.7 hard cleanup failsafe.",
+            "frequency": "OneTime",
+            "interval": 1,
+            "startTime": authorization.deadlineUtc,
+            "timeZone": "Etc/UTC",
+        }
+    }
+    try:
+        lifecycle._run(
+            (
+                "az",
+                "rest",
+                "--method",
+                "put",
+                "--url",
+                endpoint,
+                "--headers",
+                "Content-Type=application/json",
+                "--body",
+                json.dumps(body, separators=(",", ":"), sort_keys=True),
+                "--output",
+                "none",
+                "--only-show-errors",
+            )
+        )
+    except lifecycle.AzureCommandError:
+        pass
+    deadline = time.monotonic() + DEADLINE_RECOVERY_PROPAGATION_SECONDS
+    while True:
+        rows = _schedule_rows(authorization)
+        if rows:
+            observed = _validated_schedule_deadline(
+                authorization,
+                rows,
+                allowed_deadlines=frozenset({authorization.deadlineUtc}),
+                required=True,
+            )
+            if observed == authorization.deadlineUtc:
+                return True
+        if time.monotonic() >= deadline:
+            _fail("cleanup-reprovision-schedule-creation-unproved")
+        time.sleep(DEADLINE_RECOVERY_POLL_SECONDS)
+
+
 class ProductionCleanupControlRecoveryAdapter:
     """Map one typed recovery grant to the existing cleanup-only Azure stages."""
 
@@ -1604,7 +1944,9 @@ class ProductionCleanupControlRecoveryAdapter:
         )
         cleanup_at = _deadline(authorization)
         deployment_binding = _deployment_binding(authorization, contract)
-        with tempfile.TemporaryDirectory(prefix="mobius77-cleanup-recovery-") as directory:
+        with tempfile.TemporaryDirectory(
+            prefix="mobius77-cleanup-recovery-"
+        ) as directory:
             template = Path(directory) / "main.json"
             lifecycle._compile_template(template)
             lifecycle._deploy_stage(
@@ -1626,7 +1968,9 @@ class ProductionCleanupControlRecoveryAdapter:
                 expected_cost=EXPECTED_COST_USD_CENTS,
                 maximum_cost=authorization.costCeilingUsdCents,
             )
-            principal_id = lifecycle._verify_cleanup_control(subscription_id, cleanup_at)
+            principal_id = lifecycle._verify_cleanup_control(
+                subscription_id, cleanup_at
+            )
             lifecycle._deploy_stage(
                 template_path=template,
                 subscription_id=subscription_id,
@@ -1642,7 +1986,9 @@ class ProductionCleanupControlRecoveryAdapter:
             principal_id,
             authorization.roleDefinitionId,
         )
-        proved_principal_id = lifecycle._verify_cleanup_control(subscription_id, cleanup_at)
+        proved_principal_id = lifecycle._verify_cleanup_control(
+            subscription_id, cleanup_at
+        )
         if proved_principal_id.casefold() != principal_id.casefold():
             _fail("cleanup-recovery-principal-reconciliation-drift")
         lifecycle._verify_cleanup_target_role(
@@ -1658,14 +2004,18 @@ class ProductionCleanupControlRecoveryAdapter:
         )
         return {
             "authorization-consumed": True,
-            "authorization-integrity-sha256": (authorization.authorizationIntegritySha256),
+            "authorization-integrity-sha256": (
+                authorization.authorizationIntegritySha256
+            ),
             "cleanup-executable": True,
             "cleanup-parameter": authorization.authorizationParameter,
             "cleanup-parameter-value": authorization.authorizationParameterValue,
             "principal-fingerprint-sha256": hashlib.sha256(
                 proved_principal_id.casefold().encode("ascii")
             ).hexdigest(),
-            "replacement-automation-account": (authorization.replacementAutomationAccount),
+            "replacement-automation-account": (
+                authorization.replacementAutomationAccount
+            ),
             "role-definition-id": authorization.roleDefinitionId,
             "role-scope": authorization.roleScope,
             "runbook": authorization.runbook,
@@ -1673,6 +2023,170 @@ class ProductionCleanupControlRecoveryAdapter:
             "status": "cleanup-control-recovery-executable",
             "target-parameter": authorization.targetParameter,
             "target-parameter-value": authorization.targetParameterValue,
+        }
+
+    def execute_reprovision(
+        self,
+        *,
+        authorization: CleanupControlReprovisionAuthorization,
+        receipt_directory: Path,
+        expected_repository_head: str,
+    ) -> dict[str, JsonValue]:
+        """Create one new cleanup generation and the established fresh foundation."""
+
+        now = self._clock().astimezone(UTC).replace(microsecond=0)
+        validate_cleanup_control_reprovision_authorization(
+            authorization,
+            expected_repository_head=expected_repository_head,
+            now_utc=now,
+        )
+        lifecycle._verify_repository_state(expected_repository_head)
+        subscription_id = lifecycle._account_binding(now)
+        if subscription_id != authorization.subscriptionId:
+            _fail("cleanup-reprovision-subscription-mismatch")
+        if not lifecycle._group_exists(subscription_id, CLEANUP_GROUP):
+            _fail("cleanup-reprovision-cleanup-resource-group-missing")
+
+        contract = load_managed_binding_contract()
+        _validate_contract_mapping(authorization, contract)
+        _verify_completed_prior_generation(authorization, subscription_id)
+        _claim_reprovision_authorization(
+            authorization=authorization,
+            receipt_directory=receipt_directory,
+            now_utc=now,
+        )
+
+        prior = _prior_reprovision_view(authorization)
+        prior_binding_delete_issued = _remove_prior_binding(
+            prior,
+            allow_fired_parameters_absent=True,
+        )
+        prior_schedule_delete_issued = _remove_prior_schedule(authorization)
+        _validate_cleanup_inventory(
+            _cleanup_resource_group_inventory(subscription_id),
+            authorization=prior,
+            require_complete=False,
+        )
+
+        cleanup_at = _deadline(authorization)
+        expected_cost, maximum_cost = lifecycle._verified_cost()
+        deployment_binding = _deployment_binding(authorization, contract)
+        try:
+            lifecycle._configure_cleanup_runbook(subscription_id)
+        except lifecycle.AzureCommandError:
+            pass
+        _create_reprovision_schedule(authorization)
+        _verify_replacement_cleanup_graph(
+            authorization,
+            subscription_id,
+            allowed_deadlines=frozenset({authorization.deadlineUtc}),
+            allowed_runbook_hashes=frozenset({authorization.runbookContentSha256}),
+            binding_required=False,
+            role_required=False,
+        )
+        with tempfile.TemporaryDirectory(
+            prefix="mobius77-post-cleanup-reprovision-"
+        ) as directory:
+            template = Path(directory) / "main.json"
+            lifecycle._compile_template(template)
+            try:
+                lifecycle._deploy_stage(
+                    template_path=template,
+                    subscription_id=subscription_id,
+                    ledger=deployment_binding,
+                    stage="cleanup-job-binding",
+                    cleanup_at=cleanup_at,
+                    expected_cost=expected_cost,
+                    maximum_cost=maximum_cost,
+                )
+            except lifecycle.AzureCommandError:
+                pass
+            _verify_replacement_cleanup_graph(
+                authorization,
+                subscription_id,
+                allowed_deadlines=frozenset({authorization.deadlineUtc}),
+                allowed_runbook_hashes=frozenset({authorization.runbookContentSha256}),
+                binding_required=True,
+                role_required=False,
+            )
+            try:
+                lifecycle._deploy_stage(
+                    template_path=template,
+                    subscription_id=subscription_id,
+                    ledger=deployment_binding,
+                    stage="cleanup-binding",
+                    cleanup_at=cleanup_at,
+                    expected_cost=expected_cost,
+                    maximum_cost=maximum_cost,
+                )
+            except lifecycle.AzureCommandError:
+                pass
+            lifecycle._verify_cleanup_target_role(
+                subscription_id,
+                authorization.replacementPrincipalId,
+                authorization.roleDefinitionId,
+            )
+            _verify_replacement_cleanup_graph(
+                authorization,
+                subscription_id,
+                allowed_deadlines=frozenset({authorization.deadlineUtc}),
+                allowed_runbook_hashes=frozenset({authorization.runbookContentSha256}),
+                binding_required=True,
+            )
+            try:
+                lifecycle._deploy_stage(
+                    template_path=template,
+                    subscription_id=subscription_id,
+                    ledger=deployment_binding,
+                    stage="pre-secret",
+                    cleanup_at=cleanup_at,
+                    expected_cost=expected_cost,
+                    maximum_cost=maximum_cost,
+                )
+            except lifecycle.AzureCommandError:
+                pass
+
+        lifecycle._reconcile_container_apps_infrastructure_tags(
+            subscription_id=subscription_id,
+            ledger=deployment_binding,
+            cleanup_at=cleanup_at,
+        )
+        foundation_proof = lifecycle._verify_preservable_pre_secret_state(
+            subscription_id=subscription_id,
+            cleanup_at=cleanup_at,
+            ledger=deployment_binding,
+        )
+        _verify_corrupted_evidence_graph(
+            prior,
+            subscription_id,
+            assignment_required=False,
+            expected_runbook_hash=CORRUPTED_RUNBOOK_CONTENT_SHA256,
+        )
+        _validate_cleanup_inventory(
+            _cleanup_resource_group_inventory(subscription_id),
+            authorization=authorization,
+            require_complete=True,
+            corrupted_schedule_name=authorization.priorSchedule,
+        )
+        return {
+            "authorization-consumed": True,
+            "authorization-integrity-sha256": (
+                authorization.authorizationIntegritySha256
+            ),
+            "binding-generation": authorization.bindingGeneration,
+            "binding-id": authorization.bindingId,
+            "cleanup-executable": True,
+            "cleanup-marker": "CLEANUP_EXECUTABLE_AND_ARMED",
+            "deadline-utc": authorization.deadlineUtc,
+            "foundation-proof": foundation_proof,
+            "prior-binding-absent": True,
+            "prior-binding-delete-issued": prior_binding_delete_issued,
+            "prior-schedule-absent": True,
+            "prior-schedule-delete-issued": prior_schedule_delete_issued,
+            "runbook": authorization.runbook,
+            "schedule": authorization.schedule,
+            "staging-marker": "NEW_STAGING_READY",
+            "status": "post-cleanup-reprovision-complete",
         }
 
     def execute_deadline_recovery(
@@ -1696,12 +2210,16 @@ class ProductionCleanupControlRecoveryAdapter:
             _fail("cleanup-deadline-recovery-subscription-mismatch")
         if not lifecycle._group_exists(subscription_id, CLEANUP_GROUP):
             _fail("cleanup-deadline-recovery-cleanup-resource-group-missing")
-        if not lifecycle._group_exists(subscription_id, authorization.targetParameterValue):
+        if not lifecycle._group_exists(
+            subscription_id, authorization.targetParameterValue
+        ):
             _fail("cleanup-deadline-recovery-target-resource-group-missing")
 
         contract = load_managed_binding_contract()
         _validate_contract_mapping(authorization, contract)
-        transition_binding_ids = frozenset({authorization.priorBindingId, authorization.bindingId})
+        transition_binding_ids = frozenset(
+            {authorization.priorBindingId, authorization.bindingId}
+        )
         initial_resources = _cleanup_resource_group_inventory(subscription_id)
         _validate_cleanup_inventory(
             initial_resources,
@@ -1732,7 +2250,10 @@ class ProductionCleanupControlRecoveryAdapter:
             binding_required=None,
             allowed_binding_ids=transition_binding_ids,
         )
-        post_fired = authorization.authorizationVersion == POST_FIRED_RECOVERY_AUTHORIZATION_VERSION
+        post_fired = (
+            authorization.authorizationVersion
+            == POST_FIRED_RECOVERY_AUTHORIZATION_VERSION
+        )
         post_fired_resource_count: int | None = None
         if post_fired:
             post_fired_resource_count = _verify_post_fired_cleanup_state(
@@ -1767,7 +2288,9 @@ class ProductionCleanupControlRecoveryAdapter:
 
         cleanup_at = _deadline(authorization)
         deployment_binding = _deployment_binding(authorization, contract)
-        with tempfile.TemporaryDirectory(prefix="mobius77-cleanup-deadline-recovery-") as directory:
+        with tempfile.TemporaryDirectory(
+            prefix="mobius77-cleanup-deadline-recovery-"
+        ) as directory:
             template = Path(directory) / "main.json"
             lifecycle._compile_template(template)
             try:
@@ -1833,15 +2356,13 @@ class ProductionCleanupControlRecoveryAdapter:
                 subscription_id,
                 now_utc=self._clock().astimezone(UTC).replace(microsecond=0),
             )
-        schedule_resource_id = (
-            f"{authorization.replacementAutomationAccountId}/schedules/{authorization.schedule}"
-        )
-        binding_resource_id = (
-            f"{authorization.replacementAutomationAccountId}/jobSchedules/{authorization.bindingId}"
-        )
+        schedule_resource_id = f"{authorization.replacementAutomationAccountId}/schedules/{authorization.schedule}"
+        binding_resource_id = f"{authorization.replacementAutomationAccountId}/jobSchedules/{authorization.bindingId}"
         return {
             "authorization-consumed": True,
-            "authorization-integrity-sha256": (authorization.authorizationIntegritySha256),
+            "authorization-integrity-sha256": (
+                authorization.authorizationIntegritySha256
+            ),
             "binding-id": authorization.bindingId,
             "binding-resource-id": binding_resource_id,
             "cleanup-executable": True,
@@ -1859,8 +2380,12 @@ class ProductionCleanupControlRecoveryAdapter:
             "post-fired-recovery": post_fired,
             "post-fired-recovery-purpose": authorization.postFiredRecoveryPurpose,
             "post-fired-target-resource-count": post_fired_resource_count,
-            "replacement-automation-account": (authorization.replacementAutomationAccount),
-            "replacement-role-assignment-id": (authorization.replacementRoleAssignmentId),
+            "replacement-automation-account": (
+                authorization.replacementAutomationAccount
+            ),
+            "replacement-role-assignment-id": (
+                authorization.replacementRoleAssignmentId
+            ),
             "role-definition-id": authorization.roleDefinitionId,
             "role-scope": authorization.roleScope,
             "runbook": authorization.runbook,

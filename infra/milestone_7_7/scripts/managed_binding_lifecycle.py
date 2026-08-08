@@ -84,11 +84,11 @@ REGISTRY: Final = "acrmobius7711564669"
 AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup-recovery"
 RETIRED_ACCOUNT: Final = "aa-mobius77-cleanup"
 RUNBOOK: Final = "Remove-Mobius77Staging"
-SCHEDULE: Final = "schedule-mobius77-cleanup"
+SCHEDULE: Final = "schedule-mobius77-cleanup-g3"
 STAGING_LOCATION: Final = "southcentralus"
 CLEANUP_LOCATION: Final = "westus"
 REDIS_LOCATION: Final = "australiacentral"
-AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 8, 12, 15, 0, 0, UTC)
+AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 9, 8, 0, 0, 0, UTC)
 MAXIMUM_AUTHORIZED_WINDOW: Final = timedelta(hours=30)
 MINIMUM_CLEANUP_RESERVE: Final = timedelta(minutes=90)
 PROVISIONING_COST_BLOCK_USD_CENTS: Final = 12_000

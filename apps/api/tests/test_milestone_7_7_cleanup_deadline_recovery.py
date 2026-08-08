@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
@@ -7,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from infra.milestone_7_7 import cleanup_control_recovery_adapter as adapter_module
 from infra.milestone_7_7.cleanup_control_recovery_adapter import (
     CleanupControlRecoveryExecutionError,
@@ -236,6 +236,29 @@ def _install_execution_fakes(
     inventories = iter((initial_inventory, final_inventory))
     deployments: list[dict[str, Any]] = []
     calls: list[str] = []
+    historical_contract: dict[str, JsonValue] = {
+        "cleanupExecution": {
+            "activeBindingId": authorization.bindingId,
+            "authorizationParameter": authorization.authorizationParameter,
+            "authorizationValue": authorization.authorizationParameterValue,
+            "bindingContractVersion": authorization.bindingContractVersion,
+            "cleanupContributorRoleDefinitionId": authorization.roleDefinitionId,
+            "cleanupPrincipalFingerprintSha256": hashlib.sha256(
+                b"mobius.azure.cleanup-principal.v1\0"
+                + authorization.replacementPrincipalId.casefold().encode("ascii")
+            ).hexdigest(),
+            "deadlineUtc": authorization.deadlineUtc,
+            "publishedContentSha256": authorization.runbookContentSha256,
+            "targetParameter": authorization.targetParameter,
+            "targetResourceGroup": authorization.targetParameterValue,
+        },
+        "rbac": {"cleanupContributorRoleDefinitionId": authorization.roleDefinitionId},
+    }
+    monkeypatch.setattr(
+        adapter_module,
+        "load_managed_binding_contract",
+        lambda: historical_contract,
+    )
     monkeypatch.setattr(
         lifecycle, "_verify_repository_state", lambda _head: calls.append("repository")
     )
