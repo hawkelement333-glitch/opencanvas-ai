@@ -1225,6 +1225,11 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
             "6ecfca2a-29a1-4802-a236-706d77995e21",
             "73c42c96-874c-492b-b04d-ab87d138a893",
         },
+        "scanner_canary_cleanup_adapter.py": {
+            "292f18b2-0b41-4a86-a4af-46cd22d2e52e",
+            "7d78ed8f-4b48-4e74-bb95-f0fcfe811897",
+            "b24988ac-6180-42a0-ab88-20f7382dd24c",
+        },
         "scripts/managed_binding_lifecycle.py": {
             "00000000-0000-0000-0000-000000000000",
             "4d97b98b-1d4f-4787-a291-c67834d212e7",
