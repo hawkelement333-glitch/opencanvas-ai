@@ -1132,3 +1132,34 @@ def test_reprovision_schedule_rejects_duplicate_authoritative_rows(
         match="cleanup-deadline-recovery-duplicate-schedule",
     ):
         adapter_module._create_reprovision_schedule(authorization)
+
+
+def test_reprovision_deployment_timeout_reconciles_without_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deploy_calls: list[str] = []
+    reconciliation_calls: list[str] = []
+
+    def timed_out(**kwargs: object) -> None:
+        deploy_calls.append(str(kwargs["stage"]))
+        raise managed_binding_lifecycle.LifecycleError("lifecycle-process-timed-out")
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_deploy_stage", timed_out)
+    monkeypatch.setattr(
+        adapter_module,
+        "_wait_for_reprovision_deployment_terminal",
+        lambda **kwargs: reconciliation_calls.append(str(kwargs["stage"])),
+    )
+
+    adapter_module._deploy_reprovision_stage(
+        template_path=Path("unused.json"),
+        subscription_id=SUBSCRIPTION_ID,
+        deployment_binding={},
+        stage="pre-secret",
+        cleanup_at=REPROVISION_NOW,
+        expected_cost=3_110,
+        maximum_cost=20_607,
+    )
+
+    assert deploy_calls == ["pre-secret"]
+    assert reconciliation_calls == ["pre-secret"]

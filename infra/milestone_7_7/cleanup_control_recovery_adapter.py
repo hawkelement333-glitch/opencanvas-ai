@@ -80,6 +80,8 @@ WEBHOOK_API_VERSION: Final = "2024-10-23"
 TERMINAL_AUTOMATION_JOB_STATES: Final = frozenset({"Completed", "Failed", "Stopped"})
 DEADLINE_RECOVERY_PROPAGATION_SECONDS: Final = 120.0
 DEADLINE_RECOVERY_POLL_SECONDS: Final = 5.0
+REPROVISION_DEPLOYMENT_RECONCILIATION_SECONDS: Final = 1_800.0
+REPROVISION_DEPLOYMENT_POLL_SECONDS: Final = 15.0
 
 
 class CleanupControlRecoveryExecutionError(RuntimeError):
@@ -1891,6 +1893,80 @@ def _create_reprovision_schedule(
         time.sleep(DEADLINE_RECOVERY_POLL_SECONDS)
 
 
+def _wait_for_reprovision_deployment_terminal(
+    *,
+    subscription_id: str,
+    deployment_binding: dict[str, JsonValue],
+    stage: str,
+) -> None:
+    deployment_name = lifecycle._deployment_name(stage, deployment_binding)
+    deadline = time.monotonic() + REPROVISION_DEPLOYMENT_RECONCILIATION_SECONDS
+    while True:
+        observed = lifecycle._run(
+            (
+                "az",
+                "deployment",
+                "sub",
+                "show",
+                "--name",
+                deployment_name,
+                "--subscription",
+                subscription_id,
+                "--query",
+                "{state:properties.provisioningState}",
+                "--output",
+                "json",
+                "--only-show-errors",
+            ),
+            require_json=True,
+        )
+        if not isinstance(observed, dict) or set(observed) != {"state"}:
+            _fail("cleanup-reprovision-deployment-state-malformed")
+        state = observed.get("state")
+        if state == "Succeeded":
+            return
+        if state in {"Canceled", "Failed"}:
+            _fail("cleanup-reprovision-deployment-failed")
+        if state != "Running":
+            _fail("cleanup-reprovision-deployment-state-malformed")
+        if time.monotonic() >= deadline:
+            _fail("cleanup-reprovision-deployment-terminal-state-unproved")
+        time.sleep(REPROVISION_DEPLOYMENT_POLL_SECONDS)
+
+
+def _deploy_reprovision_stage(
+    *,
+    template_path: Path,
+    subscription_id: str,
+    deployment_binding: dict[str, JsonValue],
+    stage: str,
+    cleanup_at: datetime,
+    expected_cost: int,
+    maximum_cost: int,
+) -> None:
+    try:
+        lifecycle._deploy_stage(
+            template_path=template_path,
+            subscription_id=subscription_id,
+            ledger=deployment_binding,
+            stage=stage,
+            cleanup_at=cleanup_at,
+            expected_cost=expected_cost,
+            maximum_cost=maximum_cost,
+        )
+    except lifecycle.AzureCommandError:
+        # The stage-specific authoritative verifier reconciles a lost ARM response.
+        return
+    except lifecycle.LifecycleError as exc:
+        if str(exc) != "lifecycle-process-timed-out":
+            raise
+        _wait_for_reprovision_deployment_terminal(
+            subscription_id=subscription_id,
+            deployment_binding=deployment_binding,
+            stage=stage,
+        )
+
+
 class ProductionCleanupControlRecoveryAdapter:
     """Map one typed recovery grant to the existing cleanup-only Azure stages."""
 
@@ -2089,18 +2165,15 @@ class ProductionCleanupControlRecoveryAdapter:
         ) as directory:
             template = Path(directory) / "main.json"
             lifecycle._compile_template(template)
-            try:
-                lifecycle._deploy_stage(
-                    template_path=template,
-                    subscription_id=subscription_id,
-                    ledger=deployment_binding,
-                    stage="cleanup-job-binding",
-                    cleanup_at=cleanup_at,
-                    expected_cost=expected_cost,
-                    maximum_cost=maximum_cost,
-                )
-            except lifecycle.AzureCommandError:
-                pass
+            _deploy_reprovision_stage(
+                template_path=template,
+                subscription_id=subscription_id,
+                deployment_binding=deployment_binding,
+                stage="cleanup-job-binding",
+                cleanup_at=cleanup_at,
+                expected_cost=expected_cost,
+                maximum_cost=maximum_cost,
+            )
             _verify_replacement_cleanup_graph(
                 authorization,
                 subscription_id,
@@ -2109,18 +2182,15 @@ class ProductionCleanupControlRecoveryAdapter:
                 binding_required=True,
                 role_required=False,
             )
-            try:
-                lifecycle._deploy_stage(
-                    template_path=template,
-                    subscription_id=subscription_id,
-                    ledger=deployment_binding,
-                    stage="cleanup-binding",
-                    cleanup_at=cleanup_at,
-                    expected_cost=expected_cost,
-                    maximum_cost=maximum_cost,
-                )
-            except lifecycle.AzureCommandError:
-                pass
+            _deploy_reprovision_stage(
+                template_path=template,
+                subscription_id=subscription_id,
+                deployment_binding=deployment_binding,
+                stage="cleanup-binding",
+                cleanup_at=cleanup_at,
+                expected_cost=expected_cost,
+                maximum_cost=maximum_cost,
+            )
             lifecycle._verify_cleanup_target_role(
                 subscription_id,
                 authorization.replacementPrincipalId,
@@ -2133,18 +2203,15 @@ class ProductionCleanupControlRecoveryAdapter:
                 allowed_runbook_hashes=frozenset({authorization.runbookContentSha256}),
                 binding_required=True,
             )
-            try:
-                lifecycle._deploy_stage(
-                    template_path=template,
-                    subscription_id=subscription_id,
-                    ledger=deployment_binding,
-                    stage="pre-secret",
-                    cleanup_at=cleanup_at,
-                    expected_cost=expected_cost,
-                    maximum_cost=maximum_cost,
-                )
-            except lifecycle.AzureCommandError:
-                pass
+            _deploy_reprovision_stage(
+                template_path=template,
+                subscription_id=subscription_id,
+                deployment_binding=deployment_binding,
+                stage="pre-secret",
+                cleanup_at=cleanup_at,
+                expected_cost=expected_cost,
+                maximum_cost=maximum_cost,
+            )
 
         lifecycle._reconcile_container_apps_infrastructure_tags(
             subscription_id=subscription_id,

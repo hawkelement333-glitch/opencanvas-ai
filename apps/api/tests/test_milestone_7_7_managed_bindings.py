@@ -3035,7 +3035,7 @@ def test_lifecycle_binds_split_regions_and_proves_cleanup_before_staging() -> No
     text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
     assert 'STAGING_LOCATION: Final = "southcentralus"' in text
     assert 'CLEANUP_LOCATION: Final = "westus"' in text
-    assert text.count('"location": "northeurope"') == 2
+    assert text.count('"northeurope"') == 3
     bridge_parameters = (LIFECYCLE_SCRIPT.parent / "scanner_bridge_deployment.py").read_text(
         encoding="utf-8"
     )
@@ -4868,6 +4868,74 @@ def test_recovered_cleanup_seed_rejects_resource_or_role_drift(
         match="recovered-cleanup-role-drift",
     ):
         managed_binding_lifecycle._verify_recovered_cleanup_seed_state(subscription_id)
+
+
+def test_cleanup_inventory_accepts_only_exact_preserved_recovery_graph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subscription_id = "opaque-subscription"
+    group_scope = (
+        f"/subscriptions/{subscription_id}/resourceGroups/{managed_binding_lifecycle.CLEANUP_GROUP}"
+    )
+    provider = f"{group_scope}/providers/Microsoft.Automation/automationAccounts"
+    rows: list[JsonValue] = [
+        {
+            "id": f"{provider}/{managed_binding_lifecycle.RETIRED_ACCOUNT}",
+            "location": managed_binding_lifecycle.CLEANUP_LOCATION,
+            "type": "Microsoft.Automation/automationAccounts",
+        },
+        {
+            "id": (
+                f"{provider}/{managed_binding_lifecycle.RETIRED_ACCOUNT}/"
+                f"runbooks/{managed_binding_lifecycle.RUNBOOK}"
+            ),
+            "location": managed_binding_lifecycle.CLEANUP_LOCATION,
+            "type": "Microsoft.Automation/automationAccounts/runbooks",
+        },
+        {
+            "id": f"{provider}/{managed_binding_lifecycle.AUTOMATION_ACCOUNT}",
+            "location": "northeurope",
+            "type": "Microsoft.Automation/automationAccounts",
+        },
+        {
+            "id": (
+                f"{provider}/{managed_binding_lifecycle.AUTOMATION_ACCOUNT}/"
+                f"runbooks/{managed_binding_lifecycle.RUNBOOK}"
+            ),
+            "location": "northeurope",
+            "type": "Microsoft.Automation/automationAccounts/runbooks",
+        },
+    ]
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_run",
+        lambda *_args, **_kwargs: rows,
+    )
+
+    observed = managed_binding_lifecycle._resource_group_inventory(
+        subscription_id=subscription_id,
+        group=managed_binding_lifecycle.CLEANUP_GROUP,
+    )
+    assert observed == frozenset(
+        str(row["id"]).casefold().split(f"{group_scope.casefold()}/providers/", maxsplit=1)[1]
+        for row in rows
+    )
+
+    rows.append(
+        {
+            "id": (f"{provider}/{managed_binding_lifecycle.RETIRED_ACCOUNT}/runbooks/Unexpected"),
+            "location": managed_binding_lifecycle.CLEANUP_LOCATION,
+            "type": "Microsoft.Automation/automationAccounts/runbooks",
+        }
+    )
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-resource-inventory-drift",
+    ):
+        managed_binding_lifecycle._resource_group_inventory(
+            subscription_id=subscription_id,
+            group=managed_binding_lifecycle.CLEANUP_GROUP,
+        )
 
 
 def test_target_inventory_accepts_only_exact_managed_binding_identities(

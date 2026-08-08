@@ -2976,23 +2976,30 @@ def _resource_group_inventory(
             if expected_location is None or normalized_location != expected_location:
                 _fail("pre-secret-resource-inventory-drift")
         else:
-            exact_cleanup = {
-                f"microsoft.automation/automationaccounts/{AUTOMATION_ACCOUNT.casefold()}",
-                f"microsoft.automation/automationaccounts/{AUTOMATION_ACCOUNT.casefold()}/runbooks/{RUNBOOK.casefold()}",
-                f"microsoft.automation/automationaccounts/{AUTOMATION_ACCOUNT.casefold()}/schedules/{SCHEDULE.casefold()}",
-                "microsoft.automation/automationaccounts/aa-mobius77-cleanup",
+            prefix = "microsoft.automation/automationaccounts/"
+            account, separator, child = relative.removeprefix(prefix).partition("/")
+            locations = {
+                AUTOMATION_ACCOUNT.casefold(): "northeurope",
+                RETIRED_ACCOUNT.casefold(): CLEANUP_LOCATION,
             }
-            job_prefix = (
-                f"microsoft.automation/automationaccounts/{AUTOMATION_ACCOUNT.casefold()}"
-                "/jobschedules/"
+            expected_location = locations.get(account)
+            valid_child = (
+                not separator
+                or child == f"runbooks/{RUNBOOK.casefold()}"
+                or (
+                    account == AUTOMATION_ACCOUNT.casefold()
+                    and (
+                        child == f"schedules/{SCHEDULE.casefold()}"
+                        or re.fullmatch(r"jobschedules/[0-9a-f-]{36}", child)
+                        is not None
+                    )
+                )
             )
-            if relative in exact_cleanup:
-                if normalized_location not in {"", CLEANUP_LOCATION}:
-                    _fail("pre-secret-resource-inventory-drift")
-            elif relative.startswith(job_prefix):
-                if re.fullmatch(r"[0-9a-f-]{36}", relative[len(job_prefix) :]) is None:
-                    _fail("pre-secret-resource-inventory-drift")
-            else:
+            if (
+                expected_location is None
+                or not valid_child
+                or normalized_location not in {"", expected_location}
+            ):
                 _fail("pre-secret-resource-inventory-drift")
         observed.add(relative)
     return frozenset(observed)
