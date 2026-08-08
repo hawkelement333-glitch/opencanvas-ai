@@ -4058,7 +4058,7 @@ def _key_vault_metadata_access_probe(subscription_id: str) -> None:
 
 
 def _wait_for_key_vault_metadata_authority(subscription_id: str) -> None:
-    deadline = time.monotonic() + 600.0
+    deadline = time.monotonic() + 600
     while time.monotonic() < deadline:
         _private_tls_endpoint(KEY_VAULT_HOST)
         try:
@@ -4069,9 +4069,9 @@ def _wait_for_key_vault_metadata_authority(subscription_id: str) -> None:
                 _key_vault_metadata_access_probe(subscription_id)
             return
         except AzureCommandError as error:
-            if error.sanitized_azure_error_code != "forbidden":
+            if error.sanitized_azure_error_code.removesuffix("byrbac") != "forbidden":
                 raise
-        time.sleep(10.0)
+        time.sleep(10)
     _fail("key-vault-authority-propagation-unproved")
 
 

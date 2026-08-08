@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 from infra.milestone_7_7.scripts import managed_binding_lifecycle as lifecycle
 from performance.milestone_7_7.framework import JsonValue
 
@@ -96,6 +95,25 @@ def test_key_vault_authority_is_created_and_proved_before_metadata(
     assert persisted["temporaryKeyVaultAuthorityProved"] is True
     assert persisted["temporaryKeyVaultAuthorityLedgerSha256"] == "a" * 64
     assert persisted["lastCompletedStage"] == lifecycle.KEY_VAULT_AUTHORITY_PROVED_STAGE
+
+
+def test_key_vault_authority_waits_through_forbidden_by_rbac_propagation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts: list[str] = []
+
+    def probe(subscription_id: str) -> None:
+        attempts.append(subscription_id)
+        if len(attempts) == 1:
+            raise lifecycle.AzureCommandError("forbiddenbyrbac")
+
+    monkeypatch.setattr(lifecycle, "_private_tls_endpoint", lambda _host: None)
+    monkeypatch.setattr(lifecycle, "_key_vault_metadata_access_probe", probe)
+    monkeypatch.setattr(lifecycle.time, "sleep", lambda _seconds: None)
+
+    lifecycle._wait_for_key_vault_metadata_authority("opaque-subscription")
+
+    assert attempts == ["opaque-subscription", "opaque-subscription"]
 
 
 def test_stale_authority_is_revoked_before_a_current_ledger_creates_new_authority(
