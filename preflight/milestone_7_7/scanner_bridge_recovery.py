@@ -19,10 +19,9 @@ from performance.milestone_7_7.framework import (
 )
 
 AUTHORIZATION_VERSION: Final = "mobius.milestone-7.7.scanner-bridge-recovery.v1"
-AUTHORIZATION_DOMAIN: Final = (
-    b"solarplexus-mobius/milestone-7.7/scanner-bridge-recovery/v1\0"
-)
+AUTHORIZATION_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/scanner-bridge-recovery/v1\0"
 FOUNDATION_STAGE: Final = "scanner-foundation"
+PRIVATE_ENDPOINT_RECOVERY_STAGE: Final = "scanner-foundation-private-endpoint-recovery"
 PROOF_STAGE: Final = "scanner-proof"
 TARGET_RESOURCE_GROUP: Final = "rg-solarplexus-mobius-77-staging"
 CLEANUP_RESOURCE_GROUP: Final = "rg-solarplexus-mobius-77-cleanup-control"
@@ -43,6 +42,12 @@ FOUNDATION_ALLOWED_OPERATIONS: Final = (
     "deploy-private-scanner-foundation",
     "authoritative-readback-reconcile-private-scanner-foundation",
 )
+PRIVATE_ENDPOINT_RECOVERY_ALLOWED_OPERATIONS: Final = (
+    "authoritative-readback-exact-azure-monitor-private-endpoint",
+    "repair-exact-azure-monitor-private-endpoint",
+    "reconcile-exact-azure-monitor-private-dns-zone-group",
+    "authoritative-readback-reconcile-private-scanner-foundation",
+)
 PROOF_ALLOWED_OPERATIONS: Final = (
     "deploy-one-private-scanner-proof-job",
     "start-one-private-scanner-proof-execution",
@@ -59,9 +64,7 @@ _SUBSCRIPTION = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
-_IMAGE = re.compile(
-    rf"^{re.escape(REGISTRY_HOST)}/{IMAGE_REPOSITORY}@sha256:[0-9a-f]{{64}}$"
-)
+_IMAGE = re.compile(rf"^{re.escape(REGISTRY_HOST)}/{IMAGE_REPOSITORY}@sha256:[0-9a-f]{{64}}$")
 
 
 class ScannerBridgeRecoveryError(ValueError):
@@ -114,9 +117,7 @@ def _resource_ids(subscription_id: str) -> dict[str, str]:
     if _SUBSCRIPTION.fullmatch(subscription_id) is None:
         raise ScannerBridgeRecoveryError("scanner-bridge-subscription-invalid")
     target = f"/subscriptions/{subscription_id}/resourceGroups/{TARGET_RESOURCE_GROUP}"
-    cleanup = (
-        f"/subscriptions/{subscription_id}/resourceGroups/{CLEANUP_RESOURCE_GROUP}"
-    )
+    cleanup = f"/subscriptions/{subscription_id}/resourceGroups/{CLEANUP_RESOURCE_GROUP}"
     return {
         "targetResourceGroupId": target,
         "cleanupAutomationAccountId": (
@@ -177,23 +178,23 @@ def build_scanner_bridge_recovery_authorization(
     if cleanup_automation_account_id != expected["cleanupAutomationAccountId"]:
         raise ScannerBridgeRecoveryError("scanner-bridge-cleanup-account-invalid")
     current = now_utc.astimezone(UTC).replace(microsecond=0)
-    deadline = _parse_utc(
-        cleanup_deadline_utc, "scanner-bridge-cleanup-deadline-invalid"
-    )
+    deadline = _parse_utc(cleanup_deadline_utc, "scanner-bridge-cleanup-deadline-invalid")
     if deadline - current < MINIMUM_CLEANUP_WINDOW:
         raise ScannerBridgeRecoveryError("scanner-bridge-cleanup-window-insufficient")
     expires = min(current + MAXIMUM_AUTHORIZATION_AGE, deadline - timedelta(minutes=90))
     if expires <= current:
         raise ScannerBridgeRecoveryError("scanner-bridge-authorization-expired")
-    if stage == FOUNDATION_STAGE:
+    if stage in {FOUNDATION_STAGE, PRIVATE_ENDPOINT_RECOVERY_STAGE}:
         if api_image_digest is not None or build_input_sha256 is not None:
-            raise ScannerBridgeRecoveryError(
-                "scanner-foundation-image-authority-prohibited"
-            )
+            raise ScannerBridgeRecoveryError("scanner-foundation-image-authority-prohibited")
         proof_job_id = None
         proof_role_id = None
         maximum_executions = 0
-        operations: tuple[str, ...] = FOUNDATION_ALLOWED_OPERATIONS
+        operations: tuple[str, ...] = (
+            FOUNDATION_ALLOWED_OPERATIONS
+            if stage == FOUNDATION_STAGE
+            else PRIVATE_ENDPOINT_RECOVERY_ALLOWED_OPERATIONS
+        )
     elif stage == PROOF_STAGE:
         if (
             not isinstance(api_image_digest, str)
@@ -239,9 +240,7 @@ def build_scanner_bridge_recovery_authorization(
     )
     return replace(
         unsigned,
-        authorizationIntegritySha256=(
-            scanner_bridge_recovery_authorization_integrity(unsigned)
-        ),
+        authorizationIntegritySha256=(scanner_bridge_recovery_authorization_integrity(unsigned)),
     )
 
 
@@ -252,14 +251,18 @@ def validate_scanner_bridge_recovery_authorization(
     now_utc: datetime,
 ) -> ScannerBridgeRecoveryAuthorization:
     expected = _resource_ids(authorization.subscriptionId)
-    if authorization.stage == FOUNDATION_STAGE:
+    if authorization.stage in {FOUNDATION_STAGE, PRIVATE_ENDPOINT_RECOVERY_STAGE}:
         stage_values: dict[str, object] = {
             "proofJobId": None,
             "proofRoleDefinitionId": None,
             "apiImageDigest": None,
             "buildInputSha256": None,
             "maximumProofExecutions": 0,
-            "allowedOperations": FOUNDATION_ALLOWED_OPERATIONS,
+            "allowedOperations": (
+                FOUNDATION_ALLOWED_OPERATIONS
+                if authorization.stage == FOUNDATION_STAGE
+                else PRIVATE_ENDPOINT_RECOVERY_ALLOWED_OPERATIONS
+            ),
         }
     elif authorization.stage == PROOF_STAGE:
         stage_values = {
@@ -301,12 +304,8 @@ def validate_scanner_bridge_recovery_authorization(
     if _SHA40.fullmatch(authorization.repositoryHead) is None:
         raise ScannerBridgeRecoveryError("scanner-bridge-repository-head-invalid")
     current = now_utc.astimezone(UTC).replace(microsecond=0)
-    authorized = _parse_utc(
-        authorization.authorizedAtUtc, "scanner-bridge-authorized-at-invalid"
-    )
-    expires = _parse_utc(
-        authorization.expiresAtUtc, "scanner-bridge-expires-at-invalid"
-    )
+    authorized = _parse_utc(authorization.authorizedAtUtc, "scanner-bridge-authorized-at-invalid")
+    expires = _parse_utc(authorization.expiresAtUtc, "scanner-bridge-expires-at-invalid")
     cleanup = _parse_utc(
         authorization.cleanupDeadlineUtc, "scanner-bridge-cleanup-deadline-invalid"
     )
@@ -321,18 +320,14 @@ def validate_scanner_bridge_recovery_authorization(
     if authorization.authorizationIntegritySha256 != (
         scanner_bridge_recovery_authorization_integrity(authorization)
     ):
-        raise ScannerBridgeRecoveryError(
-            "scanner-bridge-authorization-integrity-invalid"
-        )
+        raise ScannerBridgeRecoveryError("scanner-bridge-authorization-integrity-invalid")
     return authorization
 
 
 def scanner_bridge_recovery_authorization_from_mapping(
     value: Mapping[str, object],
 ) -> ScannerBridgeRecoveryAuthorization:
-    expected_fields = {
-        field.name for field in fields(ScannerBridgeRecoveryAuthorization)
-    }
+    expected_fields = {field.name for field in fields(ScannerBridgeRecoveryAuthorization)}
     if set(value) != expected_fields:
         raise ScannerBridgeRecoveryError("scanner-bridge-authorization-fields-invalid")
     operations = value.get("allowedOperations")
@@ -348,9 +343,7 @@ def scanner_bridge_recovery_authorization_from_mapping(
             )
         )
     except TypeError as exc:
-        raise ScannerBridgeRecoveryError(
-            "scanner-bridge-authorization-malformed"
-        ) from exc
+        raise ScannerBridgeRecoveryError("scanner-bridge-authorization-malformed") from exc
 
 
 def load_scanner_bridge_recovery_authorization(
@@ -406,9 +399,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         authorization = load_scanner_bridge_recovery_authorization(args.authorization)
         if (authorization.stage == PROOF_STAGE) != (args.evidence_output is not None):
-            raise ScannerBridgeRecoveryError(
-                "scanner-bridge-evidence-output-contract-invalid"
-            )
+            raise ScannerBridgeRecoveryError("scanner-bridge-evidence-output-contract-invalid")
         result = execute_scanner_bridge_recovery(
             authorization=authorization,
             receipt_directory=args.receipt_directory,
@@ -434,6 +425,8 @@ if __name__ == "__main__":
 
 __all__ = [
     "FOUNDATION_STAGE",
+    "PRIVATE_ENDPOINT_RECOVERY_ALLOWED_OPERATIONS",
+    "PRIVATE_ENDPOINT_RECOVERY_STAGE",
     "PROOF_STAGE",
     "ScannerBridgeRecoveryAuthorization",
     "ScannerBridgeRecoveryError",

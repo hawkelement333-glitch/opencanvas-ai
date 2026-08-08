@@ -2,22 +2,27 @@ from __future__ import annotations
 
 import inspect
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+
 from infra.milestone_7_7 import scanner_bridge_recovery_adapter as adapter_module
 from infra.milestone_7_7.scanner_bridge_recovery_adapter import (
     ProductionScannerBridgeRecoveryAdapter,
     ScannerBridgeRecoveryExecutionError,
 )
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
+from opencanvas_api.services.scanner_bridge import BlobTagReadObservation
 from performance.milestone_7_7.framework import JsonValue
 from preflight.milestone_7_7 import scanner_bridge_recovery
 from preflight.milestone_7_7.scanner_bridge_recovery import (
     FOUNDATION_ALLOWED_OPERATIONS,
     FOUNDATION_STAGE,
+    PRIVATE_ENDPOINT_RECOVERY_ALLOWED_OPERATIONS,
+    PRIVATE_ENDPOINT_RECOVERY_STAGE,
     PROOF_ALLOWED_OPERATIONS,
     PROOF_JOB,
     PROOF_STAGE,
@@ -31,8 +36,6 @@ from preflight.milestone_7_7.scanner_bridge_recovery import (
 from preflight.milestone_7_7.scanner_result_bridge import (
     deployment_evidence_from_mapping,
 )
-
-from opencanvas_api.services.scanner_bridge import BlobTagReadObservation
 
 SUBSCRIPTION_ID = "11111111-2222-4333-8444-555555555555"
 SUBSCRIPTION = f"/subscriptions/{SUBSCRIPTION_ID}"
@@ -346,6 +349,90 @@ def test_foundation_authorization_is_image_free_and_denies_broader_authority() -
     )
 
 
+def test_private_endpoint_recovery_authorization_is_exact_and_image_free() -> None:
+    authorization = _authorization(PRIVATE_ENDPOINT_RECOVERY_STAGE)
+    assert authorization.stage == PRIVATE_ENDPOINT_RECOVERY_STAGE
+    assert authorization.monitorPrivateEndpointId == (
+        f"{TARGET}/providers/Microsoft.Network/privateEndpoints/pe-mobius77-azure-monitor"
+    )
+    assert authorization.allowedOperations == PRIVATE_ENDPOINT_RECOVERY_ALLOWED_OPERATIONS
+    assert authorization.apiImageDigest is None
+    assert authorization.buildInputSha256 is None
+    assert authorization.maximumProofExecutions == 0
+    assert authorization.publicAccessAuthorized is False
+    assert authorization.tagWriteAuthorized is False
+    assert authorization.applicationDeploymentAuthorized is False
+    assert authorization.migrationAuthorized is False
+    assert authorization.cleanupExecutionAuthorized is False
+    assert (
+        validate_scanner_bridge_recovery_authorization(
+            authorization,
+            expected_repository_head=HEAD,
+            now_utc=NOW,
+        )
+        is authorization
+    )
+
+
+def test_private_endpoint_recovery_rejects_broader_foundation_operations() -> None:
+    authorization = _resign(
+        replace(
+            _authorization(PRIVATE_ENDPOINT_RECOVERY_STAGE),
+            allowedOperations=FOUNDATION_ALLOWED_OPERATIONS,
+        )
+    )
+    with pytest.raises(
+        ScannerBridgeRecoveryError,
+        match="scanner-bridge-authorization-scope-invalid",
+    ):
+        validate_scanner_bridge_recovery_authorization(
+            authorization,
+            expected_repository_head=HEAD,
+            now_utc=NOW,
+        )
+
+
+def test_private_endpoint_recovery_maps_only_the_exact_endpoint_and_dns_child() -> None:
+    authorization = _authorization(PRIVATE_ENDPOINT_RECOVERY_STAGE)
+    tags: dict[str, JsonValue] = {"mobius-environment": "milestone-7.7-staging"}
+    endpoint_body = adapter_module._monitor_private_endpoint_write_body(
+        authorization,
+        {"endpointTags": tags},
+    )
+    subnet_id = (
+        f"{TARGET}/providers/Microsoft.Network/virtualNetworks/vnet-mobius77-staging/"
+        "subnets/snet-mobius77-private-endpoints"
+    )
+    assert endpoint_body == {
+        "location": "southcentralus",
+        "properties": {
+            "privateLinkServiceConnections": [
+                {
+                    "name": "azuremonitor",
+                    "properties": {
+                        "groupIds": ["azuremonitor"],
+                        "privateLinkServiceId": authorization.privateLinkScopeId,
+                    },
+                }
+            ],
+            "subnet": {"id": subnet_id},
+        },
+        "tags": tags,
+    }
+    zone_group_body = adapter_module._monitor_private_dns_zone_group_write_body(authorization)
+    configs = zone_group_body["properties"]
+    assert isinstance(configs, dict)
+    assert configs["privateDnsZoneConfigs"] == [
+        {
+            "name": name,
+            "properties": {
+                "privateDnsZoneId": (f"{TARGET}/providers/Microsoft.Network/privateDnsZones/{zone}")
+            },
+        }
+        for zone, _link, name in adapter_module.MONITOR_PRIVATE_DNS_BINDINGS
+    ]
+
+
 def test_proof_authorization_binds_one_exact_immutable_image_and_execution() -> None:
     authorization = _authorization(PROOF_STAGE)
     assert PROOF_JOB == "caj-mobius77-scanner-proof"
@@ -505,6 +592,220 @@ def test_ambiguous_foundation_deployment_reconciles_without_duplicate_create(
     )
     assert result["status"] == "scanner-bridge-foundation-reconciled"
     assert len(deployments) == 1
+
+
+def test_private_endpoint_recovery_consumes_one_grant_without_foundation_redeploy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    authorization = _authorization(PRIVATE_ENDPOINT_RECOVERY_STAGE)
+    calls: list[str] = []
+    deployments = _install_common_fakes(monkeypatch, authorization, calls)
+    state: dict[str, JsonValue] = {
+        "endpointProvisioningState": "Failed",
+        "integritySha256": "8" * 64,
+    }
+    monkeypatch.setattr(
+        adapter_module,
+        "_exact_monitor_private_endpoint_recovery_state",
+        lambda _authorization: calls.append("endpoint-preflight") or state,
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_repair_exact_monitor_private_endpoint",
+        lambda _authorization: (
+            calls.append("endpoint-repair")
+            or {
+                "endpointMutationIssued": True,
+                "preRecoveryIntegritySha256": "8" * 64,
+                "postRecoveryIntegritySha256": "9" * 64,
+                "zoneGroupMutationIssued": True,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_verify_monitor_private_tls_path",
+        lambda _workspace: calls.append("private-tls") or "a" * 64,
+    )
+
+    result = ProductionScannerBridgeRecoveryAdapter(clock=lambda: NOW).execute(
+        authorization=authorization,
+        receipt_directory=tmp_path,
+        expected_repository_head=HEAD,
+    )
+
+    assert result["marker"] == "STAGING_FOUNDATION_AUTHORITATIVE"
+    assert result["authorization-consumed"] is True
+    assert result["scanner-proof-execution-count"] == 0
+    assert result["cost-envelope-unchanged"] is True
+    assert result["dns-resolution-private"] is True
+    assert result["tls-path-proved"] is True
+    assert deployments == []
+    assert "compile" not in calls
+    assert "deploy" not in calls
+    assert calls.index("endpoint-preflight") < calls.index("endpoint-repair")
+    assert calls.index("endpoint-repair") < calls.index("foundation:True")
+    assert calls.index("foundation:True") < calls.index("private-tls")
+    receipt = json.loads(
+        (tmp_path / adapter_module.PRIVATE_ENDPOINT_RECOVERY_RECEIPT_FILE).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert receipt["stage"] == PRIVATE_ENDPOINT_RECOVERY_STAGE
+    assert receipt["replayDecision"] == "deny"
+
+
+def test_private_endpoint_recovery_cannot_reach_unrelated_mutation_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    authorization = _authorization(PRIVATE_ENDPOINT_RECOVERY_STAGE)
+    calls: list[str] = []
+    _install_common_fakes(monkeypatch, authorization, calls)
+    monkeypatch.setattr(
+        adapter_module,
+        "_exact_monitor_private_endpoint_recovery_state",
+        lambda _authorization: {"integritySha256": "8" * 64},
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_repair_exact_monitor_private_endpoint",
+        lambda _authorization: {
+            "endpointMutationIssued": True,
+            "preRecoveryIntegritySha256": "8" * 64,
+            "postRecoveryIntegritySha256": "9" * 64,
+            "zoneGroupMutationIssued": True,
+        },
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_verify_monitor_private_tls_path",
+        lambda _workspace: "a" * 64,
+    )
+
+    def prohibited(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("unrelated mutation path was reachable")
+
+    for symbol in (
+        "_deploy_stage",
+        "_post_secret",
+        "_prebuild_api_image",
+        "_publish_api_image",
+        "_publish_api_image_stage",
+        "_cleanup",
+    ):
+        monkeypatch.setattr(managed_binding_lifecycle, symbol, prohibited)
+    monkeypatch.setattr(adapter_module, "_start_one_execution", prohibited)
+
+    result = ProductionScannerBridgeRecoveryAdapter(clock=lambda: NOW).execute(
+        authorization=authorization,
+        receipt_directory=tmp_path,
+        expected_repository_head=HEAD,
+    )
+    assert result["scanner-proof-execution-count"] == 0
+
+
+def test_exact_private_endpoint_repair_reconciles_ambiguous_write_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _authorization(PRIVATE_ENDPOINT_RECOVERY_STAGE)
+    failed: dict[str, JsonValue] = {
+        "endpointProvisioningState": "Failed",
+        "endpointTags": {},
+        "integritySha256": "1" * 64,
+        "networkInterfaceProvisioningState": "Succeeded",
+        "pendingConnectionCount": 0,
+        "privateDnsZoneGroupProvisioningState": None,
+    }
+    endpoint_recovered = {
+        **failed,
+        "endpointProvisioningState": "Succeeded",
+        "integritySha256": "2" * 64,
+    }
+    fully_recovered = {
+        **endpoint_recovered,
+        "integritySha256": "3" * 64,
+        "privateDnsZoneGroupProvisioningState": "Succeeded",
+    }
+    states = iter((failed, endpoint_recovered, fully_recovered))
+    monkeypatch.setattr(
+        adapter_module,
+        "_exact_monitor_private_endpoint_recovery_state",
+        lambda _authorization: next(states),
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_monitor_private_endpoint_write_body",
+        lambda *_args: {"endpoint": "body"},
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_monitor_private_dns_zone_group_write_body",
+        lambda *_args: {"zoneGroup": "body"},
+    )
+    writes: list[tuple[str, Mapping[str, JsonValue]]] = []
+
+    def write(
+        resource_id: str,
+        _api_version: str,
+        body: Mapping[str, JsonValue],
+    ) -> dict[str, JsonValue]:
+        writes.append((resource_id, body))
+        if len(writes) == 1:
+            raise managed_binding_lifecycle.AzureCommandError("internalservererror")
+        return {"id": resource_id, "provisioningState": "Succeeded"}
+
+    waits: list[str | None] = []
+    monkeypatch.setattr(adapter_module, "_rest_put", write)
+    monkeypatch.setattr(
+        adapter_module,
+        "_wait_for_monitor_private_endpoint",
+        lambda _authorization, *, ambiguous_error_code: waits.append(ambiguous_error_code),
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_wait_for_monitor_private_dns_zone_group",
+        lambda _authorization, *, ambiguous_error_code: waits.append(ambiguous_error_code),
+    )
+
+    result = adapter_module._repair_exact_monitor_private_endpoint(authorization)
+
+    assert len(writes) == 2
+    assert writes[0] == (authorization.monitorPrivateEndpointId, {"endpoint": "body"})
+    assert writes[1] == (
+        f"{authorization.monitorPrivateEndpointId}/privateDnsZoneGroups/default",
+        {"zoneGroup": "body"},
+    )
+    assert waits == ["internalservererror", None]
+    assert result["endpointMutationIssued"] is True
+    assert result["zoneGroupMutationIssued"] is True
+
+
+def test_exact_private_endpoint_repair_safely_adopts_authoritative_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _authorization(PRIVATE_ENDPOINT_RECOVERY_STAGE)
+    succeeded: dict[str, JsonValue] = {
+        "endpointProvisioningState": "Succeeded",
+        "integritySha256": "3" * 64,
+        "networkInterfaceProvisioningState": "Succeeded",
+        "pendingConnectionCount": 0,
+        "privateDnsZoneGroupProvisioningState": "Succeeded",
+    }
+    monkeypatch.setattr(
+        adapter_module,
+        "_exact_monitor_private_endpoint_recovery_state",
+        lambda _authorization: succeeded,
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_rest_put",
+        lambda *_args, **_kwargs: pytest.fail("adoption must not issue a write"),
+    )
+
+    result = adapter_module._repair_exact_monitor_private_endpoint(authorization)
+
+    assert result["endpointMutationIssued"] is False
+    assert result["zoneGroupMutationIssued"] is False
 
 
 def test_proof_executes_once_then_removes_residue_and_writes_typed_evidence(
@@ -1339,7 +1640,11 @@ def test_private_dns_zone_group_requires_the_exact_authorized_set(
     monkeypatch.setattr(
         adapter_module,
         "_rest_get",
-        lambda *_args: {"id": group, "zoneIds": sorted(expected)},
+        lambda *_args: {
+            "id": group,
+            "provisioningState": "Succeeded",
+            "zoneIds": sorted(expected),
+        },
     )
     assert (
         adapter_module._verify_private_dns_zone_group(
@@ -1352,7 +1657,11 @@ def test_private_dns_zone_group_requires_the_exact_authorized_set(
     monkeypatch.setattr(
         adapter_module,
         "_rest_get",
-        lambda *_args: {"id": group, "zoneIds": [sorted(expected)[0]]},
+        lambda *_args: {
+            "id": group,
+            "provisioningState": "Succeeded",
+            "zoneIds": [sorted(expected)[0]],
+        },
     )
     with pytest.raises(
         ScannerBridgeRecoveryExecutionError,
@@ -1364,12 +1673,16 @@ def test_private_dns_zone_group_requires_the_exact_authorized_set(
         )
 
 
+@pytest.mark.parametrize("stage", [FOUNDATION_STAGE, PRIVATE_ENDPOINT_RECOVERY_STAGE])
 def test_scanner_bridge_entry_point_invokes_production_consumer(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    stage: str,
 ) -> None:
     authorization_path = tmp_path / "authorization.json"
     receipt_directory = tmp_path / "receipts"
-    write_scanner_bridge_recovery_authorization(authorization_path, _authorization())
+    write_scanner_bridge_recovery_authorization(authorization_path, _authorization(stage))
     observed: dict[str, object] = {}
 
     def execute(**kwargs: object) -> dict[str, JsonValue]:
@@ -1391,6 +1704,7 @@ def test_scanner_bridge_entry_point_invokes_production_consumer(
         == 0
     )
     assert isinstance(observed["authorization"], ScannerBridgeRecoveryAuthorization)
+    assert observed["authorization"].stage == stage
     assert observed["receipt_directory"] == receipt_directory
     assert json.loads(capsys.readouterr().out) == {"status": "scanner-bridge-foundation-reconciled"}
 

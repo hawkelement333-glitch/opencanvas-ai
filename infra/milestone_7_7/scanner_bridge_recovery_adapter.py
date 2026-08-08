@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -30,6 +31,8 @@ from preflight.milestone_7_7.managed_binding_contracts import (
 from preflight.milestone_7_7.scanner_bridge_recovery import (
     FOUNDATION_STAGE,
     LOG_ANALYTICS_WORKSPACE,
+    MONITOR_PRIVATE_ENDPOINT,
+    PRIVATE_ENDPOINT_RECOVERY_STAGE,
     PROOF_JOB,
     PROOF_STAGE,
     STORAGE_ACCOUNT,
@@ -49,6 +52,9 @@ from preflight.milestone_7_7.scanner_result_bridge import (
 RECEIPT_VERSION: Final = "mobius.milestone-7.7.scanner-bridge-recovery-receipt.v1"
 RECEIPT_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/scanner-bridge-recovery-receipt/v1\0"
 FOUNDATION_RECEIPT_FILE: Final = "scanner-bridge-foundation.receipt.json"
+PRIVATE_ENDPOINT_RECOVERY_RECEIPT_FILE: Final = (
+    "scanner-bridge-private-endpoint-recovery.receipt.json"
+)
 PROOF_RECEIPT_FILE: Final = "scanner-bridge-proof.receipt.json"
 EVIDENCE_DOMAIN: Final = b"mobius.milestone-7.7.scanner-bridge-live-proof/v1\0"
 
@@ -100,6 +106,35 @@ PROOF_RBAC_POLL_SECONDS: Final = 15.0
 PROOF_RBAC_PROPAGATION_SECONDS: Final = 900.0
 DELETION_POLL_SECONDS: Final = 5.0
 DELETION_PROPAGATION_SECONDS: Final = 180.0
+PRIVATE_ENDPOINT_RECOVERY_POLL_SECONDS: Final = 10.0
+PRIVATE_ENDPOINT_RECOVERY_PROPAGATION_SECONDS: Final = 300.0
+
+MONITOR_PRIVATE_DNS_BINDINGS: Final = (
+    ("privatelink.monitor.azure.com", "link-mobius77-monitor", "monitor"),
+    ("privatelink.oms.opinsights.azure.com", "link-mobius77-oms", "oms"),
+    ("privatelink.ods.opinsights.azure.com", "link-mobius77-ods", "ods"),
+    (
+        "privatelink.agentsvc.azure-automation.net",
+        "link-mobius77-agent",
+        "agent",
+    ),
+    ("privatelink.blob.core.windows.net", "link-mobius77-storage", "blob"),
+)
+MONITOR_REQUIRED_MEMBERS: Final = frozenset(
+    {
+        "agent-southcentralus",
+        "agentsolutionpackstore",
+        "api",
+        "dce-global",
+        "diagservicesquery",
+        "global.in.ai",
+        "live",
+        "ods-southcentralus",
+        "oms-southcentralus",
+        "profiler",
+        "snapshot",
+    }
+)
 
 _UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -226,9 +261,12 @@ def _claim_authorization(
 ) -> Path:
     directory = _outside_repository(receipt_directory, "scanner-bridge-receipts-inside-repository")
     directory.mkdir(parents=True, exist_ok=True)
-    filename = (
-        FOUNDATION_RECEIPT_FILE if authorization.stage == FOUNDATION_STAGE else PROOF_RECEIPT_FILE
-    )
+    if authorization.stage == FOUNDATION_STAGE:
+        filename = FOUNDATION_RECEIPT_FILE
+    elif authorization.stage == PRIVATE_ENDPOINT_RECOVERY_STAGE:
+        filename = PRIVATE_ENDPOINT_RECOVERY_RECEIPT_FILE
+    else:
+        filename = PROOF_RECEIPT_FILE
     path = directory / filename
     body: dict[str, JsonValue] = {
         "authorizationIntegritySha256": authorization.authorizationIntegritySha256,
@@ -479,6 +517,473 @@ def _rest_collection(resource_id: str, api_version: str, query: str) -> JsonValu
             "--only-show-errors",
         ),
         require_json=True,
+    )
+
+
+def _rest_put(
+    resource_id: str,
+    api_version: str,
+    body: Mapping[str, JsonValue],
+) -> dict[str, JsonValue]:
+    value = lifecycle._run(
+        (
+            "az",
+            "rest",
+            "--method",
+            "put",
+            "--url",
+            f"https://management.azure.com{resource_id}?api-version={api_version}",
+            "--body",
+            json.dumps(body, separators=(",", ":"), sort_keys=True),
+            "--query",
+            "{id:id,provisioningState:properties.provisioningState}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    return _json_object(value, "scanner-private-endpoint-recovery-write-malformed")
+
+
+def _monitor_recovery_resource_ids(
+    authorization: ScannerBridgeRecoveryAuthorization,
+) -> tuple[str, str, dict[str, str]]:
+    vnet_id = (
+        f"{authorization.targetResourceGroupId}/providers/Microsoft.Network/"
+        f"virtualNetworks/{VIRTUAL_NETWORK}"
+    )
+    subnet_id = f"{vnet_id}/subnets/{PRIVATE_ENDPOINT_SUBNET}"
+    zone_ids = {
+        zone: (
+            f"{authorization.targetResourceGroupId}/providers/Microsoft.Network/"
+            f"privateDnsZones/{zone}"
+        )
+        for zone, _link, _config in MONITOR_PRIVATE_DNS_BINDINGS
+    }
+    return vnet_id, subnet_id, zone_ids
+
+
+def _exact_monitor_private_endpoint_recovery_state(
+    authorization: ScannerBridgeRecoveryAuthorization,
+) -> dict[str, JsonValue]:
+    target = authorization.targetResourceGroupId
+    vnet_id, subnet_id, zone_ids = _monitor_recovery_resource_ids(authorization)
+    endpoints = _rest_collection(
+        f"{target}/providers/Microsoft.Network/privateEndpoints",
+        PRIVATE_ENDPOINT_API_VERSION,
+        "value[].{id:id,name:name,location:location,"
+        "provisioningState:properties.provisioningState,"
+        "subnetId:properties.subnet.id,networkInterfaceIds:properties.networkInterfaces[].id,"
+        "connections:properties.privateLinkServiceConnections[].{"
+        "name:name,serviceId:properties.privateLinkServiceId,"
+        "groupIds:properties.groupIds,status:properties.privateLinkServiceConnectionState.status,"
+        "provisioningState:properties.provisioningState},tags:tags}",
+    )
+    if not isinstance(endpoints, list) or any(not isinstance(row, dict) for row in endpoints):
+        _fail("scanner-private-endpoint-recovery-inventory-malformed")
+    matching_endpoints = [
+        cast(dict[str, JsonValue], row)
+        for row in endpoints
+        if _same_resource_id(
+            cast(dict[str, JsonValue], row).get("id"),
+            authorization.monitorPrivateEndpointId,
+        )
+    ]
+    if len(matching_endpoints) != 1:
+        _fail("scanner-private-endpoint-recovery-endpoint-count-invalid")
+    endpoint = matching_endpoints[0]
+    connections = endpoint.get("connections")
+    network_interface_ids = endpoint.get("networkInterfaceIds")
+    tags = endpoint.get("tags")
+    if (
+        endpoint.get("name") != MONITOR_PRIVATE_ENDPOINT
+        or endpoint.get("location") != STAGING_LOCATION
+        or endpoint.get("provisioningState") not in {"Failed", "Succeeded"}
+        or not _same_resource_id(endpoint.get("subnetId"), subnet_id)
+        or not isinstance(connections, list)
+        or len(connections) != 1
+        or not isinstance(connections[0], dict)
+        or connections[0].get("name") != "azuremonitor"
+        or not _same_resource_id(connections[0].get("serviceId"), authorization.privateLinkScopeId)
+        or connections[0].get("groupIds") != ["azuremonitor"]
+        or connections[0].get("status") != "Approved"
+        or connections[0].get("provisioningState") not in {"Failed", "Succeeded"}
+        or not isinstance(network_interface_ids, list)
+        or len(network_interface_ids) != 1
+        or not isinstance(network_interface_ids[0], str)
+        or not isinstance(tags, dict)
+    ):
+        _fail("scanner-private-endpoint-recovery-endpoint-drift")
+    try:
+        lifecycle._verify_recovered_cleanup_tags(tags)
+    except lifecycle.LifecycleError:
+        _fail("scanner-private-endpoint-recovery-tags-unproved")
+
+    subnet = _rest_get(
+        subnet_id,
+        PRIVATE_ENDPOINT_API_VERSION,
+        "{id:id,provisioningState:properties.provisioningState,"
+        "addressPrefix:properties.addressPrefix,"
+        "privateEndpointNetworkPolicies:properties.privateEndpointNetworkPolicies,"
+        "privateLinkServiceNetworkPolicies:properties.privateLinkServiceNetworkPolicies}",
+    )
+    if (
+        not _same_resource_id(subnet.get("id"), subnet_id)
+        or subnet.get("provisioningState") != "Succeeded"
+        or subnet.get("addressPrefix") != "10.77.2.0/24"
+        or subnet.get("privateEndpointNetworkPolicies") != "Disabled"
+        or subnet.get("privateLinkServiceNetworkPolicies") != "Enabled"
+    ):
+        _fail("scanner-private-endpoint-recovery-subnet-unproved")
+
+    ampls = _rest_get(
+        authorization.privateLinkScopeId,
+        AMPLS_API_VERSION,
+        "{id:id,provisioningState:properties.provisioningState,"
+        "queryAccessMode:properties.accessModeSettings.queryAccessMode,"
+        "ingestionAccessMode:properties.accessModeSettings.ingestionAccessMode,"
+        "exclusions:properties.accessModeSettings.exclusions,"
+        "connections:properties.privateEndpointConnections[].{"
+        "id:id,privateEndpointId:properties.privateEndpoint.id,"
+        "status:properties.privateLinkServiceConnectionState.status,"
+        "actionsRequired:properties.privateLinkServiceConnectionState.actionsRequired,"
+        "provisioningState:properties.provisioningState}}",
+    )
+    ampls_connections = ampls.get("connections")
+    if (
+        not _same_resource_id(ampls.get("id"), authorization.privateLinkScopeId)
+        or ampls.get("provisioningState") != "Succeeded"
+        or ampls.get("queryAccessMode") != "PrivateOnly"
+        or ampls.get("ingestionAccessMode") != "PrivateOnly"
+        or ampls.get("exclusions") != []
+        or not isinstance(ampls_connections, list)
+        or len(ampls_connections) != 1
+        or not isinstance(ampls_connections[0], dict)
+        or not _same_resource_id(
+            ampls_connections[0].get("privateEndpointId"),
+            authorization.monitorPrivateEndpointId,
+        )
+        or ampls_connections[0].get("status") != "Approved"
+        or ampls_connections[0].get("actionsRequired") != "None"
+        or ampls_connections[0].get("provisioningState") != "Succeeded"
+    ):
+        _fail("scanner-private-endpoint-recovery-ampls-unproved")
+
+    nics = _rest_collection(
+        f"{target}/providers/Microsoft.Network/networkInterfaces",
+        PRIVATE_ENDPOINT_API_VERSION,
+        "value[].{id:id,name:name,provisioningState:properties.provisioningState,"
+        "privateEndpointId:properties.privateEndpoint.id,"
+        "ipConfigurations:properties.ipConfigurations[].{"
+        "privateIPAddress:properties.privateIPAddress,"
+        "provisioningState:properties.provisioningState,"
+        "subnetId:properties.subnet.id,"
+        "requiredMemberName:properties.privateLinkConnectionProperties.requiredMemberName}}",
+    )
+    if not isinstance(nics, list) or any(not isinstance(row, dict) for row in nics):
+        _fail("scanner-private-endpoint-recovery-nic-inventory-malformed")
+    matching_nics = [
+        cast(dict[str, JsonValue], row)
+        for row in nics
+        if _same_resource_id(
+            cast(dict[str, JsonValue], row).get("privateEndpointId"),
+            authorization.monitorPrivateEndpointId,
+        )
+    ]
+    if len(matching_nics) != 1:
+        _fail("scanner-private-endpoint-recovery-nic-count-invalid")
+    nic = matching_nics[0]
+    ip_configurations = nic.get("ipConfigurations")
+    if (
+        not _same_resource_id(nic.get("id"), network_interface_ids[0])
+        or nic.get("provisioningState") != "Succeeded"
+        or not isinstance(ip_configurations, list)
+        or len(ip_configurations) != len(MONITOR_REQUIRED_MEMBERS)
+        or any(not isinstance(row, dict) for row in ip_configurations)
+    ):
+        _fail("scanner-private-endpoint-recovery-nic-unproved")
+    member_names: set[str] = set()
+    private_addresses: set[str] = set()
+    approved_network = ipaddress.ip_network("10.77.2.0/24")
+    for raw in ip_configurations:
+        row = cast(dict[str, JsonValue], raw)
+        member = row.get("requiredMemberName")
+        address = row.get("privateIPAddress")
+        if (
+            row.get("provisioningState") != "Succeeded"
+            or not _same_resource_id(row.get("subnetId"), subnet_id)
+            or not isinstance(member, str)
+            or not isinstance(address, str)
+        ):
+            _fail("scanner-private-endpoint-recovery-nic-unproved")
+        try:
+            parsed_address = ipaddress.ip_address(address)
+        except ValueError:
+            _fail("scanner-private-endpoint-recovery-nic-unproved")
+        if parsed_address not in approved_network:
+            _fail("scanner-private-endpoint-recovery-nic-unproved")
+        member_names.add(member)
+        private_addresses.add(address)
+    if member_names != MONITOR_REQUIRED_MEMBERS or len(private_addresses) != len(
+        MONITOR_REQUIRED_MEMBERS
+    ):
+        _fail("scanner-private-endpoint-recovery-nic-unproved")
+
+    zone_links: list[dict[str, JsonValue]] = []
+    for zone, link, _config in MONITOR_PRIVATE_DNS_BINDINGS:
+        link_id = f"{zone_ids[zone]}/virtualNetworkLinks/{link}"
+        row = _rest_get(
+            link_id,
+            PRIVATE_DNS_API_VERSION,
+            "{id:id,provisioningState:properties.provisioningState,"
+            "registrationEnabled:properties.registrationEnabled,"
+            "virtualNetworkId:properties.virtualNetwork.id}",
+        )
+        if (
+            not _same_resource_id(row.get("id"), link_id)
+            or row.get("provisioningState") != "Succeeded"
+            or row.get("registrationEnabled") is not False
+            or not _same_resource_id(row.get("virtualNetworkId"), vnet_id)
+        ):
+            _fail("scanner-private-endpoint-recovery-dns-link-unproved")
+        zone_links.append(row)
+
+    zone_groups = _rest_collection(
+        f"{authorization.monitorPrivateEndpointId}/privateDnsZoneGroups",
+        PRIVATE_ENDPOINT_API_VERSION,
+        "value[].{id:id,name:name,provisioningState:properties.provisioningState,"
+        "zoneIds:properties.privateDnsZoneConfigs[].properties.privateDnsZoneId}",
+    )
+    if not isinstance(zone_groups, list) or any(not isinstance(row, dict) for row in zone_groups):
+        _fail("scanner-private-endpoint-recovery-zone-group-inventory-malformed")
+    expected_zone_group_id = (
+        f"{authorization.monitorPrivateEndpointId}/privateDnsZoneGroups/default"
+    )
+    if len(zone_groups) > 1:
+        _fail("scanner-private-endpoint-recovery-zone-group-count-invalid")
+    zone_group_state: JsonValue = None
+    if zone_groups:
+        zone_group = cast(dict[str, JsonValue], zone_groups[0])
+        observed_zone_ids = zone_group.get("zoneIds")
+        if (
+            zone_group.get("name") != "default"
+            or not _same_resource_id(zone_group.get("id"), expected_zone_group_id)
+            or zone_group.get("provisioningState") not in {"Failed", "Succeeded"}
+            or not isinstance(observed_zone_ids, list)
+            or {str(value).casefold() for value in observed_zone_ids}
+            != {value.casefold() for value in zone_ids.values()}
+        ):
+            _fail("scanner-private-endpoint-recovery-zone-group-drift")
+        zone_group_state = zone_group["provisioningState"]
+
+    projection: dict[str, JsonValue] = {
+        "amplsConnectionCount": len(ampls_connections),
+        "endpointId": authorization.monitorPrivateEndpointId,
+        "endpointProvisioningState": endpoint["provisioningState"],
+        "endpointTags": tags,
+        "networkInterfaceId": nic["id"],
+        "networkInterfaceProvisioningState": nic["provisioningState"],
+        "pendingConnectionCount": 0,
+        "privateDnsZoneGroupProvisioningState": zone_group_state,
+        "privateDnsZoneLinkCount": len(zone_links),
+        "subnetId": subnet_id,
+    }
+    projection["integritySha256"] = _canonical_hash(
+        cast(JsonValue, projection),
+        "mobius.scanner-bridge.private-endpoint-recovery-state.v1",
+    )
+    return projection
+
+
+def _monitor_private_endpoint_write_body(
+    authorization: ScannerBridgeRecoveryAuthorization,
+    state: Mapping[str, JsonValue],
+) -> dict[str, JsonValue]:
+    _vnet_id, subnet_id, _zone_ids = _monitor_recovery_resource_ids(authorization)
+    tags = state.get("endpointTags")
+    if not isinstance(tags, dict):
+        _fail("scanner-private-endpoint-recovery-tags-unproved")
+    return {
+        "location": STAGING_LOCATION,
+        "properties": {
+            "privateLinkServiceConnections": [
+                {
+                    "name": "azuremonitor",
+                    "properties": {
+                        "groupIds": ["azuremonitor"],
+                        "privateLinkServiceId": authorization.privateLinkScopeId,
+                    },
+                }
+            ],
+            "subnet": {"id": subnet_id},
+        },
+        "tags": tags,
+    }
+
+
+def _monitor_private_dns_zone_group_write_body(
+    authorization: ScannerBridgeRecoveryAuthorization,
+) -> dict[str, JsonValue]:
+    _vnet_id, _subnet_id, zone_ids = _monitor_recovery_resource_ids(authorization)
+    return {
+        "properties": {
+            "privateDnsZoneConfigs": [
+                {
+                    "name": config,
+                    "properties": {"privateDnsZoneId": zone_ids[zone]},
+                }
+                for zone, _link, config in MONITOR_PRIVATE_DNS_BINDINGS
+            ]
+        }
+    }
+
+
+def _wait_for_monitor_private_endpoint(
+    authorization: ScannerBridgeRecoveryAuthorization,
+    *,
+    ambiguous_error_code: str | None,
+) -> None:
+    _vnet_id, subnet_id, _zone_ids = _monitor_recovery_resource_ids(authorization)
+    deadline = time.monotonic() + PRIVATE_ENDPOINT_RECOVERY_PROPAGATION_SECONDS
+    while True:
+        try:
+            row = _rest_get(
+                authorization.monitorPrivateEndpointId,
+                PRIVATE_ENDPOINT_API_VERSION,
+                "{id:id,provisioningState:properties.provisioningState,"
+                "subnetId:properties.subnet.id,connections:"
+                "properties.privateLinkServiceConnections[].{"
+                "serviceId:properties.privateLinkServiceId,groupIds:properties.groupIds,"
+                "status:properties.privateLinkServiceConnectionState.status,"
+                "provisioningState:properties.provisioningState}}",
+            )
+            connections = row.get("connections")
+            if (
+                _same_resource_id(row.get("id"), authorization.monitorPrivateEndpointId)
+                and row.get("provisioningState") == "Succeeded"
+                and _same_resource_id(row.get("subnetId"), subnet_id)
+                and isinstance(connections, list)
+                and len(connections) == 1
+                and isinstance(connections[0], dict)
+                and _same_resource_id(
+                    connections[0].get("serviceId"), authorization.privateLinkScopeId
+                )
+                and connections[0].get("groupIds") == ["azuremonitor"]
+                and connections[0].get("status") == "Approved"
+                and connections[0].get("provisioningState") == "Succeeded"
+            ):
+                return
+        except lifecycle.AzureCommandError as exc:
+            if not _not_found(exc):
+                ambiguous_error_code = exc.sanitized_azure_error_code
+        if time.monotonic() >= deadline:
+            code = ambiguous_error_code or "provider-terminal-failed"
+            _fail(f"scanner-private-endpoint-recovery-azure-{code}")
+        time.sleep(PRIVATE_ENDPOINT_RECOVERY_POLL_SECONDS)
+
+
+def _wait_for_monitor_private_dns_zone_group(
+    authorization: ScannerBridgeRecoveryAuthorization,
+    *,
+    ambiguous_error_code: str | None,
+) -> None:
+    _vnet_id, _subnet_id, zone_ids = _monitor_recovery_resource_ids(authorization)
+    group_id = f"{authorization.monitorPrivateEndpointId}/privateDnsZoneGroups/default"
+    deadline = time.monotonic() + PRIVATE_ENDPOINT_RECOVERY_PROPAGATION_SECONDS
+    while True:
+        try:
+            row = _rest_get(
+                group_id,
+                PRIVATE_ENDPOINT_API_VERSION,
+                "{id:id,provisioningState:properties.provisioningState,"
+                "zoneIds:properties.privateDnsZoneConfigs[].properties.privateDnsZoneId}",
+            )
+            observed_zone_ids = row.get("zoneIds")
+            if (
+                _same_resource_id(row.get("id"), group_id)
+                and row.get("provisioningState") == "Succeeded"
+                and isinstance(observed_zone_ids, list)
+                and {str(value).casefold() for value in observed_zone_ids}
+                == {value.casefold() for value in zone_ids.values()}
+            ):
+                return
+        except lifecycle.AzureCommandError as exc:
+            if not _not_found(exc):
+                ambiguous_error_code = exc.sanitized_azure_error_code
+        if time.monotonic() >= deadline:
+            code = ambiguous_error_code or "dns-zone-group-terminal-failed"
+            _fail(f"scanner-private-endpoint-recovery-azure-{code}")
+        time.sleep(PRIVATE_ENDPOINT_RECOVERY_POLL_SECONDS)
+
+
+def _repair_exact_monitor_private_endpoint(
+    authorization: ScannerBridgeRecoveryAuthorization,
+) -> dict[str, JsonValue]:
+    before = _exact_monitor_private_endpoint_recovery_state(authorization)
+    endpoint_mutation_issued = False
+    zone_group_mutation_issued = False
+    if before.get("endpointProvisioningState") != "Succeeded":
+        endpoint_mutation_issued = True
+        ambiguous_code: str | None = None
+        try:
+            _rest_put(
+                authorization.monitorPrivateEndpointId,
+                PRIVATE_ENDPOINT_API_VERSION,
+                _monitor_private_endpoint_write_body(authorization, before),
+            )
+        except lifecycle.AzureCommandError as exc:
+            ambiguous_code = exc.sanitized_azure_error_code
+        _wait_for_monitor_private_endpoint(
+            authorization,
+            ambiguous_error_code=ambiguous_code,
+        )
+
+    after_endpoint = _exact_monitor_private_endpoint_recovery_state(authorization)
+    if after_endpoint.get("privateDnsZoneGroupProvisioningState") != "Succeeded":
+        zone_group_mutation_issued = True
+        ambiguous_code = None
+        group_id = f"{authorization.monitorPrivateEndpointId}/privateDnsZoneGroups/default"
+        try:
+            _rest_put(
+                group_id,
+                PRIVATE_ENDPOINT_API_VERSION,
+                _monitor_private_dns_zone_group_write_body(authorization),
+            )
+        except lifecycle.AzureCommandError as exc:
+            ambiguous_code = exc.sanitized_azure_error_code
+        _wait_for_monitor_private_dns_zone_group(
+            authorization,
+            ambiguous_error_code=ambiguous_code,
+        )
+
+    after = _exact_monitor_private_endpoint_recovery_state(authorization)
+    if (
+        after.get("endpointProvisioningState") != "Succeeded"
+        or after.get("networkInterfaceProvisioningState") != "Succeeded"
+        or after.get("privateDnsZoneGroupProvisioningState") != "Succeeded"
+        or after.get("pendingConnectionCount") != 0
+    ):
+        _fail("scanner-private-endpoint-recovery-readback-unproved")
+    return {
+        "endpointMutationIssued": endpoint_mutation_issued,
+        "preRecoveryIntegritySha256": before["integritySha256"],
+        "postRecoveryIntegritySha256": after["integritySha256"],
+        "zoneGroupMutationIssued": zone_group_mutation_issued,
+    }
+
+
+def _verify_monitor_private_tls_path(workspace_customer_id: str) -> str:
+    hostnames = (
+        "api.monitor.azure.com",
+        f"{workspace_customer_id}.oms.opinsights.azure.com",
+        f"{workspace_customer_id}.ods.opinsights.azure.com",
+    )
+    for hostname in hostnames:
+        lifecycle._private_tls_endpoint(hostname)
+    return _canonical_hash(
+        cast(JsonValue, list(hostnames)),
+        "mobius.scanner-bridge.private-endpoint-live-path.v1",
     )
 
 
@@ -745,17 +1250,26 @@ def _verify_private_endpoint(
     row = _rest_get(
         resource_id,
         PRIVATE_ENDPOINT_API_VERSION,
-        "{id:id,subnetId:properties.subnet.id,connections:"
+        "{id:id,provisioningState:properties.provisioningState,"
+        "subnetId:properties.subnet.id,connections:"
         "properties.privateLinkServiceConnections[].{serviceId:properties.privateLinkServiceId,"
-        "groupIds:properties.groupIds,status:properties.privateLinkServiceConnectionState.status}}",
+        "groupIds:properties.groupIds,status:properties.privateLinkServiceConnectionState.status,"
+        "provisioningState:properties.provisioningState}}",
     )
     connections = row.get("connections")
     if (
         row.get("id") != resource_id
+        or row.get("provisioningState") != "Succeeded"
         or row.get("subnetId") != subnet_id
         or not isinstance(connections, list)
         or len(connections) != 1
-        or connections[0] != {"serviceId": service_id, "groupIds": [group_id], "status": "Approved"}
+        or connections[0]
+        != {
+            "serviceId": service_id,
+            "groupIds": [group_id],
+            "status": "Approved",
+            "provisioningState": "Succeeded",
+        }
     ):
         _fail("scanner-bridge-private-endpoint-unproved")
     return row
@@ -768,17 +1282,40 @@ def _verify_private_dns_zone_group(
     row = _rest_get(
         group_id,
         PRIVATE_ENDPOINT_API_VERSION,
-        "{id:id,zoneIds:properties.privateDnsZoneConfigs[].properties.privateDnsZoneId}",
+        "{id:id,provisioningState:properties.provisioningState,"
+        "zoneIds:properties.privateDnsZoneConfigs[].properties.privateDnsZoneId}",
     )
     zone_ids = row.get("zoneIds")
     if (
         row.get("id") != group_id
+        or row.get("provisioningState") != "Succeeded"
         or not isinstance(zone_ids, list)
         or any(not isinstance(value, str) for value in zone_ids)
         or {cast(str, value).casefold() for value in zone_ids}
         != {value.casefold() for value in expected_zone_ids}
     ):
         _fail("scanner-bridge-private-dns-zone-group-unproved")
+    return row
+
+
+def _verify_private_dns_zone_link(
+    *, zone_id: str, link_name: str, virtual_network_id: str
+) -> dict[str, JsonValue]:
+    link_id = f"{zone_id}/virtualNetworkLinks/{link_name}"
+    row = _rest_get(
+        link_id,
+        PRIVATE_DNS_API_VERSION,
+        "{id:id,provisioningState:properties.provisioningState,"
+        "registrationEnabled:properties.registrationEnabled,"
+        "virtualNetworkId:properties.virtualNetwork.id}",
+    )
+    if (
+        not _same_resource_id(row.get("id"), link_id)
+        or row.get("provisioningState") != "Succeeded"
+        or row.get("registrationEnabled") is not False
+        or not _same_resource_id(row.get("virtualNetworkId"), virtual_network_id)
+    ):
+        _fail("scanner-bridge-private-dns-zone-link-unproved")
     return row
 
 
@@ -1045,20 +1582,23 @@ def _foundation_readback_once(
         group_id="azuremonitor",
         subnet_id=subnet_id,
     )
-    required_zones = (
-        "privatelink.blob.core.windows.net",
-        "privatelink.monitor.azure.com",
-        "privatelink.oms.opinsights.azure.com",
-        "privatelink.ods.opinsights.azure.com",
-        "privatelink.agentsvc.azure-automation.net",
-    )
+    required_zones = tuple(zone for zone, _link, _config in MONITOR_PRIVATE_DNS_BINDINGS)
+    link_names = {zone: link for zone, link, _config in MONITOR_PRIVATE_DNS_BINDINGS}
     zone_rows: list[dict[str, JsonValue]] = []
+    zone_link_rows: list[dict[str, JsonValue]] = []
     for zone in required_zones:
         zone_id = f"{target}/providers/Microsoft.Network/privateDnsZones/{zone}"
         row = _rest_get(zone_id, PRIVATE_DNS_API_VERSION, "{id:id,location:location}")
         if row != {"id": zone_id, "location": "global"}:
             _fail("scanner-bridge-private-dns-zone-unproved")
         zone_rows.append(row)
+        zone_link_rows.append(
+            _verify_private_dns_zone_link(
+                zone_id=zone_id,
+                link_name=link_names[zone],
+                virtual_network_id=vnet_id,
+            )
+        )
     zone_ids = {
         zone: f"{target}/providers/Microsoft.Network/privateDnsZones/{zone}"
         for zone in required_zones
@@ -1196,6 +1736,7 @@ def _foundation_readback_once(
             "scopedWorkspace": scoped,
             "storagePrivateEndpoint": storage_pe,
             "storagePrivateDnsZoneGroup": storage_zone_group,
+            "zoneLinks": zone_link_rows,
             "zones": zone_rows,
         },
     )
@@ -2195,6 +2736,45 @@ class ProductionScannerBridgeRecoveryAdapter:
         if not isinstance(cleanup_role, str):
             _fail("scanner-bridge-cleanup-role-contract-malformed")
         lifecycle._verify_cleanup_target_role(subscription_id, cleanup_principal, cleanup_role)
+
+        if authorization.stage == PRIVATE_ENDPOINT_RECOVERY_STAGE:
+            _exact_monitor_private_endpoint_recovery_state(authorization)
+            _claim_authorization(
+                authorization=authorization,
+                receipt_directory=receipt_directory,
+                now_utc=now,
+            )
+            recovery = _repair_exact_monitor_private_endpoint(authorization)
+            readback = _verify_foundation(
+                authorization,
+                require_proof_console_diagnostic=True,
+            )
+            live_path_integrity = _verify_monitor_private_tls_path(readback.workspace_customer_id)
+            cleanup_principal = lifecycle._verify_cleanup_control(subscription_id, cleanup_at)
+            lifecycle._verify_cleanup_target_role(subscription_id, cleanup_principal, cleanup_role)
+            final_expected_cost, final_maximum_cost = lifecycle._verified_cost()
+            if (final_expected_cost, final_maximum_cost) != (
+                expected_cost,
+                maximum_cost,
+            ):
+                _fail("scanner-private-endpoint-recovery-cost-envelope-drift")
+            return {
+                "authorization-consumed": True,
+                "authorization-integrity-sha256": (authorization.authorizationIntegritySha256),
+                "cleanup-executable-and-armed": True,
+                "cost-envelope-unchanged": True,
+                "dns-resolution-private": True,
+                "foundation-integrity-sha256": readback.inventory_integrity,
+                "marker": "STAGING_FOUNDATION_AUTHORITATIVE",
+                "no-duplicate-private-endpoint": True,
+                "no-orphaned-private-endpoint-resources": True,
+                "private-endpoint-id": authorization.monitorPrivateEndpointId,
+                "private-path-integrity-sha256": live_path_integrity,
+                "recovery": recovery,
+                "scanner-proof-execution-count": 0,
+                "status": "scanner-foundation-private-endpoint-recovered",
+                "tls-path-proved": True,
+            }
 
         binding = _deployment_binding(authorization, contract)
         if authorization.stage == PROOF_STAGE:
