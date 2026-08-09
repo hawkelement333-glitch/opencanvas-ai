@@ -48,6 +48,9 @@ from preflight.milestone_7_7.managed_binding_contracts import (
 from preflight.milestone_7_7.scanner_result_bridge import (
     ScannerResultBridgeDeploymentEvidence,
 )
+from infra.milestone_7_7.scripts.cleanup_resource_reconciliation import (
+    exact_deleted_key_vault_purge_command,
+)
 from infra.milestone_7_7.scripts.scanner_bridge_deployment import (
     AzureCommandError as _AzureCommandError,
     PublisherAccessPending as _PublisherAccessPending,
@@ -84,11 +87,11 @@ REGISTRY: Final = "acrmobius7711564669"
 AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup-recovery"
 RETIRED_ACCOUNT: Final = "aa-mobius77-cleanup"
 RUNBOOK: Final = "Remove-Mobius77Staging"
-SCHEDULE: Final = "schedule-mobius77-cleanup-g3"
+SCHEDULE: Final = "schedule-mobius77-cleanup-g4"
 STAGING_LOCATION: Final = "southcentralus"
 CLEANUP_LOCATION: Final = "westus"
 REDIS_LOCATION: Final = "australiacentral"
-AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 9, 8, 0, 0, 0, UTC)
+AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 11, 3, 45, 0, 0, UTC)
 MAXIMUM_AUTHORIZED_WINDOW: Final = timedelta(hours=30)
 MINIMUM_CLEANUP_RESERVE: Final = timedelta(minutes=90)
 PROVISIONING_COST_BLOCK_USD_CENTS: Final = 12_000
@@ -6471,6 +6474,16 @@ def _deleted_vault_present(subscription_id: str) -> bool:
     return bool(value)
 
 
+def _purge_exact_deleted_vault(subscription_id: str) -> bool:
+    if not _deleted_vault_present(subscription_id):
+        return False
+    _run(
+        exact_deleted_key_vault_purge_command(subscription_id),
+        timeout_seconds=DEPLOYMENT_TIMEOUT_SECONDS,
+    )
+    return True
+
+
 def _cleanup_authorization_path(receipt_directory: Path) -> Path:
     return receipt_directory / CLEANUP_AUTHORIZATION_FILE
 
@@ -6622,24 +6635,7 @@ def _cleanup(
             ),
             timeout_seconds=DEPLOYMENT_TIMEOUT_SECONDS,
         )
-    if _deleted_vault_present(subscription_id):
-        _run(
-            (
-                "az",
-                "keyvault",
-                "purge",
-                "--name",
-                KEY_VAULT,
-                "--location",
-                STAGING_LOCATION,
-                "--subscription",
-                subscription_id,
-                "--only-show-errors",
-                "--output",
-                "none",
-            ),
-            timeout_seconds=DEPLOYMENT_TIMEOUT_SECONDS,
-        )
+    _purge_exact_deleted_vault(subscription_id)
     if _group_exists(subscription_id, CLEANUP_GROUP):
         _run(
             (

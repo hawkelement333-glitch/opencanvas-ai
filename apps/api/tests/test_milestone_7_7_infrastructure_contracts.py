@@ -379,8 +379,8 @@ def test_bicep_module_contracts_reflect_closed_policy_values():
             "param cleanupLocation string = 'westus'",
             "param cleanupControlDeploymentEnabled bool = false",
             "param cleanupJobScheduleDeploymentEnabled bool = false",
-            "param cleanupBindingGeneration int = 3",
-            "param cleanupBindingContractVersion string = 'm7.7-automation-cleanup-binding-v3'",
+            "param cleanupBindingGeneration int = 4",
+            "param cleanupBindingContractVersion string = 'm7.7-automation-cleanup-binding-v4'",
             (
                 "var generationOneBindingId = guid(existingAutomationAccount.id, "
                 "existingCleanupRunbook.name, existingCleanupSchedule.name)"
@@ -1184,6 +1184,7 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
             "a5429a32-87e3-5963-8c3a-bef85e777ed5",
             "f29ca20d-cd14-57d9-b99b-fd6b04406166",
             "12f27fa6-2cd5-548d-be20-c6e03a5e19d3",
+            "34b1d170-652b-505a-9cc1-b8177b872ff0",
             "d83b4107-54e0-57a4-b650-fe0b556132d2",
             "ecdbb32f-9134-5697-85f9-d569ba57454b",
             "158cac88-5679-5804-9f4d-854520bbb635",
@@ -1199,6 +1200,7 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
             "a5429a32-87e3-5963-8c3a-bef85e777ed5",
             "f29ca20d-cd14-57d9-b99b-fd6b04406166",
             "12f27fa6-2cd5-548d-be20-c6e03a5e19d3",
+            "34b1d170-652b-505a-9cc1-b8177b872ff0",
         },
         "modules/identities.bicep": {"b24988ac-6180-42a0-ab88-20f7382dd24c"},
         "modules/key-vault.bicep": {"4633458b-17de-408a-b874-0445c86b69e6"},

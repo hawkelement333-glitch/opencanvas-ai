@@ -89,15 +89,15 @@
         "authorizationParameter": { "const": "CleanupAuthorized" },
         "authorizationValue": { "const": true },
         "bindingContractVersion": {
-          "const": "m7.7-automation-cleanup-binding-v3"
+          "const": "m7.7-automation-cleanup-binding-v4"
         },
-        "bindingGeneration": { "const": 3 },
+        "bindingGeneration": { "const": 4 },
         "activeBindingId": { "$ref": "#/$defs/guid" },
         "corruptedAutomationAccount": { "const": "aa-mobius77-cleanup" },
         "tombstonedBindingIds": {
           "type": "array",
-          "minItems": 8,
-          "maxItems": 8,
+          "minItems": 9,
+          "maxItems": 9,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -115,10 +115,11 @@
               "bindingContractVersion": {
                 "enum": [
                   "m7.7-automation-cleanup-binding-v1",
-                  "m7.7-automation-cleanup-binding-v2"
+                  "m7.7-automation-cleanup-binding-v2",
+                  "m7.7-automation-cleanup-binding-v3"
                 ]
               },
-              "bindingGeneration": { "enum": [1, 2] },
+              "bindingGeneration": { "enum": [1, 2, 3] },
               "bindingId": {
                 "enum": [
                   "158cac88-5679-5804-9f4d-854520bbb635",
@@ -128,7 +129,8 @@
                   "d83b4107-54e0-57a4-b650-fe0b556132d2",
                   "5ffc55c1-7a88-5231-b0d1-e76ee95d057e",
                   "a5429a32-87e3-5963-8c3a-bef85e777ed5",
-                  "f29ca20d-cd14-57d9-b99b-fd6b04406166"
+                  "f29ca20d-cd14-57d9-b99b-fd6b04406166",
+                  "12f27fa6-2cd5-548d-be20-c6e03a5e19d3"
                 ]
               },
               "directGetStatus": { "const": "not-found" },
@@ -140,7 +142,7 @@
           }
         },
         "scheduleResourceId": {
-          "const": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/schedules/schedule-mobius77-cleanup-g3"
+          "const": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/schedules/schedule-mobius77-cleanup-g4"
         },
         "runbookResourceId": {
           "const": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/runbooks/Remove-Mobius77Staging"
@@ -153,7 +155,7 @@
           "const": "rg-solarplexus-mobius-77-staging"
         },
         "subscriptionFingerprint": { "$ref": "#/$defs/sha256" },
-        "deadlineUtc": { "const": "2026-08-09T08:00:00Z" },
+        "deadlineUtc": { "const": "2026-08-11T03:45:00Z" },
         "launchGraceSeconds": { "const": 1800 },
         "cleanupContributorRoleDefinitionId": {
           "const": "b24988ac-6180-42a0-ab88-20f7382dd24c"

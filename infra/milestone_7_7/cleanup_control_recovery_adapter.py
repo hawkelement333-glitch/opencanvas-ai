@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Final, NoReturn
 
 from infra.milestone_7_7.scripts import managed_binding_lifecycle as lifecycle
+from infra.milestone_7_7.scanner_bridge_recovery_adapter import (
+    reconcile_reprovision_scanner_foundation,
+)
 from performance.milestone_7_7.framework import (
     JsonValue,
     canonical_bytes,
@@ -65,13 +68,13 @@ POST_FIRED_RECOVERY_RECEIPT_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery-receipt/v3\0"
 )
 POST_CLEANUP_REPROVISION_RECEIPT_VERSION: Final = (
-    "mobius.milestone-7.7.cleanup-control-reprovision-receipt.v1"
+    "mobius.milestone-7.7.cleanup-control-reprovision-receipt.v2"
 )
 POST_CLEANUP_REPROVISION_RECEIPT_FILE: Final = (
     "cleanup-control-reprovision.receipt.json"
 )
 POST_CLEANUP_REPROVISION_RECEIPT_DOMAIN: Final = (
-    b"solarplexus-mobius/milestone-7.7/cleanup-control-reprovision-receipt/v1\0"
+    b"solarplexus-mobius/milestone-7.7/cleanup-control-reprovision-receipt/v2\0"
 )
 EXPECTED_COST_USD_CENTS: Final = 1
 CORRUPTED_ROLE_PROPAGATION_SECONDS: Final = 120.0
@@ -82,6 +85,8 @@ DEADLINE_RECOVERY_PROPAGATION_SECONDS: Final = 120.0
 DEADLINE_RECOVERY_POLL_SECONDS: Final = 5.0
 REPROVISION_DEPLOYMENT_RECONCILIATION_SECONDS: Final = 1_800.0
 REPROVISION_DEPLOYMENT_POLL_SECONDS: Final = 15.0
+REPROVISION_RESIDUE_PROPAGATION_SECONDS: Final = 180.0
+REPROVISION_RESIDUE_POLL_SECONDS: Final = 5.0
 
 
 class CleanupControlRecoveryExecutionError(RuntimeError):
@@ -229,6 +234,8 @@ def _claim_reprovision_authorization(
         "bindingId": authorization.bindingId,
         "claimedAtUtc": _format_utc(now_utc),
         "deadlineUtc": authorization.deadlineUtc,
+        "deletedKeyVaultId": authorization.deletedKeyVaultId,
+        "deletedWorkspaceId": authorization.deletedWorkspaceId,
         "priorBindingId": authorization.priorBindingId,
         "priorSchedule": authorization.priorSchedule,
         "receiptVersion": POST_CLEANUP_REPROVISION_RECEIPT_VERSION,
@@ -1745,6 +1752,174 @@ def _verify_completed_cleanup_job(
         _fail("cleanup-reprovision-completed-job-unproved")
 
 
+def _generation_three_residue_tags(
+    authorization: CleanupControlReprovisionAuthorization,
+) -> dict[str, str]:
+    return {
+        "mobius-cleanup-binding-sha256": authorization.priorLifecycleBindingSha256,
+        "mobius-contract-version": "m7.7-managed-binding-v1",
+        "mobius-cost-ceiling-usd-cents": str(lifecycle._verified_cost()[1]),
+        "mobius-data-class": "isolated-synthetic",
+        "mobius-environment": "milestone-7.7-staging",
+        "mobius-expires-at-utc": authorization.priorDeadlineUtc,
+        "mobius-manifest-sha256": authorization.priorManifestSha256,
+        "mobius-public-access": "denied",
+        "mobius-run-id": (
+            "scanner-bridge-scanner-foundation-"
+            f"{authorization.priorLifecycleBindingSha256[:24]}"
+        ),
+        "mobius-source-commit": authorization.priorGenerationSourceCommit,
+        "mobius-teardown-state": "preservation-only",
+    }
+
+
+def _azure_timestamp_equals(observed: JsonValue, expected: str) -> bool:
+    if not isinstance(observed, str):
+        return False
+    try:
+        observed_at = datetime.fromisoformat(observed.replace("Z", "+00:00"))
+        expected_at = datetime.fromisoformat(expected.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return (
+        observed_at.tzinfo is not None
+        and observed_at.utcoffset() is not None
+        and expected_at.tzinfo is not None
+        and expected_at.utcoffset() is not None
+        and observed_at == expected_at
+    )
+
+
+def _deleted_key_vault_rows(
+    authorization: CleanupControlReprovisionAuthorization,
+) -> list[JsonValue]:
+    value = lifecycle._run(
+        (
+            "az",
+            "keyvault",
+            "list-deleted",
+            "--subscription",
+            authorization.subscriptionId,
+            "--query",
+            (
+                f"[?name=='{authorization.deletedKeyVaultName}']."
+                "{id:id,name:name,location:properties.location,"
+                "deletedAt:properties.deletionDate,tags:properties.tags}"
+            ),
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(value, list):
+        _fail("cleanup-reprovision-deleted-key-vault-output-malformed")
+    return value
+
+
+def _deleted_workspace_rows(
+    authorization: CleanupControlReprovisionAuthorization,
+) -> list[JsonValue]:
+    value = lifecycle._run(
+        (
+            "az",
+            "monitor",
+            "log-analytics",
+            "workspace",
+            "list-deleted-workspaces",
+            "--subscription",
+            authorization.subscriptionId,
+            "--query",
+            (
+                f"[?name=='{authorization.deletedWorkspaceName}']."
+                "{id:id,name:name,location:location,deletedAt:modifiedDate,"
+                "customerId:customerId,tags:tags}"
+            ),
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    if not isinstance(value, list):
+        _fail("cleanup-reprovision-deleted-workspace-output-malformed")
+    return value
+
+
+def _verify_generation_three_residue(
+    authorization: CleanupControlReprovisionAuthorization,
+) -> None:
+    expected_tags = _generation_three_residue_tags(authorization)
+    vault_rows = _deleted_key_vault_rows(authorization)
+    if len(vault_rows) != 1:
+        _fail("cleanup-reprovision-deleted-key-vault-unproved")
+    vault = vault_rows[0]
+    if (
+        not isinstance(vault, dict)
+        or set(vault) != {"deletedAt", "id", "location", "name", "tags"}
+        or not isinstance(vault.get("id"), str)
+        or str(vault["id"]).casefold() != authorization.deletedKeyVaultId.casefold()
+        or vault.get("name") != authorization.deletedKeyVaultName
+        or vault.get("location") != authorization.deletedKeyVaultLocation
+        or not _azure_timestamp_equals(
+            vault.get("deletedAt"), authorization.deletedKeyVaultAtUtc
+        )
+        or vault.get("tags") != expected_tags
+    ):
+        _fail("cleanup-reprovision-deleted-key-vault-drift")
+
+    workspace_rows = _deleted_workspace_rows(authorization)
+    if len(workspace_rows) != 1:
+        _fail("cleanup-reprovision-deleted-workspace-unproved")
+    workspace = workspace_rows[0]
+    if (
+        not isinstance(workspace, dict)
+        or set(workspace)
+        != {"customerId", "deletedAt", "id", "location", "name", "tags"}
+        or not isinstance(workspace.get("id"), str)
+        or str(workspace["id"]).casefold()
+        != authorization.deletedWorkspaceId.casefold()
+        or workspace.get("name") != authorization.deletedWorkspaceName
+        or workspace.get("location") != authorization.deletedWorkspaceLocation
+        or workspace.get("customerId") != authorization.deletedWorkspaceCustomerId
+        or not _azure_timestamp_equals(
+            workspace.get("deletedAt"), authorization.deletedWorkspaceAtUtc
+        )
+        or workspace.get("tags") != expected_tags
+    ):
+        _fail("cleanup-reprovision-deleted-workspace-drift")
+
+
+def _purge_generation_three_key_vault(
+    authorization: CleanupControlReprovisionAuthorization,
+) -> bool:
+    purge_issued = False
+    try:
+        purge_issued = lifecycle._purge_exact_deleted_vault(
+            authorization.subscriptionId
+        )
+    except lifecycle.AzureCommandError:
+        # Reconcile a potentially committed purge; never issue a second purge.
+        pass
+    deadline = time.monotonic() + REPROVISION_RESIDUE_PROPAGATION_SECONDS
+    while True:
+        rows = _deleted_key_vault_rows(authorization)
+        if not rows:
+            return purge_issued
+        if len(rows) != 1:
+            _fail("cleanup-reprovision-deleted-key-vault-reconciliation-drift")
+        if time.monotonic() >= deadline:
+            _fail("cleanup-reprovision-deleted-key-vault-purge-unproved")
+        time.sleep(REPROVISION_RESIDUE_POLL_SECONDS)
+
+
+def _verify_generation_three_workspace_reconciled(
+    authorization: CleanupControlReprovisionAuthorization,
+) -> None:
+    if _deleted_workspace_rows(authorization):
+        _fail("cleanup-reprovision-deleted-workspace-reconciliation-unproved")
+
+
 def _verify_completed_prior_generation(
     authorization: CleanupControlReprovisionAuthorization,
     subscription_id: str,
@@ -1753,11 +1928,11 @@ def _verify_completed_prior_generation(
         _fail("cleanup-reprovision-target-resource-group-still-present")
     if lifecycle._group_exists(subscription_id, lifecycle.INFRASTRUCTURE_GROUP):
         _fail("cleanup-reprovision-infrastructure-resource-group-still-present")
-    if lifecycle._deleted_vault_present(subscription_id):
-        _fail("cleanup-reprovision-soft-deleted-key-vault-present")
+    _verify_generation_three_residue(authorization)
     prior = _prior_reprovision_view(authorization)
+    corrupted = replace(prior, schedule=authorization.corruptedSchedule)
     _verify_corrupted_evidence_graph(
-        prior,
+        corrupted,
         subscription_id,
         assignment_required=False,
         expected_runbook_hash=CORRUPTED_RUNBOOK_CONTENT_SHA256,
@@ -1777,6 +1952,7 @@ def _verify_completed_prior_generation(
         _cleanup_resource_group_inventory(subscription_id),
         authorization=prior,
         require_complete=True,
+        corrupted_schedule_name=authorization.corruptedSchedule,
     )
 
 
@@ -2132,16 +2308,20 @@ class ProductionCleanupControlRecoveryAdapter:
             now_utc=now,
         )
 
+        deleted_key_vault_purge_issued = _purge_generation_three_key_vault(
+            authorization
+        )
         prior = _prior_reprovision_view(authorization)
+        prior_schedule_delete_issued = _remove_prior_schedule(authorization)
         prior_binding_delete_issued = _remove_prior_binding(
             prior,
             allow_fired_parameters_absent=True,
         )
-        prior_schedule_delete_issued = _remove_prior_schedule(authorization)
         _validate_cleanup_inventory(
             _cleanup_resource_group_inventory(subscription_id),
             authorization=prior,
             require_complete=False,
+            corrupted_schedule_name=authorization.corruptedSchedule,
         )
 
         cleanup_at = _deadline(authorization)
@@ -2223,8 +2403,28 @@ class ProductionCleanupControlRecoveryAdapter:
             cleanup_at=cleanup_at,
             ledger=deployment_binding,
         )
+        scanner_foundation_proof = reconcile_reprovision_scanner_foundation(
+            authorization=authorization,
+            deployment_binding=deployment_binding,
+            cleanup_at=cleanup_at,
+            expected_cost=expected_cost,
+            maximum_cost=maximum_cost,
+        )
+        lifecycle._verify_cleanup_target_role(
+            subscription_id,
+            authorization.replacementPrincipalId,
+            authorization.roleDefinitionId,
+        )
+        _verify_replacement_cleanup_graph(
+            authorization,
+            subscription_id,
+            allowed_deadlines=frozenset({authorization.deadlineUtc}),
+            allowed_runbook_hashes=frozenset({authorization.runbookContentSha256}),
+            binding_required=True,
+        )
+        _verify_generation_three_workspace_reconciled(authorization)
         _verify_corrupted_evidence_graph(
-            prior,
+            replace(prior, schedule=authorization.corruptedSchedule),
             subscription_id,
             assignment_required=False,
             expected_runbook_hash=CORRUPTED_RUNBOOK_CONTENT_SHA256,
@@ -2233,7 +2433,7 @@ class ProductionCleanupControlRecoveryAdapter:
             _cleanup_resource_group_inventory(subscription_id),
             authorization=authorization,
             require_complete=True,
-            corrupted_schedule_name=authorization.priorSchedule,
+            corrupted_schedule_name=authorization.corruptedSchedule,
         )
         return {
             "authorization-consumed": True,
@@ -2245,14 +2445,18 @@ class ProductionCleanupControlRecoveryAdapter:
             "cleanup-executable": True,
             "cleanup-marker": "CLEANUP_EXECUTABLE_AND_ARMED",
             "deadline-utc": authorization.deadlineUtc,
-            "foundation-proof": foundation_proof,
+            "generation-three-key-vault-purge-issued": (deleted_key_vault_purge_issued),
+            "generation-three-key-vault-residue-absent": True,
+            "generation-three-workspace-reconciled": True,
+            "foundation-proof": scanner_foundation_proof,
+            "pre-secret-foundation-proof": foundation_proof,
             "prior-binding-absent": True,
             "prior-binding-delete-issued": prior_binding_delete_issued,
             "prior-schedule-absent": True,
             "prior-schedule-delete-issued": prior_schedule_delete_issued,
             "runbook": authorization.runbook,
             "schedule": authorization.schedule,
-            "staging-marker": "NEW_STAGING_READY",
+            "staging-marker": "STAGING_FOUNDATION_AUTHORITATIVE",
             "status": "post-cleanup-reprovision-complete",
         }
 

@@ -67,8 +67,11 @@ AUTHORIZATION_RECEIPT_DOMAIN: Final = (
 CONTRACT_VERSION: Final = "m7.7-managed-binding-v1"
 AUTOMATION_BINDING_NAMESPACE: Final = UUID("11fb06fb-712d-4ddd-98c7-e71bbd588830")
 LEGACY_CLEANUP_BINDING_CONTRACT_VERSION: Final = "m7.7-automation-cleanup-binding-v2"
-CLEANUP_BINDING_CONTRACT_VERSION: Final = "m7.7-automation-cleanup-binding-v3"
-CLEANUP_BINDING_GENERATION: Final = 3
+GENERATION_THREE_CLEANUP_BINDING_CONTRACT_VERSION: Final = (
+    "m7.7-automation-cleanup-binding-v3"
+)
+CLEANUP_BINDING_CONTRACT_VERSION: Final = "m7.7-automation-cleanup-binding-v4"
+CLEANUP_BINDING_GENERATION: Final = 4
 TOMBSTONED_CLEANUP_BINDING_ID: Final = "158cac88-5679-5804-9f4d-854520bbb635"
 TOMBSTONED_GENERATION_TWO_CLEANUP_BINDING_ID: Final = (
     "b74c6cfe-995e-5107-9e42-4f7f76b76742"
@@ -88,11 +91,16 @@ TOMBSTONED_FIFTH_DEADLINE_RECOVERY_BINDING_ID: Final = (
 )
 TOMBSTONED_POST_FIRED_CLEANUP_BINDING_ID: Final = "f29ca20d-cd14-57d9-b99b-fd6b04406166"
 GENERATION_TWO_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-08T12:15:00Z"
-ACTIVE_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-09T08:00:00Z"
-ACTIVE_CLEANUP_BINDING_ID: Final = "12f27fa6-2cd5-548d-be20-c6e03a5e19d3"
+GENERATION_THREE_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-09T08:00:00Z"
+TOMBSTONED_GENERATION_THREE_CLEANUP_BINDING_ID: Final = (
+    "12f27fa6-2cd5-548d-be20-c6e03a5e19d3"
+)
+ACTIVE_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-11T03:45:00Z"
+ACTIVE_CLEANUP_BINDING_ID: Final = "34b1d170-652b-505a-9cc1-b8177b872ff0"
 CLEANUP_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup-recovery"
 CORRUPTED_CLEANUP_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup"
-CLEANUP_SCHEDULE: Final = "schedule-mobius77-cleanup-g3"
+CLEANUP_SCHEDULE: Final = "schedule-mobius77-cleanup-g4"
+GENERATION_THREE_CLEANUP_SCHEDULE: Final = "schedule-mobius77-cleanup-g3"
 LEGACY_CLEANUP_SCHEDULE: Final = "schedule-mobius77-cleanup"
 CLEANUP_BINDING_TOMBSTONE_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/automation-cleanup-binding-tombstone/v1\0"
@@ -314,10 +322,10 @@ def deterministic_cleanup_binding_id(
     """Return the closed, versioned Azure Automation job-schedule ID.
 
     Generation one intentionally preserves the historical Bicep ``guid`` input.
-    Generations two and three normalize every resource identifier and bind the
+    Generations two through four normalize every resource identifier and bind the
     complete cleanup contract so tombstoned children are never retried. A
     deadline recovery adds its fixed UTC epoch. Generation three moves the
-    post-cleanup reprovision onto a new schedule namespace.
+    post-cleanup reprovisions onto generation-specific schedule namespaces.
     """
     historical_account = automation_account_id.strip().replace("\\", "/").rstrip("/")
     historical_runbook = runbook_resource_id.strip().replace("\\", "/").rstrip("/")
@@ -343,7 +351,8 @@ def deterministic_cleanup_binding_id(
         )
     contract_versions = {
         2: LEGACY_CLEANUP_BINDING_CONTRACT_VERSION,
-        3: CLEANUP_BINDING_CONTRACT_VERSION,
+        3: GENERATION_THREE_CLEANUP_BINDING_CONTRACT_VERSION,
+        4: CLEANUP_BINDING_CONTRACT_VERSION,
     }
     contract_version = contract_versions.get(generation)
     if contract_version is None:
@@ -370,7 +379,7 @@ def deterministic_cleanup_binding_id(
 
 
 def cleanup_binding_id_for_subscription(
-    subscription_id: str, generation: int = 3
+    subscription_id: str, generation: int = CLEANUP_BINDING_GENERATION
 ) -> str:
     """Construct the deterministic cleanup binding ID without persisting the subscription."""
     if not isinstance(subscription_id, str) or not subscription_id.strip():
@@ -386,7 +395,7 @@ def cleanup_binding_id_for_subscription(
         runbook_resource_id=f"{account}/runbooks/Remove-Mobius77Staging",
         schedule_resource_id=(
             f"{account}/schedules/"
-            f"{CLEANUP_SCHEDULE if generation == 3 else LEGACY_CLEANUP_SCHEDULE}"
+            f"{CLEANUP_SCHEDULE if generation == 4 else GENERATION_THREE_CLEANUP_SCHEDULE if generation == 3 else LEGACY_CLEANUP_SCHEDULE}"
         ),
         target_resource_group_id=(
             f"{root}/rg-solarplexus-mobius-77-cleanup-control/providers/"
@@ -396,6 +405,8 @@ def cleanup_binding_id_for_subscription(
         binding_epoch_utc=(
             ACTIVE_CLEANUP_BINDING_EPOCH_UTC
             if generation == CLEANUP_BINDING_GENERATION
+            else GENERATION_THREE_CLEANUP_BINDING_EPOCH_UTC
+            if generation == 3
             else GENERATION_TWO_CLEANUP_BINDING_EPOCH_UTC
             if generation == 2
             else None
@@ -582,6 +593,20 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
                 "deletionStatus": "accepted",
                 "evidenceIntegritySha256": (
                     "5f08ffcc391fb92d4e8a7f8dc917e00c7f5a3a8ad8506ff03cc0e4d3398bc99b"
+                ),
+            },
+            {
+                "bindingContractVersion": (
+                    GENERATION_THREE_CLEANUP_BINDING_CONTRACT_VERSION
+                ),
+                "bindingGeneration": 3,
+                "bindingId": TOMBSTONED_GENERATION_THREE_CLEANUP_BINDING_ID,
+                "directGetStatus": "not-found",
+                "listVisibility": "absent",
+                "recreationStatus": "not-attempted",
+                "deletionStatus": "accepted",
+                "evidenceIntegritySha256": (
+                    "ac457b8127c80ff0e1c63bd489950b140431da40d13d7bfe82b680b49db70512"
                 ),
             },
         ],

@@ -61,13 +61,13 @@
     "vpnGateway": "vpngw-mobius77-staging",
     "cleanupAutomationAccount": "aa-mobius77-cleanup-recovery",
     "cleanupRunbook": "Remove-Mobius77Staging",
-    "cleanupSchedule": "schedule-mobius77-cleanup-g3",
+    "cleanupSchedule": "schedule-mobius77-cleanup-g4",
     "containerAppsInfrastructureResourceGroup": "rg-solarplexus-mobius-77-containerapps-infrastructure"
   },
   "cleanupExecution": {
-    "bindingContractVersion": "m7.7-automation-cleanup-binding-v3",
-    "bindingGeneration": 3,
-    "activeBindingId": "12f27fa6-2cd5-548d-be20-c6e03a5e19d3",
+    "bindingContractVersion": "m7.7-automation-cleanup-binding-v4",
+    "bindingGeneration": 4,
+    "activeBindingId": "34b1d170-652b-505a-9cc1-b8177b872ff0",
     "corruptedAutomationAccount": "aa-mobius77-cleanup",
     "tombstonedBindingIds": [
       {
@@ -149,9 +149,19 @@
         "recreationStatus": "not-attempted",
         "deletionStatus": "accepted",
         "evidenceIntegritySha256": "5f08ffcc391fb92d4e8a7f8dc917e00c7f5a3a8ad8506ff03cc0e4d3398bc99b"
+      },
+      {
+        "bindingContractVersion": "m7.7-automation-cleanup-binding-v3",
+        "bindingGeneration": 3,
+        "bindingId": "12f27fa6-2cd5-548d-be20-c6e03a5e19d3",
+        "directGetStatus": "not-found",
+        "listVisibility": "absent",
+        "recreationStatus": "not-attempted",
+        "deletionStatus": "accepted",
+        "evidenceIntegritySha256": "ac457b8127c80ff0e1c63bd489950b140431da40d13d7bfe82b680b49db70512"
       }
     ],
-    "scheduleResourceId": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/schedules/schedule-mobius77-cleanup-g3",
+    "scheduleResourceId": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/schedules/schedule-mobius77-cleanup-g4",
     "runbookResourceId": "Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery/runbooks/Remove-Mobius77Staging",
     "targetResourceGroupId": "resourceGroups/rg-solarplexus-mobius-77-staging",
     "authorizationParameter": "CleanupAuthorized",
@@ -159,7 +169,7 @@
     "targetParameter": "TargetResourceGroupName",
     "targetResourceGroup": "rg-solarplexus-mobius-77-staging",
     "subscriptionFingerprint": "f4493115ce6375cf0e5d0616bede57126075fdb27ac78ea0ba7e0085252a7028",
-    "deadlineUtc": "2026-08-09T08:00:00Z",
+    "deadlineUtc": "2026-08-11T03:45:00Z",
     "launchGraceSeconds": 1800,
     "cleanupContributorRoleDefinitionId": "b24988ac-6180-42a0-ab88-20f7382dd24c",
     "cleanupPrincipalFingerprintSha256": "7bae422a2ef6a418379af13fc19f53a195ccc80be0504c531391e6e46f048be3",

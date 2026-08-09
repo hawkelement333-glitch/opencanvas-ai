@@ -9,11 +9,15 @@ from typing import Any
 
 import pytest
 from infra.milestone_7_7 import cleanup_control_recovery_adapter as adapter_module
+from infra.milestone_7_7 import scanner_bridge_recovery_adapter as scanner_adapter_module
 from infra.milestone_7_7.cleanup_control_recovery_adapter import (
     CleanupControlRecoveryExecutionError,
     ProductionCleanupControlRecoveryAdapter,
 )
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
+from infra.milestone_7_7.scripts.cleanup_resource_reconciliation import (
+    exact_deleted_key_vault_purge_command,
+)
 from performance.milestone_7_7.framework import JsonValue
 from preflight.milestone_7_7 import cleanup_control_recovery
 from preflight.milestone_7_7.cleanup_control_recovery import (
@@ -40,7 +44,7 @@ TARGET_GROUP = f"{SUBSCRIPTION}/resourceGroups/rg-solarplexus-mobius-77-staging"
 AUTOMATION_PREFIX = f"{CLEANUP_GROUP}/providers/Microsoft.Automation/automationAccounts"
 NOW = datetime(2026, 8, 6, tzinfo=UTC)
 DEADLINE = datetime(2026, 8, 6, 12, tzinfo=UTC)
-REPROVISION_NOW = datetime(2026, 8, 8, 14, tzinfo=UTC)
+REPROVISION_NOW = datetime(2026, 8, 9, 22, 10, tzinfo=UTC)
 PRINCIPAL_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 CORRUPTED_PRINCIPAL_ID = "be0e6b8d-f742-4c8f-8df1-9f302559a6c8"
 CORRUPTED_ASSIGNMENT_ID = (
@@ -50,6 +54,13 @@ CORRUPTED_ASSIGNMENT_ID = (
 REPLACEMENT_ASSIGNMENT_ID = (
     f"{TARGET_GROUP}/providers/Microsoft.Authorization/roleAssignments/"
     "b4acad78-f3f0-59d4-8e36-901644af1ff6"
+)
+DELETED_KEY_VAULT_ID = (
+    f"{SUBSCRIPTION}/providers/Microsoft.KeyVault/locations/southcentralus/"
+    "deletedVaults/kv-mobius77-11564669"
+)
+DELETED_WORKSPACE_ID = (
+    f"{TARGET_GROUP}/providers/Microsoft.OperationalInsights/workspaces/law-mobius77-staging"
 )
 
 
@@ -87,6 +98,24 @@ def _reprovision_authorization() -> CleanupControlReprovisionAuthorization:
         replacement_role_assignment_id=REPLACEMENT_ASSIGNMENT_ID,
         replacement_location=(cleanup_control_recovery.DEADLINE_RECOVERY_REPLACEMENT_LOCATION),
         target_resource_group_id=TARGET_GROUP,
+        prior_generation_source_commit=(
+            cleanup_control_recovery.POST_CLEANUP_REPROVISION_PRIOR_SOURCE_COMMIT
+        ),
+        prior_lifecycle_binding_sha256=(
+            cleanup_control_recovery.POST_CLEANUP_REPROVISION_PRIOR_BINDING_SHA256
+        ),
+        prior_manifest_sha256=(
+            cleanup_control_recovery.POST_CLEANUP_REPROVISION_PRIOR_MANIFEST_SHA256
+        ),
+        deleted_key_vault_id=DELETED_KEY_VAULT_ID,
+        deleted_key_vault_name="kv-mobius77-11564669",
+        deleted_key_vault_location="southcentralus",
+        deleted_key_vault_at_utc="2026-08-09T08:01:54Z",
+        deleted_workspace_id=DELETED_WORKSPACE_ID,
+        deleted_workspace_name="law-mobius77-staging",
+        deleted_workspace_location="southcentralus",
+        deleted_workspace_at_utc="2026-08-09T08:02:25.8464081Z",
+        deleted_workspace_customer_id="df2bb7a1-9504-4a8d-9d3d-de421ea1b409",
         runbook_content_sha256=_runbook_sha256(),
         now_utc=REPROVISION_NOW,
     )
@@ -841,12 +870,34 @@ def test_cleanup_recovery_entry_point_invokes_production_consumer(
 
 def test_post_cleanup_reprovision_authorization_is_exact_and_image_free() -> None:
     authorization = _reprovision_authorization()
-    assert authorization.schedule == "schedule-mobius77-cleanup-g3"
-    assert authorization.priorSchedule == "schedule-mobius77-cleanup"
-    assert authorization.bindingGeneration == 3
-    assert authorization.bindingContractVersion == ("m7.7-automation-cleanup-binding-v3")
-    assert authorization.priorBindingId == "f29ca20d-cd14-57d9-b99b-fd6b04406166"
-    assert authorization.deadlineUtc == "2026-08-09T08:00:00Z"
+    assert authorization.schedule == "schedule-mobius77-cleanup-g4"
+    assert authorization.corruptedSchedule == "schedule-mobius77-cleanup"
+    assert authorization.priorSchedule == "schedule-mobius77-cleanup-g3"
+    assert authorization.bindingGeneration == 4
+    assert authorization.bindingContractVersion == ("m7.7-automation-cleanup-binding-v4")
+    assert authorization.priorBindingId == "12f27fa6-2cd5-548d-be20-c6e03a5e19d3"
+    assert authorization.deadlineUtc == "2026-08-11T03:45:00Z"
+    assert authorization.deletedKeyVaultId == DELETED_KEY_VAULT_ID
+    assert authorization.deletedKeyVaultAction == ("purge-exact-soft-deleted-key-vault")
+    assert authorization.deletedWorkspaceId == DELETED_WORKSPACE_ID
+    assert authorization.deletedWorkspaceAction == ("recover-exact-workspace-after-cleanup-armed")
+    assert authorization.foundationStage == "scanner-foundation"
+    assert authorization.storageAccountId == (
+        f"{TARGET_GROUP}/providers/Microsoft.Storage/storageAccounts/stmobius7711564669"
+    )
+    assert authorization.logAnalyticsWorkspaceId == DELETED_WORKSPACE_ID
+    assert authorization.workerIdentityId.endswith(
+        "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-mobius77-worker"
+    )
+    assert authorization.privateLinkScopeId.endswith(
+        "/providers/Microsoft.Insights/privateLinkScopes/ampls-mobius77-staging"
+    )
+    assert authorization.monitorPrivateEndpointId.endswith(
+        "/providers/Microsoft.Network/privateEndpoints/pe-mobius77-azure-monitor"
+    )
+    assert authorization.imageRestorationAuthorized is False
+    assert authorization.scannerProofAuthorized is False
+    assert authorization.maximumScannerProofExecutions == 0
     assert authorization.roleScope == TARGET_GROUP
     assert authorization.authorizationParameterValue is True
     assert "image" not in " ".join(authorization.allowedOperations).casefold()
@@ -867,14 +918,46 @@ def test_post_cleanup_reprovision_authorization_is_exact_and_image_free() -> Non
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("schedule", "schedule-mobius77-cleanup"),
+        ("schedule", "schedule-mobius77-cleanup-g3"),
+        ("corruptedSchedule", "schedule-other"),
         ("priorSchedule", "schedule-other"),
         ("roleDefinitionId", "00000000-0000-0000-0000-000000000000"),
         ("roleScope", CLEANUP_GROUP),
         ("targetParameterValue", "rg-other"),
         ("authorizationParameterValue", False),
-        ("bindingGeneration", 2),
+        ("bindingGeneration", 3),
         ("priorBindingId", "00000000-0000-0000-0000-000000000000"),
+        ("deletedKeyVaultId", f"{SUBSCRIPTION}/providers/Microsoft.KeyVault/deletedVaults/other"),
+        ("deletedKeyVaultName", "other-vault"),
+        ("deletedKeyVaultAtUtc", "2026-08-09T08:01:55Z"),
+        (
+            "deletedWorkspaceId",
+            f"{TARGET_GROUP}/providers/Microsoft.OperationalInsights/workspaces/other",
+        ),
+        ("deletedWorkspaceName", "other-workspace"),
+        ("deletedWorkspaceAtUtc", "2026-08-09T08:02:26Z"),
+        ("priorGenerationSourceCommit", "0" * 40),
+        ("foundationStage", "scanner-proof"),
+        ("storageAccountId", f"{TARGET_GROUP}/providers/Microsoft.Storage/storageAccounts/other"),
+        (
+            "logAnalyticsWorkspaceId",
+            f"{TARGET_GROUP}/providers/Microsoft.OperationalInsights/workspaces/other",
+        ),
+        (
+            "workerIdentityId",
+            f"{TARGET_GROUP}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/other",
+        ),
+        (
+            "privateLinkScopeId",
+            f"{TARGET_GROUP}/providers/Microsoft.Insights/privateLinkScopes/other",
+        ),
+        (
+            "monitorPrivateEndpointId",
+            f"{TARGET_GROUP}/providers/Microsoft.Network/privateEndpoints/other",
+        ),
+        ("imageRestorationAuthorized", True),
+        ("scannerProofAuthorized", True),
+        ("maximumScannerProofExecutions", 1),
     ],
 )
 def test_post_cleanup_reprovision_authorization_rejects_scope_drift(
@@ -896,6 +979,244 @@ def test_post_cleanup_reprovision_authorization_rejects_scope_drift(
             expected_repository_head="a" * 40,
             now_utc=REPROVISION_NOW,
         )
+
+
+def test_reprovision_foundation_reuses_consumed_authorization_without_proof_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _reprovision_authorization()
+    scope = scanner_adapter_module._reprovision_foundation_scope(authorization)
+    assert scope.stage == "scanner-foundation"
+    assert scope.proofJobId is None
+    assert scope.proofRoleDefinitionId is None
+    assert scope.apiImageDigest is None
+
+    deployments: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        scanner_adapter_module,
+        "_verify_provider_api_versions",
+        lambda _subscription: None,
+    )
+    monkeypatch.setattr(
+        scanner_adapter_module,
+        "_verify_network_capacity",
+        lambda _subscription: None,
+    )
+    monkeypatch.setattr(
+        scanner_adapter_module,
+        "_monitor_private_endpoint_precreation_count",
+        lambda _scope: 0,
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_compile_template",
+        lambda _template: None,
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_deploy_stage",
+        lambda **kwargs: deployments.append(kwargs),
+    )
+    monkeypatch.setattr(
+        scanner_adapter_module,
+        "_read_deployment_outputs",
+        lambda **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        scanner_adapter_module,
+        "_validate_deployment_outputs",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        scanner_adapter_module,
+        "_exact_monitor_private_endpoint_recovery_state",
+        lambda _scope: {"endpointProvisioningState": "Succeeded"},
+    )
+    monkeypatch.setattr(
+        scanner_adapter_module,
+        "_verify_foundation",
+        lambda *_args, **_kwargs: scanner_adapter_module._FoundationReadback(
+            api_principal_id="a",
+            worker_principal_id="b",
+            worker_client_id="c",
+            workspace_customer_id="d",
+            provider_topic_id="e",
+            provider_proof_integrity="1" * 64,
+            diagnostic_proof_integrity="2" * 64,
+            rbac_proof_integrity="3" * 64,
+            tag_write_denial_integrity="4" * 64,
+            private_path_control_plane_integrity="5" * 64,
+            inventory_integrity="6" * 64,
+        ),
+    )
+    monkeypatch.setattr(
+        scanner_adapter_module,
+        "_verify_monitor_private_tls_path",
+        lambda _workspace: "7" * 64,
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_verified_cost",
+        lambda: (3_110, 20_607),
+    )
+    binding: dict[str, JsonValue] = {
+        "authorizationId": "post-cleanup-reprovision-generation-4",
+        "ledgerIntegritySha256": authorization.authorizationIntegritySha256,
+        "managedBindingIntegritySha256": "8" * 64,
+        "repositoryHead": authorization.repositoryHead,
+    }
+    result = scanner_adapter_module.reconcile_reprovision_scanner_foundation(
+        authorization=authorization,
+        deployment_binding=binding,
+        cleanup_at=datetime(2026, 8, 11, 3, 45, tzinfo=UTC),
+        expected_cost=3_110,
+        maximum_cost=20_607,
+    )
+    assert result["status"] == "staging-foundation-authoritative"
+    assert result["scanner-proof-execution-count"] == 0
+    assert len(deployments) == 1
+    assert deployments[0]["stage"] == "scanner-foundation"
+    assert "runtime_config" not in deployments[0]
+    assert "scanner_bridge_evidence" not in deployments[0]
+    names = scanner_adapter_module.reconcile_reprovision_scanner_foundation.__code__.co_names
+    assert "_claim_authorization" not in names
+    assert "ScannerBridgeRecoveryAuthorization" not in names
+
+
+def test_reprovision_foundation_private_endpoint_precreation_is_exact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scope = scanner_adapter_module._reprovision_foundation_scope(_reprovision_authorization())
+    monkeypatch.setattr(scanner_adapter_module, "_rest_collection", lambda *_args: [])
+    assert scanner_adapter_module._monitor_private_endpoint_precreation_count(scope) == 0
+
+    exact = {"id": scope.monitorPrivateEndpointId, "name": "pe-mobius77-azure-monitor"}
+    monkeypatch.setattr(
+        scanner_adapter_module,
+        "_rest_collection",
+        lambda *_args: [exact],
+    )
+    assert scanner_adapter_module._monitor_private_endpoint_precreation_count(scope) == 1
+
+    monkeypatch.setattr(
+        scanner_adapter_module,
+        "_rest_collection",
+        lambda *_args: [{**exact, "id": f"{scope.targetResourceGroupId}/other"}],
+    )
+    with pytest.raises(
+        scanner_adapter_module.ScannerBridgeRecoveryExecutionError,
+        match="scanner-foundation-reprovision-endpoint-identity-drift",
+    ):
+        scanner_adapter_module._monitor_private_endpoint_precreation_count(scope)
+
+    monkeypatch.setattr(
+        scanner_adapter_module,
+        "_rest_collection",
+        lambda *_args: [exact, exact],
+    )
+    with pytest.raises(
+        scanner_adapter_module.ScannerBridgeRecoveryExecutionError,
+        match="scanner-foundation-reprovision-endpoint-duplicate",
+    ):
+        scanner_adapter_module._monitor_private_endpoint_precreation_count(scope)
+
+
+def _generation_three_residue_rows(
+    authorization: CleanupControlReprovisionAuthorization,
+) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
+    tags = adapter_module._generation_three_residue_tags(authorization)
+    return (
+        {
+            "deletedAt": authorization.deletedKeyVaultAtUtc,
+            "id": authorization.deletedKeyVaultId,
+            "location": authorization.deletedKeyVaultLocation,
+            "name": authorization.deletedKeyVaultName,
+            "tags": tags,
+        },
+        {
+            "customerId": authorization.deletedWorkspaceCustomerId,
+            "deletedAt": authorization.deletedWorkspaceAtUtc,
+            "id": authorization.deletedWorkspaceId,
+            "location": authorization.deletedWorkspaceLocation,
+            "name": authorization.deletedWorkspaceName,
+            "tags": tags,
+        },
+    )
+
+
+def test_reprovision_adapter_accepts_only_exact_generation_three_residue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _reprovision_authorization()
+    monkeypatch.setattr(managed_binding_lifecycle, "_verified_cost", lambda: (3_110, 20_607))
+    vault, workspace = _generation_three_residue_rows(authorization)
+    monkeypatch.setattr(adapter_module, "_deleted_key_vault_rows", lambda *_a: [vault])
+    monkeypatch.setattr(adapter_module, "_deleted_workspace_rows", lambda *_a: [workspace])
+    adapter_module._verify_generation_three_residue(authorization)
+
+    drifted = {**workspace, "customerId": "00000000-0000-0000-0000-000000000000"}
+    monkeypatch.setattr(adapter_module, "_deleted_workspace_rows", lambda *_a: [drifted])
+    with pytest.raises(
+        CleanupControlRecoveryExecutionError,
+        match="cleanup-reprovision-deleted-workspace-drift",
+    ):
+        adapter_module._verify_generation_three_residue(authorization)
+
+
+def test_reprovision_adapter_reconciles_ambiguous_exact_vault_purge_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _reprovision_authorization()
+    calls = 0
+
+    def ambiguous(_subscription_id: str) -> bool:
+        nonlocal calls
+        calls += 1
+        raise managed_binding_lifecycle.AzureCommandError("request-timeout")
+
+    rows = iter(([{"id": authorization.deletedKeyVaultId}], []))
+    monkeypatch.setattr(managed_binding_lifecycle, "_purge_exact_deleted_vault", ambiguous)
+    monkeypatch.setattr(adapter_module, "_deleted_key_vault_rows", lambda *_a: next(rows))
+    monkeypatch.setattr(adapter_module.time, "sleep", lambda _seconds: None)
+    assert adapter_module._purge_generation_three_key_vault(authorization) is False
+    assert calls == 1
+
+
+def test_generation_three_residue_purge_command_is_exact_and_closed() -> None:
+    command = exact_deleted_key_vault_purge_command(SUBSCRIPTION_ID)
+    assert command == (
+        "az",
+        "keyvault",
+        "purge",
+        "--name",
+        "kv-mobius77-11564669",
+        "--location",
+        "southcentralus",
+        "--subscription",
+        SUBSCRIPTION_ID,
+        "--only-show-errors",
+        "--output",
+        "none",
+    )
+    with pytest.raises(ValueError, match="cleanup-residue-subscription-invalid"):
+        exact_deleted_key_vault_purge_command("other/subscription")
+
+
+def test_reprovision_deleted_workspace_readback_filters_only_exact_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _reprovision_authorization()
+    observed: list[tuple[str, ...]] = []
+
+    def run(argv: tuple[str, ...], **_kwargs: object) -> list[JsonValue]:
+        observed.append(argv)
+        return []
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
+    assert adapter_module._deleted_workspace_rows(authorization) == []
+    query = observed[0][observed[0].index("--query") + 1]
+    assert authorization.deletedWorkspaceName in query
+    assert "law-mobius76-recovery" not in query
 
 
 def _install_reprovision_execution_fakes(
@@ -942,6 +1263,11 @@ def _install_reprovision_execution_fakes(
         adapter_module,
         "_verify_completed_prior_generation",
         lambda *_args: events.append("prior-proved"),
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_purge_generation_three_key_vault",
+        lambda *_args: events.append("generation-three-vault-purged") or True,
     )
     monkeypatch.setattr(
         adapter_module,
@@ -1007,6 +1333,27 @@ def _install_reprovision_execution_fakes(
             "private-boundaries-preserved": True,
         },
     )
+
+    def reconcile_foundation(**kwargs: object) -> dict[str, JsonValue]:
+        assert kwargs["authorization"] is authorization
+        assert kwargs["deployment_binding"] is not None
+        events.append("scanner-foundation-authoritative")
+        return {
+            "foundation-integrity-sha256": "1" * 64,
+            "scanner-proof-execution-count": 0,
+            "status": "staging-foundation-authoritative",
+        }
+
+    monkeypatch.setattr(
+        adapter_module,
+        "reconcile_reprovision_scanner_foundation",
+        reconcile_foundation,
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_verify_generation_three_workspace_reconciled",
+        lambda *_args: events.append("generation-three-workspace-reconciled"),
+    )
     monkeypatch.setattr(
         adapter_module,
         "_verify_corrupted_evidence_graph",
@@ -1027,13 +1374,16 @@ def test_reprovision_adapter_consumes_once_and_orders_generation_before_foundati
         expected_repository_head="a" * 40,
     )
     assert result["cleanup-marker"] == "CLEANUP_EXECUTABLE_AND_ARMED"
-    assert result["staging-marker"] == "NEW_STAGING_READY"
-    assert events.index("prior-binding-removed") < events.index("prior-schedule-removed")
-    assert events.index("prior-schedule-removed") < events.index("runbook-published")
+    assert result["staging-marker"] == "STAGING_FOUNDATION_AUTHORITATIVE"
+    assert result["foundation-proof"]["scanner-proof-execution-count"] == 0
+    assert events.index("generation-three-vault-purged") < events.index("prior-schedule-removed")
+    assert events.index("prior-schedule-removed") < events.index("prior-binding-removed")
+    assert events.index("prior-binding-removed") < events.index("runbook-published")
     assert events.index("runbook-published") < events.index("new-schedule-created")
     assert events.index("new-schedule-created") < events.index("deploy-cleanup-job-binding")
     assert events.index("deploy-cleanup-job-binding") < events.index("deploy-cleanup-binding")
     assert events.index("deploy-cleanup-binding") < events.index("deploy-pre-secret")
+    assert events.index("deploy-pre-secret") < events.index("scanner-foundation-authoritative")
     assert (tmp_path / adapter_module.POST_CLEANUP_REPROVISION_RECEIPT_FILE).is_file()
     with pytest.raises(
         CleanupControlRecoveryExecutionError,
@@ -1046,6 +1396,7 @@ def test_reprovision_adapter_consumes_once_and_orders_generation_before_foundati
         )
     assert events.count("prior-binding-removed") == 1
     assert events.count("prior-schedule-removed") == 1
+    assert events.count("generation-three-vault-purged") == 1
 
 
 def test_reprovision_adapter_has_no_image_or_complete_ledger_path() -> None:

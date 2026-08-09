@@ -23,9 +23,9 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     CLEANUP_BINDING_GENERATION,
     CLEANUP_RUNBOOK_PATH,
     CLEANUP_SCHEDULE,
-    GENERATION_TWO_CLEANUP_BINDING_EPOCH_UTC,
+    GENERATION_THREE_CLEANUP_BINDING_EPOCH_UTC,
+    GENERATION_THREE_CLEANUP_SCHEDULE,
     LEGACY_CLEANUP_BINDING_CONTRACT_VERSION,
-    LEGACY_CLEANUP_SCHEDULE,
     REPOSITORY_ROOT,
     TOMBSTONED_DEADLINE_RECOVERY_BINDING_ID,
     TOMBSTONED_FIFTH_DEADLINE_RECOVERY_BINDING_ID,
@@ -33,6 +33,7 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     TOMBSTONED_SECOND_DEADLINE_RECOVERY_BINDING_ID,
     TOMBSTONED_THIRD_DEADLINE_RECOVERY_BINDING_ID,
     TOMBSTONED_POST_FIRED_CLEANUP_BINDING_ID,
+    TOMBSTONED_GENERATION_THREE_CLEANUP_BINDING_ID,
     cleanup_binding_id_for_subscription,
     cleanup_runbook_sha256,
 )
@@ -191,20 +192,53 @@ POST_FIRED_RECOVERY_ALLOWED_OPERATIONS: Final = (
     "verify-cleanup-executable",
 )
 POST_CLEANUP_REPROVISION_AUTHORIZATION_VERSION: Final = (
-    "mobius.milestone-7.7.cleanup-control-reprovision.v1"
+    "mobius.milestone-7.7.cleanup-control-reprovision.v2"
 )
 POST_CLEANUP_REPROVISION_AUTHORIZATION_DOMAIN: Final = (
-    b"solarplexus-mobius/milestone-7.7/cleanup-control-reprovision/v1\0"
+    b"solarplexus-mobius/milestone-7.7/cleanup-control-reprovision/v2\0"
 )
 POST_CLEANUP_REPROVISION_ACTION: Final = "create-new-cleanup-generation-and-staging"
-POST_CLEANUP_REPROVISION_PRIOR_JOB_NAME: Final = "3df6e3dc-0b2e-46cd-bb24-80e6ff848c16"
+POST_CLEANUP_REPROVISION_PRIOR_JOB_NAME: Final = "8e632544-340a-4f4f-912c-a109de48ab3c"
 POST_CLEANUP_REPROVISION_PRIOR_JOB_STATUS: Final = "Completed"
 POST_CLEANUP_REPROVISION_PRIOR_RUNBOOK_CONTENT_SHA256: Final = (
-    "8b639fa2df81cbbf10467fe75cd0e692e749715ad887ba92e4cd6067dcf27219"
+    "2bc41921d6a6d25d3a784139dfcd4dc8c551545bed5af01fc36a25ad57eb9916"
 )
+POST_CLEANUP_REPROVISION_PRIOR_SOURCE_COMMIT: Final = (
+    "bef0ae61cd467310ff9617dc77d28711bc150b5b"
+)
+POST_CLEANUP_REPROVISION_PRIOR_BINDING_SHA256: Final = (
+    "e9136d31efd3e4cadadb34b3d8ba44301da7a234048bfc7df5c70d696fcbec1c"
+)
+POST_CLEANUP_REPROVISION_PRIOR_MANIFEST_SHA256: Final = (
+    "d514f7cedcc1822881055e8d7a1db297c5a5d0a39545a55ef1dc0d925201a49b"
+)
+POST_CLEANUP_REPROVISION_DELETED_KEY_VAULT: Final = "kv-mobius77-11564669"
+POST_CLEANUP_REPROVISION_DELETED_KEY_VAULT_LOCATION: Final = "southcentralus"
+POST_CLEANUP_REPROVISION_DELETED_KEY_VAULT_AT_UTC: Final = "2026-08-09T08:01:54Z"
+POST_CLEANUP_REPROVISION_DELETED_KEY_VAULT_ACTION: Final = (
+    "purge-exact-soft-deleted-key-vault"
+)
+POST_CLEANUP_REPROVISION_DELETED_WORKSPACE: Final = "law-mobius77-staging"
+POST_CLEANUP_REPROVISION_DELETED_WORKSPACE_LOCATION: Final = "southcentralus"
+POST_CLEANUP_REPROVISION_DELETED_WORKSPACE_AT_UTC: Final = (
+    "2026-08-09T08:02:25.8464081Z"
+)
+POST_CLEANUP_REPROVISION_DELETED_WORKSPACE_CUSTOMER_ID: Final = (
+    "df2bb7a1-9504-4a8d-9d3d-de421ea1b409"
+)
+POST_CLEANUP_REPROVISION_DELETED_WORKSPACE_ACTION: Final = (
+    "recover-exact-workspace-after-cleanup-armed"
+)
+POST_CLEANUP_REPROVISION_FOUNDATION_STAGE: Final = "scanner-foundation"
+POST_CLEANUP_REPROVISION_STORAGE_ACCOUNT: Final = "stmobius7711564669"
+POST_CLEANUP_REPROVISION_WORKER_IDENTITY: Final = "id-mobius77-worker"
+POST_CLEANUP_REPROVISION_PRIVATE_LINK_SCOPE: Final = "ampls-mobius77-staging"
+POST_CLEANUP_REPROVISION_MONITOR_PRIVATE_ENDPOINT: Final = "pe-mobius77-azure-monitor"
 POST_CLEANUP_REPROVISION_EXPIRATION_MINUTES: Final = 30
 POST_CLEANUP_REPROVISION_ALLOWED_OPERATIONS: Final = (
     "verify-completed-prior-cleanup",
+    "purge-exact-generation-three-soft-deleted-key-vault",
+    "reconcile-exact-generation-three-deleted-workspace",
     "remove-exact-prior-job-schedule-binding",
     "remove-exact-prior-schedule",
     "adopt-exact-replacement-automation-account",
@@ -289,6 +323,7 @@ class CleanupControlReprovisionAuthorization(CleanupControlRecoveryAuthorization
 
     authorizationExpiresAtUtc: str
     bindingGeneration: int
+    corruptedSchedule: str
     priorBindingId: str
     priorDeadlineUtc: str
     priorSchedule: str
@@ -298,7 +333,30 @@ class CleanupControlReprovisionAuthorization(CleanupControlRecoveryAuthorization
     replacementLocation: str
     completedCleanupJobId: str
     completedCleanupJobStatus: str
+    priorGenerationSourceCommit: str
+    priorLifecycleBindingSha256: str
+    priorManifestSha256: str
+    deletedKeyVaultId: str
+    deletedKeyVaultName: str
+    deletedKeyVaultLocation: str
+    deletedKeyVaultAtUtc: str
+    deletedKeyVaultAction: str
+    deletedWorkspaceId: str
+    deletedWorkspaceName: str
+    deletedWorkspaceLocation: str
+    deletedWorkspaceAtUtc: str
+    deletedWorkspaceCustomerId: str
+    deletedWorkspaceAction: str
     reprovisionAction: str
+    foundationStage: str
+    storageAccountId: str
+    logAnalyticsWorkspaceId: str
+    workerIdentityId: str
+    privateLinkScopeId: str
+    monitorPrivateEndpointId: str
+    imageRestorationAuthorized: bool
+    scannerProofAuthorized: bool
+    maximumScannerProofExecutions: int
 
 
 @dataclass(frozen=True)
@@ -470,6 +528,35 @@ def _expected_resource_ids(subscription_id: str) -> tuple[str, str, str, str, st
     )
 
 
+def _expected_reprovision_residue_ids(subscription_id: str) -> tuple[str, str]:
+    _, _, _, target_group, _ = _expected_resource_ids(subscription_id)
+    return (
+        f"/subscriptions/{subscription_id}/providers/Microsoft.KeyVault/locations/"
+        f"{POST_CLEANUP_REPROVISION_DELETED_KEY_VAULT_LOCATION}/deletedVaults/"
+        f"{POST_CLEANUP_REPROVISION_DELETED_KEY_VAULT}",
+        f"{target_group}/providers/Microsoft.OperationalInsights/workspaces/"
+        f"{POST_CLEANUP_REPROVISION_DELETED_WORKSPACE}",
+    )
+
+
+def _expected_reprovision_foundation_ids(
+    subscription_id: str,
+) -> tuple[str, str, str, str, str]:
+    _, _, _, target_group, _ = _expected_resource_ids(subscription_id)
+    return (
+        f"{target_group}/providers/Microsoft.Storage/storageAccounts/"
+        f"{POST_CLEANUP_REPROVISION_STORAGE_ACCOUNT}",
+        f"{target_group}/providers/Microsoft.OperationalInsights/workspaces/"
+        f"{POST_CLEANUP_REPROVISION_DELETED_WORKSPACE}",
+        f"{target_group}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/"
+        f"{POST_CLEANUP_REPROVISION_WORKER_IDENTITY}",
+        f"{target_group}/providers/Microsoft.Insights/privateLinkScopes/"
+        f"{POST_CLEANUP_REPROVISION_PRIVATE_LINK_SCOPE}",
+        f"{target_group}/providers/Microsoft.Network/privateEndpoints/"
+        f"{POST_CLEANUP_REPROVISION_MONITOR_PRIVATE_ENDPOINT}",
+    )
+
+
 def cleanup_control_recovery_authorization_integrity(
     authorization: CleanupControlRecoveryAuthorization,
 ) -> str:
@@ -585,6 +672,7 @@ def _reprovision_authorization_body(
         **_authorization_body(authorization),
         "authorizationExpiresAtUtc": authorization.authorizationExpiresAtUtc,
         "bindingGeneration": authorization.bindingGeneration,
+        "corruptedSchedule": authorization.corruptedSchedule,
         "priorBindingId": authorization.priorBindingId,
         "priorDeadlineUtc": authorization.priorDeadlineUtc,
         "priorSchedule": authorization.priorSchedule,
@@ -594,7 +682,30 @@ def _reprovision_authorization_body(
         "replacementLocation": authorization.replacementLocation,
         "completedCleanupJobId": authorization.completedCleanupJobId,
         "completedCleanupJobStatus": authorization.completedCleanupJobStatus,
+        "priorGenerationSourceCommit": authorization.priorGenerationSourceCommit,
+        "priorLifecycleBindingSha256": authorization.priorLifecycleBindingSha256,
+        "priorManifestSha256": authorization.priorManifestSha256,
+        "deletedKeyVaultId": authorization.deletedKeyVaultId,
+        "deletedKeyVaultName": authorization.deletedKeyVaultName,
+        "deletedKeyVaultLocation": authorization.deletedKeyVaultLocation,
+        "deletedKeyVaultAtUtc": authorization.deletedKeyVaultAtUtc,
+        "deletedKeyVaultAction": authorization.deletedKeyVaultAction,
+        "deletedWorkspaceId": authorization.deletedWorkspaceId,
+        "deletedWorkspaceName": authorization.deletedWorkspaceName,
+        "deletedWorkspaceLocation": authorization.deletedWorkspaceLocation,
+        "deletedWorkspaceAtUtc": authorization.deletedWorkspaceAtUtc,
+        "deletedWorkspaceCustomerId": authorization.deletedWorkspaceCustomerId,
+        "deletedWorkspaceAction": authorization.deletedWorkspaceAction,
         "reprovisionAction": authorization.reprovisionAction,
+        "foundationStage": authorization.foundationStage,
+        "storageAccountId": authorization.storageAccountId,
+        "logAnalyticsWorkspaceId": authorization.logAnalyticsWorkspaceId,
+        "workerIdentityId": authorization.workerIdentityId,
+        "privateLinkScopeId": authorization.privateLinkScopeId,
+        "monitorPrivateEndpointId": authorization.monitorPrivateEndpointId,
+        "imageRestorationAuthorized": authorization.imageRestorationAuthorized,
+        "scannerProofAuthorized": authorization.scannerProofAuthorized,
+        "maximumScannerProofExecutions": authorization.maximumScannerProofExecutions,
     }
 
 
@@ -625,6 +736,18 @@ def build_cleanup_control_reprovision_authorization(
     replacement_role_assignment_id: str,
     replacement_location: str,
     target_resource_group_id: str,
+    prior_generation_source_commit: str,
+    prior_lifecycle_binding_sha256: str,
+    prior_manifest_sha256: str,
+    deleted_key_vault_id: str,
+    deleted_key_vault_name: str,
+    deleted_key_vault_location: str,
+    deleted_key_vault_at_utc: str,
+    deleted_workspace_id: str,
+    deleted_workspace_name: str,
+    deleted_workspace_location: str,
+    deleted_workspace_at_utc: str,
+    deleted_workspace_customer_id: str,
     runbook_content_sha256: str,
     now_utc: datetime,
 ) -> CleanupControlReprovisionAuthorization:
@@ -642,6 +765,16 @@ def build_cleanup_control_reprovision_authorization(
     expected_replacement_assignment = _expected_replacement_role_assignment_id(
         subscription_id
     )
+    expected_deleted_key_vault, expected_deleted_workspace = (
+        _expected_reprovision_residue_ids(subscription_id)
+    )
+    (
+        expected_storage_account,
+        expected_workspace,
+        expected_worker_identity,
+        expected_private_link_scope,
+        expected_monitor_private_endpoint,
+    ) = _expected_reprovision_foundation_ids(subscription_id)
     exact_resource_values = (
         (cleanup_resource_group_id, expected_cleanup),
         (corrupted_automation_account_id, expected_corrupted),
@@ -676,6 +809,40 @@ def build_cleanup_control_reprovision_authorization(
         raise CleanupControlRecoveryError(
             "cleanup-reprovision-replacement-location-invalid"
         )
+    expected_residue_values = (
+        (prior_generation_source_commit, POST_CLEANUP_REPROVISION_PRIOR_SOURCE_COMMIT),
+        (
+            prior_lifecycle_binding_sha256,
+            POST_CLEANUP_REPROVISION_PRIOR_BINDING_SHA256,
+        ),
+        (prior_manifest_sha256, POST_CLEANUP_REPROVISION_PRIOR_MANIFEST_SHA256),
+        (deleted_key_vault_id, expected_deleted_key_vault),
+        (deleted_key_vault_name, POST_CLEANUP_REPROVISION_DELETED_KEY_VAULT),
+        (
+            deleted_key_vault_location,
+            POST_CLEANUP_REPROVISION_DELETED_KEY_VAULT_LOCATION,
+        ),
+        (
+            deleted_key_vault_at_utc,
+            POST_CLEANUP_REPROVISION_DELETED_KEY_VAULT_AT_UTC,
+        ),
+        (deleted_workspace_id, expected_deleted_workspace),
+        (deleted_workspace_name, POST_CLEANUP_REPROVISION_DELETED_WORKSPACE),
+        (
+            deleted_workspace_location,
+            POST_CLEANUP_REPROVISION_DELETED_WORKSPACE_LOCATION,
+        ),
+        (
+            deleted_workspace_at_utc,
+            POST_CLEANUP_REPROVISION_DELETED_WORKSPACE_AT_UTC,
+        ),
+        (
+            deleted_workspace_customer_id,
+            POST_CLEANUP_REPROVISION_DELETED_WORKSPACE_CUSTOMER_ID,
+        ),
+    )
+    if any(observed != expected for observed, expected in expected_residue_values):
+        raise CleanupControlRecoveryError("cleanup-reprovision-residue-scope-invalid")
     expected_runbook_hash = cleanup_runbook_sha256(
         CLEANUP_RUNBOOK_PATH.read_text(encoding="utf-8")
     )
@@ -729,9 +896,10 @@ def build_cleanup_control_reprovision_authorization(
         authorizationIntegritySha256="",
         authorizationExpiresAtUtc=_utc(expires_at),
         bindingGeneration=CLEANUP_BINDING_GENERATION,
-        priorBindingId=TOMBSTONED_POST_FIRED_CLEANUP_BINDING_ID,
-        priorDeadlineUtc=GENERATION_TWO_CLEANUP_BINDING_EPOCH_UTC,
-        priorSchedule=LEGACY_CLEANUP_SCHEDULE,
+        corruptedSchedule=SCHEDULE,
+        priorBindingId=TOMBSTONED_GENERATION_THREE_CLEANUP_BINDING_ID,
+        priorDeadlineUtc=GENERATION_THREE_CLEANUP_BINDING_EPOCH_UTC,
+        priorSchedule=GENERATION_THREE_CLEANUP_SCHEDULE,
         priorRunbookContentSha256=(
             POST_CLEANUP_REPROVISION_PRIOR_RUNBOOK_CONTENT_SHA256
         ),
@@ -740,7 +908,30 @@ def build_cleanup_control_reprovision_authorization(
         replacementLocation=DEADLINE_RECOVERY_REPLACEMENT_LOCATION,
         completedCleanupJobId=completed_cleanup_job_id,
         completedCleanupJobStatus=POST_CLEANUP_REPROVISION_PRIOR_JOB_STATUS,
+        priorGenerationSourceCommit=prior_generation_source_commit,
+        priorLifecycleBindingSha256=prior_lifecycle_binding_sha256,
+        priorManifestSha256=prior_manifest_sha256,
+        deletedKeyVaultId=deleted_key_vault_id,
+        deletedKeyVaultName=deleted_key_vault_name,
+        deletedKeyVaultLocation=deleted_key_vault_location,
+        deletedKeyVaultAtUtc=deleted_key_vault_at_utc,
+        deletedKeyVaultAction=POST_CLEANUP_REPROVISION_DELETED_KEY_VAULT_ACTION,
+        deletedWorkspaceId=deleted_workspace_id,
+        deletedWorkspaceName=deleted_workspace_name,
+        deletedWorkspaceLocation=deleted_workspace_location,
+        deletedWorkspaceAtUtc=deleted_workspace_at_utc,
+        deletedWorkspaceCustomerId=deleted_workspace_customer_id,
+        deletedWorkspaceAction=POST_CLEANUP_REPROVISION_DELETED_WORKSPACE_ACTION,
         reprovisionAction=POST_CLEANUP_REPROVISION_ACTION,
+        foundationStage=POST_CLEANUP_REPROVISION_FOUNDATION_STAGE,
+        storageAccountId=expected_storage_account,
+        logAnalyticsWorkspaceId=expected_workspace,
+        workerIdentityId=expected_worker_identity,
+        privateLinkScopeId=expected_private_link_scope,
+        monitorPrivateEndpointId=expected_monitor_private_endpoint,
+        imageRestorationAuthorized=False,
+        scannerProofAuthorized=False,
+        maximumScannerProofExecutions=0,
     )
     return replace(
         unsigned,
@@ -766,6 +957,16 @@ def validate_cleanup_control_reprovision_authorization(
     expected_replacement_assignment = _expected_replacement_role_assignment_id(
         authorization.subscriptionId
     )
+    expected_deleted_key_vault, expected_deleted_workspace = (
+        _expected_reprovision_residue_ids(authorization.subscriptionId)
+    )
+    (
+        expected_storage_account,
+        expected_workspace,
+        expected_worker_identity,
+        expected_private_link_scope,
+        expected_monitor_private_endpoint,
+    ) = _expected_reprovision_foundation_ids(authorization.subscriptionId)
     expected_completed_job = POST_CLEANUP_REPROVISION_PRIOR_JOB_NAME
     exact_values = {
         "authorizationVersion": POST_CLEANUP_REPROVISION_AUTHORIZATION_VERSION,
@@ -798,9 +999,10 @@ def validate_cleanup_control_reprovision_authorization(
         "costCeilingUsdCents": COST_CEILING_CENTS,
         "allowedOperations": POST_CLEANUP_REPROVISION_ALLOWED_OPERATIONS,
         "bindingGeneration": CLEANUP_BINDING_GENERATION,
-        "priorBindingId": TOMBSTONED_POST_FIRED_CLEANUP_BINDING_ID,
-        "priorDeadlineUtc": GENERATION_TWO_CLEANUP_BINDING_EPOCH_UTC,
-        "priorSchedule": LEGACY_CLEANUP_SCHEDULE,
+        "corruptedSchedule": SCHEDULE,
+        "priorBindingId": TOMBSTONED_GENERATION_THREE_CLEANUP_BINDING_ID,
+        "priorDeadlineUtc": GENERATION_THREE_CLEANUP_BINDING_EPOCH_UTC,
+        "priorSchedule": GENERATION_THREE_CLEANUP_SCHEDULE,
         "priorRunbookContentSha256": (
             POST_CLEANUP_REPROVISION_PRIOR_RUNBOOK_CONTENT_SHA256
         ),
@@ -809,7 +1011,36 @@ def validate_cleanup_control_reprovision_authorization(
         "replacementLocation": DEADLINE_RECOVERY_REPLACEMENT_LOCATION,
         "completedCleanupJobId": expected_completed_job,
         "completedCleanupJobStatus": POST_CLEANUP_REPROVISION_PRIOR_JOB_STATUS,
+        "priorGenerationSourceCommit": POST_CLEANUP_REPROVISION_PRIOR_SOURCE_COMMIT,
+        "priorLifecycleBindingSha256": (POST_CLEANUP_REPROVISION_PRIOR_BINDING_SHA256),
+        "priorManifestSha256": POST_CLEANUP_REPROVISION_PRIOR_MANIFEST_SHA256,
+        "deletedKeyVaultId": expected_deleted_key_vault,
+        "deletedKeyVaultName": POST_CLEANUP_REPROVISION_DELETED_KEY_VAULT,
+        "deletedKeyVaultLocation": (
+            POST_CLEANUP_REPROVISION_DELETED_KEY_VAULT_LOCATION
+        ),
+        "deletedKeyVaultAtUtc": POST_CLEANUP_REPROVISION_DELETED_KEY_VAULT_AT_UTC,
+        "deletedKeyVaultAction": POST_CLEANUP_REPROVISION_DELETED_KEY_VAULT_ACTION,
+        "deletedWorkspaceId": expected_deleted_workspace,
+        "deletedWorkspaceName": POST_CLEANUP_REPROVISION_DELETED_WORKSPACE,
+        "deletedWorkspaceLocation": (
+            POST_CLEANUP_REPROVISION_DELETED_WORKSPACE_LOCATION
+        ),
+        "deletedWorkspaceAtUtc": POST_CLEANUP_REPROVISION_DELETED_WORKSPACE_AT_UTC,
+        "deletedWorkspaceCustomerId": (
+            POST_CLEANUP_REPROVISION_DELETED_WORKSPACE_CUSTOMER_ID
+        ),
+        "deletedWorkspaceAction": POST_CLEANUP_REPROVISION_DELETED_WORKSPACE_ACTION,
         "reprovisionAction": POST_CLEANUP_REPROVISION_ACTION,
+        "foundationStage": POST_CLEANUP_REPROVISION_FOUNDATION_STAGE,
+        "storageAccountId": expected_storage_account,
+        "logAnalyticsWorkspaceId": expected_workspace,
+        "workerIdentityId": expected_worker_identity,
+        "privateLinkScopeId": expected_private_link_scope,
+        "monitorPrivateEndpointId": expected_monitor_private_endpoint,
+        "imageRestorationAuthorized": False,
+        "scannerProofAuthorized": False,
+        "maximumScannerProofExecutions": 0,
     }
     observed = asdict(authorization)
     if any(observed.get(key) != value for key, value in exact_values.items()):
@@ -1592,18 +1823,28 @@ def cleanup_control_reprovision_authorization_from_mapping(
         "authorizationParameterValue",
         "bindingGeneration",
         "costCeilingUsdCents",
+        "imageRestorationAuthorized",
+        "maximumScannerProofExecutions",
+        "scannerProofAuthorized",
     }
     if any(not isinstance(value.get(field), str) for field in string_fields):
         raise CleanupControlRecoveryError("cleanup-reprovision-authorization-malformed")
     authorization_value = value.get("authorizationParameterValue")
     binding_generation = value.get("bindingGeneration")
     cost_ceiling = value.get("costCeilingUsdCents")
+    image_restoration_authorized = value.get("imageRestorationAuthorized")
+    maximum_scanner_proof_executions = value.get("maximumScannerProofExecutions")
+    scanner_proof_authorized = value.get("scannerProofAuthorized")
     if (
         not isinstance(authorization_value, bool)
         or not isinstance(binding_generation, int)
         or isinstance(binding_generation, bool)
         or not isinstance(cost_ceiling, int)
         or isinstance(cost_ceiling, bool)
+        or not isinstance(image_restoration_authorized, bool)
+        or not isinstance(maximum_scanner_proof_executions, int)
+        or isinstance(maximum_scanner_proof_executions, bool)
+        or not isinstance(scanner_proof_authorized, bool)
     ):
         raise CleanupControlRecoveryError("cleanup-reprovision-authorization-malformed")
     return CleanupControlReprovisionAuthorization(
@@ -1638,6 +1879,7 @@ def cleanup_control_reprovision_authorization_from_mapping(
         authorizationIntegritySha256=cast(str, value["authorizationIntegritySha256"]),
         authorizationExpiresAtUtc=cast(str, value["authorizationExpiresAtUtc"]),
         bindingGeneration=binding_generation,
+        corruptedSchedule=cast(str, value["corruptedSchedule"]),
         priorBindingId=cast(str, value["priorBindingId"]),
         priorDeadlineUtc=cast(str, value["priorDeadlineUtc"]),
         priorSchedule=cast(str, value["priorSchedule"]),
@@ -1647,7 +1889,30 @@ def cleanup_control_reprovision_authorization_from_mapping(
         replacementLocation=cast(str, value["replacementLocation"]),
         completedCleanupJobId=cast(str, value["completedCleanupJobId"]),
         completedCleanupJobStatus=cast(str, value["completedCleanupJobStatus"]),
+        priorGenerationSourceCommit=cast(str, value["priorGenerationSourceCommit"]),
+        priorLifecycleBindingSha256=cast(str, value["priorLifecycleBindingSha256"]),
+        priorManifestSha256=cast(str, value["priorManifestSha256"]),
+        deletedKeyVaultId=cast(str, value["deletedKeyVaultId"]),
+        deletedKeyVaultName=cast(str, value["deletedKeyVaultName"]),
+        deletedKeyVaultLocation=cast(str, value["deletedKeyVaultLocation"]),
+        deletedKeyVaultAtUtc=cast(str, value["deletedKeyVaultAtUtc"]),
+        deletedKeyVaultAction=cast(str, value["deletedKeyVaultAction"]),
+        deletedWorkspaceId=cast(str, value["deletedWorkspaceId"]),
+        deletedWorkspaceName=cast(str, value["deletedWorkspaceName"]),
+        deletedWorkspaceLocation=cast(str, value["deletedWorkspaceLocation"]),
+        deletedWorkspaceAtUtc=cast(str, value["deletedWorkspaceAtUtc"]),
+        deletedWorkspaceCustomerId=cast(str, value["deletedWorkspaceCustomerId"]),
+        deletedWorkspaceAction=cast(str, value["deletedWorkspaceAction"]),
         reprovisionAction=cast(str, value["reprovisionAction"]),
+        foundationStage=cast(str, value["foundationStage"]),
+        storageAccountId=cast(str, value["storageAccountId"]),
+        logAnalyticsWorkspaceId=cast(str, value["logAnalyticsWorkspaceId"]),
+        workerIdentityId=cast(str, value["workerIdentityId"]),
+        privateLinkScopeId=cast(str, value["privateLinkScopeId"]),
+        monitorPrivateEndpointId=cast(str, value["monitorPrivateEndpointId"]),
+        imageRestorationAuthorized=image_restoration_authorized,
+        scannerProofAuthorized=scanner_proof_authorized,
+        maximumScannerProofExecutions=maximum_scanner_proof_executions,
     )
 
 

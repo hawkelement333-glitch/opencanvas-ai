@@ -8,14 +8,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 from infra.milestone_7_7 import scanner_bridge_recovery_adapter as adapter_module
 from infra.milestone_7_7.scanner_bridge_recovery_adapter import (
     ProductionScannerBridgeRecoveryAdapter,
     ScannerBridgeRecoveryExecutionError,
 )
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
-from opencanvas_api.services.scanner_bridge import BlobTagReadObservation
 from performance.milestone_7_7.framework import JsonValue
 from preflight.milestone_7_7 import scanner_bridge_recovery
 from preflight.milestone_7_7.scanner_bridge_recovery import (
@@ -37,6 +35,8 @@ from preflight.milestone_7_7.scanner_result_bridge import (
     deployment_evidence_from_mapping,
 )
 
+from opencanvas_api.services.scanner_bridge import BlobTagReadObservation
+
 SUBSCRIPTION_ID = "11111111-2222-4333-8444-555555555555"
 SUBSCRIPTION = f"/subscriptions/{SUBSCRIPTION_ID}"
 TARGET = f"{SUBSCRIPTION}/resourceGroups/rg-solarplexus-mobius-77-staging"
@@ -45,7 +45,7 @@ CLEANUP_ACCOUNT = (
     "providers/Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery"
 )
 NOW = datetime(2026, 8, 6, 17, 30, tzinfo=UTC)
-DEADLINE = datetime(2026, 8, 9, 8, 0, tzinfo=UTC)
+DEADLINE = datetime(2026, 8, 11, 3, 45, tzinfo=UTC)
 HEAD = "a" * 40
 IMAGE = "acrmobius7711564669.azurecr.io/opencanvas-api@sha256:" + "b" * 64
 BUILD_INPUT = "c" * 64
@@ -60,7 +60,7 @@ def _authorization(stage: str = FOUNDATION_STAGE) -> ScannerBridgeRecoveryAuthor
         subscription_id=SUBSCRIPTION_ID,
         target_resource_group_id=TARGET,
         cleanup_automation_account_id=CLEANUP_ACCOUNT,
-        cleanup_deadline_utc="2026-08-09T08:00:00Z",
+        cleanup_deadline_utc="2026-08-11T03:45:00Z",
         now_utc=NOW,
         api_image_digest=IMAGE if stage == PROOF_STAGE else None,
         build_input_sha256=BUILD_INPUT if stage == PROOF_STAGE else None,
@@ -497,7 +497,7 @@ def test_foundation_rejects_any_image_binding() -> None:
             subscription_id=SUBSCRIPTION_ID,
             target_resource_group_id=TARGET,
             cleanup_automation_account_id=CLEANUP_ACCOUNT,
-            cleanup_deadline_utc="2026-08-09T08:00:00Z",
+            cleanup_deadline_utc="2026-08-11T03:45:00Z",
             now_utc=NOW,
             api_image_digest=IMAGE,
         )

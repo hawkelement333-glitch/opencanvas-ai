@@ -15,7 +15,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final, NoReturn, cast
+from typing import Final, NoReturn, TypeAlias, cast
 
 from infra.milestone_7_7.scripts import managed_binding_lifecycle as lifecycle
 from performance.milestone_7_7.framework import (
@@ -27,6 +27,9 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     REPOSITORY_ROOT,
     load_managed_binding_contract,
     managed_binding_integrity_sha256,
+)
+from preflight.milestone_7_7.cleanup_control_recovery import (
+    CleanupControlReprovisionAuthorization,
 )
 from preflight.milestone_7_7.scanner_bridge_recovery import (
     FOUNDATION_STAGE,
@@ -50,7 +53,9 @@ from preflight.milestone_7_7.scanner_result_bridge import (
 )
 
 RECEIPT_VERSION: Final = "mobius.milestone-7.7.scanner-bridge-recovery-receipt.v1"
-RECEIPT_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/scanner-bridge-recovery-receipt/v1\0"
+RECEIPT_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/scanner-bridge-recovery-receipt/v1\0"
+)
 FOUNDATION_RECEIPT_FILE: Final = "scanner-bridge-foundation.receipt.json"
 PRIVATE_ENDPOINT_RECOVERY_RECEIPT_FILE: Final = (
     "scanner-bridge-private-endpoint-recovery.receipt.json"
@@ -77,7 +82,9 @@ STORAGE_PRIVATE_ENDPOINT: Final = "pe-mobius77-storage"
 MANAGED_ENVIRONMENT: Final = "cae-mobius77-staging"
 PROOF_CONSOLE_DIAGNOSTIC: Final = "mobius77-scanner-proof-console"
 BLOB_TAG_OBSERVATION_MARKER: Final = "SCANNER_BLOB_TAG_OBSERVATION"
-BLOB_TAG_OBSERVATION_SCHEMA: Final = "mobius.scanner-result-bridge.blob-tags-observation.v1"
+BLOB_TAG_OBSERVATION_SCHEMA: Final = (
+    "mobius.scanner-result-bridge.blob-tags-observation.v1"
+)
 BLOB_TAG_NORMALIZATION_PATH: Final = "azure-blob-tags-xml-local-name-v1"
 BLOB_RESULT_TAG: Final = "Malware Scanning scan result"
 BLOB_SCAN_TIME_TAG: Final = "Malware Scanning scan time UTC"
@@ -108,6 +115,23 @@ DELETION_POLL_SECONDS: Final = 5.0
 DELETION_PROPAGATION_SECONDS: Final = 180.0
 PRIVATE_ENDPOINT_RECOVERY_POLL_SECONDS: Final = 10.0
 PRIVATE_ENDPOINT_RECOVERY_PROPAGATION_SECONDS: Final = 300.0
+REPROVISION_FOUNDATION_MAXIMUM_DEPLOYMENTS: Final = 3
+REPROVISION_FOUNDATION_DEPLOYMENT_SECONDS: Final = 1_800.0
+REPROVISION_FOUNDATION_DEPLOYMENT_POLL_SECONDS: Final = 15.0
+REPROVISION_FOUNDATION_READ_RETRY_DELAYS: Final = (2.0, 5.0)
+REPROVISION_FOUNDATION_TRANSIENT_AZURE_CODES: Final = frozenset(
+    {
+        "conflict",
+        "gateway-timeout",
+        "gatewaytimeout",
+        "internal-server-error",
+        "internalservererror",
+        "service-unavailable",
+        "serviceunavailable",
+        "too-many-requests",
+        "toomanyrequests",
+    }
+)
 
 MONITOR_PRIVATE_DNS_BINDINGS: Final = (
     ("privatelink.monitor.azure.com", "link-mobius77-monitor", "monitor"),
@@ -205,6 +229,28 @@ class _FoundationReadback:
     inventory_integrity: str
 
 
+@dataclass(frozen=True, slots=True)
+class _ReprovisionFoundationScope:
+    """Exact scanner-foundation view of the already-consumed Generation-4 grant."""
+
+    stage: str
+    subscriptionId: str
+    targetResourceGroupId: str
+    storageAccountId: str
+    logAnalyticsWorkspaceId: str
+    workerIdentityId: str
+    privateLinkScopeId: str
+    monitorPrivateEndpointId: str
+    proofJobId: None
+    proofRoleDefinitionId: None
+    apiImageDigest: None
+
+
+_FoundationScope: TypeAlias = (
+    ScannerBridgeRecoveryAuthorization | _ReprovisionFoundationScope
+)
+
+
 def _fail(code: str) -> NoReturn:
     raise ScannerBridgeRecoveryExecutionError(code)
 
@@ -259,7 +305,9 @@ def _claim_authorization(
     receipt_directory: Path,
     now_utc: datetime,
 ) -> Path:
-    directory = _outside_repository(receipt_directory, "scanner-bridge-receipts-inside-repository")
+    directory = _outside_repository(
+        receipt_directory, "scanner-bridge-receipts-inside-repository"
+    )
     directory.mkdir(parents=True, exist_ok=True)
     if authorization.stage == FOUNDATION_STAGE:
         filename = FOUNDATION_RECEIPT_FILE
@@ -295,7 +343,9 @@ def _claim_authorization(
     return path
 
 
-def _write_evidence(path: Path, evidence: ScannerResultBridgeDeploymentEvidence) -> None:
+def _write_evidence(
+    path: Path, evidence: ScannerResultBridgeDeploymentEvidence
+) -> None:
     resolved = _outside_repository(path, "scanner-bridge-evidence-inside-repository")
     resolved.parent.mkdir(parents=True, exist_ok=True)
     value = cast(JsonValue, evidence.canonical())
@@ -380,7 +430,8 @@ def _validate_managed_binding(
         "workspace": resources.get("logAnalyticsWorkspace") == LOG_ANALYTICS_WORKSPACE,
         "cleanup-account": resources.get("cleanupAutomationAccount")
         == "aa-mobius77-cleanup-recovery",
-        "cleanup-deadline": cleanup.get("deadlineUtc") == authorization.cleanupDeadlineUtc,
+        "cleanup-deadline": cleanup.get("deadlineUtc")
+        == authorization.cleanupDeadlineUtc,
         "cleanup-target": cleanup.get("targetResourceGroup") == TARGET_RESOURCE_GROUP,
     }
     if not all(exact.values()):
@@ -427,7 +478,9 @@ def _verify_provider_api_versions(subscription_id: str) -> None:
         )
         row = _json_object(value, "scanner-bridge-provider-metadata-malformed")
         metadata = row.get("resourceType")
-        if row.get("registrationState") != "Registered" or not isinstance(metadata, dict):
+        if row.get("registrationState") != "Registered" or not isinstance(
+            metadata, dict
+        ):
             _fail("scanner-bridge-provider-unavailable")
         versions = metadata.get("apiVersions")
         locations = metadata.get("locations")
@@ -547,7 +600,7 @@ def _rest_put(
 
 
 def _monitor_recovery_resource_ids(
-    authorization: ScannerBridgeRecoveryAuthorization,
+    authorization: _FoundationScope,
 ) -> tuple[str, str, dict[str, str]]:
     vnet_id = (
         f"{authorization.targetResourceGroupId}/providers/Microsoft.Network/"
@@ -565,7 +618,7 @@ def _monitor_recovery_resource_ids(
 
 
 def _exact_monitor_private_endpoint_recovery_state(
-    authorization: ScannerBridgeRecoveryAuthorization,
+    authorization: _FoundationScope,
 ) -> dict[str, JsonValue]:
     target = authorization.targetResourceGroupId
     vnet_id, subnet_id, zone_ids = _monitor_recovery_resource_ids(authorization)
@@ -580,7 +633,9 @@ def _exact_monitor_private_endpoint_recovery_state(
         "groupIds:properties.groupIds,status:properties.privateLinkServiceConnectionState.status,"
         "provisioningState:properties.provisioningState},tags:tags}",
     )
-    if not isinstance(endpoints, list) or any(not isinstance(row, dict) for row in endpoints):
+    if not isinstance(endpoints, list) or any(
+        not isinstance(row, dict) for row in endpoints
+    ):
         _fail("scanner-private-endpoint-recovery-inventory-malformed")
     matching_endpoints = [
         cast(dict[str, JsonValue], row)
@@ -605,7 +660,9 @@ def _exact_monitor_private_endpoint_recovery_state(
         or len(connections) != 1
         or not isinstance(connections[0], dict)
         or connections[0].get("name") != "azuremonitor"
-        or not _same_resource_id(connections[0].get("serviceId"), authorization.privateLinkScopeId)
+        or not _same_resource_id(
+            connections[0].get("serviceId"), authorization.privateLinkScopeId
+        )
         or connections[0].get("groupIds") != ["azuremonitor"]
         or connections[0].get("status") != "Approved"
         or connections[0].get("provisioningState") not in {"Failed", "Succeeded"}
@@ -755,7 +812,9 @@ def _exact_monitor_private_endpoint_recovery_state(
         "value[].{id:id,name:name,provisioningState:properties.provisioningState,"
         "zoneIds:properties.privateDnsZoneConfigs[].properties.privateDnsZoneId}",
     )
-    if not isinstance(zone_groups, list) or any(not isinstance(row, dict) for row in zone_groups):
+    if not isinstance(zone_groups, list) or any(
+        not isinstance(row, dict) for row in zone_groups
+    ):
         _fail("scanner-private-endpoint-recovery-zone-group-inventory-malformed")
     expected_zone_group_id = (
         f"{authorization.monitorPrivateEndpointId}/privateDnsZoneGroups/default"
@@ -797,7 +856,7 @@ def _exact_monitor_private_endpoint_recovery_state(
 
 
 def _monitor_private_endpoint_write_body(
-    authorization: ScannerBridgeRecoveryAuthorization,
+    authorization: _FoundationScope,
     state: Mapping[str, JsonValue],
 ) -> dict[str, JsonValue]:
     _vnet_id, subnet_id, _zone_ids = _monitor_recovery_resource_ids(authorization)
@@ -823,7 +882,7 @@ def _monitor_private_endpoint_write_body(
 
 
 def _monitor_private_dns_zone_group_write_body(
-    authorization: ScannerBridgeRecoveryAuthorization,
+    authorization: _FoundationScope,
 ) -> dict[str, JsonValue]:
     _vnet_id, _subnet_id, zone_ids = _monitor_recovery_resource_ids(authorization)
     return {
@@ -840,7 +899,7 @@ def _monitor_private_dns_zone_group_write_body(
 
 
 def _wait_for_monitor_private_endpoint(
-    authorization: ScannerBridgeRecoveryAuthorization,
+    authorization: _FoundationScope,
     *,
     ambiguous_error_code: str | None,
 ) -> None:
@@ -884,7 +943,7 @@ def _wait_for_monitor_private_endpoint(
 
 
 def _wait_for_monitor_private_dns_zone_group(
-    authorization: ScannerBridgeRecoveryAuthorization,
+    authorization: _FoundationScope,
     *,
     ambiguous_error_code: str | None,
 ) -> None:
@@ -918,7 +977,7 @@ def _wait_for_monitor_private_dns_zone_group(
 
 
 def _repair_exact_monitor_private_endpoint(
-    authorization: ScannerBridgeRecoveryAuthorization,
+    authorization: _FoundationScope,
 ) -> dict[str, JsonValue]:
     before = _exact_monitor_private_endpoint_recovery_state(authorization)
     endpoint_mutation_issued = False
@@ -943,7 +1002,9 @@ def _repair_exact_monitor_private_endpoint(
     if after_endpoint.get("privateDnsZoneGroupProvisioningState") != "Succeeded":
         zone_group_mutation_issued = True
         ambiguous_code = None
-        group_id = f"{authorization.monitorPrivateEndpointId}/privateDnsZoneGroups/default"
+        group_id = (
+            f"{authorization.monitorPrivateEndpointId}/privateDnsZoneGroups/default"
+        )
         try:
             _rest_put(
                 group_id,
@@ -1030,7 +1091,7 @@ def _read_deployment_outputs(
 
 
 def _validate_deployment_outputs(
-    authorization: ScannerBridgeRecoveryAuthorization,
+    authorization: _FoundationScope,
     outputs: Mapping[str, JsonValue],
 ) -> str | None:
     exact: dict[str, JsonValue] = {
@@ -1177,8 +1238,12 @@ def _role_permissions(
 def _grants_tag_write(role_definition_id: str) -> bool:
     data_actions, denied = _role_permissions(role_definition_id)
     target = TAG_WRITE_ACTION.casefold()
-    granted = any(fnmatch.fnmatchcase(target, action.casefold()) for action in data_actions)
-    explicitly_denied = any(fnmatch.fnmatchcase(target, action.casefold()) for action in denied)
+    granted = any(
+        fnmatch.fnmatchcase(target, action.casefold()) for action in data_actions
+    )
+    explicitly_denied = any(
+        fnmatch.fnmatchcase(target, action.casefold()) for action in denied
+    )
     return granted and not explicitly_denied
 
 
@@ -1226,7 +1291,9 @@ def _verify_ordinary_identity_roles(
     expected: frozenset[tuple[str, str]],
 ) -> tuple[list[dict[str, str]], str]:
     rows = _role_assignment_rows(subscription_id, principal_id=principal_id)
-    projected = {(_role_name(row["roleDefinitionId"]), row["scope"].casefold()) for row in rows}
+    projected = {
+        (_role_name(row["roleDefinitionId"]), row["scope"].casefold()) for row in rows
+    }
     if not expected.issubset(projected):
         _fail("scanner-bridge-required-role-assignment-absent")
     for row in rows:
@@ -1352,7 +1419,7 @@ def _validate_proof_console_diagnostic(
 
 
 def _foundation_readback_once(
-    authorization: ScannerBridgeRecoveryAuthorization,
+    authorization: _FoundationScope,
     *,
     require_proof_console_diagnostic: bool = False,
 ) -> _FoundationReadback:
@@ -1403,7 +1470,8 @@ def _foundation_readback_once(
         or not isinstance(access_rules[0].get("tenantId"), str)
         or _UUID.fullmatch(cast(str, access_rules[0]["tenantId"])) is None
         or not isinstance(access_rules[0].get("resourceId"), str)
-        or cast(str, access_rules[0]["resourceId"]).casefold() != scanner_resource_id.casefold()
+        or cast(str, access_rules[0]["resourceId"]).casefold()
+        != scanner_resource_id.casefold()
     ):
         _fail("scanner-bridge-storage-scanner-network-access-unproved")
 
@@ -1497,9 +1565,7 @@ def _foundation_readback_once(
 
     proof_console_diagnostic: dict[str, JsonValue] | None = None
     if require_proof_console_diagnostic:
-        managed_environment_id = (
-            f"{target}/providers/Microsoft.App/managedEnvironments/{MANAGED_ENVIRONMENT}"
-        )
+        managed_environment_id = f"{target}/providers/Microsoft.App/managedEnvironments/{MANAGED_ENVIRONMENT}"
         proof_console_diagnostic_id = (
             f"{managed_environment_id}/providers/Microsoft.Insights/diagnosticSettings/"
             f"{PROOF_CONSOLE_DIAGNOSTIC}"
@@ -1553,7 +1619,9 @@ def _foundation_readback_once(
         or ampls.get("exclusions") != []
     ):
         _fail("scanner-bridge-ampls-private-only-unproved")
-    scoped_id = f"{authorization.privateLinkScopeId}/scopedResources/{LOG_ANALYTICS_WORKSPACE}"
+    scoped_id = (
+        f"{authorization.privateLinkScopeId}/scopedResources/{LOG_ANALYTICS_WORKSPACE}"
+    )
     scoped = _rest_get(
         scoped_id,
         AMPLS_API_VERSION,
@@ -1567,9 +1635,7 @@ def _foundation_readback_once(
     ):
         _fail("scanner-bridge-ampls-workspace-association-unproved")
 
-    storage_pe_id = (
-        f"{target}/providers/Microsoft.Network/privateEndpoints/{STORAGE_PRIVATE_ENDPOINT}"
-    )
+    storage_pe_id = f"{target}/providers/Microsoft.Network/privateEndpoints/{STORAGE_PRIVATE_ENDPOINT}"
     storage_pe = _verify_private_endpoint(
         resource_id=storage_pe_id,
         service_id=authorization.storageAccountId,
@@ -1582,7 +1648,9 @@ def _foundation_readback_once(
         group_id="azuremonitor",
         subnet_id=subnet_id,
     )
-    required_zones = tuple(zone for zone, _link, _config in MONITOR_PRIVATE_DNS_BINDINGS)
+    required_zones = tuple(
+        zone for zone, _link, _config in MONITOR_PRIVATE_DNS_BINDINGS
+    )
     link_names = {zone: link for zone, link, _config in MONITOR_PRIVATE_DNS_BINDINGS}
     zone_rows: list[dict[str, JsonValue]] = []
     zone_link_rows: list[dict[str, JsonValue]] = []
@@ -1613,9 +1681,7 @@ def _foundation_readback_once(
     )
 
     worker = _identity_projection(authorization.workerIdentityId)
-    api_identity_id = (
-        f"{target}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{API_IDENTITY}"
-    )
+    api_identity_id = f"{target}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{API_IDENTITY}"
     api_identity = _identity_projection(api_identity_id)
     worker_principal = worker.get("principalId")
     worker_client = worker.get("clientId")
@@ -1687,8 +1753,12 @@ def _foundation_readback_once(
         or _UUID.fullmatch(scanner_principal) is None
     ):
         _fail("scanner-bridge-storage-scanner-identity-unproved")
-    storage_rows = _storage_role_assignment_rows(subscription_id, authorization.storageAccountId)
-    tag_writers = [row for row in storage_rows if _grants_tag_write(row["roleDefinitionId"])]
+    storage_rows = _storage_role_assignment_rows(
+        subscription_id, authorization.storageAccountId
+    )
+    tag_writers = [
+        row for row in storage_rows if _grants_tag_write(row["roleDefinitionId"])
+    ]
     if len(tag_writers) != 1:
         _fail("scanner-bridge-tag-writer-boundary-unproved")
     writer = tag_writers[0]
@@ -1712,9 +1782,11 @@ def _foundation_readback_once(
         for topic in topics
         if isinstance(topic, dict)
         and isinstance(topic.get("source"), str)
-        and cast(str, topic["source"]).casefold() == authorization.storageAccountId.casefold()
+        and cast(str, topic["source"]).casefold()
+        == authorization.storageAccountId.casefold()
         and isinstance(topic.get("topicType"), str)
-        and cast(str, topic["topicType"]).casefold() == "microsoft.storage.storageaccounts"
+        and cast(str, topic["topicType"]).casefold()
+        == "microsoft.storage.storageaccounts"
         and isinstance(topic.get("id"), str)
     ]
     if len(provider_topics) != 1:
@@ -1777,7 +1849,9 @@ def _foundation_readback_once(
         diagnostic_proof_integrity=_canonical_hash(
             diagnostic_projection, "mobius.scanner-bridge.diagnostic.v1"
         ),
-        rbac_proof_integrity=_canonical_hash(rbac_projection, "mobius.scanner-bridge.rbac.v1"),
+        rbac_proof_integrity=_canonical_hash(
+            rbac_projection, "mobius.scanner-bridge.rbac.v1"
+        ),
         tag_write_denial_integrity=_canonical_hash(
             cast(
                 JsonValue,
@@ -1799,7 +1873,7 @@ def _foundation_readback_once(
 
 
 def _verify_foundation(
-    authorization: ScannerBridgeRecoveryAuthorization,
+    authorization: _FoundationScope,
     *,
     require_proof_console_diagnostic: bool = False,
 ) -> _FoundationReadback:
@@ -1867,7 +1941,9 @@ def _proof_graph(
             "value": authorization.authorizationIntegritySha256,
         },
     ]
-    job_projection = {key: value for key, value in job.items() if key not in {"id", "identityIds"}}
+    job_projection = {
+        key: value for key, value in job.items() if key not in {"id", "identityIds"}
+    }
     identity_ids = job.get("identityIds")
     if (
         job_projection
@@ -1909,7 +1985,9 @@ def _proof_graph(
     canonical_role_id = _canonical_role_definition_id(authorization)
     exact_permissions: list[JsonValue] = [
         {
-            "actions": ["Microsoft.Storage/storageAccounts/blobServices/containers/read"],
+            "actions": [
+                "Microsoft.Storage/storageAccounts/blobServices/containers/read"
+            ],
             "dataActions": [
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read",
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/add/action",
@@ -1929,7 +2007,9 @@ def _proof_graph(
         or not (
             isinstance(assignable_scopes, list)
             and len(assignable_scopes) == 1
-            and _same_resource_id(assignable_scopes[0], authorization.targetResourceGroupId)
+            and _same_resource_id(
+                assignable_scopes[0], authorization.targetResourceGroupId
+            )
         )
         or permissions != exact_permissions
         or _grants_tag_write(authorization.proofRoleDefinitionId)
@@ -1949,7 +2029,8 @@ def _proof_graph(
         or not isinstance(assignment_principal, str)
         or assignment_principal.casefold() != worker_principal_id.casefold()
         or not isinstance(assignment.get("roleDefinitionId"), str)
-        or cast(str, assignment["roleDefinitionId"]).casefold() != canonical_role_id.casefold()
+        or cast(str, assignment["roleDefinitionId"]).casefold()
+        != canonical_role_id.casefold()
         or not assignment_id.casefold().startswith(
             f"{quarantine_scope}/providers/Microsoft.Authorization/roleAssignments/".casefold()
         )
@@ -1997,7 +2078,9 @@ def _job_execution_rows(
             "endTime",
         }:
             _fail("scanner-proof-execution-readback-malformed")
-        if not isinstance(row.get("name"), str) or not isinstance(row.get("status"), str):
+        if not isinstance(row.get("name"), str) or not isinstance(
+            row.get("status"), str
+        ):
             _fail("scanner-proof-execution-readback-malformed")
         if any(
             item is not None and not isinstance(item, str)
@@ -2043,7 +2126,9 @@ def _start_one_execution(authorization: ScannerBridgeRecoveryAuthorization) -> s
         rows = _job_execution_rows(authorization)
         if len(rows) == 1:
             name = rows[0]["name"]
-            if isinstance(name, str) and (requested_name is None or requested_name == name):
+            if isinstance(name, str) and (
+                requested_name is None or requested_name == name
+            ):
                 return name
         if len(rows) > 1:
             _fail("scanner-proof-duplicate-execution-created")
@@ -2179,7 +2264,8 @@ def _proof_marker(
         _fail("scanner-proof-tls-unproved")
     hashes = required - {*exact, "tlsVersion"}
     if any(
-        not isinstance(marker.get(key), str) or _SHA256.fullmatch(cast(str, marker[key])) is None
+        not isinstance(marker.get(key), str)
+        or _SHA256.fullmatch(cast(str, marker[key])) is None
         for key in hashes
     ):
         _fail("scanner-proof-marker-integrity-malformed")
@@ -2205,7 +2291,8 @@ def _proof_failure_marker(
         or not isinstance(failure_code, str)
         or _FAILURE_CODE.fullmatch(failure_code) is None
         or marker.get("marker") != "SCANNER_RESULT_BRIDGE_FAILED"
-        or marker.get("schemaVersion") != "mobius.scanner-result-bridge.proof-failure.v1"
+        or marker.get("schemaVersion")
+        != "mobius.scanner-result-bridge.proof-failure.v1"
     ):
         _fail("scanner-proof-failure-marker-malformed")
     return cast(dict[str, JsonValue], marker)
@@ -2271,7 +2358,9 @@ def _proof_blob_tag_observation(
     if not isinstance(integrity, str) or _SHA256.fullmatch(integrity) is None:
         _fail("scanner-proof-blob-tag-observation-malformed")
     body = {
-        key: cast(JsonValue, value) for key, value in marker.items() if key != "integritySha256"
+        key: cast(JsonValue, value)
+        for key, value in marker.items()
+        if key != "integritySha256"
     }
     if _blob_tag_observation_hash(cast(JsonValue, body)) != integrity:
         _fail("scanner-proof-blob-tag-observation-integrity-unproved")
@@ -2281,13 +2370,16 @@ def _proof_blob_tag_observation(
         "queriedEtagSha256",
     )
     if any(
-        not isinstance(marker.get(key), str) or _SHA256.fullmatch(cast(str, marker[key])) is None
+        not isinstance(marker.get(key), str)
+        or _SHA256.fullmatch(cast(str, marker[key])) is None
         for key in hashes
     ):
         _fail("scanner-proof-blob-tag-observation-malformed")
     for key in ("responseEtagSha256", "responseVersionIdSha256"):
         value = marker.get(key)
-        if value is not None and (not isinstance(value, str) or _SHA256.fullmatch(value) is None):
+        if value is not None and (
+            not isinstance(value, str) or _SHA256.fullmatch(value) is None
+        ):
             _fail("scanner-proof-blob-tag-observation-malformed")
     request_id = marker.get("requestCorrelationId")
     if request_id is not None and (
@@ -2357,7 +2449,11 @@ def _proof_blob_tag_observation(
     ):
         _fail("scanner-proof-blob-tag-observation-version-unproved")
     if decision == "rejected-http-status":
-        if http_status is None or 200 <= http_status < 300 or normalization != "not-run":
+        if (
+            http_status is None
+            or 200 <= http_status < 300
+            or normalization != "not-run"
+        ):
             _fail("scanner-proof-blob-tag-observation-comparison-unproved")
     elif decision == "rejected-observability-gap":
         if http_status is not None or normalization != "not-run":
@@ -2377,7 +2473,10 @@ def _proof_blob_tag_observation(
     if decision == "rejected-unexpected-key" and (not unexpected or missing):
         _fail("scanner-proof-blob-tag-observation-comparison-unproved")
     if decision == "accepted" and (
-        missing or unexpected or different_version or normalization != BLOB_TAG_NORMALIZATION_PATH
+        missing
+        or unexpected
+        or different_version
+        or normalization != BLOB_TAG_NORMALIZATION_PATH
     ):
         _fail("scanner-proof-blob-tag-observation-comparison-unproved")
     if required_for_failure and _BLOB_TAG_FAILURE_DECISIONS[failure_code] != decision:
@@ -2419,7 +2518,10 @@ def _verify_proof_graph(
                 workspace_customer_id=workspace_customer_id,
             )
         except lifecycle.AzureCommandError as exc:
-            if not (_not_found(exc) or exc.sanitized_azure_error_code == "azure-command-nonzero"):
+            if not (
+                _not_found(exc)
+                or exc.sanitized_azure_error_code == "azure-command-nonzero"
+            ):
                 raise
             if time.monotonic() >= deadline:
                 _fail("scanner-proof-graph-propagation-timeout")
@@ -2647,7 +2749,9 @@ def _build_live_evidence(
             "mobius.scanner-bridge.producer-live-proof.v1",
         ),
         blob_tag_result_sha256=marker["blobTagResultSha256"],
-        log_analytics_workspace_id_sha256=_hash_text(authorization.logAnalyticsWorkspaceId),
+        log_analytics_workspace_id_sha256=_hash_text(
+            authorization.logAnalyticsWorkspaceId
+        ),
         log_analytics_table="StorageMalwareScanningResults",
         log_query_sha256=marker["logQuerySha256"],
         dual_source_proof_integrity=marker["dualSourceEvidenceSha256"],
@@ -2664,7 +2768,9 @@ def _build_live_evidence(
         tag_write_denial_proof_integrity=readback.tag_write_denial_integrity,
         assignment_proof_integrity=proof_graph_integrity,
         ampls_resource_id_sha256=_hash_text(authorization.privateLinkScopeId),
-        private_endpoint_resource_id_sha256=_hash_text(authorization.monitorPrivateEndpointId),
+        private_endpoint_resource_id_sha256=_hash_text(
+            authorization.monitorPrivateEndpointId
+        ),
         private_dns_zone_set_sha256=readback.private_path_control_plane_integrity,
         private_address_sha256=marker["privateDnsEvidenceSha256"],
         tls_hostname_sha256=marker["tlsHostnameSha256"],
@@ -2690,6 +2796,259 @@ def _build_live_evidence(
         unresolved_reasons=(),
     )
     return build_scanner_result_bridge_deployment_evidence(evidence, now=observed_at)
+
+
+def _reprovision_foundation_scope(
+    authorization: CleanupControlReprovisionAuthorization,
+) -> _ReprovisionFoundationScope:
+    if (
+        authorization.foundationStage != FOUNDATION_STAGE
+        or authorization.imageRestorationAuthorized is not False
+        or authorization.scannerProofAuthorized is not False
+        or authorization.maximumScannerProofExecutions != 0
+    ):
+        _fail("scanner-foundation-reprovision-authority-expanded")
+    return _ReprovisionFoundationScope(
+        stage=FOUNDATION_STAGE,
+        subscriptionId=authorization.subscriptionId,
+        targetResourceGroupId=authorization.targetResourceGroupId,
+        storageAccountId=authorization.storageAccountId,
+        logAnalyticsWorkspaceId=authorization.logAnalyticsWorkspaceId,
+        workerIdentityId=authorization.workerIdentityId,
+        privateLinkScopeId=authorization.privateLinkScopeId,
+        monitorPrivateEndpointId=authorization.monitorPrivateEndpointId,
+        proofJobId=None,
+        proofRoleDefinitionId=None,
+        apiImageDigest=None,
+    )
+
+
+def _monitor_private_endpoint_precreation_count(
+    authorization: _FoundationScope,
+) -> int:
+    value: JsonValue | None = None
+    for attempt in range(len(REPROVISION_FOUNDATION_READ_RETRY_DELAYS) + 1):
+        try:
+            value = _rest_collection(
+                (
+                    f"{authorization.targetResourceGroupId}/providers/"
+                    "Microsoft.Network/privateEndpoints"
+                ),
+                PRIVATE_ENDPOINT_API_VERSION,
+                "value[].{id:id,name:name}",
+            )
+            break
+        except lifecycle.AzureCommandError:
+            if attempt == len(REPROVISION_FOUNDATION_READ_RETRY_DELAYS):
+                raise
+            time.sleep(REPROVISION_FOUNDATION_READ_RETRY_DELAYS[attempt])
+    if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
+        _fail("scanner-foundation-reprovision-endpoint-inventory-malformed")
+    matching: list[dict[str, JsonValue]] = []
+    for raw in value:
+        row = cast(dict[str, JsonValue], raw)
+        exact_id = _same_resource_id(
+            row.get("id"), authorization.monitorPrivateEndpointId
+        )
+        exact_name = row.get("name") == MONITOR_PRIVATE_ENDPOINT
+        if exact_id != exact_name:
+            _fail("scanner-foundation-reprovision-endpoint-identity-drift")
+        if exact_id:
+            matching.append(row)
+    if len(matching) > 1:
+        _fail("scanner-foundation-reprovision-endpoint-duplicate")
+    return len(matching)
+
+
+def _foundation_deployment_state(
+    *,
+    subscription_id: str,
+    deployment_binding: Mapping[str, JsonValue],
+) -> str | None:
+    deployment_name = lifecycle._deployment_name(FOUNDATION_STAGE, deployment_binding)
+    try:
+        value = lifecycle._run(
+            (
+                "az",
+                "deployment",
+                "sub",
+                "show",
+                "--name",
+                deployment_name,
+                "--subscription",
+                subscription_id,
+                "--query",
+                "{state:properties.provisioningState}",
+                "--output",
+                "json",
+                "--only-show-errors",
+            ),
+            require_json=True,
+        )
+    except lifecycle.AzureCommandError as exc:
+        if _not_found(exc):
+            return None
+        raise
+    row = _json_object(
+        value, "scanner-foundation-reprovision-deployment-state-malformed"
+    )
+    if set(row) != {"state"} or row.get("state") not in {
+        "Canceled",
+        "Failed",
+        "Running",
+        "Succeeded",
+    }:
+        _fail("scanner-foundation-reprovision-deployment-state-malformed")
+    return cast(str, row["state"])
+
+
+def _wait_for_foundation_deployment_terminal(
+    *,
+    subscription_id: str,
+    deployment_binding: Mapping[str, JsonValue],
+) -> str | None:
+    deadline = time.monotonic() + REPROVISION_FOUNDATION_DEPLOYMENT_SECONDS
+    while True:
+        state = _foundation_deployment_state(
+            subscription_id=subscription_id,
+            deployment_binding=deployment_binding,
+        )
+        if state != "Running":
+            return state
+        if time.monotonic() >= deadline:
+            _fail("scanner-foundation-reprovision-deployment-terminal-state-unproved")
+        time.sleep(REPROVISION_FOUNDATION_DEPLOYMENT_POLL_SECONDS)
+
+
+def reconcile_reprovision_scanner_foundation(
+    *,
+    authorization: CleanupControlReprovisionAuthorization,
+    deployment_binding: dict[str, JsonValue],
+    cleanup_at: datetime,
+    expected_cost: int,
+    maximum_cost: int,
+) -> dict[str, JsonValue]:
+    """Complete the existing foundation under the consumed Generation-4 grant."""
+
+    scope = _reprovision_foundation_scope(authorization)
+    if (
+        set(deployment_binding)
+        != {
+            "authorizationId",
+            "ledgerIntegritySha256",
+            "managedBindingIntegritySha256",
+            "repositoryHead",
+        }
+        or deployment_binding.get("ledgerIntegritySha256")
+        != authorization.authorizationIntegritySha256
+        or deployment_binding.get("repositoryHead") != authorization.repositoryHead
+        or not isinstance(deployment_binding.get("authorizationId"), str)
+        or not isinstance(deployment_binding.get("managedBindingIntegritySha256"), str)
+        or _SHA256.fullmatch(
+            cast(str, deployment_binding["managedBindingIntegritySha256"])
+        )
+        is None
+        or _format_utc(cleanup_at) != authorization.deadlineUtc
+        or expected_cost < 0
+        or expected_cost > maximum_cost
+        or maximum_cost > authorization.costCeilingUsdCents
+    ):
+        _fail("scanner-foundation-reprovision-binding-invalid")
+
+    _verify_provider_api_versions(authorization.subscriptionId)
+    _verify_network_capacity(authorization.subscriptionId)
+    precreation_count = _monitor_private_endpoint_precreation_count(scope)
+    recovery: dict[str, JsonValue] | None = None
+    deployment_attempts = 0
+    with tempfile.TemporaryDirectory(
+        prefix="mobius77-reprovision-foundation-"
+    ) as directory:
+        template = Path(directory) / "main.json"
+        lifecycle._compile_template(template)
+        while deployment_attempts < REPROVISION_FOUNDATION_MAXIMUM_DEPLOYMENTS:
+            if _monitor_private_endpoint_precreation_count(scope) == 1:
+                recovery = _repair_exact_monitor_private_endpoint(scope)
+            deployment_attempts += 1
+            azure_error_code: str | None = None
+            try:
+                lifecycle._deploy_stage(
+                    template_path=template,
+                    subscription_id=authorization.subscriptionId,
+                    ledger=deployment_binding,
+                    stage=FOUNDATION_STAGE,
+                    cleanup_at=cleanup_at,
+                    expected_cost=expected_cost,
+                    maximum_cost=maximum_cost,
+                )
+            except lifecycle.AzureCommandError as exc:
+                azure_error_code = exc.sanitized_azure_error_code
+            except lifecycle.LifecycleError as exc:
+                if str(exc) != "lifecycle-process-timed-out":
+                    raise
+                azure_error_code = "lifecycle-process-timed-out"
+            if azure_error_code is None:
+                break
+
+            deployment_state = _foundation_deployment_state(
+                subscription_id=authorization.subscriptionId,
+                deployment_binding=deployment_binding,
+            )
+            if deployment_state == "Running":
+                deployment_state = _wait_for_foundation_deployment_terminal(
+                    subscription_id=authorization.subscriptionId,
+                    deployment_binding=deployment_binding,
+                )
+            if deployment_state == "Succeeded":
+                break
+
+            endpoint_count = _monitor_private_endpoint_precreation_count(scope)
+            reconciled_partial_endpoint = endpoint_count == 1
+            if reconciled_partial_endpoint:
+                recovery = _repair_exact_monitor_private_endpoint(scope)
+            retryable_pre_mutation = (
+                endpoint_count == 0
+                and azure_error_code in REPROVISION_FOUNDATION_TRANSIENT_AZURE_CODES
+            )
+            if (
+                deployment_attempts >= REPROVISION_FOUNDATION_MAXIMUM_DEPLOYMENTS
+                or not (reconciled_partial_endpoint or retryable_pre_mutation)
+            ):
+                _fail(f"scanner-foundation-reprovision-azure-{azure_error_code}")
+            time.sleep(float(deployment_attempts * 2))
+        else:
+            _fail("scanner-foundation-reprovision-deployment-attempts-exhausted")
+
+    outputs = _read_deployment_outputs(
+        subscription_id=authorization.subscriptionId,
+        stage=FOUNDATION_STAGE,
+        binding=deployment_binding,
+    )
+    if _validate_deployment_outputs(scope, outputs) is not None:
+        _fail("scanner-foundation-reprovision-proof-authority-reachable")
+    endpoint_state = _exact_monitor_private_endpoint_recovery_state(scope)
+    readback = _verify_foundation(scope, require_proof_console_diagnostic=True)
+    private_path_integrity = _verify_monitor_private_tls_path(
+        readback.workspace_customer_id
+    )
+    final_expected_cost, final_maximum_cost = lifecycle._verified_cost()
+    if (final_expected_cost, final_maximum_cost) != (expected_cost, maximum_cost):
+        _fail("scanner-foundation-reprovision-cost-envelope-drift")
+    return {
+        "deployment-attempt-count": deployment_attempts,
+        "diagnostic-integrity-sha256": readback.diagnostic_proof_integrity,
+        "expected-cost-usd-cents": final_expected_cost,
+        "foundation-integrity-sha256": readback.inventory_integrity,
+        "maximum-cost-usd-cents": final_maximum_cost,
+        "monitor-private-endpoint-precreation-count": precreation_count,
+        "monitor-private-endpoint-recovery": recovery,
+        "monitor-private-endpoint-state": endpoint_state,
+        "networking-integrity-sha256": (readback.private_path_control_plane_integrity),
+        "private-tls-integrity-sha256": private_path_integrity,
+        "rbac-integrity-sha256": readback.rbac_proof_integrity,
+        "scanner-proof-execution-count": 0,
+        "status": "staging-foundation-authoritative",
+        "tag-writer-boundary-integrity-sha256": (readback.tag_write_denial_integrity),
+    }
 
 
 class ProductionScannerBridgeRecoveryAdapter:
@@ -2729,13 +3088,17 @@ class ProductionScannerBridgeRecoveryAdapter:
         cleanup_at = _parse_utc(
             authorization.cleanupDeadlineUtc, "scanner-bridge-cleanup-deadline-invalid"
         )
-        cleanup_principal = lifecycle._verify_cleanup_control(subscription_id, cleanup_at)
+        cleanup_principal = lifecycle._verify_cleanup_control(
+            subscription_id, cleanup_at
+        )
         cleanup_role = cast(dict[str, JsonValue], contract["cleanupExecution"]).get(
             "cleanupContributorRoleDefinitionId"
         )
         if not isinstance(cleanup_role, str):
             _fail("scanner-bridge-cleanup-role-contract-malformed")
-        lifecycle._verify_cleanup_target_role(subscription_id, cleanup_principal, cleanup_role)
+        lifecycle._verify_cleanup_target_role(
+            subscription_id, cleanup_principal, cleanup_role
+        )
 
         if authorization.stage == PRIVATE_ENDPOINT_RECOVERY_STAGE:
             _exact_monitor_private_endpoint_recovery_state(authorization)
@@ -2749,9 +3112,15 @@ class ProductionScannerBridgeRecoveryAdapter:
                 authorization,
                 require_proof_console_diagnostic=True,
             )
-            live_path_integrity = _verify_monitor_private_tls_path(readback.workspace_customer_id)
-            cleanup_principal = lifecycle._verify_cleanup_control(subscription_id, cleanup_at)
-            lifecycle._verify_cleanup_target_role(subscription_id, cleanup_principal, cleanup_role)
+            live_path_integrity = _verify_monitor_private_tls_path(
+                readback.workspace_customer_id
+            )
+            cleanup_principal = lifecycle._verify_cleanup_control(
+                subscription_id, cleanup_at
+            )
+            lifecycle._verify_cleanup_target_role(
+                subscription_id, cleanup_principal, cleanup_role
+            )
             final_expected_cost, final_maximum_cost = lifecycle._verified_cost()
             if (final_expected_cost, final_maximum_cost) != (
                 expected_cost,
@@ -2760,7 +3129,9 @@ class ProductionScannerBridgeRecoveryAdapter:
                 _fail("scanner-private-endpoint-recovery-cost-envelope-drift")
             return {
                 "authorization-consumed": True,
-                "authorization-integrity-sha256": (authorization.authorizationIntegritySha256),
+                "authorization-integrity-sha256": (
+                    authorization.authorizationIntegritySha256
+                ),
                 "cleanup-executable-and-armed": True,
                 "cost-envelope-unchanged": True,
                 "dns-resolution-private": True,
@@ -2787,7 +3158,9 @@ class ProductionScannerBridgeRecoveryAdapter:
             receipt_directory=receipt_directory,
             now_utc=now,
         )
-        with tempfile.TemporaryDirectory(prefix="mobius77-scanner-bridge-") as directory:
+        with tempfile.TemporaryDirectory(
+            prefix="mobius77-scanner-bridge-"
+        ) as directory:
             template = Path(directory) / "main.json"
             lifecycle._compile_template(template)
             # A lost or failed response is reconciled from ARM before any retry.
@@ -2819,7 +3192,9 @@ class ProductionScannerBridgeRecoveryAdapter:
         if authorization.stage == FOUNDATION_STAGE:
             return {
                 "authorization-consumed": True,
-                "authorization-integrity-sha256": (authorization.authorizationIntegritySha256),
+                "authorization-integrity-sha256": (
+                    authorization.authorizationIntegritySha256
+                ),
                 "cleanup-executable-and-armed": True,
                 "foundation-integrity-sha256": readback.inventory_integrity,
                 "public-access-enabled": False,
@@ -2858,9 +3233,13 @@ class ProductionScannerBridgeRecoveryAdapter:
                 _fail(f"scanner-proof-wait-azure-{exc.sanitized_azure_error_code}")
             if execution["status"] != "Succeeded":
                 try:
-                    failure_marker = _proof_failure_marker(authorization, execution_name)
+                    failure_marker = _proof_failure_marker(
+                        authorization, execution_name
+                    )
                 except lifecycle.AzureCommandError as exc:
-                    _fail(f"scanner-proof-failure-marker-azure-{exc.sanitized_azure_error_code}")
+                    _fail(
+                        f"scanner-proof-failure-marker-azure-{exc.sanitized_azure_error_code}"
+                    )
                 failure_code = cast(str, failure_marker["failureCode"])
                 try:
                     blob_tag_observation = _proof_blob_tag_observation(
@@ -2909,7 +3288,9 @@ class ProductionScannerBridgeRecoveryAdapter:
         _write_evidence(evidence_output, evidence)
         return {
             "authorization-consumed": True,
-            "authorization-integrity-sha256": (authorization.authorizationIntegritySha256),
+            "authorization-integrity-sha256": (
+                authorization.authorizationIntegritySha256
+            ),
             "cleanup-executable-and-armed": True,
             "evidence-integrity-sha256": evidence.integrity_sha256(),
             "immutable-image-digest": authorization.apiImageDigest,
