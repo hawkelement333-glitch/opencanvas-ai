@@ -1150,6 +1150,122 @@ def test_redis_access_policy_fallback_rejects_unrelated_redis_child(
     assert result[0:2] == ("blocked", "required-resource-type-unavailable")
 
 
+def test_exact_postgres_administrator_parent_fallback_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status, explanation, fields = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            inventory_rows=[
+                _automation_metadata_row(
+                    "flexibleServers",
+                    api_versions=("2024-08-01",),
+                    locations=("Central US",),
+                )
+            ]
+        ),
+        provider_key="Microsoft.DBforPostgreSQL/flexibleServers/administrators",
+    )
+
+    assert (status, explanation) == ("proved", "provider-prerequisites-proved")
+    assert fields["parent-fallback-count"] == 1
+    assert fields["pinned-api-version-count"] == 1
+    assert fields["approved-region-count"] == 1
+
+
+def test_postgres_administrator_fallback_rejects_missing_parent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(inventory_rows=[]),
+        provider_key="Microsoft.DBforPostgreSQL/flexibleServers/administrators",
+    )
+
+    assert result[0:2] == ("blocked", "required-resource-type-unavailable")
+
+
+def test_postgres_administrator_fallback_rejects_parent_without_pinned_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            inventory_rows=[
+                _automation_metadata_row(
+                    "flexibleServers",
+                    api_versions=("2023-12-01-preview",),
+                    locations=("Central US",),
+                )
+            ]
+        ),
+        provider_key="Microsoft.DBforPostgreSQL/flexibleServers/administrators",
+    )
+
+    assert result[0:2] == ("blocked", "pinned-api-version-unavailable")
+
+
+def test_postgres_administrator_fallback_rejects_unrelated_postgres_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unrelated_key = "Microsoft.DBforPostgreSQL/flexibleServers/unrelatedChild"
+    original = managed_binding_execution._provider_binding
+
+    def binding(key: str) -> tuple[str, str, str]:
+        if key == unrelated_key:
+            return (
+                "Microsoft.DBforPostgreSQL",
+                "flexibleServers/unrelatedChild",
+                "2024-08-01",
+            )
+        return original(key)
+
+    monkeypatch.setattr(managed_binding_execution, "_provider_binding", binding)
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            inventory_rows=[
+                _automation_metadata_row(
+                    "flexibleServers",
+                    api_versions=("2024-08-01",),
+                    locations=("Central US",),
+                )
+            ]
+        ),
+        provider_key=unrelated_key,
+    )
+
+    assert result[0:2] == ("blocked", "required-resource-type-unavailable")
+
+
+def test_explicit_postgres_administrator_metadata_overrides_parent_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    explicit_child = _automation_metadata_row(
+        "flexibleServers/administrators",
+        api_versions=("2023-12-01-preview",),
+        locations=("Central US",),
+    )
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            direct_child=explicit_child,
+            inventory_rows=[
+                explicit_child,
+                _automation_metadata_row(
+                    "flexibleServers",
+                    api_versions=("2024-08-01",),
+                    locations=("Central US",),
+                ),
+            ],
+        ),
+        provider_key="Microsoft.DBforPostgreSQL/flexibleServers/administrators",
+    )
+
+    assert result[0:2] == ("blocked", "pinned-api-version-unavailable")
+    assert result[2]["parent-fallback-count"] == 0
+
+
 def test_exact_child_metadata_fallback_set_remains_closed() -> None:
     assert managed_binding_execution._EXACT_CHILD_METADATA_FALLBACKS == {
         "Microsoft.Automation/automationAccounts/jobSchedules": (
@@ -1169,6 +1285,12 @@ def test_exact_child_metadata_fallback_set_remains_closed() -> None:
             "redisEnterprise/databases/accessPolicyAssignments",
             "redisEnterprise/databases",
             "2026-05-01-preview",
+        ),
+        "Microsoft.DBforPostgreSQL/flexibleServers/administrators": (
+            "Microsoft.DBforPostgreSQL",
+            "flexibleServers/administrators",
+            "flexibleServers",
+            "2024-08-01",
         ),
         "Microsoft.Network/privateEndpoints/privateDnsZoneGroups": (
             "Microsoft.Network",

@@ -84,6 +84,12 @@ _EXACT_CHILD_METADATA_FALLBACKS: Final = {
         "redisEnterprise/databases",
         "2026-05-01-preview",
     ),
+    "Microsoft.DBforPostgreSQL/flexibleServers/administrators": (
+        "Microsoft.DBforPostgreSQL",
+        "flexibleServers/administrators",
+        "flexibleServers",
+        "2024-08-01",
+    ),
     "Microsoft.Network/privateEndpoints/privateDnsZoneGroups": (
         "Microsoft.Network",
         "privateEndpoints/privateDnsZoneGroups",
