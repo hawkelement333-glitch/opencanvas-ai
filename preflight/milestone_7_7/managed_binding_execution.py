@@ -102,6 +102,12 @@ _EXACT_CHILD_METADATA_FALLBACKS: Final = {
         "privateEndpoints",
         "2025-07-01",
     ),
+    "Microsoft.Storage/storageAccounts/blobServices/containers": (
+        "Microsoft.Storage",
+        "storageAccounts/blobServices/containers",
+        "storageAccounts/blobServices",
+        "2025-06-01",
+    ),
 }
 _EXACT_REGION_INDEPENDENT_BINDINGS: Final[
     dict[str, tuple[str, str, str, frozenset[str]]]
