@@ -90,6 +90,12 @@ _EXACT_CHILD_METADATA_FALLBACKS: Final = {
         "flexibleServers",
         "2024-08-01",
     ),
+    "Microsoft.DBforPostgreSQL/flexibleServers/databases": (
+        "Microsoft.DBforPostgreSQL",
+        "flexibleServers/databases",
+        "flexibleServers",
+        "2024-08-01",
+    ),
     "Microsoft.Network/privateEndpoints/privateDnsZoneGroups": (
         "Microsoft.Network",
         "privateEndpoints/privateDnsZoneGroups",
