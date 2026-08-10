@@ -1059,6 +1059,126 @@ def test_redis_region_is_exact_and_staging_region_is_rejected(
     assert blocked[0:2] == ("blocked", "approved-region-unavailable")
 
 
+def test_exact_redis_access_policy_parent_fallback_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = ExactChildMetadataAdapter(
+        inventory_rows=[
+            _automation_metadata_row(
+                "redisEnterprise/databases",
+                api_versions=("2026-05-01-preview",),
+                locations=("Australia Central",),
+            )
+        ]
+    )
+
+    status, explanation, fields = _run_exact_child_check(
+        monkeypatch,
+        adapter,
+        provider_key=("Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments"),
+    )
+
+    assert (status, explanation) == ("proved", "provider-prerequisites-proved")
+    assert fields["parent-fallback-count"] == 1
+    assert fields["pinned-api-version-count"] == 1
+    assert fields["approved-region-count"] == 1
+    assert all(call[1:3] == ("provider", "show") for call in adapter.calls)
+
+
+def test_redis_access_policy_fallback_rejects_missing_parent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(inventory_rows=[]),
+        provider_key=("Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments"),
+    )
+
+    assert result[0:2] == ("blocked", "required-resource-type-unavailable")
+
+
+def test_redis_access_policy_fallback_rejects_parent_without_pinned_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            inventory_rows=[
+                _automation_metadata_row(
+                    "redisEnterprise/databases",
+                    api_versions=("2025-07-01",),
+                    locations=("Australia Central",),
+                )
+            ]
+        ),
+        provider_key=("Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments"),
+    )
+
+    assert result[0:2] == ("blocked", "pinned-api-version-unavailable")
+
+
+def test_redis_access_policy_fallback_rejects_unrelated_redis_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unrelated_key = "Microsoft.Cache/redisEnterprise/databases/unrelatedChild"
+    original = managed_binding_execution._provider_binding
+
+    def binding(key: str) -> tuple[str, str, str]:
+        if key == unrelated_key:
+            return (
+                "Microsoft.Cache",
+                "redisEnterprise/databases/unrelatedChild",
+                "2026-05-01-preview",
+            )
+        return original(key)
+
+    monkeypatch.setattr(managed_binding_execution, "_provider_binding", binding)
+    result = _run_exact_child_check(
+        monkeypatch,
+        ExactChildMetadataAdapter(
+            inventory_rows=[
+                _automation_metadata_row(
+                    "redisEnterprise/databases",
+                    api_versions=("2026-05-01-preview",),
+                    locations=("Australia Central",),
+                )
+            ]
+        ),
+        provider_key=unrelated_key,
+    )
+
+    assert result[0:2] == ("blocked", "required-resource-type-unavailable")
+
+
+def test_exact_child_metadata_fallback_set_remains_closed() -> None:
+    assert managed_binding_execution._EXACT_CHILD_METADATA_FALLBACKS == {
+        "Microsoft.Automation/automationAccounts/jobSchedules": (
+            "Microsoft.Automation",
+            "automationAccounts/jobSchedules",
+            "automationAccounts",
+            "2024-10-23",
+        ),
+        "Microsoft.Automation/automationAccounts/schedules": (
+            "Microsoft.Automation",
+            "automationAccounts/schedules",
+            "automationAccounts",
+            "2024-10-23",
+        ),
+        "Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments": (
+            "Microsoft.Cache",
+            "redisEnterprise/databases/accessPolicyAssignments",
+            "redisEnterprise/databases",
+            "2026-05-01-preview",
+        ),
+        "Microsoft.Network/privateEndpoints/privateDnsZoneGroups": (
+            "Microsoft.Network",
+            "privateEndpoints/privateDnsZoneGroups",
+            "privateEndpoints",
+            "2025-07-01",
+        ),
+    }
+
+
 @pytest.mark.parametrize(
     ("registration_state", "rows", "explanation"),
     [
@@ -1098,7 +1218,7 @@ def test_automation_job_schedules_fallback_prerequisites_fail_closed(
     assert result[1] == explanation
 
 
-def test_automation_fallback_rejects_every_other_child_type(
+def test_exact_fallback_rejects_unrelated_provider_child_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     result = _run_exact_child_check(
@@ -1509,6 +1629,8 @@ def test_closed_package_blocks_on_unregistered_required_provider(
     assert result["blockedExplanationCode"] == "required-provider-not-registered"
     assert result["mutationPerformed"] is False
     assert result["provisioningPerformed"] is False
+    assert not (tmp_path / "receipts" / "pre-secret-provisioning.receipt.json").exists()
+    assert not (tmp_path / "receipts" / "publish-api-image.receipt.json").exists()
     assert all(
         call == EXPECTED_ACCOUNT_COMMAND or call[1:3] == ("provider", "show")
         for call in adapter.calls
@@ -2910,6 +3032,12 @@ def test_publication_is_a_required_lifecycle_transition_before_post_secret() -> 
     overlay = load_operation_overlay()
     lifecycle = cast(list[dict[str, JsonValue]], overlay["lifecycleOperations"])
     ids = [str(item["id"]) for item in lifecycle]
+    pre_secret = next(item for item in lifecycle if item["id"] == "pre-secret-provisioning")
+    assert pre_secret["authorizationPredicate"] == [
+        "all-fifteen-prerequisites-proved",
+        "valid-unconsumed-one-run-ledger",
+        "approved-cost-ceiling",
+    ]
     assert ids.index("pre-secret-provisioning") < ids.index("private-path-verification")
     assert ids.index("private-path-verification") < ids.index("publish-api-image")
     assert ids.index("publish-api-image") < ids.index("post-secret-provisioning")

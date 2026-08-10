@@ -78,6 +78,12 @@ _EXACT_CHILD_METADATA_FALLBACKS: Final = {
         "automationAccounts",
         "2024-10-23",
     ),
+    "Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments": (
+        "Microsoft.Cache",
+        "redisEnterprise/databases/accessPolicyAssignments",
+        "redisEnterprise/databases",
+        "2026-05-01-preview",
+    ),
     "Microsoft.Network/privateEndpoints/privateDnsZoneGroups": (
         "Microsoft.Network",
         "privateEndpoints/privateDnsZoneGroups",
