@@ -133,10 +133,12 @@ API_IMAGE_BUILDER_PREFIX: Final = "mobius77-api-build-"
 API_IMAGE_BUILD_INPUT_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/api-image-build-input/v1\x00"
 )
-PREBUILT_IMAGE_RECORD_DOMAIN: Final = (
+LEGACY_PREBUILT_IMAGE_RECORD_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/prebuilt-api-image/v1\x00"
 )
-PREBUILT_IMAGE_RECORD_VERSION: Final = "mobius.milestone-7.7.prebuilt-api-image.v1"
+LEGACY_PREBUILT_IMAGE_RECORD_VERSION: Final = "mobius.milestone-7.7.prebuilt-api-image.v1"
+PREBUILT_IMAGE_RECORD_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/prebuilt-api-image/v2\x00"
+PREBUILT_IMAGE_RECORD_VERSION: Final = "mobius.milestone-7.7.prebuilt-api-image.v2"
 DOCKER_PUSH_MAXIMUM_ATTEMPTS: Final = 2
 ACR_TOKEN_RESOURCE: Final = "https://containerregistry.azure.net"
 ACR_REFRESH_TOKEN_USERNAME: Final = "00000000-0000-0000-0000-000000000000"
@@ -7025,7 +7027,7 @@ def main() -> int:
                 "config-digest": record["configDigest"],
                 "image-id": record["imageId"],
                 "platform": record["platform"],
-                "repository-head": record["repositoryHead"],
+                "image-source-commit": record["imageSourceCommit"],
                 "status": "complete",
             }
             print(json.dumps(result, separators=(",", ":"), sort_keys=True))

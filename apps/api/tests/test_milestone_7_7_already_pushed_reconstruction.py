@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
+
 from infra.milestone_7_7 import api_image_publication as publication
 from infra.milestone_7_7.scripts import reconstruct_already_pushed_publication as script
 
@@ -62,7 +63,7 @@ def _retained_artifacts() -> tuple[dict[str, object], dict[str, object]]:
         docker,
     )
     prebuilt: dict[str, object] = {
-        "schemaVersion": publication.PREBUILT_IMAGE_RECORD_VERSION,
+        "schemaVersion": publication.LEGACY_PREBUILT_IMAGE_RECORD_VERSION,
         "completionStatus": "READY",
         "repositoryHead": SOURCE,
         "buildInputSha256": BUILD,
@@ -75,7 +76,7 @@ def _retained_artifacts() -> tuple[dict[str, object], dict[str, object]]:
         "platform": "linux/amd64",
     }
     prebuilt["integritySha256"] = publication._integrity_value(
-        publication.PREBUILT_IMAGE_RECORD_DOMAIN,
+        publication.LEGACY_PREBUILT_IMAGE_RECORD_DOMAIN,
         prebuilt,
     )
     return docker, prebuilt
