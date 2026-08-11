@@ -45,12 +45,17 @@ BLOB_SCAN_TIME_TAG: Final = "Malware Scanning scan time UTC"
 BLOB_TAG_OBSERVATION_MARKER: Final = "SCANNER_BLOB_TAG_OBSERVATION"
 BLOB_TAG_OBSERVATION_SCHEMA: Final = "mobius.scanner-result-bridge.blob-tags-observation.v1"
 BLOB_TAG_NORMALIZATION_PATH: Final = "azure-blob-tags-xml-local-name-v1"
+SCAN_FINISHED_NORMALIZATION_PATH: Final = (
+    "trim-z-to-offset-truncate-beyond-microseconds-fromisoformat-utc-v1"
+)
+SCAN_FINISHED_COMPARISON_CONTRACT: Final = "exact-parsed-utc-instant-equality-v1"
 LOG_ANALYTICS_TOKEN_RESOURCE: Final = "https://api.loganalytics.io/"
 SCANNER_IDENTITY: Final = "azure-defender-for-storage"
 SCANNER_VERSION: Final = "defender-storage-dual-source-v1"
 BRIDGE_PROVENANCE: Final = "defender-blob-tags-plus-storage-malware-scanning-results"
 _ACCOUNT_NAME = re.compile(r"^[a-z0-9]{3,24}$")
 _AZURE_ETAG = re.compile(r"^0x[0-9A-Fa-f]+$")
+_SANITIZED_TIMESTAMP = re.compile(r"^[0-9TtZz:+. -]{1,128}$")
 _BLOB_RESULTS = frozenset({"No threats found", "Malicious", "Error", "Not scanned"})
 _LOG_RESULT_NORMALIZATIONS: Final = {
     "No Threat Found": "No threats found",
@@ -77,6 +82,7 @@ class BlobScanEvidence:
     etag: str
     scan_result: str
     scan_finished_at: datetime
+    scan_finished_raw: str
     evidence_sha256: str
 
     def canonical(self) -> dict[str, str]:
@@ -159,6 +165,7 @@ class LogAnalyticsScanEvidence:
     scan_result: str
     correlation_id: str
     scan_finished_at: datetime
+    scan_finished_raw: str
     time_generated: datetime
     evidence_sha256: str
 
@@ -203,6 +210,7 @@ class ScanEvidenceCorrelation:
 
     decision: ScannerBridgeDecision | None
     failure_code: str | None
+    terminal_evidence: dict[str, JsonValue] | None = None
 
 
 class BlobScanEvidenceReader(Protocol):
@@ -380,8 +388,9 @@ class AzureBlobScanEvidenceClient:
         result = tags[BLOB_RESULT_TAG]
         if result not in _BLOB_RESULTS:
             raise ScannerBridgeEvidenceError("scanner-blob-tag-result-invalid")
+        scan_finished_raw = tags[BLOB_SCAN_TIME_TAG]
         try:
-            finished = _parse_utc(tags[BLOB_SCAN_TIME_TAG])
+            finished = _parse_utc(scan_finished_raw)
         except ScannerBridgeEvidenceError as exc:
             raise ScannerBridgeEvidenceError("scanner-blob-tag-scan-time-invalid") from exc
         etag = _normalize_azure_etag(version.etag)
@@ -403,6 +412,7 @@ class AzureBlobScanEvidenceClient:
             etag=etag,
             scan_result=result,
             scan_finished_at=finished,
+            scan_finished_raw=scan_finished_raw,
             evidence_sha256=integrity,
         )
 
@@ -541,7 +551,8 @@ class AzureLogAnalyticsScanEvidenceClient:
             result = _LOG_RESULT_NORMALIZATIONS.get(values["ScanResultType"])
             if result is None or not values["CorrelationId"]:
                 raise ScannerBridgeEvidenceError("scanner-log-query-response-invalid")
-            finished = _parse_utc(values["ScanFinishedTimeUtc"])
+            scan_finished_raw = values["ScanFinishedTimeUtc"]
+            finished = _parse_utc(scan_finished_raw)
             generated = _parse_utc(values["TimeGenerated"])
             integrity = _canonical_sha256(values, domain="mobius.scanner-bridge.log-row.v1")
             parsed.append(
@@ -552,6 +563,7 @@ class AzureLogAnalyticsScanEvidenceClient:
                     scan_result=result,
                     correlation_id=values["CorrelationId"],
                     scan_finished_at=finished,
+                    scan_finished_raw=scan_finished_raw,
                     time_generated=generated,
                     evidence_sha256=integrity,
                 )
@@ -609,7 +621,11 @@ def diagnose_scan_evidence(
     if not _azure_etags_equal(first.etag, blob.etag):
         return ScanEvidenceCorrelation(None, "scanner-correlation-etag-mismatch")
     if first.scan_finished_at != blob.scan_finished_at:
-        return ScanEvidenceCorrelation(None, "scanner-correlation-scan-finished-mismatch")
+        return ScanEvidenceCorrelation(
+            None,
+            "scanner-correlation-scan-finished-mismatch",
+            _scan_finished_comparison_evidence(blob=blob, log=first),
+        )
     verdict: BridgeVerdict
     normalized_log_result = _LOG_RESULT_NORMALIZATIONS.get(first.scan_result)
     if (blob.scan_result, normalized_log_result) == (
@@ -1022,6 +1038,73 @@ def _parse_utc(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
+def _timestamp_representation(raw_value: str, parsed: datetime) -> dict[str, JsonValue]:
+    exact_bytes = raw_value.encode("utf-8")
+    stripped = raw_value.strip()
+    fraction = re.search(r"\.(\d+)", stripped)
+    if stripped.endswith(("Z", "z")):
+        timezone_representation = stripped[-1]
+    else:
+        offset = re.search(r"([+-]\d\d:\d\d)$", stripped)
+        timezone_representation = offset.group(1) if offset is not None else "unproved"
+    display_value = (
+        raw_value
+        if _SANITIZED_TIMESTAMP.fullmatch(raw_value) is not None
+        else "<redacted-invalid-timestamp>"
+    )
+    return {
+        "canonicalUtc": _format_utc(parsed),
+        "fractionalSecondDigits": len(fraction.group(1)) if fraction is not None else 0,
+        "parserNormalizationPath": SCAN_FINISHED_NORMALIZATION_PATH,
+        "rawLengthBytes": len(exact_bytes),
+        "rawValue": display_value,
+        "rawValueSha256": hashlib.sha256(exact_bytes).hexdigest(),
+        "timezoneRepresentation": timezone_representation,
+    }
+
+
+def _datetime_delta_microseconds(left: datetime, right: datetime) -> int:
+    delta = _aware_utc(left) - _aware_utc(right)
+    return ((delta.days * 86_400) + delta.seconds) * 1_000_000 + delta.microseconds
+
+
+def _scan_finished_comparison_evidence(
+    *,
+    blob: BlobScanEvidence,
+    log: LogAnalyticsScanEvidence,
+) -> dict[str, JsonValue]:
+    body: dict[str, JsonValue] = {
+        "blobEvidenceSha256": blob.evidence_sha256,
+        "blobTagResult": blob.scan_result,
+        "blobTagsTimestamp": _timestamp_representation(
+            blob.scan_finished_raw, blob.scan_finished_at
+        ),
+        "comparisonContract": SCAN_FINISHED_COMPARISON_CONTRACT,
+        "comparisonDecision": "different-instant",
+        "correlationIdSha256": _sha256_text(log.correlation_id),
+        "etagComparison": "matched",
+        "etagSha256": _sha256_text(_normalize_azure_etag(blob.etag)),
+        "logAnalyticsEvidenceSha256": log.evidence_sha256,
+        "logAnalyticsResult": log.scan_result,
+        "logAnalyticsTimestamp": _timestamp_representation(
+            log.scan_finished_raw, log.scan_finished_at
+        ),
+        "logAnalyticsMinusBlobTagsMicroseconds": _datetime_delta_microseconds(
+            log.scan_finished_at, blob.scan_finished_at
+        ),
+        "providerVersionSha256": _sha256_text(blob.provider_version_id),
+        "uriComparison": "matched",
+        "uriSha256": _sha256_text(blob.object_uri),
+    }
+    return {
+        **body,
+        "integritySha256": _canonical_sha256(
+            body,
+            domain="mobius.scanner-bridge.scan-finished-comparison.v1",
+        ),
+    }
+
+
 def _normalize_azure_etag(value: str) -> str:
     normalized = value.strip()
     if normalized.startswith('"') or normalized.endswith('"'):
@@ -1063,6 +1146,8 @@ __all__ = [
     "BLOB_TAG_OBSERVATION_MARKER",
     "BLOB_TAG_OBSERVATION_SCHEMA",
     "BRIDGE_PROVENANCE",
+    "SCAN_FINISHED_COMPARISON_CONTRACT",
+    "SCAN_FINISHED_NORMALIZATION_PATH",
     "AzureBlobScanEvidenceClient",
     "AzureLogAnalyticsScanEvidenceClient",
     "BlobScanEvidence",

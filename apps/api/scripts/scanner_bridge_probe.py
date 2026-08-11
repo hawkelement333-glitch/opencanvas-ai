@@ -46,10 +46,19 @@ _FAILURE_CODE = re.compile(r"^scanner-[a-z0-9]+(?:-[a-z0-9]+)*$")
 class ScannerBridgeProbeFailure(RuntimeError):
     """A sanitized terminal proof failure retained before canary cleanup."""
 
-    def __init__(self, failure_code: str, attempt_count: int) -> None:
+    def __init__(
+        self,
+        failure_code: str,
+        attempt_count: int,
+        *,
+        blob_tag_observation_count: int = 0,
+        terminal_evidence: object | None = None,
+    ) -> None:
         super().__init__(failure_code)
         self.failure_code = failure_code
         self.attempt_count = attempt_count
+        self.blob_tag_observation_count = blob_tag_observation_count
+        self.terminal_evidence = terminal_evidence
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,13 +186,22 @@ def _safe_failure_code(exc: RuntimeError, fallback: str) -> str:
 
 
 def _emit_failure_marker(failure: ScannerBridgeProbeFailure) -> None:
+    body: dict[str, object] = {
+        "attemptCount": failure.attempt_count,
+        "blobTagObservationCount": failure.blob_tag_observation_count,
+        "failureCode": failure.failure_code,
+        "marker": "SCANNER_RESULT_BRIDGE_FAILED",
+        "schemaVersion": "mobius.scanner-result-bridge.proof-failure.v2",
+        "terminalEvidence": failure.terminal_evidence,
+    }
     print(
         json.dumps(
             {
-                "attemptCount": failure.attempt_count,
-                "failureCode": failure.failure_code,
-                "marker": "SCANNER_RESULT_BRIDGE_FAILED",
-                "schemaVersion": "mobius.scanner-result-bridge.proof-failure.v1",
+                **body,
+                "markerIntegritySha256": hashlib.sha256(
+                    b"mobius.scanner-bridge.proof-failure-marker.v2\0"
+                    + json.dumps(body, separators=(",", ":"), sort_keys=True).encode()
+                ).hexdigest(),
             },
             separators=(",", ":"),
             sort_keys=True,
@@ -224,7 +242,9 @@ async def _poll_dual_source_evidence(
     if max_attempts < 1:
         raise RuntimeError("scanner-bridge-probe-bounds-invalid")
     latest_failure = "scanner-correlation-log-evidence-missing"
+    latest_terminal_evidence: object | None = None
     for attempt in range(max_attempts):
+        latest_terminal_evidence = None
         observed_at = clock()
         try:
             blob = await blob_reader.read(version, observed_at=observed_at)
@@ -256,6 +276,7 @@ async def _poll_dual_source_evidence(
                         exc, "scanner-correlation-validation-failed"
                     )
                 else:
+                    latest_terminal_evidence = correlation.terminal_evidence
                     if correlation.decision is not None:
                         if not logs:
                             raise RuntimeError("scanner-correlation-log-evidence-missing")
@@ -269,7 +290,11 @@ async def _poll_dual_source_evidence(
                     )
         if attempt + 1 < max_attempts:
             await asyncio.sleep(delay_seconds)
-    raise ScannerBridgeProbeFailure(latest_failure, max_attempts)
+    raise ScannerBridgeProbeFailure(
+        latest_failure,
+        max_attempts,
+        terminal_evidence=latest_terminal_evidence,
+    )
 
 
 async def run(*, max_attempts: int, delay_seconds: float) -> int:
@@ -308,10 +333,17 @@ async def run(*, max_attempts: int, delay_seconds: float) -> int:
         return addresses
 
     dns = PrivateDnsVerifier(recording_resolver)
+    blob_tag_observation_count = 0
+
+    def record_blob_tag_observation(observation: BlobTagReadObservation) -> None:
+        nonlocal blob_tag_observation_count
+        blob_tag_observation_count += 1
+        _emit_blob_tag_observation(observation)
+
     blob_reader = AzureBlobScanEvidenceClient(
         storage,
         dns=dns,
-        observation_sink=_emit_blob_tag_observation,
+        observation_sink=record_blob_tag_observation,
     )
     log_reader = AzureLogAnalyticsScanEvidenceClient(
         workspace_id=workspace_customer_id,
@@ -377,7 +409,12 @@ async def run(*, max_attempts: int, delay_seconds: float) -> int:
             attempt_count = match.attempt_count
         except ScannerBridgeProbeFailure as exc:
             attempt_count = exc.attempt_count
-            raise
+            raise ScannerBridgeProbeFailure(
+                exc.failure_code,
+                exc.attempt_count,
+                blob_tag_observation_count=blob_tag_observation_count,
+                terminal_evidence=exc.terminal_evidence,
+            ) from None
     finally:
         try:
             await _remove_exact_canary(storage, provider)
@@ -385,6 +422,7 @@ async def run(*, max_attempts: int, delay_seconds: float) -> int:
             raise ScannerBridgeProbeFailure(
                 _safe_failure_code(exc, "scanner-bridge-probe-canary-cleanup-failed"),
                 attempt_count,
+                blob_tag_observation_count=blob_tag_observation_count,
             ) from None
     decision = match.decision
     matched_blob = match.blob

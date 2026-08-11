@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 from infra.milestone_7_7 import scanner_bridge_recovery_adapter as adapter_module
@@ -45,7 +46,7 @@ CLEANUP_ACCOUNT = (
     "providers/Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery"
 )
 NOW = datetime(2026, 8, 6, 17, 30, tzinfo=UTC)
-DEADLINE = datetime(2026, 8, 11, 19, 30, tzinfo=UTC)
+DEADLINE = datetime(2026, 8, 12, 8, 15, tzinfo=UTC)
 HEAD = "a" * 40
 IMAGE = "acrmobius7711564669.azurecr.io/opencanvas-api@sha256:" + "b" * 64
 BUILD_INPUT = "c" * 64
@@ -60,7 +61,7 @@ def _authorization(stage: str = FOUNDATION_STAGE) -> ScannerBridgeRecoveryAuthor
         subscription_id=SUBSCRIPTION_ID,
         target_resource_group_id=TARGET,
         cleanup_automation_account_id=CLEANUP_ACCOUNT,
-        cleanup_deadline_utc="2026-08-11T19:30:00Z",
+        cleanup_deadline_utc="2026-08-12T08:15:00Z",
         now_utc=NOW,
         api_image_digest=IMAGE if stage == PROOF_STAGE else None,
         build_input_sha256=BUILD_INPUT if stage == PROOF_STAGE else None,
@@ -168,11 +169,68 @@ def _marker() -> dict[str, str]:
 def _failure_marker(
     code: str = "scanner-correlation-uri-mismatch",
 ) -> dict[str, JsonValue]:
-    return {
+    terminal: dict[str, JsonValue] | None = (
+        _scan_finished_terminal_evidence()
+        if code == "scanner-correlation-scan-finished-mismatch"
+        else None
+    )
+    body: dict[str, JsonValue] = {
         "attemptCount": 120,
+        "blobTagObservationCount": 120,
         "failureCode": code,
         "marker": "SCANNER_RESULT_BRIDGE_FAILED",
-        "schemaVersion": "mobius.scanner-result-bridge.proof-failure.v1",
+        "schemaVersion": "mobius.scanner-result-bridge.proof-failure.v2",
+        "terminalEvidence": terminal,
+    }
+    return {
+        **body,
+        "markerIntegritySha256": adapter_module._canonical_hash(
+            body,
+            "mobius.scanner-bridge.proof-failure-marker.v2",
+        ),
+    }
+
+
+def _timestamp_representation(value: str) -> dict[str, JsonValue]:
+    canonical = value
+    body: dict[str, JsonValue] = {
+        "canonicalUtc": canonical,
+        "fractionalSecondDigits": (
+            len(value.rsplit(".", maxsplit=1)[1].removesuffix("Z")) if "." in value else 0
+        ),
+        "parserNormalizationPath": adapter_module.SCAN_FINISHED_NORMALIZATION_PATH,
+        "rawLengthBytes": len(value.encode()),
+        "rawValue": value,
+        "rawValueSha256": adapter_module._hash_text(value),
+        "timezoneRepresentation": "Z",
+    }
+    return body
+
+
+def _scan_finished_terminal_evidence() -> dict[str, JsonValue]:
+    body: dict[str, JsonValue] = {
+        "blobEvidenceSha256": "1" * 64,
+        "blobTagResult": "No threats found",
+        "blobTagsTimestamp": _timestamp_representation("2026-08-06T14:24:59.999999Z"),
+        "comparisonContract": adapter_module.SCAN_FINISHED_COMPARISON_CONTRACT,
+        "comparisonDecision": "different-instant",
+        "correlationIdSha256": "2" * 64,
+        "etagComparison": "matched",
+        "etagSha256": "3" * 64,
+        "logAnalyticsEvidenceSha256": "4" * 64,
+        "logAnalyticsMinusBlobTagsMicroseconds": 1,
+        "logAnalyticsResult": "No threats found",
+        "logAnalyticsTimestamp": _timestamp_representation("2026-08-06T14:25:00Z"),
+        "providerVersionSha256": "5" * 64,
+        "uriComparison": "matched",
+        "uriSha256": "6" * 64,
+    }
+    return {
+        **body,
+        "integritySha256": adapter_module._canonical_hash(
+            body,
+            "mobius.scanner-bridge.scan-finished-comparison.v1",
+        ),
     }
 
 
@@ -497,7 +555,7 @@ def test_foundation_rejects_any_image_binding() -> None:
             subscription_id=SUBSCRIPTION_ID,
             target_resource_group_id=TARGET,
             cleanup_automation_account_id=CLEANUP_ACCOUNT,
-            cleanup_deadline_utc="2026-08-11T19:30:00Z",
+            cleanup_deadline_utc="2026-08-12T08:15:00Z",
             now_utc=NOW,
             api_image_digest=IMAGE,
         )
@@ -827,7 +885,7 @@ def test_proof_executes_once_then_removes_residue_and_writes_typed_evidence(
     monkeypatch.setattr(
         adapter_module,
         "_wait_for_execution",
-        lambda *_args: (
+        lambda *_args, **_kwargs: (
             calls.append("wait")
             or {
                 "name": "proof-execution",
@@ -898,9 +956,14 @@ def test_failed_execution_preserves_exact_marker_before_residue_removal(
     monkeypatch.setattr(
         adapter_module,
         "_proof_failure_marker",
-        lambda *_args: (
+        lambda *_args, **_kwargs: (
             calls.append("failure-marker") or _failure_marker("scanner-blob-tags-key-missing")
         ),
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_log_output",
+        lambda *_args: calls.append("bounded-terminal-log") or "[]",
     )
     observation = _blob_tag_observation()
     monkeypatch.setattr(
@@ -938,7 +1001,19 @@ def test_failed_execution_preserves_exact_marker_before_residue_removal(
     assert decoded["executionStatus"] == "Failed"
     assert decoded["marker"] == "SCANNER_RESULT_BRIDGE_FAILED"
     assert decoded["blobTagObservation"] == observation
-    assert decoded["schemaVersion"] == "mobius.scanner-result-bridge.failure-evidence.v2"
+    assert decoded["schemaVersion"] == "mobius.scanner-result-bridge.failure-evidence.v3"
+    assert decoded["blobTagObservationCount"] == 120
+    assert decoded["proofExecutionCount"] == 1
+    assert decoded["terminalEdge"] == "scanner-blob-tags-key-missing"
+    assert decoded["finalBoundedErrorCode"] == "scanner-blob-tags-key-missing"
+    assert decoded["scanFinishedComparison"] is None
+    assert decoded["terminalLogSummary"] == {
+        "maximumSerializedBytes": adapter_module.PROOF_LOG_OUTPUT_MAX_BYTES,
+        "rawHistoryRetained": False,
+        "retentionDecision": "final-integrity-bound-markers-only",
+        "tailLineLimit": adapter_module.PROOF_LOG_TAIL_LINES,
+    }
+    assert len(evidence_path.read_bytes()) < adapter_module.FAILURE_EVIDENCE_MAX_BYTES
     assert decoded["failureEvidenceIntegritySha256"]
 
 
@@ -1446,6 +1521,51 @@ def test_log_parser_accepts_only_one_complete_sanitized_marker() -> None:
     assert adapter_module._find_marker('{"marker":"wrong"}', "SCANNER_RESULT_BRIDGE_PROVED") is None
 
 
+def test_large_repeated_history_is_reduced_to_one_bounded_terminal_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    accepted = _blob_tag_observation(
+        decision="accepted",
+        returned=(adapter_module.BLOB_RESULT_TAG, adapter_module.BLOB_SCAN_TIME_TAG),
+    )
+    failure = _failure_marker("scanner-correlation-scan-finished-mismatch")
+    full_history = [
+        {"Log": json.dumps(accepted, separators=(",", ":"), sort_keys=True)} for _ in range(5_000)
+    ]
+    full_history.append({"Log": json.dumps(failure, separators=(",", ":"), sort_keys=True)})
+    bounded = json.dumps(full_history[-adapter_module.PROOF_LOG_TAIL_LINES :])
+    calls: list[tuple[str, ...]] = []
+
+    def run(argv: tuple[str, ...], **_kwargs: object) -> str:
+        calls.append(argv)
+        return bounded
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
+    output = adapter_module._proof_log_output(_authorization(PROOF_STAGE), "proof-execution")
+
+    assert len(json.dumps(full_history).encode()) > managed_binding_lifecycle.MAXIMUM_OUTPUT_BYTES
+    assert len(output.encode()) < adapter_module.PROOF_LOG_OUTPUT_MAX_BYTES
+    assert calls[0][calls[0].index("--tail") + 1] == str(adapter_module.PROOF_LOG_TAIL_LINES)
+    assert (
+        adapter_module._proof_failure_marker(
+            _authorization(PROOF_STAGE),
+            "proof-execution",
+            log_output=output,
+        )
+        == failure
+    )
+    assert (
+        adapter_module._proof_blob_tag_observation(
+            _authorization(PROOF_STAGE),
+            "proof-execution",
+            failure_code="scanner-correlation-scan-finished-mismatch",
+            log_output=output,
+        )
+        == accepted
+    )
+    assert len(calls) == 1
+
+
 def test_failure_log_parser_accepts_only_sanitized_exact_marker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1465,6 +1585,86 @@ def test_failure_log_parser_accepts_only_sanitized_exact_marker(
         match="scanner-proof-failure-marker-malformed",
     ):
         adapter_module._proof_failure_marker(_authorization(PROOF_STAGE), "proof")
+
+
+def test_timestamp_mismatch_artifact_is_bounded_complete_and_deterministic(
+    tmp_path: Path,
+) -> None:
+    authorization = _authorization(PROOF_STAGE)
+    marker = _failure_marker("scanner-correlation-scan-finished-mismatch")
+    observation = _blob_tag_observation(
+        decision="accepted",
+        returned=(adapter_module.BLOB_RESULT_TAG, adapter_module.BLOB_SCAN_TIME_TAG),
+    )
+    execution = {
+        "name": "proof",
+        "status": "Failed",
+        "startTime": "2026-08-06T14:20:00Z",
+        "endTime": "2026-08-06T14:25:00Z",
+    }
+    first = tmp_path.parent / f"{tmp_path.name}-first.json"
+    second = tmp_path.parent / f"{tmp_path.name}-second.json"
+
+    for path in (first, second):
+        adapter_module._write_failure_evidence(
+            path,
+            authorization=authorization,
+            execution_name="proof",
+            execution=execution,
+            marker=marker,
+            blob_tag_observation=observation,
+            observed_at=NOW,
+        )
+
+    assert first.read_bytes() == second.read_bytes()
+    assert len(first.read_bytes()) < adapter_module.FAILURE_EVIDENCE_MAX_BYTES
+    decoded = json.loads(first.read_text(encoding="utf-8"))
+    comparison = decoded["scanFinishedComparison"]
+    assert comparison["blobTagsTimestamp"]["rawValue"] == ("2026-08-06T14:24:59.999999Z")
+    assert comparison["logAnalyticsTimestamp"]["rawValue"] == ("2026-08-06T14:25:00Z")
+    assert comparison["logAnalyticsMinusBlobTagsMicroseconds"] == 1
+    assert comparison["correlationIdSha256"] == "2" * 64
+    assert comparison["uriComparison"] == "matched"
+    assert comparison["etagComparison"] == "matched"
+    assert decoded["blobTagObservationCount"] == 120
+    assert decoded["finalBoundedErrorCode"] == ("scanner-correlation-scan-finished-mismatch")
+    body = {key: value for key, value in decoded.items() if key != "failureEvidenceIntegritySha256"}
+    assert decoded["failureEvidenceIntegritySha256"] == adapter_module._canonical_hash(
+        body,
+        "mobius.scanner-bridge.failure-evidence.v3",
+    )
+
+
+def test_timestamp_diagnostic_cannot_drop_the_raw_value_needed_for_diagnosis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = _failure_marker("scanner-correlation-scan-finished-mismatch")
+    terminal = dict(cast(dict[str, JsonValue], marker["terminalEvidence"]))
+    blob_timestamp = dict(cast(dict[str, JsonValue], terminal["blobTagsTimestamp"]))
+    blob_timestamp.pop("rawValue")
+    terminal["blobTagsTimestamp"] = blob_timestamp
+    terminal_body = {key: value for key, value in terminal.items() if key != "integritySha256"}
+    terminal["integritySha256"] = adapter_module._canonical_hash(
+        terminal_body,
+        "mobius.scanner-bridge.scan-finished-comparison.v1",
+    )
+    marker["terminalEvidence"] = terminal
+    marker_body = {key: value for key, value in marker.items() if key != "markerIntegritySha256"}
+    marker["markerIntegritySha256"] = adapter_module._canonical_hash(
+        marker_body,
+        "mobius.scanner-bridge.proof-failure-marker.v2",
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_log_output",
+        lambda *_args: json.dumps(marker),
+    )
+
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-scan-finished-evidence-malformed",
+    ):
+        adapter_module._proof_failure_marker(_authorization(PROOF_STAGE), "proof-execution")
 
 
 def test_blob_tag_observation_parser_retains_latest_integrity_bound_comparison(

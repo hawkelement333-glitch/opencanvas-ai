@@ -88,6 +88,13 @@ BLOB_TAG_OBSERVATION_SCHEMA: Final = (
 BLOB_TAG_NORMALIZATION_PATH: Final = "azure-blob-tags-xml-local-name-v1"
 BLOB_RESULT_TAG: Final = "Malware Scanning scan result"
 BLOB_SCAN_TIME_TAG: Final = "Malware Scanning scan time UTC"
+SCAN_FINISHED_NORMALIZATION_PATH: Final = (
+    "trim-z-to-offset-truncate-beyond-microseconds-fromisoformat-utc-v1"
+)
+SCAN_FINISHED_COMPARISON_CONTRACT: Final = "exact-parsed-utc-instant-equality-v1"
+PROOF_LOG_TAIL_LINES: Final = 32
+PROOF_LOG_OUTPUT_MAX_BYTES: Final = 49_152
+FAILURE_EVIDENCE_MAX_BYTES: Final = 32_768
 API_IDENTITY: Final = "id-mobius77-api"
 DEFENDER_SCANNER: Final = "StorageDataScanner"
 DEFENDER_SCANNER_ROLE: Final = "cd50fd1f-0421-46f2-8cce-afc587dbcc77"
@@ -166,6 +173,7 @@ _UUID = re.compile(
 )
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _FAILURE_CODE = re.compile(r"^scanner-[a-z0-9]+(?:-[a-z0-9]+)*$")
+_SANITIZED_TIMESTAMP = re.compile(r"^[0-9TtZz:+. -]{1,128}$")
 _BLOB_TAG_DECISIONS: Final = frozenset(
     {
         "accepted",
@@ -375,6 +383,7 @@ def _write_failure_evidence(
 ) -> None:
     resolved = _outside_repository(path, "scanner-bridge-evidence-inside-repository")
     resolved.parent.mkdir(parents=True, exist_ok=True)
+    terminal_evidence = marker.get("terminalEvidence")
     body = cast(
         dict[str, JsonValue],
         {
@@ -383,27 +392,48 @@ def _write_failure_evidence(
             "blobTagObservation": (
                 dict(blob_tag_observation) if blob_tag_observation is not None else None
             ),
+            "blobTagObservationCount": marker["blobTagObservationCount"],
+            "executionEndAtUtc": execution["endTime"],
             "executionNameSha256": _hash_text(execution_name),
+            "executionStartAtUtc": execution["startTime"],
             "executionStatus": execution["status"],
+            "finalBoundedErrorCode": marker["failureCode"],
             "failureCode": marker["failureCode"],
             "marker": marker["marker"],
+            "markerIntegritySha256": marker["markerIntegritySha256"],
             "observedAtUtc": _format_utc(observed_at),
-            "schemaVersion": "mobius.scanner-result-bridge.failure-evidence.v2",
+            "proofExecutionCount": 1,
+            "scanFinishedComparison": (
+                dict(terminal_evidence)
+                if isinstance(terminal_evidence, Mapping)
+                else None
+            ),
+            "schemaVersion": "mobius.scanner-result-bridge.failure-evidence.v3",
+            "terminalEdge": marker["failureCode"],
+            "terminalLogSummary": {
+                "maximumSerializedBytes": PROOF_LOG_OUTPUT_MAX_BYTES,
+                "rawHistoryRetained": False,
+                "retentionDecision": "final-integrity-bound-markers-only",
+                "tailLineLimit": PROOF_LOG_TAIL_LINES,
+            },
         },
     )
     value: dict[str, JsonValue] = {
         **body,
         "failureEvidenceIntegritySha256": _canonical_hash(
-            cast(JsonValue, body), "mobius.scanner-bridge.failure-evidence.v2"
+            cast(JsonValue, body), "mobius.scanner-bridge.failure-evidence.v3"
         ),
     }
+    serialized = canonical_bytes(cast(JsonValue, value))
+    if len(serialized) > FAILURE_EVIDENCE_MAX_BYTES:
+        _fail("scanner-proof-failure-evidence-oversized")
     try:
         descriptor = os.open(resolved, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
         _fail("scanner-bridge-evidence-already-exists")
     try:
         with os.fdopen(descriptor, "wb") as stream:
-            stream.write(canonical_bytes(value))
+            stream.write(serialized)
             stream.flush()
             os.fsync(stream.fileno())
     except OSError:
@@ -2205,7 +2235,7 @@ def _proof_log_output(
             "--container",
             PROOF_CONTAINER,
             "--tail",
-            "100",
+            str(PROOF_LOG_TAIL_LINES),
             "--format",
             "json",
             "--subscription",
@@ -2214,7 +2244,7 @@ def _proof_log_output(
         ),
         require_text=True,
     )
-    if not isinstance(value, str) or len(value.encode()) > 1_048_576:
+    if not isinstance(value, str) or len(value.encode()) > PROOF_LOG_OUTPUT_MAX_BYTES:
         _fail("scanner-proof-log-output-malformed")
     return value
 
@@ -2272,28 +2302,215 @@ def _proof_marker(
     return cast(dict[str, str], marker)
 
 
+def _precise_utc(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _parsed_timestamp_representation(value: object) -> datetime:
+    if not isinstance(value, Mapping):
+        _fail("scanner-proof-scan-finished-evidence-malformed")
+    required = {
+        "canonicalUtc",
+        "fractionalSecondDigits",
+        "parserNormalizationPath",
+        "rawLengthBytes",
+        "rawValue",
+        "rawValueSha256",
+        "timezoneRepresentation",
+    }
+    if set(value) != required:
+        _fail("scanner-proof-scan-finished-evidence-malformed")
+    raw_value = value.get("rawValue")
+    raw_hash = value.get("rawValueSha256")
+    raw_length = value.get("rawLengthBytes")
+    precision = value.get("fractionalSecondDigits")
+    timezone = value.get("timezoneRepresentation")
+    canonical = value.get("canonicalUtc")
+    if (
+        not isinstance(raw_value, str)
+        or _SANITIZED_TIMESTAMP.fullmatch(raw_value) is None
+        or not isinstance(raw_hash, str)
+        or _SHA256.fullmatch(raw_hash) is None
+        or raw_hash != _hash_text(raw_value)
+        or not isinstance(raw_length, int)
+        or isinstance(raw_length, bool)
+        or raw_length != len(raw_value.encode())
+        or not isinstance(precision, int)
+        or isinstance(precision, bool)
+        or not 0 <= precision <= 32
+        or not isinstance(timezone, str)
+        or not isinstance(canonical, str)
+        or value.get("parserNormalizationPath") != SCAN_FINISHED_NORMALIZATION_PATH
+    ):
+        _fail("scanner-proof-scan-finished-evidence-malformed")
+    stripped = raw_value.strip()
+    fraction = re.search(r"\.(\d+)", stripped)
+    expected_precision = len(fraction.group(1)) if fraction is not None else 0
+    offset = re.search(r"([+-]\d\d:\d\d)$", stripped)
+    expected_timezone = (
+        stripped[-1]
+        if stripped.endswith(("Z", "z"))
+        else offset.group(1)
+        if offset is not None
+        else "unproved"
+    )
+    normalized = stripped.replace("Z", "+00:00")
+    oversized_fraction = re.search(r"\.(\d{7,})(?=[+-]\d\d:\d\d$)", normalized)
+    if oversized_fraction is not None:
+        normalized = (
+            normalized[: oversized_fraction.start(1)]
+            + oversized_fraction.group(1)[:6]
+            + normalized[oversized_fraction.end(1) :]
+        )
+    try:
+        parsed_raw = datetime.fromisoformat(normalized)
+        parsed_canonical = datetime.fromisoformat(canonical.replace("Z", "+00:00"))
+    except ValueError:
+        _fail("scanner-proof-scan-finished-evidence-malformed")
+    if (
+        parsed_raw.tzinfo is None
+        or parsed_raw.utcoffset() is None
+        or parsed_canonical.tzinfo is None
+        or parsed_canonical.utcoffset() is None
+        or expected_precision != precision
+        or expected_timezone != timezone
+        or _precise_utc(parsed_raw) != canonical
+        or _precise_utc(parsed_canonical) != canonical
+    ):
+        _fail("scanner-proof-scan-finished-evidence-malformed")
+    return parsed_canonical.astimezone(UTC)
+
+
+def _delta_microseconds(left: datetime, right: datetime) -> int:
+    delta = left - right
+    return ((delta.days * 86_400) + delta.seconds) * 1_000_000 + delta.microseconds
+
+
+def _validate_scan_finished_terminal_evidence(value: object) -> None:
+    if not isinstance(value, Mapping):
+        _fail("scanner-proof-scan-finished-evidence-malformed")
+    required = {
+        "blobEvidenceSha256",
+        "blobTagResult",
+        "blobTagsTimestamp",
+        "comparisonContract",
+        "comparisonDecision",
+        "correlationIdSha256",
+        "etagComparison",
+        "etagSha256",
+        "integritySha256",
+        "logAnalyticsEvidenceSha256",
+        "logAnalyticsMinusBlobTagsMicroseconds",
+        "logAnalyticsResult",
+        "logAnalyticsTimestamp",
+        "providerVersionSha256",
+        "uriComparison",
+        "uriSha256",
+    }
+    if set(value) != required:
+        _fail("scanner-proof-scan-finished-evidence-malformed")
+    integrity = value.get("integritySha256")
+    body = {
+        key: cast(JsonValue, item)
+        for key, item in value.items()
+        if key != "integritySha256"
+    }
+    hashes = {
+        "blobEvidenceSha256",
+        "correlationIdSha256",
+        "etagSha256",
+        "logAnalyticsEvidenceSha256",
+        "providerVersionSha256",
+        "uriSha256",
+    }
+    delta = value.get("logAnalyticsMinusBlobTagsMicroseconds")
+    if (
+        not isinstance(integrity, str)
+        or _SHA256.fullmatch(integrity) is None
+        or integrity
+        != _canonical_hash(
+            cast(JsonValue, body),
+            "mobius.scanner-bridge.scan-finished-comparison.v1",
+        )
+        or any(
+            not isinstance(value.get(key), str)
+            or _SHA256.fullmatch(cast(str, value[key])) is None
+            for key in hashes
+        )
+        or value.get("comparisonContract") != SCAN_FINISHED_COMPARISON_CONTRACT
+        or value.get("comparisonDecision") != "different-instant"
+        or value.get("uriComparison") != "matched"
+        or value.get("etagComparison") != "matched"
+        or value.get("blobTagResult")
+        not in {"Error", "Malicious", "No threats found", "Not scanned"}
+        or value.get("logAnalyticsResult")
+        not in {"Error", "Malicious", "No threats found", "Not Scanned"}
+        or not isinstance(delta, int)
+        or isinstance(delta, bool)
+        or delta == 0
+    ):
+        _fail("scanner-proof-scan-finished-evidence-malformed")
+    blob_timestamp = _parsed_timestamp_representation(value.get("blobTagsTimestamp"))
+    log_timestamp = _parsed_timestamp_representation(value.get("logAnalyticsTimestamp"))
+    if _delta_microseconds(log_timestamp, blob_timestamp) != delta:
+        _fail("scanner-proof-scan-finished-evidence-malformed")
+
+
 def _proof_failure_marker(
-    authorization: ScannerBridgeRecoveryAuthorization, execution_name: str
+    authorization: ScannerBridgeRecoveryAuthorization,
+    execution_name: str,
+    *,
+    log_output: str | None = None,
 ) -> dict[str, JsonValue]:
     marker = _find_marker(
-        _proof_log_output(authorization, execution_name),
+        log_output
+        if log_output is not None
+        else _proof_log_output(authorization, execution_name),
         "SCANNER_RESULT_BRIDGE_FAILED",
     )
-    required = {"attemptCount", "failureCode", "marker", "schemaVersion"}
+    required = {
+        "attemptCount",
+        "blobTagObservationCount",
+        "failureCode",
+        "marker",
+        "markerIntegritySha256",
+        "schemaVersion",
+        "terminalEvidence",
+    }
     if marker is None or set(marker) != required:
         _fail("scanner-proof-failure-marker-malformed")
     attempt_count = marker.get("attemptCount")
+    observation_count = marker.get("blobTagObservationCount")
     failure_code = marker.get("failureCode")
+    integrity = marker.get("markerIntegritySha256")
+    body = {
+        key: value for key, value in marker.items() if key != "markerIntegritySha256"
+    }
     if (
         not isinstance(attempt_count, int)
         or isinstance(attempt_count, bool)
         or not 1 <= attempt_count <= 120
+        or not isinstance(observation_count, int)
+        or isinstance(observation_count, bool)
+        or not 0 <= observation_count <= 120
         or not isinstance(failure_code, str)
         or _FAILURE_CODE.fullmatch(failure_code) is None
+        or not isinstance(integrity, str)
+        or _SHA256.fullmatch(integrity) is None
+        or integrity
+        != _canonical_hash(
+            cast(JsonValue, body),
+            "mobius.scanner-bridge.proof-failure-marker.v2",
+        )
         or marker.get("marker") != "SCANNER_RESULT_BRIDGE_FAILED"
         or marker.get("schemaVersion")
-        != "mobius.scanner-result-bridge.proof-failure.v1"
+        != "mobius.scanner-result-bridge.proof-failure.v2"
     ):
+        _fail("scanner-proof-failure-marker-malformed")
+    terminal_evidence = marker.get("terminalEvidence")
+    if failure_code == "scanner-correlation-scan-finished-mismatch":
+        _validate_scan_finished_terminal_evidence(terminal_evidence)
+    elif terminal_evidence is not None:
         _fail("scanner-proof-failure-marker-malformed")
     return cast(dict[str, JsonValue], marker)
 
@@ -2319,9 +2536,12 @@ def _proof_blob_tag_observation(
     execution_name: str,
     *,
     failure_code: str,
+    log_output: str | None = None,
 ) -> dict[str, JsonValue] | None:
     markers = _find_markers(
-        _proof_log_output(authorization, execution_name),
+        log_output
+        if log_output is not None
+        else _proof_log_output(authorization, execution_name),
         BLOB_TAG_OBSERVATION_MARKER,
     )
     required_for_failure = failure_code in _BLOB_TAG_FAILURE_DECISIONS
@@ -3233,8 +3453,13 @@ class ProductionScannerBridgeRecoveryAdapter:
                 _fail(f"scanner-proof-wait-azure-{exc.sanitized_azure_error_code}")
             if execution["status"] != "Succeeded":
                 try:
-                    failure_marker = _proof_failure_marker(
+                    terminal_log_output = _proof_log_output(
                         authorization, execution_name
+                    )
+                    failure_marker = _proof_failure_marker(
+                        authorization,
+                        execution_name,
+                        log_output=terminal_log_output,
                     )
                 except lifecycle.AzureCommandError as exc:
                     _fail(
@@ -3246,6 +3471,7 @@ class ProductionScannerBridgeRecoveryAdapter:
                         authorization,
                         execution_name,
                         failure_code=failure_code,
+                        log_output=terminal_log_output,
                     )
                 except lifecycle.AzureCommandError as exc:
                     _fail(

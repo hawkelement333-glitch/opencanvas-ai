@@ -93,6 +93,7 @@ def _blob(*, result: str = "No threats found") -> BlobScanEvidence:
         etag=ETAG,
         scan_result=result,
         scan_finished_at=FINISHED,
+        scan_finished_raw=FINISHED.isoformat().replace("+00:00", "Z"),
         evidence_sha256="c" * 64,
     )
 
@@ -105,6 +106,7 @@ def _log(*, result: str = "No Threat Found") -> LogAnalyticsScanEvidence:
         scan_result=result,
         correlation_id=CORRELATION_ID,
         scan_finished_at=FINISHED,
+        scan_finished_raw=FINISHED.isoformat().replace("+00:00", "Z"),
         time_generated=FINISHED + timedelta(seconds=2),
         evidence_sha256="d" * 64,
     )
@@ -225,6 +227,72 @@ def test_proof_diagnostics_distinguish_exact_correlation_gate(
     diagnosis = _diagnose(logs=logs)
     assert diagnosis.decision is None  # type: ignore[union-attr]
     assert diagnosis.failure_code == expected  # type: ignore[union-attr]
+
+
+def test_scan_finished_contract_accepts_timezone_equivalent_exact_instants() -> None:
+    decision = _correlate(
+        blob=replace(
+            _blob(),
+            scan_finished_raw="2026-08-06T09:59:00-05:00",
+        ),
+        logs=(
+            replace(
+                _log(),
+                scan_finished_raw="2026-08-06T14:59:00Z",
+            ),
+        ),
+    )
+
+    assert decision is not None
+
+
+def test_scan_finished_contract_preserves_existing_submicrosecond_normalization() -> None:
+    parsed = datetime(2026, 8, 6, 14, 59, 0, 123_456, tzinfo=UTC)
+    decision = _correlate(
+        blob=replace(
+            _blob(),
+            scan_finished_at=parsed,
+            scan_finished_raw="2026-08-06T14:59:00.1234567Z",
+        ),
+        logs=(
+            replace(
+                _log(),
+                scan_finished_at=parsed,
+                scan_finished_raw="2026-08-06T14:59:00.1234569+00:00",
+            ),
+        ),
+    )
+
+    assert decision is not None
+
+
+def test_scan_finished_contract_has_no_arbitrary_tolerance_and_retains_both_values() -> None:
+    blob = replace(
+        _blob(),
+        scan_finished_raw="2026-08-06T14:59:00.000000Z",
+    )
+    log = replace(
+        _log(),
+        scan_finished_at=FINISHED + timedelta(microseconds=1),
+        scan_finished_raw="2026-08-06T14:59:00.000001Z",
+    )
+
+    diagnosis = _diagnose(blob=blob, logs=(log,))
+
+    assert diagnosis.decision is None  # type: ignore[union-attr]
+    assert diagnosis.failure_code == (  # type: ignore[union-attr]
+        "scanner-correlation-scan-finished-mismatch"
+    )
+    terminal = diagnosis.terminal_evidence  # type: ignore[union-attr]
+    assert terminal is not None
+    assert terminal["comparisonContract"] == "exact-parsed-utc-instant-equality-v1"
+    assert terminal["comparisonDecision"] == "different-instant"
+    assert terminal["logAnalyticsMinusBlobTagsMicroseconds"] == 1
+    blob_timestamp = cast(dict[str, object], terminal["blobTagsTimestamp"])
+    log_timestamp = cast(dict[str, object], terminal["logAnalyticsTimestamp"])
+    assert blob_timestamp["rawValue"] == "2026-08-06T14:59:00.000000Z"
+    assert log_timestamp["rawValue"] == "2026-08-06T14:59:00.000001Z"
+    assert URI not in json.dumps(terminal)
 
 
 def test_identical_duplicate_log_rows_reconcile_without_a_duplicate_decision() -> None:
@@ -1440,11 +1508,20 @@ def test_probe_main_retains_a_specific_post_poll_failure_marker(
         scanner_bridge_probe.main()
 
     marker = json.loads(capsys.readouterr().out)
-    assert marker == {
+    body = {
         "attemptCount": 73,
+        "blobTagObservationCount": 0,
         "failureCode": "scanner-bridge-probe-private-tls-unproved",
         "marker": "SCANNER_RESULT_BRIDGE_FAILED",
-        "schemaVersion": "mobius.scanner-result-bridge.proof-failure.v1",
+        "schemaVersion": "mobius.scanner-result-bridge.proof-failure.v2",
+        "terminalEvidence": None,
+    }
+    assert marker == {
+        **body,
+        "markerIntegritySha256": hashlib.sha256(
+            b"mobius.scanner-bridge.proof-failure-marker.v2\0"
+            + json.dumps(body, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest(),
     }
 
 
@@ -1453,7 +1530,7 @@ def test_probe_wires_blob_tag_observation_to_retained_console_before_polling() -
 
     source = inspect.getsource(scanner_bridge_probe.run)
     emit = inspect.getsource(scanner_bridge_probe._emit_blob_tag_observation)
-    assert source.index("observation_sink=_emit_blob_tag_observation") < source.index(
+    assert source.index("observation_sink=record_blob_tag_observation") < source.index(
         "_poll_dual_source_evidence("
     )
     assert "observation.canonical()" in emit
@@ -1540,6 +1617,54 @@ async def test_probe_allows_later_success_after_source_failure(
     assert match.decision.verdict == "clean"
     assert match.attempt_count == 2
     assert log_reader.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_probe_does_not_retain_stale_timestamp_evidence_from_a_prior_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    class BlobReader:
+        async def read(self, *_args: object, **_kwargs: object) -> BlobScanEvidence:
+            return _blob()
+
+    class ChangingLogReader:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def read(self, **_kwargs: object) -> tuple[LogAnalyticsScanEvidence, ...]:
+            self.calls += 1
+            if self.calls == 1:
+                different = FINISHED + timedelta(microseconds=1)
+                return (
+                    replace(
+                        _log(),
+                        scan_finished_at=different,
+                        scan_finished_raw=different.isoformat().replace("+00:00", "Z"),
+                    ),
+                )
+            raise RuntimeError("scanner-log-query-unavailable")
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    version = _version()
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "sleep", no_sleep)
+    with pytest.raises(
+        scanner_bridge_probe.ScannerBridgeProbeFailure,
+        match="scanner-log-query-unavailable",
+    ) as failure:
+        await scanner_bridge_probe._poll_dual_source_evidence(
+            version=version,
+            request=_request(version),
+            blob_reader=cast(BlobScanEvidenceReader, BlobReader()),
+            log_reader=cast(LogAnalyticsScanEvidenceReader, ChangingLogReader()),
+            max_attempts=2,
+            delay_seconds=1.0,
+            clock=lambda: NOW,
+        )
+    assert failure.value.terminal_evidence is None
 
 
 @pytest.mark.asyncio
