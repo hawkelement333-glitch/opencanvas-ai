@@ -27,7 +27,9 @@ from preflight.milestone_7_7.cleanup_control_recovery import (
     CORRUPTED_AUTOMATION_ACCOUNT,
     CORRUPTED_RUNBOOK_CONTENT_SHA256,
     DEADLINE_EXTENSION_AUTHORIZATION_VERSION,
+    GENERATION_FOUR_DEADLINE_EXTENSION_AUTHORIZATION_VERSION,
     POST_FIRED_RECOVERY_AUTHORIZATION_VERSION,
+    SCHEDULE,
     CleanupControlDeadlineRecoveryAuthorization,
     CleanupControlRecoveryAuthorization,
     CleanupControlReprovisionAuthorization,
@@ -66,6 +68,12 @@ POST_FIRED_RECOVERY_RECEIPT_VERSION: Final = (
 )
 POST_FIRED_RECOVERY_RECEIPT_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery-receipt/v3\0"
+)
+GENERATION_FOUR_DEADLINE_EXTENSION_RECEIPT_VERSION: Final = (
+    "mobius.milestone-7.7.cleanup-control-deadline-recovery-receipt.v4"
+)
+GENERATION_FOUR_DEADLINE_EXTENSION_RECEIPT_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery-receipt/v4\0"
 )
 POST_CLEANUP_REPROVISION_RECEIPT_VERSION: Final = (
     "mobius.milestone-7.7.cleanup-control-reprovision-receipt.v2"
@@ -162,7 +170,17 @@ def _claim_deadline_recovery_authorization(
     directory = _outside_repository(receipt_directory)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / DEADLINE_RECOVERY_RECEIPT_FILE
-    if authorization.authorizationVersion == POST_FIRED_RECOVERY_AUTHORIZATION_VERSION:
+    if (
+        authorization.authorizationVersion
+        == GENERATION_FOUR_DEADLINE_EXTENSION_AUTHORIZATION_VERSION
+    ):
+        receipt_version, receipt_domain = (
+            GENERATION_FOUR_DEADLINE_EXTENSION_RECEIPT_VERSION,
+            GENERATION_FOUR_DEADLINE_EXTENSION_RECEIPT_DOMAIN,
+        )
+    elif (
+        authorization.authorizationVersion == POST_FIRED_RECOVERY_AUTHORIZATION_VERSION
+    ):
         receipt_version, receipt_domain = (
             POST_FIRED_RECOVERY_RECEIPT_VERSION,
             POST_FIRED_RECOVERY_RECEIPT_DOMAIN,
@@ -2467,7 +2485,7 @@ class ProductionCleanupControlRecoveryAdapter:
         receipt_directory: Path,
         expected_repository_head: str,
     ) -> dict[str, JsonValue]:
-        """Re-arm only the preserved generation-2 cleanup execution edge."""
+        """Re-arm only the exact preserved cleanup execution edge."""
 
         now = self._clock().astimezone(UTC).replace(microsecond=0)
         validate_cleanup_control_deadline_recovery_authorization(
@@ -2488,6 +2506,12 @@ class ProductionCleanupControlRecoveryAdapter:
 
         contract = load_managed_binding_contract()
         _validate_contract_mapping(authorization, contract)
+        corrupted_authorization = (
+            replace(authorization, schedule=SCHEDULE)
+            if authorization.authorizationVersion
+            == GENERATION_FOUR_DEADLINE_EXTENSION_AUTHORIZATION_VERSION
+            else authorization
+        )
         transition_binding_ids = frozenset(
             {authorization.priorBindingId, authorization.bindingId}
         )
@@ -2497,9 +2521,10 @@ class ProductionCleanupControlRecoveryAdapter:
             authorization=authorization,
             require_complete=False,
             permitted_binding_ids=transition_binding_ids,
+            corrupted_schedule_name=corrupted_authorization.schedule,
         )
         _verify_corrupted_evidence_graph(
-            authorization,
+            corrupted_authorization,
             subscription_id,
             assignment_required=False,
             expected_runbook_hash=CORRUPTED_RUNBOOK_CONTENT_SHA256,
@@ -2605,7 +2630,7 @@ class ProductionCleanupControlRecoveryAdapter:
             binding_required=True,
         )
         _verify_corrupted_evidence_graph(
-            authorization,
+            corrupted_authorization,
             subscription_id,
             assignment_required=False,
             expected_runbook_hash=CORRUPTED_RUNBOOK_CONTENT_SHA256,
@@ -2615,6 +2640,7 @@ class ProductionCleanupControlRecoveryAdapter:
             final_resources,
             authorization=authorization,
             require_complete=True,
+            corrupted_schedule_name=corrupted_authorization.schedule,
         )
         if post_fired:
             _verify_post_fired_rearmed_target_tags(

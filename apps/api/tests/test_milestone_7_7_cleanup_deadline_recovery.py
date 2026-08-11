@@ -33,6 +33,10 @@ from preflight.milestone_7_7.cleanup_control_recovery import (
     DEADLINE_RECOVERY_DEADLINE_UTC,
     DEADLINE_RECOVERY_OBSERVED_AZURE_UTC,
     DEADLINE_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256,
+    GENERATION_FOUR_DEADLINE_EXTENSION_AUTHORIZATION_VERSION,
+    GENERATION_FOUR_DEADLINE_EXTENSION_DEADLINE_UTC,
+    GENERATION_FOUR_DEADLINE_EXTENSION_OBSERVED_AZURE_UTC,
+    GENERATION_FOUR_DEADLINE_EXTENSION_PRIOR_RUNBOOK_CONTENT_SHA256,
     POST_FIRED_EXPECTED_TARGET_RESOURCE_COUNT,
     POST_FIRED_PRIOR_JOB_EXCEPTION,
     POST_FIRED_PRIOR_JOB_NAME,
@@ -77,6 +81,8 @@ COMPLETION_OBSERVED = datetime(2026, 8, 6, 23, 39, 5, tzinfo=UTC)
 COMPLETION_NOW = datetime(2026, 8, 6, 23, 40, tzinfo=UTC)
 POST_FIRED_OBSERVED = datetime(2026, 8, 7, 18, 14, 28, tzinfo=UTC)
 POST_FIRED_NOW = datetime(2026, 8, 7, 18, 20, tzinfo=UTC)
+GENERATION_FOUR_EXTENSION_OBSERVED = datetime(2026, 8, 11, 1, 30, tzinfo=UTC)
+GENERATION_FOUR_EXTENSION_NOW = datetime(2026, 8, 11, 1, 35, tzinfo=UTC)
 
 
 def _runbook_sha256() -> str:
@@ -191,6 +197,28 @@ def _post_fired_authorization() -> CleanupControlDeadlineRecoveryAuthorization:
     )
 
 
+def _generation_four_extension_authorization() -> CleanupControlDeadlineRecoveryAuthorization:
+    return build_cleanup_control_deadline_recovery_authorization(
+        repository_head="e" * 40,
+        subscription_id=SUBSCRIPTION_ID,
+        cleanup_resource_group_id=CLEANUP_GROUP,
+        corrupted_automation_account_id=f"{AUTOMATION_PREFIX}/aa-mobius77-cleanup",
+        corrupted_principal_id="be0e6b8d-f742-4c8f-8df1-9f302559a6c8",
+        corrupted_role_assignment_id=CORRUPTED_ASSIGNMENT_ID,
+        replacement_automation_account_id=(f"{AUTOMATION_PREFIX}/aa-mobius77-cleanup-recovery"),
+        replacement_principal_id="a47789c6-b8eb-40a1-898a-517a52d60a86",
+        replacement_role_assignment_id=REPLACEMENT_ASSIGNMENT_ID,
+        replacement_location="northeurope",
+        target_resource_group_id=TARGET_GROUP,
+        prior_runbook_content_sha256=(
+            GENERATION_FOUR_DEADLINE_EXTENSION_PRIOR_RUNBOOK_CONTENT_SHA256
+        ),
+        runbook_content_sha256=_runbook_sha256(),
+        observed_azure_utc=GENERATION_FOUR_EXTENSION_OBSERVED,
+        authorization_version=(GENERATION_FOUR_DEADLINE_EXTENSION_AUTHORIZATION_VERSION),
+    )
+
+
 def _resign(
     authorization: CleanupControlDeadlineRecoveryAuthorization,
 ) -> CleanupControlDeadlineRecoveryAuthorization:
@@ -208,11 +236,17 @@ def _final_inventory(
 ) -> frozenset[str]:
     corrupted = "microsoft.automation/automationaccounts/aa-mobius77-cleanup"
     replacement = "microsoft.automation/automationaccounts/aa-mobius77-cleanup-recovery"
+    corrupted_schedule = (
+        "schedule-mobius77-cleanup"
+        if authorization.authorizationVersion
+        == GENERATION_FOUR_DEADLINE_EXTENSION_AUTHORIZATION_VERSION
+        else authorization.schedule
+    )
     return frozenset(
         {
             corrupted,
             f"{corrupted}/runbooks/{authorization.runbook.casefold()}",
-            f"{corrupted}/schedules/{authorization.schedule.casefold()}",
+            f"{corrupted}/schedules/{corrupted_schedule.casefold()}",
             replacement,
             f"{replacement}/runbooks/{authorization.runbook.casefold()}",
             f"{replacement}/schedules/{authorization.schedule.casefold()}",
@@ -385,6 +419,78 @@ def test_post_fired_deadline_is_exactly_eighteen_hours_then_next_quarter() -> No
     assert derived == datetime(2026, 8, 8, 12, 15, tzinfo=UTC)
     assert POST_FIRED_RECOVERY_OBSERVED_AZURE_UTC == "2026-08-07T18:14:28Z"
     assert POST_FIRED_RECOVERY_DEADLINE_UTC == "2026-08-08T12:15:00Z"
+
+
+def test_generation_four_extension_binds_exact_schedule_deadline_and_binding(
+    tmp_path: Path,
+) -> None:
+    authorization = _generation_four_extension_authorization()
+    path = tmp_path / "generation-four-extension.json"
+    write_cleanup_control_recovery_authorization(path, authorization)
+
+    assert authorization.schedule == "schedule-mobius77-cleanup-g4"
+    assert authorization.priorDeadlineUtc == "2026-08-11T03:45:00Z"
+    assert authorization.deadlineUtc == GENERATION_FOUR_DEADLINE_EXTENSION_DEADLINE_UTC
+    assert authorization.priorBindingId == "34b1d170-652b-505a-9cc1-b8177b872ff0"
+    assert authorization.bindingId == "57e1b300-a91a-5629-995e-d587fd0e0cdb"
+    assert authorization.bindingContractVersion == "m7.7-automation-cleanup-binding-v4"
+    assert GENERATION_FOUR_DEADLINE_EXTENSION_OBSERVED_AZURE_UTC == ("2026-08-11T01:30:00Z")
+    assert derive_cleanup_control_recovery_deadline(
+        GENERATION_FOUR_EXTENSION_OBSERVED, minimum_lead_hours=18
+    ) == datetime(2026, 8, 11, 19, 30, tzinfo=UTC)
+    assert load_cleanup_control_recovery_authorization(path) == authorization
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schedule", "schedule-mobius77-cleanup"),
+        ("priorBindingId", "12f27fa6-2cd5-548d-be20-c6e03a5e19d3"),
+        ("bindingId", "34b1d170-652b-505a-9cc1-b8177b872ff0"),
+        ("bindingContractVersion", "m7.7-automation-cleanup-binding-v3"),
+    ],
+)
+def test_generation_four_extension_rejects_transition_drift(field: str, value: object) -> None:
+    authorization = _generation_four_extension_authorization()
+    drifted = _resign(replace(authorization, **{field: value}))
+
+    with pytest.raises(
+        CleanupControlRecoveryError,
+        match="cleanup-deadline-recovery-authorization-scope-invalid",
+    ):
+        validate_cleanup_control_deadline_recovery_authorization(
+            drifted,
+            expected_repository_head="e" * 40,
+            now_utc=GENERATION_FOUR_EXTENSION_NOW,
+        )
+
+
+def test_generation_four_extension_executes_one_exact_transition(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    authorization = _generation_four_extension_authorization()
+    deployments, calls = _install_execution_fakes(monkeypatch, authorization)
+
+    result = ProductionCleanupControlRecoveryAdapter(
+        clock=lambda: GENERATION_FOUR_EXTENSION_NOW
+    ).execute_deadline_recovery(
+        authorization=authorization,
+        receipt_directory=tmp_path,
+        expected_repository_head="e" * 40,
+    )
+
+    assert result["marker"] == "CLEANUP_EXECUTABLE_AND_ARMED"
+    assert result["deadline-utc"] == "2026-08-11T19:30:00Z"
+    assert result["prior-binding-absent"] is True
+    assert len(deployments) == 1
+    assert calls.index("remove-binding") < calls.index("replace-schedule")
+    assert calls.index("replace-schedule") < calls.index("deploy-binding")
+    receipt = json.loads(
+        (tmp_path / adapter_module.DEADLINE_RECOVERY_RECEIPT_FILE).read_text(encoding="utf-8")
+    )
+    assert receipt["receiptVersion"] == (
+        adapter_module.GENERATION_FOUR_DEADLINE_EXTENSION_RECEIPT_VERSION
+    )
 
 
 def test_post_fired_authorization_binds_exact_failed_preserved_state_and_round_trips(

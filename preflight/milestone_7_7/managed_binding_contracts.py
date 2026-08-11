@@ -95,8 +95,12 @@ GENERATION_THREE_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-09T08:00:00Z"
 TOMBSTONED_GENERATION_THREE_CLEANUP_BINDING_ID: Final = (
     "12f27fa6-2cd5-548d-be20-c6e03a5e19d3"
 )
-ACTIVE_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-11T03:45:00Z"
-ACTIVE_CLEANUP_BINDING_ID: Final = "34b1d170-652b-505a-9cc1-b8177b872ff0"
+TOMBSTONED_GENERATION_FOUR_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-11T03:45:00Z"
+TOMBSTONED_GENERATION_FOUR_CLEANUP_BINDING_ID: Final = (
+    "34b1d170-652b-505a-9cc1-b8177b872ff0"
+)
+ACTIVE_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-11T19:30:00Z"
+ACTIVE_CLEANUP_BINDING_ID: Final = "57e1b300-a91a-5629-995e-d587fd0e0cdb"
 CLEANUP_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup-recovery"
 CORRUPTED_CLEANUP_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup"
 CLEANUP_SCHEDULE: Final = "schedule-mobius77-cleanup-g4"
@@ -379,7 +383,10 @@ def deterministic_cleanup_binding_id(
 
 
 def cleanup_binding_id_for_subscription(
-    subscription_id: str, generation: int = CLEANUP_BINDING_GENERATION
+    subscription_id: str,
+    generation: int = CLEANUP_BINDING_GENERATION,
+    *,
+    binding_epoch_utc: str | None = None,
 ) -> str:
     """Construct the deterministic cleanup binding ID without persisting the subscription."""
     if not isinstance(subscription_id, str) or not subscription_id.strip():
@@ -403,7 +410,9 @@ def cleanup_binding_id_for_subscription(
         ),
         cleanup_authorized=True,
         binding_epoch_utc=(
-            ACTIVE_CLEANUP_BINDING_EPOCH_UTC
+            binding_epoch_utc
+            if binding_epoch_utc is not None
+            else ACTIVE_CLEANUP_BINDING_EPOCH_UTC
             if generation == CLEANUP_BINDING_GENERATION
             else GENERATION_THREE_CLEANUP_BINDING_EPOCH_UTC
             if generation == 3
@@ -607,6 +616,18 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
                 "deletionStatus": "accepted",
                 "evidenceIntegritySha256": (
                     "ac457b8127c80ff0e1c63bd489950b140431da40d13d7bfe82b680b49db70512"
+                ),
+            },
+            {
+                "bindingContractVersion": CLEANUP_BINDING_CONTRACT_VERSION,
+                "bindingGeneration": 4,
+                "bindingId": TOMBSTONED_GENERATION_FOUR_CLEANUP_BINDING_ID,
+                "directGetStatus": "not-found",
+                "listVisibility": "absent",
+                "recreationStatus": "not-attempted",
+                "deletionStatus": "accepted",
+                "evidenceIntegritySha256": (
+                    "4a178878a6491aabe854d50a423557ed723fd0e4cee8a2a6f522a57f6d024428"
                 ),
             },
         ],

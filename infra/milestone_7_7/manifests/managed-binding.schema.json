@@ -96,8 +96,8 @@
         "corruptedAutomationAccount": { "const": "aa-mobius77-cleanup" },
         "tombstonedBindingIds": {
           "type": "array",
-          "minItems": 9,
-          "maxItems": 9,
+          "minItems": 10,
+          "maxItems": 10,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -116,10 +116,11 @@
                 "enum": [
                   "m7.7-automation-cleanup-binding-v1",
                   "m7.7-automation-cleanup-binding-v2",
-                  "m7.7-automation-cleanup-binding-v3"
+                  "m7.7-automation-cleanup-binding-v3",
+                  "m7.7-automation-cleanup-binding-v4"
                 ]
               },
-              "bindingGeneration": { "enum": [1, 2, 3] },
+              "bindingGeneration": { "enum": [1, 2, 3, 4] },
               "bindingId": {
                 "enum": [
                   "158cac88-5679-5804-9f4d-854520bbb635",
@@ -130,7 +131,8 @@
                   "5ffc55c1-7a88-5231-b0d1-e76ee95d057e",
                   "a5429a32-87e3-5963-8c3a-bef85e777ed5",
                   "f29ca20d-cd14-57d9-b99b-fd6b04406166",
-                  "12f27fa6-2cd5-548d-be20-c6e03a5e19d3"
+                  "12f27fa6-2cd5-548d-be20-c6e03a5e19d3",
+                  "34b1d170-652b-505a-9cc1-b8177b872ff0"
                 ]
               },
               "directGetStatus": { "const": "not-found" },
@@ -155,7 +157,7 @@
           "const": "rg-solarplexus-mobius-77-staging"
         },
         "subscriptionFingerprint": { "$ref": "#/$defs/sha256" },
-        "deadlineUtc": { "const": "2026-08-11T03:45:00Z" },
+        "deadlineUtc": { "const": "2026-08-11T19:30:00Z" },
         "launchGraceSeconds": { "const": 1800 },
         "cleanupContributorRoleDefinitionId": {
           "const": "b24988ac-6180-42a0-ab88-20f7382dd24c"

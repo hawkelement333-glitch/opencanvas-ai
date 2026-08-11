@@ -102,7 +102,7 @@ SCHEDULE: Final = "schedule-mobius77-cleanup-g4"
 STAGING_LOCATION: Final = "southcentralus"
 CLEANUP_LOCATION: Final = "westus"
 REDIS_LOCATION: Final = "australiacentral"
-AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 11, 3, 45, 0, 0, UTC)
+AUTHORIZED_CLEANUP_AT_UTC: Final = datetime(2026, 8, 11, 19, 30, 0, 0, UTC)
 MAXIMUM_AUTHORIZED_WINDOW: Final = timedelta(hours=30)
 MINIMUM_CLEANUP_RESERVE: Final = timedelta(minutes=90)
 PROVISIONING_COST_BLOCK_USD_CENTS: Final = 12_000
