@@ -45,6 +45,17 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     load_managed_binding_contract,
     validate_authorization_ledger,
 )
+from preflight.milestone_7_7.private_endpoint_adoption import (
+    PRIVATE_DNS_ZONE_GROUP_LIST_QUERY,
+    PRIVATE_ENDPOINT_LIST_QUERY,
+    PRIVATE_ENDPOINT_NIC_LIST_QUERY,
+    PRIVATE_ENDPOINT_RESOURCE_LOCATIONS,
+    PrivateEndpointAdoptionError,
+    private_endpoint_expectations,
+    validate_private_dns_zone_groups,
+    validate_private_endpoint_network_interfaces,
+    validate_private_endpoint_rows,
+)
 from preflight.milestone_7_7.scanner_result_bridge import (
     ScannerResultBridgeDeploymentEvidence,
 )
@@ -333,20 +344,8 @@ TARGET_RESOURCE_LOCATIONS: Final = (
         "microsoft.containerregistry/registries/acrmobius7711564669",
         "southcentralus",
     ),
-    ("microsoft.network/privateendpoints/pe-mobius77-acr", "southcentralus"),
-    (
-        "microsoft.network/privateendpoints/pe-mobius77-acr/privatednszonegroups/default",
-        "southcentralus",
-    ),
     ("microsoft.keyvault/vaults/kv-mobius77-11564669", "southcentralus"),
-    (
-        "microsoft.network/privateendpoints/pe-mobius77-keyvault",
-        "southcentralus",
-    ),
-    (
-        "microsoft.network/privateendpoints/pe-mobius77-keyvault/privatednszonegroups/default",
-        "southcentralus",
-    ),
+    *PRIVATE_ENDPOINT_RESOURCE_LOCATIONS,
     ("microsoft.app/managedenvironments/cae-mobius77-staging", "southcentralus"),
     ("microsoft.app/containerapps/ca-mobius77-api", "southcentralus"),
 )
@@ -2814,20 +2813,11 @@ def _verify_cleanup_target_role(
 
 def _private_endpoint_network_interfaces(subscription_id: str) -> frozenset[str]:
     target_scope = _scope(subscription_id, f"/resourceGroups/{TARGET_GROUP}")
-    private_subnet = (
+    subnet = (
         f"{target_scope}/providers/Microsoft.Network/virtualNetworks/"
         "vnet-mobius77-staging/subnets/snet-mobius77-private-endpoints"
-    ).casefold()
-    expected = {
-        "pe-mobius77-acr": (
-            f"{target_scope}/providers/Microsoft.ContainerRegistry/registries/{REGISTRY}".casefold(),
-            ("registry",),
-        ),
-        "pe-mobius77-keyvault": (
-            f"{target_scope}/providers/Microsoft.KeyVault/vaults/{KEY_VAULT}".casefold(),
-            ("vault",),
-        ),
-    }
+    )
+    expected = private_endpoint_expectations(target_scope)
     rows = _run(
         (
             "az",
@@ -2839,67 +2829,77 @@ def _private_endpoint_network_interfaces(subscription_id: str) -> frozenset[str]
             "--subscription",
             subscription_id,
             "--query",
-            "[].{connections:privateLinkServiceConnections[].{groups:groupIds,service:privateLinkServiceId,state:privateLinkServiceConnectionState.status},name:name,nics:networkInterfaces[].id,subnet:subnet.id}",
+            PRIVATE_ENDPOINT_LIST_QUERY,
             "--output",
             "json",
             "--only-show-errors",
         ),
         require_json=True,
     )
-    if not isinstance(rows, list):
-        _fail("pre-secret-private-endpoint-output-malformed")
-    observed_names: set[str] = set()
-    network_interfaces: set[str] = set()
-    for row in rows:
-        if not isinstance(row, dict) or set(row) != {
-            "connections",
-            "name",
-            "nics",
-            "subnet",
-        }:
-            _fail("pre-secret-private-endpoint-output-malformed")
-        name = row["name"]
-        subnet = row["subnet"]
-        connections = row["connections"]
-        nics = row["nics"]
-        if (
-            not isinstance(name, str)
-            or name not in expected
-            or name in observed_names
-            or not isinstance(subnet, str)
-            or subnet.casefold() != private_subnet
-            or not isinstance(connections, list)
-            or len(connections) != 1
-            or not isinstance(nics, list)
-        ):
-            _fail("pre-secret-private-endpoint-drift")
-        connection = connections[0]
-        if not isinstance(connection, dict) or set(connection) != {
-            "groups",
-            "service",
-            "state",
-        }:
-            _fail("pre-secret-private-endpoint-output-malformed")
-        groups = connection["groups"]
-        service = connection["service"]
-        state = connection["state"]
-        expected_service, expected_groups = expected[name]
-        if (
-            not isinstance(groups, list)
-            or tuple(groups) != expected_groups
-            or not isinstance(service, str)
-            or service.casefold() != expected_service
-            or state not in {"Approved", "Pending", "Rejected", "Disconnected"}
-        ):
-            _fail("pre-secret-private-endpoint-drift")
-        for nic in nics:
-            if not isinstance(nic, str) or not nic.casefold().startswith(
-                f"{target_scope.casefold()}/providers/microsoft.network/networkinterfaces/"
-            ):
-                _fail("pre-secret-private-endpoint-drift")
-            network_interfaces.add(nic.casefold())
-        observed_names.add(name)
-    return frozenset(network_interfaces)
+    try:
+        nic_endpoints = validate_private_endpoint_rows(
+            rows,
+            expectations=expected,
+            target_scope=target_scope,
+            private_subnet_id=subnet,
+            location=STAGING_LOCATION,
+        )
+    except PrivateEndpointAdoptionError as exc:
+        _fail(exc.code)
+
+    nic_rows = _run(
+        (
+            "az",
+            "network",
+            "nic",
+            "list",
+            "--resource-group",
+            TARGET_GROUP,
+            "--subscription",
+            subscription_id,
+            "--query",
+            PRIVATE_ENDPOINT_NIC_LIST_QUERY,
+            "--output",
+            "json",
+            "--only-show-errors",
+        ),
+        require_json=True,
+    )
+    try:
+        nics = validate_private_endpoint_network_interfaces(
+            nic_rows,
+            network_interface_endpoints=nic_endpoints,
+            private_subnet_id=subnet,
+            location=STAGING_LOCATION,
+        )
+    except PrivateEndpointAdoptionError as exc:
+        _fail(exc.code)
+
+    for expectation in expected.values():
+        zone_groups = _run(
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                (
+                    f"https://management.azure.com{expectation.endpoint_id}/privateDnsZoneGroups"
+                    "?api-version=2025-07-01"
+                ),
+                "--query",
+                PRIVATE_DNS_ZONE_GROUP_LIST_QUERY,
+                "--output",
+                "json",
+                "--only-show-errors",
+            ),
+            require_json=True,
+        )
+        try:
+            validate_private_dns_zone_groups(zone_groups, expectation)
+        except PrivateEndpointAdoptionError as exc:
+            _fail(exc.code)
+    return nics
 
 
 def _resource_group_inventory(

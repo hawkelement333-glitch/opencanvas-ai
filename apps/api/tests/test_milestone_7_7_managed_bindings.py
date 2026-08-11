@@ -5400,6 +5400,461 @@ def test_cleanup_inventory_accepts_only_exact_preserved_recovery_graph(
         )
 
 
+def _private_endpoint_adoption_graph() -> tuple[
+    list[JsonValue], list[JsonValue], dict[str, list[JsonValue]]
+]:
+    subscription_id = SYNTHETIC_SUBSCRIPTION
+    target_scope = (
+        f"/subscriptions/{subscription_id}/resourceGroups/{managed_binding_lifecycle.TARGET_GROUP}"
+    )
+    subnet_id = (
+        f"{target_scope}/providers/Microsoft.Network/virtualNetworks/"
+        "vnet-mobius77-staging/subnets/snet-mobius77-private-endpoints"
+    )
+    expectations = (
+        (
+            "pe-mobius77-acr",
+            "plc-mobius77-acr",
+            "Microsoft.ContainerRegistry/registries/acrmobius7711564669",
+            "registry",
+            (("registry", "privatelink.azurecr.io"),),
+        ),
+        (
+            "pe-mobius77-keyvault",
+            "plc-mobius77-keyvault",
+            "Microsoft.KeyVault/vaults/kv-mobius77-11564669",
+            "vault",
+            (("vault", "privatelink.vaultcore.azure.net"),),
+        ),
+        (
+            "pe-mobius77-storage",
+            "blob",
+            "Microsoft.Storage/storageAccounts/stmobius7711564669",
+            "blob",
+            (("blob", "privatelink.blob.core.windows.net"),),
+        ),
+        (
+            "pe-mobius77-azure-monitor",
+            "azuremonitor",
+            "Microsoft.Insights/privateLinkScopes/ampls-mobius77-staging",
+            "azuremonitor",
+            (
+                ("monitor", "privatelink.monitor.azure.com"),
+                ("oms", "privatelink.oms.opinsights.azure.com"),
+                ("ods", "privatelink.ods.opinsights.azure.com"),
+                ("agent", "privatelink.agentsvc.azure-automation.net"),
+                ("blob", "privatelink.blob.core.windows.net"),
+            ),
+        ),
+    )
+    endpoints: list[JsonValue] = []
+    network_interfaces: list[JsonValue] = []
+    zone_groups: dict[str, list[JsonValue]] = {}
+    next_address = 10
+    for (
+        endpoint_name,
+        connection_name,
+        service_relative_id,
+        group_id,
+        zone_configs,
+    ) in expectations:
+        endpoint_id = f"{target_scope}/providers/Microsoft.Network/privateEndpoints/{endpoint_name}"
+        nic_id = f"{target_scope}/providers/Microsoft.Network/networkInterfaces/nic-{endpoint_name}"
+        endpoints.append(
+            {
+                "id": endpoint_id,
+                "name": endpoint_name,
+                "location": "southcentralus",
+                "provisioningState": "Succeeded",
+                "subnetId": subnet_id,
+                "networkInterfaceIds": [nic_id],
+                "connections": [
+                    {
+                        "name": connection_name,
+                        "serviceId": f"{target_scope}/providers/{service_relative_id}",
+                        "groupIds": [group_id],
+                        "status": "Approved",
+                        "provisioningState": "Succeeded",
+                    }
+                ],
+            }
+        )
+        configuration_count = 11 if endpoint_name == "pe-mobius77-azure-monitor" else 1
+        ip_configurations: list[JsonValue] = []
+        for _ in range(configuration_count):
+            ip_configurations.append(
+                {
+                    "privateIPAddress": f"10.77.2.{next_address}",
+                    "provisioningState": "Succeeded",
+                    "subnetId": subnet_id,
+                }
+            )
+            next_address += 1
+        network_interfaces.append(
+            {
+                "id": nic_id,
+                "location": "southcentralus",
+                "provisioningState": "Succeeded",
+                "privateEndpointId": endpoint_id,
+                "ipConfigurations": ip_configurations,
+            }
+        )
+        zone_groups[endpoint_id.casefold()] = [
+            {
+                "id": f"{endpoint_id}/privateDnsZoneGroups/default",
+                "name": "default",
+                "provisioningState": "Succeeded",
+                "configs": [
+                    {
+                        "name": config_name,
+                        "zoneId": (
+                            f"{target_scope}/providers/Microsoft.Network/"
+                            f"privateDnsZones/{zone_name}"
+                        ),
+                    }
+                    for config_name, zone_name in zone_configs
+                ],
+            }
+        ]
+    return endpoints, network_interfaces, zone_groups
+
+
+def _endpoint_adoption_row(endpoints: list[JsonValue], endpoint_name: str) -> dict[str, JsonValue]:
+    return cast(
+        dict[str, JsonValue],
+        next(
+            row for row in endpoints if isinstance(row, dict) and row.get("name") == endpoint_name
+        ),
+    )
+
+
+def _endpoint_adoption_connection(
+    endpoints: list[JsonValue], endpoint_name: str
+) -> dict[str, JsonValue]:
+    row = _endpoint_adoption_row(endpoints, endpoint_name)
+    connections = cast(list[JsonValue], row["connections"])
+    return cast(dict[str, JsonValue], connections[0])
+
+
+def _execute_private_endpoint_adoption(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    endpoints: list[JsonValue],
+    network_interfaces: list[JsonValue],
+    zone_groups: dict[str, list[JsonValue]],
+) -> frozenset[str]:
+    def run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        if argv[1:4] == ("network", "private-endpoint", "list"):
+            return endpoints
+        if argv[1:4] == ("network", "nic", "list"):
+            return network_interfaces
+        if argv[1] == "rest":
+            url = argv[argv.index("--url") + 1]
+            endpoint_id = (
+                url.removeprefix("https://management.azure.com")
+                .split("/privateDnsZoneGroups?", maxsplit=1)[0]
+                .casefold()
+            )
+            return zone_groups[endpoint_id]
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run", run)
+    return managed_binding_lifecycle._private_endpoint_network_interfaces(SYNTHETIC_SUBSCRIPTION)
+
+
+def test_private_endpoint_adoption_accepts_exact_authoritative_four_endpoint_graph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
+
+    observed = _execute_private_endpoint_adoption(
+        monkeypatch,
+        endpoints=endpoints,
+        network_interfaces=network_interfaces,
+        zone_groups=zone_groups,
+    )
+
+    assert observed == frozenset(
+        cast(str, cast(dict[str, JsonValue], row)["id"]).casefold() for row in network_interfaces
+    )
+
+
+def test_private_endpoint_adoption_rejects_historical_two_endpoint_graph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
+    endpoints = [
+        row
+        for row in endpoints
+        if isinstance(row, dict) and row.get("name") in {"pe-mobius77-acr", "pe-mobius77-keyvault"}
+    ]
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-private-endpoint-drift",
+    ):
+        _execute_private_endpoint_adoption(
+            monkeypatch,
+            endpoints=endpoints,
+            network_interfaces=network_interfaces,
+            zone_groups=zone_groups,
+        )
+
+
+@pytest.mark.parametrize(
+    "missing_name",
+    [
+        "pe-mobius77-acr",
+        "pe-mobius77-keyvault",
+        "pe-mobius77-storage",
+        "pe-mobius77-azure-monitor",
+    ],
+)
+def test_private_endpoint_adoption_rejects_each_missing_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    missing_name: str,
+) -> None:
+    endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
+    endpoints = [
+        row for row in endpoints if not isinstance(row, dict) or row.get("name") != missing_name
+    ]
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-private-endpoint-drift",
+    ):
+        _execute_private_endpoint_adoption(
+            monkeypatch,
+            endpoints=endpoints,
+            network_interfaces=network_interfaces,
+            zone_groups=zone_groups,
+        )
+
+
+def test_private_endpoint_adoption_rejects_unexpected_fifth_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
+    unexpected = deepcopy(cast(dict[str, JsonValue], endpoints[0]))
+    unexpected["name"] = "pe-mobius77-unexpected"
+    endpoints.append(unexpected)
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-private-endpoint-drift",
+    ):
+        _execute_private_endpoint_adoption(
+            monkeypatch,
+            endpoints=endpoints,
+            network_interfaces=network_interfaces,
+            zone_groups=zone_groups,
+        )
+
+
+@pytest.mark.parametrize("drift", ["target", "scope"])
+def test_private_endpoint_adoption_rejects_wrong_target_or_scope(
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+) -> None:
+    endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
+    storage = _endpoint_adoption_row(endpoints, "pe-mobius77-storage")
+    if drift == "target":
+        connection = _endpoint_adoption_connection(endpoints, "pe-mobius77-storage")
+        connection["serviceId"] = cast(str, connection["serviceId"]).replace(
+            "stmobius7711564669", "stmobius77wrong"
+        )
+    else:
+        storage["id"] = cast(str, storage["id"]).replace(
+            f"/resourceGroups/{managed_binding_lifecycle.TARGET_GROUP}/",
+            "/resourceGroups/rg-wrong-generation/",
+        )
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-private-endpoint-drift",
+    ):
+        _execute_private_endpoint_adoption(
+            monkeypatch,
+            endpoints=endpoints,
+            network_interfaces=network_interfaces,
+            zone_groups=zone_groups,
+        )
+
+
+def test_private_endpoint_adoption_rejects_wrong_group_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
+    connection = _endpoint_adoption_connection(endpoints, "pe-mobius77-storage")
+    connection["groupIds"] = ["file"]
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-private-endpoint-drift",
+    ):
+        _execute_private_endpoint_adoption(
+            monkeypatch,
+            endpoints=endpoints,
+            network_interfaces=network_interfaces,
+            zone_groups=zone_groups,
+        )
+
+
+def test_private_endpoint_adoption_rejects_non_succeeded_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
+    _endpoint_adoption_row(endpoints, "pe-mobius77-keyvault")["provisioningState"] = "Failed"
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-private-endpoint-drift",
+    ):
+        _execute_private_endpoint_adoption(
+            monkeypatch,
+            endpoints=endpoints,
+            network_interfaces=network_interfaces,
+            zone_groups=zone_groups,
+        )
+
+
+def test_private_endpoint_adoption_rejects_non_approved_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
+    connection = _endpoint_adoption_connection(endpoints, "pe-mobius77-acr")
+    connection["status"] = "Pending"
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-private-endpoint-drift",
+    ):
+        _execute_private_endpoint_adoption(
+            monkeypatch,
+            endpoints=endpoints,
+            network_interfaces=network_interfaces,
+            zone_groups=zone_groups,
+        )
+
+
+@pytest.mark.parametrize("identity_kind", ["endpoint", "nic"])
+def test_private_endpoint_adoption_rejects_duplicate_endpoint_or_nic_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    identity_kind: str,
+) -> None:
+    endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
+    first = cast(dict[str, JsonValue], endpoints[0])
+    second = cast(dict[str, JsonValue], endpoints[1])
+    if identity_kind == "endpoint":
+        second["name"] = first["name"]
+    else:
+        second["networkInterfaceIds"] = deepcopy(first["networkInterfaceIds"])
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-private-endpoint-drift",
+    ):
+        _execute_private_endpoint_adoption(
+            monkeypatch,
+            endpoints=endpoints,
+            network_interfaces=network_interfaces,
+            zone_groups=zone_groups,
+        )
+
+
+def test_private_endpoint_adoption_rejects_wrong_nic_back_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
+    first_nic = cast(dict[str, JsonValue], network_interfaces[0])
+    second_endpoint = cast(dict[str, JsonValue], endpoints[1])
+    first_nic["privateEndpointId"] = second_endpoint["id"]
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-private-endpoint-drift",
+    ):
+        _execute_private_endpoint_adoption(
+            monkeypatch,
+            endpoints=endpoints,
+            network_interfaces=network_interfaces,
+            zone_groups=zone_groups,
+        )
+
+
+@pytest.mark.parametrize("address", [None, "203.0.113.10", "not-an-ip"])
+def test_private_endpoint_adoption_rejects_missing_or_invalid_private_ip(
+    monkeypatch: pytest.MonkeyPatch,
+    address: str | None,
+) -> None:
+    endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
+    first_nic = cast(dict[str, JsonValue], network_interfaces[0])
+    configurations = cast(list[JsonValue], first_nic["ipConfigurations"])
+    first_configuration = cast(dict[str, JsonValue], configurations[0])
+    first_configuration["privateIPAddress"] = address
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-private-endpoint-drift",
+    ):
+        _execute_private_endpoint_adoption(
+            monkeypatch,
+            endpoints=endpoints,
+            network_interfaces=network_interfaces,
+            zone_groups=zone_groups,
+        )
+
+
+def test_private_endpoint_adoption_rejects_non_succeeded_nic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
+    cast(dict[str, JsonValue], network_interfaces[0])["provisioningState"] = "Failed"
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-private-endpoint-drift",
+    ):
+        _execute_private_endpoint_adoption(
+            monkeypatch,
+            endpoints=endpoints,
+            network_interfaces=network_interfaces,
+            zone_groups=zone_groups,
+        )
+
+
+@pytest.mark.parametrize("dns_drift", ["missing", "wrong-zone", "duplicate-config"])
+def test_private_endpoint_adoption_rejects_dns_zone_group_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    dns_drift: str,
+) -> None:
+    endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
+    endpoint_id = cast(str, cast(dict[str, JsonValue], endpoints[0])["id"]).casefold()
+    if dns_drift == "missing":
+        zone_groups[endpoint_id] = []
+    else:
+        group = cast(dict[str, JsonValue], zone_groups[endpoint_id][0])
+        configs = cast(list[JsonValue], group["configs"])
+        if dns_drift == "wrong-zone":
+            config = cast(dict[str, JsonValue], configs[0])
+            config["zoneId"] = cast(str, config["zoneId"]).replace(
+                "privatelink.azurecr.io", "privatelink.wrong.invalid"
+            )
+        else:
+            configs.append(deepcopy(configs[0]))
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-private-endpoint-drift",
+    ):
+        _execute_private_endpoint_adoption(
+            monkeypatch,
+            endpoints=endpoints,
+            network_interfaces=network_interfaces,
+            zone_groups=zone_groups,
+        )
+
+
 def test_target_inventory_accepts_only_exact_managed_binding_identities(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
