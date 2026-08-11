@@ -136,33 +136,50 @@ def _outputs(authorization: ScannerBridgeRecoveryAuthorization) -> dict[str, Jso
     }
 
 
-def _marker() -> dict[str, str]:
+def _marker() -> dict[str, JsonValue]:
+    completion = "2026-08-06T14:25:00Z"
+    comparison = _scan_finished_terminal_evidence(equal=True)
+    observation = _blob_tag_observation(
+        decision="accepted",
+        returned=(adapter_module.BLOB_RESULT_TAG, adapter_module.BLOB_SCAN_TIME_TAG),
+    )
     values = {
         "accountNameSha256": "0" * 64,
         "blobEvidenceSha256": "1" * 64,
-        "blobTagResultSha256": "2" * 64,
-        "blobUriSha256": "3" * 64,
-        "completionTimeSha256": "4" * 64,
-        "contentSha256": "5" * 64,
-        "correlationIdSha256": "6" * 64,
+        "blobTagResultSha256": adapter_module._hash_text("No threats found"),
+        "blobUriSha256": "6" * 64,
+        "completionTimeSha256": adapter_module._hash_text(completion),
+        "contentSha256": "7" * 64,
+        "correlationIdSha256": "2" * 64,
         "dualSourceEvidenceSha256": "7" * 64,
-        "etagSha256": "8" * 64,
-        "logAnalyticsEvidenceSha256": "9" * 64,
+        "etagSha256": "3" * 64,
+        "logAnalyticsEvidenceSha256": "4" * 64,
         "logQuerySha256": "a" * 64,
         "privateDnsEvidenceSha256": "b" * 64,
-        "providerVersionSha256": "c" * 64,
+        "providerVersionSha256": "5" * 64,
         "scanRequestIdSha256": "d" * 64,
         "storageResourceSha256": "e" * 64,
         "tlsEvidenceSha256": "f" * 64,
         "tlsHostnameSha256": "0" * 64,
     }
-    return {
+    body: dict[str, JsonValue] = {
         **values,
+        "attemptCount": 3,
+        "blobTagObservation": observation,
+        "blobTagObservationCount": 3,
         "decision": "clean",
         "marker": "SCANNER_RESULT_BRIDGE_PROVED",
         "residue": "canary-version-deleted",
-        "schemaVersion": "mobius.scanner-result-bridge.proof.v1",
+        "scanFinishedComparison": comparison,
+        "schemaVersion": "mobius.scanner-result-bridge.proof.v2",
         "tlsVersion": "TLS1_3",
+    }
+    return {
+        **body,
+        "markerIntegritySha256": adapter_module._scanner_runtime_hash(
+            body,
+            "mobius.scanner-bridge.proof-success-marker.v2",
+        ),
     }
 
 
@@ -184,7 +201,7 @@ def _failure_marker(
     }
     return {
         **body,
-        "markerIntegritySha256": adapter_module._canonical_hash(
+        "markerIntegritySha256": adapter_module._scanner_runtime_hash(
             body,
             "mobius.scanner-bridge.proof-failure-marker.v2",
         ),
@@ -207,18 +224,22 @@ def _timestamp_representation(value: str) -> dict[str, JsonValue]:
     return body
 
 
-def _scan_finished_terminal_evidence() -> dict[str, JsonValue]:
+def _scan_finished_terminal_evidence(
+    *,
+    equal: bool = False,
+) -> dict[str, JsonValue]:
+    blob_timestamp = "2026-08-06T14:25:00Z" if equal else "2026-08-06T14:24:59.999999Z"
     body: dict[str, JsonValue] = {
         "blobEvidenceSha256": "1" * 64,
         "blobTagResult": "No threats found",
-        "blobTagsTimestamp": _timestamp_representation("2026-08-06T14:24:59.999999Z"),
+        "blobTagsTimestamp": _timestamp_representation(blob_timestamp),
         "comparisonContract": adapter_module.SCAN_FINISHED_COMPARISON_CONTRACT,
-        "comparisonDecision": "different-instant",
+        "comparisonDecision": "equal-instant" if equal else "different-instant",
         "correlationIdSha256": "2" * 64,
         "etagComparison": "matched",
         "etagSha256": "3" * 64,
         "logAnalyticsEvidenceSha256": "4" * 64,
-        "logAnalyticsMinusBlobTagsMicroseconds": 1,
+        "logAnalyticsMinusBlobTagsMicroseconds": 0 if equal else 1,
         "logAnalyticsResult": "No threats found",
         "logAnalyticsTimestamp": _timestamp_representation("2026-08-06T14:25:00Z"),
         "providerVersionSha256": "5" * 64,
@@ -227,7 +248,7 @@ def _scan_finished_terminal_evidence() -> dict[str, JsonValue]:
     }
     return {
         **body,
-        "integritySha256": adapter_module._canonical_hash(
+        "integritySha256": adapter_module._scanner_runtime_hash(
             body,
             "mobius.scanner-bridge.scan-finished-comparison.v1",
         ),
@@ -249,14 +270,14 @@ def _blob_tag_observation(
         "httpStatus": 200,
         "marker": "SCANNER_BLOB_TAG_OBSERVATION",
         "parserNormalizationPath": "azure-blob-tags-xml-local-name-v1",
-        "queriedBlobUriSha256": "1" * 64,
-        "queriedBlobVersionIdSha256": "2" * 64,
+        "queriedBlobUriSha256": "6" * 64,
+        "queriedBlobVersionIdSha256": "5" * 64,
         "queriedEtagSha256": "3" * 64,
         "requestCorrelationId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
         "requiredKeysFound": [key for key in required if key in returned],
         "requiredKeysMissing": [key for key in required if key not in returned],
         "responseEmpty": not returned,
-        "responseEtagSha256": "4" * 64,
+        "responseEtagSha256": "3" * 64,
         "responseVersionIdSha256": "5" * 64,
         "returnedTagKeys": list(returned),
         "schemaVersion": "mobius.scanner-result-bridge.blob-tags-observation.v1",
@@ -1521,6 +1542,134 @@ def test_log_parser_accepts_only_one_complete_sanitized_marker() -> None:
     assert adapter_module._find_marker('{"marker":"wrong"}', "SCANNER_RESULT_BRIDGE_PROVED") is None
 
 
+def test_success_marker_parser_preserves_exact_bounded_terminal_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = _marker()
+    payload = json.dumps([{"TimeStamp": "redacted", "Log": json.dumps(marker)}])
+    monkeypatch.setattr(adapter_module, "_proof_log_output", lambda *_args: payload)
+
+    parsed = adapter_module._proof_marker(
+        _authorization(PROOF_STAGE),
+        "proof-execution",
+    )
+
+    comparison = cast(dict[str, JsonValue], parsed["scanFinishedComparison"])
+    blob_timestamp = cast(dict[str, JsonValue], comparison["blobTagsTimestamp"])
+    log_timestamp = cast(dict[str, JsonValue], comparison["logAnalyticsTimestamp"])
+    observation = cast(dict[str, JsonValue], parsed["blobTagObservation"])
+    assert parsed == marker
+    assert parsed["schemaVersion"] == "mobius.scanner-result-bridge.proof.v2"
+    assert comparison["comparisonDecision"] == "equal-instant"
+    assert comparison["logAnalyticsMinusBlobTagsMicroseconds"] == 0
+    assert blob_timestamp["rawValue"] == "2026-08-06T14:25:00Z"
+    assert blob_timestamp["canonicalUtc"] == "2026-08-06T14:25:00Z"
+    assert log_timestamp["rawValue"] == "2026-08-06T14:25:00Z"
+    assert log_timestamp["canonicalUtc"] == "2026-08-06T14:25:00Z"
+    assert observation["exactComparisonDecision"] == "accepted"
+    assert observation["requiredKeysMissing"] == []
+    assert observation["unexpectedKeys"] == []
+    assert observation["differentBlobVersion"] is False
+    assert len(json.dumps(parsed, separators=(",", ":"), sort_keys=True).encode()) < (
+        adapter_module.PROOF_LOG_OUTPUT_MAX_BYTES
+    )
+
+
+def test_runtime_success_marker_is_consumed_by_the_production_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    expected = _marker()
+    body = {key: value for key, value in expected.items() if key != "markerIntegritySha256"}
+    runtime_marker = scanner_bridge_probe._success_marker(cast(dict[str, object], body))
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_log_output",
+        lambda *_args: json.dumps(runtime_marker),
+    )
+
+    assert runtime_marker == expected
+    assert adapter_module._proof_marker(_authorization(PROOF_STAGE), "proof-execution") == expected
+
+
+def test_success_marker_rejects_missing_raw_timestamp_even_with_recomputed_integrity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = _marker()
+    comparison = dict(cast(dict[str, JsonValue], marker["scanFinishedComparison"]))
+    blob_timestamp = dict(cast(dict[str, JsonValue], comparison["blobTagsTimestamp"]))
+    blob_timestamp.pop("rawValue")
+    comparison["blobTagsTimestamp"] = blob_timestamp
+    comparison_body = {key: value for key, value in comparison.items() if key != "integritySha256"}
+    comparison["integritySha256"] = adapter_module._scanner_runtime_hash(
+        comparison_body,
+        "mobius.scanner-bridge.scan-finished-comparison.v1",
+    )
+    marker["scanFinishedComparison"] = comparison
+    marker_body = {key: value for key, value in marker.items() if key != "markerIntegritySha256"}
+    marker["markerIntegritySha256"] = adapter_module._scanner_runtime_hash(
+        marker_body,
+        "mobius.scanner-bridge.proof-success-marker.v2",
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_log_output",
+        lambda *_args: json.dumps(marker),
+    )
+
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-scan-finished-evidence-malformed",
+    ):
+        adapter_module._proof_marker(_authorization(PROOF_STAGE), "proof-execution")
+
+
+def test_success_marker_rejects_nonzero_delta_without_tolerance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = _marker()
+    comparison = dict(cast(dict[str, JsonValue], marker["scanFinishedComparison"]))
+    comparison["comparisonDecision"] = "different-instant"
+    comparison["logAnalyticsMinusBlobTagsMicroseconds"] = 1
+    comparison_body = {key: value for key, value in comparison.items() if key != "integritySha256"}
+    comparison["integritySha256"] = adapter_module._scanner_runtime_hash(
+        comparison_body,
+        "mobius.scanner-bridge.scan-finished-comparison.v1",
+    )
+    marker["scanFinishedComparison"] = comparison
+    marker_body = {key: value for key, value in marker.items() if key != "markerIntegritySha256"}
+    marker["markerIntegritySha256"] = adapter_module._scanner_runtime_hash(
+        marker_body,
+        "mobius.scanner-bridge.proof-success-marker.v2",
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_log_output",
+        lambda *_args: json.dumps(marker),
+    )
+
+    with pytest.raises(
+        ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-scan-finished-evidence-malformed",
+    ):
+        adapter_module._proof_marker(_authorization(PROOF_STAGE), "proof-execution")
+
+
+def test_success_marker_integrity_is_deterministic_and_history_free() -> None:
+    first = _marker()
+    second = _marker()
+
+    assert first == second
+    assert first["blobTagObservationCount"] == 3
+    assert "blobTagObservationHistory" not in first
+    body = {key: value for key, value in first.items() if key != "markerIntegritySha256"}
+    assert first["markerIntegritySha256"] == adapter_module._scanner_runtime_hash(
+        body,
+        "mobius.scanner-bridge.proof-success-marker.v2",
+    )
+
+
 def test_large_repeated_history_is_reduced_to_one_bounded_terminal_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1644,13 +1793,13 @@ def test_timestamp_diagnostic_cannot_drop_the_raw_value_needed_for_diagnosis(
     blob_timestamp.pop("rawValue")
     terminal["blobTagsTimestamp"] = blob_timestamp
     terminal_body = {key: value for key, value in terminal.items() if key != "integritySha256"}
-    terminal["integritySha256"] = adapter_module._canonical_hash(
+    terminal["integritySha256"] = adapter_module._scanner_runtime_hash(
         terminal_body,
         "mobius.scanner-bridge.scan-finished-comparison.v1",
     )
     marker["terminalEvidence"] = terminal
     marker_body = {key: value for key, value in marker.items() if key != "markerIntegritySha256"}
-    marker["markerIntegritySha256"] = adapter_module._canonical_hash(
+    marker["markerIntegritySha256"] = adapter_module._scanner_runtime_hash(
         marker_body,
         "mobius.scanner-bridge.proof-failure-marker.v2",
     )

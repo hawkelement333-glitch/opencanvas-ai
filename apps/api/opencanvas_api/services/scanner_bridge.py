@@ -620,11 +620,12 @@ def diagnose_scan_evidence(
         return ScanEvidenceCorrelation(None, "scanner-correlation-uri-mismatch")
     if not _azure_etags_equal(first.etag, blob.etag):
         return ScanEvidenceCorrelation(None, "scanner-correlation-etag-mismatch")
+    scan_finished_comparison = _scan_finished_comparison_evidence(blob=blob, log=first)
     if first.scan_finished_at != blob.scan_finished_at:
         return ScanEvidenceCorrelation(
             None,
             "scanner-correlation-scan-finished-mismatch",
-            _scan_finished_comparison_evidence(blob=blob, log=first),
+            scan_finished_comparison,
         )
     verdict: BridgeVerdict
     normalized_log_result = _LOG_RESULT_NORMALIZATIONS.get(first.scan_result)
@@ -672,6 +673,7 @@ def diagnose_scan_evidence(
             evidence_integrity_sha256=integrity,
         ),
         None,
+        scan_finished_comparison,
     )
 
 
@@ -1073,6 +1075,7 @@ def _scan_finished_comparison_evidence(
     blob: BlobScanEvidence,
     log: LogAnalyticsScanEvidence,
 ) -> dict[str, JsonValue]:
+    delta_microseconds = _datetime_delta_microseconds(log.scan_finished_at, blob.scan_finished_at)
     body: dict[str, JsonValue] = {
         "blobEvidenceSha256": blob.evidence_sha256,
         "blobTagResult": blob.scan_result,
@@ -1080,7 +1083,7 @@ def _scan_finished_comparison_evidence(
             blob.scan_finished_raw, blob.scan_finished_at
         ),
         "comparisonContract": SCAN_FINISHED_COMPARISON_CONTRACT,
-        "comparisonDecision": "different-instant",
+        "comparisonDecision": ("equal-instant" if delta_microseconds == 0 else "different-instant"),
         "correlationIdSha256": _sha256_text(log.correlation_id),
         "etagComparison": "matched",
         "etagSha256": _sha256_text(_normalize_azure_etag(blob.etag)),
@@ -1089,9 +1092,7 @@ def _scan_finished_comparison_evidence(
         "logAnalyticsTimestamp": _timestamp_representation(
             log.scan_finished_raw, log.scan_finished_at
         ),
-        "logAnalyticsMinusBlobTagsMicroseconds": _datetime_delta_microseconds(
-            log.scan_finished_at, blob.scan_finished_at
-        ),
+        "logAnalyticsMinusBlobTagsMicroseconds": delta_microseconds,
         "providerVersionSha256": _sha256_text(blob.provider_version_id),
         "uriComparison": "matched",
         "uriSha256": _sha256_text(blob.object_uri),

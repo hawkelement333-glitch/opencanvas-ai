@@ -292,6 +292,11 @@ def _canonical_hash(value: JsonValue, domain: str) -> str:
     return integrity_sha256(value, domain.encode() + b"\0")
 
 
+def _scanner_runtime_hash(value: JsonValue, domain: str) -> str:
+    canonical = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(domain.encode() + b"\0" + canonical).hexdigest()
+
+
 def _blob_tag_observation_hash(value: JsonValue) -> str:
     canonical = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
     return hashlib.sha256(
@@ -2251,14 +2256,17 @@ def _proof_log_output(
 
 def _proof_marker(
     authorization: ScannerBridgeRecoveryAuthorization, execution_name: str
-) -> dict[str, str]:
+) -> dict[str, JsonValue]:
     marker = _find_marker(
         _proof_log_output(authorization, execution_name),
         "SCANNER_RESULT_BRIDGE_PROVED",
     )
     required = {
         "accountNameSha256",
+        "attemptCount",
         "blobEvidenceSha256",
+        "blobTagObservation",
+        "blobTagObservationCount",
         "blobTagResultSha256",
         "blobUriSha256",
         "completionTimeSha256",
@@ -2270,9 +2278,11 @@ def _proof_marker(
         "logAnalyticsEvidenceSha256",
         "logQuerySha256",
         "marker",
+        "markerIntegritySha256",
         "privateDnsEvidenceSha256",
         "providerVersionSha256",
         "residue",
+        "scanFinishedComparison",
         "scanRequestIdSha256",
         "schemaVersion",
         "storageResourceSha256",
@@ -2286,20 +2296,108 @@ def _proof_marker(
         "decision": "clean",
         "marker": "SCANNER_RESULT_BRIDGE_PROVED",
         "residue": "canary-version-deleted",
-        "schemaVersion": "mobius.scanner-result-bridge.proof.v1",
+        "schemaVersion": "mobius.scanner-result-bridge.proof.v2",
     }
     if any(marker.get(key) != expected for key, expected in exact.items()):
         _fail("scanner-proof-marker-unresolved")
     if marker.get("tlsVersion") not in {"TLS1_2", "TLS1_3"}:
         _fail("scanner-proof-tls-unproved")
-    hashes = required - {*exact, "tlsVersion"}
+    hashes = {
+        "accountNameSha256",
+        "blobEvidenceSha256",
+        "blobTagResultSha256",
+        "blobUriSha256",
+        "completionTimeSha256",
+        "contentSha256",
+        "correlationIdSha256",
+        "dualSourceEvidenceSha256",
+        "etagSha256",
+        "logAnalyticsEvidenceSha256",
+        "logQuerySha256",
+        "privateDnsEvidenceSha256",
+        "providerVersionSha256",
+        "scanRequestIdSha256",
+        "storageResourceSha256",
+        "tlsEvidenceSha256",
+        "tlsHostnameSha256",
+    }
     if any(
         not isinstance(marker.get(key), str)
         or _SHA256.fullmatch(cast(str, marker[key])) is None
         for key in hashes
     ):
         _fail("scanner-proof-marker-integrity-malformed")
-    return cast(dict[str, str], marker)
+    attempt_count = marker.get("attemptCount")
+    observation_count = marker.get("blobTagObservationCount")
+    integrity = marker.get("markerIntegritySha256")
+    body = {
+        key: value for key, value in marker.items() if key != "markerIntegritySha256"
+    }
+    if (
+        not isinstance(attempt_count, int)
+        or isinstance(attempt_count, bool)
+        or not 1 <= attempt_count <= 120
+        or not isinstance(observation_count, int)
+        or isinstance(observation_count, bool)
+        or not 1 <= observation_count <= attempt_count
+        or not isinstance(integrity, str)
+        or _SHA256.fullmatch(integrity) is None
+        or integrity
+        != _scanner_runtime_hash(
+            cast(JsonValue, body),
+            "mobius.scanner-bridge.proof-success-marker.v2",
+        )
+    ):
+        _fail("scanner-proof-marker-integrity-malformed")
+    comparison = marker.get("scanFinishedComparison")
+    _validate_scan_finished_terminal_evidence(
+        comparison,
+        expected_decision="equal-instant",
+    )
+    observation = _validate_blob_tag_observation_marker(
+        marker.get("blobTagObservation"),
+        expected_decision="accepted",
+    )
+    if not isinstance(comparison, Mapping):
+        _fail("scanner-proof-marker-correlation-unproved")
+    blob_timestamp = comparison.get("blobTagsTimestamp")
+    log_timestamp = comparison.get("logAnalyticsTimestamp")
+    if not isinstance(blob_timestamp, Mapping) or not isinstance(
+        log_timestamp, Mapping
+    ):
+        _fail("scanner-proof-marker-correlation-unproved")
+    blob_canonical = blob_timestamp.get("canonicalUtc")
+    log_canonical = log_timestamp.get("canonicalUtc")
+    cross_bindings = {
+        "blobEvidenceSha256": "blobEvidenceSha256",
+        "correlationIdSha256": "correlationIdSha256",
+        "etagSha256": "etagSha256",
+        "logAnalyticsEvidenceSha256": "logAnalyticsEvidenceSha256",
+        "providerVersionSha256": "providerVersionSha256",
+        "uriSha256": "blobUriSha256",
+    }
+    observation_bindings = {
+        "queriedBlobUriSha256": "blobUriSha256",
+        "queriedBlobVersionIdSha256": "providerVersionSha256",
+        "queriedEtagSha256": "etagSha256",
+    }
+    if (
+        not isinstance(blob_canonical, str)
+        or blob_canonical != log_canonical
+        or marker.get("completionTimeSha256") != _hash_text(blob_canonical)
+        or marker.get("blobTagResultSha256")
+        != _hash_text(cast(str, comparison.get("blobTagResult")))
+        or any(
+            comparison.get(evidence_key) != marker.get(marker_key)
+            for evidence_key, marker_key in cross_bindings.items()
+        )
+        or any(
+            observation.get(evidence_key) != marker.get(marker_key)
+            for evidence_key, marker_key in observation_bindings.items()
+        )
+    ):
+        _fail("scanner-proof-marker-correlation-unproved")
+    return cast(dict[str, JsonValue], marker)
 
 
 def _precise_utc(value: datetime) -> str:
@@ -2386,7 +2484,11 @@ def _delta_microseconds(left: datetime, right: datetime) -> int:
     return ((delta.days * 86_400) + delta.seconds) * 1_000_000 + delta.microseconds
 
 
-def _validate_scan_finished_terminal_evidence(value: object) -> None:
+def _validate_scan_finished_terminal_evidence(
+    value: object,
+    *,
+    expected_decision: str = "different-instant",
+) -> None:
     if not isinstance(value, Mapping):
         _fail("scanner-proof-scan-finished-evidence-malformed")
     required = {
@@ -2425,10 +2527,11 @@ def _validate_scan_finished_terminal_evidence(value: object) -> None:
     }
     delta = value.get("logAnalyticsMinusBlobTagsMicroseconds")
     if (
-        not isinstance(integrity, str)
+        expected_decision not in {"different-instant", "equal-instant"}
+        or not isinstance(integrity, str)
         or _SHA256.fullmatch(integrity) is None
         or integrity
-        != _canonical_hash(
+        != _scanner_runtime_hash(
             cast(JsonValue, body),
             "mobius.scanner-bridge.scan-finished-comparison.v1",
         )
@@ -2438,7 +2541,7 @@ def _validate_scan_finished_terminal_evidence(value: object) -> None:
             for key in hashes
         )
         or value.get("comparisonContract") != SCAN_FINISHED_COMPARISON_CONTRACT
-        or value.get("comparisonDecision") != "different-instant"
+        or value.get("comparisonDecision") != expected_decision
         or value.get("uriComparison") != "matched"
         or value.get("etagComparison") != "matched"
         or value.get("blobTagResult")
@@ -2447,7 +2550,8 @@ def _validate_scan_finished_terminal_evidence(value: object) -> None:
         not in {"Error", "Malicious", "No threats found", "Not Scanned"}
         or not isinstance(delta, int)
         or isinstance(delta, bool)
-        or delta == 0
+        or (expected_decision == "different-instant" and delta == 0)
+        or (expected_decision == "equal-instant" and delta != 0)
     ):
         _fail("scanner-proof-scan-finished-evidence-malformed")
     blob_timestamp = _parsed_timestamp_representation(value.get("blobTagsTimestamp"))
@@ -2498,7 +2602,7 @@ def _proof_failure_marker(
         or not isinstance(integrity, str)
         or _SHA256.fullmatch(integrity) is None
         or integrity
-        != _canonical_hash(
+        != _scanner_runtime_hash(
             cast(JsonValue, body),
             "mobius.scanner-bridge.proof-failure-marker.v2",
         )
@@ -2531,25 +2635,14 @@ def _marker_string_tuple(
     return tuple(cast(list[str], value))
 
 
-def _proof_blob_tag_observation(
-    authorization: ScannerBridgeRecoveryAuthorization,
-    execution_name: str,
+def _validate_blob_tag_observation_marker(
+    marker: object,
     *,
-    failure_code: str,
-    log_output: str | None = None,
-) -> dict[str, JsonValue] | None:
-    markers = _find_markers(
-        log_output
-        if log_output is not None
-        else _proof_log_output(authorization, execution_name),
-        BLOB_TAG_OBSERVATION_MARKER,
-    )
-    required_for_failure = failure_code in _BLOB_TAG_FAILURE_DECISIONS
-    if not markers:
-        if required_for_failure:
-            _fail("scanner-proof-blob-tag-observation-missing")
-        return None
-    marker = markers[-1]
+    failure_code: str | None = None,
+    expected_decision: str | None = None,
+) -> dict[str, JsonValue]:
+    if not isinstance(marker, dict):
+        _fail("scanner-proof-blob-tag-observation-malformed")
     required = {
         "differentBlobVersion",
         "exactComparisonDecision",
@@ -2699,9 +2792,38 @@ def _proof_blob_tag_observation(
         or normalization != BLOB_TAG_NORMALIZATION_PATH
     ):
         _fail("scanner-proof-blob-tag-observation-comparison-unproved")
-    if required_for_failure and _BLOB_TAG_FAILURE_DECISIONS[failure_code] != decision:
+    if (
+        failure_code in _BLOB_TAG_FAILURE_DECISIONS
+        and _BLOB_TAG_FAILURE_DECISIONS[failure_code] != decision
+    ):
         _fail("scanner-proof-blob-tag-observation-failure-mismatch")
+    if expected_decision is not None and decision != expected_decision:
+        _fail("scanner-proof-blob-tag-observation-comparison-unproved")
     return cast(dict[str, JsonValue], marker)
+
+
+def _proof_blob_tag_observation(
+    authorization: ScannerBridgeRecoveryAuthorization,
+    execution_name: str,
+    *,
+    failure_code: str,
+    log_output: str | None = None,
+) -> dict[str, JsonValue] | None:
+    markers = _find_markers(
+        log_output
+        if log_output is not None
+        else _proof_log_output(authorization, execution_name),
+        BLOB_TAG_OBSERVATION_MARKER,
+    )
+    required_for_failure = failure_code in _BLOB_TAG_FAILURE_DECISIONS
+    if not markers:
+        if required_for_failure:
+            _fail("scanner-proof-blob-tag-observation-missing")
+        return None
+    return _validate_blob_tag_observation_marker(
+        markers[-1],
+        failure_code=failure_code,
+    )
 
 
 def _not_found(exc: lifecycle.AzureCommandError) -> bool:
@@ -2859,18 +2981,25 @@ def _remove_proof_residue(
     )
 
 
+def _success_marker_text(marker: Mapping[str, JsonValue], key: str) -> str:
+    value = marker.get(key)
+    if not isinstance(value, str):
+        _fail("scanner-proof-marker-malformed")
+    return value
+
+
 def _build_live_evidence(
     *,
     authorization: ScannerBridgeRecoveryAuthorization,
     readback: _FoundationReadback,
     execution_name: str,
     execution: Mapping[str, str | None],
-    marker: Mapping[str, str],
+    marker: Mapping[str, JsonValue],
     proof_graph_integrity: str,
     revocation_integrity: str,
     observed_at: datetime,
 ) -> ScannerResultBridgeDeploymentEvidence:
-    completion_hash = marker["completionTimeSha256"]
+    completion_hash = _success_marker_text(marker, "completionTimeSha256")
     legacy = ScannerResultBridgeEvidence(
         observed_at_utc=_format_utc(observed_at),
         provider=PROVIDER,
@@ -2889,10 +3018,12 @@ def _build_live_evidence(
             "correlation": True,
             "revocation": True,
         },
-        correlation_id_sha256=marker["correlationIdSha256"],
-        blob_tag_evidence_sha256=marker["blobEvidenceSha256"],
-        log_analytics_evidence_sha256=marker["logAnalyticsEvidenceSha256"],
-        object_version_or_etag_sha256=marker["etagSha256"],
+        correlation_id_sha256=_success_marker_text(marker, "correlationIdSha256"),
+        blob_tag_evidence_sha256=_success_marker_text(marker, "blobEvidenceSha256"),
+        log_analytics_evidence_sha256=_success_marker_text(
+            marker, "logAnalyticsEvidenceSha256"
+        ),
+        object_version_or_etag_sha256=_success_marker_text(marker, "etagSha256"),
         storage_resource_sha256=_hash_text(authorization.storageAccountId),
         completion_time_sha256=completion_hash,
         decision="clean",
@@ -2954,27 +3085,31 @@ def _build_live_evidence(
         ),
         storage_resource_id_sha256=_hash_text(authorization.storageAccountId),
         quarantine_container="quarantine",
-        blob_identity_sha256=marker["blobUriSha256"],
-        content_sha256=marker["contentSha256"],
-        scan_request_id_sha256=marker["scanRequestIdSha256"],
+        blob_identity_sha256=_success_marker_text(marker, "blobUriSha256"),
+        content_sha256=_success_marker_text(marker, "contentSha256"),
+        scan_request_id_sha256=_success_marker_text(marker, "scanRequestIdSha256"),
         producer_proof_integrity=_canonical_hash(
             cast(
                 JsonValue,
                 {
-                    "account": marker["accountNameSha256"],
-                    "blob": marker["blobUriSha256"],
-                    "providerVersion": marker["providerVersionSha256"],
+                    "account": _success_marker_text(marker, "accountNameSha256"),
+                    "blob": _success_marker_text(marker, "blobUriSha256"),
+                    "providerVersion": _success_marker_text(
+                        marker, "providerVersionSha256"
+                    ),
                 },
             ),
             "mobius.scanner-bridge.producer-live-proof.v1",
         ),
-        blob_tag_result_sha256=marker["blobTagResultSha256"],
+        blob_tag_result_sha256=_success_marker_text(marker, "blobTagResultSha256"),
         log_analytics_workspace_id_sha256=_hash_text(
             authorization.logAnalyticsWorkspaceId
         ),
         log_analytics_table="StorageMalwareScanningResults",
-        log_query_sha256=marker["logQuerySha256"],
-        dual_source_proof_integrity=marker["dualSourceEvidenceSha256"],
+        log_query_sha256=_success_marker_text(marker, "logQuerySha256"),
+        dual_source_proof_integrity=_success_marker_text(
+            marker, "dualSourceEvidenceSha256"
+        ),
         consumer_identity_sha256=_hash_text(readback.worker_principal_id),
         consumer_entry_point="scripts.worker.DocumentWorker",
         consumer_proof_integrity=consumer_proof,
@@ -2992,23 +3127,25 @@ def _build_live_evidence(
             authorization.monitorPrivateEndpointId
         ),
         private_dns_zone_set_sha256=readback.private_path_control_plane_integrity,
-        private_address_sha256=marker["privateDnsEvidenceSha256"],
-        tls_hostname_sha256=marker["tlsHostnameSha256"],
-        tls_version=marker["tlsVersion"],
+        private_address_sha256=_success_marker_text(marker, "privateDnsEvidenceSha256"),
+        tls_hostname_sha256=_success_marker_text(marker, "tlsHostnameSha256"),
+        tls_version=_success_marker_text(marker, "tlsVersion"),
         private_path_proof_integrity=_canonical_hash(
             cast(
                 JsonValue,
                 {
                     "controlPlane": readback.private_path_control_plane_integrity,
-                    "dns": marker["privateDnsEvidenceSha256"],
-                    "tls": marker["tlsEvidenceSha256"],
+                    "dns": _success_marker_text(marker, "privateDnsEvidenceSha256"),
+                    "tls": _success_marker_text(marker, "tlsEvidenceSha256"),
                 },
             ),
             "mobius.scanner-bridge.private-path-live-proof.v1",
         ),
         proof_job_resource_id_sha256=_hash_text(cast(str, authorization.proofJobId)),
         proof_execution_id_sha256=_hash_text(execution_name),
-        clean_decision_proof_integrity=marker["dualSourceEvidenceSha256"],
+        clean_decision_proof_integrity=_success_marker_text(
+            marker, "dualSourceEvidenceSha256"
+        ),
         malicious_decision_proof_integrity=malicious_contract_proof,
         provider_owned_system_topic_preserved=True,
         revocation_proof_integrity=revocation_integrity,

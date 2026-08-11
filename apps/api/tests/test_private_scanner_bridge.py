@@ -33,6 +33,7 @@ from opencanvas_api.services.scanner_bridge import (
     LogAnalyticsScanEvidenceReader,
     PrivateDnsVerifier,
     PrivateScannerResultBridgeConsumer,
+    ScanEvidenceCorrelation,
     ScannerBridgeEvidenceError,
     bounded_scanner_retry_delay,
     correlate_scan_evidence,
@@ -134,7 +135,7 @@ def _diagnose(
     blob: BlobScanEvidence | None = None,
     logs: tuple[LogAnalyticsScanEvidence, ...] | None = None,
     observed_at: datetime = NOW,
-) -> object:
+) -> ScanEvidenceCorrelation:
     version = _version()
     return diagnose_scan_evidence(
         version=version,
@@ -230,7 +231,7 @@ def test_proof_diagnostics_distinguish_exact_correlation_gate(
 
 
 def test_scan_finished_contract_accepts_timezone_equivalent_exact_instants() -> None:
-    decision = _correlate(
+    diagnosis = _diagnose(
         blob=replace(
             _blob(),
             scan_finished_raw="2026-08-06T09:59:00-05:00",
@@ -243,12 +244,24 @@ def test_scan_finished_contract_accepts_timezone_equivalent_exact_instants() -> 
         ),
     )
 
-    assert decision is not None
+    assert diagnosis.decision is not None
+    comparison = diagnosis.terminal_evidence
+    assert comparison is not None
+    assert comparison["comparisonDecision"] == "equal-instant"
+    assert comparison["logAnalyticsMinusBlobTagsMicroseconds"] == 0
+    blob_timestamp = cast(dict[str, object], comparison["blobTagsTimestamp"])
+    log_timestamp = cast(dict[str, object], comparison["logAnalyticsTimestamp"])
+    assert blob_timestamp["rawValue"] == "2026-08-06T09:59:00-05:00"
+    assert blob_timestamp["canonicalUtc"] == "2026-08-06T14:59:00Z"
+    assert blob_timestamp["timezoneRepresentation"] == "-05:00"
+    assert log_timestamp["rawValue"] == "2026-08-06T14:59:00Z"
+    assert log_timestamp["canonicalUtc"] == "2026-08-06T14:59:00Z"
+    assert log_timestamp["timezoneRepresentation"] == "Z"
 
 
 def test_scan_finished_contract_preserves_existing_submicrosecond_normalization() -> None:
     parsed = datetime(2026, 8, 6, 14, 59, 0, 123_456, tzinfo=UTC)
-    decision = _correlate(
+    diagnosis = _diagnose(
         blob=replace(
             _blob(),
             scan_finished_at=parsed,
@@ -263,7 +276,16 @@ def test_scan_finished_contract_preserves_existing_submicrosecond_normalization(
         ),
     )
 
-    assert decision is not None
+    assert diagnosis.decision is not None
+    comparison = diagnosis.terminal_evidence
+    assert comparison is not None
+    assert comparison["comparisonDecision"] == "equal-instant"
+    blob_timestamp = cast(dict[str, object], comparison["blobTagsTimestamp"])
+    log_timestamp = cast(dict[str, object], comparison["logAnalyticsTimestamp"])
+    assert blob_timestamp["fractionalSecondDigits"] == 7
+    assert log_timestamp["fractionalSecondDigits"] == 7
+    assert blob_timestamp["canonicalUtc"] == "2026-08-06T14:59:00.123456Z"
+    assert log_timestamp["canonicalUtc"] == "2026-08-06T14:59:00.123456Z"
 
 
 def test_scan_finished_contract_has_no_arbitrary_tolerance_and_retains_both_values() -> None:
@@ -1454,21 +1476,24 @@ def test_live_probe_is_bounded_sanitized_and_deletes_its_exact_version() -> None
         scanner_bridge_probe._emit_failure_marker
     )
     assert "provider.provider_version_id" in source
-    assert "print(" in source
+    assert "_emit_success_marker(" in source
+    assert "print(" in inspect.getsource(scanner_bridge_probe._emit_success_marker)
 
 
 def test_probe_rejects_a_malicious_match_with_the_exact_poll_count() -> None:
     from scripts import scanner_bridge_probe
 
-    decision = _correlate(
+    diagnosis = _diagnose(
         blob=_blob(result="Malicious"),
         logs=(_log(result="Malicious"),),
     )
-    assert decision is not None
+    assert diagnosis.decision is not None
+    assert diagnosis.terminal_evidence is not None
     match = scanner_bridge_probe._ProofMatch(
-        decision=decision,  # type: ignore[arg-type]
+        decision=diagnosis.decision,
         blob=_blob(result="Malicious"),
         attempt_count=17,
+        scan_finished_comparison=diagnosis.terminal_evidence,
     )
 
     with pytest.raises(scanner_bridge_probe.ScannerBridgeProbeFailure) as failure:
@@ -1535,6 +1560,102 @@ def test_probe_wires_blob_tag_observation_to_retained_console_before_polling() -
     )
     assert "observation.canonical()" in emit
     assert "flush=True" in emit
+
+
+def test_success_marker_is_complete_deterministic_and_history_bounded() -> None:
+    from scripts import scanner_bridge_probe
+
+    diagnosis = _diagnose(
+        blob=replace(
+            _blob(),
+            scan_finished_raw="2026-08-06T09:59:00.000000-05:00",
+        ),
+        logs=(
+            replace(
+                _log(),
+                scan_finished_raw="2026-08-06T14:59:00.000000Z",
+            ),
+        ),
+    )
+    assert diagnosis.terminal_evidence is not None
+    observation = BlobTagReadObservation(
+        queried_blob_version_id_sha256="1" * 64,
+        queried_blob_uri_sha256="2" * 64,
+        queried_etag_sha256="3" * 64,
+        http_status=200,
+        request_correlation_id=CORRELATION_ID,
+        returned_tag_keys=(BLOB_RESULT_TAG, BLOB_SCAN_TIME_TAG),
+        required_keys_found=(BLOB_RESULT_TAG, BLOB_SCAN_TIME_TAG),
+        required_keys_missing=(),
+        unexpected_keys=(),
+        parser_normalization_path="azure-blob-tags-xml-local-name-v1",
+        exact_comparison_decision="accepted",
+        response_empty=False,
+        different_blob_version=False,
+        response_version_id_sha256="1" * 64,
+        response_etag_sha256="3" * 64,
+        version_identity_path="response-version-id-and-etag",
+    ).canonical()
+    body: dict[str, object] = {
+        "accountNameSha256": "0" * 64,
+        "attemptCount": 120,
+        "blobEvidenceSha256": "1" * 64,
+        "blobTagObservation": observation,
+        "blobTagObservationCount": 120,
+        "blobTagResultSha256": "2" * 64,
+        "blobUriSha256": "3" * 64,
+        "completionTimeSha256": "4" * 64,
+        "contentSha256": "5" * 64,
+        "correlationIdSha256": "6" * 64,
+        "decision": "clean",
+        "dualSourceEvidenceSha256": "7" * 64,
+        "etagSha256": "8" * 64,
+        "logAnalyticsEvidenceSha256": "9" * 64,
+        "logQuerySha256": "a" * 64,
+        "marker": "SCANNER_RESULT_BRIDGE_PROVED",
+        "privateDnsEvidenceSha256": "b" * 64,
+        "providerVersionSha256": "c" * 64,
+        "residue": "canary-version-deleted",
+        "scanFinishedComparison": diagnosis.terminal_evidence,
+        "scanRequestIdSha256": "d" * 64,
+        "schemaVersion": "mobius.scanner-result-bridge.proof.v2",
+        "storageResourceSha256": "e" * 64,
+        "tlsEvidenceSha256": "f" * 64,
+        "tlsHostnameSha256": "0" * 64,
+        "tlsVersion": "TLS1_3",
+    }
+
+    first = scanner_bridge_probe._success_marker(body)
+    second = scanner_bridge_probe._success_marker(body)
+
+    assert first == second
+    comparison = cast(dict[str, object], first["scanFinishedComparison"])
+    blob_timestamp = cast(dict[str, object], comparison["blobTagsTimestamp"])
+    log_timestamp = cast(dict[str, object], comparison["logAnalyticsTimestamp"])
+    assert blob_timestamp["rawValue"] == "2026-08-06T09:59:00.000000-05:00"
+    assert blob_timestamp["canonicalUtc"] == "2026-08-06T14:59:00Z"
+    assert blob_timestamp["fractionalSecondDigits"] == 6
+    assert blob_timestamp["timezoneRepresentation"] == "-05:00"
+    assert log_timestamp["rawValue"] == "2026-08-06T14:59:00.000000Z"
+    assert log_timestamp["canonicalUtc"] == "2026-08-06T14:59:00Z"
+    assert log_timestamp["fractionalSecondDigits"] == 6
+    assert log_timestamp["timezoneRepresentation"] == "Z"
+    assert comparison["comparisonDecision"] == "equal-instant"
+    assert comparison["logAnalyticsMinusBlobTagsMicroseconds"] == 0
+    assert first["blobTagObservation"] == observation
+    assert first["blobTagObservationCount"] == 120
+    assert "blobTagObservationHistory" not in first
+    unsigned = {key: value for key, value in first.items() if key != "markerIntegritySha256"}
+    assert (
+        first["markerIntegritySha256"]
+        == hashlib.sha256(
+            scanner_bridge_probe._SUCCESS_MARKER_DOMAIN
+            + json.dumps(unsigned, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest()
+    )
+    assert len(json.dumps(first, separators=(",", ":"), sort_keys=True).encode()) < (
+        scanner_bridge_probe._SUCCESS_MARKER_MAX_BYTES
+    )
 
 
 @pytest.mark.asyncio
@@ -1616,6 +1737,9 @@ async def test_probe_allows_later_success_after_source_failure(
     )
     assert match.decision.verdict == "clean"
     assert match.attempt_count == 2
+    comparison = cast(dict[str, object], match.scan_finished_comparison)
+    assert comparison["comparisonDecision"] == "equal-instant"
+    assert comparison["logAnalyticsMinusBlobTagsMicroseconds"] == 0
     assert log_reader.calls == 2
 
 
@@ -1665,6 +1789,59 @@ async def test_probe_does_not_retain_stale_timestamp_evidence_from_a_prior_attem
             clock=lambda: NOW,
         )
     assert failure.value.terminal_evidence is None
+
+
+@pytest.mark.asyncio
+async def test_probe_success_carries_only_the_current_attempt_timestamp_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    class BlobReader:
+        async def read(self, *_args: object, **_kwargs: object) -> BlobScanEvidence:
+            return _blob()
+
+    class MismatchThenMatchLogReader:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def read(self, **_kwargs: object) -> tuple[LogAnalyticsScanEvidence, ...]:
+            self.calls += 1
+            if self.calls == 1:
+                different = FINISHED + timedelta(microseconds=1)
+                return (
+                    replace(
+                        _log(),
+                        scan_finished_at=different,
+                        scan_finished_raw=different.isoformat().replace("+00:00", "Z"),
+                    ),
+                )
+            return (_log(),)
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    version = _version()
+    reader = MismatchThenMatchLogReader()
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "sleep", no_sleep)
+    match = await scanner_bridge_probe._poll_dual_source_evidence(
+        version=version,
+        request=_request(version),
+        blob_reader=cast(BlobScanEvidenceReader, BlobReader()),
+        log_reader=cast(LogAnalyticsScanEvidenceReader, reader),
+        max_attempts=2,
+        delay_seconds=1.0,
+        clock=lambda: NOW,
+    )
+
+    comparison = cast(dict[str, object], match.scan_finished_comparison)
+    blob_timestamp = cast(dict[str, object], comparison["blobTagsTimestamp"])
+    log_timestamp = cast(dict[str, object], comparison["logAnalyticsTimestamp"])
+    assert reader.calls == 2
+    assert comparison["comparisonDecision"] == "equal-instant"
+    assert comparison["logAnalyticsMinusBlobTagsMicroseconds"] == 0
+    assert blob_timestamp["rawValue"] == FINISHED.isoformat().replace("+00:00", "Z")
+    assert log_timestamp["rawValue"] == FINISHED.isoformat().replace("+00:00", "Z")
 
 
 @pytest.mark.asyncio

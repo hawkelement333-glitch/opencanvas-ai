@@ -12,6 +12,40 @@ from infra.milestone_7_7 import publication_state_machine as state_machine
 from infra.milestone_7_7.scripts import managed_binding_lifecycle as lifecycle
 
 
+@pytest.mark.parametrize(
+    "changed_path",
+    (
+        "apps/api/opencanvas_api/services/scanner_bridge.py",
+        "apps/api/scripts/scanner_bridge_probe.py",
+    ),
+)
+def test_scanner_evidence_runtime_changes_canonical_image_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    changed_path: str,
+) -> None:
+    def tree_entries(changed_object: str) -> str:
+        rows: list[str] = []
+        for relative in publication.API_IMAGE_BUILD_INPUTS:
+            candidate = publication.REPOSITORY_ROOT / relative
+            path = (
+                relative
+                if candidate.is_file()
+                else changed_path
+                if changed_path.startswith(f"{relative}/")
+                else f"{relative}/sentinel.py"
+            )
+            object_id = changed_object if path == changed_path else "a" * 40
+            rows.append(f"100644 blob {object_id}\t{path}")
+        return "\n".join(rows)
+
+    monkeypatch.setattr(publication, "_run_text", lambda _argv: tree_entries("b" * 40))
+    changed = publication._api_image_build_input_sha256("c" * 40)
+    monkeypatch.setattr(publication, "_run_text", lambda _argv: tree_entries("a" * 40))
+    baseline = publication._api_image_build_input_sha256("c" * 40)
+
+    assert changed != baseline
+
+
 def _finalizer_success_mocks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> tuple[list[tuple[str, str]], list[dict[str, object]]]:

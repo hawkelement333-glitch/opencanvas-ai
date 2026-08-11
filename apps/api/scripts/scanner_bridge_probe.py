@@ -41,6 +41,8 @@ _WORKSPACE_ID = uuid.UUID("2b5f8ed5-725f-5b10-ab10-ad255bf42bb2")
 _USER_ID = uuid.UUID("f9c06d27-29bf-59be-b236-fee627452a5f")
 _TRACE_ID = uuid.UUID("9070a5fc-688a-5587-a3d4-69cf3bb767cd")
 _FAILURE_CODE = re.compile(r"^scanner-[a-z0-9]+(?:-[a-z0-9]+)*$")
+_SUCCESS_MARKER_DOMAIN = b"mobius.scanner-bridge.proof-success-marker.v2\0"
+_SUCCESS_MARKER_MAX_BYTES = 16_384
 
 
 class ScannerBridgeProbeFailure(RuntimeError):
@@ -66,6 +68,7 @@ class _ProofMatch:
     decision: ScannerBridgeDecision
     blob: BlobScanEvidence
     attempt_count: int
+    scan_finished_comparison: object
 
 
 def _required_environment(name: str) -> str:
@@ -210,6 +213,38 @@ def _emit_failure_marker(failure: ScannerBridgeProbeFailure) -> None:
     )
 
 
+def _success_marker(body: dict[str, object]) -> dict[str, object]:
+    marker = {
+        **body,
+        "markerIntegritySha256": hashlib.sha256(
+            _SUCCESS_MARKER_DOMAIN
+            + json.dumps(body, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest(),
+    }
+    if len(json.dumps(marker, separators=(",", ":"), sort_keys=True).encode()) > (
+        _SUCCESS_MARKER_MAX_BYTES
+    ):
+        attempt_count = body.get("attemptCount")
+        raise ScannerBridgeProbeFailure(
+            "scanner-bridge-probe-success-marker-oversized",
+            attempt_count
+            if isinstance(attempt_count, int) and not isinstance(attempt_count, bool)
+            else 1,
+        )
+    return marker
+
+
+def _emit_success_marker(body: dict[str, object]) -> None:
+    print(
+        json.dumps(
+            _success_marker(body),
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
 def _emit_blob_tag_observation(observation: BlobTagReadObservation) -> None:
     print(
         json.dumps(
@@ -280,10 +315,13 @@ async def _poll_dual_source_evidence(
                     if correlation.decision is not None:
                         if not logs:
                             raise RuntimeError("scanner-correlation-log-evidence-missing")
+                        if correlation.terminal_evidence is None:
+                            raise RuntimeError("scanner-bridge-probe-success-evidence-incomplete")
                         return _ProofMatch(
                             decision=correlation.decision,
                             blob=blob,
                             attempt_count=attempt + 1,
+                            scan_finished_comparison=correlation.terminal_evidence,
                         )
                     latest_failure = (
                         correlation.failure_code or "scanner-correlation-validation-failed"
@@ -334,10 +372,12 @@ async def run(*, max_attempts: int, delay_seconds: float) -> int:
 
     dns = PrivateDnsVerifier(recording_resolver)
     blob_tag_observation_count = 0
+    latest_blob_tag_observation: object | None = None
 
     def record_blob_tag_observation(observation: BlobTagReadObservation) -> None:
-        nonlocal blob_tag_observation_count
+        nonlocal blob_tag_observation_count, latest_blob_tag_observation
         blob_tag_observation_count += 1
+        latest_blob_tag_observation = observation.canonical()
         _emit_blob_tag_observation(observation)
 
     blob_reader = AzureBlobScanEvidenceClient(
@@ -445,44 +485,54 @@ async def run(*, max_attempts: int, delay_seconds: float) -> int:
             _safe_failure_code(exc, "scanner-bridge-probe-private-tls-unproved"),
             match.attempt_count,
         ) from None
+    if (
+        not isinstance(match.scan_finished_comparison, dict)
+        or match.scan_finished_comparison.get("comparisonDecision") != "equal-instant"
+        or not isinstance(latest_blob_tag_observation, dict)
+        or latest_blob_tag_observation.get("exactComparisonDecision") != "accepted"
+    ):
+        raise ScannerBridgeProbeFailure(
+            "scanner-bridge-probe-success-evidence-incomplete",
+            match.attempt_count,
+            blob_tag_observation_count=blob_tag_observation_count,
+        )
     completion = decision.scan_finished_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
-    print(
-        json.dumps(
-            {
-                "accountNameSha256": _sha256_text(matched_blob.account_name),
-                "blobEvidenceSha256": decision.blob_evidence_sha256,
-                "blobTagResultSha256": _sha256_text(matched_blob.scan_result),
-                "blobUriSha256": _sha256_text(matched_blob.object_uri),
-                "completionTimeSha256": _sha256_text(completion),
-                "contentSha256": digest,
-                "correlationIdSha256": _sha256_text(decision.correlation_id),
-                "decision": decision.verdict,
-                "dualSourceEvidenceSha256": decision.evidence_integrity_sha256,
-                "etagSha256": _sha256_text(matched_blob.etag),
-                "logAnalyticsEvidenceSha256": decision.log_analytics_evidence_sha256,
-                "logQuerySha256": log_analytics_query_sha256(
-                    account_name=matched_blob.account_name,
-                    object_uri=matched_blob.object_uri,
-                    etag=matched_blob.etag,
-                    max_rows=4,
-                ),
-                "marker": "SCANNER_RESULT_BRIDGE_PROVED",
-                "privateDnsEvidenceSha256": dns_integrity,
-                "providerVersionSha256": _sha256_text(matched_blob.provider_version_id),
-                "residue": "canary-version-deleted",
-                "scanRequestIdSha256": _sha256_text(str(request.scan_request_id)),
-                "schemaVersion": "mobius.scanner-result-bridge.proof.v1",
-                "storageResourceSha256": _sha256_text(account_url),
-                "tlsEvidenceSha256": tls_integrity,
-                "tlsHostnameSha256": _sha256_text(
-                    "|".join((storage_hostname, "api.loganalytics.azure.com"))
-                ),
-                "tlsVersion": tls_version,
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        ),
-        flush=True,
+    _emit_success_marker(
+        {
+            "accountNameSha256": _sha256_text(matched_blob.account_name),
+            "attemptCount": match.attempt_count,
+            "blobEvidenceSha256": decision.blob_evidence_sha256,
+            "blobTagObservation": latest_blob_tag_observation,
+            "blobTagObservationCount": blob_tag_observation_count,
+            "blobTagResultSha256": _sha256_text(matched_blob.scan_result),
+            "blobUriSha256": _sha256_text(matched_blob.object_uri),
+            "completionTimeSha256": _sha256_text(completion),
+            "contentSha256": digest,
+            "correlationIdSha256": _sha256_text(decision.correlation_id),
+            "decision": decision.verdict,
+            "dualSourceEvidenceSha256": decision.evidence_integrity_sha256,
+            "etagSha256": _sha256_text(matched_blob.etag),
+            "logAnalyticsEvidenceSha256": decision.log_analytics_evidence_sha256,
+            "logQuerySha256": log_analytics_query_sha256(
+                account_name=matched_blob.account_name,
+                object_uri=matched_blob.object_uri,
+                etag=matched_blob.etag,
+                max_rows=4,
+            ),
+            "marker": "SCANNER_RESULT_BRIDGE_PROVED",
+            "privateDnsEvidenceSha256": dns_integrity,
+            "providerVersionSha256": _sha256_text(matched_blob.provider_version_id),
+            "residue": "canary-version-deleted",
+            "scanFinishedComparison": match.scan_finished_comparison,
+            "scanRequestIdSha256": _sha256_text(str(request.scan_request_id)),
+            "schemaVersion": "mobius.scanner-result-bridge.proof.v2",
+            "storageResourceSha256": _sha256_text(account_url),
+            "tlsEvidenceSha256": tls_integrity,
+            "tlsHostnameSha256": _sha256_text(
+                "|".join((storage_hostname, "api.loganalytics.azure.com"))
+            ),
+            "tlsVersion": tls_version,
+        }
     )
     return 0
 
