@@ -18,8 +18,8 @@ from performance.milestone_7_7.framework import (
     load_json,
 )
 
-AUTHORIZATION_VERSION: Final = "mobius.milestone-7.7.scanner-bridge-recovery.v1"
-AUTHORIZATION_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/scanner-bridge-recovery/v1\0"
+AUTHORIZATION_VERSION: Final = "mobius.milestone-7.7.scanner-bridge-recovery.v2"
+AUTHORIZATION_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/scanner-bridge-recovery/v2\0"
 FOUNDATION_STAGE: Final = "scanner-foundation"
 PRIVATE_ENDPOINT_RECOVERY_STAGE: Final = "scanner-foundation-private-endpoint-recovery"
 PROOF_STAGE: Final = "scanner-proof"
@@ -38,6 +38,7 @@ IMAGE_REPOSITORY: Final = "opencanvas-api"
 COST_CEILING_USD_CENTS: Final = 25_000
 MINIMUM_CLEANUP_WINDOW: Final = timedelta(hours=6)
 MAXIMUM_AUTHORIZATION_AGE: Final = timedelta(hours=1)
+FINAL_PROOF_EXECUTION_ORDINAL: Final = 3
 FOUNDATION_ALLOWED_OPERATIONS: Final = (
     "deploy-private-scanner-foundation",
     "authoritative-readback-reconcile-private-scanner-foundation",
@@ -93,6 +94,7 @@ class ScannerBridgeRecoveryAuthorization:
     expiresAtUtc: str
     maximumCostUsdCents: int
     maximumProofExecutions: int
+    proofExecutionOrdinal: int
     publicAccessAuthorized: bool
     tagWriteAuthorized: bool
     applicationDeploymentAuthorized: bool
@@ -167,6 +169,7 @@ def build_scanner_bridge_recovery_authorization(
     now_utc: datetime,
     api_image_digest: str | None = None,
     build_input_sha256: str | None = None,
+    proof_execution_ordinal: int = 0,
 ) -> ScannerBridgeRecoveryAuthorization:
     """Issue one short-lived, stage-specific, replay-denying production grant."""
 
@@ -185,7 +188,11 @@ def build_scanner_bridge_recovery_authorization(
     if expires <= current:
         raise ScannerBridgeRecoveryError("scanner-bridge-authorization-expired")
     if stage in {FOUNDATION_STAGE, PRIVATE_ENDPOINT_RECOVERY_STAGE}:
-        if api_image_digest is not None or build_input_sha256 is not None:
+        if (
+            api_image_digest is not None
+            or build_input_sha256 is not None
+            or proof_execution_ordinal != 0
+        ):
             raise ScannerBridgeRecoveryError("scanner-foundation-image-authority-prohibited")
         proof_job_id = None
         proof_role_id = None
@@ -203,6 +210,8 @@ def build_scanner_bridge_recovery_authorization(
             or _SHA256.fullmatch(build_input_sha256) is None
         ):
             raise ScannerBridgeRecoveryError("scanner-proof-image-binding-invalid")
+        if proof_execution_ordinal != FINAL_PROOF_EXECUTION_ORDINAL:
+            raise ScannerBridgeRecoveryError("scanner-proof-execution-ceiling-exceeded")
         proof_job_id = expected["proofJobId"]
         proof_role_id = expected["proofRoleDefinitionId"]
         maximum_executions = 1
@@ -230,6 +239,7 @@ def build_scanner_bridge_recovery_authorization(
         expiresAtUtc=_format_utc(expires),
         maximumCostUsdCents=COST_CEILING_USD_CENTS,
         maximumProofExecutions=maximum_executions,
+        proofExecutionOrdinal=proof_execution_ordinal,
         publicAccessAuthorized=False,
         tagWriteAuthorized=False,
         applicationDeploymentAuthorized=False,
@@ -258,6 +268,7 @@ def validate_scanner_bridge_recovery_authorization(
             "apiImageDigest": None,
             "buildInputSha256": None,
             "maximumProofExecutions": 0,
+            "proofExecutionOrdinal": 0,
             "allowedOperations": (
                 FOUNDATION_ALLOWED_OPERATIONS
                 if authorization.stage == FOUNDATION_STAGE
@@ -269,6 +280,7 @@ def validate_scanner_bridge_recovery_authorization(
             "proofJobId": expected["proofJobId"],
             "proofRoleDefinitionId": expected["proofRoleDefinitionId"],
             "maximumProofExecutions": 1,
+            "proofExecutionOrdinal": FINAL_PROOF_EXECUTION_ORDINAL,
             "allowedOperations": PROOF_ALLOWED_OPERATIONS,
         }
         if (

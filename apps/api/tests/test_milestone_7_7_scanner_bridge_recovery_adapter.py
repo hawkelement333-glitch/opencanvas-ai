@@ -9,12 +9,18 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+
 from infra.milestone_7_7 import scanner_bridge_recovery_adapter as adapter_module
 from infra.milestone_7_7.scanner_bridge_recovery_adapter import (
     ProductionScannerBridgeRecoveryAdapter,
     ScannerBridgeRecoveryExecutionError,
 )
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
+from infra.milestone_7_7.scripts.scanner_bridge_deployment import (
+    bicep_parameters,
+    load_deployment_evidence,
+)
+from opencanvas_api.services.scanner_bridge import BlobTagReadObservation
 from performance.milestone_7_7.framework import JsonValue
 from preflight.milestone_7_7 import scanner_bridge_recovery
 from preflight.milestone_7_7.scanner_bridge_recovery import (
@@ -35,8 +41,7 @@ from preflight.milestone_7_7.scanner_bridge_recovery import (
 from preflight.milestone_7_7.scanner_result_bridge import (
     deployment_evidence_from_mapping,
 )
-
-from opencanvas_api.services.scanner_bridge import BlobTagReadObservation
+from scripts import scanner_bridge_probe
 
 SUBSCRIPTION_ID = "11111111-2222-4333-8444-555555555555"
 SUBSCRIPTION = f"/subscriptions/{SUBSCRIPTION_ID}"
@@ -65,6 +70,7 @@ def _authorization(stage: str = FOUNDATION_STAGE) -> ScannerBridgeRecoveryAuthor
         now_utc=NOW,
         api_image_digest=IMAGE if stage == PROOF_STAGE else None,
         build_input_sha256=BUILD_INPUT if stage == PROOF_STAGE else None,
+        proof_execution_ordinal=3 if stage == PROOF_STAGE else 0,
     )
 
 
@@ -206,6 +212,51 @@ def _failure_marker(
             "mobius.scanner-bridge.proof-failure-marker.v2",
         ),
     }
+
+
+def test_runtime_success_marker_feeds_production_evidence_and_post_secret_consumer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    authorization = _authorization(PROOF_STAGE)
+    expected = _marker()
+    body = {key: value for key, value in expected.items() if key != "markerIntegritySha256"}
+    runtime_marker = cast(
+        dict[str, JsonValue],
+        scanner_bridge_probe._success_marker(cast(dict[str, object], body)),
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_proof_log_output",
+        lambda *_args: json.dumps(runtime_marker, separators=(",", ":")),
+    )
+    parsed = adapter_module._proof_marker(authorization, "proof-execution")
+    assert parsed == runtime_marker
+
+    execution = {
+        "name": "proof-execution",
+        "status": "Succeeded",
+        "startTime": "2026-08-06T14:20:00Z",
+        "endTime": "2026-08-06T14:25:00Z",
+    }
+    produced = adapter_module._build_live_evidence(
+        authorization=authorization,
+        readback=_readback(),
+        execution_name="proof-execution",
+        execution=execution,
+        marker=parsed,
+        proof_graph_integrity="8" * 64,
+        revocation_integrity="9" * 64,
+        observed_at=NOW,
+    )
+    path = tmp_path / "scanner-deployment-evidence.json"
+    adapter_module._write_evidence(path, produced)
+    consumed = load_deployment_evidence(path, repository_head=HEAD, now=NOW)
+    parameters = bicep_parameters(consumed, repository_head=HEAD, now=NOW)
+
+    assert consumed == produced
+    assert consumed.unresolved_reasons == ()
+    assert "scannerResultBridgeUnresolvedReasonCount=0" in parameters
+    assert ("scannerResultBridgeEvidenceIntegrity=" + produced.integrity_sha256()) in parameters
 
 
 def _timestamp_representation(value: str) -> dict[str, JsonValue]:
@@ -419,6 +470,7 @@ def test_foundation_authorization_is_image_free_and_denies_broader_authority() -
     assert authorization.buildInputSha256 is None
     assert authorization.allowedOperations == FOUNDATION_ALLOWED_OPERATIONS
     assert authorization.maximumProofExecutions == 0
+    assert authorization.proofExecutionOrdinal == 0
     assert authorization.publicAccessAuthorized is False
     assert authorization.tagWriteAuthorized is False
     assert authorization.applicationDeploymentAuthorized is False
@@ -444,6 +496,7 @@ def test_private_endpoint_recovery_authorization_is_exact_and_image_free() -> No
     assert authorization.apiImageDigest is None
     assert authorization.buildInputSha256 is None
     assert authorization.maximumProofExecutions == 0
+    assert authorization.proofExecutionOrdinal == 0
     assert authorization.publicAccessAuthorized is False
     assert authorization.tagWriteAuthorized is False
     assert authorization.applicationDeploymentAuthorized is False
@@ -526,6 +579,7 @@ def test_proof_authorization_binds_one_exact_immutable_image_and_execution() -> 
     assert authorization.apiImageDigest == IMAGE
     assert authorization.buildInputSha256 == BUILD_INPUT
     assert authorization.maximumProofExecutions == 1
+    assert authorization.proofExecutionOrdinal == 3
     assert authorization.proofJobId == f"{TARGET}/providers/Microsoft.App/jobs/{PROOF_JOB}"
     assert authorization.proofRoleDefinitionId == (
         f"{TARGET}/providers/Microsoft.Authorization/roleDefinitions/"
@@ -559,6 +613,7 @@ def test_proof_authorization_binds_one_exact_immutable_image_and_execution() -> 
         ("migrationAuthorized", True),
         ("cleanupExecutionAuthorized", True),
         ("maximumProofExecutions", 2),
+        ("proofExecutionOrdinal", 4),
     ],
 )
 def test_exact_scope_and_prohibited_authority_drift_is_rejected(field: str, value: object) -> None:
@@ -585,6 +640,25 @@ def test_foundation_rejects_any_image_binding() -> None:
             cleanup_deadline_utc="2026-08-12T08:15:00Z",
             now_utc=NOW,
             api_image_digest=IMAGE,
+        )
+
+
+def test_proof_four_is_rejected_before_authorization() -> None:
+    with pytest.raises(
+        ScannerBridgeRecoveryError,
+        match="scanner-proof-execution-ceiling-exceeded",
+    ):
+        build_scanner_bridge_recovery_authorization(
+            stage=PROOF_STAGE,
+            repository_head=HEAD,
+            subscription_id=SUBSCRIPTION_ID,
+            target_resource_group_id=TARGET,
+            cleanup_automation_account_id=CLEANUP_ACCOUNT,
+            cleanup_deadline_utc="2026-08-12T08:15:00Z",
+            now_utc=NOW,
+            api_image_digest=IMAGE,
+            build_input_sha256=BUILD_INPUT,
+            proof_execution_ordinal=4,
         )
 
 

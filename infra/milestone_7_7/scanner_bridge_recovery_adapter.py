@@ -53,9 +53,7 @@ from preflight.milestone_7_7.scanner_result_bridge import (
 )
 
 RECEIPT_VERSION: Final = "mobius.milestone-7.7.scanner-bridge-recovery-receipt.v1"
-RECEIPT_DOMAIN: Final = (
-    b"solarplexus-mobius/milestone-7.7/scanner-bridge-recovery-receipt/v1\0"
-)
+RECEIPT_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/scanner-bridge-recovery-receipt/v1\0"
 FOUNDATION_RECEIPT_FILE: Final = "scanner-bridge-foundation.receipt.json"
 PRIVATE_ENDPOINT_RECOVERY_RECEIPT_FILE: Final = (
     "scanner-bridge-private-endpoint-recovery.receipt.json"
@@ -82,18 +80,14 @@ STORAGE_PRIVATE_ENDPOINT: Final = "pe-mobius77-storage"
 MANAGED_ENVIRONMENT: Final = "cae-mobius77-staging"
 PROOF_CONSOLE_DIAGNOSTIC: Final = "mobius77-scanner-proof-console"
 BLOB_TAG_OBSERVATION_MARKER: Final = "SCANNER_BLOB_TAG_OBSERVATION"
-BLOB_TAG_OBSERVATION_SCHEMA: Final = (
-    "mobius.scanner-result-bridge.blob-tags-observation.v1"
-)
+BLOB_TAG_OBSERVATION_SCHEMA: Final = "mobius.scanner-result-bridge.blob-tags-observation.v1"
 BLOB_TAG_NORMALIZATION_PATH: Final = "azure-blob-tags-xml-local-name-v1"
 BLOB_RESULT_TAG: Final = "Malware Scanning scan result"
 BLOB_SCAN_TIME_TAG: Final = "Malware Scanning scan time UTC"
 SCAN_FINISHED_NORMALIZATION_PATH: Final = (
     "trim-z-to-offset-truncate-beyond-microseconds-fromisoformat-utc-v1"
 )
-SCAN_FINISHED_COMPARISON_CONTRACT: Final = (
-    "maximum-common-representable-precision-equality-v1"
-)
+SCAN_FINISHED_COMPARISON_CONTRACT: Final = "maximum-common-representable-precision-equality-v1"
 LEGACY_SCAN_FINISHED_COMPARISON_CONTRACT: Final = "exact-parsed-utc-instant-equality-v1"
 PROOF_LOG_TAIL_LINES: Final = 32
 PROOF_LOG_OUTPUT_MAX_BYTES: Final = 49_152
@@ -349,9 +343,7 @@ def _claim_authorization(
     receipt_directory: Path,
     now_utc: datetime,
 ) -> Path:
-    directory = _outside_repository(
-        receipt_directory, "scanner-bridge-receipts-inside-repository"
-    )
+    directory = _outside_repository(receipt_directory, "scanner-bridge-receipts-inside-repository")
     directory.mkdir(parents=True, exist_ok=True)
     if authorization.stage == FOUNDATION_STAGE:
         filename = FOUNDATION_RECEIPT_FILE
@@ -387,9 +379,7 @@ def _claim_authorization(
     return path
 
 
-def _write_evidence(
-    path: Path, evidence: ScannerResultBridgeDeploymentEvidence
-) -> None:
+def _write_evidence(path: Path, evidence: ScannerResultBridgeDeploymentEvidence) -> None:
     resolved = _outside_repository(path, "scanner-bridge-evidence-inside-repository")
     resolved.parent.mkdir(parents=True, exist_ok=True)
     value = cast(JsonValue, evidence.canonical())
@@ -439,10 +429,9 @@ def _write_failure_evidence(
             "markerIntegritySha256": marker["markerIntegritySha256"],
             "observedAtUtc": _format_utc(observed_at),
             "proofExecutionCount": 1,
+            "proofExecutionOrdinal": authorization.proofExecutionOrdinal,
             "scanFinishedComparison": (
-                dict(terminal_evidence)
-                if isinstance(terminal_evidence, Mapping)
-                else None
+                dict(terminal_evidence) if isinstance(terminal_evidence, Mapping) else None
             ),
             "schemaVersion": "mobius.scanner-result-bridge.failure-evidence.v3",
             "terminalEdge": marker["failureCode"],
@@ -496,8 +485,7 @@ def _validate_managed_binding(
         "workspace": resources.get("logAnalyticsWorkspace") == LOG_ANALYTICS_WORKSPACE,
         "cleanup-account": resources.get("cleanupAutomationAccount")
         == "aa-mobius77-cleanup-recovery",
-        "cleanup-deadline": cleanup.get("deadlineUtc")
-        == authorization.cleanupDeadlineUtc,
+        "cleanup-deadline": cleanup.get("deadlineUtc") == authorization.cleanupDeadlineUtc,
         "cleanup-target": cleanup.get("targetResourceGroup") == TARGET_RESOURCE_GROUP,
     }
     if not all(exact.values()):
@@ -544,9 +532,7 @@ def _verify_provider_api_versions(subscription_id: str) -> None:
         )
         row = _json_object(value, "scanner-bridge-provider-metadata-malformed")
         metadata = row.get("resourceType")
-        if row.get("registrationState") != "Registered" or not isinstance(
-            metadata, dict
-        ):
+        if row.get("registrationState") != "Registered" or not isinstance(metadata, dict):
             _fail("scanner-bridge-provider-unavailable")
         versions = metadata.get("apiVersions")
         locations = metadata.get("locations")
@@ -699,9 +685,7 @@ def _exact_monitor_private_endpoint_recovery_state(
         "groupIds:properties.groupIds,status:properties.privateLinkServiceConnectionState.status,"
         "provisioningState:properties.provisioningState},tags:tags}",
     )
-    if not isinstance(endpoints, list) or any(
-        not isinstance(row, dict) for row in endpoints
-    ):
+    if not isinstance(endpoints, list) or any(not isinstance(row, dict) for row in endpoints):
         _fail("scanner-private-endpoint-recovery-inventory-malformed")
     matching_endpoints = [
         cast(dict[str, JsonValue], row)
@@ -726,9 +710,7 @@ def _exact_monitor_private_endpoint_recovery_state(
         or len(connections) != 1
         or not isinstance(connections[0], dict)
         or connections[0].get("name") != "azuremonitor"
-        or not _same_resource_id(
-            connections[0].get("serviceId"), authorization.privateLinkScopeId
-        )
+        or not _same_resource_id(connections[0].get("serviceId"), authorization.privateLinkScopeId)
         or connections[0].get("groupIds") != ["azuremonitor"]
         or connections[0].get("status") != "Approved"
         or connections[0].get("provisioningState") not in {"Failed", "Succeeded"}
@@ -878,9 +860,7 @@ def _exact_monitor_private_endpoint_recovery_state(
         "value[].{id:id,name:name,provisioningState:properties.provisioningState,"
         "zoneIds:properties.privateDnsZoneConfigs[].properties.privateDnsZoneId}",
     )
-    if not isinstance(zone_groups, list) or any(
-        not isinstance(row, dict) for row in zone_groups
-    ):
+    if not isinstance(zone_groups, list) or any(not isinstance(row, dict) for row in zone_groups):
         _fail("scanner-private-endpoint-recovery-zone-group-inventory-malformed")
     expected_zone_group_id = (
         f"{authorization.monitorPrivateEndpointId}/privateDnsZoneGroups/default"
@@ -1068,9 +1048,7 @@ def _repair_exact_monitor_private_endpoint(
     if after_endpoint.get("privateDnsZoneGroupProvisioningState") != "Succeeded":
         zone_group_mutation_issued = True
         ambiguous_code = None
-        group_id = (
-            f"{authorization.monitorPrivateEndpointId}/privateDnsZoneGroups/default"
-        )
+        group_id = f"{authorization.monitorPrivateEndpointId}/privateDnsZoneGroups/default"
         try:
             _rest_put(
                 group_id,
@@ -1304,12 +1282,8 @@ def _role_permissions(
 def _grants_tag_write(role_definition_id: str) -> bool:
     data_actions, denied = _role_permissions(role_definition_id)
     target = TAG_WRITE_ACTION.casefold()
-    granted = any(
-        fnmatch.fnmatchcase(target, action.casefold()) for action in data_actions
-    )
-    explicitly_denied = any(
-        fnmatch.fnmatchcase(target, action.casefold()) for action in denied
-    )
+    granted = any(fnmatch.fnmatchcase(target, action.casefold()) for action in data_actions)
+    explicitly_denied = any(fnmatch.fnmatchcase(target, action.casefold()) for action in denied)
     return granted and not explicitly_denied
 
 
@@ -1357,9 +1331,7 @@ def _verify_ordinary_identity_roles(
     expected: frozenset[tuple[str, str]],
 ) -> tuple[list[dict[str, str]], str]:
     rows = _role_assignment_rows(subscription_id, principal_id=principal_id)
-    projected = {
-        (_role_name(row["roleDefinitionId"]), row["scope"].casefold()) for row in rows
-    }
+    projected = {(_role_name(row["roleDefinitionId"]), row["scope"].casefold()) for row in rows}
     if not expected.issubset(projected):
         _fail("scanner-bridge-required-role-assignment-absent")
     for row in rows:
@@ -1536,8 +1508,7 @@ def _foundation_readback_once(
         or not isinstance(access_rules[0].get("tenantId"), str)
         or _UUID.fullmatch(cast(str, access_rules[0]["tenantId"])) is None
         or not isinstance(access_rules[0].get("resourceId"), str)
-        or cast(str, access_rules[0]["resourceId"]).casefold()
-        != scanner_resource_id.casefold()
+        or cast(str, access_rules[0]["resourceId"]).casefold() != scanner_resource_id.casefold()
     ):
         _fail("scanner-bridge-storage-scanner-network-access-unproved")
 
@@ -1631,7 +1602,9 @@ def _foundation_readback_once(
 
     proof_console_diagnostic: dict[str, JsonValue] | None = None
     if require_proof_console_diagnostic:
-        managed_environment_id = f"{target}/providers/Microsoft.App/managedEnvironments/{MANAGED_ENVIRONMENT}"
+        managed_environment_id = (
+            f"{target}/providers/Microsoft.App/managedEnvironments/{MANAGED_ENVIRONMENT}"
+        )
         proof_console_diagnostic_id = (
             f"{managed_environment_id}/providers/Microsoft.Insights/diagnosticSettings/"
             f"{PROOF_CONSOLE_DIAGNOSTIC}"
@@ -1685,9 +1658,7 @@ def _foundation_readback_once(
         or ampls.get("exclusions") != []
     ):
         _fail("scanner-bridge-ampls-private-only-unproved")
-    scoped_id = (
-        f"{authorization.privateLinkScopeId}/scopedResources/{LOG_ANALYTICS_WORKSPACE}"
-    )
+    scoped_id = f"{authorization.privateLinkScopeId}/scopedResources/{LOG_ANALYTICS_WORKSPACE}"
     scoped = _rest_get(
         scoped_id,
         AMPLS_API_VERSION,
@@ -1701,7 +1672,9 @@ def _foundation_readback_once(
     ):
         _fail("scanner-bridge-ampls-workspace-association-unproved")
 
-    storage_pe_id = f"{target}/providers/Microsoft.Network/privateEndpoints/{STORAGE_PRIVATE_ENDPOINT}"
+    storage_pe_id = (
+        f"{target}/providers/Microsoft.Network/privateEndpoints/{STORAGE_PRIVATE_ENDPOINT}"
+    )
     storage_pe = _verify_private_endpoint(
         resource_id=storage_pe_id,
         service_id=authorization.storageAccountId,
@@ -1714,9 +1687,7 @@ def _foundation_readback_once(
         group_id="azuremonitor",
         subnet_id=subnet_id,
     )
-    required_zones = tuple(
-        zone for zone, _link, _config in MONITOR_PRIVATE_DNS_BINDINGS
-    )
+    required_zones = tuple(zone for zone, _link, _config in MONITOR_PRIVATE_DNS_BINDINGS)
     link_names = {zone: link for zone, link, _config in MONITOR_PRIVATE_DNS_BINDINGS}
     zone_rows: list[dict[str, JsonValue]] = []
     zone_link_rows: list[dict[str, JsonValue]] = []
@@ -1747,7 +1718,9 @@ def _foundation_readback_once(
     )
 
     worker = _identity_projection(authorization.workerIdentityId)
-    api_identity_id = f"{target}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{API_IDENTITY}"
+    api_identity_id = (
+        f"{target}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{API_IDENTITY}"
+    )
     api_identity = _identity_projection(api_identity_id)
     worker_principal = worker.get("principalId")
     worker_client = worker.get("clientId")
@@ -1819,12 +1792,8 @@ def _foundation_readback_once(
         or _UUID.fullmatch(scanner_principal) is None
     ):
         _fail("scanner-bridge-storage-scanner-identity-unproved")
-    storage_rows = _storage_role_assignment_rows(
-        subscription_id, authorization.storageAccountId
-    )
-    tag_writers = [
-        row for row in storage_rows if _grants_tag_write(row["roleDefinitionId"])
-    ]
+    storage_rows = _storage_role_assignment_rows(subscription_id, authorization.storageAccountId)
+    tag_writers = [row for row in storage_rows if _grants_tag_write(row["roleDefinitionId"])]
     if len(tag_writers) != 1:
         _fail("scanner-bridge-tag-writer-boundary-unproved")
     writer = tag_writers[0]
@@ -1848,11 +1817,9 @@ def _foundation_readback_once(
         for topic in topics
         if isinstance(topic, dict)
         and isinstance(topic.get("source"), str)
-        and cast(str, topic["source"]).casefold()
-        == authorization.storageAccountId.casefold()
+        and cast(str, topic["source"]).casefold() == authorization.storageAccountId.casefold()
         and isinstance(topic.get("topicType"), str)
-        and cast(str, topic["topicType"]).casefold()
-        == "microsoft.storage.storageaccounts"
+        and cast(str, topic["topicType"]).casefold() == "microsoft.storage.storageaccounts"
         and isinstance(topic.get("id"), str)
     ]
     if len(provider_topics) != 1:
@@ -1915,9 +1882,7 @@ def _foundation_readback_once(
         diagnostic_proof_integrity=_canonical_hash(
             diagnostic_projection, "mobius.scanner-bridge.diagnostic.v1"
         ),
-        rbac_proof_integrity=_canonical_hash(
-            rbac_projection, "mobius.scanner-bridge.rbac.v1"
-        ),
+        rbac_proof_integrity=_canonical_hash(rbac_projection, "mobius.scanner-bridge.rbac.v1"),
         tag_write_denial_integrity=_canonical_hash(
             cast(
                 JsonValue,
@@ -2007,9 +1972,7 @@ def _proof_graph(
             "value": authorization.authorizationIntegritySha256,
         },
     ]
-    job_projection = {
-        key: value for key, value in job.items() if key not in {"id", "identityIds"}
-    }
+    job_projection = {key: value for key, value in job.items() if key not in {"id", "identityIds"}}
     identity_ids = job.get("identityIds")
     if (
         job_projection
@@ -2051,9 +2014,7 @@ def _proof_graph(
     canonical_role_id = _canonical_role_definition_id(authorization)
     exact_permissions: list[JsonValue] = [
         {
-            "actions": [
-                "Microsoft.Storage/storageAccounts/blobServices/containers/read"
-            ],
+            "actions": ["Microsoft.Storage/storageAccounts/blobServices/containers/read"],
             "dataActions": [
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read",
                 "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/add/action",
@@ -2073,9 +2034,7 @@ def _proof_graph(
         or not (
             isinstance(assignable_scopes, list)
             and len(assignable_scopes) == 1
-            and _same_resource_id(
-                assignable_scopes[0], authorization.targetResourceGroupId
-            )
+            and _same_resource_id(assignable_scopes[0], authorization.targetResourceGroupId)
         )
         or permissions != exact_permissions
         or _grants_tag_write(authorization.proofRoleDefinitionId)
@@ -2095,8 +2054,7 @@ def _proof_graph(
         or not isinstance(assignment_principal, str)
         or assignment_principal.casefold() != worker_principal_id.casefold()
         or not isinstance(assignment.get("roleDefinitionId"), str)
-        or cast(str, assignment["roleDefinitionId"]).casefold()
-        != canonical_role_id.casefold()
+        or cast(str, assignment["roleDefinitionId"]).casefold() != canonical_role_id.casefold()
         or not assignment_id.casefold().startswith(
             f"{quarantine_scope}/providers/Microsoft.Authorization/roleAssignments/".casefold()
         )
@@ -2144,9 +2102,7 @@ def _job_execution_rows(
             "endTime",
         }:
             _fail("scanner-proof-execution-readback-malformed")
-        if not isinstance(row.get("name"), str) or not isinstance(
-            row.get("status"), str
-        ):
+        if not isinstance(row.get("name"), str) or not isinstance(row.get("status"), str):
             _fail("scanner-proof-execution-readback-malformed")
         if any(
             item is not None and not isinstance(item, str)
@@ -2192,9 +2148,7 @@ def _start_one_execution(authorization: ScannerBridgeRecoveryAuthorization) -> s
         rows = _job_execution_rows(authorization)
         if len(rows) == 1:
             name = rows[0]["name"]
-            if isinstance(name, str) and (
-                requested_name is None or requested_name == name
-            ):
+            if isinstance(name, str) and (requested_name is None or requested_name == name):
                 return name
         if len(rows) > 1:
             _fail("scanner-proof-duplicate-execution-created")
@@ -2368,17 +2322,14 @@ def _proof_marker(
         "tlsHostnameSha256",
     }
     if any(
-        not isinstance(marker.get(key), str)
-        or _SHA256.fullmatch(cast(str, marker[key])) is None
+        not isinstance(marker.get(key), str) or _SHA256.fullmatch(cast(str, marker[key])) is None
         for key in hashes
     ):
         _fail("scanner-proof-marker-integrity-malformed")
     attempt_count = marker.get("attemptCount")
     observation_count = marker.get("blobTagObservationCount")
     integrity = marker.get("markerIntegritySha256")
-    body = {
-        key: value for key, value in marker.items() if key != "markerIntegritySha256"
-    }
+    body = {key: value for key, value in marker.items() if key != "markerIntegritySha256"}
     if (
         not isinstance(attempt_count, int)
         or isinstance(attempt_count, bool)
@@ -2408,9 +2359,7 @@ def _proof_marker(
         _fail("scanner-proof-marker-correlation-unproved")
     blob_timestamp = comparison.get("blobTagsTimestamp")
     log_timestamp = comparison.get("logAnalyticsTimestamp")
-    if not isinstance(blob_timestamp, Mapping) or not isinstance(
-        log_timestamp, Mapping
-    ):
+    if not isinstance(blob_timestamp, Mapping) or not isinstance(log_timestamp, Mapping):
         _fail("scanner-proof-marker-correlation-unproved")
     blob_canonical = blob_timestamp.get("canonicalUtc")
     blob_common = comparison.get("blobTagsCommonPrecisionUtc")
@@ -2545,9 +2494,7 @@ def _parsed_timestamp_representation(
     ):
         _fail("scanner-proof-scan-finished-evidence-malformed")
     represented_timezone = represented.group("timezone")
-    normalized_timezone = (
-        "+00:00" if represented_timezone in {"Z", "z"} else represented_timezone
-    )
+    normalized_timezone = "+00:00" if represented_timezone in {"Z", "z"} else represented_timezone
     try:
         utc_second = datetime.fromisoformat(
             f"{represented.group('date')}T{represented.group('time')}{normalized_timezone}"
@@ -2575,15 +2522,11 @@ def _timestamp_units(value: _ValidatedTimestampRepresentation, precision: int) -
     elif value.precision >= precision:
         fraction = int(value.fractional_digits[:precision])
     else:
-        fraction = int(value.fractional_digits or "0") * 10 ** (
-            precision - value.precision
-        )
+        fraction = int(value.fractional_digits or "0") * 10 ** (precision - value.precision)
     return int(seconds * 10**precision + fraction)
 
 
-def _common_precision_utc(
-    value: _ValidatedTimestampRepresentation, precision: int
-) -> str:
+def _common_precision_utc(value: _ValidatedTimestampRepresentation, precision: int) -> str:
     base = value.utc_second.strftime("%Y-%m-%dT%H:%M:%S")
     if precision == 0:
         return f"{base}Z"
@@ -2624,11 +2567,7 @@ def _validate_scan_finished_terminal_evidence(
     if set(value) != required:
         _fail("scanner-proof-scan-finished-evidence-malformed")
     integrity = value.get("integritySha256")
-    body = {
-        key: cast(JsonValue, item)
-        for key, item in value.items()
-        if key != "integritySha256"
-    }
+    body = {key: cast(JsonValue, item) for key, item in value.items() if key != "integritySha256"}
     hashes = {
         "blobEvidenceSha256",
         "correlationIdSha256",
@@ -2639,8 +2578,7 @@ def _validate_scan_finished_terminal_evidence(
     }
     delta = value.get("logAnalyticsMinusBlobTagsMicroseconds")
     if (
-        expected_decision
-        not in {"different-common-precision", "equal-common-precision"}
+        expected_decision not in {"different-common-precision", "equal-common-precision"}
         or not isinstance(integrity, str)
         or _SHA256.fullmatch(integrity) is None
         or integrity
@@ -2649,8 +2587,7 @@ def _validate_scan_finished_terminal_evidence(
             "mobius.scanner-bridge.scan-finished-comparison.v2",
         )
         or any(
-            not isinstance(value.get(key), str)
-            or _SHA256.fullmatch(cast(str, value[key])) is None
+            not isinstance(value.get(key), str) or _SHA256.fullmatch(cast(str, value[key])) is None
             for key in hashes
         )
         or value.get("comparisonContract") != SCAN_FINISHED_COMPARISON_CONTRACT
@@ -2673,9 +2610,9 @@ def _validate_scan_finished_terminal_evidence(
     exact_equal = _timestamp_units(blob_timestamp, exact_precision) == _timestamp_units(
         log_timestamp, exact_precision
     )
-    common_equal = _timestamp_units(
-        blob_timestamp, common_precision
-    ) == _timestamp_units(log_timestamp, common_precision)
+    common_equal = _timestamp_units(blob_timestamp, common_precision) == _timestamp_units(
+        log_timestamp, common_precision
+    )
     if (
         _delta_microseconds(log_timestamp.parsed, blob_timestamp.parsed) != delta
         or value.get("comparisonPrecisionFractionalSecondDigits") != common_precision
@@ -2716,11 +2653,7 @@ def _validate_legacy_scan_finished_terminal_evidence(value: object) -> None:
     if set(value) != required:
         _fail("scanner-proof-scan-finished-evidence-malformed")
     integrity = value.get("integritySha256")
-    body = {
-        key: cast(JsonValue, item)
-        for key, item in value.items()
-        if key != "integritySha256"
-    }
+    body = {key: cast(JsonValue, item) for key, item in value.items() if key != "integritySha256"}
     hashes = {
         "blobEvidenceSha256",
         "correlationIdSha256",
@@ -2739,8 +2672,7 @@ def _validate_legacy_scan_finished_terminal_evidence(value: object) -> None:
             "mobius.scanner-bridge.scan-finished-comparison.v1",
         )
         or any(
-            not isinstance(value.get(key), str)
-            or _SHA256.fullmatch(cast(str, value[key])) is None
+            not isinstance(value.get(key), str) or _SHA256.fullmatch(cast(str, value[key])) is None
             for key in hashes
         )
         or value.get("comparisonContract") != LEGACY_SCAN_FINISHED_COMPARISON_CONTRACT
@@ -2767,9 +2699,7 @@ def _proof_failure_marker(
     log_output: str | None = None,
 ) -> dict[str, JsonValue]:
     marker = _find_marker(
-        log_output
-        if log_output is not None
-        else _proof_log_output(authorization, execution_name),
+        log_output if log_output is not None else _proof_log_output(authorization, execution_name),
         "SCANNER_RESULT_BRIDGE_FAILED",
     )
     required = {
@@ -2787,9 +2717,7 @@ def _proof_failure_marker(
     observation_count = marker.get("blobTagObservationCount")
     failure_code = marker.get("failureCode")
     integrity = marker.get("markerIntegritySha256")
-    body = {
-        key: value for key, value in marker.items() if key != "markerIntegritySha256"
-    }
+    body = {key: value for key, value in marker.items() if key != "markerIntegritySha256"}
     if (
         not isinstance(attempt_count, int)
         or isinstance(attempt_count, bool)
@@ -2807,8 +2735,7 @@ def _proof_failure_marker(
             "mobius.scanner-bridge.proof-failure-marker.v2",
         )
         or marker.get("marker") != "SCANNER_RESULT_BRIDGE_FAILED"
-        or marker.get("schemaVersion")
-        != "mobius.scanner-result-bridge.proof-failure.v2"
+        or marker.get("schemaVersion") != "mobius.scanner-result-bridge.proof-failure.v2"
     ):
         _fail("scanner-proof-failure-marker-malformed")
     terminal_evidence = marker.get("terminalEvidence")
@@ -2871,9 +2798,7 @@ def _validate_blob_tag_observation_marker(
     if not isinstance(integrity, str) or _SHA256.fullmatch(integrity) is None:
         _fail("scanner-proof-blob-tag-observation-malformed")
     body = {
-        key: cast(JsonValue, value)
-        for key, value in marker.items()
-        if key != "integritySha256"
+        key: cast(JsonValue, value) for key, value in marker.items() if key != "integritySha256"
     }
     if _blob_tag_observation_hash(cast(JsonValue, body)) != integrity:
         _fail("scanner-proof-blob-tag-observation-integrity-unproved")
@@ -2883,16 +2808,13 @@ def _validate_blob_tag_observation_marker(
         "queriedEtagSha256",
     )
     if any(
-        not isinstance(marker.get(key), str)
-        or _SHA256.fullmatch(cast(str, marker[key])) is None
+        not isinstance(marker.get(key), str) or _SHA256.fullmatch(cast(str, marker[key])) is None
         for key in hashes
     ):
         _fail("scanner-proof-blob-tag-observation-malformed")
     for key in ("responseEtagSha256", "responseVersionIdSha256"):
         value = marker.get(key)
-        if value is not None and (
-            not isinstance(value, str) or _SHA256.fullmatch(value) is None
-        ):
+        if value is not None and (not isinstance(value, str) or _SHA256.fullmatch(value) is None):
             _fail("scanner-proof-blob-tag-observation-malformed")
     request_id = marker.get("requestCorrelationId")
     if request_id is not None and (
@@ -2962,11 +2884,7 @@ def _validate_blob_tag_observation_marker(
     ):
         _fail("scanner-proof-blob-tag-observation-version-unproved")
     if decision == "rejected-http-status":
-        if (
-            http_status is None
-            or 200 <= http_status < 300
-            or normalization != "not-run"
-        ):
+        if http_status is None or 200 <= http_status < 300 or normalization != "not-run":
             _fail("scanner-proof-blob-tag-observation-comparison-unproved")
     elif decision == "rejected-observability-gap":
         if http_status is not None or normalization != "not-run":
@@ -2986,10 +2904,7 @@ def _validate_blob_tag_observation_marker(
     if decision == "rejected-unexpected-key" and (not unexpected or missing):
         _fail("scanner-proof-blob-tag-observation-comparison-unproved")
     if decision == "accepted" and (
-        missing
-        or unexpected
-        or different_version
-        or normalization != BLOB_TAG_NORMALIZATION_PATH
+        missing or unexpected or different_version or normalization != BLOB_TAG_NORMALIZATION_PATH
     ):
         _fail("scanner-proof-blob-tag-observation-comparison-unproved")
     if (
@@ -3012,11 +2927,7 @@ def _verified_retained_record(
     if set(value) != required or value.get("schemaVersion") != schema:
         _fail("scanner-proof-reconciliation-history-malformed")
     integrity = value.get("integritySha256")
-    body = {
-        key: cast(JsonValue, item)
-        for key, item in value.items()
-        if key != "integritySha256"
-    }
+    body = {key: cast(JsonValue, item) for key, item in value.items() if key != "integritySha256"}
     if (
         not isinstance(integrity, str)
         or _SHA256.fullmatch(integrity) is None
@@ -3041,17 +2952,14 @@ def _retained_failure_marker(log_output: str) -> dict[str, JsonValue]:
         _fail("scanner-proof-reconciliation-failure-marker-malformed")
     integrity = marker.get("markerIntegritySha256")
     body = {
-        key: cast(JsonValue, item)
-        for key, item in marker.items()
-        if key != "markerIntegritySha256"
+        key: cast(JsonValue, item) for key, item in marker.items() if key != "markerIntegritySha256"
     }
     if (
         marker.get("attemptCount") != 120
         or marker.get("blobTagObservationCount") != 120
         or marker.get("failureCode") != "scanner-correlation-scan-finished-mismatch"
         or marker.get("marker") != "SCANNER_RESULT_BRIDGE_FAILED"
-        or marker.get("schemaVersion")
-        != "mobius.scanner-result-bridge.proof-failure.v2"
+        or marker.get("schemaVersion") != "mobius.scanner-result-bridge.proof-failure.v2"
         or integrity != RETAINED_PROOF_FAILURE_MARKER_INTEGRITY
         or integrity
         != _scanner_runtime_hash(
@@ -3105,9 +3013,7 @@ def reconcile_retained_scanner_proof(
     ordinal = _verified_retained_record(
         ordinal_binding,
         schema="mobius.milestone-7.7.scanner-proof-ordinal-binding-evidence.v1",
-        domain=(
-            "solarplexus-mobius/milestone-7.7/scanner-proof-ordinal-binding-evidence/v1"
-        ),
+        domain=("solarplexus-mobius/milestone-7.7/scanner-proof-ordinal-binding-evidence/v1"),
         required={
             "absoluteTotalExecutionCeiling",
             "apiImageDigest",
@@ -3130,9 +3036,7 @@ def reconcile_retained_scanner_proof(
     start = _verified_retained_record(
         execution_start,
         schema="mobius.milestone-7.7.scanner-proof-execution-start-evidence.v1",
-        domain=(
-            "solarplexus-mobius/milestone-7.7/scanner-proof-execution-start-evidence/v1"
-        ),
+        domain=("solarplexus-mobius/milestone-7.7/scanner-proof-execution-start-evidence/v1"),
         required={
             "absoluteTotalExecutionCeiling",
             "apiImageDigest",
@@ -3171,9 +3075,7 @@ def reconcile_retained_scanner_proof(
         "ociConfigDigest": RETAINED_PROOF_OCI_CONFIG,
         "priorExecutionCount": 1,
     }
-    if any(
-        ordinal.get(key) != expected for key, expected in ordinal_expectations.items()
-    ) or any(
+    if any(ordinal.get(key) != expected for key, expected in ordinal_expectations.items()) or any(
         start.get(key) != expected for key, expected in start_expectations.items()
     ):
         _fail("scanner-proof-reconciliation-execution-history-invalid")
@@ -3194,9 +3096,9 @@ def reconcile_retained_scanner_proof(
     exact_equal = _timestamp_units(blob_timestamp, exact_precision) == _timestamp_units(
         log_timestamp, exact_precision
     )
-    common_equal = _timestamp_units(
-        blob_timestamp, common_precision
-    ) == _timestamp_units(log_timestamp, common_precision)
+    common_equal = _timestamp_units(blob_timestamp, common_precision) == _timestamp_units(
+        log_timestamp, common_precision
+    )
     blob_raw = blob_mapping.get("rawValue")
     log_raw = log_mapping.get("rawValue")
     delta = terminal.get("logAnalyticsMinusBlobTagsMicroseconds")
@@ -3215,8 +3117,7 @@ def reconcile_retained_scanner_proof(
         or terminal.get("logAnalyticsResult") != "No threats found"
         or observation.get("queriedBlobUriSha256") != terminal.get("uriSha256")
         or observation.get("queriedEtagSha256") != terminal.get("etagSha256")
-        or observation.get("queriedBlobVersionIdSha256")
-        != terminal.get("providerVersionSha256")
+        or observation.get("queriedBlobVersionIdSha256") != terminal.get("providerVersionSha256")
         or tuple(cast(list[str], observation.get("returnedTagKeys"))) != required_keys
         or tuple(cast(list[str], observation.get("requiredKeysFound"))) != required_keys
         or observation.get("requiredKeysMissing") != []
@@ -3228,9 +3129,7 @@ def reconcile_retained_scanner_proof(
         "authorizationCreated": False,
         "authorizationIntegritySha256": RETAINED_PROOF_AUTHORIZATION_INTEGRITY,
         "azureMutationPerformed": False,
-        "blobTagObservationIntegritySha256": (
-            RETAINED_PROOF_BLOB_OBSERVATION_INTEGRITY
-        ),
+        "blobTagObservationIntegritySha256": (RETAINED_PROOF_BLOB_OBSERVATION_INTEGRITY),
         "cleanupDeadlineUtc": RETAINED_PROOF_CLEANUP_DEADLINE,
         "commonPrecisionEqual": common_equal,
         "commonPrecisionProjection": {
@@ -3249,16 +3148,10 @@ def reconcile_retained_scanner_proof(
         "exactInstantDeltaMicroseconds": delta,
         "exactInstantEqual": exact_equal,
         "executionName": RETAINED_PROOF_EXECUTION,
-        "finalSemanticDecision": (
-            "equivalent-at-maximum-common-representable-precision"
-        ),
-        "historicalFailureMarkerIntegritySha256": (
-            RETAINED_PROOF_FAILURE_MARKER_INTEGRITY
-        ),
+        "finalSemanticDecision": ("equivalent-at-maximum-common-representable-precision"),
+        "historicalFailureMarkerIntegritySha256": (RETAINED_PROOF_FAILURE_MARKER_INTEGRITY),
         "historicalMarkerBytesRewritten": False,
-        "historicalTerminalEvidenceIntegritySha256": (
-            RETAINED_PROOF_TERMINAL_EVIDENCE_INTEGRITY
-        ),
+        "historicalTerminalEvidenceIntegritySha256": (RETAINED_PROOF_TERMINAL_EVIDENCE_INTEGRITY),
         "ociConfigDigest": RETAINED_PROOF_OCI_CONFIG,
         "originalParsedUtc": {
             "blobTags": cast(str, blob_mapping.get("canonicalUtc")),
@@ -3323,9 +3216,7 @@ def _proof_blob_tag_observation(
     log_output: str | None = None,
 ) -> dict[str, JsonValue] | None:
     markers = _find_markers(
-        log_output
-        if log_output is not None
-        else _proof_log_output(authorization, execution_name),
+        log_output if log_output is not None else _proof_log_output(authorization, execution_name),
         BLOB_TAG_OBSERVATION_MARKER,
     )
     required_for_failure = failure_code in _BLOB_TAG_FAILURE_DECISIONS
@@ -3373,10 +3264,7 @@ def _verify_proof_graph(
                 workspace_customer_id=workspace_customer_id,
             )
         except lifecycle.AzureCommandError as exc:
-            if not (
-                _not_found(exc)
-                or exc.sanitized_azure_error_code == "azure-command-nonzero"
-            ):
+            if not (_not_found(exc) or exc.sanitized_azure_error_code == "azure-command-nonzero"):
                 raise
             if time.monotonic() >= deadline:
                 _fail("scanner-proof-graph-propagation-timeout")
@@ -3533,9 +3421,7 @@ def _build_live_evidence(
         },
         correlation_id_sha256=_success_marker_text(marker, "correlationIdSha256"),
         blob_tag_evidence_sha256=_success_marker_text(marker, "blobEvidenceSha256"),
-        log_analytics_evidence_sha256=_success_marker_text(
-            marker, "logAnalyticsEvidenceSha256"
-        ),
+        log_analytics_evidence_sha256=_success_marker_text(marker, "logAnalyticsEvidenceSha256"),
         object_version_or_etag_sha256=_success_marker_text(marker, "etagSha256"),
         storage_resource_sha256=_hash_text(authorization.storageAccountId),
         completion_time_sha256=completion_hash,
@@ -3607,22 +3493,16 @@ def _build_live_evidence(
                 {
                     "account": _success_marker_text(marker, "accountNameSha256"),
                     "blob": _success_marker_text(marker, "blobUriSha256"),
-                    "providerVersion": _success_marker_text(
-                        marker, "providerVersionSha256"
-                    ),
+                    "providerVersion": _success_marker_text(marker, "providerVersionSha256"),
                 },
             ),
             "mobius.scanner-bridge.producer-live-proof.v1",
         ),
         blob_tag_result_sha256=_success_marker_text(marker, "blobTagResultSha256"),
-        log_analytics_workspace_id_sha256=_hash_text(
-            authorization.logAnalyticsWorkspaceId
-        ),
+        log_analytics_workspace_id_sha256=_hash_text(authorization.logAnalyticsWorkspaceId),
         log_analytics_table="StorageMalwareScanningResults",
         log_query_sha256=_success_marker_text(marker, "logQuerySha256"),
-        dual_source_proof_integrity=_success_marker_text(
-            marker, "dualSourceEvidenceSha256"
-        ),
+        dual_source_proof_integrity=_success_marker_text(marker, "dualSourceEvidenceSha256"),
         consumer_identity_sha256=_hash_text(readback.worker_principal_id),
         consumer_entry_point="scripts.worker.DocumentWorker",
         consumer_proof_integrity=consumer_proof,
@@ -3636,9 +3516,7 @@ def _build_live_evidence(
         tag_write_denial_proof_integrity=readback.tag_write_denial_integrity,
         assignment_proof_integrity=proof_graph_integrity,
         ampls_resource_id_sha256=_hash_text(authorization.privateLinkScopeId),
-        private_endpoint_resource_id_sha256=_hash_text(
-            authorization.monitorPrivateEndpointId
-        ),
+        private_endpoint_resource_id_sha256=_hash_text(authorization.monitorPrivateEndpointId),
         private_dns_zone_set_sha256=readback.private_path_control_plane_integrity,
         private_address_sha256=_success_marker_text(marker, "privateDnsEvidenceSha256"),
         tls_hostname_sha256=_success_marker_text(marker, "tlsHostnameSha256"),
@@ -3656,9 +3534,7 @@ def _build_live_evidence(
         ),
         proof_job_resource_id_sha256=_hash_text(cast(str, authorization.proofJobId)),
         proof_execution_id_sha256=_hash_text(execution_name),
-        clean_decision_proof_integrity=_success_marker_text(
-            marker, "dualSourceEvidenceSha256"
-        ),
+        clean_decision_proof_integrity=_success_marker_text(marker, "dualSourceEvidenceSha256"),
         malicious_decision_proof_integrity=malicious_contract_proof,
         provider_owned_system_topic_preserved=True,
         revocation_proof_integrity=revocation_integrity,
@@ -3717,9 +3593,7 @@ def _monitor_private_endpoint_precreation_count(
     matching: list[dict[str, JsonValue]] = []
     for raw in value:
         row = cast(dict[str, JsonValue], raw)
-        exact_id = _same_resource_id(
-            row.get("id"), authorization.monitorPrivateEndpointId
-        )
+        exact_id = _same_resource_id(row.get("id"), authorization.monitorPrivateEndpointId)
         exact_name = row.get("name") == MONITOR_PRIVATE_ENDPOINT
         if exact_id != exact_name:
             _fail("scanner-foundation-reprovision-endpoint-identity-drift")
@@ -3759,9 +3633,7 @@ def _foundation_deployment_state(
         if _not_found(exc):
             return None
         raise
-    row = _json_object(
-        value, "scanner-foundation-reprovision-deployment-state-malformed"
-    )
+    row = _json_object(value, "scanner-foundation-reprovision-deployment-state-malformed")
     if set(row) != {"state"} or row.get("state") not in {
         "Canceled",
         "Failed",
@@ -3814,10 +3686,7 @@ def reconcile_reprovision_scanner_foundation(
         or deployment_binding.get("repositoryHead") != authorization.repositoryHead
         or not isinstance(deployment_binding.get("authorizationId"), str)
         or not isinstance(deployment_binding.get("managedBindingIntegritySha256"), str)
-        or _SHA256.fullmatch(
-            cast(str, deployment_binding["managedBindingIntegritySha256"])
-        )
-        is None
+        or _SHA256.fullmatch(cast(str, deployment_binding["managedBindingIntegritySha256"])) is None
         or _format_utc(cleanup_at) != authorization.deadlineUtc
         or expected_cost < 0
         or expected_cost > maximum_cost
@@ -3830,9 +3699,7 @@ def reconcile_reprovision_scanner_foundation(
     precreation_count = _monitor_private_endpoint_precreation_count(scope)
     recovery: dict[str, JsonValue] | None = None
     deployment_attempts = 0
-    with tempfile.TemporaryDirectory(
-        prefix="mobius77-reprovision-foundation-"
-    ) as directory:
+    with tempfile.TemporaryDirectory(prefix="mobius77-reprovision-foundation-") as directory:
         template = Path(directory) / "main.json"
         lifecycle._compile_template(template)
         while deployment_attempts < REPROVISION_FOUNDATION_MAXIMUM_DEPLOYMENTS:
@@ -3879,9 +3746,8 @@ def reconcile_reprovision_scanner_foundation(
                 endpoint_count == 0
                 and azure_error_code in REPROVISION_FOUNDATION_TRANSIENT_AZURE_CODES
             )
-            if (
-                deployment_attempts >= REPROVISION_FOUNDATION_MAXIMUM_DEPLOYMENTS
-                or not (reconciled_partial_endpoint or retryable_pre_mutation)
+            if deployment_attempts >= REPROVISION_FOUNDATION_MAXIMUM_DEPLOYMENTS or not (
+                reconciled_partial_endpoint or retryable_pre_mutation
             ):
                 _fail(f"scanner-foundation-reprovision-azure-{azure_error_code}")
             time.sleep(float(deployment_attempts * 2))
@@ -3897,9 +3763,7 @@ def reconcile_reprovision_scanner_foundation(
         _fail("scanner-foundation-reprovision-proof-authority-reachable")
     endpoint_state = _exact_monitor_private_endpoint_recovery_state(scope)
     readback = _verify_foundation(scope, require_proof_console_diagnostic=True)
-    private_path_integrity = _verify_monitor_private_tls_path(
-        readback.workspace_customer_id
-    )
+    private_path_integrity = _verify_monitor_private_tls_path(readback.workspace_customer_id)
     final_expected_cost, final_maximum_cost = lifecycle._verified_cost()
     if (final_expected_cost, final_maximum_cost) != (expected_cost, maximum_cost):
         _fail("scanner-foundation-reprovision-cost-envelope-drift")
@@ -3958,17 +3822,13 @@ class ProductionScannerBridgeRecoveryAdapter:
         cleanup_at = _parse_utc(
             authorization.cleanupDeadlineUtc, "scanner-bridge-cleanup-deadline-invalid"
         )
-        cleanup_principal = lifecycle._verify_cleanup_control(
-            subscription_id, cleanup_at
-        )
+        cleanup_principal = lifecycle._verify_cleanup_control(subscription_id, cleanup_at)
         cleanup_role = cast(dict[str, JsonValue], contract["cleanupExecution"]).get(
             "cleanupContributorRoleDefinitionId"
         )
         if not isinstance(cleanup_role, str):
             _fail("scanner-bridge-cleanup-role-contract-malformed")
-        lifecycle._verify_cleanup_target_role(
-            subscription_id, cleanup_principal, cleanup_role
-        )
+        lifecycle._verify_cleanup_target_role(subscription_id, cleanup_principal, cleanup_role)
 
         if authorization.stage == PRIVATE_ENDPOINT_RECOVERY_STAGE:
             _exact_monitor_private_endpoint_recovery_state(authorization)
@@ -3982,15 +3842,9 @@ class ProductionScannerBridgeRecoveryAdapter:
                 authorization,
                 require_proof_console_diagnostic=True,
             )
-            live_path_integrity = _verify_monitor_private_tls_path(
-                readback.workspace_customer_id
-            )
-            cleanup_principal = lifecycle._verify_cleanup_control(
-                subscription_id, cleanup_at
-            )
-            lifecycle._verify_cleanup_target_role(
-                subscription_id, cleanup_principal, cleanup_role
-            )
+            live_path_integrity = _verify_monitor_private_tls_path(readback.workspace_customer_id)
+            cleanup_principal = lifecycle._verify_cleanup_control(subscription_id, cleanup_at)
+            lifecycle._verify_cleanup_target_role(subscription_id, cleanup_principal, cleanup_role)
             final_expected_cost, final_maximum_cost = lifecycle._verified_cost()
             if (final_expected_cost, final_maximum_cost) != (
                 expected_cost,
@@ -3999,9 +3853,7 @@ class ProductionScannerBridgeRecoveryAdapter:
                 _fail("scanner-private-endpoint-recovery-cost-envelope-drift")
             return {
                 "authorization-consumed": True,
-                "authorization-integrity-sha256": (
-                    authorization.authorizationIntegritySha256
-                ),
+                "authorization-integrity-sha256": (authorization.authorizationIntegritySha256),
                 "cleanup-executable-and-armed": True,
                 "cost-envelope-unchanged": True,
                 "dns-resolution-private": True,
@@ -4028,9 +3880,7 @@ class ProductionScannerBridgeRecoveryAdapter:
             receipt_directory=receipt_directory,
             now_utc=now,
         )
-        with tempfile.TemporaryDirectory(
-            prefix="mobius77-scanner-bridge-"
-        ) as directory:
+        with tempfile.TemporaryDirectory(prefix="mobius77-scanner-bridge-") as directory:
             template = Path(directory) / "main.json"
             lifecycle._compile_template(template)
             # A lost or failed response is reconciled from ARM before any retry.
@@ -4062,9 +3912,7 @@ class ProductionScannerBridgeRecoveryAdapter:
         if authorization.stage == FOUNDATION_STAGE:
             return {
                 "authorization-consumed": True,
-                "authorization-integrity-sha256": (
-                    authorization.authorizationIntegritySha256
-                ),
+                "authorization-integrity-sha256": (authorization.authorizationIntegritySha256),
                 "cleanup-executable-and-armed": True,
                 "foundation-integrity-sha256": readback.inventory_integrity,
                 "public-access-enabled": False,
@@ -4103,18 +3951,14 @@ class ProductionScannerBridgeRecoveryAdapter:
                 _fail(f"scanner-proof-wait-azure-{exc.sanitized_azure_error_code}")
             if execution["status"] != "Succeeded":
                 try:
-                    terminal_log_output = _proof_log_output(
-                        authorization, execution_name
-                    )
+                    terminal_log_output = _proof_log_output(authorization, execution_name)
                     failure_marker = _proof_failure_marker(
                         authorization,
                         execution_name,
                         log_output=terminal_log_output,
                     )
                 except lifecycle.AzureCommandError as exc:
-                    _fail(
-                        f"scanner-proof-failure-marker-azure-{exc.sanitized_azure_error_code}"
-                    )
+                    _fail(f"scanner-proof-failure-marker-azure-{exc.sanitized_azure_error_code}")
                 failure_code = cast(str, failure_marker["failureCode"])
                 try:
                     blob_tag_observation = _proof_blob_tag_observation(
@@ -4164,14 +4008,13 @@ class ProductionScannerBridgeRecoveryAdapter:
         _write_evidence(evidence_output, evidence)
         return {
             "authorization-consumed": True,
-            "authorization-integrity-sha256": (
-                authorization.authorizationIntegritySha256
-            ),
+            "authorization-integrity-sha256": (authorization.authorizationIntegritySha256),
             "cleanup-executable-and-armed": True,
             "evidence-integrity-sha256": evidence.integrity_sha256(),
             "immutable-image-digest": authorization.apiImageDigest,
             "marker": "SCANNER_RESULT_BRIDGE_PROVED",
             "proof-execution-count": 1,
+            "proof-execution-ordinal": authorization.proofExecutionOrdinal,
             "proof-residue-absent": True,
             "provider-system-topic-preserved": True,
             "public-access-enabled": False,
