@@ -3,8 +3,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import inspect
+import io
 import json
 import re
+import tarfile
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
@@ -69,6 +71,83 @@ def _pending_image(source_commit: str = TEST_IMAGE_SOURCE_COMMIT) -> dict[str, J
         "sourceTag": f"source-{source_commit}",
         "registryManifestDigest": None,
     }
+
+
+def _add_tar_member(archive: tarfile.TarFile, name: str, body: bytes) -> None:
+    member = tarfile.TarInfo(name)
+    member.size = len(body)
+    archive.addfile(member, io.BytesIO(body))
+
+
+def _write_test_oci_archive(
+    path: Path,
+    *,
+    image_reference: str,
+    missing_config_descriptor: bool = False,
+    malformed_manifest: bool = False,
+    config_descriptor_digest: str | None = None,
+    index_manifest_digest: str | None = None,
+) -> tuple[str, str, int]:
+    config_body = canonical_bytes(
+        {
+            "architecture": "amd64",
+            "config": {},
+            "os": "linux",
+            "rootfs": {"diff_ids": [], "type": "layers"},
+        }
+    )
+    config_digest = "sha256:" + hashlib.sha256(config_body).hexdigest()
+    effective_config_digest = config_descriptor_digest or config_digest
+    manifest_value: dict[str, JsonValue] = {
+        "schemaVersion": 2,
+        "mediaType": api_image_publication.OCI_MANIFEST_MEDIA_TYPE,
+        "layers": [],
+    }
+    if not missing_config_descriptor:
+        manifest_value["config"] = {
+            "digest": effective_config_digest,
+            "mediaType": api_image_publication.OCI_CONFIG_MEDIA_TYPE,
+            "size": len(config_body),
+        }
+    manifest_body = b"not-json" if malformed_manifest else canonical_bytes(manifest_value)
+    manifest_digest = "sha256:" + hashlib.sha256(manifest_body).hexdigest()
+    index_body = canonical_bytes(
+        {
+            "manifests": [
+                {
+                    "digest": index_manifest_digest or manifest_digest,
+                    "mediaType": api_image_publication.OCI_MANIFEST_MEDIA_TYPE,
+                    "size": len(manifest_body),
+                }
+            ],
+            "mediaType": api_image_publication.OCI_LAYOUT_MEDIA_TYPE,
+            "schemaVersion": 2,
+        }
+    )
+    compatibility_body = canonical_bytes(
+        [
+            {
+                "Config": api_image_publication._blob_path(effective_config_digest),
+                "Layers": [],
+                "RepoTags": [image_reference],
+            }
+        ]
+    )
+    with tarfile.open(path, mode="w") as archive:
+        _add_tar_member(archive, "oci-layout", canonical_bytes({"imageLayoutVersion": "1.0.0"}))
+        _add_tar_member(archive, "index.json", index_body)
+        _add_tar_member(
+            archive,
+            api_image_publication._blob_path(manifest_digest),
+            manifest_body,
+        )
+        _add_tar_member(
+            archive,
+            api_image_publication._blob_path(config_digest),
+            config_body,
+        )
+        _add_tar_member(archive, "manifest.json", compatibility_body)
+    return manifest_digest, config_digest, len(manifest_body)
 
 
 def _synthetic_jwt(claims: Mapping[str, object]) -> bytearray:
@@ -2550,6 +2629,115 @@ def test_publisher_registry_requests_reject_catalog_and_nearby_targets(
         managed_binding_lifecycle._validate_registry_request(method, path)
 
 
+def test_local_oci_inspection_derives_manifest_and_config_independently(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    image_reference = api_image_publication._api_image_reference(TEST_IMAGE_SOURCE_COMMIT)
+    fixture = tmp_path / "fixture.tar"
+    manifest_digest, config_digest, manifest_size = _write_test_oci_archive(
+        fixture, image_reference=image_reference
+    )
+    export_root = tmp_path / "export"
+    export_root.mkdir()
+    commands: list[tuple[str, ...]] = []
+
+    def run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue | None:
+        commands.append(argv)
+        if argv[:3] == ("docker", "image", "inspect"):
+            return {
+                "Architecture": "amd64",
+                "Descriptor": {
+                    "digest": manifest_digest,
+                    "mediaType": api_image_publication.OCI_MANIFEST_MEDIA_TYPE,
+                    "size": manifest_size,
+                },
+                "Id": "sha256:" + "9" * 64,
+                "Os": "linux",
+                "RepoTags": [image_reference],
+            }
+        if argv[:3] == ("docker", "image", "save"):
+            output = Path(argv[argv.index("--output") + 1])
+            output.write_bytes(fixture.read_bytes())
+            return None
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(api_image_publication, "_run", run)
+    monkeypatch.setattr(api_image_publication, "_outside_repository", lambda path, _label: path)
+    monkeypatch.setattr(
+        api_image_publication.tempfile, "mkdtemp", lambda **_kwargs: str(export_root)
+    )
+
+    assert api_image_publication._inspect_local_api_image(image_reference) == (
+        manifest_digest,
+        config_digest,
+    )
+    assert manifest_digest != config_digest
+    assert commands[0][:3] == ("docker", "image", "inspect")
+    assert commands[1][:3] == ("docker", "image", "save")
+    assert not export_root.exists()
+
+
+@pytest.mark.parametrize(
+    ("archive_options", "expected_error"),
+    [
+        (
+            {"missing_config_descriptor": True},
+            "prebuilt-api-image-config-descriptor-missing",
+        ),
+        (
+            {"malformed_manifest": True},
+            "prebuilt-api-image-manifest-descriptor-mismatch",
+        ),
+        (
+            {"config_descriptor_digest": "sha256:" + "8" * 64},
+            "prebuilt-api-image-config-descriptor-mismatch",
+        ),
+    ],
+)
+def test_local_oci_inspection_fails_closed_on_invalid_descriptor_evidence(
+    tmp_path: Path,
+    archive_options: dict[str, JsonValue],
+    expected_error: str,
+) -> None:
+    image_reference = api_image_publication._api_image_reference(TEST_IMAGE_SOURCE_COMMIT)
+    archive = tmp_path / "invalid.tar"
+    manifest_digest, _config_digest, manifest_size = _write_test_oci_archive(
+        archive,
+        image_reference=image_reference,
+        **archive_options,
+    )
+    with pytest.raises(managed_binding_lifecycle.LifecycleError, match=expected_error):
+        api_image_publication._local_oci_archive_config_digest(
+            archive,
+            image_reference=image_reference,
+            manifest_digest=manifest_digest,
+            manifest_media_type=api_image_publication.OCI_MANIFEST_MEDIA_TYPE,
+            manifest_size=manifest_size,
+        )
+
+
+def test_local_oci_inspection_rejects_descriptor_from_another_manifest(
+    tmp_path: Path,
+) -> None:
+    image_reference = api_image_publication._api_image_reference(TEST_IMAGE_SOURCE_COMMIT)
+    archive = tmp_path / "image.tar"
+    _manifest_digest, _config_digest, manifest_size = _write_test_oci_archive(
+        archive, image_reference=image_reference
+    )
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="prebuilt-api-image-manifest-descriptor-mismatch",
+    ):
+        api_image_publication._local_oci_archive_config_digest(
+            archive,
+            image_reference=image_reference,
+            manifest_digest="sha256:" + "7" * 64,
+            manifest_media_type=api_image_publication.OCI_MANIFEST_MEDIA_TYPE,
+            manifest_size=manifest_size,
+        )
+
+
 def test_production_image_build_uses_one_owned_docker_container_builder_and_load(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -2558,6 +2746,7 @@ def test_production_image_build_uses_one_owned_docker_container_builder_and_load
     temporary_root = tmp_path / "buildkit-state"
     temporary_root.mkdir()
     image_id = "sha256:" + "b" * 64
+    config_digest = "sha256:" + "d" * 64
     build_input = "c" * 64
     commands: list[tuple[str, ...]] = []
     active_builder: str | None = None
@@ -2620,7 +2809,7 @@ def test_production_image_build_uses_one_owned_docker_container_builder_and_load
     monkeypatch.setattr(
         api_image_publication,
         "_inspect_local_api_image",
-        lambda _reference: (image_id, image_id),
+        lambda _reference: (image_id, config_digest),
     )
 
     record = api_image_publication._prebuild_api_image(
@@ -2643,7 +2832,8 @@ def test_production_image_build_uses_one_owned_docker_container_builder_and_load
     assert not temporary_root.exists()
     assert record["buildInputSha256"] == build_input
     assert record["imageId"] == image_id
-    assert record["configDigest"] == image_id
+    assert record["configDigest"] == config_digest
+    assert record["configDigest"] != record["imageId"]
     assert record_path.is_file()
 
 
@@ -2675,12 +2865,13 @@ def test_prebuilt_image_record_rejects_source_drift_and_image_identity_mismatch(
 ) -> None:
     head = TEST_IMAGE_SOURCE_COMMIT
     image_id = "sha256:" + "b" * 64
-    build_input = "c" * 64
+    config_digest = "sha256:" + "c" * 64
+    build_input = "d" * 64
     unsigned = api_image_publication._prebuilt_record_unsigned(
         repository_head=head,
         build_input_sha256=build_input,
         image_id=image_id,
-        config_digest=image_id,
+        config_digest=config_digest,
     )
     record: dict[str, JsonValue] = {
         **unsigned,
@@ -2694,7 +2885,7 @@ def test_prebuilt_image_record_rejects_source_drift_and_image_identity_mismatch(
     monkeypatch.setattr(
         api_image_publication,
         "_api_image_build_input_sha256",
-        lambda _head: "d" * 64,
+        lambda _head: "e" * 64,
     )
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
@@ -2712,7 +2903,19 @@ def test_prebuilt_image_record_rejects_source_drift_and_image_identity_mismatch(
     monkeypatch.setattr(
         api_image_publication,
         "_inspect_local_api_image",
-        lambda _reference: ("sha256:" + "e" * 64, "sha256:" + "e" * 64),
+        lambda _reference: (image_id, config_digest),
+    )
+    assert (
+        api_image_publication._load_prebuilt_api_image_record(
+            path, image_source_commit=head, control_plane_head=head
+        )
+        == record
+    )
+
+    monkeypatch.setattr(
+        api_image_publication,
+        "_inspect_local_api_image",
+        lambda _reference: ("sha256:" + "f" * 64, config_digest),
     )
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
@@ -2720,6 +2923,62 @@ def test_prebuilt_image_record_rejects_source_drift_and_image_identity_mismatch(
     ):
         api_image_publication._load_prebuilt_api_image_record(
             path, image_source_commit=head, control_plane_head=head
+        )
+
+    wrong_config_unsigned = api_image_publication._prebuilt_record_unsigned(
+        repository_head=head,
+        build_input_sha256=build_input,
+        image_id=image_id,
+        config_digest="sha256:" + "a" * 64,
+    )
+    wrong_config: dict[str, JsonValue] = {
+        **wrong_config_unsigned,
+        "integritySha256": hashlib.sha256(
+            managed_binding_lifecycle.PREBUILT_IMAGE_RECORD_DOMAIN
+            + canonical_bytes(wrong_config_unsigned)
+        ).hexdigest(),
+    }
+    wrong_config_path = tmp_path / "wrong-config-record.json"
+    wrong_config_path.write_bytes(canonical_bytes(wrong_config))
+    monkeypatch.setattr(
+        api_image_publication,
+        "_inspect_local_api_image",
+        lambda _reference: (image_id, config_digest),
+    )
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="prebuilt-api-image-identity-mismatch",
+    ):
+        api_image_publication._load_prebuilt_api_image_record(
+            wrong_config_path, image_source_commit=head, control_plane_head=head
+        )
+
+    historical_unsigned = api_image_publication._prebuilt_record_unsigned(
+        repository_head=head,
+        build_input_sha256=build_input,
+        image_id=image_id,
+        config_digest=image_id,
+    )
+    historical: dict[str, JsonValue] = {
+        **historical_unsigned,
+        "integritySha256": hashlib.sha256(
+            managed_binding_lifecycle.PREBUILT_IMAGE_RECORD_DOMAIN
+            + canonical_bytes(historical_unsigned)
+        ).hexdigest(),
+    }
+    historical_path = tmp_path / "historical-record.json"
+    historical_path.write_bytes(canonical_bytes(historical))
+    monkeypatch.setattr(
+        api_image_publication,
+        "_inspect_local_api_image",
+        lambda _reference: (image_id, config_digest),
+    )
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="prebuilt-api-image-identity-mismatch",
+    ):
+        api_image_publication._load_prebuilt_api_image_record(
+            historical_path, image_source_commit=head, control_plane_head=head
         )
 
 
@@ -3360,6 +3619,28 @@ def test_pending_image_ledger_rejects_historical_identity() -> None:
             control_plane_head=TEST_IMAGE_SOURCE_COMMIT,
             value=_pending_image("948e81b5bf34f5c2f5069ee40568beb09cb997d3"),
         )
+
+
+def test_pending_image_ledger_accepts_independent_manifest_and_config_digests() -> None:
+    pending = _pending_image()
+    pending["configDigest"] = "sha256:" + "c" * 64
+
+    identity = managed_binding_contracts.pending_image_identity(
+        control_plane_head=TEST_IMAGE_SOURCE_COMMIT,
+        value=pending,
+    )
+
+    assert identity["localImageId"] == "sha256:" + "b" * 64
+    assert identity["imageConfigDigest"] == "sha256:" + "c" * 64
+    assert identity["localImageId"] != identity["imageConfigDigest"]
+
+
+def test_legacy_finalizer_checks_independent_local_config_identity() -> None:
+    source = inspect.getsource(acr_tag_finalization.execute_finalization)
+
+    assert "image_id != LOCAL_IMAGE_ID" in source
+    assert "config_id != REGISTRY_CONFIG_DIGEST" in source
+    assert "config_id != LOCAL_IMAGE_ID" not in source
 
 
 def test_publication_is_a_required_lifecycle_transition_before_post_secret() -> None:

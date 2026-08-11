@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import tarfile
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -148,6 +149,16 @@ RECONSTRUCTION_PROHIBITED_OPERATIONS = (
     "repository-deletion",
 )
 DOCKER_PUSH_MAXIMUM_OUTPUT_BYTES = 4 * 1024 * 1024
+LOCAL_OCI_JSON_MAXIMUM_BYTES = 16 * 1024 * 1024
+OCI_LAYOUT_MEDIA_TYPE = "application/vnd.oci.image.index.v1+json"
+OCI_MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
+DOCKER_MANIFEST_MEDIA_TYPE = "application/vnd.docker.distribution.manifest.v2+json"
+OCI_CONFIG_MEDIA_TYPE = "application/vnd.oci.image.config.v1+json"
+DOCKER_CONFIG_MEDIA_TYPE = "application/vnd.docker.container.image.v1+json"
+LOCAL_MANIFEST_MEDIA_TYPES = frozenset(
+    {OCI_MANIFEST_MEDIA_TYPE, DOCKER_MANIFEST_MEDIA_TYPE}
+)
+LOCAL_CONFIG_MEDIA_TYPES = frozenset({OCI_CONFIG_MEDIA_TYPE, DOCKER_CONFIG_MEDIA_TYPE})
 SENSITIVE_PUSH_OUTPUT_PATTERNS = (
     re.compile(r"(?i)(Authorization\s*:\s*)(?:Bearer|Basic)\s+\S+"),
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{16,}"),
@@ -1691,6 +1702,202 @@ def _validate_api_image_builder(rows: list[dict[str, JsonValue]], *, name: str) 
                 _fail("api-image-builder-contract-mismatch")
 
 
+def _archive_member_bytes(
+    archive: tarfile.TarFile,
+    members: Mapping[str, tarfile.TarInfo],
+    name: str,
+    *,
+    error: str,
+) -> bytes:
+    member = members.get(name)
+    if (
+        member is None
+        or not member.isfile()
+        or member.size <= 0
+        or member.size > LOCAL_OCI_JSON_MAXIMUM_BYTES
+    ):
+        _fail(error)
+    try:
+        stream = archive.extractfile(member)
+        if stream is None:
+            _fail(error)
+        body = stream.read(LOCAL_OCI_JSON_MAXIMUM_BYTES + 1)
+    except (OSError, tarfile.TarError):
+        _fail(error)
+    if len(body) != member.size or len(body) > LOCAL_OCI_JSON_MAXIMUM_BYTES:
+        _fail(error)
+    return body
+
+
+def _archive_json(body: bytes, *, error: str) -> JsonValue:
+    try:
+        return cast(JsonValue, json.loads(body))
+    except (UnicodeError, json.JSONDecodeError):
+        _fail(error)
+
+
+def _blob_path(digest: str) -> str:
+    if RAW_IMAGE_DIGEST.fullmatch(digest) is None:
+        _fail("prebuilt-api-image-oci-archive-malformed")
+    return f"blobs/sha256/{digest.removeprefix('sha256:')}"
+
+
+def _local_oci_archive_config_digest(
+    archive_path: Path,
+    *,
+    image_reference: str,
+    manifest_digest: str,
+    manifest_media_type: str,
+    manifest_size: int,
+) -> str:
+    try:
+        with tarfile.open(archive_path, mode="r:*") as archive:
+            members: dict[str, tarfile.TarInfo] = {}
+            for member in archive.getmembers():
+                if member.name in members:
+                    _fail("prebuilt-api-image-oci-archive-malformed")
+                members[member.name] = member
+
+            layout = _archive_json(
+                _archive_member_bytes(
+                    archive,
+                    members,
+                    "oci-layout",
+                    error="prebuilt-api-image-oci-archive-malformed",
+                ),
+                error="prebuilt-api-image-oci-archive-malformed",
+            )
+            if layout != {"imageLayoutVersion": "1.0.0"}:
+                _fail("prebuilt-api-image-oci-archive-malformed")
+
+            index = _archive_json(
+                _archive_member_bytes(
+                    archive,
+                    members,
+                    "index.json",
+                    error="prebuilt-api-image-oci-archive-malformed",
+                ),
+                error="prebuilt-api-image-oci-archive-malformed",
+            )
+            if not isinstance(index, dict):
+                _fail("prebuilt-api-image-oci-archive-malformed")
+            descriptors = index.get("manifests")
+            if (
+                index.get("schemaVersion") != 2
+                or index.get("mediaType") != OCI_LAYOUT_MEDIA_TYPE
+                or not isinstance(descriptors, list)
+                or len(descriptors) != 1
+                or not isinstance(descriptors[0], dict)
+            ):
+                _fail("prebuilt-api-image-manifest-descriptor-mismatch")
+            index_descriptor = descriptors[0]
+            if (
+                index_descriptor.get("digest") != manifest_digest
+                or index_descriptor.get("mediaType") != manifest_media_type
+                or index_descriptor.get("size") != manifest_size
+            ):
+                _fail("prebuilt-api-image-manifest-descriptor-mismatch")
+
+            manifest_body = _archive_member_bytes(
+                archive,
+                members,
+                _blob_path(manifest_digest),
+                error="prebuilt-api-image-manifest-descriptor-mismatch",
+            )
+            if (
+                len(manifest_body) != manifest_size
+                or "sha256:" + hashlib.sha256(manifest_body).hexdigest()
+                != manifest_digest
+            ):
+                _fail("prebuilt-api-image-manifest-descriptor-mismatch")
+            manifest = _archive_json(
+                manifest_body, error="prebuilt-api-image-manifest-descriptor-mismatch"
+            )
+            if (
+                not isinstance(manifest, dict)
+                or manifest.get("schemaVersion") != 2
+                or manifest.get("mediaType") != manifest_media_type
+            ):
+                _fail("prebuilt-api-image-manifest-descriptor-mismatch")
+            config = manifest.get("config")
+            if not isinstance(config, dict):
+                _fail("prebuilt-api-image-config-descriptor-missing")
+            config_digest = config.get("digest")
+            config_size = config.get("size")
+            if (
+                not isinstance(config_digest, str)
+                or RAW_IMAGE_DIGEST.fullmatch(config_digest) is None
+                or config.get("mediaType") not in LOCAL_CONFIG_MEDIA_TYPES
+                or type(config_size) is not int
+                or config_size <= 0
+            ):
+                _fail("prebuilt-api-image-config-descriptor-missing")
+
+            layers = manifest.get("layers")
+            if not isinstance(layers, list):
+                _fail("prebuilt-api-image-manifest-descriptor-mismatch")
+            layer_paths: list[str] = []
+            for layer in layers:
+                if not isinstance(layer, dict):
+                    _fail("prebuilt-api-image-manifest-descriptor-mismatch")
+                layer_digest = layer.get("digest")
+                layer_media_type = layer.get("mediaType")
+                layer_size = layer.get("size")
+                if (
+                    not isinstance(layer_digest, str)
+                    or RAW_IMAGE_DIGEST.fullmatch(layer_digest) is None
+                    or not isinstance(layer_media_type, str)
+                    or not isinstance(layer_size, int)
+                    or isinstance(layer_size, bool)
+                    or layer_size < 0
+                ):
+                    _fail("prebuilt-api-image-manifest-descriptor-mismatch")
+                layer_paths.append(_blob_path(layer_digest))
+
+            config_body = _archive_member_bytes(
+                archive,
+                members,
+                _blob_path(config_digest),
+                error="prebuilt-api-image-config-descriptor-mismatch",
+            )
+            if (
+                len(config_body) != config_size
+                or "sha256:" + hashlib.sha256(config_body).hexdigest() != config_digest
+            ):
+                _fail("prebuilt-api-image-config-descriptor-mismatch")
+            config_value = _archive_json(
+                config_body, error="prebuilt-api-image-config-descriptor-mismatch"
+            )
+            if (
+                not isinstance(config_value, dict)
+                or config_value.get("os") != "linux"
+                or config_value.get("architecture") != "amd64"
+            ):
+                _fail("prebuilt-api-image-config-descriptor-mismatch")
+
+            compatibility = _archive_json(
+                _archive_member_bytes(
+                    archive,
+                    members,
+                    "manifest.json",
+                    error="prebuilt-api-image-oci-archive-malformed",
+                ),
+                error="prebuilt-api-image-oci-archive-malformed",
+            )
+            if (
+                not isinstance(compatibility, list)
+                or len(compatibility) != 1
+                or not isinstance(compatibility[0], dict)
+                or compatibility[0].get("RepoTags") != [image_reference]
+                or compatibility[0].get("Config") != _blob_path(config_digest)
+                or compatibility[0].get("Layers") != layer_paths
+            ):
+                _fail("prebuilt-api-image-oci-archive-malformed")
+            return config_digest
+    except (OSError, tarfile.TarError):
+        _fail("prebuilt-api-image-oci-archive-malformed")
+
+
 def _inspect_local_api_image(image_reference: str) -> tuple[str, str]:
     if not re.fullmatch(
         rf"{re.escape(REGISTRY_HOST)}/{PUBLISHER_REPOSITORY}:source-[0-9a-f]{{40}}",
@@ -1711,6 +1918,7 @@ def _inspect_local_api_image(image_reference: str) -> tuple[str, str]:
     if not isinstance(value, dict):
         _fail("prebuilt-api-image-inspection-malformed")
     image_id = value.get("Id")
+    descriptor = value.get("Descriptor")
     repository_tags = value.get("RepoTags")
     if (
         not isinstance(image_id, str)
@@ -1721,7 +1929,55 @@ def _inspect_local_api_image(image_reference: str) -> tuple[str, str]:
         or image_reference not in repository_tags
     ):
         _fail("prebuilt-api-image-inspection-mismatch")
-    return image_id, image_id
+    if not isinstance(descriptor, dict):
+        _fail("prebuilt-api-image-descriptor-malformed")
+    manifest_digest = descriptor.get("digest")
+    manifest_media_type = descriptor.get("mediaType")
+    manifest_size = descriptor.get("size")
+    if (
+        not isinstance(manifest_digest, str)
+        or RAW_IMAGE_DIGEST.fullmatch(manifest_digest) is None
+        or manifest_media_type not in LOCAL_MANIFEST_MEDIA_TYPES
+        or type(manifest_size) is not int
+        or manifest_size <= 0
+    ):
+        _fail("prebuilt-api-image-descriptor-malformed")
+
+    temporary_root = _outside_repository(
+        Path(tempfile.mkdtemp(prefix="mobius77-local-oci-inspect-")),
+        "local-oci-inspection-temporary-directory",
+    )
+    archive_path = temporary_root / "image.tar"
+    config_digest: str | None = None
+    try:
+        _run(
+            (
+                "docker",
+                "image",
+                "save",
+                "--output",
+                str(archive_path),
+                image_reference,
+            ),
+            timeout_seconds=DEPLOYMENT_TIMEOUT_SECONDS,
+        )
+        if not archive_path.is_file():
+            _fail("prebuilt-api-image-oci-archive-missing")
+        config_digest = _local_oci_archive_config_digest(
+            archive_path,
+            image_reference=image_reference,
+            manifest_digest=manifest_digest,
+            manifest_media_type=str(manifest_media_type),
+            manifest_size=manifest_size,
+        )
+    finally:
+        try:
+            shutil.rmtree(temporary_root, ignore_errors=False)
+        except OSError:
+            _fail("prebuilt-api-image-inspection-cleanup-failed")
+    if temporary_root.exists() or config_digest is None:
+        _fail("prebuilt-api-image-inspection-cleanup-failed")
+    return manifest_digest, config_digest
 
 
 def _prebuilt_record_unsigned(
@@ -1827,7 +2083,8 @@ def _load_prebuilt_api_image_record(
         or HEX_SHA256.fullmatch(build_input_sha256) is None
         or not isinstance(image_id, str)
         or RAW_IMAGE_DIGEST.fullmatch(image_id) is None
-        or config_digest != image_id
+        or not isinstance(config_digest, str)
+        or RAW_IMAGE_DIGEST.fullmatch(config_digest) is None
     ):
         _fail("prebuilt-api-image-record-malformed")
     if _api_image_build_input_sha256(source_commit) != build_input_sha256:

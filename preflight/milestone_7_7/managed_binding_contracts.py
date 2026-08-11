@@ -1066,7 +1066,9 @@ def pending_image_identity(
         or not isinstance(image_id, str)
         or not image_id.startswith("sha256:")
         or HEX_SHA64.fullmatch(image_id.removeprefix("sha256:")) is None
-        or config_digest != image_id
+        or not isinstance(config_digest, str)
+        or not config_digest.startswith("sha256:")
+        or HEX_SHA64.fullmatch(config_digest.removeprefix("sha256:")) is None
         or image.get("platform") != IMAGE_PUBLICATION_PLATFORM
         or image.get("repository") != IMAGE_PUBLICATION_REPOSITORY
         or image.get("sourceTag") != f"source-{source_commit}"

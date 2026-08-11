@@ -1549,7 +1549,7 @@ def execute_finalization(
     image_id, config_id = image_publication._inspect_local_api_image(
         image_publication._api_image_reference(IMAGE_SOURCE_COMMIT)
     )
-    if image_id != LOCAL_IMAGE_ID or config_id != LOCAL_IMAGE_ID:
+    if image_id != LOCAL_IMAGE_ID or config_id != REGISTRY_CONFIG_DIGEST:
         _fail("finalization-local-image-drift")
     registry_scope = lifecycle._scope(
         subscription_id,
