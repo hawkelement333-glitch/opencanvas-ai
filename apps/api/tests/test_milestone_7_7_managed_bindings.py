@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+
 from infra.milestone_7_7 import acr_tag_finalization, api_image_publication
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
 from performance.milestone_7_7.framework import ContractError, JsonValue, canonical_bytes
@@ -53,6 +54,7 @@ from preflight.milestone_7_7.operation_contracts import OPERATION_IDS
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 INFRASTRUCTURE_ROOT = REPOSITORY_ROOT / "infra" / "milestone_7_7"
 LIFECYCLE_SCRIPT = INFRASTRUCTURE_ROOT / "scripts" / "managed_binding_lifecycle.py"
+TERMINAL_LIFECYCLE_ADAPTER = INFRASTRUCTURE_ROOT / "terminal_lifecycle_adapter.py"
 IMAGE_PUBLICATION_SCRIPT = INFRASTRUCTURE_ROOT / "api_image_publication.py"
 SYNTHETIC_SUBSCRIPTION = "synthetic-managed-binding-subscription"
 SYNTHETIC_TENANT = "synthetic-managed-binding-tenant"
@@ -419,7 +421,7 @@ def test_local_dry_run_never_authorizes_or_invokes_azure() -> None:
     result = dry_run()
     assert result["status"] == "valid-local-only"
     assert result["operationCount"] == 15
-    assert result["lifecycleOperationCount"] == 8
+    assert result["lifecycleOperationCount"] == 14
     assert result["azureProcessInvocations"] == 0
     assert result["provisioningAuthorized"] is False
     assert result["secretAccessAuthorized"] is False
@@ -2868,7 +2870,7 @@ def test_prebuilt_image_record_rejects_source_drift_and_image_identity_mismatch(
     config_digest = "sha256:" + "c" * 64
     build_input = "d" * 64
     unsigned = api_image_publication._prebuilt_record_unsigned(
-        repository_head=head,
+        image_source_commit=head,
         build_input_sha256=build_input,
         image_id=image_id,
         config_digest=config_digest,
@@ -2912,6 +2914,41 @@ def test_prebuilt_image_record_rejects_source_drift_and_image_identity_mismatch(
         == record
     )
 
+    comparison = {"returncode": 0}
+    commands: list[tuple[str, ...]] = []
+
+    def compare(command: tuple[str, ...], **_kwargs: object) -> object:
+        commands.append(command)
+        return api_image_publication.subprocess.CompletedProcess(
+            args=command,
+            returncode=comparison["returncode"],
+            stdout=b"",
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(api_image_publication.subprocess, "run", compare)
+    control_plane_head = "f" * 40
+    assert (
+        api_image_publication._load_prebuilt_api_image_record(
+            path,
+            image_source_commit=head,
+            control_plane_head=control_plane_head,
+        )
+        == record
+    )
+    assert commands[-1][2:5] == ("--quiet", head, control_plane_head)
+    comparison["returncode"] = 1
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="prebuilt-api-image-control-plane-input-drift",
+    ):
+        api_image_publication._load_prebuilt_api_image_record(
+            path,
+            image_source_commit=head,
+            control_plane_head=control_plane_head,
+        )
+    comparison["returncode"] = 0
+
     monkeypatch.setattr(
         api_image_publication,
         "_inspect_local_api_image",
@@ -2926,7 +2963,7 @@ def test_prebuilt_image_record_rejects_source_drift_and_image_identity_mismatch(
         )
 
     wrong_config_unsigned = api_image_publication._prebuilt_record_unsigned(
-        repository_head=head,
+        image_source_commit=head,
         build_input_sha256=build_input,
         image_id=image_id,
         config_digest="sha256:" + "a" * 64,
@@ -2954,7 +2991,7 @@ def test_prebuilt_image_record_rejects_source_drift_and_image_identity_mismatch(
         )
 
     historical_unsigned = api_image_publication._prebuilt_record_unsigned(
-        repository_head=head,
+        image_source_commit=head,
         build_input_sha256=build_input,
         image_id=image_id,
         config_digest=image_id,
@@ -4363,7 +4400,7 @@ def _write_cleanup_authorization(
     directory: Path,
     ledger: Mapping[str, JsonValue],
     *,
-    successful: bool = True,
+    successful: bool = False,
 ) -> Path:
     issued = managed_binding_lifecycle._utc_now()
     stage_names = (
@@ -4838,9 +4875,16 @@ def test_migration_job_starts_once_and_requires_matching_success(
 ) -> None:
     execution_name = "caj-mobius77-migration-synthetic"
     calls: list[tuple[str, ...]] = []
+    execution_list_calls = 0
 
     def fake_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        nonlocal execution_list_calls
         calls.append(argv)
+        if argv[1:5] == ("containerapp", "job", "execution", "list"):
+            execution_list_calls += 1
+            return (
+                [] if execution_list_calls == 1 else [{"name": execution_name, "status": "Running"}]
+            )
         if argv[1:4] == ("containerapp", "job", "start"):
             return {"name": execution_name}
         if argv[1:5] == ("containerapp", "job", "execution", "show"):
@@ -4859,8 +4903,17 @@ def test_migration_job_fails_closed_on_execution_identity_or_status_drift(
 ) -> None:
     execution_name = "caj-mobius77-migration-synthetic"
     status: JsonValue = {"name": "unexpected-execution", "status": "Succeeded"}
+    execution_list_calls = 0
 
     def fake_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
+        nonlocal execution_list_calls
+        if argv[1:5] == ("containerapp", "job", "execution", "list"):
+            execution_list_calls += 1
+            return (
+                []
+                if execution_list_calls % 2 == 1
+                else [{"name": execution_name, "status": "Running"}]
+            )
         if argv[1:4] == ("containerapp", "job", "start"):
             return {"name": execution_name}
         if argv[1:5] == ("containerapp", "job", "execution", "show"):
@@ -6501,7 +6554,7 @@ def test_managed_secret_states_use_only_exact_metadata_projection(
             managed_binding_lifecycle._managed_secret_states("opaque-subscription")
 
 
-def test_cleanup_is_idempotent_without_residue(
+def test_cleanup_consumes_authorization_and_rejects_replay(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(managed_binding_lifecycle, "_group_exists", lambda *_args: False)
@@ -6510,11 +6563,14 @@ def test_cleanup_is_idempotent_without_residue(
     ledger = _test_lifecycle_ledger()
     _write_cleanup_authorization(tmp_path, ledger)
     first = managed_binding_lifecycle._cleanup("opaque-subscription", tmp_path, ledger=ledger)
-    second = managed_binding_lifecycle._cleanup("opaque-subscription", tmp_path, ledger=ledger)
 
-    assert first == second
     assert first["status"] == "cleanup-completed"
     assert first["temporary-authority-cleanup-path"] == "no-transient-state"
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="cleanup-authorization-missing",
+    ):
+        managed_binding_lifecycle._cleanup("opaque-subscription", tmp_path, ledger=ledger)
 
 
 @pytest.mark.parametrize(
@@ -6548,7 +6604,7 @@ def test_cleanup_guard_rejects_missing_stale_or_altered_authority(
         elif mutation == "wrong-state":
             value["lifecycleState"] = "RUNNING"
         elif mutation == "incomplete-stages":
-            value["requiredStages"]["soak90Minutes"] = False
+            value["requiredStages"]["soak90Minutes"] = True
         elif mutation == "altered-integrity":
             value["authorizationIntegritySha256"] = "0" * 64
         if mutation != "altered-integrity":
@@ -6812,14 +6868,17 @@ def test_verified_security_failures_contain_without_deletion(
 
 def test_no_failure_timer_or_runner_exit_path_can_bypass_cleanup_guard() -> None:
     lifecycle_text = LIFECYCLE_SCRIPT.read_text(encoding="utf-8")
+    terminal_text = TERMINAL_LIFECYCLE_ADAPTER.read_text(encoding="utf-8")
     handler = lifecycle_text.split("def _handle_failure", 1)[1].split("def _parser", 1)[0]
-    cleanup = lifecycle_text.split("def _cleanup(", 1)[1].split("def _zero_residue", 1)[0]
+    cleanup_entry = lifecycle_text.split("def _cleanup(", 1)[1].split("def _zero_residue", 1)[0]
+    cleanup = terminal_text.split("def cleanup(", 1)[1].split("def zero_residue", 1)[0]
     deploy = lifecycle_text.split("def _deploy_stage", 1)[1].split(
         "def _signed_in_user_object_id", 1
     )[0]
 
     assert "_cleanup(" not in handler
-    assert "_validate_cleanup_authorization(" in cleanup
+    assert "_terminal_adapter_module().cleanup(" in cleanup_entry
+    assert "validate_cleanup_authorization(" in cleanup
     assert '"--mode"' not in deploy
     assert "deployment stack" not in lifecycle_text.casefold()
 

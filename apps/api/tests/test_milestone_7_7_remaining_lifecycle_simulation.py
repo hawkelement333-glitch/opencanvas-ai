@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from datetime import UTC, datetime
 
 import pytest
@@ -17,6 +18,13 @@ from preflight.milestone_7_7.scanner_result_bridge import (
     ScannerResultBridgeDeploymentEvidence,
     ScannerResultBridgeEvidence,
 )
+
+CONTROL_HEAD = subprocess.run(
+    ("git", "rev-parse", "HEAD"),
+    check=True,
+    capture_output=True,
+    encoding="utf-8",
+).stdout.strip()
 
 
 def _input(**changes: object) -> RemainingLifecycleSimulationInput:
@@ -51,7 +59,7 @@ def _input(**changes: object) -> RemainingLifecycleSimulationInput:
         decision="clean",
     )
     evidence = ScannerResultBridgeDeploymentEvidence(
-        control_plane_head="b" * 40,
+        control_plane_head=CONTROL_HEAD,
         environment_sha256=digest,
         operation_id_sha256=digest,
         observed_at_utc="2026-08-05T04:00:00Z",
@@ -100,7 +108,7 @@ def _input(**changes: object) -> RemainingLifecycleSimulationInput:
     )
     values: dict[str, object] = {
         "operation_id_sha256": digest,
-        "control_plane_head": "b" * 40,
+        "control_plane_head": CONTROL_HEAD,
         "immutable_digest": "sha256:" + digest,
         "migration_job_name": "migration-job",
         "migration_job_resource_id": "opaque-resource-alias",
@@ -118,11 +126,18 @@ def test_complete_remaining_path_reaches_cleanup_proved_in_order() -> None:
     )
     assert simulation.run() == DURABLE_MARKERS
     assert simulation.operation_counts == {
-        "publication-reconciliation": 1,
-        "canonical-finalizer": 1,
-        "tag-delete": 1,
+        "current-head-ledger": 1,
+        "image-admission-and-publication-reconciliation": 1,
+        "scanner-evidence-producer-consumer": 1,
+        "post-secret-provisioning": 1,
         "migration-execution": 1,
-        "cleanup": 1,
+        "readiness-validation": 1,
+        "live-validation": 1,
+        "uninterrupted-soak": 1,
+        "successful-closeout": 1,
+        "cleanup-authorization-and-execution": 1,
+        "zero-residue-verification": 1,
+        "milestone-completion": 1,
     }
 
 

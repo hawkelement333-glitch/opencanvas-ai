@@ -224,6 +224,91 @@
       ],
       "controlPlaneOnly": false
     },
+    "lifecycle-migration-execution-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "-m",
+        "infra.milestone_7_7.scripts.managed_binding_lifecycle",
+        "--operation",
+        "migration-execution",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
+    "lifecycle-readiness-validation-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "-m",
+        "infra.milestone_7_7.scripts.managed_binding_lifecycle",
+        "--operation",
+        "readiness-validation",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
+    "lifecycle-live-validation-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "-m",
+        "infra.milestone_7_7.scripts.managed_binding_lifecycle",
+        "--operation",
+        "live-validation",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
+    "lifecycle-soak-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "-m",
+        "infra.milestone_7_7.scripts.managed_binding_lifecycle",
+        "--operation",
+        "soak",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
+    "lifecycle-successful-closeout-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "-m",
+        "infra.milestone_7_7.scripts.managed_binding_lifecycle",
+        "--operation",
+        "successful-closeout",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
     "repository-cost-contract-v1": {
       "executable": "{python}",
       "argumentVector": [
@@ -342,6 +427,8 @@
         "{ledgerPath}",
         "--receipt-directory",
         "{receiptDirectory}",
+        "--scanner-bridge-evidence",
+        "{scannerBridgeEvidencePath}",
         "--repository-head",
         "{repositoryHead}"
       ],
@@ -389,6 +476,23 @@
         "infra.milestone_7_7.scripts.managed_binding_lifecycle",
         "--operation",
         "zero-residue-verification",
+        "--ledger",
+        "{ledgerPath}",
+        "--receipt-directory",
+        "{receiptDirectory}",
+        "--repository-head",
+        "{repositoryHead}"
+      ],
+      "controlPlaneOnly": false
+    },
+    "lifecycle-milestone-completion-v1": {
+      "executable": "{python}",
+      "argumentVector": [
+        "-B",
+        "-m",
+        "infra.milestone_7_7.scripts.managed_binding_lifecycle",
+        "--operation",
+        "milestone-completion",
         "--ledger",
         "{ledgerPath}",
         "--receipt-directory",
@@ -1037,14 +1141,112 @@
       ],
       "scope": [
         "exact-api-container-app",
+        "exact-worker-container-app",
+        "exact-telemetry-container-app",
+        "exact-managed-container-apps-environment",
+        "exact-postgresql-server",
+        "exact-redis-resource",
+        "exact-migration-job",
         "exact-key-vault-resource",
         "exact-container-registry-resource"
       ],
       "terminalStates": [
-        "private-revision-ready",
+        "post-secret-foundation-ready",
         "paused-preserved",
         "contained-preserved"
       ],
+      "failureDispositionPolicy": "pause-preserved",
+      "replayDecision": "deny"
+    },
+    {
+      "id": "migration-execution",
+      "methodDefinition": "lifecycle-migration-execution-v1",
+      "mutation": true,
+      "authorizationPredicate": [
+        "post-secret-foundation-ready-evidence",
+        "valid-unconsumed-one-run-ledger"
+      ],
+      "scope": ["exact-migration-job", "exact-postgresql-database"],
+      "terminalStates": [
+        "migration-completed",
+        "migration-failed-closed",
+        "paused-preserved"
+      ],
+      "failureDispositionPolicy": "pause-preserved",
+      "replayDecision": "deny"
+    },
+    {
+      "id": "readiness-validation",
+      "methodDefinition": "lifecycle-readiness-validation-v1",
+      "mutation": false,
+      "authorizationPredicate": [
+        "migration-completed-evidence",
+        "valid-unconsumed-one-run-ledger"
+      ],
+      "scope": [
+        "exact-api-container-app",
+        "exact-worker-container-app",
+        "exact-telemetry-container-app"
+      ],
+      "terminalStates": ["readiness-passed", "readiness-failed-closed"],
+      "failureDispositionPolicy": "pause-preserved",
+      "replayDecision": "deny"
+    },
+    {
+      "id": "live-validation",
+      "methodDefinition": "lifecycle-live-validation-v1",
+      "mutation": false,
+      "authorizationPredicate": [
+        "readiness-passed-evidence",
+        "private-vpn-path-active",
+        "valid-unconsumed-one-run-ledger"
+      ],
+      "scope": [
+        "exact-private-container-apps-hostnames",
+        "exact-cleanup-control",
+        "exact-cost-envelope"
+      ],
+      "terminalStates": ["validation-passed", "validation-failed-closed"],
+      "failureDispositionPolicy": "pause-preserved",
+      "replayDecision": "deny"
+    },
+    {
+      "id": "soak",
+      "methodDefinition": "lifecycle-soak-v1",
+      "mutation": false,
+      "authorizationPredicate": [
+        "validation-passed-evidence",
+        "minimum-three-hour-cleanup-window",
+        "valid-unconsumed-one-run-ledger"
+      ],
+      "scope": [
+        "exact-private-runtime-graph",
+        "exact-cleanup-control",
+        "exact-cost-envelope"
+      ],
+      "terminalStates": [
+        "soak-completed",
+        "soak-invalidated-reset-required",
+        "soak-failed-closed"
+      ],
+      "failureDispositionPolicy": "restart-full-soak-after-correction",
+      "replayDecision": "deny"
+    },
+    {
+      "id": "successful-closeout",
+      "methodDefinition": "lifecycle-successful-closeout-v1",
+      "mutation": true,
+      "authorizationPredicate": [
+        "soak-completed-evidence",
+        "temporary-residue-inventory-zero",
+        "valid-unconsumed-one-run-ledger"
+      ],
+      "scope": [
+        "exact-temporary-role-assignments",
+        "exact-ephemeral-publisher-identities",
+        "exact-cleanup-authorization-file"
+      ],
+      "terminalStates": ["ready-for-final-cleanup", "closeout-failed-closed"],
       "failureDispositionPolicy": "pause-preserved",
       "replayDecision": "deny"
     },
@@ -1097,7 +1299,20 @@
       "terminalStates": ["zero-residue", "residue-detected"],
       "failureDispositionPolicy": "pause-preserved",
       "replayDecision": "deny"
+    },
+    {
+      "id": "milestone-completion",
+      "methodDefinition": "lifecycle-milestone-completion-v1",
+      "mutation": false,
+      "authorizationPredicate": [
+        "zero-residue-evidence",
+        "valid-unconsumed-one-run-ledger"
+      ],
+      "scope": ["exact-terminal-evidence-chain"],
+      "terminalStates": ["milestone-7-7-complete", "completion-failed-closed"],
+      "failureDispositionPolicy": "deny-completion",
+      "replayDecision": "deny"
     }
   ],
-  "contractIntegritySha256": "070993728060b53d8c700d82aa45ca222e4c1e43be5895af5ec0cc7e6bb4327b"
+  "contractIntegritySha256": "37067b69db0deef01bef7bf99fc26fe91e2f46cbda321763469a7b2cccb2a411"
 }

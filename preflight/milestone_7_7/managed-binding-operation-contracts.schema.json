@@ -99,8 +99,8 @@
     },
     "lifecycleOperations": {
       "type": "array",
-      "minItems": 8,
-      "maxItems": 8,
+      "minItems": 14,
+      "maxItems": 14,
       "items": { "$ref": "#/$defs/lifecycle" }
     },
     "contractIntegritySha256": { "$ref": "#/$defs/sha256" }
@@ -219,7 +219,12 @@
         "scope": { "$ref": "#/$defs/nonEmptyStringArray" },
         "terminalStates": { "$ref": "#/$defs/nonEmptyStringArray" },
         "failureDispositionPolicy": {
-          "enum": ["reconcile-and-pause-preserved", "pause-preserved"]
+          "enum": [
+            "reconcile-and-pause-preserved",
+            "pause-preserved",
+            "restart-full-soak-after-correction",
+            "deny-completion"
+          ]
         },
         "replayDecision": { "const": "deny" }
       }

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+
 from infra.milestone_7_7.scripts import managed_binding_lifecycle as lifecycle
 from performance.milestone_7_7.framework import JsonValue
 
@@ -156,7 +157,9 @@ def test_post_secret_always_revokes_temporary_authority_after_metadata_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ledger = _ledger()
-    _path, _state_value = _write_state(tmp_path, ledger)
+    path, state_value = _write_state(tmp_path, ledger)
+    state_value["resumableCheckpoint"] = "post-secret-admission"
+    lifecycle._replace_state(path, state_value)
     calls: list[str] = []
     monkeypatch.setattr(lifecycle, "_utc_now", lambda: datetime(2026, 8, 2, 18, tzinfo=UTC))
 
@@ -190,10 +193,90 @@ def test_post_secret_always_revokes_temporary_authority_after_metadata_failure(
     assert calls == ["authority-proved", "authority-revoked-and-denied"]
 
 
-def test_resume_state_cannot_claim_post_secret_readiness_without_authority() -> None:
+def test_post_secret_reconciles_ambiguous_deployment_without_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = _ledger()
+    path, state = _write_state(tmp_path, ledger)
+    state["resumableCheckpoint"] = "post-secret-admission"
+    lifecycle._replace_state(path, state)
+    calls: list[str] = []
+
+    class Evidence:
+        def integrity_sha256(self) -> str:
+            return "c" * 64
+
+    secret_names = (
+        "openai-api-key",
+        "opencanvas-smtp-username",
+        "opencanvas-smtp-password",
+        "opencanvas-session-secret",
+        "opencanvas-invitation-secret",
+        "opencanvas-upload-capability-secret",
+        "opencanvas-scanner-result-secret",
+        "opencanvas-rate-limit-hmac-secret",
+        "opencanvas-telemetry-token",
+        "opencanvas-telemetry-pseudonymization-secret",
+        "opencanvas-observability-operator-user-ids",
+    )
+    monkeypatch.setattr(lifecycle, "_utc_now", lambda: datetime(2026, 8, 2, 18, tzinfo=UTC))
+    monkeypatch.setattr(
+        lifecycle,
+        "load_scanner_bridge_deployment_evidence",
+        lambda *_args, **_kwargs: Evidence(),
+    )
+    monkeypatch.setattr(lifecycle, "_ensure_temporary_key_vault_authority", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        lifecycle,
+        "_managed_secret_states",
+        lambda _subscription: dict.fromkeys(secret_names, True),
+    )
+    monkeypatch.setattr(lifecycle, "_revoke_temporary_key_vault_authority", lambda **_kwargs: True)
+    monkeypatch.setattr(lifecycle, "_verified_cost", lambda: (20_607, 25_000))
+    monkeypatch.setattr(
+        lifecycle,
+        "_reconcile_published_api_image",
+        lambda **_kwargs: "acrmobius7711564669.azurecr.io/opencanvas-api@sha256:" + "d" * 64,
+    )
+    monkeypatch.setattr(lifecycle, "_compile_template", lambda _path: None)
+
+    def deploy(**_kwargs: object) -> None:
+        calls.append("deploy-once")
+        raise lifecycle.AzureCommandError("gatewaytimeout")
+
+    monkeypatch.setattr(lifecycle, "_deploy_stage", deploy)
+    monkeypatch.setattr(
+        lifecycle,
+        "_verify_post_secret_foundation",
+        lambda **_kwargs: calls.append("authoritative-readback"),
+    )
+
+    result = lifecycle._post_secret(
+        ledger=ledger,
+        subscription_id="opaque-subscription",
+        receipt_directory=tmp_path,
+        scanner_bridge_evidence_path=tmp_path / "scanner-evidence.json",
+    )
+
+    assert result["managedSecretCount"] == 11
+    assert calls == ["deploy-once", "authoritative-readback"]
+    assert json.loads(path.read_text(encoding="utf-8"))["resumableCheckpoint"] == (
+        "migration-execution"
+    )
+
+
+def test_post_secret_resume_checkpoint_requires_no_retained_key_vault_authority() -> None:
     ledger = _ledger()
     state = _state(ledger)
-    state["resumableCheckpoint"] = "post-secret-provisioning"
+    state["resumableCheckpoint"] = "post-secret-admission"
+
+    lifecycle._validate_transient_state(state, ledger=ledger)
+
+
+def test_runtime_handoff_cannot_skip_required_key_vault_authority() -> None:
+    ledger = _ledger()
+    state = _state(ledger)
+    state["resumableCheckpoint"] = "runtime-deployment-handoff"
 
     with pytest.raises(
         lifecycle.LifecycleError, match="resumable-checkpoint-skips-key-vault-authority"
