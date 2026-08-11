@@ -5908,6 +5908,165 @@ def test_target_inventory_accepts_only_exact_managed_binding_identities(
         )
 
 
+def _generation_four_scanner_foundation_inventory_rows() -> list[JsonValue]:
+    scope = (
+        f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}/resourceGroups/"
+        f"{managed_binding_lifecycle.TARGET_GROUP}/providers"
+    )
+    rows: list[JsonValue] = []
+    for (
+        relative,
+        location,
+    ) in managed_binding_lifecycle.GENERATION_FOUR_SCANNER_FOUNDATION_RESOURCE_LOCATIONS:
+        parts = relative.split("/")
+        resource_type = "/".join((parts[0], *parts[1::2]))
+        rows.append(
+            {
+                "id": f"{scope}/{relative}",
+                "location": location,
+                "type": resource_type,
+            }
+        )
+    return rows
+
+
+def _execute_generation_four_scanner_foundation_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+    rows: list[JsonValue],
+) -> frozenset[str]:
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_container_apps_private_dns_projection",
+        lambda *_args: ("private.example.invalid", "10.0.0.1"),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_run",
+        lambda *_args, **_kwargs: rows,
+    )
+    return managed_binding_lifecycle._resource_group_inventory(
+        subscription_id=SYNTHETIC_SUBSCRIPTION,
+        group=managed_binding_lifecycle.TARGET_GROUP,
+    )
+
+
+def test_target_inventory_accepts_exact_generation_four_scanner_foundation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = dict(managed_binding_lifecycle.GENERATION_FOUR_SCANNER_FOUNDATION_RESOURCE_LOCATIONS)
+    assert expected == {
+        "microsoft.storage/storageaccounts/stmobius7711564669": "southcentralus",
+        (
+            "microsoft.eventgrid/systemtopics/"
+            "stmobius7711564669-e846ac4b-bf07-473f-a3d8-1996a567f485"
+        ): "southcentralus",
+        "microsoft.insights/privatelinkscopes/ampls-mobius77-staging": "global",
+        "microsoft.network/privatednszones/privatelink.blob.core.windows.net": "global",
+        (
+            "microsoft.network/privatednszones/privatelink.blob.core.windows.net/"
+            "virtualnetworklinks/link-mobius77-storage"
+        ): "global",
+        "microsoft.network/privatednszones/privatelink.monitor.azure.com": "global",
+        (
+            "microsoft.network/privatednszones/privatelink.monitor.azure.com/"
+            "virtualnetworklinks/link-mobius77-monitor"
+        ): "global",
+        "microsoft.network/privatednszones/privatelink.oms.opinsights.azure.com": "global",
+        (
+            "microsoft.network/privatednszones/privatelink.oms.opinsights.azure.com/"
+            "virtualnetworklinks/link-mobius77-oms"
+        ): "global",
+        "microsoft.network/privatednszones/privatelink.ods.opinsights.azure.com": "global",
+        (
+            "microsoft.network/privatednszones/privatelink.ods.opinsights.azure.com/"
+            "virtualnetworklinks/link-mobius77-ods"
+        ): "global",
+        ("microsoft.network/privatednszones/privatelink.agentsvc.azure-automation.net"): "global",
+        (
+            "microsoft.network/privatednszones/"
+            "privatelink.agentsvc.azure-automation.net/"
+            "virtualnetworklinks/link-mobius77-agent"
+        ): "global",
+    }
+
+    observed = _execute_generation_four_scanner_foundation_inventory(
+        monkeypatch,
+        _generation_four_scanner_foundation_inventory_rows(),
+    )
+
+    assert observed == frozenset(expected)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    [
+        ("unexpected-resource", "pre-secret-resource-inventory-drift"),
+        ("wrong-type", "pre-secret-resource-inventory-drift"),
+        ("wrong-name", "pre-secret-resource-inventory-drift"),
+        ("wrong-generation", "pre-secret-resource-inventory-drift"),
+        ("wrong-resource-group", "pre-secret-resource-scope-drift"),
+        ("wrong-subscription", "pre-secret-resource-scope-drift"),
+        ("duplicate", "pre-secret-resource-inventory-drift"),
+        ("missing", "pre-secret-resource-inventory-drift"),
+    ],
+)
+def test_target_inventory_rejects_scanner_foundation_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    error: str,
+) -> None:
+    rows = _generation_four_scanner_foundation_inventory_rows()
+    first = cast(dict[str, JsonValue], rows[0])
+    if mutation == "unexpected-resource":
+        rows.append(
+            {
+                "id": (
+                    f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}/resourceGroups/"
+                    f"{managed_binding_lifecycle.TARGET_GROUP}/providers/"
+                    "Microsoft.Storage/storageAccounts/unexpected"
+                ),
+                "location": "southcentralus",
+                "type": "Microsoft.Storage/storageAccounts",
+            }
+        )
+    elif mutation == "wrong-type":
+        first["type"] = "Microsoft.Storage/storageAccounts/blobServices"
+    elif mutation == "wrong-name":
+        first["id"] = cast(str, first["id"]).replace("stmobius7711564669", "stmobius77unexpected")
+    elif mutation == "wrong-generation":
+        ampls = cast(dict[str, JsonValue], rows[2])
+        ampls["id"] = cast(str, ampls["id"]).replace(
+            "ampls-mobius77-staging", "ampls-mobius77-generation3"
+        )
+    elif mutation == "wrong-resource-group":
+        first["id"] = cast(str, first["id"]).replace(
+            managed_binding_lifecycle.TARGET_GROUP, "rg-mobius77-wrong"
+        )
+    elif mutation == "wrong-subscription":
+        first["id"] = cast(str, first["id"]).replace(
+            SYNTHETIC_SUBSCRIPTION, "00000000-0000-0000-0000-000000000099"
+        )
+    elif mutation == "duplicate":
+        rows.append(deepcopy(rows[0]))
+    else:
+        rows.pop()
+
+    with pytest.raises(managed_binding_lifecycle.LifecycleError, match=error):
+        _execute_generation_four_scanner_foundation_inventory(monkeypatch, rows)
+
+
+def test_target_inventory_rejects_scanner_resource_before_complete_lifecycle_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows = _generation_four_scanner_foundation_inventory_rows()[:1]
+
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="pre-secret-resource-inventory-drift",
+    ):
+        _execute_generation_four_scanner_foundation_inventory(monkeypatch, rows)
+
+
 def test_pre_secret_role_inventory_requires_exact_managed_identity_matrix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

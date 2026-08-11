@@ -59,6 +59,11 @@ from preflight.milestone_7_7.private_endpoint_adoption import (
 from preflight.milestone_7_7.scanner_result_bridge import (
     ScannerResultBridgeDeploymentEvidence,
 )
+from preflight.milestone_7_7.target_resource_adoption import (
+    GENERATION_FOUR_SCANNER_FOUNDATION_RESOURCE_LOCATIONS,
+    resource_type_matches_relative_id,
+    scanner_foundation_projection_is_complete,
+)
 from infra.milestone_7_7.scripts.cleanup_resource_reconciliation import (
     exact_deleted_key_vault_purge_command,
 )
@@ -345,6 +350,7 @@ TARGET_RESOURCE_LOCATIONS: Final = (
         "southcentralus",
     ),
     ("microsoft.keyvault/vaults/kv-mobius77-11564669", "southcentralus"),
+    *GENERATION_FOUR_SCANNER_FOUNDATION_RESOURCE_LOCATIONS,
     *PRIVATE_ENDPOINT_RESOURCE_LOCATIONS,
     ("microsoft.app/managedenvironments/cae-mobius77-staging", "southcentralus"),
     ("microsoft.app/containerapps/ca-mobius77-api", "southcentralus"),
@@ -2960,8 +2966,12 @@ def _resource_group_inventory(
         relative = normalized_id[len(prefix) :]
         normalized_location = location.casefold() if isinstance(location, str) else ""
         normalized_type = resource_type.casefold()
+        if not resource_type_matches_relative_id(normalized_type, relative):
+            _fail("pre-secret-resource-inventory-drift")
         if normalized_type == "microsoft.authorization/roleassignments":
             continue
+        if relative in observed:
+            _fail("pre-secret-resource-inventory-drift")
         if normalized_type == "microsoft.network/networkinterfaces":
             if normalized_id not in allowed_network_interfaces:
                 _fail("pre-secret-resource-inventory-drift")
@@ -3005,6 +3015,10 @@ def _resource_group_inventory(
             ):
                 _fail("pre-secret-resource-inventory-drift")
         observed.add(relative)
+    if group == TARGET_GROUP and not scanner_foundation_projection_is_complete(
+        observed
+    ):
+        _fail("pre-secret-resource-inventory-drift")
     return frozenset(observed)
 
 
