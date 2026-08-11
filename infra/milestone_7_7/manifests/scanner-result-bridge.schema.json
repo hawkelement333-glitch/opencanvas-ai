@@ -1,75 +1,306 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.7:scanner-result-bridge:v2",
+  "$id": "urn:solarplexus:mobius:milestone-7.7:scanner-result-bridge:v3",
   "title": "Milestone 7.7 private-pull scanner-result bridge contract",
   "type": "object",
   "additionalProperties": false,
-  "required": ["$schema", "contractVersion", "resolutionStatus", "provider", "producer", "transport", "consumer", "identities", "network", "resolver", "proof", "cleanup", "provisioningAuthorized"],
+  "required": [
+    "$schema",
+    "contractVersion",
+    "resolutionStatus",
+    "provider",
+    "producer",
+    "transport",
+    "consumer",
+    "identities",
+    "network",
+    "resolver",
+    "proof",
+    "cleanup",
+    "provisioningAuthorized"
+  ],
   "properties": {
-    "$schema": {"const": "scanner-result-bridge.schema.json"},
-    "contractVersion": {"const": "m7.7-scanner-result-bridge-v2"},
-    "resolutionStatus": {"const": "private-pull-implementation-complete-live-proof-required"},
+    "$schema": { "const": "scanner-result-bridge.schema.json" },
+    "contractVersion": { "const": "m7.7-scanner-result-bridge-v3" },
+    "resolutionStatus": {
+      "const": "private-pull-implementation-complete-retained-proof-reconciliation-required"
+    },
     "provider": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "resourceType", "apiVersion", "resultSources", "diagnosticCategory", "providerManagedSystemTopic", "providerRegistration"],
+      "required": [
+        "name",
+        "resourceType",
+        "apiVersion",
+        "resultSources",
+        "diagnosticCategory",
+        "providerManagedSystemTopic",
+        "providerRegistration"
+      ],
       "properties": {
-        "name": {"const": "microsoft-defender-for-storage-malware-scanning"},
-        "resourceType": {"const": "Microsoft.Security/defenderForStorageSettings"},
-        "apiVersion": {"const": "2025-06-01"},
-        "resultSources": {"const": ["blob-index-tags", "StorageMalwareScanningResults"]},
-        "diagnosticCategory": {"const": "ScanResults"},
-        "providerManagedSystemTopic": {"const": "preserve-unmodified"},
-        "providerRegistration": {"const": "Microsoft.Security"}
+        "name": { "const": "microsoft-defender-for-storage-malware-scanning" },
+        "resourceType": {
+          "const": "Microsoft.Security/defenderForStorageSettings"
+        },
+        "apiVersion": { "const": "2025-06-01" },
+        "resultSources": {
+          "const": ["blob-index-tags", "StorageMalwareScanningResults"]
+        },
+        "diagnosticCategory": { "const": "ScanResults" },
+        "providerManagedSystemTopic": { "const": "preserve-unmodified" },
+        "providerRegistration": { "const": "Microsoft.Security" }
       }
     },
     "producer": {
-      "type": "object", "additionalProperties": false,
-      "required": ["storageContainer", "immutableBinding", "correlation", "noFilenameOnlyMatching"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "storageContainer",
+        "immutableBinding",
+        "correlation",
+        "timestampComparison",
+        "noFilenameOnlyMatching"
+      ],
       "properties": {
-        "storageContainer": {"const": "quarantine"},
-        "immutableBinding": {"type": "array", "minItems": 5, "uniqueItems": true, "items": {"type": "string"}},
-        "correlation": {"type": "array", "minItems": 5, "uniqueItems": true, "items": {"type": "string"}},
-        "noFilenameOnlyMatching": {"const": true}
+        "storageContainer": { "const": "quarantine" },
+        "immutableBinding": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "correlation": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "timestampComparison": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "contract",
+            "precisionSource",
+            "comparisonPrecision",
+            "projection",
+            "exactDeltaPreserved",
+            "toleranceAuthorized"
+          ],
+          "properties": {
+            "contract": {
+              "const": "maximum-common-representable-precision-equality-v1"
+            },
+            "precisionSource": {
+              "const": "fractional-second-digits-present-in-each-raw-provider-value"
+            },
+            "comparisonPrecision": {
+              "const": "minimum-source-fractional-second-digits"
+            },
+            "projection": { "const": "truncate-not-round" },
+            "exactDeltaPreserved": { "const": true },
+            "toleranceAuthorized": { "const": false }
+          }
+        },
+        "noFilenameOnlyMatching": { "const": true }
       }
     },
     "transport": {
-      "type": "object", "additionalProperties": false,
-      "required": ["kind", "blobTagKeys", "logAnalyticsTable", "logAnalyticsColumns", "privateLinkScopeResourceType", "queryAccessMode", "ingestionAccessMode", "noCustomEventGridTopic", "noEventSubscription", "noQueue", "publicFallback"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "blobTagKeys",
+        "logAnalyticsTable",
+        "logAnalyticsColumns",
+        "privateLinkScopeResourceType",
+        "queryAccessMode",
+        "ingestionAccessMode",
+        "noCustomEventGridTopic",
+        "noEventSubscription",
+        "noQueue",
+        "publicFallback"
+      ],
       "properties": {
-        "kind": {"const": "private-blob-tags-plus-ampls-log-analytics-pull"},
-        "blobTagKeys": {"const": ["Malware Scanning scan result", "Malware Scanning scan time UTC"]},
-        "logAnalyticsTable": {"const": "StorageMalwareScanningResults"},
-        "logAnalyticsColumns": {"type": "array", "minItems": 7, "uniqueItems": true, "items": {"type": "string"}},
-        "privateLinkScopeResourceType": {"const": "Microsoft.Insights/privateLinkScopes"},
-        "queryAccessMode": {"const": "PrivateOnly"},
-        "ingestionAccessMode": {"const": "PrivateOnly"},
-        "noCustomEventGridTopic": {"const": true},
-        "noEventSubscription": {"const": true},
-        "noQueue": {"const": true},
-        "publicFallback": {"const": false}
+        "kind": { "const": "private-blob-tags-plus-ampls-log-analytics-pull" },
+        "blobTagKeys": {
+          "const": [
+            "Malware Scanning scan result",
+            "Malware Scanning scan time UTC"
+          ]
+        },
+        "logAnalyticsTable": { "const": "StorageMalwareScanningResults" },
+        "logAnalyticsColumns": {
+          "type": "array",
+          "minItems": 7,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "privateLinkScopeResourceType": {
+          "const": "Microsoft.Insights/privateLinkScopes"
+        },
+        "queryAccessMode": { "const": "PrivateOnly" },
+        "ingestionAccessMode": { "const": "PrivateOnly" },
+        "noCustomEventGridTopic": { "const": true },
+        "noEventSubscription": { "const": true },
+        "noQueue": { "const": true },
+        "publicFallback": { "const": false }
       }
     },
     "consumer": {
-      "type": "object", "additionalProperties": false,
-      "required": ["entryPoint", "adapter", "service", "authentication", "legacyHmacCallbackIsNotTransportAuthentication", "idempotency", "promotion", "maliciousDisposition", "uncertainDisposition"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryPoint",
+        "adapter",
+        "service",
+        "authentication",
+        "legacyHmacCallbackIsNotTransportAuthentication",
+        "idempotency",
+        "promotion",
+        "maliciousDisposition",
+        "uncertainDisposition"
+      ],
       "properties": {
-        "entryPoint": {"const": "scripts.worker.DocumentWorker"},
-        "adapter": {"const": "opencanvas_api.services.scanner_bridge.PrivateScannerResultBridgeConsumer"},
-        "service": {"const": "MalwareScanService.record_bridge_result"},
-        "authentication": {"const": "worker-managed-identity-data-plane-read-only"},
-        "legacyHmacCallbackIsNotTransportAuthentication": {"const": true},
-        "idempotency": {"const": "correlationId-plus-objectVersionId"},
-        "promotion": {"const": "only-clean-exact-dual-source-immutable-object-version"},
-        "maliciousDisposition": {"const": "rejected"},
-        "uncertainDisposition": {"const": "quarantine"}
+        "entryPoint": { "const": "scripts.worker.DocumentWorker" },
+        "adapter": {
+          "const": "opencanvas_api.services.scanner_bridge.PrivateScannerResultBridgeConsumer"
+        },
+        "service": { "const": "MalwareScanService.record_bridge_result" },
+        "authentication": {
+          "const": "worker-managed-identity-data-plane-read-only"
+        },
+        "legacyHmacCallbackIsNotTransportAuthentication": { "const": true },
+        "idempotency": { "const": "correlationId-plus-objectVersionId" },
+        "promotion": {
+          "const": "only-clean-common-precision-dual-source-immutable-object-version"
+        },
+        "maliciousDisposition": { "const": "rejected" },
+        "uncertainDisposition": { "const": "quarantine" }
       }
     },
-    "identities": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "object", "additionalProperties": false, "required": ["alias", "scope", "blobTagsRead", "blobTagsWrite"], "properties": {"alias": {"enum": ["api", "scan-worker"]}, "scope": {"type": "string"}, "blobTagsRead": {"type": "boolean"}, "blobTagsWrite": {"const": false}}}},
-    "network": {"type": "object", "additionalProperties": false, "required": ["blobPrivateEndpoint", "azureMonitorPrivateLinkScope", "privateDnsZones", "containerAppInternalOnly", "tls", "publicNetworkAccess"], "properties": {"blobPrivateEndpoint": {"const": true}, "azureMonitorPrivateLinkScope": {"const": true}, "privateDnsZones": {"type": "array", "minItems": 5, "uniqueItems": true, "items": {"type": "string"}}, "containerAppInternalOnly": {"const": true}, "tls": {"const": "TLS1_2-or-later"}, "publicNetworkAccess": {"const": false}}},
-    "resolver": {"type": "object", "additionalProperties": false, "required": ["implementation", "booleanMayBeTrueOnlyWhen", "states"], "properties": {"implementation": {"const": "preflight.milestone_7_7.scanner_result_bridge.resolve_bridge"}, "booleanMayBeTrueOnlyWhen": {"const": "RESOLVED"}, "states": {"type": "array", "minItems": 14, "uniqueItems": true, "items": {"type": "string"}}}},
-    "proof": {"type": "object", "additionalProperties": false, "required": ["jobKind", "failureMarkerSchema", "blobTagObservationSchema", "blobTagObservationMarker", "blobTagObservationSink", "requiredDecisions", "privateDnsReadback", "retainedConsoleDiagnosticCategory", "retainedConsoleDiagnosticScope", "temporaryProbeAuthorityRevoked", "sanitizedEvidenceOnly"], "properties": {"jobKind": {"const": "bounded-container-apps-job"}, "failureMarkerSchema": {"const": "mobius.scanner-result-bridge.proof-failure.v1"}, "blobTagObservationSchema": {"const": "mobius.scanner-result-bridge.blob-tags-observation.v1"}, "blobTagObservationMarker": {"const": "SCANNER_BLOB_TAG_OBSERVATION"}, "blobTagObservationSink": {"const": "retained-console-diagnostic"}, "requiredDecisions": {"type": "array", "minItems": 7, "uniqueItems": true, "items": {"type": "string"}}, "privateDnsReadback": {"const": true}, "retainedConsoleDiagnosticCategory": {"const": "ContainerAppConsoleLogs"}, "retainedConsoleDiagnosticScope": {"const": "managed-environment"}, "temporaryProbeAuthorityRevoked": {"const": true}, "sanitizedEvidenceOnly": {"const": true}}},
-    "cleanup": {"type": "object", "additionalProperties": false, "required": ["inventory", "zeroResidueRequiresEveryTemporaryEntryAbsent"], "properties": {"inventory": {"type": "array", "minItems": 9, "uniqueItems": true, "items": {"type": "string"}}, "zeroResidueRequiresEveryTemporaryEntryAbsent": {"const": true}}},
-    "provisioningAuthorized": {"const": true}
+    "identities": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["alias", "scope", "blobTagsRead", "blobTagsWrite"],
+        "properties": {
+          "alias": { "enum": ["api", "scan-worker"] },
+          "scope": { "type": "string" },
+          "blobTagsRead": { "type": "boolean" },
+          "blobTagsWrite": { "const": false }
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "blobPrivateEndpoint",
+        "azureMonitorPrivateLinkScope",
+        "privateDnsZones",
+        "containerAppInternalOnly",
+        "tls",
+        "publicNetworkAccess"
+      ],
+      "properties": {
+        "blobPrivateEndpoint": { "const": true },
+        "azureMonitorPrivateLinkScope": { "const": true },
+        "privateDnsZones": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "containerAppInternalOnly": { "const": true },
+        "tls": { "const": "TLS1_2-or-later" },
+        "publicNetworkAccess": { "const": false }
+      }
+    },
+    "resolver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["implementation", "booleanMayBeTrueOnlyWhen", "states"],
+      "properties": {
+        "implementation": {
+          "const": "preflight.milestone_7_7.scanner_result_bridge.resolve_bridge"
+        },
+        "booleanMayBeTrueOnlyWhen": { "const": "RESOLVED" },
+        "states": {
+          "type": "array",
+          "minItems": 14,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jobKind",
+        "failureMarkerSchema",
+        "blobTagObservationSchema",
+        "blobTagObservationMarker",
+        "blobTagObservationSink",
+        "requiredDecisions",
+        "privateDnsReadback",
+        "retainedConsoleDiagnosticCategory",
+        "retainedConsoleDiagnosticScope",
+        "containerLogEnvelopes",
+        "retainedProofReconciliation",
+        "maximumHistoricalProofExecutionCount",
+        "temporaryProbeAuthorityRevoked",
+        "sanitizedEvidenceOnly"
+      ],
+      "properties": {
+        "jobKind": { "const": "bounded-container-apps-job" },
+        "failureMarkerSchema": {
+          "const": "mobius.scanner-result-bridge.proof-failure.v2"
+        },
+        "blobTagObservationSchema": {
+          "const": "mobius.scanner-result-bridge.blob-tags-observation.v1"
+        },
+        "blobTagObservationMarker": { "const": "SCANNER_BLOB_TAG_OBSERVATION" },
+        "blobTagObservationSink": { "const": "retained-console-diagnostic" },
+        "requiredDecisions": {
+          "type": "array",
+          "minItems": 7,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "privateDnsReadback": { "const": true },
+        "retainedConsoleDiagnosticCategory": {
+          "const": "ContainerAppConsoleLogs"
+        },
+        "retainedConsoleDiagnosticScope": { "const": "managed-environment" },
+        "containerLogEnvelopes": {
+          "const": ["direct-json", "azure-container-apps-f-space-json"]
+        },
+        "retainedProofReconciliation": {
+          "const": "integrity-bound-read-only-no-execution"
+        },
+        "maximumHistoricalProofExecutionCount": { "const": 2 },
+        "temporaryProbeAuthorityRevoked": { "const": true },
+        "sanitizedEvidenceOnly": { "const": true }
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inventory", "zeroResidueRequiresEveryTemporaryEntryAbsent"],
+      "properties": {
+        "inventory": {
+          "type": "array",
+          "minItems": 9,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "zeroResidueRequiresEveryTemporaryEntryAbsent": { "const": true }
+      }
+    },
+    "provisioningAuthorized": { "const": true }
   }
 }

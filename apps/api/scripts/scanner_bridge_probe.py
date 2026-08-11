@@ -487,7 +487,8 @@ async def run(*, max_attempts: int, delay_seconds: float) -> int:
         ) from None
     if (
         not isinstance(match.scan_finished_comparison, dict)
-        or match.scan_finished_comparison.get("comparisonDecision") != "equal-instant"
+        or match.scan_finished_comparison.get("comparisonDecision") != "equal-common-precision"
+        or match.scan_finished_comparison.get("commonPrecisionEqual") is not True
         or not isinstance(latest_blob_tag_observation, dict)
         or latest_blob_tag_observation.get("exactComparisonDecision") != "accepted"
     ):

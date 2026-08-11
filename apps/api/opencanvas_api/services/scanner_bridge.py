@@ -48,7 +48,7 @@ BLOB_TAG_NORMALIZATION_PATH: Final = "azure-blob-tags-xml-local-name-v1"
 SCAN_FINISHED_NORMALIZATION_PATH: Final = (
     "trim-z-to-offset-truncate-beyond-microseconds-fromisoformat-utc-v1"
 )
-SCAN_FINISHED_COMPARISON_CONTRACT: Final = "exact-parsed-utc-instant-equality-v1"
+SCAN_FINISHED_COMPARISON_CONTRACT: Final = "maximum-common-representable-precision-equality-v1"
 LOG_ANALYTICS_TOKEN_RESOURCE: Final = "https://api.loganalytics.io/"
 SCANNER_IDENTITY: Final = "azure-defender-for-storage"
 SCANNER_VERSION: Final = "defender-storage-dual-source-v1"
@@ -56,6 +56,12 @@ BRIDGE_PROVENANCE: Final = "defender-blob-tags-plus-storage-malware-scanning-res
 _ACCOUNT_NAME = re.compile(r"^[a-z0-9]{3,24}$")
 _AZURE_ETAG = re.compile(r"^0x[0-9A-Fa-f]+$")
 _SANITIZED_TIMESTAMP = re.compile(r"^[0-9TtZz:+. -]{1,128}$")
+_REPRESENTED_TIMESTAMP = re.compile(
+    r"^(?P<date>\d{4}-\d{2}-\d{2})[Tt ]"
+    r"(?P<time>\d{2}:\d{2}:\d{2})"
+    r"(?:\.(?P<fraction>\d{1,32}))?"
+    r"(?P<timezone>[Zz]|[+-]\d{2}:\d{2})$"
+)
 _BLOB_RESULTS = frozenset({"No threats found", "Malicious", "Error", "Not scanned"})
 _LOG_RESULT_NORMALIZATIONS: Final = {
     "No Threat Found": "No threats found",
@@ -155,6 +161,16 @@ class _NormalizedBlobTags:
     tags: dict[str, str] | None
     returned_keys: tuple[str, ...]
     succeeded: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _RepresentedTimestamp:
+    utc_second: datetime
+    fractional_digits: str
+
+    @property
+    def precision(self) -> int:
+        return len(self.fractional_digits)
 
 
 @dataclass(frozen=True, slots=True)
@@ -620,8 +636,14 @@ def diagnose_scan_evidence(
         return ScanEvidenceCorrelation(None, "scanner-correlation-uri-mismatch")
     if not _azure_etags_equal(first.etag, blob.etag):
         return ScanEvidenceCorrelation(None, "scanner-correlation-etag-mismatch")
-    scan_finished_comparison = _scan_finished_comparison_evidence(blob=blob, log=first)
-    if first.scan_finished_at != blob.scan_finished_at:
+    try:
+        scan_finished_comparison = _scan_finished_comparison_evidence(blob=blob, log=first)
+    except ScannerBridgeEvidenceError:
+        return ScanEvidenceCorrelation(
+            None,
+            "scanner-correlation-scan-finished-mismatch",
+        )
+    if not bool(scan_finished_comparison["commonPrecisionEqual"]):
         return ScanEvidenceCorrelation(
             None,
             "scanner-correlation-scan-finished-mismatch",
@@ -1025,7 +1047,8 @@ def log_analytics_query_sha256(
 
 
 def _parse_utc(value: str) -> datetime:
-    normalized = value.strip().replace("Z", "+00:00")
+    stripped = value.strip()
+    normalized = f"{stripped[:-1]}+00:00" if stripped.endswith(("Z", "z")) else stripped
     fraction = re.search(r"\.(\d{7,})(?=[+-]\d\d:\d\d$)", normalized)
     if fraction is not None:
         normalized = (
@@ -1065,6 +1088,88 @@ def _timestamp_representation(raw_value: str, parsed: datetime) -> dict[str, Jso
     }
 
 
+def _represented_timestamp(raw_value: str, parsed: datetime) -> _RepresentedTimestamp:
+    stripped = raw_value.strip()
+    match = _REPRESENTED_TIMESTAMP.fullmatch(stripped)
+    if match is None or _SANITIZED_TIMESTAMP.fullmatch(raw_value) is None:
+        raise ScannerBridgeEvidenceError("scanner-evidence-time-invalid")
+    timezone = match.group("timezone")
+    normalized_timezone = "+00:00" if timezone in {"Z", "z"} else timezone
+    try:
+        utc_second = datetime.fromisoformat(
+            f"{match.group('date')}T{match.group('time')}{normalized_timezone}"
+        ).astimezone(UTC)
+    except ValueError as exc:
+        raise ScannerBridgeEvidenceError("scanner-evidence-time-invalid") from exc
+    if _aware_utc(parsed) != _parse_utc(stripped):
+        raise ScannerBridgeEvidenceError("scanner-evidence-time-invalid")
+    return _RepresentedTimestamp(
+        utc_second=utc_second,
+        fractional_digits=match.group("fraction") or "",
+    )
+
+
+def _timestamp_units(value: _RepresentedTimestamp, precision: int) -> int:
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
+    delta = value.utc_second - epoch
+    seconds = delta.days * 86_400 + delta.seconds
+    scale = 10**precision
+    if precision == 0:
+        fraction = 0
+    elif value.precision >= precision:
+        fraction = int(value.fractional_digits[:precision])
+    else:
+        fraction = int(value.fractional_digits or "0") * 10 ** (precision - value.precision)
+    return int(seconds * scale + fraction)
+
+
+def _common_precision_utc(value: _RepresentedTimestamp, precision: int) -> str:
+    base = value.utc_second.strftime("%Y-%m-%dT%H:%M:%S")
+    if precision == 0:
+        return f"{base}Z"
+    return f"{base}.{value.fractional_digits[:precision]}Z"
+
+
+def _timestamp_comparison(
+    *,
+    blob_raw: str,
+    blob_parsed: datetime,
+    log_raw: str,
+    log_parsed: datetime,
+) -> dict[str, JsonValue]:
+    blob = _represented_timestamp(blob_raw, blob_parsed)
+    log = _represented_timestamp(log_raw, log_parsed)
+    exact_precision = max(blob.precision, log.precision)
+    common_precision = min(blob.precision, log.precision)
+    exact_equal = _timestamp_units(blob, exact_precision) == _timestamp_units(log, exact_precision)
+    common_equal = _timestamp_units(blob, common_precision) == _timestamp_units(
+        log, common_precision
+    )
+    delta_microseconds = _datetime_delta_microseconds(log_parsed, blob_parsed)
+    return {
+        "blobTagsCommonPrecisionUtc": _common_precision_utc(blob, common_precision),
+        "commonPrecisionEqual": common_equal,
+        "comparisonPrecisionFractionalSecondDigits": common_precision,
+        "exactInstantDeltaMicroseconds": delta_microseconds,
+        "exactInstantEqual": exact_equal,
+        "logAnalyticsCommonPrecisionUtc": _common_precision_utc(log, common_precision),
+        "logAnalyticsMinusBlobTagsMicroseconds": delta_microseconds,
+    }
+
+
+def compare_scan_finished_timestamps(
+    *, blob_raw: str, log_analytics_raw: str
+) -> dict[str, JsonValue]:
+    """Compare two provider timestamps at their maximum common represented precision."""
+
+    return _timestamp_comparison(
+        blob_raw=blob_raw,
+        blob_parsed=_parse_utc(blob_raw),
+        log_raw=log_analytics_raw,
+        log_parsed=_parse_utc(log_analytics_raw),
+    )
+
+
 def _datetime_delta_microseconds(left: datetime, right: datetime) -> int:
     delta = _aware_utc(left) - _aware_utc(right)
     return ((delta.days * 86_400) + delta.seconds) * 1_000_000 + delta.microseconds
@@ -1075,7 +1180,12 @@ def _scan_finished_comparison_evidence(
     blob: BlobScanEvidence,
     log: LogAnalyticsScanEvidence,
 ) -> dict[str, JsonValue]:
-    delta_microseconds = _datetime_delta_microseconds(log.scan_finished_at, blob.scan_finished_at)
+    semantic_comparison = _timestamp_comparison(
+        blob_raw=blob.scan_finished_raw,
+        blob_parsed=blob.scan_finished_at,
+        log_raw=log.scan_finished_raw,
+        log_parsed=log.scan_finished_at,
+    )
     body: dict[str, JsonValue] = {
         "blobEvidenceSha256": blob.evidence_sha256,
         "blobTagResult": blob.scan_result,
@@ -1083,7 +1193,11 @@ def _scan_finished_comparison_evidence(
             blob.scan_finished_raw, blob.scan_finished_at
         ),
         "comparisonContract": SCAN_FINISHED_COMPARISON_CONTRACT,
-        "comparisonDecision": ("equal-instant" if delta_microseconds == 0 else "different-instant"),
+        "comparisonDecision": (
+            "equal-common-precision"
+            if semantic_comparison["commonPrecisionEqual"]
+            else "different-common-precision"
+        ),
         "correlationIdSha256": _sha256_text(log.correlation_id),
         "etagComparison": "matched",
         "etagSha256": _sha256_text(_normalize_azure_etag(blob.etag)),
@@ -1092,16 +1206,16 @@ def _scan_finished_comparison_evidence(
         "logAnalyticsTimestamp": _timestamp_representation(
             log.scan_finished_raw, log.scan_finished_at
         ),
-        "logAnalyticsMinusBlobTagsMicroseconds": delta_microseconds,
         "providerVersionSha256": _sha256_text(blob.provider_version_id),
         "uriComparison": "matched",
         "uriSha256": _sha256_text(blob.object_uri),
+        **semantic_comparison,
     }
     return {
         **body,
         "integritySha256": _canonical_sha256(
             body,
-            domain="mobius.scanner-bridge.scan-finished-comparison.v1",
+            domain="mobius.scanner-bridge.scan-finished-comparison.v2",
         ),
     }
 
@@ -1160,6 +1274,7 @@ __all__ = [
     "ScannerBridgeDecision",
     "ScannerBridgeEvidenceError",
     "build_private_scanner_result_bridge",
+    "compare_scan_finished_timestamps",
     "correlate_scan_evidence",
     "diagnose_scan_evidence",
     "log_analytics_query_sha256",

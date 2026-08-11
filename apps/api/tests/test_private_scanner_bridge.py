@@ -36,6 +36,7 @@ from opencanvas_api.services.scanner_bridge import (
     ScanEvidenceCorrelation,
     ScannerBridgeEvidenceError,
     bounded_scanner_retry_delay,
+    compare_scan_finished_timestamps,
     correlate_scan_evidence,
     diagnose_scan_evidence,
 )
@@ -247,7 +248,9 @@ def test_scan_finished_contract_accepts_timezone_equivalent_exact_instants() -> 
     assert diagnosis.decision is not None
     comparison = diagnosis.terminal_evidence
     assert comparison is not None
-    assert comparison["comparisonDecision"] == "equal-instant"
+    assert comparison["comparisonDecision"] == "equal-common-precision"
+    assert comparison["exactInstantEqual"] is True
+    assert comparison["commonPrecisionEqual"] is True
     assert comparison["logAnalyticsMinusBlobTagsMicroseconds"] == 0
     blob_timestamp = cast(dict[str, object], comparison["blobTagsTimestamp"])
     log_timestamp = cast(dict[str, object], comparison["logAnalyticsTimestamp"])
@@ -259,7 +262,7 @@ def test_scan_finished_contract_accepts_timezone_equivalent_exact_instants() -> 
     assert log_timestamp["timezoneRepresentation"] == "Z"
 
 
-def test_scan_finished_contract_preserves_existing_submicrosecond_normalization() -> None:
+def test_scan_finished_contract_does_not_collapse_distinct_same_precision_values() -> None:
     parsed = datetime(2026, 8, 6, 14, 59, 0, 123_456, tzinfo=UTC)
     diagnosis = _diagnose(
         blob=replace(
@@ -276,10 +279,13 @@ def test_scan_finished_contract_preserves_existing_submicrosecond_normalization(
         ),
     )
 
-    assert diagnosis.decision is not None
+    assert diagnosis.decision is None
+    assert diagnosis.failure_code == "scanner-correlation-scan-finished-mismatch"
     comparison = diagnosis.terminal_evidence
     assert comparison is not None
-    assert comparison["comparisonDecision"] == "equal-instant"
+    assert comparison["comparisonDecision"] == "different-common-precision"
+    assert comparison["exactInstantEqual"] is False
+    assert comparison["commonPrecisionEqual"] is False
     blob_timestamp = cast(dict[str, object], comparison["blobTagsTimestamp"])
     log_timestamp = cast(dict[str, object], comparison["logAnalyticsTimestamp"])
     assert blob_timestamp["fractionalSecondDigits"] == 7
@@ -307,14 +313,97 @@ def test_scan_finished_contract_has_no_arbitrary_tolerance_and_retains_both_valu
     )
     terminal = diagnosis.terminal_evidence  # type: ignore[union-attr]
     assert terminal is not None
-    assert terminal["comparisonContract"] == "exact-parsed-utc-instant-equality-v1"
-    assert terminal["comparisonDecision"] == "different-instant"
+    assert terminal["comparisonContract"] == ("maximum-common-representable-precision-equality-v1")
+    assert terminal["comparisonDecision"] == "different-common-precision"
+    assert terminal["exactInstantEqual"] is False
+    assert terminal["commonPrecisionEqual"] is False
+    assert terminal["exactInstantDeltaMicroseconds"] == 1
     assert terminal["logAnalyticsMinusBlobTagsMicroseconds"] == 1
     blob_timestamp = cast(dict[str, object], terminal["blobTagsTimestamp"])
     log_timestamp = cast(dict[str, object], terminal["logAnalyticsTimestamp"])
     assert blob_timestamp["rawValue"] == "2026-08-06T14:59:00.000000Z"
     assert log_timestamp["rawValue"] == "2026-08-06T14:59:00.000001Z"
     assert URI not in json.dumps(terminal)
+
+
+def test_common_precision_accepts_retained_whole_second_and_fractional_event() -> None:
+    comparison = compare_scan_finished_timestamps(
+        blob_raw="2026-08-11 17:15:16Z",
+        log_analytics_raw="2026-08-11T17:15:16.4539552Z",
+    )
+
+    assert comparison == {
+        "blobTagsCommonPrecisionUtc": "2026-08-11T17:15:16Z",
+        "commonPrecisionEqual": True,
+        "comparisonPrecisionFractionalSecondDigits": 0,
+        "exactInstantDeltaMicroseconds": 453_955,
+        "exactInstantEqual": False,
+        "logAnalyticsCommonPrecisionUtc": "2026-08-11T17:15:16Z",
+        "logAnalyticsMinusBlobTagsMicroseconds": 453_955,
+    }
+
+
+@pytest.mark.parametrize(
+    "log_value",
+    [
+        "2026-08-11T17:15:17.000001Z",
+        "2026-08-11T17:15:15.999999Z",
+    ],
+)
+def test_common_precision_never_uses_a_nearby_second_tolerance(log_value: str) -> None:
+    comparison = compare_scan_finished_timestamps(
+        blob_raw="2026-08-11T17:15:16Z",
+        log_analytics_raw=log_value,
+    )
+
+    assert comparison["commonPrecisionEqual"] is False
+
+
+def test_common_precision_preserves_explicit_microseconds() -> None:
+    equal = compare_scan_finished_timestamps(
+        blob_raw="2026-08-11T17:15:16.123456Z",
+        log_analytics_raw="2026-08-11T12:15:16.123456-05:00",
+    )
+    different = compare_scan_finished_timestamps(
+        blob_raw="2026-08-11T17:15:16.123456Z",
+        log_analytics_raw="2026-08-11T17:15:16.123457Z",
+    )
+
+    assert equal["comparisonPrecisionFractionalSecondDigits"] == 6
+    assert equal["exactInstantEqual"] is True
+    assert equal["commonPrecisionEqual"] is True
+    assert different["exactInstantEqual"] is False
+    assert different["commonPrecisionEqual"] is False
+
+
+def test_common_precision_uses_lower_declared_fractional_precision_without_rounding() -> None:
+    comparison = compare_scan_finished_timestamps(
+        blob_raw="2026-08-11T17:15:16.4Z",
+        log_analytics_raw="2026-08-11T17:15:16.4999999Z",
+    )
+
+    assert comparison["comparisonPrecisionFractionalSecondDigits"] == 1
+    assert comparison["commonPrecisionEqual"] is True
+    assert comparison["exactInstantEqual"] is False
+    assert comparison["blobTagsCommonPrecisionUtc"] == "2026-08-11T17:15:16.4Z"
+    assert comparison["logAnalyticsCommonPrecisionUtc"] == "2026-08-11T17:15:16.4Z"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2026-08-11T17:15Z",
+        "2026-08-11T17:15:16",
+        "2026-08-11T17:15:16.Z",
+        "not-a-timestamp",
+    ],
+)
+def test_common_precision_malformed_timestamp_fails_closed(value: str) -> None:
+    with pytest.raises(ScannerBridgeEvidenceError, match="scanner-evidence-time-invalid"):
+        compare_scan_finished_timestamps(
+            blob_raw=value,
+            log_analytics_raw="2026-08-11T17:15:16Z",
+        )
 
 
 def test_identical_duplicate_log_rows_reconcile_without_a_duplicate_decision() -> None:
@@ -1640,7 +1729,7 @@ def test_success_marker_is_complete_deterministic_and_history_bounded() -> None:
     assert log_timestamp["canonicalUtc"] == "2026-08-06T14:59:00Z"
     assert log_timestamp["fractionalSecondDigits"] == 6
     assert log_timestamp["timezoneRepresentation"] == "Z"
-    assert comparison["comparisonDecision"] == "equal-instant"
+    assert comparison["comparisonDecision"] == "equal-common-precision"
     assert comparison["logAnalyticsMinusBlobTagsMicroseconds"] == 0
     assert first["blobTagObservation"] == observation
     assert first["blobTagObservationCount"] == 120
@@ -1738,7 +1827,7 @@ async def test_probe_allows_later_success_after_source_failure(
     assert match.decision.verdict == "clean"
     assert match.attempt_count == 2
     comparison = cast(dict[str, object], match.scan_finished_comparison)
-    assert comparison["comparisonDecision"] == "equal-instant"
+    assert comparison["comparisonDecision"] == "equal-common-precision"
     assert comparison["logAnalyticsMinusBlobTagsMicroseconds"] == 0
     assert log_reader.calls == 2
 
@@ -1751,7 +1840,12 @@ async def test_probe_does_not_retain_stale_timestamp_evidence_from_a_prior_attem
 
     class BlobReader:
         async def read(self, *_args: object, **_kwargs: object) -> BlobScanEvidence:
-            return _blob()
+            return replace(
+                _blob(),
+                scan_finished_raw=FINISHED.isoformat(timespec="microseconds").replace(
+                    "+00:00", "Z"
+                ),
+            )
 
     class ChangingLogReader:
         def __init__(self) -> None:
@@ -1799,7 +1893,12 @@ async def test_probe_success_carries_only_the_current_attempt_timestamp_evidence
 
     class BlobReader:
         async def read(self, *_args: object, **_kwargs: object) -> BlobScanEvidence:
-            return _blob()
+            return replace(
+                _blob(),
+                scan_finished_raw=FINISHED.isoformat(timespec="microseconds").replace(
+                    "+00:00", "Z"
+                ),
+            )
 
     class MismatchThenMatchLogReader:
         def __init__(self) -> None:
@@ -1838,9 +1937,11 @@ async def test_probe_success_carries_only_the_current_attempt_timestamp_evidence
     blob_timestamp = cast(dict[str, object], comparison["blobTagsTimestamp"])
     log_timestamp = cast(dict[str, object], comparison["logAnalyticsTimestamp"])
     assert reader.calls == 2
-    assert comparison["comparisonDecision"] == "equal-instant"
+    assert comparison["comparisonDecision"] == "equal-common-precision"
     assert comparison["logAnalyticsMinusBlobTagsMicroseconds"] == 0
-    assert blob_timestamp["rawValue"] == FINISHED.isoformat().replace("+00:00", "Z")
+    assert blob_timestamp["rawValue"] == FINISHED.isoformat(timespec="microseconds").replace(
+        "+00:00", "Z"
+    )
     assert log_timestamp["rawValue"] == FINISHED.isoformat().replace("+00:00", "Z")
 
 

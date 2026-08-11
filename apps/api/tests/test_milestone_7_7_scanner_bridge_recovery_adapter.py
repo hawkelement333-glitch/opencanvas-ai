@@ -232,13 +232,19 @@ def _scan_finished_terminal_evidence(
     body: dict[str, JsonValue] = {
         "blobEvidenceSha256": "1" * 64,
         "blobTagResult": "No threats found",
+        "blobTagsCommonPrecisionUtc": ("2026-08-06T14:25:00Z" if equal else "2026-08-06T14:24:59Z"),
         "blobTagsTimestamp": _timestamp_representation(blob_timestamp),
+        "commonPrecisionEqual": equal,
         "comparisonContract": adapter_module.SCAN_FINISHED_COMPARISON_CONTRACT,
-        "comparisonDecision": "equal-instant" if equal else "different-instant",
+        "comparisonDecision": ("equal-common-precision" if equal else "different-common-precision"),
+        "comparisonPrecisionFractionalSecondDigits": 0,
         "correlationIdSha256": "2" * 64,
         "etagComparison": "matched",
         "etagSha256": "3" * 64,
+        "exactInstantDeltaMicroseconds": 0 if equal else 1,
+        "exactInstantEqual": equal,
         "logAnalyticsEvidenceSha256": "4" * 64,
+        "logAnalyticsCommonPrecisionUtc": "2026-08-06T14:25:00Z",
         "logAnalyticsMinusBlobTagsMicroseconds": 0 if equal else 1,
         "logAnalyticsResult": "No threats found",
         "logAnalyticsTimestamp": _timestamp_representation("2026-08-06T14:25:00Z"),
@@ -250,7 +256,7 @@ def _scan_finished_terminal_evidence(
         **body,
         "integritySha256": adapter_module._scanner_runtime_hash(
             body,
-            "mobius.scanner-bridge.scan-finished-comparison.v1",
+            "mobius.scanner-bridge.scan-finished-comparison.v2",
         ),
     }
 
@@ -1542,6 +1548,37 @@ def test_log_parser_accepts_only_one_complete_sanitized_marker() -> None:
     assert adapter_module._find_marker('{"marker":"wrong"}', "SCANNER_RESULT_BRIDGE_PROVED") is None
 
 
+def test_log_envelope_accepts_direct_object_array_and_exact_azure_prefix() -> None:
+    marker = _marker()
+    serialized = json.dumps(marker, separators=(",", ":"), sort_keys=True)
+
+    assert adapter_module._find_marker(serialized, "SCANNER_RESULT_BRIDGE_PROVED") == marker
+    assert adapter_module._find_marker(f"[{serialized}]", "SCANNER_RESULT_BRIDGE_PROVED") == marker
+    assert adapter_module._find_marker(f"F {serialized}", "SCANNER_RESULT_BRIDGE_PROVED") == marker
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "garbage ",
+        "F F ",
+        "I ",
+        "FF ",
+        "F  ",
+    ],
+)
+def test_log_envelope_rejects_arbitrary_or_multiple_prefixes(prefix: str) -> None:
+    marker = json.dumps(_marker(), separators=(",", ":"), sort_keys=True)
+
+    assert adapter_module._find_marker(f"{prefix}{marker}", "SCANNER_RESULT_BRIDGE_PROVED") is None
+
+
+def test_log_envelope_rejects_invalid_or_oversized_json_boundedly() -> None:
+    assert adapter_module._find_marker("F {invalid", "SCANNER_RESULT_BRIDGE_PROVED") is None
+    oversized = "F " + "[" + (" " * adapter_module.PROOF_LOG_OUTPUT_MAX_BYTES) + "]"
+    assert adapter_module._find_marker(oversized, "SCANNER_RESULT_BRIDGE_PROVED") is None
+
+
 def test_success_marker_parser_preserves_exact_bounded_terminal_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1560,7 +1597,9 @@ def test_success_marker_parser_preserves_exact_bounded_terminal_evidence(
     observation = cast(dict[str, JsonValue], parsed["blobTagObservation"])
     assert parsed == marker
     assert parsed["schemaVersion"] == "mobius.scanner-result-bridge.proof.v2"
-    assert comparison["comparisonDecision"] == "equal-instant"
+    assert comparison["comparisonDecision"] == "equal-common-precision"
+    assert comparison["exactInstantEqual"] is True
+    assert comparison["commonPrecisionEqual"] is True
     assert comparison["logAnalyticsMinusBlobTagsMicroseconds"] == 0
     assert blob_timestamp["rawValue"] == "2026-08-06T14:25:00Z"
     assert blob_timestamp["canonicalUtc"] == "2026-08-06T14:25:00Z"
@@ -1604,7 +1643,7 @@ def test_success_marker_rejects_missing_raw_timestamp_even_with_recomputed_integ
     comparison_body = {key: value for key, value in comparison.items() if key != "integritySha256"}
     comparison["integritySha256"] = adapter_module._scanner_runtime_hash(
         comparison_body,
-        "mobius.scanner-bridge.scan-finished-comparison.v1",
+        "mobius.scanner-bridge.scan-finished-comparison.v2",
     )
     marker["scanFinishedComparison"] = comparison
     marker_body = {key: value for key, value in marker.items() if key != "markerIntegritySha256"}
@@ -1630,12 +1669,12 @@ def test_success_marker_rejects_nonzero_delta_without_tolerance(
 ) -> None:
     marker = _marker()
     comparison = dict(cast(dict[str, JsonValue], marker["scanFinishedComparison"]))
-    comparison["comparisonDecision"] = "different-instant"
+    comparison["comparisonDecision"] = "different-common-precision"
     comparison["logAnalyticsMinusBlobTagsMicroseconds"] = 1
     comparison_body = {key: value for key, value in comparison.items() if key != "integritySha256"}
     comparison["integritySha256"] = adapter_module._scanner_runtime_hash(
         comparison_body,
-        "mobius.scanner-bridge.scan-finished-comparison.v1",
+        "mobius.scanner-bridge.scan-finished-comparison.v2",
     )
     marker["scanFinishedComparison"] = comparison
     marker_body = {key: value for key, value in marker.items() if key != "markerIntegritySha256"}
@@ -1795,7 +1834,7 @@ def test_timestamp_diagnostic_cannot_drop_the_raw_value_needed_for_diagnosis(
     terminal_body = {key: value for key, value in terminal.items() if key != "integritySha256"}
     terminal["integritySha256"] = adapter_module._scanner_runtime_hash(
         terminal_body,
-        "mobius.scanner-bridge.scan-finished-comparison.v1",
+        "mobius.scanner-bridge.scan-finished-comparison.v2",
     )
     marker["terminalEvidence"] = terminal
     marker_body = {key: value for key, value in marker.items() if key != "markerIntegritySha256"}

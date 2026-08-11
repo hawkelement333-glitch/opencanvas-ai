@@ -173,6 +173,30 @@ def test_scanner_proof_contract_retains_sanitized_blob_tag_observations() -> Non
     assert {key: proof_properties[key]["const"] for key in expected} == expected
 
 
+def test_scanner_contract_closes_common_precision_and_log_envelope_semantics() -> None:
+    contract_value = _json(MANIFESTS / "scanner-result-bridge.contract.json")
+    schema = _json(MANIFESTS / "scanner-result-bridge.schema.json")
+
+    comparison = contract_value["producer"]["timestampComparison"]
+    assert comparison == {
+        "contract": "maximum-common-representable-precision-equality-v1",
+        "precisionSource": ("fractional-second-digits-present-in-each-raw-provider-value"),
+        "comparisonPrecision": "minimum-source-fractional-second-digits",
+        "projection": "truncate-not-round",
+        "exactDeltaPreserved": True,
+        "toleranceAuthorized": False,
+    }
+    assert contract_value["proof"]["containerLogEnvelopes"] == [
+        "direct-json",
+        "azure-container-apps-f-space-json",
+    ]
+    assert contract_value["proof"]["retainedProofReconciliation"] == (
+        "integrity-bound-read-only-no-execution"
+    )
+    assert contract_value["proof"]["maximumHistoricalProofExecutionCount"] == 2
+    assert schema["properties"]["producer"]["properties"]["timestampComparison"]
+
+
 @pytest.mark.parametrize(
     "schema_name",
     [

@@ -1,7 +1,7 @@
 {
   "$schema": "scanner-result-bridge.schema.json",
-  "contractVersion": "m7.7-scanner-result-bridge-v2",
-  "resolutionStatus": "private-pull-implementation-complete-live-proof-required",
+  "contractVersion": "m7.7-scanner-result-bridge-v3",
+  "resolutionStatus": "private-pull-implementation-complete-retained-proof-reconciliation-required",
   "provider": {
     "name": "microsoft-defender-for-storage-malware-scanning",
     "resourceType": "Microsoft.Security/defenderForStorageSettings",
@@ -13,15 +13,46 @@
   },
   "producer": {
     "storageContainer": "quarantine",
-    "immutableBinding": ["storageAccountName", "blobUri", "blobVersionId", "etag", "contentSha256"],
-    "correlation": ["storageAccountName", "blobUri", "etag", "scanResult", "scanFinishedTimeUtc"],
+    "immutableBinding": [
+      "storageAccountName",
+      "blobUri",
+      "blobVersionId",
+      "etag",
+      "contentSha256"
+    ],
+    "correlation": [
+      "storageAccountName",
+      "blobUri",
+      "etag",
+      "scanResult",
+      "scanFinishedTimeUtc"
+    ],
+    "timestampComparison": {
+      "contract": "maximum-common-representable-precision-equality-v1",
+      "precisionSource": "fractional-second-digits-present-in-each-raw-provider-value",
+      "comparisonPrecision": "minimum-source-fractional-second-digits",
+      "projection": "truncate-not-round",
+      "exactDeltaPreserved": true,
+      "toleranceAuthorized": false
+    },
     "noFilenameOnlyMatching": true
   },
   "transport": {
     "kind": "private-blob-tags-plus-ampls-log-analytics-pull",
-    "blobTagKeys": ["Malware Scanning scan result", "Malware Scanning scan time UTC"],
+    "blobTagKeys": [
+      "Malware Scanning scan result",
+      "Malware Scanning scan time UTC"
+    ],
     "logAnalyticsTable": "StorageMalwareScanningResults",
-    "logAnalyticsColumns": ["StorageAccountName", "ScannedObjectUri", "ScannedObjectEtag", "ScanResultType", "CorrelationId", "ScanFinishedTimeUtc", "TimeGenerated"],
+    "logAnalyticsColumns": [
+      "StorageAccountName",
+      "ScannedObjectUri",
+      "ScannedObjectEtag",
+      "ScanResultType",
+      "CorrelationId",
+      "ScanFinishedTimeUtc",
+      "TimeGenerated"
+    ],
     "privateLinkScopeResourceType": "Microsoft.Insights/privateLinkScopes",
     "queryAccessMode": "PrivateOnly",
     "ingestionAccessMode": "PrivateOnly",
@@ -37,18 +68,34 @@
     "authentication": "worker-managed-identity-data-plane-read-only",
     "legacyHmacCallbackIsNotTransportAuthentication": true,
     "idempotency": "correlationId-plus-objectVersionId",
-    "promotion": "only-clean-exact-dual-source-immutable-object-version",
+    "promotion": "only-clean-common-precision-dual-source-immutable-object-version",
     "maliciousDisposition": "rejected",
     "uncertainDisposition": "quarantine"
   },
   "identities": [
-    {"alias": "api", "scope": "exact-upload-and-clean-containers", "blobTagsRead": false, "blobTagsWrite": false},
-    {"alias": "scan-worker", "scope": "exact-quarantine-and-clean-containers-plus-workspace", "blobTagsRead": true, "blobTagsWrite": false}
+    {
+      "alias": "api",
+      "scope": "exact-upload-and-clean-containers",
+      "blobTagsRead": false,
+      "blobTagsWrite": false
+    },
+    {
+      "alias": "scan-worker",
+      "scope": "exact-quarantine-and-clean-containers-plus-workspace",
+      "blobTagsRead": true,
+      "blobTagsWrite": false
+    }
   ],
   "network": {
     "blobPrivateEndpoint": true,
     "azureMonitorPrivateLinkScope": true,
-    "privateDnsZones": ["privatelink.blob.core.windows.net", "privatelink.monitor.azure.com", "privatelink.oms.opinsights.azure.com", "privatelink.ods.opinsights.azure.com", "privatelink.agentsvc.azure-automation.net"],
+    "privateDnsZones": [
+      "privatelink.blob.core.windows.net",
+      "privatelink.monitor.azure.com",
+      "privatelink.oms.opinsights.azure.com",
+      "privatelink.ods.opinsights.azure.com",
+      "privatelink.agentsvc.azure-automation.net"
+    ],
     "containerAppInternalOnly": true,
     "tls": "TLS1_2-or-later",
     "publicNetworkAccess": false
@@ -56,23 +103,62 @@
   "resolver": {
     "implementation": "preflight.milestone_7_7.scanner_result_bridge.resolve_bridge",
     "booleanMayBeTrueOnlyWhen": "RESOLVED",
-    "states": ["CONTRACT_UNDEFINED", "PROVIDER_UNAVAILABLE", "RESOURCES_UNDEPLOYED", "IDENTITY_UNPROVED", "RBAC_UNPROVED", "PRIVATE_PATH_UNPROVED", "PRODUCER_UNPROVED", "TRANSPORT_UNPROVED", "CONSUMER_UNPROVED", "SCHEMA_UNPROVED", "CORRELATION_UNPROVED", "REVOCATION_UNPROVED", "STALE_EVIDENCE", "RESOLVED"]
+    "states": [
+      "CONTRACT_UNDEFINED",
+      "PROVIDER_UNAVAILABLE",
+      "RESOURCES_UNDEPLOYED",
+      "IDENTITY_UNPROVED",
+      "RBAC_UNPROVED",
+      "PRIVATE_PATH_UNPROVED",
+      "PRODUCER_UNPROVED",
+      "TRANSPORT_UNPROVED",
+      "CONSUMER_UNPROVED",
+      "SCHEMA_UNPROVED",
+      "CORRELATION_UNPROVED",
+      "REVOCATION_UNPROVED",
+      "STALE_EVIDENCE",
+      "RESOLVED"
+    ]
   },
   "proof": {
     "jobKind": "bounded-container-apps-job",
-    "failureMarkerSchema": "mobius.scanner-result-bridge.proof-failure.v1",
+    "failureMarkerSchema": "mobius.scanner-result-bridge.proof-failure.v2",
     "blobTagObservationSchema": "mobius.scanner-result-bridge.blob-tags-observation.v1",
     "blobTagObservationMarker": "SCANNER_BLOB_TAG_OBSERVATION",
     "blobTagObservationSink": "retained-console-diagnostic",
-    "requiredDecisions": ["clean", "malicious", "missing", "error", "not-scanned", "conflict", "stale"],
+    "requiredDecisions": [
+      "clean",
+      "malicious",
+      "missing",
+      "error",
+      "not-scanned",
+      "conflict",
+      "stale"
+    ],
     "privateDnsReadback": true,
     "retainedConsoleDiagnosticCategory": "ContainerAppConsoleLogs",
     "retainedConsoleDiagnosticScope": "managed-environment",
+    "containerLogEnvelopes": [
+      "direct-json",
+      "azure-container-apps-f-space-json"
+    ],
+    "retainedProofReconciliation": "integrity-bound-read-only-no-execution",
+    "maximumHistoricalProofExecutionCount": 2,
     "temporaryProbeAuthorityRevoked": true,
     "sanitizedEvidenceOnly": true
   },
   "cleanup": {
-    "inventory": ["defenderForStorageSettings", "diagnosticSettings", "privateLinkScopes", "scopedResources", "privateEndpoints", "privateDnsZones", "roleDefinitions", "roleAssignments", "proofJobs"],
+    "inventory": [
+      "defenderForStorageSettings",
+      "diagnosticSettings",
+      "privateLinkScopes",
+      "scopedResources",
+      "privateEndpoints",
+      "privateDnsZones",
+      "roleDefinitions",
+      "roleAssignments",
+      "proofJobs"
+    ],
     "zeroResidueRequiresEveryTemporaryEntryAbsent": true
   },
   "provisioningAuthorized": true

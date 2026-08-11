@@ -15,7 +15,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final, NoReturn, TypeAlias, cast
+from typing import Final, NoReturn, cast
 
 from infra.milestone_7_7.scripts import managed_binding_lifecycle as lifecycle
 from performance.milestone_7_7.framework import (
@@ -23,13 +23,13 @@ from performance.milestone_7_7.framework import (
     canonical_bytes,
     integrity_sha256,
 )
+from preflight.milestone_7_7.cleanup_control_recovery import (
+    CleanupControlReprovisionAuthorization,
+)
 from preflight.milestone_7_7.managed_binding_contracts import (
     REPOSITORY_ROOT,
     load_managed_binding_contract,
     managed_binding_integrity_sha256,
-)
-from preflight.milestone_7_7.cleanup_control_recovery import (
-    CleanupControlReprovisionAuthorization,
 )
 from preflight.milestone_7_7.scanner_bridge_recovery import (
     FOUNDATION_STAGE,
@@ -91,10 +91,36 @@ BLOB_SCAN_TIME_TAG: Final = "Malware Scanning scan time UTC"
 SCAN_FINISHED_NORMALIZATION_PATH: Final = (
     "trim-z-to-offset-truncate-beyond-microseconds-fromisoformat-utc-v1"
 )
-SCAN_FINISHED_COMPARISON_CONTRACT: Final = "exact-parsed-utc-instant-equality-v1"
+SCAN_FINISHED_COMPARISON_CONTRACT: Final = (
+    "maximum-common-representable-precision-equality-v1"
+)
+LEGACY_SCAN_FINISHED_COMPARISON_CONTRACT: Final = "exact-parsed-utc-instant-equality-v1"
 PROOF_LOG_TAIL_LINES: Final = 32
 PROOF_LOG_OUTPUT_MAX_BYTES: Final = 49_152
 FAILURE_EVIDENCE_MAX_BYTES: Final = 32_768
+RECONCILIATION_EVIDENCE_MAX_BYTES: Final = 32_768
+RETAINED_PROOF_EXECUTION: Final = "caj-mobius77-scanner-proof-jqlmaym"
+RETAINED_PROOF_AUTHORIZATION_INTEGRITY: Final = (
+    "c357f0e932b9693b144f418c37e494f09fdb43bfbbb737663af175214335c8b8"
+)
+RETAINED_PROOF_FAILURE_MARKER_INTEGRITY: Final = (
+    "c412042f2cdb45eed23f61a299f99dd85ae46715ae49c79c24d900622778c29d"
+)
+RETAINED_PROOF_TERMINAL_EVIDENCE_INTEGRITY: Final = (
+    "af32dd0ec8d8a4e80e756c01e32da54dfcf9bcbbf4c2e3a64e7e8f9475544089"
+)
+RETAINED_PROOF_BLOB_OBSERVATION_INTEGRITY: Final = (
+    "9e2eccc0b0fda84bfde0f59419742da5a271d999f1e181060cf01214a68de5ba"
+)
+RETAINED_PROOF_IMAGE: Final = (
+    "acrmobius7711564669.azurecr.io/opencanvas-api@"
+    "sha256:5ab6b370e015628bd36e5f5e6077f723f6854e43f99d8dc4c9cc94a8a04003d7"
+)
+RETAINED_PROOF_OCI_CONFIG: Final = (
+    "sha256:a4c77d21e09563c696901c8720420577befb914514aaa3cb9e8586c142fdb044"
+)
+RETAINED_PROOF_SOURCE_HEAD: Final = "1fac5e876ff76bdfa393a9c719d769fa4ee117b1"
+RETAINED_PROOF_CLEANUP_DEADLINE: Final = "2026-08-12T08:15:00Z"
 API_IDENTITY: Final = "id-mobius77-api"
 DEFENDER_SCANNER: Final = "StorageDataScanner"
 DEFENDER_SCANNER_ROLE: Final = "cd50fd1f-0421-46f2-8cce-afc587dbcc77"
@@ -172,8 +198,15 @@ _UUID = re.compile(
     re.IGNORECASE,
 )
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _FAILURE_CODE = re.compile(r"^scanner-[a-z0-9]+(?:-[a-z0-9]+)*$")
 _SANITIZED_TIMESTAMP = re.compile(r"^[0-9TtZz:+. -]{1,128}$")
+_REPRESENTED_TIMESTAMP = re.compile(
+    r"^(?P<date>\d{4}-\d{2}-\d{2})[Tt ]"
+    r"(?P<time>\d{2}:\d{2}:\d{2})"
+    r"(?:\.(?P<fraction>\d{1,32}))?"
+    r"(?P<timezone>[Zz]|[+-]\d{2}:\d{2})$"
+)
 _BLOB_TAG_DECISIONS: Final = frozenset(
     {
         "accepted",
@@ -254,9 +287,7 @@ class _ReprovisionFoundationScope:
     apiImageDigest: None
 
 
-_FoundationScope: TypeAlias = (
-    ScannerBridgeRecoveryAuthorization | _ReprovisionFoundationScope
-)
+type _FoundationScope = ScannerBridgeRecoveryAuthorization | _ReprovisionFoundationScope
 
 
 def _fail(code: str) -> NoReturn:
@@ -2209,11 +2240,26 @@ def _find_markers(value: object, marker_name: str) -> tuple[dict[str, object], .
         for child in value:
             found.extend(_find_markers(child, marker_name))
     elif isinstance(value, str):
-        stripped = value.strip()
-        if stripped.startswith(("{", "[")):
-            with suppress(json.JSONDecodeError):
-                found.extend(_find_markers(json.loads(stripped), marker_name))
+        decoded = _decode_container_log_envelope(value)
+        if decoded is not None:
+            found.extend(_find_markers(decoded, marker_name))
     return tuple(found)
+
+
+def _decode_container_log_envelope(value: str) -> object | None:
+    """Decode only direct JSON or the observed Azure Container Apps `F ` envelope."""
+
+    if len(value.encode()) > PROOF_LOG_OUTPUT_MAX_BYTES:
+        return None
+    payload = value.strip()
+    if payload.startswith("F "):
+        payload = payload[2:]
+    if not payload.startswith(("{", "[")):
+        return None
+    try:
+        return cast(object, json.loads(payload))
+    except json.JSONDecodeError:
+        return None
 
 
 def _find_marker(value: object, marker_name: str) -> dict[str, object] | None:
@@ -2352,7 +2398,7 @@ def _proof_marker(
     comparison = marker.get("scanFinishedComparison")
     _validate_scan_finished_terminal_evidence(
         comparison,
-        expected_decision="equal-instant",
+        expected_decision="equal-common-precision",
     )
     observation = _validate_blob_tag_observation_marker(
         marker.get("blobTagObservation"),
@@ -2367,7 +2413,8 @@ def _proof_marker(
     ):
         _fail("scanner-proof-marker-correlation-unproved")
     blob_canonical = blob_timestamp.get("canonicalUtc")
-    log_canonical = log_timestamp.get("canonicalUtc")
+    blob_common = comparison.get("blobTagsCommonPrecisionUtc")
+    log_common = comparison.get("logAnalyticsCommonPrecisionUtc")
     cross_bindings = {
         "blobEvidenceSha256": "blobEvidenceSha256",
         "correlationIdSha256": "correlationIdSha256",
@@ -2383,7 +2430,9 @@ def _proof_marker(
     }
     if (
         not isinstance(blob_canonical, str)
-        or blob_canonical != log_canonical
+        or not isinstance(blob_common, str)
+        or blob_common != log_common
+        or comparison.get("commonPrecisionEqual") is not True
         or marker.get("completionTimeSha256") != _hash_text(blob_canonical)
         or marker.get("blobTagResultSha256")
         != _hash_text(cast(str, comparison.get("blobTagResult")))
@@ -2404,7 +2453,20 @@ def _precise_utc(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _parsed_timestamp_representation(value: object) -> datetime:
+@dataclass(frozen=True, slots=True)
+class _ValidatedTimestampRepresentation:
+    parsed: datetime
+    utc_second: datetime
+    fractional_digits: str
+
+    @property
+    def precision(self) -> int:
+        return len(self.fractional_digits)
+
+
+def _parsed_timestamp_representation(
+    value: object,
+) -> _ValidatedTimestampRepresentation:
     if not isinstance(value, Mapping):
         _fail("scanner-proof-scan-finished-evidence-malformed")
     required = {
@@ -2442,6 +2504,9 @@ def _parsed_timestamp_representation(value: object) -> datetime:
     ):
         _fail("scanner-proof-scan-finished-evidence-malformed")
     stripped = raw_value.strip()
+    represented = _REPRESENTED_TIMESTAMP.fullmatch(stripped)
+    if represented is None:
+        _fail("scanner-proof-scan-finished-evidence-malformed")
     fraction = re.search(r"\.(\d+)", stripped)
     expected_precision = len(fraction.group(1)) if fraction is not None else 0
     offset = re.search(r"([+-]\d\d:\d\d)$", stripped)
@@ -2452,7 +2517,7 @@ def _parsed_timestamp_representation(value: object) -> datetime:
         if offset is not None
         else "unproved"
     )
-    normalized = stripped.replace("Z", "+00:00")
+    normalized = f"{stripped[:-1]}+00:00" if stripped.endswith(("Z", "z")) else stripped
     oversized_fraction = re.search(r"\.(\d{7,})(?=[+-]\d\d:\d\d$)", normalized)
     if oversized_fraction is not None:
         normalized = (
@@ -2462,7 +2527,10 @@ def _parsed_timestamp_representation(value: object) -> datetime:
         )
     try:
         parsed_raw = datetime.fromisoformat(normalized)
-        parsed_canonical = datetime.fromisoformat(canonical.replace("Z", "+00:00"))
+        canonical_normalized = (
+            f"{canonical[:-1]}+00:00" if canonical.endswith(("Z", "z")) else canonical
+        )
+        parsed_canonical = datetime.fromisoformat(canonical_normalized)
     except ValueError:
         _fail("scanner-proof-scan-finished-evidence-malformed")
     if (
@@ -2476,7 +2544,21 @@ def _parsed_timestamp_representation(value: object) -> datetime:
         or _precise_utc(parsed_canonical) != canonical
     ):
         _fail("scanner-proof-scan-finished-evidence-malformed")
-    return parsed_canonical.astimezone(UTC)
+    represented_timezone = represented.group("timezone")
+    normalized_timezone = (
+        "+00:00" if represented_timezone in {"Z", "z"} else represented_timezone
+    )
+    try:
+        utc_second = datetime.fromisoformat(
+            f"{represented.group('date')}T{represented.group('time')}{normalized_timezone}"
+        ).astimezone(UTC)
+    except ValueError:
+        _fail("scanner-proof-scan-finished-evidence-malformed")
+    return _ValidatedTimestampRepresentation(
+        parsed=parsed_canonical.astimezone(UTC),
+        utc_second=utc_second,
+        fractional_digits=represented.group("fraction") or "",
+    )
 
 
 def _delta_microseconds(left: datetime, right: datetime) -> int:
@@ -2484,11 +2566,133 @@ def _delta_microseconds(left: datetime, right: datetime) -> int:
     return ((delta.days * 86_400) + delta.seconds) * 1_000_000 + delta.microseconds
 
 
+def _timestamp_units(value: _ValidatedTimestampRepresentation, precision: int) -> int:
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
+    delta = value.utc_second - epoch
+    seconds = delta.days * 86_400 + delta.seconds
+    if precision == 0:
+        fraction = 0
+    elif value.precision >= precision:
+        fraction = int(value.fractional_digits[:precision])
+    else:
+        fraction = int(value.fractional_digits or "0") * 10 ** (
+            precision - value.precision
+        )
+    return int(seconds * 10**precision + fraction)
+
+
+def _common_precision_utc(
+    value: _ValidatedTimestampRepresentation, precision: int
+) -> str:
+    base = value.utc_second.strftime("%Y-%m-%dT%H:%M:%S")
+    if precision == 0:
+        return f"{base}Z"
+    return f"{base}.{value.fractional_digits[:precision]}Z"
+
+
 def _validate_scan_finished_terminal_evidence(
     value: object,
     *,
-    expected_decision: str = "different-instant",
+    expected_decision: str = "different-common-precision",
 ) -> None:
+    if not isinstance(value, Mapping):
+        _fail("scanner-proof-scan-finished-evidence-malformed")
+    required = {
+        "blobEvidenceSha256",
+        "blobTagResult",
+        "blobTagsCommonPrecisionUtc",
+        "blobTagsTimestamp",
+        "commonPrecisionEqual",
+        "comparisonContract",
+        "comparisonDecision",
+        "comparisonPrecisionFractionalSecondDigits",
+        "correlationIdSha256",
+        "etagComparison",
+        "etagSha256",
+        "exactInstantDeltaMicroseconds",
+        "exactInstantEqual",
+        "integritySha256",
+        "logAnalyticsEvidenceSha256",
+        "logAnalyticsCommonPrecisionUtc",
+        "logAnalyticsMinusBlobTagsMicroseconds",
+        "logAnalyticsResult",
+        "logAnalyticsTimestamp",
+        "providerVersionSha256",
+        "uriComparison",
+        "uriSha256",
+    }
+    if set(value) != required:
+        _fail("scanner-proof-scan-finished-evidence-malformed")
+    integrity = value.get("integritySha256")
+    body = {
+        key: cast(JsonValue, item)
+        for key, item in value.items()
+        if key != "integritySha256"
+    }
+    hashes = {
+        "blobEvidenceSha256",
+        "correlationIdSha256",
+        "etagSha256",
+        "logAnalyticsEvidenceSha256",
+        "providerVersionSha256",
+        "uriSha256",
+    }
+    delta = value.get("logAnalyticsMinusBlobTagsMicroseconds")
+    if (
+        expected_decision
+        not in {"different-common-precision", "equal-common-precision"}
+        or not isinstance(integrity, str)
+        or _SHA256.fullmatch(integrity) is None
+        or integrity
+        != _scanner_runtime_hash(
+            cast(JsonValue, body),
+            "mobius.scanner-bridge.scan-finished-comparison.v2",
+        )
+        or any(
+            not isinstance(value.get(key), str)
+            or _SHA256.fullmatch(cast(str, value[key])) is None
+            for key in hashes
+        )
+        or value.get("comparisonContract") != SCAN_FINISHED_COMPARISON_CONTRACT
+        or value.get("comparisonDecision") != expected_decision
+        or value.get("uriComparison") != "matched"
+        or value.get("etagComparison") != "matched"
+        or value.get("blobTagResult")
+        not in {"Error", "Malicious", "No threats found", "Not scanned"}
+        or value.get("logAnalyticsResult")
+        not in {"Error", "Malicious", "No threats found", "Not Scanned"}
+        or not isinstance(delta, int)
+        or isinstance(delta, bool)
+        or value.get("exactInstantDeltaMicroseconds") != delta
+    ):
+        _fail("scanner-proof-scan-finished-evidence-malformed")
+    blob_timestamp = _parsed_timestamp_representation(value.get("blobTagsTimestamp"))
+    log_timestamp = _parsed_timestamp_representation(value.get("logAnalyticsTimestamp"))
+    common_precision = min(blob_timestamp.precision, log_timestamp.precision)
+    exact_precision = max(blob_timestamp.precision, log_timestamp.precision)
+    exact_equal = _timestamp_units(blob_timestamp, exact_precision) == _timestamp_units(
+        log_timestamp, exact_precision
+    )
+    common_equal = _timestamp_units(
+        blob_timestamp, common_precision
+    ) == _timestamp_units(log_timestamp, common_precision)
+    if (
+        _delta_microseconds(log_timestamp.parsed, blob_timestamp.parsed) != delta
+        or value.get("comparisonPrecisionFractionalSecondDigits") != common_precision
+        or value.get("exactInstantEqual") is not exact_equal
+        or value.get("commonPrecisionEqual") is not common_equal
+        or value.get("blobTagsCommonPrecisionUtc")
+        != _common_precision_utc(blob_timestamp, common_precision)
+        or value.get("logAnalyticsCommonPrecisionUtc")
+        != _common_precision_utc(log_timestamp, common_precision)
+        or (expected_decision == "equal-common-precision") is not common_equal
+    ):
+        _fail("scanner-proof-scan-finished-evidence-malformed")
+
+
+def _validate_legacy_scan_finished_terminal_evidence(value: object) -> None:
+    """Validate retained v1 failure evidence without reinterpreting its bytes."""
+
     if not isinstance(value, Mapping):
         _fail("scanner-proof-scan-finished-evidence-malformed")
     required = {
@@ -2527,8 +2731,7 @@ def _validate_scan_finished_terminal_evidence(
     }
     delta = value.get("logAnalyticsMinusBlobTagsMicroseconds")
     if (
-        expected_decision not in {"different-instant", "equal-instant"}
-        or not isinstance(integrity, str)
+        not isinstance(integrity, str)
         or _SHA256.fullmatch(integrity) is None
         or integrity
         != _scanner_runtime_hash(
@@ -2540,23 +2743,20 @@ def _validate_scan_finished_terminal_evidence(
             or _SHA256.fullmatch(cast(str, value[key])) is None
             for key in hashes
         )
-        or value.get("comparisonContract") != SCAN_FINISHED_COMPARISON_CONTRACT
-        or value.get("comparisonDecision") != expected_decision
+        or value.get("comparisonContract") != LEGACY_SCAN_FINISHED_COMPARISON_CONTRACT
+        or value.get("comparisonDecision") != "different-instant"
         or value.get("uriComparison") != "matched"
         or value.get("etagComparison") != "matched"
-        or value.get("blobTagResult")
-        not in {"Error", "Malicious", "No threats found", "Not scanned"}
-        or value.get("logAnalyticsResult")
-        not in {"Error", "Malicious", "No threats found", "Not Scanned"}
+        or value.get("blobTagResult") != "No threats found"
+        or value.get("logAnalyticsResult") != "No threats found"
         or not isinstance(delta, int)
         or isinstance(delta, bool)
-        or (expected_decision == "different-instant" and delta == 0)
-        or (expected_decision == "equal-instant" and delta != 0)
+        or delta == 0
     ):
         _fail("scanner-proof-scan-finished-evidence-malformed")
     blob_timestamp = _parsed_timestamp_representation(value.get("blobTagsTimestamp"))
     log_timestamp = _parsed_timestamp_representation(value.get("logAnalyticsTimestamp"))
-    if _delta_microseconds(log_timestamp, blob_timestamp) != delta:
+    if _delta_microseconds(log_timestamp.parsed, blob_timestamp.parsed) != delta:
         _fail("scanner-proof-scan-finished-evidence-malformed")
 
 
@@ -2800,6 +3000,319 @@ def _validate_blob_tag_observation_marker(
     if expected_decision is not None and decision != expected_decision:
         _fail("scanner-proof-blob-tag-observation-comparison-unproved")
     return cast(dict[str, JsonValue], marker)
+
+
+def _verified_retained_record(
+    value: Mapping[str, object],
+    *,
+    schema: str,
+    domain: str,
+    required: set[str],
+) -> dict[str, JsonValue]:
+    if set(value) != required or value.get("schemaVersion") != schema:
+        _fail("scanner-proof-reconciliation-history-malformed")
+    integrity = value.get("integritySha256")
+    body = {
+        key: cast(JsonValue, item)
+        for key, item in value.items()
+        if key != "integritySha256"
+    }
+    if (
+        not isinstance(integrity, str)
+        or _SHA256.fullmatch(integrity) is None
+        or integrity != _canonical_hash(cast(JsonValue, body), domain)
+    ):
+        _fail("scanner-proof-reconciliation-history-integrity-invalid")
+    return cast(dict[str, JsonValue], dict(value))
+
+
+def _retained_failure_marker(log_output: str) -> dict[str, JsonValue]:
+    marker = _find_marker(log_output, "SCANNER_RESULT_BRIDGE_FAILED")
+    required = {
+        "attemptCount",
+        "blobTagObservationCount",
+        "failureCode",
+        "marker",
+        "markerIntegritySha256",
+        "schemaVersion",
+        "terminalEvidence",
+    }
+    if marker is None or set(marker) != required:
+        _fail("scanner-proof-reconciliation-failure-marker-malformed")
+    integrity = marker.get("markerIntegritySha256")
+    body = {
+        key: cast(JsonValue, item)
+        for key, item in marker.items()
+        if key != "markerIntegritySha256"
+    }
+    if (
+        marker.get("attemptCount") != 120
+        or marker.get("blobTagObservationCount") != 120
+        or marker.get("failureCode") != "scanner-correlation-scan-finished-mismatch"
+        or marker.get("marker") != "SCANNER_RESULT_BRIDGE_FAILED"
+        or marker.get("schemaVersion")
+        != "mobius.scanner-result-bridge.proof-failure.v2"
+        or integrity != RETAINED_PROOF_FAILURE_MARKER_INTEGRITY
+        or integrity
+        != _scanner_runtime_hash(
+            cast(JsonValue, body),
+            "mobius.scanner-bridge.proof-failure-marker.v2",
+        )
+    ):
+        _fail("scanner-proof-reconciliation-failure-marker-integrity-invalid")
+    terminal = marker.get("terminalEvidence")
+    _validate_legacy_scan_finished_terminal_evidence(terminal)
+    if (
+        not isinstance(terminal, Mapping)
+        or terminal.get("integritySha256") != RETAINED_PROOF_TERMINAL_EVIDENCE_INTEGRITY
+    ):
+        _fail("scanner-proof-reconciliation-terminal-integrity-invalid")
+    return cast(dict[str, JsonValue], marker)
+
+
+def _retained_blob_tag_observation(log_output: str) -> dict[str, JsonValue]:
+    marker = _find_marker(log_output, BLOB_TAG_OBSERVATION_MARKER)
+    observation = _validate_blob_tag_observation_marker(
+        marker,
+        expected_decision="accepted",
+    )
+    if observation.get("integritySha256") != RETAINED_PROOF_BLOB_OBSERVATION_INTEGRITY:
+        _fail("scanner-proof-reconciliation-blob-observation-integrity-invalid")
+    return observation
+
+
+def reconcile_retained_scanner_proof(
+    *,
+    correction_repository_head: str,
+    ordinal_binding: Mapping[str, object],
+    execution_start: Mapping[str, object],
+    failure_log_output: str,
+    blob_tag_log_output: str,
+    proof_residue_count: int,
+    observed_at: datetime,
+    output_path: Path,
+) -> dict[str, JsonValue]:
+    """Reconcile retained Proof #2 evidence without authority or Azure execution."""
+
+    if (
+        _SHA40.fullmatch(correction_repository_head) is None
+        or correction_repository_head == RETAINED_PROOF_SOURCE_HEAD
+        or observed_at.tzinfo is None
+        or observed_at.utcoffset() is None
+        or proof_residue_count != 0
+    ):
+        _fail("scanner-proof-reconciliation-binding-invalid")
+    ordinal = _verified_retained_record(
+        ordinal_binding,
+        schema="mobius.milestone-7.7.scanner-proof-ordinal-binding-evidence.v1",
+        domain=(
+            "solarplexus-mobius/milestone-7.7/scanner-proof-ordinal-binding-evidence/v1"
+        ),
+        required={
+            "absoluteTotalExecutionCeiling",
+            "apiImageDigest",
+            "authorizedAdditionalExecutionCount",
+            "authorizedAtUtc",
+            "buildInputSha256",
+            "cleanupDeadlineUtc",
+            "cleanupGeneration",
+            "expiresAtUtc",
+            "foundationIntegritySha256",
+            "integritySha256",
+            "ociConfigDigest",
+            "priorExecutionCorrelationId",
+            "priorExecutionCount",
+            "repositoryHead",
+            "schemaVersion",
+            "typedAuthorizationIntegritySha256",
+        },
+    )
+    start = _verified_retained_record(
+        execution_start,
+        schema="mobius.milestone-7.7.scanner-proof-execution-start-evidence.v1",
+        domain=(
+            "solarplexus-mobius/milestone-7.7/scanner-proof-execution-start-evidence/v1"
+        ),
+        required={
+            "absoluteTotalExecutionCeiling",
+            "apiImageDigest",
+            "authorizationIntegritySha256",
+            "executionName",
+            "executionOrdinal",
+            "integritySha256",
+            "ociConfigDigest",
+            "priorExecutionCount",
+            "proofJobId",
+            "schemaVersion",
+            "startTimeUtc",
+            "temporaryAuthorityPrincipalId",
+            "temporaryAuthorityScope",
+            "temporaryRoleAssignmentId",
+            "temporaryRoleDefinitionId",
+        },
+    )
+    ordinal_expectations: dict[str, JsonValue] = {
+        "absoluteTotalExecutionCeiling": 2,
+        "apiImageDigest": RETAINED_PROOF_IMAGE,
+        "authorizedAdditionalExecutionCount": 1,
+        "cleanupDeadlineUtc": RETAINED_PROOF_CLEANUP_DEADLINE,
+        "cleanupGeneration": 4,
+        "ociConfigDigest": RETAINED_PROOF_OCI_CONFIG,
+        "priorExecutionCount": 1,
+        "repositoryHead": RETAINED_PROOF_SOURCE_HEAD,
+        "typedAuthorizationIntegritySha256": RETAINED_PROOF_AUTHORIZATION_INTEGRITY,
+    }
+    start_expectations: dict[str, JsonValue] = {
+        "absoluteTotalExecutionCeiling": 2,
+        "apiImageDigest": RETAINED_PROOF_IMAGE,
+        "authorizationIntegritySha256": RETAINED_PROOF_AUTHORIZATION_INTEGRITY,
+        "executionName": RETAINED_PROOF_EXECUTION,
+        "executionOrdinal": 2,
+        "ociConfigDigest": RETAINED_PROOF_OCI_CONFIG,
+        "priorExecutionCount": 1,
+    }
+    if any(
+        ordinal.get(key) != expected for key, expected in ordinal_expectations.items()
+    ) or any(
+        start.get(key) != expected for key, expected in start_expectations.items()
+    ):
+        _fail("scanner-proof-reconciliation-execution-history-invalid")
+
+    failure_marker = _retained_failure_marker(failure_log_output)
+    observation = _retained_blob_tag_observation(blob_tag_log_output)
+    terminal = failure_marker.get("terminalEvidence")
+    if not isinstance(terminal, Mapping):
+        _fail("scanner-proof-reconciliation-terminal-evidence-malformed")
+    blob_mapping = terminal.get("blobTagsTimestamp")
+    log_mapping = terminal.get("logAnalyticsTimestamp")
+    if not isinstance(blob_mapping, Mapping) or not isinstance(log_mapping, Mapping):
+        _fail("scanner-proof-reconciliation-terminal-evidence-malformed")
+    blob_timestamp = _parsed_timestamp_representation(blob_mapping)
+    log_timestamp = _parsed_timestamp_representation(log_mapping)
+    common_precision = min(blob_timestamp.precision, log_timestamp.precision)
+    exact_precision = max(blob_timestamp.precision, log_timestamp.precision)
+    exact_equal = _timestamp_units(blob_timestamp, exact_precision) == _timestamp_units(
+        log_timestamp, exact_precision
+    )
+    common_equal = _timestamp_units(
+        blob_timestamp, common_precision
+    ) == _timestamp_units(log_timestamp, common_precision)
+    blob_raw = blob_mapping.get("rawValue")
+    log_raw = log_mapping.get("rawValue")
+    delta = terminal.get("logAnalyticsMinusBlobTagsMicroseconds")
+    required_keys = (BLOB_RESULT_TAG, BLOB_SCAN_TIME_TAG)
+    if (
+        blob_raw != "2026-08-11 17:15:16Z"
+        or log_raw != "2026-08-11T17:15:16.4539552Z"
+        or blob_timestamp.precision != 0
+        or log_timestamp.precision != 7
+        or delta != 453_955
+        or exact_equal
+        or not common_equal
+        or terminal.get("uriComparison") != "matched"
+        or terminal.get("etagComparison") != "matched"
+        or terminal.get("blobTagResult") != "No threats found"
+        or terminal.get("logAnalyticsResult") != "No threats found"
+        or observation.get("queriedBlobUriSha256") != terminal.get("uriSha256")
+        or observation.get("queriedEtagSha256") != terminal.get("etagSha256")
+        or observation.get("queriedBlobVersionIdSha256")
+        != terminal.get("providerVersionSha256")
+        or tuple(cast(list[str], observation.get("returnedTagKeys"))) != required_keys
+        or tuple(cast(list[str], observation.get("requiredKeysFound"))) != required_keys
+        or observation.get("requiredKeysMissing") != []
+        or observation.get("unexpectedKeys") != []
+    ):
+        _fail("scanner-proof-reconciliation-correlation-unproved")
+
+    body: dict[str, JsonValue] = {
+        "authorizationCreated": False,
+        "authorizationIntegritySha256": RETAINED_PROOF_AUTHORIZATION_INTEGRITY,
+        "azureMutationPerformed": False,
+        "blobTagObservationIntegritySha256": (
+            RETAINED_PROOF_BLOB_OBSERVATION_INTEGRITY
+        ),
+        "cleanupDeadlineUtc": RETAINED_PROOF_CLEANUP_DEADLINE,
+        "commonPrecisionEqual": common_equal,
+        "commonPrecisionProjection": {
+            "blobTagsUtc": _common_precision_utc(blob_timestamp, common_precision),
+            "logAnalyticsUtc": _common_precision_utc(log_timestamp, common_precision),
+        },
+        "comparisonPrecisionFractionalSecondDigits": common_precision,
+        "correctionRepositoryHead": correction_repository_head,
+        "correlationDecisions": {
+            "blobTagKeySet": "matched",
+            "etag": "matched",
+            "result": "matched-clean",
+            "uri": "matched",
+            "version": "matched",
+        },
+        "exactInstantDeltaMicroseconds": delta,
+        "exactInstantEqual": exact_equal,
+        "executionName": RETAINED_PROOF_EXECUTION,
+        "finalSemanticDecision": (
+            "equivalent-at-maximum-common-representable-precision"
+        ),
+        "historicalFailureMarkerIntegritySha256": (
+            RETAINED_PROOF_FAILURE_MARKER_INTEGRITY
+        ),
+        "historicalMarkerBytesRewritten": False,
+        "historicalTerminalEvidenceIntegritySha256": (
+            RETAINED_PROOF_TERMINAL_EVIDENCE_INTEGRITY
+        ),
+        "ociConfigDigest": RETAINED_PROOF_OCI_CONFIG,
+        "originalParsedUtc": {
+            "blobTags": cast(str, blob_mapping.get("canonicalUtc")),
+            "logAnalytics": cast(str, log_mapping.get("canonicalUtc")),
+        },
+        "originalRaw": {
+            "blobTags": blob_raw,
+            "logAnalytics": log_raw,
+        },
+        "proofExecutionCount": 2,
+        "proofExecutionCreated": False,
+        "proofImageDigest": RETAINED_PROOF_IMAGE,
+        "proofResidueCount": proof_residue_count,
+        "reconciledAtUtc": _format_utc(observed_at),
+        "scannerGateDecision": "SCANNER_PROOF_PASSED_FROM_RECONCILED_EVIDENCE",
+        "schemaVersion": "mobius.scanner-result-bridge.proof-reconciliation.v1",
+        "sourcePrecisionFractionalSecondDigits": {
+            "blobTags": blob_timestamp.precision,
+            "logAnalytics": log_timestamp.precision,
+        },
+        "sourceRepositoryHead": RETAINED_PROOF_SOURCE_HEAD,
+        "sourceRecordIntegrities": {
+            "executionStart": cast(str, start["integritySha256"]),
+            "ordinalBinding": cast(str, ordinal["integritySha256"]),
+        },
+    }
+    artifact: dict[str, JsonValue] = {
+        **body,
+        "reconciliationIntegritySha256": _canonical_hash(
+            cast(JsonValue, body),
+            "mobius.scanner-result-bridge.proof-reconciliation.v1",
+        ),
+    }
+    serialized = canonical_bytes(cast(JsonValue, artifact))
+    if len(serialized) > RECONCILIATION_EVIDENCE_MAX_BYTES:
+        _fail("scanner-proof-reconciliation-evidence-oversized")
+    resolved = _outside_repository(
+        output_path,
+        "scanner-proof-reconciliation-evidence-inside-repository",
+    )
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(resolved, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        _fail("scanner-proof-reconciliation-evidence-already-exists")
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(serialized)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError:
+        resolved.unlink(missing_ok=True)
+        _fail("scanner-proof-reconciliation-evidence-write-failed")
+    return artifact
 
 
 def _proof_blob_tag_observation(
@@ -3670,4 +4183,5 @@ class ProductionScannerBridgeRecoveryAdapter:
 __all__ = [
     "ProductionScannerBridgeRecoveryAdapter",
     "ScannerBridgeRecoveryExecutionError",
+    "reconcile_retained_scanner_proof",
 ]
