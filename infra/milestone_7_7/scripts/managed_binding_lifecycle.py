@@ -167,18 +167,10 @@ MANIFEST_ACCEPT: Final = (
 )
 RECOVERABLE_API_IMAGE_SOURCE_COMMIT: Final = "24dbad86c44baef53120d75ed993ac8165549f72"
 API_IMAGE_BUILD_INPUTS: Final = (
-    "apps/api/Dockerfile",
-    "apps/api/Dockerfile.dockerignore",
-    "apps/api/pyproject.toml",
-    "apps/api/build-requirements.lock",
-    "apps/api/requirements.lock",
-    "apps/api/opencanvas_api",
-    "apps/api/alembic.ini",
-    "apps/api/alembic",
-    "apps/api/scripts",
-    "LICENSE",
-    "COPYRIGHT",
-    "NOTICE",
+    "apps/api/Dockerfile", "apps/api/Dockerfile.dockerignore", "apps/api/pyproject.toml",
+    "apps/api/build-requirements.lock", "apps/api/requirements.lock", "apps/api/opencanvas_api",
+    "apps/api/alembic.ini", "apps/api/alembic", "apps/api/scripts",
+    "LICENSE", "COPYRIGHT", "NOTICE",
     "THIRD_PARTY_NOTICES.md",
 )
 CONTAINER_APPS_INFRASTRUCTURE_INPUTS: Final = (
@@ -188,28 +180,16 @@ CONTAINER_APPS_INFRASTRUCTURE_INPUTS: Final = (
     "infra/milestone_7_7/policies",
 )
 LIFECYCLE_OPERATIONS: Final = (
-    "pre-secret-provisioning",
-    "private-path-verification",
-    "publish-api-image",
-    "post-secret-provisioning",
-    "migration-execution",
-    "readiness-validation",
-    "live-validation",
-    "soak",
-    "successful-closeout",
-    "temporary-authority-revocation",
-    "cleanup",
-    "zero-residue-verification",
+    "pre-secret-provisioning", "private-path-verification", "publish-api-image",
+    "post-secret-provisioning", "migration-execution", "readiness-validation",
+    "live-validation", "soak", "successful-closeout",
+    "temporary-authority-revocation", "cleanup", "zero-residue-verification",
     "milestone-completion",
 )
 DEPLOYMENT_STAGES: Final = frozenset(
     {
-        "cleanup-control",
-        "cleanup-job-binding",
-        "cleanup-binding",
-        "pre-secret",
-        "scanner-foundation",
-        "scanner-proof",
+        "cleanup-control", "cleanup-job-binding", "cleanup-binding", "pre-secret",
+        "scanner-foundation", "scanner-proof",
         "post-secret",
     }
 )
@@ -270,49 +250,34 @@ PROTECTED_OPERATION_CATALOG: Final = (
 )
 LOCAL_PRE_REQUEST_ERROR_CODES: Final = frozenset(
     {
-        "lifecycle-bookkeeping-failed",
-        "lifecycle-process-launch-failed",
+        "lifecycle-bookkeeping-failed", "lifecycle-process-launch-failed",
         "lifecycle-serialization-failed",
         "protected-operation-attribution-reconciliation-failed",
     }
 )
 TRANSIENT_STATE_FIELDS: Final = frozenset(
     {
-        "activeStage",
-        "cleanupAtUtc",
-        "disposition",
-        "failedStage",
-        "lastCompletedStage",
-        "preSecretDeploymentName",
-        "privatePathProved",
-        "publicationEvidenceIntegritySha256",
-        "publishedManifestDigest",
-        "publisherRevocationProved",
-        "repositoryHead",
-        "resumableCheckpoint",
-        "secretValueAccessed",
-        "temporaryKeyVaultAssignmentId",
-        "temporaryKeyVaultAuthorityLedgerSha256",
-        "temporaryKeyVaultAuthorityProved",
+        "activeStage", "cleanupAtUtc", "disposition", "failedStage",
+        "lastCompletedStage", "preSecretDeploymentName", "privatePathProved",
+        "publicationEvidenceIntegritySha256", "publishedManifestDigest",
+        "publisherRevocationProved", "repositoryHead", "resumableCheckpoint",
+        "secretValueAccessed", "temporaryKeyVaultAssignmentId",
+        "temporaryKeyVaultAuthorityLedgerSha256", "temporaryKeyVaultAuthorityProved",
         "temporaryRegistryAssignmentId",
     }
 )
 KEY_VAULT_AUTHORITY_PROVED_STAGE: Final = "key-vault-authority-proved"
 KEY_VAULT_AUTHORITY_REVOKED_STAGE: Final = "key-vault-authority-revoked"
 LEGACY_TRANSIENT_STATE_FIELDS: Final = TRANSIENT_STATE_FIELDS - {
-    "temporaryKeyVaultAuthorityLedgerSha256",
-    "temporaryKeyVaultAuthorityProved",
-    "publicationEvidenceIntegritySha256",
-    "publishedManifestDigest",
+    "temporaryKeyVaultAuthorityLedgerSha256", "temporaryKeyVaultAuthorityProved",
+    "publicationEvidenceIntegritySha256", "publishedManifestDigest",
     "publisherRevocationProved",
     "privatePathProved",
 }
 SECURITY_CONTAINMENT_ERROR_CODES: Final = frozenset(
     {
-        "cleanup-role-scope-not-exact",
-        "managed-secret-presence-or-state-unproved",
-        "pre-secret-related-group-drift",
-        "pre-secret-role-inventory-drift",
+        "cleanup-role-scope-not-exact", "managed-secret-presence-or-state-unproved",
+        "pre-secret-related-group-drift", "pre-secret-role-inventory-drift",
         "private-endpoint-resolved-publicly",
     }
 )
@@ -370,10 +335,8 @@ TARGET_RESOURCE_LOCATIONS: Final = (
 )
 TARGET_DEPLOYMENT_NAMES: Final = frozenset(
     {
-        "mobius77-managed-binding-network",
-        "mobius77-managed-binding-identities",
-        "mobius77-managed-binding-observability",
-        "mobius77-managed-binding-registry",
+        "mobius77-managed-binding-network", "mobius77-managed-binding-identities",
+        "mobius77-managed-binding-observability", "mobius77-managed-binding-registry",
         "mobius77-managed-binding-key-vault",
         "mobius77-managed-binding-compute",
     }
@@ -384,16 +347,10 @@ CLEANUP_DEPLOYMENT_NAMES: Final = frozenset(
 AUTOMATION_API_VERSION: Final = "2024-10-23"
 RECOVERED_CLEANUP_TAG_KEYS: Final = frozenset(
     {
-        "mobius-cleanup-binding-sha256",
-        "mobius-contract-version",
-        "mobius-cost-ceiling-usd-cents",
-        "mobius-data-class",
-        "mobius-environment",
-        "mobius-expires-at-utc",
-        "mobius-manifest-sha256",
-        "mobius-public-access",
-        "mobius-run-id",
-        "mobius-source-commit",
+        "mobius-cleanup-binding-sha256", "mobius-contract-version",
+        "mobius-cost-ceiling-usd-cents", "mobius-data-class", "mobius-environment",
+        "mobius-expires-at-utc", "mobius-manifest-sha256", "mobius-public-access",
+        "mobius-run-id", "mobius-source-commit",
         "mobius-teardown-state",
     }
 )

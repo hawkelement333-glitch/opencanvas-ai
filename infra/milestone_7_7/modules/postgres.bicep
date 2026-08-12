@@ -136,7 +136,7 @@ resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = if (ena
       privateDnsZoneArmResourceId: privateDnsZone.id
       publicNetworkAccess: 'Disabled'
     }
-    storage: { autoGrow: 'Disabled', storageSizeGB: 64, tier: 'P4' }
+    storage: { autoGrow: 'Disabled', storageSizeGB: 64, tier: 'P6' }
     version: '17'
   }
   dependsOn: [postgresDnsLink, stagingDnsLink, stagingToPostgres, postgresToStaging]
@@ -151,6 +151,16 @@ resource administrator 'Microsoft.DBforPostgreSQL/flexibleServers/administrators
     principalType: 'ServicePrincipal'
     tenantId: tenantId
   }
+  dependsOn: [vectorExtensionAllowlist]
+}
+
+resource vectorExtensionAllowlist 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = if (enabled) {
+  parent: server
+  name: 'azure.extensions'
+  properties: {
+    source: 'user-override'
+    value: 'vector'
+  }
 }
 
 resource applicationDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = if (enabled) {
@@ -160,7 +170,7 @@ resource applicationDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/database
     charset: 'UTF8'
     collation: 'en_US.utf8'
   }
-  dependsOn: [administrator]
+  dependsOn: [administrator, vectorExtensionAllowlist]
 }
 
 output serverId string = enabled ? server.id : ''

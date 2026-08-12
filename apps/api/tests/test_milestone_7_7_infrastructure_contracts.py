@@ -301,7 +301,7 @@ def test_verified_environment_requires_exact_bounded_lease():
 
 def test_bicep_preserves_inert_defaults_and_gates_one_run_resources():
     bicep_files = sorted(ROOT.rglob("*.bicep"))
-    assert len(bicep_files) == 14
+    assert len(bicep_files) == 15
     combined = "\n".join(path.read_text(encoding="utf-8") for path in bicep_files)
     assert not re.search(r"\b(?:utcNow|newGuid|uniqueString)\s*\(", combined)
     assert not re.search(r"\b(?:subscription|resourceGroup)\s*\(\s*\)", combined)
@@ -373,6 +373,7 @@ def test_module_inventory_and_safe_outputs_are_exact():
         "key-vault.bicep",
         "network.bicep",
         "observability.bicep",
+        "owner-bootstrap.bicep",
         "policy.bicep",
         "postgres.bicep",
         "redis.bicep",

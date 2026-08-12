@@ -29,6 +29,7 @@ param managedBindingDeploymentEnabled bool = false
   'pre-secret'
   'scanner-foundation'
   'scanner-proof'
+  'owner-bootstrap'
   'post-secret'
 ])
 param deploymentStage string = 'none'
@@ -60,7 +61,7 @@ param redisLocation string = 'australiacentral'
 @maxLength(64)
 param authorizationLedgerSha256 string = ''
 
-@description('Immutable private ACR digest reference. Required only for post-secret deployment.')
+@description('Immutable private ACR digest reference. Required for owner bootstrap and post-secret deployment.')
 param apiImageDigest string = ''
 
 @allowed([
@@ -132,6 +133,7 @@ var cleanupBindingEnabled = oneRunEnabled && deploymentStage == 'cleanup-binding
 var preSecretEnabled = oneRunEnabled && deploymentStage == 'pre-secret'
 var scannerFoundationStageEnabled = oneRunEnabled && deploymentStage == 'scanner-foundation'
 var scannerProofEnabled = oneRunEnabled && deploymentStage == 'scanner-proof'
+var ownerBootstrapEnabled = oneRunEnabled && deploymentStage == 'owner-bootstrap'
 var scannerResultBridgeResolved = scannerResultBridgeContractVersion == 'mobius.scanner-result-bridge.v2' && scannerResultBridgeState == 'RESOLVED' && scannerResultBridgeUnresolvedReasonCount == 0 && length(scannerResultBridgeEvidenceIntegrity) == 64 && length(scannerResultBridgeProviderProofIntegrity) == 64 && length(scannerResultBridgeProducerProofIntegrity) == 64 && length(scannerResultBridgeTransportProofIntegrity) == 64 && length(scannerResultBridgeConsumerProofIntegrity) == 64 && length(scannerResultBridgeIdentityRbacProofIntegrity) == 64 && length(scannerResultBridgePrivatePathProofIntegrity) == 64 && length(scannerResultBridgeCorrelationProofIntegrity) == 64 && length(scannerResultBridgeRevocationProofIntegrity) == 64 && length(scannerResultBridgeCleanupInventoryIntegrity) == 64 && !empty(scannerResultBridgeObservedAtUtc)
 var postSecretEnabled = oneRunEnabled && deploymentStage == 'post-secret' && scannerResultBridgeResolved
 var scannerFoundationEnabled = scannerFoundationStageEnabled || scannerProofEnabled || postSecretEnabled
@@ -151,6 +153,7 @@ var moduleBoundaries = [
   'redis'
   'storage-scanner'
   'scanner-result-bridge'
+  'owner-bootstrap'
   'compute'
   'container-apps-dns'
   'observability'
@@ -279,6 +282,21 @@ module postgres './modules/postgres.bicep' = if (postSecretEnabled) {
   }
 }
 
+module ownerBootstrap './modules/owner-bootstrap.bicep' = if (ownerBootstrapEnabled) {
+  name: 'mobius77-observability-operator-owner-bootstrap'
+  params: {
+    checkpointMode: checkpointMode
+    deploymentEnabled: deploymentEnabled
+    managedBindingMode: managedBindingMode
+    managedBindingDeploymentEnabled: true
+    targetResourceGroupName: targetResourceGroupName
+    location: location
+    postgresLocation: postgresLocation
+    apiImageDigest: apiImageDigest
+    lifecycleTags: lifecycleTags
+  }
+}
+
 module redis './modules/redis.bicep' = if (postSecretEnabled) {
   name: 'mobius77-managed-binding-redis'
   scope: targetResourceGroup
@@ -391,14 +409,17 @@ module compute './modules/compute.bicep' = if (workloadEnabled) {
     managedBindingMode: managedBindingMode
     managedBindingDeploymentEnabled: true
     applicationDeploymentEnabled: postSecretEnabled
+    ownerBootstrapDeploymentEnabled: false
     location: location
     containerAppsSubnetId: network.outputs.containerAppsSubnetId
     infrastructureResourceGroupName: containerAppsInfrastructureResourceGroupName
     apiIdentityId: identities.outputs.workloadIdentityId
     apiIdentityClientId: identities.outputs.workloadIdentityClientId
+    apiIdentityPrincipalId: identities.outputs.workloadIdentityPrincipalId
     apiIdentityName: identities.outputs.workloadIdentityName
     workerIdentityId: identities.outputs.workerIdentityId
     workerIdentityClientId: identities.outputs.workerIdentityClientId
+    workerIdentityPrincipalId: identities.outputs.workerIdentityPrincipalId
     workerIdentityName: identities.outputs.workerIdentityName
     telemetryIdentityId: identities.outputs.telemetryIdentityId
     databaseAdministratorIdentityId: identities.outputs.databaseAdministratorIdentityId
@@ -454,6 +475,14 @@ output stagingLocation string = location
 output cleanupLocation string = cleanupLocation
 output postgresLocation string = postgresLocation
 output redisLocation string = redisLocation
+output ownerBootstrapEnabled bool = ownerBootstrapEnabled && ownerBootstrap!.outputs.ownerBootstrapEnabled
+output ownerBootstrapPrivateApplicationUrl string = ownerBootstrapEnabled ? ownerBootstrap!.outputs.privateApplicationUrl : ''
+output ownerBootstrapApiContainerAppId string = ownerBootstrapEnabled ? ownerBootstrap!.outputs.apiContainerAppId : ''
+output ownerBootstrapMigrationJobName string = ownerBootstrapEnabled ? ownerBootstrap!.outputs.migrationJobName : ''
+output ownerBootstrapReadbackJobName string = ownerBootstrapEnabled ? ownerBootstrap!.outputs.ownerReadbackJobName : ''
+output ownerBootstrapSessionSecretReferenceCount int = ownerBootstrapEnabled ? ownerBootstrap!.outputs.sessionSecretReferenceCount : 0
+output ownerBootstrapPublicIngress bool = false
+output ownerBootstrapFullApplicationDeploymentEnabled bool = false
 output postgresServerFqdn string = postSecretEnabled ? postgres.outputs.serverFqdn : ''
 output redisHostName string = postSecretEnabled ? redis.outputs.hostName : ''
 output redisPort int = postSecretEnabled ? redis.outputs.port : 10000
@@ -480,7 +509,7 @@ output scannerBridgeProofJobId string = scannerProofEnabled ? scannerResultBridg
 output scannerBridgeTemporaryRoleId string = scannerProofEnabled ? scannerResultBridge.outputs.temporaryProofRoleId : ''
 output scannerBridgeTemporaryRoleAssignmentId string = scannerProofEnabled ? scannerResultBridge.outputs.temporaryProofRoleAssignmentId : ''
 output scannerBridgeProofImageDigest string = scannerProofEnabled ? apiImageDigest : ''
-output apiImageDigest string = postSecretEnabled ? apiImageDigest : ''
+output apiImageDigest string = postSecretEnabled || ownerBootstrapEnabled ? apiImageDigest : ''
 output workloadIdentityClientId string = workloadEnabled ? identities.outputs.workloadIdentityClientId : ''
 output defaultProvisioningAuthorized bool = false
 output secretValueAccessAuthorized bool = false

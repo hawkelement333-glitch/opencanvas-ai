@@ -1,4 +1,4 @@
-"""Fail-closed scanner-result bridge serialization for post-secret deployment.
+"""Fail-closed runtime serialization for the managed-binding deployment stages.
 
 This module has no Azure client. It accepts only a complete sanitized evidence
 envelope and produces explicit Bicep parameters for the post-secret executor.
@@ -137,13 +137,19 @@ def deployment_parameters(
         + json.dumps(lifecycle_tags, separators=(",", ":"), sort_keys=True),
     ]
     if runtime_config is None:
+        if stage == "owner-bootstrap":
+            raise ScannerBridgeDeploymentError("owner-bootstrap-runtime-config-absent")
         return parameters
-    if stage == "scanner-proof":
+    if stage in {"scanner-proof", "owner-bootstrap"}:
         if set(runtime_config) != {"apiImageDigest"}:
-            raise ScannerBridgeDeploymentError("scanner-proof-runtime-config-invalid")
+            raise ScannerBridgeDeploymentError(f"{stage}-runtime-config-invalid")
         image = runtime_config.get("apiImageDigest")
         if not isinstance(image, str) or "@sha256:" not in image:
-            raise ScannerBridgeDeploymentError("scanner-proof-runtime-config-invalid")
+            raise ScannerBridgeDeploymentError(f"{stage}-runtime-config-invalid")
+        if stage == "owner-bootstrap" and scanner_bridge_evidence is not None:
+            raise ScannerBridgeDeploymentError(
+                "owner-bootstrap-scanner-evidence-forbidden"
+            )
         return [*parameters, f"apiImageDigest={image}"]
     if stage != "post-secret":
         raise ScannerBridgeDeploymentError("deployment-runtime-config-stage-invalid")
@@ -218,4 +224,65 @@ def parse_post_secret_outputs(
         "scanner-result-bridge-evidence-integrity": integrity,
         "migration-job-name": job_name,
         "migration-job-resource-id": "redacted",
+    }
+
+
+def parse_owner_bootstrap_outputs(response: Mapping[str, object]) -> dict[str, str]:
+    """Validate the private, non-runtime bootstrap output projection."""
+
+    properties = response.get("properties")
+    if not isinstance(properties, Mapping):
+        raise ScannerBridgeDeploymentError(
+            "owner-bootstrap-deployment-output-malformed"
+        )
+    outputs = properties.get("outputs")
+    if not isinstance(outputs, Mapping):
+        raise ScannerBridgeDeploymentError(
+            "owner-bootstrap-deployment-output-malformed"
+        )
+
+    def value(name: str) -> object:
+        output = outputs.get(name)
+        if not isinstance(output, Mapping) or set(output) - {"type", "value"}:
+            raise ScannerBridgeDeploymentError(
+                "owner-bootstrap-deployment-output-malformed"
+            )
+        return output.get("value")
+
+    state = properties.get("provisioningState")
+    stage = value("deploymentStage")
+    enabled = value("ownerBootstrapEnabled")
+    url = value("ownerBootstrapPrivateApplicationUrl")
+    api_id = value("ownerBootstrapApiContainerAppId")
+    migration = value("ownerBootstrapMigrationJobName")
+    readback = value("ownerBootstrapReadbackJobName")
+    secret_count = value("ownerBootstrapSessionSecretReferenceCount")
+    public = value("ownerBootstrapPublicIngress")
+    full = value("ownerBootstrapFullApplicationDeploymentEnabled")
+    image = value("apiImageDigest")
+    if (
+        state != "Succeeded"
+        or stage != "owner-bootstrap"
+        or enabled is not True
+        or not isinstance(url, str)
+        or not url.startswith("https://ca-mobius77-api.")
+        or not isinstance(api_id, str)
+        or not api_id.casefold().endswith(
+            "/providers/microsoft.app/containerapps/ca-mobius77-api"
+        )
+        or migration != "caj-mobius77-migration"
+        or readback != "caj-mobius77-owner-readback"
+        or secret_count != 1
+        or public is not False
+        or full is not False
+        or not isinstance(image, str)
+        or "@sha256:" not in image
+    ):
+        raise ScannerBridgeDeploymentError("owner-bootstrap-deployment-output-invalid")
+    return {
+        "api-container-app-id": api_id,
+        "immutable-image": image,
+        "migration-job-name": migration,
+        "owner-readback-job-name": readback,
+        "private-application-url": url,
     }

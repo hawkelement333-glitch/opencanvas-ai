@@ -93,7 +93,12 @@ def container_app_revision_ready(subscription_id: str, app_name: str) -> str:
         latest = value["latest"]
         ready = value["ready"]
         state = value["state"]
-        if state == "Succeeded" and isinstance(latest, str) and latest and ready == latest:
+        if (
+            state == "Succeeded"
+            and isinstance(latest, str)
+            and latest
+            and ready == latest
+        ):
             revision = lifecycle._run(
                 (
                     "az",
@@ -203,14 +208,18 @@ def migration_job_ready(subscription_id: str) -> str:
         )
         if isinstance(started, dict) and set(started) == {"name"}:
             candidate = started["name"]
-            if isinstance(candidate, str) and candidate.startswith("caj-mobius77-migration-"):
+            if isinstance(candidate, str) and candidate.startswith(
+                "caj-mobius77-migration-"
+            ):
                 requested_name = candidate
     except lifecycle.AzureCommandError:
         requested_name = None
     start_deadline = time.monotonic() + 120.0
     while True:
         rows = _migration_execution_rows(subscription_id)
-        if len(rows) == 1 and (requested_name is None or rows[0]["name"] == requested_name):
+        if len(rows) == 1 and (
+            requested_name is None or rows[0]["name"] == requested_name
+        ):
             execution_name = rows[0]["name"]
             break
         if len(rows) > 1:
@@ -356,8 +365,12 @@ def _post_secret_deployment_outputs(
         "telemetry",
     }:
         lifecycle._fail("post-secret-deployment-output-malformed")
-    target_scope = lifecycle._scope(subscription_id, f"/resourceGroups/{lifecycle.TARGET_GROUP}")
-    expected_migration_id = f"{target_scope}/providers/Microsoft.App/jobs/caj-mobius77-migration"
+    target_scope = lifecycle._scope(
+        subscription_id, f"/resourceGroups/{lifecycle.TARGET_GROUP}"
+    )
+    expected_migration_id = (
+        f"{target_scope}/providers/Microsoft.App/jobs/caj-mobius77-migration"
+    )
     expected_telemetry_id = (
         f"{target_scope}/providers/Microsoft.App/containerApps/ca-mobius77-telemetry"
     )
@@ -369,10 +382,14 @@ def _post_secret_deployment_outputs(
         or value.get("bridgeIntegrity") != scanner_evidence_integrity
         or value.get("image") != immutable_image_digest
         or value.get("migrationName") != "caj-mobius77-migration"
-        or str(value.get("migrationId", "")).casefold() != expected_migration_id.casefold()
-        or str(value.get("telemetry", "")).casefold() != expected_telemetry_id.casefold()
+        or str(value.get("migrationId", "")).casefold()
+        != expected_migration_id.casefold()
+        or str(value.get("telemetry", "")).casefold()
+        != expected_telemetry_id.casefold()
         or not isinstance(value.get("postgres"), str)
-        or not str(value["postgres"]).casefold().endswith(".postgres.database.azure.com")
+        or not str(value["postgres"])
+        .casefold()
+        .endswith(".postgres.database.azure.com")
         or not isinstance(value.get("redis"), str)
         or not str(value["redis"]).casefold().endswith(".redis.azure.net")
         or value.get("redisPort") != 10000
@@ -408,7 +425,8 @@ def _runtime_definition(
         set(value) != {"environment", "identity", "image", "state"}
         or value.get("state") != "Succeeded"
         or value.get("image") != immutable_image_digest
-        or str(value.get("environment", "")).casefold() != expected_environment.casefold()
+        or str(value.get("environment", "")).casefold()
+        != expected_environment.casefold()
         or value.get("identity") != "UserAssigned"
     ):
         lifecycle._fail("post-secret-runtime-definition-drift")
@@ -509,7 +527,21 @@ def migration_stage(
     state = lifecycle._read_current_transient_state(state_path, ledger=ledger)
     if state.get("resumableCheckpoint") != "migration-execution":
         lifecycle._fail("migration-stage-prerequisite-missing")
-    execution_name = migration_job_ready(subscription_id)
+    from infra.milestone_7_7 import observability_operator_bootstrap_adapter
+
+    repository_head = ledger.get("repositoryHead")
+    if not isinstance(repository_head, str):
+        lifecycle._fail("migration-stage-repository-head-missing")
+    try:
+        execution_name = observability_operator_bootstrap_adapter.reconcile_completed_bootstrap_migration(
+            receipt_directory=receipt_directory,
+            repository_head=repository_head,
+            subscription_id=subscription_id,
+        )
+    except observability_operator_bootstrap_adapter.ObservabilityOperatorBootstrapExecutionError as exc:
+        lifecycle._fail(str(exc))
+    if execution_name is None:
+        execution_name = migration_job_ready(subscription_id)
     state["lastCompletedStage"] = "migration-execution"
     state["resumableCheckpoint"] = "readiness-validation"
     lifecycle._replace_state(state_path, state)
@@ -542,7 +574,9 @@ def readiness_stage(
     state["resumableCheckpoint"] = "live-validation"
     lifecycle._replace_state(state_path, state)
     return {
-        "apiRevisionSha256": hashlib.sha256(revisions["ca-mobius77-api"].encode()).hexdigest(),
+        "apiRevisionSha256": hashlib.sha256(
+            revisions["ca-mobius77-api"].encode()
+        ).hexdigest(),
         "immutableImageDigest": image_digest,
         "privateIngressOnly": True,
         "telemetryRevisionSha256": hashlib.sha256(
@@ -645,7 +679,9 @@ def live_validation_sample(
     if not isinstance(cleanup_raw, str):
         lifecycle._fail("live-validation-cleanup-deadline-missing")
     try:
-        cleanup_at = datetime.strptime(cleanup_raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        cleanup_at = datetime.strptime(cleanup_raw, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=UTC
+        )
     except ValueError:
         lifecycle._fail("live-validation-cleanup-deadline-invalid")
     if lifecycle._utc_now() >= cleanup_at - lifecycle.MINIMUM_CLEANUP_RESERVE:
@@ -653,7 +689,9 @@ def live_validation_sample(
     lifecycle._verify_cleanup_control(subscription_id, cleanup_at)
     revisions = private_revision_ready(subscription_id)
     image_digest = lifecycle._reconcile_published_api_image(ledger=ledger, state=state)
-    domain, static_ip = lifecycle._container_apps_private_dns_projection(subscription_id)
+    domain, static_ip = lifecycle._container_apps_private_dns_projection(
+        subscription_id
+    )
     api_hostname = f"ca-mobius77-api.{domain}"
     telemetry_hostname = f"ca-mobius77-telemetry.{domain}"
     live, address_integrity, tls_version = _private_https_json(
@@ -689,7 +727,8 @@ def live_validation_sample(
             }
         )
         != 1
-        or {tls_version, ready_tls, worker_tls, runtime_tls, telemetry_tls} - {"TLS1_2", "TLS1_3"}
+        or {tls_version, ready_tls, worker_tls, runtime_tls, telemetry_tls}
+        - {"TLS1_2", "TLS1_3"}
     ):
         lifecycle._fail("live-validation-health-contract-failed")
     _expected_cost, maximum_cost = lifecycle._verified_cost()
@@ -715,7 +754,8 @@ def live_validation_sample(
         private_dns_proved=True,
         tls_version=(
             "TLS1_2"
-            if "TLS1_2" in {tls_version, ready_tls, worker_tls, runtime_tls, telemetry_tls}
+            if "TLS1_2"
+            in {tls_version, ready_tls, worker_tls, runtime_tls, telemetry_tls}
             else "TLS1_3"
         ),
         api_live=True,
@@ -789,7 +829,9 @@ def soak_stage(
     if not isinstance(cleanup_raw, str):
         lifecycle._fail("soak-cleanup-deadline-missing")
     try:
-        cleanup_at = datetime.strptime(cleanup_raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        cleanup_at = datetime.strptime(cleanup_raw, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=UTC
+        )
     except ValueError:
         lifecycle._fail("soak-cleanup-deadline-invalid")
     progress_path = receipt_directory / terminal_lifecycle.SOAK_PROGRESS_FILE
@@ -805,7 +847,9 @@ def soak_stage(
         clock=lifecycle._utc_now,
         monotonic=time.monotonic,
         sleep=time.sleep,
-        progress=lambda value: terminal_lifecycle.write_soak_progress(progress_path, value),
+        progress=lambda value: terminal_lifecycle.write_soak_progress(
+            progress_path, value
+        ),
     )
     state["lastCompletedStage"] = "soak"
     state["resumableCheckpoint"] = "successful-closeout"
@@ -852,7 +896,8 @@ def _exact_ephemeral_identity_count(
     )
     for value in (applications, principals):
         if not isinstance(value, list) or any(
-            not isinstance(item, dict) or item != {"displayName": display_name} for item in value
+            not isinstance(item, dict) or item != {"displayName": display_name}
+            for item in value
         ):
             lifecycle._fail("closeout-ephemeral-identity-inventory-malformed")
     assert isinstance(applications, list)
@@ -1024,7 +1069,9 @@ def cleanup(
         except (ContractError, lifecycle.LifecycleError, OSError, ValueError):
             revocation_path = "superseded-by-resource-deletion"
     resource_group_delete_count = 0
-    target_group_present = lifecycle._group_exists(subscription_id, lifecycle.TARGET_GROUP)
+    target_group_present = lifecycle._group_exists(
+        subscription_id, lifecycle.TARGET_GROUP
+    )
 
     def delete_group(group: str) -> None:
         nonlocal resource_group_delete_count
@@ -1048,7 +1095,8 @@ def cleanup(
         except lifecycle.AzureCommandError as exc:
             if lifecycle._group_exists(subscription_id, group):
                 lifecycle._fail(
-                    "cleanup-resource-group-delete-azure-" + exc.sanitized_azure_error_code
+                    "cleanup-resource-group-delete-azure-"
+                    + exc.sanitized_azure_error_code
                 )
         resource_group_delete_count += 1
 
@@ -1174,7 +1222,9 @@ def milestone_completion(
     *, ledger: Mapping[str, JsonValue], receipt_directory: Path
 ) -> dict[str, JsonValue]:
     zero_evidence = terminal_lifecycle.load_stage_evidence(
-        terminal_lifecycle.stage_evidence_path(receipt_directory, "zero-residue-verification"),
+        terminal_lifecycle.stage_evidence_path(
+            receipt_directory, "zero-residue-verification"
+        ),
         expected_stage="zero-residue-verification",
         repository_head=str(ledger["repositoryHead"]),
         ledger_integrity_sha256=lifecycle._ledger_integrity(ledger),
@@ -1234,7 +1284,9 @@ def persist_terminal_stage(
     predecessor = terminal_lifecycle.STAGE_PREDECESSOR[operation]
     previous = None
     if predecessor is not None:
-        predecessor_path = terminal_lifecycle.stage_evidence_path(receipt_directory, predecessor)
+        predecessor_path = terminal_lifecycle.stage_evidence_path(
+            receipt_directory, predecessor
+        )
         if operation == "zero-residue-verification" and not predecessor_path.is_file():
             return None
         previous = terminal_lifecycle.load_stage_evidence(

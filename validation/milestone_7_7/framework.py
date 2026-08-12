@@ -49,19 +49,23 @@ REQUIREMENT_CATALOG_DOMAIN: Final = b"mobius.m7.7.validation-requirements.v1\0"
 
 SOURCE_COMMIT: Final = "c4fdab9ed46ae8d1b8ef380dae9a3812155097c5"
 CHECKPOINT1_BUNDLE_SHA256: Final = (
-    "17b648d05e04f449ebd8eeb12b4d8848277bbcf538d154ff1723a322a7e43e70"
+    "2cf5b28d31ee1bca462b4c177d998dd0ddc418c9a236bd8590fae2d5c695bb10"
 )
 CHECKPOINT2_MANIFEST_SHA256: Final = (
     "7d8832aae03e00ec93a6203a2360555ba19b030912a406b775fc7b20630c1c26"
 )
-CHECKPOINT2_PLAN_SHA256: Final = "4c13cc8b536cef325a27a0a00b4d008d164ff5d955512e599df309f69c7f32b3"
+CHECKPOINT2_PLAN_SHA256: Final = (
+    "4c13cc8b536cef325a27a0a00b4d008d164ff5d955512e599df309f69c7f32b3"
+)
 CHECKPOINT2_RESULT_SHA256: Final = (
     "a98e8122f5c16a448de69f17cc6b537ea03989843805bbb584dfc620ae5d5c79"
 )
 CHECKPOINT3_PACKAGE_SHA256: Final = (
     "e88ab17245804f26d535ee225de1042ebf20d1fb6acf66e4cc755262c8e94ad1"
 )
-CHECKPOINT4_PLAN_SHA256: Final = "2acff12715b346984dd75dbcb1ddce9419f0907f5f0a80c23200952ced8a9cf4"
+CHECKPOINT4_PLAN_SHA256: Final = (
+    "2acff12715b346984dd75dbcb1ddce9419f0907f5f0a80c23200952ced8a9cf4"
+)
 CHECKPOINT4_CATALOG_SHA256: Final = (
     "bf38c10982a5ed3e15fe27174f0b472b44fa0e44c23d9c62f1a2e68148fac8be"
 )
@@ -238,17 +242,24 @@ def _current_bindings() -> dict[str, str]:
         REPOSITORY_ROOT / "evidence/milestone_7_7/fixtures/request-plan.fixture.json"
     )
     result_path = (
-        REPOSITORY_ROOT / "evidence/milestone_7_7/fixtures/measurement-result.fixture.json"
+        REPOSITORY_ROOT
+        / "evidence/milestone_7_7/fixtures/measurement-result.fixture.json"
     )
-    evidence_path = REPOSITORY_ROOT / "evidence/milestone_7_7/evidence-package.example.json"
-    failure_path = REPOSITORY_ROOT / "resilience/milestone_7_7/failure-plan.example.json"
+    evidence_path = (
+        REPOSITORY_ROOT / "evidence/milestone_7_7/evidence-package.example.json"
+    )
+    failure_path = (
+        REPOSITORY_ROOT / "resilience/milestone_7_7/failure-plan.example.json"
+    )
 
     manifest = load_json(manifest_path)
     expected_plan, expected_result = simulate_local(manifest)
     committed_plan = load_json(request_plan_path)
     committed_result = load_json(result_path)
     if canonical_bytes(expected_plan) != canonical_bytes(committed_plan):
-        raise ContractError("Checkpoint 2 request-plan fixture differs from reproduction")
+        raise ContractError(
+            "Checkpoint 2 request-plan fixture differs from reproduction"
+        )
     if canonical_bytes(expected_result) != canonical_bytes(committed_result):
         raise ContractError("Checkpoint 2 result fixture differs from reproduction")
     validated_result = validate_result(committed_result)
@@ -541,9 +552,13 @@ def _verification_result(
         "status": status,
         "errorCode": error_code,
         "reportId": None if report is None else report.get("reportId"),
-        "reportIntegritySha256": (None if report is None else report.get("reportIntegritySha256")),
+        "reportIntegritySha256": (
+            None if report is None else report.get("reportIntegritySha256")
+        ),
         "validationCheckCount": 0 if report is None else len(VALIDATION_CHECK_IDS),
-        "validationRequirementCount": (0 if report is None else len(VALIDATION_REQUIREMENTS)),
+        "validationRequirementCount": (
+            0 if report is None else len(VALIDATION_REQUIREMENTS)
+        ),
         "classification": "local-validation-only",
         "localValidationState": ("invalid" if report is None else "complete"),
         "milestoneEvidenceState": "partial",
