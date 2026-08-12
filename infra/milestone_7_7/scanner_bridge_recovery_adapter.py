@@ -29,9 +29,9 @@ from preflight.milestone_7_7.cleanup_control_recovery import (
 )
 from preflight.milestone_7_7.managed_binding_contracts import (
     REPOSITORY_ROOT,
+    authorization_ledger_integrity_sha256,
     load_managed_binding_contract,
     managed_binding_integrity_sha256,
-    validate_authorization_ledger,
 )
 from preflight.milestone_7_7.scanner_bridge_recovery import (
     FOUNDATION_STAGE,
@@ -189,6 +189,9 @@ RETAINED_SUCCESS_OCI_CONFIG: Final = (
     "sha256:39d0bf5669c1d89820c2049ea176e645e02366b401610a9a3ea8b1138f17885e"
 )
 RETAINED_SUCCESS_SOURCE_HEAD: Final = "f023c87b0d68e4cacdba905c15e52ea4986b8ec3"
+RETAINED_SUCCESS_LEDGER_INTEGRITY: Final = (
+    "3de2dee6435d308cce667a47d9245ea1a187e05e44edf76ec89d6a5e5f6f3157"
+)
 RETAINED_SUCCESS_DEPLOYMENT: Final = (
     "mobius77-managed-binding-scanner-proof-066c029b71dd4bf2"
 )
@@ -521,6 +524,8 @@ def _write_failure_evidence(
 
 def _validate_managed_binding(
     authorization: ScannerBridgeRecoveryAuthorization,
+    *,
+    cleanup_deadline_utc: str | None = None,
 ) -> dict[str, JsonValue]:
     contract = load_managed_binding_contract()
     resources = contract.get("resources")
@@ -539,7 +544,7 @@ def _validate_managed_binding(
         "cleanup-account": resources.get("cleanupAutomationAccount")
         == "aa-mobius77-cleanup-recovery",
         "cleanup-deadline": cleanup.get("deadlineUtc")
-        == authorization.cleanupDeadlineUtc,
+        == (cleanup_deadline_utc or authorization.cleanupDeadlineUtc),
         "cleanup-target": cleanup.get("targetResourceGroup") == TARGET_RESOURCE_GROUP,
     }
     if not all(exact.values()):
@@ -4048,14 +4053,18 @@ def _validate_retained_publication_binding(
     authorization: ScannerBridgeRecoveryAuthorization,
     ledger_path: Path,
     finalization_evidence_path: Path,
-    now: datetime,
 ) -> dict[str, JsonValue]:
     ledger_value = load_json(_outside_repository(ledger_path, "retained-proof-ledger"))
-    ledger = validate_authorization_ledger(
-        ledger_value,
-        now_utc=now,
-        expected_repository_head=authorization.repositoryHead,
-    )
+    if (
+        not isinstance(ledger_value, Mapping)
+        or ledger_value.get("repositoryHead") != authorization.repositoryHead
+        or ledger_value.get("ledgerIntegritySha256")
+        != RETAINED_SUCCESS_LEDGER_INTEGRITY
+        or authorization_ledger_integrity_sha256(ledger_value)
+        != RETAINED_SUCCESS_LEDGER_INTEGRITY
+    ):
+        _fail("scanner-proof-retained-ledger-invalid")
+    ledger = ledger_value
     published = ledger.get("publishedImage")
     if not isinstance(published, Mapping):
         _fail("scanner-proof-retained-image-binding-malformed")
@@ -4526,21 +4535,19 @@ def reconcile_retained_successful_scanner_proof(
         authorization=authorization,
         ledger_path=lifecycle_ledger_path,
         finalization_evidence_path=finalization_evidence_path,
-        now=now,
     )
     subscription_id = lifecycle._account_binding(now)
     if subscription_id != authorization.subscriptionId:
         _fail("scanner-proof-retained-subscription-mismatch")
     if not lifecycle._group_exists(subscription_id, TARGET_RESOURCE_GROUP):
         _fail("scanner-proof-retained-target-missing")
-    contract = _validate_managed_binding(authorization)
+    cleanup_at = lifecycle._cleanup_deadline(now)
+    contract = _validate_managed_binding(
+        authorization, cleanup_deadline_utc=_format_utc(cleanup_at)
+    )
     _, maximum_cost = lifecycle._verified_cost()
     if maximum_cost > authorization.maximumCostUsdCents:
         _fail("scanner-proof-retained-cost-ceiling-exceeded")
-    cleanup_at = _parse_utc(
-        authorization.cleanupDeadlineUtc,
-        "scanner-proof-retained-cleanup-deadline-invalid",
-    )
     cleanup_principal = lifecycle._verify_cleanup_control(subscription_id, cleanup_at)
     cleanup_role = cast(dict[str, JsonValue], contract["cleanupExecution"]).get(
         "cleanupContributorRoleDefinitionId"

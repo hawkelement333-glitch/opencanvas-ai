@@ -487,12 +487,19 @@ def _install_reconciliation_fakes(
     monkeypatch.setattr(adapter.lifecycle, "_account_binding", lambda _now: SUBSCRIPTION_ID)
     monkeypatch.setattr(adapter.lifecycle, "_group_exists", lambda *_args: True)
     monkeypatch.setattr(adapter.lifecycle, "_verified_cost", lambda: (100, 200))
+    monkeypatch.setattr(
+        adapter.lifecycle,
+        "_cleanup_deadline",
+        lambda _now: datetime(2026, 8, 13, 6, 30, tzinfo=UTC),
+    )
     monkeypatch.setattr(adapter.lifecycle, "_verify_cleanup_control", lambda *_args: "principal")
     monkeypatch.setattr(adapter.lifecycle, "_verify_cleanup_target_role", lambda *_args: None)
     monkeypatch.setattr(
         adapter,
         "_validate_managed_binding",
-        lambda _authorization: {"cleanupExecution": {"cleanupContributorRoleDefinitionId": "role"}},
+        lambda _authorization, **_kwargs: {
+            "cleanupExecution": {"cleanupContributorRoleDefinitionId": "role"}
+        },
     )
     monkeypatch.setattr(adapter, "_verify_foundation", lambda *_args, **_kwargs: _foundation())
     monkeypatch.setattr(
@@ -516,12 +523,105 @@ def _install_reconciliation_fakes(
     )
 
 
+def test_retained_publication_uses_exact_historical_ledger_integrity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    authorization = _authorization()
+    published: dict[str, JsonValue] = {
+        "controlPlaneHead": adapter.RETAINED_SUCCESS_SOURCE_HEAD,
+        "imageBuildInputSha256": adapter.RETAINED_SUCCESS_BUILD_INPUT,
+        "imageConfigDigest": adapter.RETAINED_SUCCESS_OCI_CONFIG,
+        "imageSourceCommit": adapter.RETAINED_SUCCESS_IMAGE_SOURCE,
+        "localImageId": adapter.RETAINED_SUCCESS_IMAGE.split("@", 1)[1],
+        "platform": "linux/amd64",
+        "repository": "opencanvas-api",
+        "sourceTag": f"source-{adapter.RETAINED_SUCCESS_IMAGE_SOURCE}",
+    }
+    ledger: dict[str, JsonValue] = {
+        "repositoryHead": authorization.repositoryHead,
+        "ledgerIntegritySha256": adapter.RETAINED_SUCCESS_LEDGER_INTEGRITY,
+        "managedBindingIntegritySha256": "historical-not-current",
+        "publishedImage": published,
+    }
+    finalization_body: dict[str, JsonValue] = {
+        "schemaVersion": "mobius.milestone-7.7.acr-tag-finalization-evidence.v1",
+        "ledgerIntegritySha256": adapter.RETAINED_SUCCESS_LEDGER_INTEGRITY,
+        "manifestDigest": adapter.RETAINED_SUCCESS_IMAGE.split("@", 1)[1],
+        "registryConfigDigest": adapter.RETAINED_SUCCESS_OCI_CONFIG,
+        "sourceTagSha256": adapter._hash_text(f"source-{adapter.RETAINED_SUCCESS_IMAGE_SOURCE}"),
+        "sourceTagAbsent": True,
+        "immutableManifestRetained": True,
+        "finalizerIdentityDeleted": True,
+        "secretValueAccessed": False,
+    }
+    finalization = {
+        **finalization_body,
+        "evidenceIntegritySha256": adapter.integrity_sha256(
+            finalization_body, adapter.FINALIZATION_EVIDENCE_DOMAIN
+        ),
+    }
+    ledger_path = tmp_path / "ledger.json"
+    finalization_path = tmp_path / "finalization.json"
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    finalization_path.write_text(json.dumps(finalization), encoding="utf-8")
+    monkeypatch.setattr(
+        adapter,
+        "authorization_ledger_integrity_sha256",
+        lambda _value: adapter.RETAINED_SUCCESS_LEDGER_INTEGRITY,
+    )
+
+    result = adapter._validate_retained_publication_binding(
+        authorization=authorization,
+        ledger_path=ledger_path,
+        finalization_evidence_path=finalization_path,
+    )
+
+    assert result["ledgerIntegritySha256"] == adapter.RETAINED_SUCCESS_LEDGER_INTEGRITY
+
+    ledger["ledgerIntegritySha256"] = "0" * 64
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    with pytest.raises(
+        adapter.ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-retained-ledger-invalid",
+    ):
+        adapter._validate_retained_publication_binding(
+            authorization=authorization,
+            ledger_path=ledger_path,
+            finalization_evidence_path=finalization_path,
+        )
+
+
+def test_retained_success_validates_live_cleanup_deadline_separately() -> None:
+    authorization = _authorization()
+
+    with pytest.raises(
+        adapter.ScannerBridgeRecoveryExecutionError,
+        match="scanner-bridge-managed-binding-drift",
+    ):
+        adapter._validate_managed_binding(authorization)
+
+    contract = adapter._validate_managed_binding(
+        authorization,
+        cleanup_deadline_utc="2026-08-13T06:30:00Z",
+    )
+
+    assert cast(dict[str, JsonValue], contract["cleanupExecution"])["deadlineUtc"] == (
+        "2026-08-13T06:30:00Z"
+    )
+
+
 def test_retained_proof_four_builds_serializes_and_loads_real_deployment_evidence(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     authorization = _authorization()
     _install_reconciliation_fakes(monkeypatch, authorization)
+    cleanup_deadlines: list[datetime] = []
+    monkeypatch.setattr(
+        adapter.lifecycle,
+        "_verify_cleanup_control",
+        lambda _subscription, deadline: cleanup_deadlines.append(deadline) or "principal",
+    )
     binding = tmp_path / "proof4-retained-success.json"
     evidence_path = tmp_path / "scanner-deployment-evidence-v2.json"
 
@@ -546,6 +646,7 @@ def test_retained_proof_four_builds_serializes_and_loads_real_deployment_evidenc
     )
     assert evidence.legacy_evidence.decision == "clean"
     assert binding.is_file()
+    assert cleanup_deadlines == [datetime(2026, 8, 13, 6, 30, tzinfo=UTC)]
 
 
 def test_retained_success_reconciliation_is_one_use(
