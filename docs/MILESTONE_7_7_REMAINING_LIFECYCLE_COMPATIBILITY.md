@@ -22,7 +22,7 @@ ledger bindings, and requires its integrity as the sole predecessor.
 | ------------------- | ---------------------------------------------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | Current-HEAD ledger | `materialize_ledger` and `build_authorization_ledger`                        | lifecycle receipt claimant                | integrity-bound one-run ledger                                                         | local producer; replay denied                                                                                                     |
 | Image admission     | prebuilt image record v2, with separate `imageSourceCommit`                  | publication adapter and ledger validator  | source, build-input, config, and manifest identities separated from control-plane HEAD | one final build/publication only in a later authorized run                                                                        |
-| Scanner evidence    | proof runtime success marker v2 plus authoritative recovery adapter readback | post-secret deployment-evidence v2 loader | `SCANNER_RESULT_BRIDGE_PROVED`, zero unresolved reasons                                | one later Proof #3; Proof #4 denied                                                                                               |
+| Scanner evidence    | proof runtime success marker v2 plus authoritative recovery adapter readback | post-secret deployment-evidence v2 loader | `SCANNER_RESULT_BRIDGE_PROVED`, zero unresolved reasons                                | three historical executions; one final execution at ordinal 4; ordinal 5 denied                                                   |
 | Post-secret         | metadata-only Key Vault admission and subscription deployment readback       | migration stage                           | `POST_SECRET_FOUNDATION_READY`                                                         | PostgreSQL, Redis, environment, API, worker, telemetry, DNS, and migration definition reconciled; retry denied                    |
 | Migration           | exact Container Apps migration job execution                                 | readiness stage                           | `MIGRATION_COMPLETED`, revision `20260726_0028`                                        | one start, bounded terminal polling, failure preserves environment                                                                |
 | Readiness           | authoritative private revision and immutable-image readback                  | live validation                           | `READINESS_PASSED`                                                                     | read-only; unhealthy or nonterminal revision fails closed                                                                         |
@@ -67,8 +67,8 @@ revocation, and residue readback. It writes
 post-secret loader accepts directly. Current observations are not relabeled as
 historical proof, and no post-scan evidence patch is part of the path.
 The one-use scanner recovery authorization is v2 and binds the only remaining
-execution to ordinal 3; any ordinal 4 authorization is rejected before adapter
-execution.
+execution to ordinal 4 after three historical executions; any ordinal 5
+authorization is rejected before adapter execution.
 
 ## End-to-end simulation boundary
 
@@ -100,8 +100,8 @@ No step below is authorized by this document. A later explicit run must use one
 fresh one-run ledger and the existing exact scopes:
 
 1. Build the frozen source once and publish its immutable manifest once.
-2. Run Proof #3 exactly once; persist deployment-evidence v2; never create
-   Proof #4.
+2. Run Proof #4 exactly once; persist deployment-evidence v2; never create
+   Proof #5.
 3. Run `post-secret-provisioning`; require the fresh scanner artifact and
    authoritative foundation readback.
 4. Run `migration-execution` once and require terminal success at `0028`.
@@ -115,5 +115,5 @@ fresh one-run ledger and the existing exact scopes:
 
 Ambiguous service responses are reconciled authoritatively within existing
 bounded adapters. A failed one-run receipt is never replayed. Any need for a
-second image, Proof #4, broader RBAC, public networking, a higher cost ceiling,
+second image, Proof #5, broader RBAC, public networking, a higher cost ceiling,
 or migration `20260726_0029` is a terminal stop, not a fallback.

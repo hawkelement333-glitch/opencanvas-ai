@@ -38,7 +38,7 @@ IMAGE_REPOSITORY: Final = "opencanvas-api"
 COST_CEILING_USD_CENTS: Final = 25_000
 MINIMUM_CLEANUP_WINDOW: Final = timedelta(hours=6)
 MAXIMUM_AUTHORIZATION_AGE: Final = timedelta(hours=1)
-FINAL_PROOF_EXECUTION_ORDINAL: Final = 3
+FINAL_PROOF_EXECUTION_ORDINAL: Final = 4
 FOUNDATION_ALLOWED_OPERATIONS: Final = (
     "deploy-private-scanner-foundation",
     "authoritative-readback-reconcile-private-scanner-foundation",

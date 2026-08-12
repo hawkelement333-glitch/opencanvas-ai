@@ -497,6 +497,7 @@ def _normalize_azure_error_code(value: str) -> str | None:
 
 def _sanitized_azure_error_code(stdout: bytearray, stderr: bytearray) -> str:
     observed: list[str] = []
+    plaintext_categories: list[str] = []
 
     def visit(value: JsonValue) -> None:
         if isinstance(value, dict):
@@ -526,7 +527,66 @@ def _sanitized_azure_error_code(stdout: bytearray, stderr: bytearray) -> str:
                 normalized = _normalize_azure_error_code(match.group(1))
                 if normalized is not None:
                     observed.append(normalized)
-    return observed[-1] if observed else "azure-command-nonzero"
+        for match in re.finditer(r"(?i)\bAADSTS\d{5,8}\b", decoded):
+            normalized = _normalize_azure_error_code(match.group(0))
+            if normalized is not None:
+                observed.append(normalized)
+        for category, pattern in (
+            (
+                "authentication-failed",
+                r"(?i)(?:please\s+run\s+['\"]?az\s+login|not\s+logged\s+in|"
+                r"authentication\s+failed|credential[^\r\n]{0,80}(?:unavailable|expired)|"
+                r"token[^\r\n]{0,80}(?:expired|invalid))",
+            ),
+            (
+                "authorization-denied",
+                r"(?i)(?:insufficient\s+privileges|authorization_requestdenied|"
+                r"does\s+not\s+have\s+authorization|not\s+authorized|"
+                r"permission[^\r\n]{0,80}denied|\bforbidden\b)",
+            ),
+            (
+                "tenant-policy-denied",
+                r"(?i)(?:tenant[^\r\n]{0,80}policy|blocked\s+by[^\r\n]{0,80}policy|"
+                r"policy[^\r\n]{0,80}(?:blocked|denied|prohibit)|requestdisallowedbypolicy)",
+            ),
+            (
+                "command-argument-invalid",
+                r"(?i)(?:unrecognized\s+arguments?|invalid\s+arguments?|usage\s+error|"
+                r"required\s+arguments?)",
+            ),
+            (
+                "certificate-generation-failed",
+                r"(?i)(?:failed\s+to[^\r\n]{0,80}(?:certificate|private\s+key|pem)|"
+                r"(?:certificate|private\s+key|pem)[^\r\n]{0,80}(?:failed|error)|"
+                r"openssl[^\r\n]{0,80}error)",
+            ),
+            (
+                "graph-throttled",
+                r"(?i)(?:too\s+many\s+requests|(?:http|status(?:\s+code)?)\s*[:=]?\s*429|"
+                r"\bthrottl(?:e|ed|ing)\b)",
+            ),
+            (
+                "graph-service-unavailable",
+                r"(?i)(?:service\s+unavailable|temporarily\s+unavailable|"
+                r"(?:http|status(?:\s+code)?)\s*[:=]?\s*5\d\d|"
+                r"connection\s+(?:reset|aborted)|remote\s+end\s+closed|"
+                r"name\s+resolution|proxyerror)",
+            ),
+            (
+                "duplicate-name-conflict",
+                r"(?i)(?:another\s+object\s+with\s+the\s+same\s+value|"
+                r"already\s+exists|\bconflict\b)",
+            ),
+            ("graph-request-timeout", r"(?i)\b(?:timed\s+out|timeout)\b"),
+        ):
+            if re.search(pattern, decoded) is not None:
+                plaintext_categories.append(category)
+                break
+    if observed:
+        return observed[-1]
+    if plaintext_categories:
+        return plaintext_categories[0]
+    return "azure-command-nonzero"
 
 
 def _run(

@@ -83,7 +83,7 @@ def _authorization(stage: str = FOUNDATION_STAGE) -> ScannerBridgeRecoveryAuthor
         now_utc=NOW,
         api_image_digest=IMAGE if stage == PROOF_STAGE else None,
         build_input_sha256=BUILD_INPUT if stage == PROOF_STAGE else None,
-        proof_execution_ordinal=3 if stage == PROOF_STAGE else 0,
+        proof_execution_ordinal=4 if stage == PROOF_STAGE else 0,
     )
 
 
@@ -657,7 +657,7 @@ def test_proof_authorization_binds_one_exact_immutable_image_and_execution() -> 
     assert authorization.apiImageDigest == IMAGE
     assert authorization.buildInputSha256 == BUILD_INPUT
     assert authorization.maximumProofExecutions == 1
-    assert authorization.proofExecutionOrdinal == 3
+    assert authorization.proofExecutionOrdinal == 4
     assert authorization.proofJobId == f"{TARGET}/providers/Microsoft.App/jobs/{PROOF_JOB}"
     assert authorization.proofRoleDefinitionId == (
         f"{TARGET}/providers/Microsoft.Authorization/roleDefinitions/"
@@ -691,7 +691,7 @@ def test_proof_authorization_binds_one_exact_immutable_image_and_execution() -> 
         ("migrationAuthorized", True),
         ("cleanupExecutionAuthorized", True),
         ("maximumProofExecutions", 2),
-        ("proofExecutionOrdinal", 4),
+        ("proofExecutionOrdinal", 3),
     ],
 )
 def test_exact_scope_and_prohibited_authority_drift_is_rejected(field: str, value: object) -> None:
@@ -721,7 +721,7 @@ def test_foundation_rejects_any_image_binding() -> None:
         )
 
 
-def test_proof_four_is_rejected_before_authorization() -> None:
+def test_proof_five_is_rejected_before_authorization() -> None:
     with pytest.raises(
         ScannerBridgeRecoveryError,
         match="scanner-proof-execution-ceiling-exceeded",
@@ -736,7 +736,7 @@ def test_proof_four_is_rejected_before_authorization() -> None:
             now_utc=NOW,
             api_image_digest=IMAGE,
             build_input_sha256=BUILD_INPUT,
-            proof_execution_ordinal=4,
+            proof_execution_ordinal=5,
         )
 
 

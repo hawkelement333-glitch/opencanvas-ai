@@ -3559,6 +3559,39 @@ def test_lifecycle_working_directory_must_be_outside_repository() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("stderr", "expected"),
+    (
+        (b"ERROR: Please run 'az login' before continuing", "authentication-failed"),
+        (b"ERROR: Insufficient privileges to complete the operation", "authorization-denied"),
+        (b"ERROR: Request blocked by tenant policy", "tenant-policy-denied"),
+        (b"ERROR: unrecognized arguments: --removed", "command-argument-invalid"),
+        (b"ERROR: failed to generate certificate PEM", "certificate-generation-failed"),
+        (b"ERROR: Too many requests (HTTP 429)", "graph-throttled"),
+        (b"ERROR: Service unavailable (HTTP 503)", "graph-service-unavailable"),
+        (b"ERROR: another object with the same value already exists", "duplicate-name-conflict"),
+        (b"ERROR: Graph request timed out", "graph-request-timeout"),
+        (b"ERROR: AADSTS700082: token lifetime exceeded", "aadsts700082"),
+    ),
+)
+def test_azure_plaintext_failure_is_safely_classified(stderr: bytes, expected: str) -> None:
+    assert (
+        managed_binding_lifecycle._sanitized_azure_error_code(bytearray(), bytearray(stderr))
+        == expected
+    )
+
+
+def test_structured_azure_error_code_precedes_plaintext_category() -> None:
+    stderr = bytearray(
+        b"ERROR: authentication failed; code: ServiceUnavailable; secret: do-not-retain"
+    )
+
+    assert (
+        managed_binding_lifecycle._sanitized_azure_error_code(bytearray(), stderr)
+        == "serviceunavailable"
+    )
+
+
 def test_denial_probe_requires_remote_authorization_denial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
