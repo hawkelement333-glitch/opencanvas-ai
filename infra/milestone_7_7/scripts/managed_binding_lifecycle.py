@@ -31,26 +31,12 @@ from infra.milestone_7_7.scripts.cleanup_resource_reconciliation import (
 )
 from infra.milestone_7_7.scripts.scanner_bridge_deployment import (
     AzureCommandError as _AzureCommandError,
-)
-from infra.milestone_7_7.scripts.scanner_bridge_deployment import (
     PublisherAccessPending as _PublisherAccessPending,
-)
-from infra.milestone_7_7.scripts.scanner_bridge_deployment import (
     PublisherOAuthTransient as _PublisherOAuthTransient,
-)
-from infra.milestone_7_7.scripts.scanner_bridge_deployment import (
     ScannerBridgeDeploymentError,
-)
-from infra.milestone_7_7.scripts.scanner_bridge_deployment import (
     deployment_name as scanner_bridge_deployment_name,
-)
-from infra.milestone_7_7.scripts.scanner_bridge_deployment import (
     deployment_parameters as scanner_bridge_deployment_parameters,
-)
-from infra.milestone_7_7.scripts.scanner_bridge_deployment import (
     format_utc as _format_utc,
-)
-from infra.milestone_7_7.scripts.scanner_bridge_deployment import (
     load_deployment_evidence as load_scanner_bridge_deployment_evidence,
 )
 from performance.milestone_7_7.framework import (
@@ -90,6 +76,10 @@ from preflight.milestone_7_7.scanner_result_bridge import (
 )
 from preflight.milestone_7_7.target_resource_adoption import (
     GENERATION_FOUR_SCANNER_FOUNDATION_RESOURCE_LOCATIONS,
+    POST_BOOTSTRAP,
+    managed_identity_principal as adopted_managed_identity_principal,
+    managed_binding_protected_resources,
+    orphaned_temporary_key_vault_assignment_id,
     resource_type_matches_relative_id,
     scanner_foundation_projection_is_complete,
 )
@@ -332,6 +322,7 @@ TARGET_RESOURCE_LOCATIONS: Final = (
     *PRIVATE_ENDPOINT_RESOURCE_LOCATIONS,
     ("microsoft.app/managedenvironments/cae-mobius77-staging", "southcentralus"),
     ("microsoft.app/containerapps/ca-mobius77-api", "southcentralus"),
+    *POST_BOOTSTRAP,
 )
 TARGET_DEPLOYMENT_NAMES: Final = frozenset(
     {
@@ -3177,44 +3168,15 @@ def _verify_recovered_cleanup_seed_state(subscription_id: str) -> None:
         _fail("recovered-cleanup-role-drift")
 
 
-MANAGED_BINDING_IDENTITY_NAMES: Final = frozenset(
-    {
-        "id-mobius77-api",
-        "id-mobius77-worker",
-        "id-mobius77-telemetry",
-        "id-mobius77-db-admin",
-    }
-)
-
-
 def _managed_identity_principal(subscription_id: str, identity_name: str) -> str:
-    if identity_name not in MANAGED_BINDING_IDENTITY_NAMES:
-        _fail("pre-secret-workload-identity-malformed")
-    value = _run(
-        (
-            "az",
-            "identity",
-            "show",
-            "--resource-group",
-            TARGET_GROUP,
-            "--name",
-            identity_name,
-            "--subscription",
-            subscription_id,
-            "--query",
-            "{principalId:principalId}",
-            "--output",
-            "json",
-            "--only-show-errors",
-        ),
-        require_json=True,
-    )
-    if not isinstance(value, dict) or set(value) != {"principalId"}:
-        _fail("pre-secret-workload-identity-malformed")
-    principal_id = value["principalId"]
-    if not isinstance(principal_id, str) or re.fullmatch(r"[0-9a-fA-F-]{36}", principal_id) is None:
-        _fail("pre-secret-workload-identity-malformed")
-    return principal_id
+    try:
+        return adopted_managed_identity_principal(
+            subscription_id=subscription_id,
+            identity_name=identity_name,
+            read=lambda command: _run(command, require_json=True),
+        )
+    except ValueError as exc:
+        _fail(str(exc))
 
 
 def _verify_pre_secret_role_inventory(
@@ -3250,27 +3212,11 @@ def _verify_pre_secret_role_inventory(
     ):
         _fail("pre-secret-role-inventory-drift")
 
-    protected_resources = {
-        "microsoft.keyvault/vaults/kv-mobius77-11564669": (
-            f"{target_scope}/providers/Microsoft.KeyVault/vaults/{KEY_VAULT}",
-            str(rbac["keyVaultSecretsUserRoleDefinitionId"]),
-            (
-                "id-mobius77-api",
-                "id-mobius77-worker",
-                "id-mobius77-telemetry",
-            ),
-        ),
-        "microsoft.containerregistry/registries/acrmobius7711564669": (
-            f"{target_scope}/providers/Microsoft.ContainerRegistry/registries/{REGISTRY}",
-            str(rbac["acrPullRoleDefinitionId"]),
-            (
-                "id-mobius77-api",
-                "id-mobius77-worker",
-                "id-mobius77-telemetry",
-                "id-mobius77-db-admin",
-            ),
-        ),
-    }
+    protected_resources = managed_binding_protected_resources(
+        target_scope,
+        key_vault_role_id=str(rbac["keyVaultSecretsUserRoleDefinitionId"]),
+        acr_pull_role_id=str(rbac["acrPullRoleDefinitionId"]),
+    )
     if any(relative in target_resources for relative in protected_resources):
         for relative, (scope, role_id, identity_names) in protected_resources.items():
             if relative not in target_resources:
@@ -3802,6 +3748,22 @@ def _signed_in_user_object_id() -> str:
     if not isinstance(object_id, str) or re.fullmatch(r"[0-9a-fA-F-]{36}", object_id) is None:
         _fail("signed-in-user-output-malformed")
     return object_id
+
+
+def _orphaned_temporary_key_vault_assignment(subscription_id: str) -> str | None:
+    with _attribution_scope(
+        lifecycle_substage="key-vault-temporary-authority-revocation",
+        expected_authorization="allow",
+    ):
+        try:
+            return orphaned_temporary_key_vault_assignment_id(
+                contract=load_managed_binding_contract(),
+                subscription_id=subscription_id,
+                principal_id=_signed_in_user_object_id(),
+                read=lambda command: _run(command, require_json=True),
+            )
+        except ValueError as exc:
+            _fail(str(exc))
 
 
 def _temporary_role_assignment(
@@ -5577,6 +5539,14 @@ def _pre_secret(
         "temporaryRegistryAssignmentId": None,
     }
     _write_state(state_path, state)
+    assignment_id = _orphaned_temporary_key_vault_assignment(subscription_id)
+    if assignment_id is not None:
+        state["temporaryKeyVaultAssignmentId"] = assignment_id
+        state["temporaryKeyVaultAuthorityLedgerSha256"] = _ledger_integrity(ledger)
+        _replace_state(state_path, state)
+        _revoke_temporary_key_vault_authority(
+            subscription_id=subscription_id, state_path=state_path, state=state
+        )
 
     target_exists = _group_exists(subscription_id, TARGET_GROUP)
     cleanup_exists = _group_exists(subscription_id, CLEANUP_GROUP)

@@ -5,9 +5,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 from infra.milestone_7_7.scripts import managed_binding_lifecycle as lifecycle
 from performance.milestone_7_7.framework import JsonValue
+from preflight.milestone_7_7 import target_resource_adoption
 
 
 def _ledger(marker: str = "a") -> dict[str, JsonValue]:
@@ -74,6 +74,105 @@ def _install_authority_fakes(monkeypatch: pytest.MonkeyPatch, calls: list[str]) 
         "_wait_for_key_vault_metadata_authority",
         lambda _subscription: calls.append("propagation-proved"),
     )
+
+
+def _exact_orphan_row() -> dict[str, JsonValue]:
+    scope = "/subscriptions/opaque/resourceGroups/target/providers/Microsoft.KeyVault/vaults/vault"
+    return {
+        "id": (
+            f"{scope}/providers/Microsoft.Authorization/roleAssignments/"
+            "2fa1d1df-5057-482e-ab5a-dc90f597328e"
+        ),
+        "principalId": "1ec7f7c3-84ca-4c84-9449-107293f4f51d",
+        "roleDefinitionId": (
+            "/subscriptions/opaque/providers/Microsoft.Authorization/roleDefinitions/"
+            "b86a8fe4-44ce-4948-aee5-eccb2c155cd7"
+        ),
+        "scope": scope,
+    }
+
+
+def test_exact_orphaned_temporary_role_assignment_is_selected() -> None:
+    row = _exact_orphan_row()
+
+    assert target_resource_adoption.exact_orphaned_temporary_role_assignment_id(
+        [row],
+        principal_id=str(row["principalId"]),
+        role_definition_id=str(row["roleDefinitionId"]),
+        scope=str(row["scope"]),
+    ) == str(row["id"])
+
+
+@pytest.mark.parametrize("drift", ["principalId", "roleDefinitionId", "scope", "id"])
+def test_orphaned_temporary_role_assignment_drift_is_rejected(drift: str) -> None:
+    row = _exact_orphan_row()
+    row[drift] = "wrong"
+
+    with pytest.raises(ValueError, match="orphaned-temporary-role-assignment-drift"):
+        target_resource_adoption.exact_orphaned_temporary_role_assignment_id(
+            [row],
+            principal_id="1ec7f7c3-84ca-4c84-9449-107293f4f51d",
+            role_definition_id=(
+                "/subscriptions/opaque/providers/Microsoft.Authorization/roleDefinitions/"
+                "b86a8fe4-44ce-4948-aee5-eccb2c155cd7"
+            ),
+            scope=(
+                "/subscriptions/opaque/resourceGroups/target/providers/"
+                "Microsoft.KeyVault/vaults/vault"
+            ),
+        )
+
+
+def test_duplicate_orphaned_temporary_role_assignments_are_rejected() -> None:
+    row = _exact_orphan_row()
+
+    with pytest.raises(ValueError, match="orphaned-temporary-role-assignment-drift"):
+        target_resource_adoption.exact_orphaned_temporary_role_assignment_id(
+            [row, row],
+            principal_id=str(row["principalId"]),
+            role_definition_id=str(row["roleDefinitionId"]),
+            scope=str(row["scope"]),
+        )
+
+
+def test_pre_secret_revokes_exact_orphan_before_resource_reconciliation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+    ledger = _ledger()
+    assignment_id = str(_exact_orphan_row()["id"])
+    monkeypatch.setattr(lifecycle, "_verified_cost", lambda: (1, 2))
+    monkeypatch.setattr(
+        lifecycle, "_cleanup_deadline", lambda _now: datetime(2026, 8, 13, tzinfo=UTC)
+    )
+    monkeypatch.setattr(
+        lifecycle, "_orphaned_temporary_key_vault_assignment", lambda _subscription: assignment_id
+    )
+
+    def revoke(**kwargs: object) -> bool:
+        state = kwargs["state"]
+        assert isinstance(state, dict)
+        assert state["temporaryKeyVaultAssignmentId"] == assignment_id
+        assert state["temporaryKeyVaultAuthorityLedgerSha256"] == ledger["ledgerIntegritySha256"]
+        calls.append("orphan-revoked")
+        return True
+
+    def group_exists(_subscription: str, group: str) -> bool:
+        calls.append(f"group:{group}")
+        return group == lifecycle.TARGET_GROUP
+
+    monkeypatch.setattr(lifecycle, "_revoke_temporary_key_vault_authority", revoke)
+    monkeypatch.setattr(lifecycle, "_group_exists", group_exists)
+
+    with pytest.raises(lifecycle.LifecycleError, match="pre-secret-authorized-scope-incomplete"):
+        lifecycle._pre_secret(
+            ledger=ledger,
+            subscription_id="opaque-subscription",
+            receipt_directory=tmp_path,
+        )
+
+    assert calls[0] == "orphan-revoked"
+    assert calls[1].startswith("group:")
 
 
 def test_key_vault_authority_is_created_and_proved_before_metadata(

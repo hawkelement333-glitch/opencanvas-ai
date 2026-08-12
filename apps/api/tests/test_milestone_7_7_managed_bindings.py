@@ -14,12 +14,15 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-
 from infra.milestone_7_7 import acr_tag_finalization, api_image_publication
 from infra.milestone_7_7.scripts import managed_binding_lifecycle
 from performance.milestone_7_7.framework import ContractError, JsonValue, canonical_bytes
 from preflight.milestone_7_7 import framework as topology_framework
-from preflight.milestone_7_7 import managed_binding_contracts, managed_binding_execution
+from preflight.milestone_7_7 import (
+    managed_binding_contracts,
+    managed_binding_execution,
+    target_resource_adoption,
+)
 from preflight.milestone_7_7.execution import _ProcessCapture
 from preflight.milestone_7_7.framework import (
     EXPECTED_ACCOUNT_COMMAND,
@@ -5420,6 +5423,11 @@ def test_fresh_pre_secret_resume_is_idempotent_and_skips_cleanup_recreation(
     monkeypatch.setattr(managed_binding_lifecycle, "_group_exists", lambda *_args: True)
     monkeypatch.setattr(
         managed_binding_lifecycle,
+        "_orphaned_temporary_key_vault_assignment",
+        lambda _subscription: None,
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
         "_compile_template",
         lambda path: path.write_text("{}", encoding="utf-8"),
     )
@@ -5513,6 +5521,11 @@ def test_exact_cleanup_only_recovery_seed_is_reconciled_before_staging(
     )
     monkeypatch.setattr(
         managed_binding_lifecycle,
+        "_orphaned_temporary_key_vault_assignment",
+        lambda _subscription: None,
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
         "_verify_recovered_cleanup_seed_state",
         lambda _subscription: ordered.append("seed-proved"),
     )
@@ -5594,6 +5607,11 @@ def test_staging_only_recovery_state_fails_before_any_deployment(
         managed_binding_lifecycle,
         "_group_exists",
         lambda _subscription, group: group == managed_binding_lifecycle.TARGET_GROUP,
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_orphaned_temporary_key_vault_assignment",
+        lambda _subscription: None,
     )
     monkeypatch.setattr(
         managed_binding_lifecycle,
@@ -6335,6 +6353,59 @@ def test_target_inventory_accepts_only_exact_managed_binding_identities(
         )
 
 
+def test_target_inventory_adopts_exact_post_bootstrap_database_graph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subscription_id = "opaque-subscription"
+    group_scope = (
+        f"/subscriptions/{subscription_id}/resourceGroups/"
+        f"{managed_binding_lifecycle.TARGET_GROUP}/providers"
+    )
+    expected = {
+        "microsoft.app/jobs/caj-mobius77-migration": "southcentralus",
+        ("microsoft.dbforpostgresql/flexibleservers/psql-mobius77-11564669"): "centralus",
+        ("microsoft.network/privatednszones/privatelink.postgres.database.azure.com"): "global",
+        (
+            "microsoft.network/privatednszones/"
+            "privatelink.postgres.database.azure.com/virtualnetworklinks/"
+            "link-mobius77-postgres"
+        ): "global",
+        (
+            "microsoft.network/privatednszones/"
+            "privatelink.postgres.database.azure.com/virtualnetworklinks/"
+            "link-mobius77-staging-postgres"
+        ): "global",
+        "microsoft.network/virtualnetworks/vnet-mobius77-postgres": "centralus",
+    }
+    rows: list[JsonValue] = []
+    for relative, location in expected.items():
+        parts = relative.split("/")
+        rows.append(
+            {
+                "id": f"{group_scope}/{relative}",
+                "location": location,
+                "type": "/".join((parts[0], *parts[1::2])),
+            }
+        )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_container_apps_private_dns_projection",
+        lambda *_args: ("private.example.invalid", "10.0.0.1"),
+    )
+    monkeypatch.setattr(
+        managed_binding_lifecycle,
+        "_run",
+        lambda *_args, **_kwargs: rows,
+    )
+
+    observed = managed_binding_lifecycle._resource_group_inventory(
+        subscription_id=subscription_id,
+        group=managed_binding_lifecycle.TARGET_GROUP,
+    )
+
+    assert observed == frozenset(expected)
+
+
 def _generation_four_scanner_foundation_inventory_rows() -> list[JsonValue]:
     scope = (
         f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}/resourceGroups/"
@@ -6514,7 +6585,7 @@ def test_pre_secret_role_inventory_requires_exact_managed_identity_matrix(
     principal_ids = {
         name: f"00000000-0000-0000-0000-{index:012d}"
         for index, name in enumerate(
-            sorted(managed_binding_lifecycle.MANAGED_BINDING_IDENTITY_NAMES), start=1
+            sorted(target_resource_adoption.MANAGED_BINDING_IDENTITY_NAMES), start=1
         )
     }
     contract = managed_binding_lifecycle.load_managed_binding_contract()
@@ -6583,7 +6654,7 @@ def test_pre_secret_role_inventory_requires_exact_managed_identity_matrix(
             "microsoft.containerregistry/registries/acrmobius7711564669",
             *(
                 "microsoft.managedidentity/userassignedidentities/" + name
-                for name in managed_binding_lifecycle.MANAGED_BINDING_IDENTITY_NAMES
+                for name in target_resource_adoption.MANAGED_BINDING_IDENTITY_NAMES
             ),
         }
     )
