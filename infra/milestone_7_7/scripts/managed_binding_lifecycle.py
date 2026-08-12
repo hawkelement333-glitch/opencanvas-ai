@@ -5556,6 +5556,16 @@ def _pre_secret(
     if not target_exists and infrastructure_exists:
         _fail("container-apps-infrastructure-group-collision")
 
+    infrastructure_tags_reconciled = False
+
+    def reconcile_infrastructure_tags() -> None:
+        stage = "container-apps-infrastructure-tag-reconciliation"
+        _mark_stage(state_path, state, stage)
+        _reconcile_container_apps_infrastructure_tags(
+            subscription_id=subscription_id, ledger=ledger, cleanup_at=cleanup_at
+        )
+        _mark_stage(state_path, state, stage, completed=True)
+
     with tempfile.TemporaryDirectory(prefix="mobius77-binding-") as directory:
         template = Path(directory) / "main.json"
         _mark_stage(state_path, state, "compile-template")
@@ -5563,6 +5573,8 @@ def _pre_secret(
         _mark_stage(state_path, state, "compile-template", completed=True)
 
         if target_exists:
+            reconcile_infrastructure_tags()
+            infrastructure_tags_reconciled = True
             _mark_stage(state_path, state, "pre-secret-reconciliation")
             _verify_preservable_pre_secret_state(
                 subscription_id=subscription_id,
@@ -5645,18 +5657,8 @@ def _pre_secret(
         )
         _mark_stage(state_path, state, PRE_SECRET_PRESERVABLE_STAGE, completed=True)
 
-    _mark_stage(state_path, state, "container-apps-infrastructure-tag-reconciliation")
-    _reconcile_container_apps_infrastructure_tags(
-        subscription_id=subscription_id,
-        ledger=ledger,
-        cleanup_at=cleanup_at,
-    )
-    _mark_stage(
-        state_path,
-        state,
-        "container-apps-infrastructure-tag-reconciliation",
-        completed=True,
-    )
+    if not infrastructure_tags_reconciled:
+        reconcile_infrastructure_tags()
 
     _mark_stage(state_path, state, "pre-secret-verification")
     _verify_preservable_pre_secret_state(

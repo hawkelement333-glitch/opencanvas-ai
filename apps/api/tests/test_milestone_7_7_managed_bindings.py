@@ -5478,11 +5478,11 @@ def test_fresh_pre_secret_resume_is_idempotent_and_skips_cleanup_recreation(
 
     assert deployed == ["pre-secret", "pre-secret"]
     assert reconciled == [
-        "proved",
         "tags-reconciled",
         "proved",
         "proved",
         "tags-reconciled",
+        "proved",
         "proved",
     ]
 
