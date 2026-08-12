@@ -85,8 +85,14 @@ TOMBSTONED_GENERATION_FOUR_COMPLETION_EXTENSION_BINDING_EPOCH_UTC: Final = (
 TOMBSTONED_GENERATION_FOUR_COMPLETION_EXTENSION_BINDING_ID: Final = (
     "e830f957-0b9b-5859-87ec-e0ac8ffc59c3"
 )
-ACTIVE_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-12T22:15:00Z"
-ACTIVE_CLEANUP_BINDING_ID: Final = "708810d2-d718-55c8-aac6-3baf75f18364"
+TOMBSTONED_POST_V7_FINAL_COMPLETION_EXTENSION_BINDING_EPOCH_UTC: Final = (
+    "2026-08-12T22:15:00Z"
+)
+TOMBSTONED_POST_V7_FINAL_COMPLETION_EXTENSION_BINDING_ID: Final = (
+    "708810d2-d718-55c8-aac6-3baf75f18364"
+)
+ACTIVE_CLEANUP_BINDING_EPOCH_UTC: Final = "2026-08-13T06:30:00Z"
+ACTIVE_CLEANUP_BINDING_ID: Final = "6a1caaa1-3b61-50e2-9ed6-44abb4a3a87a"
 CLEANUP_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup-recovery"
 CORRUPTED_CLEANUP_AUTOMATION_ACCOUNT: Final = "aa-mobius77-cleanup"
 CLEANUP_SCHEDULE: Final = "schedule-mobius77-cleanup-g4"
@@ -638,6 +644,20 @@ def validate_managed_binding_contract(value: JsonValue) -> dict[str, JsonValue]:
                 "deletionStatus": "accepted",
                 "evidenceIntegritySha256": (
                     "6aaa29bf4ef7f67fd7c3f7f5ed50e589f41258b3b026a9d58ab71a6180b883d8"
+                ),
+            },
+            {
+                "bindingContractVersion": CLEANUP_BINDING_CONTRACT_VERSION,
+                "bindingGeneration": 4,
+                "bindingId": (
+                    TOMBSTONED_POST_V7_FINAL_COMPLETION_EXTENSION_BINDING_ID
+                ),
+                "directGetStatus": "not-found",
+                "listVisibility": "absent",
+                "recreationStatus": "not-attempted",
+                "deletionStatus": "accepted",
+                "evidenceIntegritySha256": (
+                    "7e67d66b0d46834d1e6fa37ba9a2b16bd3a0355beef4cdf53fbc78a95fc94be1"
                 ),
             },
         ],

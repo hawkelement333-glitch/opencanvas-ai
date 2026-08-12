@@ -96,8 +96,8 @@
         "corruptedAutomationAccount": { "const": "aa-mobius77-cleanup" },
         "tombstonedBindingIds": {
           "type": "array",
-          "minItems": 12,
-          "maxItems": 12,
+          "minItems": 13,
+          "maxItems": 13,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -134,7 +134,8 @@
                   "12f27fa6-2cd5-548d-be20-c6e03a5e19d3",
                   "34b1d170-652b-505a-9cc1-b8177b872ff0",
                   "57e1b300-a91a-5629-995e-d587fd0e0cdb",
-                  "e830f957-0b9b-5859-87ec-e0ac8ffc59c3"
+                  "e830f957-0b9b-5859-87ec-e0ac8ffc59c3",
+                  "708810d2-d718-55c8-aac6-3baf75f18364"
                 ]
               },
               "directGetStatus": { "const": "not-found" },
@@ -159,7 +160,7 @@
           "const": "rg-solarplexus-mobius-77-staging"
         },
         "subscriptionFingerprint": { "$ref": "#/$defs/sha256" },
-        "deadlineUtc": { "const": "2026-08-12T22:15:00Z" },
+        "deadlineUtc": { "const": "2026-08-13T06:30:00Z" },
         "launchGraceSeconds": { "const": 1800 },
         "cleanupContributorRoleDefinitionId": {
           "const": "b24988ac-6180-42a0-ab88-20f7382dd24c"

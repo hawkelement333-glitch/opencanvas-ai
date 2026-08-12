@@ -38,6 +38,8 @@ from preflight.milestone_7_7.managed_binding_contracts import (
     TOMBSTONED_GENERATION_FOUR_DEADLINE_EXTENSION_BINDING_ID,
     TOMBSTONED_GENERATION_THREE_CLEANUP_BINDING_ID,
     TOMBSTONED_POST_FIRED_CLEANUP_BINDING_ID,
+    TOMBSTONED_POST_V7_FINAL_COMPLETION_EXTENSION_BINDING_EPOCH_UTC,
+    TOMBSTONED_POST_V7_FINAL_COMPLETION_EXTENSION_BINDING_ID,
     TOMBSTONED_SECOND_DEADLINE_RECOVERY_BINDING_ID,
     TOMBSTONED_THIRD_DEADLINE_RECOVERY_BINDING_ID,
     cleanup_binding_id_for_subscription,
@@ -118,6 +120,12 @@ POST_V7_FINAL_COMPLETION_EXTENSION_AUTHORIZATION_VERSION: Final = (
 POST_V7_FINAL_COMPLETION_EXTENSION_AUTHORIZATION_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery/v8\0"
 )
+CLEANUP_RECOVERY_V9_AUTHORIZATION_VERSION: Final = (
+    "mobius.milestone-7.7.cleanup-control-deadline-recovery.v9"
+)
+CLEANUP_RECOVERY_V9_AUTHORIZATION_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery/v9\0"
+)
 DEADLINE_RECOVERY_OBSERVED_AZURE_UTC: Final = "2026-08-06T12:23:26Z"
 DEADLINE_RECOVERY_DEADLINE_UTC: Final = "2026-08-06T18:30:00Z"
 DEADLINE_RECOVERY_DERIVATION_RULE: Final = (
@@ -179,6 +187,15 @@ POST_V7_FINAL_COMPLETION_EXTENSION_ACTION: Final = (
     "extend-generation-four-cleanup-for-final-live-completion"
 )
 POST_V7_FINAL_COMPLETION_MINIMUM_REMAINING_SECONDS: Final = 30_000
+CLEANUP_RECOVERY_V9_OBSERVED_AZURE_UTC: Final = "2026-08-12T20:23:35Z"
+CLEANUP_RECOVERY_V9_DEADLINE_UTC: Final = "2026-08-13T06:30:00Z"
+CLEANUP_RECOVERY_V9_DERIVATION_RULE: Final = (
+    "next-15-minute-utc-boundary-at-least-10-hours-after-observed"
+)
+CLEANUP_RECOVERY_V9_ACTION: Final = (
+    "extend-generation-four-cleanup-for-post-secret-soak-completion"
+)
+CLEANUP_RECOVERY_V9_MINIMUM_REMAINING_SECONDS: Final = 30_000
 POST_FIRED_RECOVERY_PURPOSE: Final = "POST_FIRED_CLEANUP_RECOVERY_AND_REARM"
 POST_FIRED_PRIOR_JOB_NAME: Final = "3a0c2ace-79bc-4120-90b8-00bc8b6ff46d"
 POST_FIRED_PRIOR_JOB_STATUS: Final = "Failed"
@@ -608,6 +625,32 @@ def _deadline_recovery_profile(authorization_version: str) -> _DeadlineRecoveryP
             ),
             prior_binding_id=(
                 TOMBSTONED_GENERATION_FOUR_COMPLETION_EXTENSION_BINDING_ID
+            ),
+            binding_id=(
+                TOMBSTONED_POST_V7_FINAL_COMPLETION_EXTENSION_BINDING_ID
+            ),
+            prior_runbook_content_sha256=(
+                POST_V7_FINAL_COMPLETION_EXTENSION_PRIOR_RUNBOOK_CONTENT_SHA256
+            ),
+            schedule=CLEANUP_SCHEDULE,
+            binding_contract_version=CLEANUP_BINDING_CONTRACT_VERSION,
+            corrupted_schedule=SCHEDULE,
+            post_fired=False,
+        )
+    if authorization_version == CLEANUP_RECOVERY_V9_AUTHORIZATION_VERSION:
+        return _DeadlineRecoveryProfile(
+            authorization_version=authorization_version,
+            authorization_domain=CLEANUP_RECOVERY_V9_AUTHORIZATION_DOMAIN,
+            observed_azure_utc=CLEANUP_RECOVERY_V9_OBSERVED_AZURE_UTC,
+            deadline_utc=CLEANUP_RECOVERY_V9_DEADLINE_UTC,
+            derivation_rule=CLEANUP_RECOVERY_V9_DERIVATION_RULE,
+            minimum_lead_hours=10,
+            recovery_action=CLEANUP_RECOVERY_V9_ACTION,
+            prior_deadline_utc=(
+                TOMBSTONED_POST_V7_FINAL_COMPLETION_EXTENSION_BINDING_EPOCH_UTC
+            ),
+            prior_binding_id=(
+                TOMBSTONED_POST_V7_FINAL_COMPLETION_EXTENSION_BINDING_ID
             ),
             binding_id=ACTIVE_CLEANUP_BINDING_ID,
             prior_runbook_content_sha256=(
@@ -1810,11 +1853,17 @@ def validate_cleanup_control_deadline_recovery_authorization(
         raise CleanupControlRecoveryError(
             "cleanup-deadline-recovery-authorization-expired"
         )
-    if (
-        authorization.authorizationVersion
+    minimum_remaining_seconds = (
+        CLEANUP_RECOVERY_V9_MINIMUM_REMAINING_SECONDS
+        if authorization.authorizationVersion == CLEANUP_RECOVERY_V9_AUTHORIZATION_VERSION
+        else POST_V7_FINAL_COMPLETION_MINIMUM_REMAINING_SECONDS
+        if authorization.authorizationVersion
         == POST_V7_FINAL_COMPLETION_EXTENSION_AUTHORIZATION_VERSION
-        and (deadline - current).total_seconds()
-        < POST_V7_FINAL_COMPLETION_MINIMUM_REMAINING_SECONDS
+        else None
+    )
+    if (
+        minimum_remaining_seconds is not None
+        and (deadline - current).total_seconds() < minimum_remaining_seconds
     ):
         raise CleanupControlRecoveryError(
             "cleanup-deadline-recovery-completion-window-insufficient"
@@ -2105,6 +2154,7 @@ def cleanup_control_recovery_authorization_from_mapping(
         GENERATION_FOUR_DEADLINE_EXTENSION_AUTHORIZATION_VERSION,
         GENERATION_FOUR_COMPLETION_EXTENSION_AUTHORIZATION_VERSION,
         POST_V7_FINAL_COMPLETION_EXTENSION_AUTHORIZATION_VERSION,
+        CLEANUP_RECOVERY_V9_AUTHORIZATION_VERSION,
     }:
         return cleanup_control_deadline_recovery_authorization_from_mapping(value)
     if not isinstance(value, dict):

@@ -1213,6 +1213,7 @@ def test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path():
             "57e1b300-a91a-5629-995e-d587fd0e0cdb",
             "e830f957-0b9b-5859-87ec-e0ac8ffc59c3",
             "708810d2-d718-55c8-aac6-3baf75f18364",
+            "6a1caaa1-3b61-50e2-9ed6-44abb4a3a87a",
             "d83b4107-54e0-57a4-b650-fe0b556132d2",
             "ecdbb32f-9134-5697-85f9-d569ba57454b",
             "158cac88-5679-5804-9f4d-854520bbb635",

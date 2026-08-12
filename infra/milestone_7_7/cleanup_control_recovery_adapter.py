@@ -24,6 +24,7 @@ from performance.milestone_7_7.framework import (
 )
 from preflight.milestone_7_7.cleanup_control_recovery import (
     CLEANUP_GROUP,
+    CLEANUP_RECOVERY_V9_AUTHORIZATION_VERSION,
     CORRUPTED_AUTOMATION_ACCOUNT,
     CORRUPTED_RUNBOOK_CONTENT_SHA256,
     DEADLINE_EXTENSION_AUTHORIZATION_VERSION,
@@ -88,6 +89,12 @@ POST_V7_FINAL_COMPLETION_EXTENSION_RECEIPT_VERSION: Final = (
 )
 POST_V7_FINAL_COMPLETION_EXTENSION_RECEIPT_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery-receipt/v6\0"
+)
+CLEANUP_RECOVERY_V9_RECEIPT_VERSION: Final = (
+    "mobius.milestone-7.7.cleanup-control-deadline-recovery-receipt.v7"
+)
+CLEANUP_RECOVERY_V9_RECEIPT_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery-receipt/v7\0"
 )
 POST_CLEANUP_REPROVISION_RECEIPT_VERSION: Final = (
     "mobius.milestone-7.7.cleanup-control-reprovision-receipt.v2"
@@ -184,7 +191,12 @@ def _claim_deadline_recovery_authorization(
     directory = _outside_repository(receipt_directory)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / DEADLINE_RECOVERY_RECEIPT_FILE
-    if (
+    if authorization.authorizationVersion == CLEANUP_RECOVERY_V9_AUTHORIZATION_VERSION:
+        receipt_version, receipt_domain = (
+            CLEANUP_RECOVERY_V9_RECEIPT_VERSION,
+            CLEANUP_RECOVERY_V9_RECEIPT_DOMAIN,
+        )
+    elif (
         authorization.authorizationVersion
         == POST_V7_FINAL_COMPLETION_EXTENSION_AUTHORIZATION_VERSION
     ):
@@ -2534,9 +2546,17 @@ class ProductionCleanupControlRecoveryAdapter:
         ):
             _fail("cleanup-deadline-recovery-target-resource-group-missing")
 
+        expected_cost = EXPECTED_COST_USD_CENTS
+        maximum_cost = authorization.costCeilingUsdCents
+        if authorization.authorizationVersion == CLEANUP_RECOVERY_V9_AUTHORIZATION_VERSION:
+            expected_cost, maximum_cost = lifecycle._verified_cost()
+            if maximum_cost > authorization.costCeilingUsdCents:
+                _fail("cleanup-deadline-recovery-cost-ceiling-exceeded")
+
         contract = load_managed_binding_contract()
         _validate_contract_mapping(authorization, contract)
         generation_four_extension_versions = {
+            CLEANUP_RECOVERY_V9_AUTHORIZATION_VERSION,
             GENERATION_FOUR_DEADLINE_EXTENSION_AUTHORIZATION_VERSION,
             GENERATION_FOUR_COMPLETION_EXTENSION_AUTHORIZATION_VERSION,
             POST_V7_FINAL_COMPLETION_EXTENSION_AUTHORIZATION_VERSION,
@@ -2630,8 +2650,8 @@ class ProductionCleanupControlRecoveryAdapter:
                     ledger=deployment_binding,
                     stage="cleanup-job-binding",
                     cleanup_at=cleanup_at,
-                    expected_cost=EXPECTED_COST_USD_CENTS,
-                    maximum_cost=authorization.costCeilingUsdCents,
+                    expected_cost=expected_cost,
+                    maximum_cost=maximum_cost,
                 )
             except lifecycle.AzureCommandError:
                 # Adopt only an exact binding after an ambiguous deployment.
@@ -2702,7 +2722,7 @@ class ProductionCleanupControlRecoveryAdapter:
             "deadline-observed-at-utc": authorization.deadlineObservedAtUtc,
             "deadline-utc": authorization.deadlineUtc,
             "marker": "CLEANUP_EXECUTABLE_AND_ARMED",
-            "maximum-plausible-usd-cents": authorization.costCeilingUsdCents,
+            "maximum-plausible-usd-cents": maximum_cost,
             "principal-fingerprint-sha256": hashlib.sha256(
                 proved_principal_id.casefold().encode("ascii")
             ).hexdigest(),
