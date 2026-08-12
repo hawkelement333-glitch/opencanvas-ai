@@ -4707,6 +4707,48 @@ def test_container_apps_infrastructure_reconciles_only_lower_prior_cost_ceiling(
             )
 
 
+def test_container_apps_infrastructure_accepts_exact_prior_scanner_proof_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prior_tags = _test_recovered_cleanup_tags()
+    prior_binding = "d" * 64
+    prior_tags.update(
+        {
+            "aca-managed-env-id": (
+                f"/subscriptions/{SYNTHETIC_SUBSCRIPTION}/resourceGroups/"
+                f"{managed_binding_lifecycle.TARGET_GROUP}/providers/Microsoft.App/"
+                "managedEnvironments/cae-mobius77-staging"
+            ),
+            "mobius-cleanup-binding-sha256": prior_binding,
+            "mobius-expires-at-utc": "2026-08-02T07:00:00Z",
+            "mobius-run-id": f"scanner-bridge-scanner-proof-{prior_binding[:24]}",
+            "mobius-source-commit": "d" * 40,
+        }
+    )
+
+    assert (
+        _verify_container_apps_infrastructure_fixture(
+            monkeypatch,
+            group_tags=prior_tags,
+            changed_inputs="infra/milestone_7_7/main.bicep",
+            allow_prior_binding_with_changed_inputs=True,
+        )
+        == 1
+    )
+
+    prior_tags["mobius-run-id"] = f"scanner-bridge-scanner-proof-{'e' * 24}"
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="container-apps-infrastructure-group-drift",
+    ):
+        _verify_container_apps_infrastructure_fixture(
+            monkeypatch,
+            group_tags=prior_tags,
+            changed_inputs="infra/milestone_7_7/main.bicep",
+            allow_prior_binding_with_changed_inputs=True,
+        )
+
+
 def _reconcile_container_apps_infrastructure_tags_fixture(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -4776,6 +4818,18 @@ def test_container_apps_infrastructure_tags_reconcile_exact_prior_binding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _reconcile_container_apps_infrastructure_tags_fixture(monkeypatch)
+    assert sum(argv[1:3] == ("group", "update") for argv in calls) == 1
+
+
+def test_container_apps_infrastructure_tags_reconcile_exact_scanner_proof_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _reconcile_container_apps_infrastructure_tags_fixture(
+        monkeypatch,
+        mutate=lambda tags: tags.update(
+            {"mobius-run-id": f"scanner-bridge-scanner-proof-{'a' * 24}"}
+        ),
+    )
     assert sum(argv[1:3] == ("group", "update") for argv in calls) == 1
 
 

@@ -2138,6 +2138,27 @@ def _matches_container_apps_infrastructure_tags(
     )
 
 
+def _reconcilable_container_apps_infrastructure_run_id(
+    observed_run_id: object,
+    expected_run_id: object,
+    observed_binding: object,
+) -> bool:
+    if (
+        not isinstance(observed_run_id, str)
+        or not isinstance(expected_run_id, str)
+        or re.fullmatch(r"[A-Za-z0-9._-]{1,128}", observed_run_id) is None
+        or re.fullmatch(r"[A-Za-z0-9._-]{1,128}", expected_run_id) is None
+    ):
+        return False
+    if observed_run_id == expected_run_id:
+        return True
+    return (
+        isinstance(observed_binding, str)
+        and HEX_SHA256.fullmatch(observed_binding) is not None
+        and observed_run_id == f"scanner-bridge-scanner-proof-{observed_binding[:24]}"
+    )
+
+
 def _container_apps_infrastructure_tags_reconcilable(
     observed: JsonValue,
     expected: Mapping[str, str],
@@ -2182,11 +2203,10 @@ def _container_apps_infrastructure_tags_reconcilable(
         or int(observed_cost) > int(expected_cost)
     ):
         return False
-    observed_run_id = observed.get("mobius-run-id")
-    if (
-        not isinstance(observed_run_id, str)
-        or observed_run_id != expected.get("mobius-run-id")
-        or re.fullmatch(r"[A-Za-z0-9._-]{1,128}", observed_run_id) is None
+    if not _reconcilable_container_apps_infrastructure_run_id(
+        observed.get("mobius-run-id"),
+        expected.get("mobius-run-id"),
+        observed.get("mobius-cleanup-binding-sha256"),
     ):
         return False
     observed_source = observed.get("mobius-source-commit")
@@ -2283,11 +2303,10 @@ def _reconcile_container_apps_infrastructure_tags(
         for key in ("mobius-cleanup-binding-sha256", "mobius-manifest-sha256")
     ):
         _fail("container-apps-infrastructure-tag-reconciliation-denied")
-    observed_run_id = observed.get("mobius-run-id")
-    if (
-        not isinstance(observed_run_id, str)
-        or observed_run_id != expected.get("mobius-run-id")
-        or re.fullmatch(r"[A-Za-z0-9._-]{1,128}", observed_run_id) is None
+    if not _reconcilable_container_apps_infrastructure_run_id(
+        observed.get("mobius-run-id"),
+        expected.get("mobius-run-id"),
+        observed.get("mobius-cleanup-binding-sha256"),
     ):
         _fail("container-apps-infrastructure-tag-reconciliation-denied")
     observed_source = observed.get("mobius-source-commit")
