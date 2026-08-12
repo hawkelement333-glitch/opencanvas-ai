@@ -4761,6 +4761,9 @@ def _reconcile_container_apps_infrastructure_tags_fixture(
     *,
     mutate: Callable[[dict[str, str]], None] | None = None,
     update_matches: bool = True,
+    ancestor: bool = True,
+    amended_input_diff: str = "",
+    amended_parent_matches: bool = True,
 ) -> list[tuple[str, ...]]:
     subscription = SYNTHETIC_SUBSCRIPTION
     group_scope = (
@@ -4795,6 +4798,8 @@ def _reconcile_container_apps_infrastructure_tags_fixture(
     def fake_run(argv: tuple[str, ...], **_kwargs: object) -> JsonValue:
         calls.append(argv)
         if argv[0:3] == ("git", "merge-base", "--is-ancestor"):
+            if not ancestor:
+                raise managed_binding_lifecycle.LifecycleError("not-an-ancestor")
             return None
         if argv[1:3] == ("group", "show"):
             return {
@@ -4811,6 +4816,15 @@ def _reconcile_container_apps_infrastructure_tags_fixture(
         raise AssertionError(argv)
 
     monkeypatch.setattr(managed_binding_lifecycle, "_run", fake_run)
+
+    def fake_run_text(argv: tuple[str, ...]) -> str:
+        if argv[0:3] == ("git", "diff", "--name-only"):
+            return amended_input_diff
+        if argv[0:2] == ("git", "rev-parse") and not amended_parent_matches:
+            return "8" * 40
+        return "7" * 40
+
+    monkeypatch.setattr(managed_binding_lifecycle, "_run_text", fake_run_text)
     monkeypatch.setattr(managed_binding_lifecycle, "_lifecycle_tags", lambda **_kwargs: expected)
     monkeypatch.setattr(managed_binding_lifecycle, "_verified_cost", lambda: (1, 2))
     managed_binding_lifecycle._reconcile_container_apps_infrastructure_tags(
@@ -4826,6 +4840,41 @@ def test_container_apps_infrastructure_tags_reconcile_exact_prior_binding(
 ) -> None:
     calls = _reconcile_container_apps_infrastructure_tags_fixture(monkeypatch)
     assert sum(argv[1:3] == ("group", "update") for argv in calls) == 1
+
+
+def test_container_apps_infrastructure_tags_reconcile_amended_sibling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _reconcile_container_apps_infrastructure_tags_fixture(monkeypatch, ancestor=False)
+    assert sum(argv[1:3] == ("group", "update") for argv in calls) == 1
+
+
+def test_container_apps_infrastructure_tags_reject_amended_sibling_with_input_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="container-apps-infrastructure-tag-reconciliation-denied",
+    ):
+        _reconcile_container_apps_infrastructure_tags_fixture(
+            monkeypatch,
+            ancestor=False,
+            amended_input_diff="infra/milestone_7_7/main.bicep",
+        )
+
+
+def test_container_apps_infrastructure_tags_reject_unrelated_equal_input_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(
+        managed_binding_lifecycle.LifecycleError,
+        match="container-apps-infrastructure-tag-reconciliation-denied",
+    ):
+        _reconcile_container_apps_infrastructure_tags_fixture(
+            monkeypatch,
+            ancestor=False,
+            amended_parent_matches=False,
+        )
 
 
 def test_container_apps_infrastructure_tags_reconcile_exact_scanner_proof_binding(

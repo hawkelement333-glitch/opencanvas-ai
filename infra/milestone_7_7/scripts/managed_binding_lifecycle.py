@@ -2269,7 +2269,16 @@ def _reconcile_container_apps_infrastructure_tags(
     try:
         _run(("git", "merge-base", "--is-ancestor", observed_source, expected_source))
     except LifecycleError:
-        _fail("container-apps-infrastructure-tag-reconciliation-denied")
+        try:
+            amended = _run_text(("git", "merge-base", observed_source, expected_source)) == _run_text(
+                ("git", "rev-parse", f"{observed_source}^")
+            ) and not _run_text(
+                ("git", "diff", "--name-only", observed_source, expected_source, "--", *CONTAINER_APPS_INFRASTRUCTURE_INPUTS)
+            )
+        except LifecycleError:
+            amended = False
+        if not amended:
+            _fail("container-apps-infrastructure-tag-reconciliation-denied")
     observed_expiry = observed.get("mobius-expires-at-utc")
     if not isinstance(observed_expiry, str):
         _fail("container-apps-infrastructure-tag-reconciliation-denied")
