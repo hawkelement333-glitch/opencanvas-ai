@@ -13,10 +13,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, NoReturn
 
-from infra.milestone_7_7.scripts import managed_binding_lifecycle as lifecycle
 from infra.milestone_7_7.scanner_bridge_recovery_adapter import (
     reconcile_reprovision_scanner_foundation,
 )
+from infra.milestone_7_7.scripts import managed_binding_lifecycle as lifecycle
 from performance.milestone_7_7.framework import (
     JsonValue,
     canonical_bytes,
@@ -30,6 +30,7 @@ from preflight.milestone_7_7.cleanup_control_recovery import (
     GENERATION_FOUR_COMPLETION_EXTENSION_AUTHORIZATION_VERSION,
     GENERATION_FOUR_DEADLINE_EXTENSION_AUTHORIZATION_VERSION,
     POST_FIRED_RECOVERY_AUTHORIZATION_VERSION,
+    POST_V7_FINAL_COMPLETION_EXTENSION_AUTHORIZATION_VERSION,
     SCHEDULE,
     CleanupControlDeadlineRecoveryAuthorization,
     CleanupControlRecoveryAuthorization,
@@ -81,6 +82,12 @@ GENERATION_FOUR_COMPLETION_EXTENSION_RECEIPT_VERSION: Final = (
 )
 GENERATION_FOUR_COMPLETION_EXTENSION_RECEIPT_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery-receipt/v5\0"
+)
+POST_V7_FINAL_COMPLETION_EXTENSION_RECEIPT_VERSION: Final = (
+    "mobius.milestone-7.7.cleanup-control-deadline-recovery-receipt.v6"
+)
+POST_V7_FINAL_COMPLETION_EXTENSION_RECEIPT_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/cleanup-control-deadline-recovery-receipt/v6\0"
 )
 POST_CLEANUP_REPROVISION_RECEIPT_VERSION: Final = (
     "mobius.milestone-7.7.cleanup-control-reprovision-receipt.v2"
@@ -178,6 +185,14 @@ def _claim_deadline_recovery_authorization(
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / DEADLINE_RECOVERY_RECEIPT_FILE
     if (
+        authorization.authorizationVersion
+        == POST_V7_FINAL_COMPLETION_EXTENSION_AUTHORIZATION_VERSION
+    ):
+        receipt_version, receipt_domain = (
+            POST_V7_FINAL_COMPLETION_EXTENSION_RECEIPT_VERSION,
+            POST_V7_FINAL_COMPLETION_EXTENSION_RECEIPT_DOMAIN,
+        )
+    elif (
         authorization.authorizationVersion
         == GENERATION_FOUR_COMPLETION_EXTENSION_AUTHORIZATION_VERSION
     ):
@@ -2524,6 +2539,7 @@ class ProductionCleanupControlRecoveryAdapter:
         generation_four_extension_versions = {
             GENERATION_FOUR_DEADLINE_EXTENSION_AUTHORIZATION_VERSION,
             GENERATION_FOUR_COMPLETION_EXTENSION_AUTHORIZATION_VERSION,
+            POST_V7_FINAL_COMPLETION_EXTENSION_AUTHORIZATION_VERSION,
         }
         corrupted_authorization = (
             replace(authorization, schedule=SCHEDULE)

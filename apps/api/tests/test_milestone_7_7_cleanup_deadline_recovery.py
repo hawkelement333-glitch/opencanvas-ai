@@ -49,6 +49,10 @@ from preflight.milestone_7_7.cleanup_control_recovery import (
     POST_FIRED_RECOVERY_OBSERVED_AZURE_UTC,
     POST_FIRED_RECOVERY_PRIOR_RUNBOOK_CONTENT_SHA256,
     POST_FIRED_RECOVERY_PURPOSE,
+    POST_V7_FINAL_COMPLETION_EXTENSION_AUTHORIZATION_VERSION,
+    POST_V7_FINAL_COMPLETION_EXTENSION_DEADLINE_UTC,
+    POST_V7_FINAL_COMPLETION_EXTENSION_OBSERVED_AZURE_UTC,
+    POST_V7_FINAL_COMPLETION_EXTENSION_PRIOR_RUNBOOK_CONTENT_SHA256,
     CleanupControlDeadlineRecoveryAuthorization,
     CleanupControlRecoveryError,
     build_cleanup_control_deadline_recovery_authorization,
@@ -89,6 +93,8 @@ GENERATION_FOUR_EXTENSION_OBSERVED = datetime(2026, 8, 11, 1, 30, tzinfo=UTC)
 GENERATION_FOUR_EXTENSION_NOW = datetime(2026, 8, 11, 1, 35, tzinfo=UTC)
 GENERATION_FOUR_COMPLETION_OBSERVED = datetime(2026, 8, 11, 14, 2, 42, tzinfo=UTC)
 GENERATION_FOUR_COMPLETION_NOW = datetime(2026, 8, 11, 14, 10, tzinfo=UTC)
+POST_V7_FINAL_COMPLETION_OBSERVED = datetime(2026, 8, 12, 4, 3, 19, tzinfo=UTC)
+POST_V7_FINAL_COMPLETION_NOW = datetime(2026, 8, 12, 4, 10, tzinfo=UTC)
 
 
 def _runbook_sha256() -> str:
@@ -247,6 +253,28 @@ def _generation_four_completion_authorization() -> CleanupControlDeadlineRecover
     )
 
 
+def _post_v7_final_completion_authorization() -> CleanupControlDeadlineRecoveryAuthorization:
+    return build_cleanup_control_deadline_recovery_authorization(
+        repository_head="1" * 40,
+        subscription_id=SUBSCRIPTION_ID,
+        cleanup_resource_group_id=CLEANUP_GROUP,
+        corrupted_automation_account_id=f"{AUTOMATION_PREFIX}/aa-mobius77-cleanup",
+        corrupted_principal_id="be0e6b8d-f742-4c8f-8df1-9f302559a6c8",
+        corrupted_role_assignment_id=CORRUPTED_ASSIGNMENT_ID,
+        replacement_automation_account_id=(f"{AUTOMATION_PREFIX}/aa-mobius77-cleanup-recovery"),
+        replacement_principal_id="a47789c6-b8eb-40a1-898a-517a52d60a86",
+        replacement_role_assignment_id=REPLACEMENT_ASSIGNMENT_ID,
+        replacement_location="northeurope",
+        target_resource_group_id=TARGET_GROUP,
+        prior_runbook_content_sha256=(
+            POST_V7_FINAL_COMPLETION_EXTENSION_PRIOR_RUNBOOK_CONTENT_SHA256
+        ),
+        runbook_content_sha256=_runbook_sha256(),
+        observed_azure_utc=POST_V7_FINAL_COMPLETION_OBSERVED,
+        authorization_version=(POST_V7_FINAL_COMPLETION_EXTENSION_AUTHORIZATION_VERSION),
+    )
+
+
 def _resign(
     authorization: CleanupControlDeadlineRecoveryAuthorization,
 ) -> CleanupControlDeadlineRecoveryAuthorization:
@@ -270,6 +298,7 @@ def _final_inventory(
         in {
             GENERATION_FOUR_DEADLINE_EXTENSION_AUTHORIZATION_VERSION,
             GENERATION_FOUR_COMPLETION_EXTENSION_AUTHORIZATION_VERSION,
+            POST_V7_FINAL_COMPLETION_EXTENSION_AUTHORIZATION_VERSION,
         }
         else authorization.schedule
     )
@@ -562,6 +591,190 @@ def test_generation_four_completion_extension_executes_one_exact_transition(
     assert receipt["receiptVersion"] == (
         adapter_module.GENERATION_FOUR_COMPLETION_EXTENSION_RECEIPT_VERSION
     )
+
+
+def test_post_v7_contract_preserves_v7_and_binds_exact_successor(
+    tmp_path: Path,
+) -> None:
+    predecessor = _generation_four_completion_authorization()
+    authorization = _post_v7_final_completion_authorization()
+    path = tmp_path / "post-v7-final-completion-extension.json"
+    write_cleanup_control_recovery_authorization(path, authorization)
+
+    assert load_cleanup_control_recovery_authorization(path) == authorization
+    assert predecessor.authorizationVersion == (
+        GENERATION_FOUR_COMPLETION_EXTENSION_AUTHORIZATION_VERSION
+    )
+    assert predecessor.deadlineUtc == "2026-08-12T08:15:00Z"
+    assert predecessor.bindingId == "e830f957-0b9b-5859-87ec-e0ac8ffc59c3"
+    assert authorization.authorizationVersion == (
+        "mobius.milestone-7.7.cleanup-control-deadline-recovery.v8"
+    )
+    assert authorization.priorDeadlineUtc == predecessor.deadlineUtc
+    assert authorization.priorBindingId == predecessor.bindingId
+    assert authorization.bindingId == "708810d2-d718-55c8-aac6-3baf75f18364"
+    assert authorization.deadlineUtc == POST_V7_FINAL_COMPLETION_EXTENSION_DEADLINE_UTC
+    assert authorization.schedule == "schedule-mobius77-cleanup-g4"
+    assert authorization.bindingContractVersion == "m7.7-automation-cleanup-binding-v4"
+    assert POST_V7_FINAL_COMPLETION_EXTENSION_OBSERVED_AZURE_UTC == ("2026-08-12T04:03:19Z")
+    assert derive_cleanup_control_recovery_deadline(
+        POST_V7_FINAL_COMPLETION_OBSERVED,
+        minimum_lead_hours=18,
+    ) == datetime(2026, 8, 12, 22, 15, tzinfo=UTC)
+
+
+def test_v7_receipt_remains_replay_denied_after_v8_is_introduced(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    authorization = _generation_four_completion_authorization()
+    _install_execution_fakes(monkeypatch, authorization)
+    adapter = ProductionCleanupControlRecoveryAdapter(clock=lambda: GENERATION_FOUR_COMPLETION_NOW)
+    adapter.execute_deadline_recovery(
+        authorization=authorization,
+        receipt_directory=tmp_path,
+        expected_repository_head="f" * 40,
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_cleanup_resource_group_inventory",
+        lambda _subscription: _final_inventory(authorization),
+    )
+
+    with pytest.raises(
+        CleanupControlRecoveryExecutionError,
+        match="cleanup-deadline-recovery-authorization-already-consumed",
+    ):
+        adapter.execute_deadline_recovery(
+            authorization=authorization,
+            receipt_directory=tmp_path,
+            expected_repository_head="f" * 40,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("repositoryHead", "2" * 40),
+        ("priorDeadlineUtc", "2026-08-12T08:30:00Z"),
+        ("priorBindingId", "57e1b300-a91a-5629-995e-d587fd0e0cdb"),
+        ("bindingId", "e830f957-0b9b-5859-87ec-e0ac8ffc59c3"),
+        ("schedule", "schedule-mobius77-cleanup"),
+        ("replacementAutomationAccount", "other-account"),
+        ("targetResourceGroupId", f"{SUBSCRIPTION}/resourceGroups/other"),
+        ("roleDefinitionId", "00000000-0000-0000-0000-000000000000"),
+        ("roleScope", f"{SUBSCRIPTION}/resourceGroups/other"),
+        ("costCeilingUsdCents", 24_999),
+        ("deadlineUtc", "2026-08-12T22:30:00Z"),
+    ],
+)
+def test_post_v7_contract_rejects_head_predecessor_scope_cost_or_deadline_drift(
+    field: str,
+    value: object,
+) -> None:
+    authorization = _resign(replace(_post_v7_final_completion_authorization(), **{field: value}))
+
+    with pytest.raises(
+        CleanupControlRecoveryError,
+        match="cleanup-deadline-recovery-authorization-scope-invalid",
+    ):
+        validate_cleanup_control_deadline_recovery_authorization(
+            authorization,
+            expected_repository_head="1" * 40,
+            now_utc=POST_V7_FINAL_COMPLETION_NOW,
+        )
+
+
+def test_post_v7_contract_rejects_insufficient_completion_headroom() -> None:
+    authorization = _post_v7_final_completion_authorization()
+
+    with pytest.raises(
+        CleanupControlRecoveryError,
+        match="cleanup-deadline-recovery-completion-window-insufficient",
+    ):
+        validate_cleanup_control_deadline_recovery_authorization(
+            authorization,
+            expected_repository_head="1" * 40,
+            now_utc=datetime(2026, 8, 12, 14, 0, 1, tzinfo=UTC),
+        )
+
+
+def test_post_v7_contract_executes_one_transition_and_denies_replay(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    authorization = _post_v7_final_completion_authorization()
+    deployments, calls = _install_execution_fakes(monkeypatch, authorization)
+    adapter = ProductionCleanupControlRecoveryAdapter(clock=lambda: POST_V7_FINAL_COMPLETION_NOW)
+
+    result = adapter.execute_deadline_recovery(
+        authorization=authorization,
+        receipt_directory=tmp_path,
+        expected_repository_head="1" * 40,
+    )
+
+    assert result["marker"] == "CLEANUP_EXECUTABLE_AND_ARMED"
+    assert result["deadline-utc"] == "2026-08-12T22:15:00Z"
+    assert result["binding-id"] == "708810d2-d718-55c8-aac6-3baf75f18364"
+    assert result["prior-binding-absent"] is True
+    assert len(deployments) == 1
+    assert calls.index("remove-binding") < calls.index("replace-schedule")
+    assert calls.index("replace-schedule") < calls.index("deploy-binding")
+    receipt = json.loads(
+        (tmp_path / adapter_module.DEADLINE_RECOVERY_RECEIPT_FILE).read_text(encoding="utf-8")
+    )
+    assert receipt["receiptVersion"] == (
+        adapter_module.POST_V7_FINAL_COMPLETION_EXTENSION_RECEIPT_VERSION
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_cleanup_resource_group_inventory",
+        lambda _subscription: _final_inventory(authorization),
+    )
+    with pytest.raises(
+        CleanupControlRecoveryExecutionError,
+        match="cleanup-deadline-recovery-authorization-already-consumed",
+    ):
+        adapter.execute_deadline_recovery(
+            authorization=authorization,
+            receipt_directory=tmp_path,
+            expected_repository_head="1" * 40,
+        )
+    assert len(deployments) == 1
+    assert calls.count("remove-binding") == 1
+
+
+def test_post_v7_parallel_schedule_or_binding_is_rejected() -> None:
+    authorization = _post_v7_final_completion_authorization()
+    schedule: JsonValue = {
+        "frequency": "OneTime",
+        "id": (
+            f"{authorization.replacementAutomationAccountId}/schedules/{authorization.schedule}"
+        ),
+        "isEnabled": True,
+        "name": authorization.schedule,
+        "startTime": authorization.deadlineUtc,
+        "timeZone": "Etc/UTC",
+    }
+    with pytest.raises(
+        CleanupControlRecoveryExecutionError,
+        match="cleanup-deadline-recovery-duplicate-schedule",
+    ):
+        adapter_module._validated_schedule_deadline(
+            authorization,
+            [schedule, schedule],
+            allowed_deadlines=frozenset({authorization.deadlineUtc}),
+            required=True,
+        )
+    with pytest.raises(
+        CleanupControlRecoveryExecutionError,
+        match="cleanup-deadline-recovery-duplicate-binding",
+    ):
+        adapter_module._validate_job_schedule_rows(
+            authorization,
+            [{}, {}],
+            required=None,
+        )
 
 
 def test_post_fired_authorization_binds_exact_failed_preserved_state_and_round_trips(
