@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import subprocess
 from collections.abc import Mapping
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
@@ -9,6 +10,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from infra.milestone_7_7 import api_image_publication
 from infra.milestone_7_7 import scanner_bridge_recovery_adapter as adapter_module
 from infra.milestone_7_7.scanner_bridge_recovery_adapter import (
     ProductionScannerBridgeRecoveryAdapter,
@@ -21,6 +23,11 @@ from infra.milestone_7_7.scripts.scanner_bridge_deployment import (
 )
 from performance.milestone_7_7.framework import JsonValue
 from preflight.milestone_7_7 import scanner_bridge_recovery
+from preflight.milestone_7_7.remaining_lifecycle_simulation import (
+    DURABLE_MARKERS,
+    Milestone77RemainingLifecycleSimulation,
+    RemainingLifecycleSimulationInput,
+)
 from preflight.milestone_7_7.scanner_bridge_recovery import (
     FOUNDATION_ALLOWED_OPERATIONS,
     FOUNDATION_STAGE,
@@ -57,6 +64,12 @@ IMAGE = "acrmobius7711564669.azurecr.io/opencanvas-api@sha256:" + "b" * 64
 BUILD_INPUT = "c" * 64
 WORKER_PRINCIPAL = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 DEFENDER_SCANNER_ROLE = "cd50fd1f-0421-46f2-8cce-afc587dbcc77"
+REPOSITORY_HEAD = subprocess.run(
+    ("git", "rev-parse", "HEAD"),
+    check=True,
+    capture_output=True,
+    encoding="utf-8",
+).stdout.strip()
 
 
 def _authorization(stage: str = FOUNDATION_STAGE) -> ScannerBridgeRecoveryAuthorization:
@@ -214,12 +227,40 @@ def _failure_marker(
     }
 
 
-def test_runtime_success_marker_feeds_production_evidence_and_post_secret_consumer(
+@pytest.mark.asyncio
+async def test_runtime_success_marker_feeds_production_evidence_and_post_secret_consumer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    authorization = _authorization(PROOF_STAGE)
+    authorization = _resign(replace(_authorization(PROOF_STAGE), repositoryHead=REPOSITORY_HEAD))
+    tls_hosts = (
+        "stmobius7711564669.blob.core.windows.net",
+        "api.loganalytics.azure.com",
+    )
+
+    class ValidatedTls:
+        def version(self) -> str:
+            return "TLSv1.3"
+
+    class Writer:
+        def get_extra_info(self, _name: str) -> object:
+            return ValidatedTls()
+
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            return None
+
+    async def open_connection(*_args: object, **_kwargs: object) -> tuple[object, object]:
+        return object(), Writer()
+
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "open_connection", open_connection)
+    tls_version, tls_integrity = await scanner_bridge_probe._prove_private_tls(tls_hosts)
     expected = _marker()
     body = {key: value for key, value in expected.items() if key != "markerIntegritySha256"}
+    body["tlsEvidenceSha256"] = tls_integrity
+    body["tlsHostnameSha256"] = adapter_module._hash_text("|".join(tls_hosts))
+    body["tlsVersion"] = tls_version
     runtime_marker = cast(
         dict[str, JsonValue],
         scanner_bridge_probe._success_marker(cast(dict[str, object], body)),
@@ -250,13 +291,50 @@ def test_runtime_success_marker_feeds_production_evidence_and_post_secret_consum
     )
     path = tmp_path / "scanner-deployment-evidence.json"
     adapter_module._write_evidence(path, produced)
-    consumed = load_deployment_evidence(path, repository_head=HEAD, now=NOW)
-    parameters = bicep_parameters(consumed, repository_head=HEAD, now=NOW)
+    consumed = load_deployment_evidence(path, repository_head=REPOSITORY_HEAD, now=NOW)
+    parameters = bicep_parameters(consumed, repository_head=REPOSITORY_HEAD, now=NOW)
 
     assert consumed == produced
     assert consumed.unresolved_reasons == ()
+    assert consumed.private_address_sha256 == body["privateDnsEvidenceSha256"]
+    assert consumed.tls_hostname_sha256 == body["tlsHostnameSha256"]
+    assert consumed.tls_version == "TLS1_3"
+    assert consumed.private_path_proof_integrity == adapter_module._canonical_hash(
+        cast(
+            JsonValue,
+            {
+                "controlPlane": _readback().private_path_control_plane_integrity,
+                "dns": body["privateDnsEvidenceSha256"],
+                "tls": tls_integrity,
+            },
+        ),
+        "mobius.scanner-bridge.private-path-live-proof.v1",
+    )
     assert "scannerResultBridgeUnresolvedReasonCount=0" in parameters
     assert ("scannerResultBridgeEvidenceIntegrity=" + produced.integrity_sha256()) in parameters
+
+    monkeypatch.setattr(
+        api_image_publication,
+        "_api_image_build_input_sha256",
+        lambda _head: BUILD_INPUT,
+    )
+    simulation = Milestone77RemainingLifecycleSimulation(
+        RemainingLifecycleSimulationInput(
+            operation_id_sha256="d" * 64,
+            control_plane_head=REPOSITORY_HEAD,
+            immutable_digest=IMAGE,
+            migration_job_name="migration-job",
+            migration_job_resource_id="opaque-resource-alias",
+            bridge_evidence=consumed,
+            cleanup_resources=("bridge", "runtime", "migration"),
+            cleanup_generation=4,
+        ),
+        NOW,
+    )
+    assert simulation.run() == DURABLE_MARKERS
+    assert simulation.operation_counts["scanner-evidence-producer-consumer"] == 1
+    assert simulation.operation_counts["uninterrupted-soak"] == 1
+    assert simulation.operation_counts["milestone-completion"] == 1
 
 
 def _timestamp_representation(value: str) -> dict[str, JsonValue]:

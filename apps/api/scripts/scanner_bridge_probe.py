@@ -43,6 +43,7 @@ _TRACE_ID = uuid.UUID("9070a5fc-688a-5587-a3d4-69cf3bb767cd")
 _FAILURE_CODE = re.compile(r"^scanner-[a-z0-9]+(?:-[a-z0-9]+)*$")
 _SUCCESS_MARKER_DOMAIN = b"mobius.scanner-bridge.proof-success-marker.v2\0"
 _SUCCESS_MARKER_MAX_BYTES = 16_384
+_TLS_CLOSE_TIMEOUT_SECONDS = 2.0
 
 
 class ScannerBridgeProbeFailure(RuntimeError):
@@ -86,27 +87,45 @@ async def _prove_private_tls(hostnames: tuple[str, ...]) -> tuple[str, str]:
     observed: dict[str, str] = {}
     context = ssl.create_default_context()
     for hostname in hostnames:
+        writer: asyncio.StreamWriter | None = None
         try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(
-                    hostname,
-                    443,
-                    family=socket.AF_UNSPEC,
-                    ssl=context,
-                    server_hostname=hostname,
-                ),
-                timeout=20.0,
-            )
-            del reader
-            ssl_object = writer.get_extra_info("ssl_object")
-            version = ssl_object.version() if ssl_object is not None else None
-            writer.close()
-            await writer.wait_closed()
-        except (OSError, TimeoutError, ssl.SSLError) as exc:
-            raise RuntimeError("scanner-bridge-probe-private-tls-unproved") from exc
-        if version not in {"TLSv1.2", "TLSv1.3"}:
-            raise RuntimeError("scanner-bridge-probe-private-tls-unproved")
-        observed[hostname] = version
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(
+                        hostname,
+                        443,
+                        family=socket.AF_UNSPEC,
+                        ssl=context,
+                        server_hostname=hostname,
+                    ),
+                    timeout=20.0,
+                )
+                del reader
+            except socket.gaierror as exc:
+                raise RuntimeError(_private_tls_failure_code(hostname, "dns")) from exc
+            except ssl.SSLCertVerificationError as exc:
+                raise RuntimeError(_private_tls_failure_code(hostname, "validation")) from exc
+            except ssl.SSLError as exc:
+                raise RuntimeError(_private_tls_failure_code(hostname, "handshake")) from exc
+            except (OSError, TimeoutError) as exc:
+                raise RuntimeError(_private_tls_failure_code(hostname, "connect")) from exc
+
+            assert writer is not None
+            try:
+                ssl_object = writer.get_extra_info("ssl_object")
+                version = ssl_object.version() if ssl_object is not None else None
+            except (OSError, TimeoutError, ssl.SSLError) as exc:
+                raise RuntimeError(_private_tls_failure_code(hostname, "validation")) from exc
+            if version not in {"TLSv1.2", "TLSv1.3"}:
+                raise RuntimeError(_private_tls_failure_code(hostname, "validation"))
+
+            # The authenticated handshake is the security property.  Record it
+            # before best-effort transport shutdown so close failures cannot
+            # erase an already-validated TLS result.
+            observed[hostname] = version
+        finally:
+            if writer is not None:
+                await _close_tls_writer(writer)
     minimum = "TLS1_2" if "TLSv1.2" in observed.values() else "TLS1_3"
     return (
         minimum,
@@ -114,6 +133,28 @@ async def _prove_private_tls(hostnames: tuple[str, ...]) -> tuple[str, str]:
             json.dumps(observed, separators=(",", ":"), sort_keys=True).encode()
         ).hexdigest(),
     )
+
+
+def _private_tls_failure_code(hostname: str, stage: str) -> str:
+    if hostname == "api.loganalytics.azure.com":
+        endpoint = "log-analytics"
+    elif re.fullmatch(r"[a-z0-9]{3,24}\.blob\.core\.windows\.net", hostname) is not None:
+        endpoint = "storage"
+    else:
+        endpoint = "endpoint"
+    return f"scanner-bridge-probe-private-tls-{endpoint}-{stage}-unproved"
+
+
+async def _close_tls_writer(writer: asyncio.StreamWriter) -> None:
+    try:
+        writer.close()
+    except (OSError, TimeoutError, ssl.SSLError):
+        return
+    with suppress(OSError, TimeoutError, ssl.SSLError):
+        await asyncio.wait_for(
+            writer.wait_closed(),
+            timeout=_TLS_CLOSE_TIMEOUT_SECONDS,
+        )
 
 
 async def _remove_exact_canary(
@@ -475,6 +516,7 @@ async def run(*, max_attempts: int, delay_seconds: float) -> int:
         raise ScannerBridgeProbeFailure(
             "scanner-bridge-probe-configuration-incomplete",
             match.attempt_count,
+            blob_tag_observation_count=blob_tag_observation_count,
         )
     try:
         tls_version, tls_integrity = await _prove_private_tls(
@@ -484,6 +526,7 @@ async def run(*, max_attempts: int, delay_seconds: float) -> int:
         raise ScannerBridgeProbeFailure(
             _safe_failure_code(exc, "scanner-bridge-probe-private-tls-unproved"),
             match.attempt_count,
+            blob_tag_observation_count=blob_tag_observation_count,
         ) from None
     if (
         not isinstance(match.scan_finished_comparison, dict)

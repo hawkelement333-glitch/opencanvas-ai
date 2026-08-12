@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
+import socket
+import ssl
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -1569,6 +1572,406 @@ def test_live_probe_is_bounded_sanitized_and_deletes_its_exact_version() -> None
     assert "print(" in inspect.getsource(scanner_bridge_probe._emit_success_marker)
 
 
+@pytest.mark.asyncio
+async def test_private_tls_proof_preserves_validated_handshake_when_shutdown_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    hostname = "stmobius7711564669.blob.core.windows.net"
+
+    class ValidatedTls:
+        def version(self) -> str:
+            return "TLSv1.3"
+
+    class ShutdownTimeoutWriter:
+        def __init__(self) -> None:
+            self.validated = False
+            self.close_called = False
+
+        def get_extra_info(self, name: str) -> object | None:
+            assert name == "ssl_object"
+            self.validated = True
+            return ValidatedTls()
+
+        def close(self) -> None:
+            assert self.validated is True
+            self.close_called = True
+
+        async def wait_closed(self) -> None:
+            assert self.close_called is True
+            raise TimeoutError("SSL shutdown timed out")
+
+    writer = ShutdownTimeoutWriter()
+
+    async def open_connection(*_args: object, **_kwargs: object) -> tuple[object, object]:
+        return object(), writer
+
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "open_connection", open_connection)
+
+    version, integrity = await scanner_bridge_probe._prove_private_tls((hostname,))
+
+    assert version == "TLS1_3"
+    assert (
+        integrity
+        == hashlib.sha256(
+            json.dumps({hostname: "TLSv1.3"}, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest()
+    )
+    assert writer.validated is True
+    assert writer.close_called is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tls_version", ["TLSv1.2", "TLSv1.3"])
+async def test_private_tls_proof_accepts_supported_validated_handshakes(
+    monkeypatch: pytest.MonkeyPatch,
+    tls_version: str,
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    hostname = "stmobius7711564669.blob.core.windows.net"
+    calls: list[str] = []
+
+    class ValidatedTls:
+        def version(self) -> str:
+            return tls_version
+
+    class Writer:
+        def get_extra_info(self, name: str) -> object | None:
+            assert name == "ssl_object"
+            return ValidatedTls()
+
+        def close(self) -> None:
+            calls.append("close")
+
+        async def wait_closed(self) -> None:
+            calls.append("wait-closed")
+
+    async def open_connection(*_args: object, **kwargs: object) -> tuple[object, object]:
+        assert kwargs["server_hostname"] == hostname
+        assert kwargs["ssl"].verify_mode == ssl.CERT_REQUIRED  # type: ignore[union-attr]
+        assert kwargs["ssl"].check_hostname is True  # type: ignore[union-attr]
+        return object(), Writer()
+
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "open_connection", open_connection)
+
+    version, _integrity = await scanner_bridge_probe._prove_private_tls((hostname,))
+
+    assert version == ("TLS1_2" if tls_version == "TLSv1.2" else "TLS1_3")
+    assert calls == ["close", "wait-closed"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "shutdown_error",
+    [
+        pytest.param(TimeoutError("SSL shutdown timed out"), id="timeout"),
+        pytest.param(ssl.SSLError("shutdown failed"), id="ssl-error"),
+        pytest.param(OSError("connection reset during shutdown"), id="os-error"),
+    ],
+)
+async def test_private_tls_proof_ignores_only_post_validation_shutdown_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    shutdown_error: BaseException,
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    class ValidatedTls:
+        def version(self) -> str:
+            return "TLSv1.3"
+
+    class Writer:
+        def get_extra_info(self, _name: str) -> object:
+            return ValidatedTls()
+
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            raise shutdown_error
+
+    async def open_connection(*_args: object, **_kwargs: object) -> tuple[object, object]:
+        return object(), Writer()
+
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "open_connection", open_connection)
+
+    assert await scanner_bridge_probe._prove_private_tls(
+        ("stmobius7711564669.blob.core.windows.net",)
+    ) == (
+        "TLS1_3",
+        hashlib.sha256(b'{"stmobius7711564669.blob.core.windows.net":"TLSv1.3"}').hexdigest(),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("hostname", "connection_error", "expected_code"),
+    [
+        pytest.param(
+            "stmobius7711564669.blob.core.windows.net",
+            socket.gaierror(-2, "secret-name-resolution-detail"),
+            "scanner-bridge-probe-private-tls-storage-dns-unproved",
+            id="dns",
+        ),
+        pytest.param(
+            "stmobius7711564669.blob.core.windows.net",
+            ConnectionRefusedError("secret-peer-detail"),
+            "scanner-bridge-probe-private-tls-storage-connect-unproved",
+            id="tcp-refused",
+        ),
+        pytest.param(
+            "stmobius7711564669.blob.core.windows.net",
+            TimeoutError("secret-connect-timeout-detail"),
+            "scanner-bridge-probe-private-tls-storage-connect-unproved",
+            id="connect-timeout",
+        ),
+        pytest.param(
+            "stmobius7711564669.blob.core.windows.net",
+            ssl.SSLError("secret-handshake-detail"),
+            "scanner-bridge-probe-private-tls-storage-handshake-unproved",
+            id="handshake",
+        ),
+        pytest.param(
+            "stmobius7711564669.blob.core.windows.net",
+            ssl.SSLCertVerificationError(1, "secret-untrusted-certificate-detail"),
+            "scanner-bridge-probe-private-tls-storage-validation-unproved",
+            id="untrusted-certificate",
+        ),
+        pytest.param(
+            "api.loganalytics.azure.com",
+            ssl.SSLCertVerificationError(1, "secret-hostname-mismatch-detail"),
+            "scanner-bridge-probe-private-tls-log-analytics-validation-unproved",
+            id="hostname-mismatch",
+        ),
+    ],
+)
+async def test_private_tls_proof_fails_closed_with_sanitized_endpoint_stage(
+    monkeypatch: pytest.MonkeyPatch,
+    hostname: str,
+    connection_error: BaseException,
+    expected_code: str,
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    async def open_connection(*_args: object, **_kwargs: object) -> tuple[object, object]:
+        raise connection_error
+
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "open_connection", open_connection)
+
+    with pytest.raises(RuntimeError, match=f"^{expected_code}$") as failure:
+        await scanner_bridge_probe._prove_private_tls((hostname,))
+
+    assert "secret" not in str(failure.value)
+
+
+@pytest.mark.asyncio
+async def test_private_tls_failure_marker_never_serializes_sensitive_exception_detail(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    async def open_connection(*_args: object, **_kwargs: object) -> tuple[object, object]:
+        raise ssl.SSLCertVerificationError(
+            1,
+            "super-secret-certificate-payload",
+        )
+
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "open_connection", open_connection)
+
+    with pytest.raises(RuntimeError) as failure:
+        await scanner_bridge_probe._prove_private_tls(("api.loganalytics.azure.com",))
+    retained = scanner_bridge_probe.ScannerBridgeProbeFailure(
+        scanner_bridge_probe._safe_failure_code(
+            failure.value,
+            "scanner-bridge-probe-private-tls-unproved",
+        ),
+        6,
+        blob_tag_observation_count=6,
+    )
+    scanner_bridge_probe._emit_failure_marker(retained)
+
+    serialized = capsys.readouterr().out
+    marker = json.loads(serialized)
+    assert marker["failureCode"] == (
+        "scanner-bridge-probe-private-tls-log-analytics-validation-unproved"
+    )
+    assert marker["blobTagObservationCount"] == 6
+    assert "super-secret" not in serialized
+    assert "certificate-payload" not in serialized
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("ssl_object", "expected_code"),
+    [
+        pytest.param(
+            None,
+            "scanner-bridge-probe-private-tls-storage-validation-unproved",
+            id="missing-tls-object",
+        ),
+        pytest.param(
+            "TLSv1.1",
+            "scanner-bridge-probe-private-tls-storage-validation-unproved",
+            id="unsupported-version",
+        ),
+    ],
+)
+async def test_private_tls_proof_rejects_incomplete_or_unsupported_tls_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    ssl_object: str | None,
+    expected_code: str,
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    class TlsObject:
+        def version(self) -> str:
+            assert ssl_object is not None
+            return ssl_object
+
+    class Writer:
+        def get_extra_info(self, _name: str) -> object | None:
+            return None if ssl_object is None else TlsObject()
+
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            return None
+
+    async def open_connection(*_args: object, **_kwargs: object) -> tuple[object, object]:
+        return object(), Writer()
+
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "open_connection", open_connection)
+
+    with pytest.raises(RuntimeError, match=f"^{expected_code}$"):
+        await scanner_bridge_probe._prove_private_tls(("stmobius7711564669.blob.core.windows.net",))
+
+
+@pytest.mark.asyncio
+async def test_private_tls_proof_attributes_second_endpoint_failure_after_storage_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    class ValidatedTls:
+        def version(self) -> str:
+            return "TLSv1.3"
+
+    class Writer:
+        def get_extra_info(self, _name: str) -> object:
+            return ValidatedTls()
+
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            return None
+
+    async def open_connection(
+        hostname: str, *_args: object, **_kwargs: object
+    ) -> tuple[object, object]:
+        if hostname == "api.loganalytics.azure.com":
+            raise TimeoutError("secret-second-endpoint-detail")
+        return object(), Writer()
+
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "open_connection", open_connection)
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"^scanner-bridge-probe-private-tls-log-analytics-connect-unproved$",
+    ):
+        await scanner_bridge_probe._prove_private_tls(
+            (
+                "stmobius7711564669.blob.core.windows.net",
+                "api.loganalytics.azure.com",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_private_tls_proof_continues_after_storage_shutdown_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    connected: list[str] = []
+
+    class ValidatedTls:
+        def version(self) -> str:
+            return "TLSv1.3"
+
+    class Writer:
+        def __init__(self, hostname: str) -> None:
+            self.hostname = hostname
+
+        def get_extra_info(self, _name: str) -> object:
+            return ValidatedTls()
+
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            if self.hostname.endswith(".blob.core.windows.net"):
+                raise TimeoutError("SSL shutdown timed out")
+
+    async def open_connection(
+        hostname: str, *_args: object, **_kwargs: object
+    ) -> tuple[object, object]:
+        connected.append(hostname)
+        return object(), Writer(hostname)
+
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "open_connection", open_connection)
+
+    version, _integrity = await scanner_bridge_probe._prove_private_tls(
+        (
+            "stmobius7711564669.blob.core.windows.net",
+            "api.loganalytics.azure.com",
+        )
+    )
+
+    assert version == "TLS1_3"
+    assert connected == [
+        "stmobius7711564669.blob.core.windows.net",
+        "api.loganalytics.azure.com",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_private_tls_writer_shutdown_is_explicitly_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    class ValidatedTls:
+        def version(self) -> str:
+            return "TLSv1.3"
+
+    class HangingWriter:
+        def get_extra_info(self, _name: str) -> object:
+            return ValidatedTls()
+
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            await asyncio.Event().wait()
+
+    async def open_connection(*_args: object, **_kwargs: object) -> tuple[object, object]:
+        return object(), HangingWriter()
+
+    monkeypatch.setattr(scanner_bridge_probe.asyncio, "open_connection", open_connection)
+    monkeypatch.setattr(scanner_bridge_probe, "_TLS_CLOSE_TIMEOUT_SECONDS", 0.01)
+
+    result = await asyncio.wait_for(
+        scanner_bridge_probe._prove_private_tls(("stmobius7711564669.blob.core.windows.net",)),
+        timeout=0.5,
+    )
+
+    assert result[0] == "TLS1_3"
+
+
 def test_probe_rejects_a_malicious_match_with_the_exact_poll_count() -> None:
     from scripts import scanner_bridge_probe
 
@@ -1637,6 +2040,105 @@ def test_probe_main_retains_a_specific_post_poll_failure_marker(
             + json.dumps(body, separators=(",", ":"), sort_keys=True).encode()
         ).hexdigest(),
     }
+
+
+@pytest.mark.asyncio
+async def test_probe_tls_failure_retains_six_accumulated_blob_tag_observations(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from scripts import scanner_bridge_probe
+
+    monkeypatch.setenv(
+        "OPENCANVAS_AZURE_STORAGE_ACCOUNT_URL",
+        "https://stmobius7711564669.blob.core.windows.net",
+    )
+    monkeypatch.setenv(
+        "OPENCANVAS_AZURE_LOG_ANALYTICS_WORKSPACE_ID",
+        "55555555-aaaa-4bbb-8ccc-666666666666",
+    )
+    monkeypatch.setenv(
+        "IDENTITY_ENDPOINT",
+        "http://127.0.0.1/metadata/identity/oauth2/token",
+    )
+    monkeypatch.setenv("IDENTITY_HEADER", "sanitized-test-header")
+    monkeypatch.setenv(
+        "OPENCANVAS_AZURE_MANAGED_IDENTITY_CLIENT_ID",
+        "33333333-aaaa-4bbb-8ccc-444444444444",
+    )
+    monkeypatch.setenv("OPENCANVAS_SCANNER_BRIDGE_PROOF_SEED", "a" * 64)
+
+    provider = ProviderObjectVersion(
+        physical_key="quarantine/objects/evidence",
+        provider_name="azure",
+        provider_version_id=VERSION_ID,
+        etag=ETAG,
+        byte_size=18,
+        content_sha256=hashlib.sha256(scanner_bridge_probe._CANARY).hexdigest(),
+    )
+
+    async def put_canary(*_args: object, **_kwargs: object) -> ProviderObjectVersion:
+        return provider
+
+    async def remove_canary(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(scanner_bridge_probe, "_put_exact_canary", put_canary)
+    monkeypatch.setattr(scanner_bridge_probe, "_remove_exact_canary", remove_canary)
+    diagnosis = _diagnose()
+    assert diagnosis.decision is not None
+    assert diagnosis.terminal_evidence is not None
+    observation = BlobTagReadObservation(
+        queried_blob_version_id_sha256="1" * 64,
+        queried_blob_uri_sha256="2" * 64,
+        queried_etag_sha256="3" * 64,
+        http_status=200,
+        request_correlation_id=CORRELATION_ID,
+        returned_tag_keys=(BLOB_RESULT_TAG, BLOB_SCAN_TIME_TAG),
+        required_keys_found=(BLOB_RESULT_TAG, BLOB_SCAN_TIME_TAG),
+        required_keys_missing=(),
+        unexpected_keys=(),
+        parser_normalization_path="azure-blob-tags-xml-local-name-v1",
+        exact_comparison_decision="accepted",
+        response_empty=False,
+        different_blob_version=False,
+        response_version_id_sha256="1" * 64,
+        response_etag_sha256="3" * 64,
+        version_identity_path="response-version-id-and-etag",
+    )
+
+    async def poll(
+        *,
+        blob_reader: object,
+        **_kwargs: object,
+    ) -> object:
+        sink = cast(AzureBlobScanEvidenceClient, blob_reader).observation_sink
+        assert sink is not None
+        for _ in range(6):
+            sink(observation)
+        return scanner_bridge_probe._ProofMatch(
+            decision=diagnosis.decision,
+            blob=_blob(),
+            attempt_count=6,
+            scan_finished_comparison=diagnosis.terminal_evidence,
+        )
+
+    async def fail_tls(_hostnames: tuple[str, ...]) -> tuple[str, str]:
+        raise RuntimeError("scanner-bridge-probe-private-tls-log-analytics-connect-unproved")
+
+    monkeypatch.setattr(scanner_bridge_probe, "_poll_dual_source_evidence", poll)
+    monkeypatch.setattr(scanner_bridge_probe, "_prove_private_tls", fail_tls)
+
+    with pytest.raises(scanner_bridge_probe.ScannerBridgeProbeFailure) as failure:
+        await scanner_bridge_probe.run(max_attempts=6, delay_seconds=1.0)
+
+    scanner_bridge_probe._emit_failure_marker(failure.value)
+    marker = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert marker["failureCode"] == (
+        "scanner-bridge-probe-private-tls-log-analytics-connect-unproved"
+    )
+    assert marker["blobTagObservationCount"] == 6
+    assert "sanitized-test-header" not in json.dumps(marker)
 
 
 def test_probe_wires_blob_tag_observation_to_retained_console_before_polling() -> None:
