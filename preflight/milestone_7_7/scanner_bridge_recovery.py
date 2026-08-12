@@ -19,7 +19,9 @@ from performance.milestone_7_7.framework import (
 )
 
 AUTHORIZATION_VERSION: Final = "mobius.milestone-7.7.scanner-bridge-recovery.v2"
-AUTHORIZATION_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/scanner-bridge-recovery/v2\0"
+AUTHORIZATION_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/scanner-bridge-recovery/v2\0"
+)
 FOUNDATION_STAGE: Final = "scanner-foundation"
 PRIVATE_ENDPOINT_RECOVERY_STAGE: Final = "scanner-foundation-private-endpoint-recovery"
 PROOF_STAGE: Final = "scanner-proof"
@@ -65,7 +67,9 @@ _SUBSCRIPTION = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
-_IMAGE = re.compile(rf"^{re.escape(REGISTRY_HOST)}/{IMAGE_REPOSITORY}@sha256:[0-9a-f]{{64}}$")
+_IMAGE = re.compile(
+    rf"^{re.escape(REGISTRY_HOST)}/{IMAGE_REPOSITORY}@sha256:[0-9a-f]{{64}}$"
+)
 
 
 class ScannerBridgeRecoveryError(ValueError):
@@ -119,7 +123,9 @@ def _resource_ids(subscription_id: str) -> dict[str, str]:
     if _SUBSCRIPTION.fullmatch(subscription_id) is None:
         raise ScannerBridgeRecoveryError("scanner-bridge-subscription-invalid")
     target = f"/subscriptions/{subscription_id}/resourceGroups/{TARGET_RESOURCE_GROUP}"
-    cleanup = f"/subscriptions/{subscription_id}/resourceGroups/{CLEANUP_RESOURCE_GROUP}"
+    cleanup = (
+        f"/subscriptions/{subscription_id}/resourceGroups/{CLEANUP_RESOURCE_GROUP}"
+    )
     return {
         "targetResourceGroupId": target,
         "cleanupAutomationAccountId": (
@@ -181,7 +187,9 @@ def build_scanner_bridge_recovery_authorization(
     if cleanup_automation_account_id != expected["cleanupAutomationAccountId"]:
         raise ScannerBridgeRecoveryError("scanner-bridge-cleanup-account-invalid")
     current = now_utc.astimezone(UTC).replace(microsecond=0)
-    deadline = _parse_utc(cleanup_deadline_utc, "scanner-bridge-cleanup-deadline-invalid")
+    deadline = _parse_utc(
+        cleanup_deadline_utc, "scanner-bridge-cleanup-deadline-invalid"
+    )
     if deadline - current < MINIMUM_CLEANUP_WINDOW:
         raise ScannerBridgeRecoveryError("scanner-bridge-cleanup-window-insufficient")
     expires = min(current + MAXIMUM_AUTHORIZATION_AGE, deadline - timedelta(minutes=90))
@@ -193,7 +201,9 @@ def build_scanner_bridge_recovery_authorization(
             or build_input_sha256 is not None
             or proof_execution_ordinal != 0
         ):
-            raise ScannerBridgeRecoveryError("scanner-foundation-image-authority-prohibited")
+            raise ScannerBridgeRecoveryError(
+                "scanner-foundation-image-authority-prohibited"
+            )
         proof_job_id = None
         proof_role_id = None
         maximum_executions = 0
@@ -250,7 +260,9 @@ def build_scanner_bridge_recovery_authorization(
     )
     return replace(
         unsigned,
-        authorizationIntegritySha256=(scanner_bridge_recovery_authorization_integrity(unsigned)),
+        authorizationIntegritySha256=(
+            scanner_bridge_recovery_authorization_integrity(unsigned)
+        ),
     )
 
 
@@ -316,8 +328,12 @@ def validate_scanner_bridge_recovery_authorization(
     if _SHA40.fullmatch(authorization.repositoryHead) is None:
         raise ScannerBridgeRecoveryError("scanner-bridge-repository-head-invalid")
     current = now_utc.astimezone(UTC).replace(microsecond=0)
-    authorized = _parse_utc(authorization.authorizedAtUtc, "scanner-bridge-authorized-at-invalid")
-    expires = _parse_utc(authorization.expiresAtUtc, "scanner-bridge-expires-at-invalid")
+    authorized = _parse_utc(
+        authorization.authorizedAtUtc, "scanner-bridge-authorized-at-invalid"
+    )
+    expires = _parse_utc(
+        authorization.expiresAtUtc, "scanner-bridge-expires-at-invalid"
+    )
     cleanup = _parse_utc(
         authorization.cleanupDeadlineUtc, "scanner-bridge-cleanup-deadline-invalid"
     )
@@ -332,14 +348,18 @@ def validate_scanner_bridge_recovery_authorization(
     if authorization.authorizationIntegritySha256 != (
         scanner_bridge_recovery_authorization_integrity(authorization)
     ):
-        raise ScannerBridgeRecoveryError("scanner-bridge-authorization-integrity-invalid")
+        raise ScannerBridgeRecoveryError(
+            "scanner-bridge-authorization-integrity-invalid"
+        )
     return authorization
 
 
 def scanner_bridge_recovery_authorization_from_mapping(
     value: Mapping[str, object],
 ) -> ScannerBridgeRecoveryAuthorization:
-    expected_fields = {field.name for field in fields(ScannerBridgeRecoveryAuthorization)}
+    expected_fields = {
+        field.name for field in fields(ScannerBridgeRecoveryAuthorization)
+    }
     if set(value) != expected_fields:
         raise ScannerBridgeRecoveryError("scanner-bridge-authorization-fields-invalid")
     operations = value.get("allowedOperations")
@@ -355,7 +375,9 @@ def scanner_bridge_recovery_authorization_from_mapping(
             )
         )
     except TypeError as exc:
-        raise ScannerBridgeRecoveryError("scanner-bridge-authorization-malformed") from exc
+        raise ScannerBridgeRecoveryError(
+            "scanner-bridge-authorization-malformed"
+        ) from exc
 
 
 def load_scanner_bridge_recovery_authorization(
@@ -397,12 +419,43 @@ def execute_scanner_bridge_recovery(
     )
 
 
+def reconcile_successful_scanner_bridge_recovery(
+    *,
+    authorization: ScannerBridgeRecoveryAuthorization,
+    authorization_receipt_directory: Path,
+    lifecycle_ledger_path: Path,
+    finalization_evidence_path: Path,
+    correction_repository_head: str,
+    binding_output: Path,
+    deployment_evidence_output: Path,
+) -> dict[str, JsonValue]:
+    """Invoke the production-only delayed-success reconciliation consumer."""
+
+    from infra.milestone_7_7.scanner_bridge_recovery_adapter import (
+        reconcile_retained_successful_scanner_proof,
+    )
+
+    return reconcile_retained_successful_scanner_proof(
+        authorization=authorization,
+        authorization_receipt_directory=authorization_receipt_directory,
+        lifecycle_ledger_path=lifecycle_ledger_path,
+        finalization_evidence_path=finalization_evidence_path,
+        correction_repository_head=correction_repository_head,
+        binding_output=binding_output,
+        deployment_evidence_output=deployment_evidence_output,
+    )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--authorization", type=Path, required=True)
     parser.add_argument("--receipt-directory", type=Path, required=True)
     parser.add_argument("--repository-head", required=True)
     parser.add_argument("--evidence-output", type=Path)
+    parser.add_argument("--retained-success", action="store_true")
+    parser.add_argument("--lifecycle-ledger", type=Path)
+    parser.add_argument("--finalization-evidence", type=Path)
+    parser.add_argument("--binding-output", type=Path)
     return parser
 
 
@@ -410,8 +463,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         authorization = load_scanner_bridge_recovery_authorization(args.authorization)
+        if args.retained_success:
+            if (
+                authorization.stage != PROOF_STAGE
+                or args.evidence_output is None
+                or args.lifecycle_ledger is None
+                or args.finalization_evidence is None
+                or args.binding_output is None
+            ):
+                raise ScannerBridgeRecoveryError(
+                    "scanner-proof-retained-success-command-contract-invalid"
+                )
+            result = reconcile_successful_scanner_bridge_recovery(
+                authorization=authorization,
+                authorization_receipt_directory=args.receipt_directory,
+                lifecycle_ledger_path=args.lifecycle_ledger,
+                finalization_evidence_path=args.finalization_evidence,
+                correction_repository_head=args.repository_head,
+                binding_output=args.binding_output,
+                deployment_evidence_output=args.evidence_output,
+            )
+            print(json.dumps(result, separators=(",", ":"), sort_keys=True))
+            return 0
+        if any(
+            value is not None
+            for value in (
+                args.lifecycle_ledger,
+                args.finalization_evidence,
+                args.binding_output,
+            )
+        ):
+            raise ScannerBridgeRecoveryError("scanner-bridge-command-contract-invalid")
         if (authorization.stage == PROOF_STAGE) != (args.evidence_output is not None):
-            raise ScannerBridgeRecoveryError("scanner-bridge-evidence-output-contract-invalid")
+            raise ScannerBridgeRecoveryError(
+                "scanner-bridge-evidence-output-contract-invalid"
+            )
         result = execute_scanner_bridge_recovery(
             authorization=authorization,
             receipt_directory=args.receipt_directory,
@@ -445,6 +531,7 @@ __all__ = [
     "build_scanner_bridge_recovery_authorization",
     "execute_scanner_bridge_recovery",
     "load_scanner_bridge_recovery_authorization",
+    "reconcile_successful_scanner_bridge_recovery",
     "scanner_bridge_recovery_authorization_integrity",
     "validate_scanner_bridge_recovery_authorization",
     "write_scanner_bridge_recovery_authorization",
