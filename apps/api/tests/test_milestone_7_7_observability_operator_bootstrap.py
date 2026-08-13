@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+
 from infra.milestone_7_7 import observability_operator_bootstrap_adapter as adapter
 from infra.milestone_7_7 import terminal_lifecycle_adapter
 from infra.milestone_7_7.scripts import scanner_bridge_deployment
@@ -197,57 +198,19 @@ def test_bicep_bootstrap_is_private_and_excludes_full_runtime() -> None:
     )
     assert compute.count("{ name: 'OPENCANVAS_DATABASE_TLS_MODE', value: 'verify-full' }") >= 2
     assert "OPENCANVAS_DATABASE_TLS_MODE', value: 'require'" not in compute
-    revision_boundaries = (
-        "settings-validation-failed",
-        "managed-identity-token-failed",
-        "database-connect-failed",
-        "version-table-read-failed",
-        "revision-value-read-failed",
-        "revision-value-invalid",
-    )
-    assert 'f"observability-bootstrap-{phase}-' in compute
-    for boundary in revision_boundaries:
-        assert boundary in compute
-    assert {
-        f"observability-bootstrap-{phase}-{boundary}"
-        for phase in ("initial", "final")
-        for boundary in revision_boundaries
-    } <= adapter._MIGRATION_FAILURE_CODES
-    assert "observability-bootstrap-migration-apply-failed" in compute
-    assert "observability-bootstrap-revision-drift" in compute
-    assert 'database="postgres"' in compute
-    assert "pgaadauth_create_principal_with_oid" in compute
-    assert "pgaadauth_list_principals" in compute
-    assert 'principal_type"] != "service"' in compute
+    assert "from scripts.bootstrap_postgres import main" in compute
+    assert "from scripts.migrate_and_grant import main" in compute
+    assert "resource databasePrincipalBootstrapJob" in compute
+    assert "databaseAdministratorIdentityId" in compute
+    assert "databaseMigrationIdentityId" in migration_definition
+    assert "databaseAdministratorIdentityId" not in migration_definition
+    assert "OPENCANVAS_DATABASE_MIGRATION_PRINCIPAL_ID" in compute
     assert "OPENCANVAS_DATABASE_RUNTIME_API_PRINCIPAL_ID" in compute
     assert "OPENCANVAS_DATABASE_RUNTIME_WORKER_PRINCIPAL_ID" in compute
-    assert "from scripts.bootstrap_postgres import _grant_runtime_roles" not in compute
     assert "apiIdentityPrincipalId: apiIdentity!.properties.principalId" in owner
     assert "workerIdentityPrincipalId: workerIdentity!.properties.principalId" in owner
-    assert "observability-bootstrap-runtime-role-grant-failed" in compute
-    runtime_failure_codes = {
-        "observability-bootstrap-runtime-grant-database-connect-failed",
-        "observability-bootstrap-runtime-managed-identity-token-failed",
-        "observability-bootstrap-runtime-principal-catalog-connect-failed",
-        "observability-bootstrap-runtime-principal-contract-invalid",
-        "observability-bootstrap-runtime-principal-create-failed",
-        "observability-bootstrap-runtime-principal-list-failed",
-        "observability-bootstrap-runtime-principal-mapping-invalid",
-        "observability-bootstrap-runtime-principal-privilege-invalid",
-        "observability-bootstrap-runtime-principal-provider-column-invalid",
-        "observability-bootstrap-runtime-principal-provider-duplicate",
-        "observability-bootstrap-runtime-principal-provider-function-absent",
-        "observability-bootstrap-runtime-principal-provider-identity-not-found",
-        "observability-bootstrap-runtime-principal-provider-permission-denied",
-        "observability-bootstrap-runtime-principal-readback-failed",
-        "observability-bootstrap-runtime-role-grant-failed",
-    }
-    assert runtime_failure_codes <= adapter._MIGRATION_FAILURE_CODES
-    assert all(code in compute for code in runtime_failure_codes)
-    assert "observability-bootstrap-final-revision-mismatch" in compute
-    assert "GENUINE_OWNER_APPLICATION_UUID_PROVED" in compute
-    assert "SELECT DISTINCT u.id::text" in compute
-    assert "INSERT INTO users" not in compute
+    assert "databaseMigrationIdentity!.properties.principalId" in owner
+    assert "dependsOn: [databasePrincipalBootstrapJob]" in migration_definition
     assert "dependsOn: appEnabled ? [telemetryContainerApp] : []" in compute
 
 
@@ -378,8 +341,7 @@ def test_migration_definition_is_bound_to_exact_checked_in_program(
 ) -> None:
     authorization = _authorization()
     program = adapter._expected_migration_bootstrap_program()
-    assert program.startswith("import asyncio\n")
-    assert program.endswith('print("observability-bootstrap-migration-succeeded", flush=True)\n')
+    assert program == ("from scripts.migrate_and_grant import main\n\nraise SystemExit(main())\n")
     monkeypatch.setattr(
         adapter.lifecycle,
         "_verify_resource_projection",

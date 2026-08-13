@@ -703,7 +703,11 @@ async def test_graph_api_authentication_csrf_scope_and_authority_fields(
         workspace_id = workspace["id"]
         canvas_response = await owner.post(
             f"{api_prefix}/canvases",
-            json={"name": "Graph API", "workspaceId": workspace_id},
+            json={
+                "idempotencyKey": str(uuid.uuid4()),
+                "name": "Graph API",
+                "workspaceId": workspace_id,
+            },
             headers=headers,
         )
         assert canvas_response.status_code == 201, canvas_response.text

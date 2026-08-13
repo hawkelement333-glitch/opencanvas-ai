@@ -1547,3 +1547,10 @@ current audit evidence is recorded in
 [`MILESTONE_7_8_ARCHITECTURE_SCOPE_AUDIT_HANDOFF.md`](MILESTONE_7_8_ARCHITECTURE_SCOPE_AUDIT_HANDOFF.md),
 with exact findings in
 [`MILESTONE_7_8_DEFECT_REGISTER.md`](MILESTONE_7_8_DEFECT_REGISTER.md).
+
+That preceding paragraph records the immutable Milestone 7.8 entry state. A
+later explicitly authorized High-defect remediation created direct child
+`20260726_0029` for durable legacy-creation idempotency; `0029` is now the sole
+head and `0030` is absent. The later role separation, migration identity, and
+validation record are in
+[`MILESTONE_7_8_MANAGED_POSTGRESQL_HIGH_DEFECT_REMEDIATION_HANDOFF.md`](MILESTONE_7_8_MANAGED_POSTGRESQL_HIGH_DEFECT_REMEDIATION_HANDOFF.md).

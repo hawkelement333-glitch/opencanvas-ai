@@ -7,11 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from scripts.telemetry_gateway import application
 
 from opencanvas_api.core.config import DatabaseRole
 from opencanvas_api.db.runtime import DatabaseRuntimeError
-from scripts import bootstrap_postgres, runtime_dependency_gate
-from scripts.telemetry_gateway import application
+from scripts import migrate_and_grant, runtime_dependency_gate
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 INFRASTRUCTURE_ROOT = REPOSITORY_ROOT / "infra" / "milestone_7_7"
@@ -32,6 +32,7 @@ def test_root_reaches_every_runtime_module_and_compute_binding() -> None:
         assert token in main
     for token in (
         "resource migrationJob 'Microsoft.App/jobs@2025-01-01'",
+        "resource databasePrincipalBootstrapJob 'Microsoft.App/jobs@2025-01-01'",
         "resource apiContainerApp 'Microsoft.App/containerApps@2026-01-01'",
         "resource workerContainerApp 'Microsoft.App/containerApps@2026-01-01'",
         "resource telemetryContainerApp 'Microsoft.App/containerApps@2026-01-01'",
@@ -102,60 +103,66 @@ def test_telemetry_gateway_is_bounded_authenticated_and_payload_blind(
     assert payload_digest not in response.text
 
 
-def test_postgres_bootstrap_is_revision_guarded_and_principal_closed() -> None:
+def test_postgres_bootstrap_and_migration_are_separated_and_principal_closed() -> None:
     bootstrap = (REPOSITORY_ROOT / "apps" / "api" / "scripts" / "bootstrap_postgres.py").read_text(
         encoding="utf-8"
     )
-    assert "EXPECTED_DATABASE_REVISION" in bootstrap
+    migration = (REPOSITORY_ROOT / "apps" / "api" / "scripts" / "migrate_and_grant.py").read_text(
+        encoding="utf-8"
+    )
     assert "pgaadauth_create_principal" in bootstrap
-    assert "id-mobius77-(?:api|worker)" in bootstrap
+    assert "id-mobius77-(?:api|worker|db-migration)" in bootstrap
     assert "REVOKE CREATE ON SCHEMA public FROM PUBLIC" in bootstrap
-    assert "database migration state is inconsistent" in bootstrap
+    assert "EXPECTED_DATABASE_REVISION" in migration
+    assert "database migration state is inconsistent" in migration
+    assert "runtime_privilege_statements" in migration
     assert "password" not in bootstrap.casefold()
+    assert "password" not in migration.casefold()
 
 
 @pytest.mark.parametrize(
     ("initial_revision", "migration_calls"),
     [
-        ("base", [("base", bootstrap_postgres.EXPECTED_DATABASE_REVISION)]),
-        (bootstrap_postgres.EXPECTED_DATABASE_REVISION, []),
+        ("base", [("base", migrate_and_grant.EXPECTED_DATABASE_REVISION)]),
+        (migrate_and_grant.EXPECTED_DATABASE_REVISION, []),
     ],
 )
-def test_postgres_bootstrap_runs_once_or_reconciles_without_reapplying(
+def test_migration_job_runs_once_or_reconciles_without_reapplying(
     monkeypatch: pytest.MonkeyPatch,
     initial_revision: str,
     migration_calls: list[tuple[str, str]],
 ) -> None:
-    revisions = iter((initial_revision, bootstrap_postgres.EXPECTED_DATABASE_REVISION))
+    revisions = iter((initial_revision, migrate_and_grant.EXPECTED_DATABASE_REVISION))
     granted: list[bool] = []
     applied: list[tuple[str, str]] = []
 
     async def current_revision() -> str:
         return next(revisions)
 
-    async def grant_runtime_roles() -> None:
+    async def apply_runtime_privileges() -> None:
         granted.append(True)
 
-    def run_migration(*, expected_current: str, target: str) -> None:
+    def run_migration(*, expected_current: str, target: str) -> int:
         applied.append((expected_current, target))
+        return 0
 
-    monkeypatch.setattr(bootstrap_postgres, "_current_revision", current_revision)
-    monkeypatch.setattr(bootstrap_postgres, "_grant_runtime_roles", grant_runtime_roles)
-    monkeypatch.setattr(bootstrap_postgres, "run_migration", run_migration)
+    monkeypatch.setattr(migrate_and_grant, "_current_revision", current_revision)
+    monkeypatch.setattr(migrate_and_grant, "apply_runtime_privileges", apply_runtime_privileges)
+    monkeypatch.setattr(migrate_and_grant, "run_migration", run_migration)
 
-    assert bootstrap_postgres.main() == 0
+    assert migrate_and_grant.main() == 0
     assert applied == migration_calls
     assert granted == [True]
 
 
-def test_postgres_bootstrap_fails_closed_on_unexpected_revision(
+def test_migration_job_fails_closed_on_unexpected_revision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def current_revision() -> str:
         return "unexpected-revision"
 
-    monkeypatch.setattr(bootstrap_postgres, "_current_revision", current_revision)
-    assert bootstrap_postgres.main() == 1
+    monkeypatch.setattr(migrate_and_grant, "_current_revision", current_revision)
+    assert migrate_and_grant.main() == 1
 
 
 @pytest.mark.asyncio

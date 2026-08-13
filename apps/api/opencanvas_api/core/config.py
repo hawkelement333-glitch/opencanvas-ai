@@ -30,7 +30,7 @@ DEVELOPMENT_UPLOAD_CAPABILITY_SECRET = (
 DEVELOPMENT_SCANNER_RESULT_SECRET = "development-only-scanner-result-secret-change-before-deploying"
 DEVELOPMENT_RATE_LIMIT_SECRET = "development-only-rate-limit-secret-change-before-deploying"
 DEVELOPMENT_TELEMETRY_SECRET = "development-only-telemetry-secret-change-before-deploying"
-EXPECTED_DATABASE_REVISION = "20260726_0028"
+EXPECTED_DATABASE_REVISION = "20260726_0029"
 
 
 class AppMode(StrEnum):
@@ -45,6 +45,7 @@ class AppMode(StrEnum):
 class DatabaseRole(StrEnum):
     API = "api"
     WORKER = "worker"
+    PROVISIONING = "provisioning"
     MIGRATION = "migration"
     BACKUP = "backup"
     OBSERVABILITY = "observability"

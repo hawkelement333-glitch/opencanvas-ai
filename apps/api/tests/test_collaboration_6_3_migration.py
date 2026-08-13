@@ -23,7 +23,7 @@ def _config(tmp_path: Path) -> Config:
 def test_milestone_6_3_is_the_only_head_and_0024_is_absent(tmp_path: Path) -> None:
     config = _config(tmp_path)
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["20260726_0028"]
+    assert scripts.get_heads() == ["20260726_0029"]
     assert scripts.get_revision("20260725_0023").down_revision == "20260725_0022"
     assert scripts.get_revision("20260725_0024").down_revision == "20260725_0023"
 

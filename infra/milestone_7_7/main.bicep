@@ -378,6 +378,7 @@ module registry './modules/registry.bicep' = if (workloadEnabled) {
     workerIdentityPrincipalId: identities.outputs.workerIdentityPrincipalId
     telemetryIdentityPrincipalId: identities.outputs.telemetryIdentityPrincipalId
     databaseAdministratorPrincipalId: identities.outputs.databaseAdministratorPrincipalId
+    databaseMigrationPrincipalId: identities.outputs.databaseMigrationPrincipalId
     lifecycleTags: lifecycleTags
   }
 }
@@ -425,6 +426,10 @@ module compute './modules/compute.bicep' = if (workloadEnabled) {
     databaseAdministratorIdentityId: identities.outputs.databaseAdministratorIdentityId
     databaseAdministratorClientId: identities.outputs.databaseAdministratorClientId
     databaseAdministratorName: identities.outputs.databaseAdministratorName
+    databaseMigrationIdentityId: identities.outputs.databaseMigrationIdentityId
+    databaseMigrationClientId: identities.outputs.databaseMigrationClientId
+    databaseMigrationPrincipalId: identities.outputs.databaseMigrationPrincipalId
+    databaseMigrationName: identities.outputs.databaseMigrationName
     keyVaultName: keyVault.outputs.keyVaultName
     registryLoginServer: registry.outputs.registryLoginServer
     apiImageDigest: apiImageDigest
@@ -489,7 +494,8 @@ output redisPort int = postSecretEnabled ? redis.outputs.port : 10000
 output storageAccountUrl string = scannerFoundationEnabled ? storage.outputs.storageAccountUrl : ''
 output telemetryContainerAppId string = postSecretEnabled ? compute.outputs.telemetryContainerAppId : ''
 output migrationJobName string = postSecretEnabled ? compute.outputs.migrationJobName : ''
-output migrationJobResourceId string = postSecretEnabled && !empty(compute.outputs.migrationJobName) ? resourceId(subscription().subscriptionId, targetResourceGroupName, 'Microsoft.App/jobs', compute.outputs.migrationJobName) : ''
+output migrationJobResourceId string = postSecretEnabled && !empty(compute.outputs.migrationJobName) ? extensionResourceId(targetResourceGroup.id, 'Microsoft.App/jobs', compute.outputs.migrationJobName) : ''
+output databasePrincipalBootstrapJobName string = postSecretEnabled ? compute.outputs.databasePrincipalBootstrapJobName : ''
 output scannerResultBridgeResolved bool = scannerResultBridgeResolved
 output scannerResultBridgeState string = scannerResultBridgeState
 output scannerResultBridgeEvidenceIntegrity string = scannerResultBridgeEvidenceIntegrity

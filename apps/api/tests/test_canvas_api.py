@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any, cast
 
 import httpx
@@ -10,7 +11,9 @@ JsonObject = dict[str, Any]
 async def _create_canvas(
     client: httpx.AsyncClient, prefix: str, name: str = "Project Vox"
 ) -> JsonObject:
-    response = await client.post(f"{prefix}/canvases", json={"name": name})
+    response = await client.post(
+        f"{prefix}/canvases", json={"idempotencyKey": str(uuid.uuid4()), "name": name}
+    )
     assert response.status_code == 201
     canvas = cast(JsonObject, response.json())
     assert str(canvas["createdAt"]).endswith("Z")
@@ -29,6 +32,7 @@ async def _create_node(
     response = await client.post(
         f"{prefix}/canvases/{canvas_id}/nodes",
         json={
+            "idempotencyKey": str(uuid.uuid4()),
             "type": "note",
             "title": title,
             "text": text,
@@ -87,6 +91,7 @@ async def test_create_and_delete_directional_edge(
     edge_response = await client.post(
         f"{api_prefix}/canvases/{canvas['id']}/edges",
         json={
+            "idempotencyKey": str(uuid.uuid4()),
             "sourceNodeId": source["id"],
             "targetNodeId": target["id"],
             "kind": "default",
@@ -123,6 +128,7 @@ async def test_universe_viewport_is_bounded_revision_fenced_and_hydrates_boundar
     edge = await client.post(
         f"{api_prefix}/canvases/{canvas['id']}/edges",
         json={
+            "idempotencyKey": str(uuid.uuid4()),
             "sourceNodeId": visible["id"],
             "targetNodeId": outside["id"],
             "kind": "default",
@@ -175,7 +181,7 @@ async def test_duplicate_and_delete_node(client: httpx.AsyncClient, api_prefix: 
 
     duplicate_response = await client.post(
         f"{api_prefix}/canvases/{canvas['id']}/nodes/{node['id']}/duplicate",
-        json={"revision": node["revision"]},
+        json={"idempotencyKey": str(uuid.uuid4()), "revision": node["revision"]},
     )
     assert duplicate_response.status_code == 201
     duplicate = duplicate_response.json()
@@ -192,7 +198,10 @@ async def test_duplicate_and_delete_node(client: httpx.AsyncClient, api_prefix: 
 async def test_invalid_graph_requests_are_rejected(
     client: httpx.AsyncClient, api_prefix: str
 ) -> None:
-    invalid_canvas = await client.post(f"{api_prefix}/canvases", json={"name": "  "})
+    invalid_canvas = await client.post(
+        f"{api_prefix}/canvases",
+        json={"idempotencyKey": str(uuid.uuid4()), "name": "  "},
+    )
     assert invalid_canvas.status_code == 422
 
     first_canvas = await _create_canvas(client, api_prefix, "First")
@@ -206,13 +215,21 @@ async def test_invalid_graph_requests_are_rejected(
 
     self_edge = await client.post(
         f"{api_prefix}/canvases/{first_canvas['id']}/edges",
-        json={"sourceNodeId": first_node["id"], "targetNodeId": first_node["id"]},
+        json={
+            "idempotencyKey": str(uuid.uuid4()),
+            "sourceNodeId": first_node["id"],
+            "targetNodeId": first_node["id"],
+        },
     )
     assert self_edge.status_code == 422
 
     cross_canvas = await client.post(
         f"{api_prefix}/canvases/{first_canvas['id']}/edges",
-        json={"sourceNodeId": first_node["id"], "targetNodeId": second_node["id"]},
+        json={
+            "idempotencyKey": str(uuid.uuid4()),
+            "sourceNodeId": first_node["id"],
+            "targetNodeId": second_node["id"],
+        },
     )
     assert cross_canvas.status_code == 400
     assert cross_canvas.json()["code"] == "invalid_node_reference"

@@ -367,8 +367,8 @@ def test_post_secret_migration_output_uses_explicit_subscription_scope() -> None
     main = (ROOT / "main.bicep").read_text(encoding="utf-8")
 
     assert (
-        "resourceId(subscription().subscriptionId, targetResourceGroupName, "
-        "'Microsoft.App/jobs', compute.outputs.migrationJobName)"
+        "extensionResourceId(targetResourceGroup.id, 'Microsoft.App/jobs', "
+        "compute.outputs.migrationJobName)"
     ) in main
     assert (
         "resourceId(targetResourceGroupName, 'Microsoft.App/jobs', "

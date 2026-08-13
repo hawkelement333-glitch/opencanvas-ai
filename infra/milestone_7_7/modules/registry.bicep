@@ -53,6 +53,7 @@ param workloadIdentityPrincipalId string = ''
 param workerIdentityPrincipalId string = ''
 param telemetryIdentityPrincipalId string = ''
 param databaseAdministratorPrincipalId string = ''
+param databaseMigrationPrincipalId string = ''
 param lifecycleTags object = {}
 
 var enabled = managedBindingMode == 'managed-binding-one-run' && managedBindingDeploymentEnabled
@@ -153,11 +154,24 @@ resource telemetryRegistryPull 'Microsoft.Authorization/roleAssignments@2022-04-
   }
 }
 
-resource migrationRegistryPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enabled) {
+resource databaseBootstrapRegistryPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enabled) {
   name: guid(registry.id, databaseAdministratorPrincipalId, '7f951dda-4ed3-4680-a7ca-43fe172d538d')
   scope: registry
   properties: {
     principalId: databaseAdministratorPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+    )
+  }
+}
+
+resource migrationRegistryPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enabled) {
+  name: guid(registry.id, databaseMigrationPrincipalId, '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+  scope: registry
+  properties: {
+    principalId: databaseMigrationPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId(
       'Microsoft.Authorization/roleDefinitions',

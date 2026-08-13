@@ -210,12 +210,20 @@ async def test_two_users_cannot_cross_workspace_canvas_document_file_or_trace_bo
 
         alice_canvas_response = await alice.post(
             f"{api_prefix}/canvases",
-            json={"name": "Alice private", "workspaceId": alice_workspace["id"]},
+            json={
+                "idempotencyKey": str(uuid.uuid4()),
+                "name": "Alice private",
+                "workspaceId": alice_workspace["id"],
+            },
             headers=alice_headers,
         )
         bob_canvas_response = await bob.post(
             f"{api_prefix}/canvases",
-            json={"name": "Bob private", "workspaceId": bob_workspace["id"]},
+            json={
+                "idempotencyKey": str(uuid.uuid4()),
+                "name": "Bob private",
+                "workspaceId": bob_workspace["id"],
+            },
             headers=bob_headers,
         )
         assert alice_canvas_response.status_code == bob_canvas_response.status_code == 201
@@ -225,6 +233,7 @@ async def test_two_users_cannot_cross_workspace_canvas_document_file_or_trace_bo
         alice_node_response = await alice.post(
             f"{api_prefix}/canvases/{alice_canvas['id']}/nodes",
             json={
+                "idempotencyKey": str(uuid.uuid4()),
                 "type": "note",
                 "title": "Alice evidence",
                 "text": "Private launch evidence.",

@@ -171,7 +171,11 @@ async def test_comments_are_bounded_idempotent_traceable_and_tombstoned(
         )
         canvas_response = await owner.post(
             f"{api_prefix}/canvases",
-            json={"name": "Comment canvas", "workspaceId": workspace["id"]},
+            json={
+                "idempotencyKey": str(uuid.uuid4()),
+                "name": "Comment canvas",
+                "workspaceId": workspace["id"],
+            },
             headers=_csrf(owner_session),
         )
         assert canvas_response.status_code == 201, canvas_response.text

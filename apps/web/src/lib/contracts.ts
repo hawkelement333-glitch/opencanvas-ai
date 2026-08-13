@@ -125,6 +125,11 @@ export const canvasSnapshotSchema = z.object({
 
 export const createCanvasInputSchema = z
   .object({
+    idempotencyKey: z
+      .string()
+      .min(8)
+      .max(128)
+      .regex(/^[A-Za-z0-9._:-]+$/),
     name: z.string().trim().min(1, "Name is required").max(120),
     workspaceId: z.string().uuid().optional(),
   })
@@ -132,6 +137,11 @@ export const createCanvasInputSchema = z
 
 export const createNodeInputSchema = z
   .object({
+    idempotencyKey: z
+      .string()
+      .min(8)
+      .max(128)
+      .regex(/^[A-Za-z0-9._:-]+$/),
     type: canvasNodeTypeSchema,
     title: z.string().trim().min(1).max(160),
     text: z.string().max(100_000),
@@ -154,6 +164,11 @@ export const updateNodeInputSchema = z
 
 export const createEdgeInputSchema = z
   .object({
+    idempotencyKey: z
+      .string()
+      .min(8)
+      .max(128)
+      .regex(/^[A-Za-z0-9._:-]+$/),
     sourceNodeId: z.string().min(1),
     targetNodeId: z.string().min(1),
     kind: canvasEdgeKindSchema.default("default"),
@@ -472,6 +487,7 @@ export const DEFAULT_NODE_SIZE = { width: 320, height: 240 } as const;
 
 export function createNodeDraft(position: Point): CreateNodeInput {
   return {
+    idempotencyKey: crypto.randomUUID(),
     type: "note",
     title: "Untitled note",
     text: "",

@@ -963,6 +963,7 @@ function CanvasWorkspace({
 
       try {
         const saved = await canvasApi.createEdge(snapshot.canvas.id, {
+          idempotencyKey: crypto.randomUUID(),
           sourceNodeId: connection.source,
           targetNodeId: connection.target,
           kind: "default",

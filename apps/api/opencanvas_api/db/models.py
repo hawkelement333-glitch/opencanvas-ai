@@ -222,6 +222,56 @@ class Edge(TimestampMixin, Base):
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
+class LegacyCreationRequestIdentity(Base):
+    __tablename__ = "legacy_creation_request_identities"
+    __table_args__ = (
+        UniqueConstraint(
+            "actor_user_id",
+            "operation",
+            "idempotency_key",
+            name="uq_legacy_creation_actor_operation_key",
+        ),
+        CheckConstraint(
+            "operation IN ('canvas.create', 'node.create', 'node.duplicate', 'edge.create')",
+            name="ck_legacy_creation_operation",
+        ),
+        CheckConstraint(
+            "result_kind IN ('canvas', 'node', 'edge')",
+            name="ck_legacy_creation_result_kind",
+        ),
+        CheckConstraint(
+            "(operation = 'canvas.create' AND result_kind = 'canvas' AND canvas_id = result_id) "
+            "OR (operation IN ('node.create', 'node.duplicate') "
+            "AND result_kind = 'node' AND canvas_id IS NOT NULL) "
+            "OR (operation = 'edge.create' AND result_kind = 'edge' AND canvas_id IS NOT NULL)",
+            name="ck_legacy_creation_result_shape",
+        ),
+        Index(
+            "ix_legacy_creation_workspace_created",
+            "workspace_id",
+            "created_at",
+        ),
+        Index("ix_legacy_creation_canvas", "canvas_id"),
+    )
+
+    request_id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    canvas_id: Mapped[uuid.UUID | None] = mapped_column()
+    operation: Mapped[str] = mapped_column(String(32), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    result_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class AIRequest(TimestampMixin, Base):
     __tablename__ = "ai_requests"
     __table_args__ = (
@@ -8440,6 +8490,8 @@ COLLABORATION_IMMUTABLE_MODELS = (
     CollaborationCommentTransition,
 )
 
+LEGACY_CREATION_IMMUTABLE_MODELS = (LegacyCreationRequestIdentity,)
+
 INDEXER_IMMUTABLE_MODELS = (
     PipelineManifest,
     IngestionRequest,
@@ -8600,6 +8652,14 @@ for _agent_studio_immutable_model in BOUNDED_AGENT_STUDIO_IMMUTABLE_MODELS:
 for _collaboration_immutable_model in COLLABORATION_IMMUTABLE_MODELS:
     event.listen(_collaboration_immutable_model, "before_update", _reject_controlled_agent_mutation)
     event.listen(_collaboration_immutable_model, "before_delete", _reject_controlled_agent_mutation)
+
+for _legacy_creation_immutable_model in LEGACY_CREATION_IMMUTABLE_MODELS:
+    event.listen(
+        _legacy_creation_immutable_model, "before_update", _reject_controlled_agent_mutation
+    )
+    event.listen(
+        _legacy_creation_immutable_model, "before_delete", _reject_controlled_agent_mutation
+    )
 
 for _indexer_immutable_model in INDEXER_IMMUTABLE_MODELS:
     event.listen(_indexer_immutable_model, "before_update", _reject_controlled_agent_mutation)

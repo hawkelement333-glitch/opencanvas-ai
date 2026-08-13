@@ -57,6 +57,7 @@ from opencanvas_api.db.models import (
     Document,
     DocumentFile,
     Edge,
+    LegacyCreationRequestIdentity,
     UsageRecord,
     Workspace,
     WorkspaceGraphState,
@@ -90,6 +91,12 @@ from opencanvas_api.services.documents import (
     build_document_storage,
     build_embedding_provider,
     search_documents,
+)
+from opencanvas_api.services.legacy_creation_idempotency import (
+    LegacyCreationOperation,
+    claim_request_identity,
+    load_request_identity,
+    request_digest,
 )
 from opencanvas_api.services.trace import (
     CompleteTraceInput,
@@ -164,6 +171,106 @@ async def _bump_canvas(session: AsyncSession, canvas_id: uuid.UUID) -> None:
     )
 
 
+def _idempotency_conflict() -> ApiError:
+    return ApiError(
+        status.HTTP_409_CONFLICT,
+        "idempotency_conflict",
+        "That idempotency key was already used for a different creation request.",
+    )
+
+
+def _idempotency_result_unavailable() -> ApiError:
+    return ApiError(
+        status.HTTP_409_CONFLICT,
+        "idempotency_result_unavailable",
+        "The original creation result is no longer available.",
+    )
+
+
+def _validate_identity(
+    identity: LegacyCreationRequestIdentity,
+    *,
+    digest: str,
+    workspace_id: uuid.UUID | None = None,
+    canvas_id: uuid.UUID | None = None,
+) -> None:
+    if identity.request_digest != digest:
+        raise _idempotency_conflict()
+    if workspace_id is not None and identity.workspace_id != workspace_id:
+        raise _idempotency_conflict()
+    if canvas_id is not None and identity.canvas_id != canvas_id:
+        raise _idempotency_conflict()
+
+
+async def _replay_canvas(
+    session: AsyncSession,
+    principal: Principal,
+    identity: LegacyCreationRequestIdentity,
+    digest: str,
+    requested_workspace_id: uuid.UUID | None,
+) -> CanvasOut:
+    _validate_identity(identity, digest=digest, workspace_id=requested_workspace_id)
+    try:
+        await require_owned_workspace(session, principal, identity.workspace_id)
+    except AuthorizationError as exc:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND, "workspace_not_found", "Workspace not found."
+        ) from exc
+    canvas = await session.scalar(
+        select(Canvas).where(
+            Canvas.id == identity.result_id,
+            Canvas.workspace_id == identity.workspace_id,
+        )
+    )
+    if canvas is None or identity.result_kind != "canvas":
+        raise _idempotency_result_unavailable()
+    return _canvas_out(canvas)
+
+
+async def _replay_node(
+    session: AsyncSession,
+    principal: Principal,
+    identity: LegacyCreationRequestIdentity,
+    digest: str,
+    canvas_id: uuid.UUID,
+) -> NodeOut:
+    _validate_identity(identity, digest=digest, canvas_id=canvas_id)
+    await _require_canvas(session, canvas_id, principal)
+    node = await session.scalar(
+        select(CanvasNode).where(
+            CanvasNode.id == identity.result_id,
+            CanvasNode.canvas_id == canvas_id,
+        )
+    )
+    if node is None or identity.result_kind != "node":
+        raise _idempotency_result_unavailable()
+    document = None
+    if node.type == "document":
+        reference = await session.get(CanvasDocumentNode, node.id)
+        if reference is not None:
+            stored_document = await session.get(Document, reference.document_id)
+            if stored_document is not None:
+                document = document_metadata_out(stored_document)
+    return node_out(node, document=document)
+
+
+async def _replay_edge(
+    session: AsyncSession,
+    principal: Principal,
+    identity: LegacyCreationRequestIdentity,
+    digest: str,
+    canvas_id: uuid.UUID,
+) -> EdgeOut:
+    _validate_identity(identity, digest=digest, canvas_id=canvas_id)
+    await _require_canvas(session, canvas_id, principal)
+    edge = await session.scalar(
+        select(Edge).where(Edge.id == identity.result_id, Edge.canvas_id == canvas_id)
+    )
+    if edge is None or identity.result_kind != "edge":
+        raise _idempotency_result_unavailable()
+    return _edge_out(edge)
+
+
 @router.get("", response_model=list[CanvasOut])
 async def list_canvases(
     principal: PrincipalDep,
@@ -217,6 +324,7 @@ async def list_canvases(
 async def create_canvas(
     payload: CanvasCreate, principal: MutatingPrincipalDep, session: SessionDep
 ) -> CanvasOut:
+    digest = request_digest(payload.model_dump(mode="json", exclude={"idempotency_key"}))
     workspace = None
     if payload.workspace_id is not None:
         try:
@@ -225,7 +333,15 @@ async def create_canvas(
             raise ApiError(
                 status.HTTP_404_NOT_FOUND, "workspace_not_found", "Workspace not found."
             ) from exc
-    else:
+    existing = await load_request_identity(
+        session,
+        actor_user_id=principal.user_id,
+        operation=LegacyCreationOperation.CANVAS_CREATE,
+        idempotency_key=payload.idempotency_key,
+    )
+    if existing is not None:
+        return await _replay_canvas(session, principal, existing, digest, payload.workspace_id)
+    if payload.workspace_id is None:
         workspace = await session.scalar(
             select(Workspace)
             .where(
@@ -247,7 +363,30 @@ async def create_canvas(
             workspace=workspace,
             actor_user_id=principal.user_id,
         )
-    canvas = Canvas(name=payload.name, workspace_id=workspace.id)
+    canvas_id = uuid.uuid4()
+    claimed = await claim_request_identity(
+        session,
+        actor_user_id=principal.user_id,
+        workspace_id=workspace.id,
+        canvas_id=canvas_id,
+        operation=LegacyCreationOperation.CANVAS_CREATE,
+        idempotency_key=payload.idempotency_key,
+        digest=digest,
+        result_kind="canvas",
+        result_id=canvas_id,
+    )
+    if not claimed:
+        await session.rollback()
+        winner = await load_request_identity(
+            session,
+            actor_user_id=principal.user_id,
+            operation=LegacyCreationOperation.CANVAS_CREATE,
+            idempotency_key=payload.idempotency_key,
+        )
+        if winner is None:
+            raise _idempotency_result_unavailable()
+        return await _replay_canvas(session, principal, winner, digest, payload.workspace_id)
+    canvas = Canvas(id=canvas_id, name=payload.name, workspace_id=workspace.id)
     session.add(canvas)
     await session.commit()
     await session.refresh(canvas)
@@ -542,14 +681,52 @@ async def create_node(
     principal: MutatingPrincipalDep,
     session: SessionDep,
 ) -> NodeOut:
-    await _require_canvas(session, canvas_id, principal)
+    canvas = await _require_canvas(session, canvas_id, principal)
     if payload.type == "document":
         raise ApiError(
             status.HTTP_400_BAD_REQUEST,
             "document_upload_required",
             "Create document nodes through the document upload endpoint.",
         )
+    digest = request_digest(
+        {
+            "canvasId": str(canvas_id),
+            **payload.model_dump(mode="json", exclude={"idempotency_key"}),
+        }
+    )
+    existing = await load_request_identity(
+        session,
+        actor_user_id=principal.user_id,
+        operation=LegacyCreationOperation.NODE_CREATE,
+        idempotency_key=payload.idempotency_key,
+    )
+    if existing is not None:
+        return await _replay_node(session, principal, existing, digest, canvas_id)
+    node_id = uuid.uuid4()
+    claimed = await claim_request_identity(
+        session,
+        actor_user_id=principal.user_id,
+        workspace_id=canvas.workspace_id,
+        canvas_id=canvas_id,
+        operation=LegacyCreationOperation.NODE_CREATE,
+        idempotency_key=payload.idempotency_key,
+        digest=digest,
+        result_kind="node",
+        result_id=node_id,
+    )
+    if not claimed:
+        await session.rollback()
+        winner = await load_request_identity(
+            session,
+            actor_user_id=principal.user_id,
+            operation=LegacyCreationOperation.NODE_CREATE,
+            idempotency_key=payload.idempotency_key,
+        )
+        if winner is None:
+            raise _idempotency_result_unavailable()
+        return await _replay_node(session, principal, winner, digest, canvas_id)
     node = CanvasNode(
+        id=node_id,
         canvas_id=canvas_id,
         type=payload.type,
         title=payload.title,
@@ -653,7 +830,22 @@ async def duplicate_node(
     principal: MutatingPrincipalDep,
     session: SessionDep,
 ) -> NodeOut:
-    await _require_canvas(session, canvas_id, principal)
+    canvas = await _require_canvas(session, canvas_id, principal)
+    digest = request_digest(
+        {
+            "canvasId": str(canvas_id),
+            "sourceNodeId": str(node_id),
+            **payload.model_dump(mode="json", exclude={"idempotency_key"}),
+        }
+    )
+    existing = await load_request_identity(
+        session,
+        actor_user_id=principal.user_id,
+        operation=LegacyCreationOperation.NODE_DUPLICATE,
+        idempotency_key=payload.idempotency_key,
+    )
+    if existing is not None:
+        return await _replay_node(session, principal, existing, digest, canvas_id)
     source = await session.scalar(
         select(CanvasNode).where(CanvasNode.id == node_id, CanvasNode.canvas_id == canvas_id)
     )
@@ -663,7 +855,31 @@ async def duplicate_node(
         raise ApiError(status.HTTP_409_CONFLICT, "revision_conflict", "Node revision is stale.")
     position = payload.position or Point(x=source.position_x + 40, y=source.position_y + 40)
     title = f"Copy of {source.title}"[:160]
+    duplicate_id = uuid.uuid4()
+    claimed = await claim_request_identity(
+        session,
+        actor_user_id=principal.user_id,
+        workspace_id=canvas.workspace_id,
+        canvas_id=canvas_id,
+        operation=LegacyCreationOperation.NODE_DUPLICATE,
+        idempotency_key=payload.idempotency_key,
+        digest=digest,
+        result_kind="node",
+        result_id=duplicate_id,
+    )
+    if not claimed:
+        await session.rollback()
+        winner = await load_request_identity(
+            session,
+            actor_user_id=principal.user_id,
+            operation=LegacyCreationOperation.NODE_DUPLICATE,
+            idempotency_key=payload.idempotency_key,
+        )
+        if winner is None:
+            raise _idempotency_result_unavailable()
+        return await _replay_node(session, principal, winner, digest, canvas_id)
     duplicate = CanvasNode(
+        id=duplicate_id,
         canvas_id=canvas_id,
         type=source.type,
         title=title,
@@ -746,7 +962,7 @@ async def create_edge(
     principal: MutatingPrincipalDep,
     session: SessionDep,
 ) -> EdgeOut:
-    await _require_canvas(session, canvas_id, principal)
+    canvas = await _require_canvas(session, canvas_id, principal)
     node_ids = {payload.source_node_id, payload.target_node_id}
     found_ids = set(
         (
@@ -763,7 +979,45 @@ async def create_edge(
             "invalid_node_reference",
             "Both edge endpoints must belong to this canvas.",
         )
+    digest = request_digest(
+        {
+            "canvasId": str(canvas_id),
+            **payload.model_dump(mode="json", exclude={"idempotency_key"}),
+        }
+    )
+    existing = await load_request_identity(
+        session,
+        actor_user_id=principal.user_id,
+        operation=LegacyCreationOperation.EDGE_CREATE,
+        idempotency_key=payload.idempotency_key,
+    )
+    if existing is not None:
+        return await _replay_edge(session, principal, existing, digest, canvas_id)
+    edge_id = uuid.uuid4()
+    claimed = await claim_request_identity(
+        session,
+        actor_user_id=principal.user_id,
+        workspace_id=canvas.workspace_id,
+        canvas_id=canvas_id,
+        operation=LegacyCreationOperation.EDGE_CREATE,
+        idempotency_key=payload.idempotency_key,
+        digest=digest,
+        result_kind="edge",
+        result_id=edge_id,
+    )
+    if not claimed:
+        await session.rollback()
+        winner = await load_request_identity(
+            session,
+            actor_user_id=principal.user_id,
+            operation=LegacyCreationOperation.EDGE_CREATE,
+            idempotency_key=payload.idempotency_key,
+        )
+        if winner is None:
+            raise _idempotency_result_unavailable()
+        return await _replay_edge(session, principal, winner, digest, canvas_id)
     edge = Edge(
+        id=edge_id,
         canvas_id=canvas_id,
         source_node_id=payload.source_node_id,
         target_node_id=payload.target_node_id,

@@ -1114,7 +1114,11 @@ async def test_rollback_approval_api_enforces_authentication_csrf_and_scope(
         workspace = cast(dict[str, Any], (await owner.get(f"{api_prefix}/workspaces")).json()[0])
         canvas_response = await owner.post(
             f"{api_prefix}/canvases",
-            json={"name": "Rollback API canvas", "workspaceId": workspace["id"]},
+            json={
+                "idempotencyKey": str(uuid.uuid4()),
+                "name": "Rollback API canvas",
+                "workspaceId": workspace["id"],
+            },
             headers=headers,
         )
         assert canvas_response.status_code == 201, canvas_response.text
@@ -1312,7 +1316,11 @@ async def test_execution_cancellation_api_enforces_authentication_csrf_and_autho
         )
         canvas_response = await owner.post(
             f"{api_prefix}/canvases",
-            json={"name": "Cancellation API canvas", "workspaceId": workspace["id"]},
+            json={
+                "idempotencyKey": str(uuid.uuid4()),
+                "name": "Cancellation API canvas",
+                "workspaceId": workspace["id"],
+            },
             headers=headers,
         )
         assert canvas_response.status_code == 201, canvas_response.text

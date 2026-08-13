@@ -45,6 +45,7 @@ var containerAppsSubnetName = 'snet-mobius77-containerapps'
 var apiIdentityName = 'id-mobius77-api'
 var workerIdentityName = 'id-mobius77-worker'
 var databaseAdministratorIdentityName = 'id-mobius77-db-admin'
+var databaseMigrationIdentityName = 'id-mobius77-db-migration'
 var keyVaultName = 'kv-mobius77-11564669'
 var registryLoginServer = 'acrmobius7711564669.azurecr.io'
 
@@ -70,6 +71,11 @@ resource workerIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-1
 resource databaseAdministratorIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' existing = if (enabled) {
   scope: targetResourceGroup
   name: databaseAdministratorIdentityName
+}
+
+resource databaseMigrationIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' existing = if (enabled) {
+  scope: targetResourceGroup
+  name: databaseMigrationIdentityName
 }
 
 module postgres './postgres.bicep' = if (enabled) {
@@ -113,6 +119,10 @@ module compute './compute.bicep' = if (enabled) {
     databaseAdministratorIdentityId: databaseAdministratorIdentity!.id
     databaseAdministratorClientId: databaseAdministratorIdentity!.properties.clientId
     databaseAdministratorName: databaseAdministratorIdentity!.name
+    databaseMigrationIdentityId: databaseMigrationIdentity!.id
+    databaseMigrationClientId: databaseMigrationIdentity!.properties.clientId
+    databaseMigrationPrincipalId: databaseMigrationIdentity!.properties.principalId
+    databaseMigrationName: databaseMigrationIdentity!.name
     keyVaultName: keyVaultName
     registryLoginServer: registryLoginServer
     apiImageDigest: apiImageDigest
@@ -136,6 +146,9 @@ output postgresDatabase string = enabled ? postgres!.outputs.databaseName : ''
 output apiContainerAppId string = enabled ? compute!.outputs.apiContainerAppId : ''
 output privateApplicationUrl string = enabled ? 'https://ca-mobius77-api.${compute!.outputs.managedEnvironmentDefaultDomain}' : ''
 output migrationJobName string = enabled ? compute!.outputs.migrationJobName : ''
+output databasePrincipalBootstrapJobName string = enabled
+  ? compute!.outputs.databasePrincipalBootstrapJobName
+  : ''
 output ownerReadbackJobName string = enabled ? compute!.outputs.ownerReadbackJobName : ''
 output publicApplicationIngress bool = false
 output sessionSecretReferenceCount int = enabled ? 1 : 0

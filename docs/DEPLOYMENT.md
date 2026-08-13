@@ -136,10 +136,12 @@ policy/result authentication, and all four distinct containers. A mutable blob
 tag is not a standalone clean decision. Follow
 [`OBJECT_INGESTION_RUNBOOK.md`](OBJECT_INGESTION_RUNBOOK.md).
 
-Inject exactly one database credential into each process. API, worker, and
-migration tasks use distinct least-privilege database users. API and worker
+Inject exactly one database identity into each process. API, worker, and
+migration tasks use distinct least-privilege database principals. API and worker
 users must not be superusers, database/role creators, replication or RLS-bypass
-roles, or schema creators. The one-shot migration task receives
+roles, schema creators, owners, or members of the migration role. The
+administrator identity is attached only to the manual principal-bootstrap job.
+The one-shot migration task is attached only to `id-mobius77-db-migration` and receives
 `OPENCANVAS_DATABASE_ROLE=migration`; its credential is never injected into
 normal API or worker containers. Backup, observability, and emergency
 credentials remain separately controlled and are not application credentials.
@@ -152,11 +154,10 @@ authorization, CSRF, SMTP, storage, or OpenAI secrets.
 
 1. Build immutable API and web images from the reviewed commit and record their digests.
 2. Back up the production database and verify object-store versioning/retention.
-3. Run the migration image as a one-shot task:
-
-   ```sh
-   python -m scripts.migrate --expected-current 20260726_0027
-   ```
+3. Run the administrator-attached principal-bootstrap job and require a
+   successful terminal execution. Then run the migration-identity job and
+   require exact revision `20260726_0029` plus successful runtime-grant
+   reconciliation. Do not start the migration job when bootstrap fails.
 
 4. Deploy worker instances and wait for a fresh worker heartbeat.
 5. Deploy API instances and require `/api/v1/health/live`, `/ready`, and `/worker` to pass.
@@ -168,11 +169,14 @@ authorization, CSRF, SMTP, storage, or OpenAI secrets.
 Do not run multiple application revisions against an incompatible schema. Migrations must finish
 before new API/worker instances accept traffic.
 
-The guarded runner verifies the repository target `20260726_0028`, verifies
+The guarded runner verifies the repository target `20260726_0029`, verifies
 the operator-declared current revision (`base` for an empty database), obtains
 one PostgreSQL session advisory lock, uses a direct non-pooled connection, and
 verifies the final revision. A competing runner fails safely. API and worker
 readiness stays false while the migration lock is held or the schema differs.
+The API and worker grants are reconciled from the literal per-operation table
+matrix after the migration. Neither runtime principal receives sequence or
+function privileges, and no current/default blanket grants are permitted.
 
 The current runner and historical migrations must not be used to claim a
 successful clean PostgreSQL installation. After a migration error, runner

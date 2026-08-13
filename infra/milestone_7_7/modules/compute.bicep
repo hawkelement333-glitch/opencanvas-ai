@@ -64,6 +64,10 @@ param telemetryIdentityId string = ''
 param databaseAdministratorIdentityId string = ''
 param databaseAdministratorClientId string = ''
 param databaseAdministratorName string = ''
+param databaseMigrationIdentityId string = ''
+param databaseMigrationClientId string = ''
+param databaseMigrationPrincipalId string = ''
+param databaseMigrationName string = ''
 param keyVaultName string = ''
 param registryLoginServer string = ''
 param apiImageDigest string = ''
@@ -97,6 +101,7 @@ var environmentName = 'cae-mobius77-staging'
 var apiName = 'ca-mobius77-api'
 var workerName = 'ca-mobius77-worker'
 var telemetryName = 'ca-mobius77-telemetry'
+var databasePrincipalBootstrapJobName = 'caj-mobius77-db-principal-bootstrap'
 var migrationJobName = 'caj-mobius77-migration'
 var ownerReadbackJobName = 'caj-mobius77-owner-readback'
 var effectiveManagedEnvironmentId = ownerBootstrapEnabled ? existingOwnerBootstrapEnvironment!.id : managedEnvironment!.id
@@ -134,7 +139,7 @@ var commonSettings = [
   { name: 'OPENCANVAS_DATABASE_AUTH_MODE', value: 'entra' }
   { name: 'OPENCANVAS_DATABASE_TLS_MODE', value: 'verify-full' }
   { name: 'PGSSLROOTCERT', value: '/etc/ssl/certs/ca-certificates.crt' }
-  { name: 'OPENCANVAS_DATABASE_EXPECTED_REVISION', value: '20260726_0028' }
+  { name: 'OPENCANVAS_DATABASE_EXPECTED_REVISION', value: '20260726_0029' }
   { name: 'OPENCANVAS_STORAGE_PROVIDER', value: 'azure' }
   { name: 'OPENCANVAS_AZURE_STORAGE_ACCOUNT_URL', value: storageAccountUrl }
   { name: 'OPENCANVAS_OBJECT_INGESTION_MODE', value: 'trusted' }
@@ -189,7 +194,7 @@ var ownerBootstrapSettings = [
   { name: 'OPENCANVAS_DATABASE_AUTH_MODE', value: 'entra' }
   { name: 'OPENCANVAS_DATABASE_TLS_MODE', value: 'verify-full' }
   { name: 'PGSSLROOTCERT', value: '/etc/ssl/certs/ca-certificates.crt' }
-  { name: 'OPENCANVAS_DATABASE_EXPECTED_REVISION', value: '20260726_0028' }
+  { name: 'OPENCANVAS_DATABASE_EXPECTED_REVISION', value: '20260726_0029' }
   { name: 'OPENCANVAS_STORAGE_PROVIDER', value: 'memory' }
   { name: 'OPENCANVAS_OBJECT_INGESTION_MODE', value: 'disabled' }
   { name: 'OPENCANVAS_JOB_PROVIDER', value: 'inline' }
@@ -210,313 +215,15 @@ var databaseApiSettings = [
   { name: 'OPENCANVAS_DATABASE_MANAGED_IDENTITY_CLIENT_ID', value: apiIdentityClientId }
   { name: 'OPENCANVAS_AZURE_MANAGED_IDENTITY_CLIENT_ID', value: apiIdentityClientId }
 ]
+var principalBootstrapProgram = '''
+from scripts.bootstrap_postgres import main
+
+raise SystemExit(main())
+'''
 var migrationBootstrapProgram = '''
-import asyncio
-import os
-import re
-import sys
+from scripts.migrate_and_grant import main
 
-import asyncpg
-from sqlalchemy.engine import make_url
-
-from opencanvas_api.core.config import EXPECTED_DATABASE_REVISION, get_settings
-from opencanvas_api.db.session import _POSTGRES_ENTRA_AUDIENCE
-from opencanvas_api.services.managed_identity import ManagedIdentityTokenProvider
-from scripts.migrate import run as run_migration
-
-
-class PhaseFailure(Exception):
-    pass
-
-
-_SAFE_RUNTIME_PRINCIPAL = re.compile(r"^id-mobius77-(?:api|worker)$")
-_SAFE_ADMIN_PRINCIPAL = re.compile(r"^id-mobius77-db-admin$")
-_UUID = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
-
-
-def fail(code):
-    print(code, file=sys.stderr, flush=True)
-    raise SystemExit(1)
-
-
-async def read_revision(phase):
-    try:
-        settings = get_settings()
-    except Exception:
-        raise PhaseFailure(f"observability-bootstrap-{phase}-settings-validation-failed")
-    provider = ManagedIdentityTokenProvider(
-        endpoint=settings.database_managed_identity_endpoint or "",
-        resource=_POSTGRES_ENTRA_AUDIENCE,
-        client_id=settings.database_managed_identity_client_id or "",
-        identity_header=settings.database_managed_identity_header,
-        timeout_seconds=settings.database_connect_timeout_seconds,
-    )
-    try:
-        token = await provider.token()
-    except Exception:
-        raise PhaseFailure(f"observability-bootstrap-{phase}-managed-identity-token-failed")
-    url = make_url(settings.database_url_value)
-    try:
-        connection = await asyncpg.connect(
-            user=url.username,
-            password=token,
-            database=url.database,
-            host=url.host,
-            port=url.port or 5432,
-            ssl=settings.database_tls_mode,
-            timeout=settings.database_connect_timeout_seconds,
-        )
-    except Exception:
-        raise PhaseFailure(f"observability-bootstrap-{phase}-database-connect-failed")
-    try:
-        try:
-            version_table = await connection.fetchval(
-                "SELECT to_regclass('public.alembic_version')::text"
-            )
-        except Exception:
-            raise PhaseFailure(f"observability-bootstrap-{phase}-version-table-read-failed")
-        if version_table is None:
-            return "base"
-        try:
-            revision = await connection.fetchval("SELECT version_num FROM alembic_version")
-        except Exception:
-            raise PhaseFailure(f"observability-bootstrap-{phase}-revision-value-read-failed")
-        if not isinstance(revision, str):
-            raise PhaseFailure(f"observability-bootstrap-{phase}-revision-value-invalid")
-        return revision
-    finally:
-        try:
-            await connection.close()
-        except Exception:
-            pass
-
-
-def quote_identifier(value):
-    return '"' + value.replace('"', '""') + '"'
-
-
-def raise_principal_provider_failure(default_code, error):
-    message = str(error).casefold()
-    sqlstate = getattr(error, "sqlstate", None)
-    if sqlstate == "42883" or "no function matches" in message:
-        raise PhaseFailure("observability-bootstrap-runtime-principal-provider-function-absent")
-    if sqlstate == "42703":
-        raise PhaseFailure("observability-bootstrap-runtime-principal-provider-column-invalid")
-    if sqlstate == "42501" or "permission denied" in message:
-        raise PhaseFailure("observability-bootstrap-runtime-principal-provider-permission-denied")
-    if "not found in the tenant" in message:
-        raise PhaseFailure("observability-bootstrap-runtime-principal-provider-identity-not-found")
-    if sqlstate == "42710" or "already exists" in message:
-        raise PhaseFailure("observability-bootstrap-runtime-principal-provider-duplicate")
-    raise PhaseFailure(default_code)
-
-
-async def runtime_principal_rows(connection, principal):
-    rows = await connection.fetch(
-        "SELECT * FROM pg_catalog.pgaadauth_list_principals(false)"
-    )
-    result = []
-    for row in rows:
-        if len(row) != 6:
-            raise PhaseFailure("observability-bootstrap-runtime-principal-mapping-invalid")
-        if str(row[0]) == principal:
-            result.append(
-                {
-                    "role_name": str(row[0]),
-                    "principal_type": str(row[1]),
-                    "object_id": str(row[2]),
-                    "is_admin": int(row[5]),
-                }
-            )
-    return result
-
-
-async def grant_runtime_roles():
-    principals = (
-        (
-            os.getenv("OPENCANVAS_DATABASE_RUNTIME_API_PRINCIPAL", ""),
-            os.getenv("OPENCANVAS_DATABASE_RUNTIME_API_PRINCIPAL_ID", ""),
-        ),
-        (
-            os.getenv("OPENCANVAS_DATABASE_RUNTIME_WORKER_PRINCIPAL", ""),
-            os.getenv("OPENCANVAS_DATABASE_RUNTIME_WORKER_PRINCIPAL_ID", ""),
-        ),
-    )
-    if any(
-        _SAFE_RUNTIME_PRINCIPAL.fullmatch(principal) is None
-        or _UUID.fullmatch(object_id) is None
-        for principal, object_id in principals
-    ):
-        raise PhaseFailure("observability-bootstrap-runtime-principal-contract-invalid")
-    settings = get_settings()
-    provider = ManagedIdentityTokenProvider(
-        endpoint=settings.database_managed_identity_endpoint or "",
-        resource=_POSTGRES_ENTRA_AUDIENCE,
-        client_id=settings.database_managed_identity_client_id or "",
-        identity_header=settings.database_managed_identity_header,
-        timeout_seconds=settings.database_connect_timeout_seconds,
-    )
-    try:
-        token = await provider.token()
-    except Exception:
-        raise PhaseFailure("observability-bootstrap-runtime-managed-identity-token-failed")
-    url = make_url(settings.database_url_value)
-    if _SAFE_ADMIN_PRINCIPAL.fullmatch(url.username or "") is None:
-        raise PhaseFailure("observability-bootstrap-runtime-principal-contract-invalid")
-    connection_arguments = {
-        "user": url.username,
-        "password": token,
-        "host": url.host,
-        "port": url.port or 5432,
-        "ssl": settings.database_tls_mode,
-        "timeout": settings.database_connect_timeout_seconds,
-    }
-    try:
-        principal_connection = await asyncpg.connect(
-            database="postgres", **connection_arguments
-        )
-    except Exception:
-        raise PhaseFailure("observability-bootstrap-runtime-principal-catalog-connect-failed")
-    try:
-        for principal, object_id in principals:
-            try:
-                rows = await runtime_principal_rows(principal_connection, principal)
-            except PhaseFailure:
-                raise
-            except Exception as exc:
-                raise_principal_provider_failure(
-                    "observability-bootstrap-runtime-principal-list-failed", exc
-                )
-            if rows == []:
-                try:
-                    await principal_connection.fetchval(
-                        "SELECT * FROM pg_catalog.pgaadauth_create_principal_with_oid("
-                        "$1::text, $2::text, 'service'::text, false, false)",
-                        principal,
-                        object_id,
-                    )
-                except PhaseFailure:
-                    raise
-                except Exception as exc:
-                    raise_principal_provider_failure(
-                        "observability-bootstrap-runtime-principal-create-failed", exc
-                    )
-                try:
-                    rows = await runtime_principal_rows(principal_connection, principal)
-                except PhaseFailure:
-                    raise
-                except Exception as exc:
-                    raise_principal_provider_failure(
-                        "observability-bootstrap-runtime-principal-readback-failed", exc
-                    )
-            if (
-                len(rows) != 1
-                or rows[0]["role_name"] != principal
-                or rows[0]["principal_type"] != "service"
-                or str(rows[0]["object_id"]).lower() != object_id.lower()
-                or rows[0]["is_admin"] != 0
-            ):
-                raise PhaseFailure("observability-bootstrap-runtime-principal-mapping-invalid")
-            privileges = await principal_connection.fetchrow(
-                "SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls "
-                "FROM pg_roles WHERE rolname = $1",
-                principal,
-            )
-            if privileges is None or any(bool(value) for value in privileges):
-                raise PhaseFailure("observability-bootstrap-runtime-principal-privilege-invalid")
-    finally:
-        await principal_connection.close()
-    try:
-        application_connection = await asyncpg.connect(
-            database=url.database, **connection_arguments
-        )
-    except Exception:
-        raise PhaseFailure("observability-bootstrap-runtime-grant-database-connect-failed")
-    try:
-        try:
-            async with application_connection.transaction():
-                current_user = await application_connection.fetchval("SELECT current_user")
-                if current_user != url.username:
-                    raise PhaseFailure("observability-bootstrap-runtime-principal-contract-invalid")
-                quoted_admin = quote_identifier(current_user)
-                await application_connection.execute(
-                    "REVOKE CREATE ON SCHEMA public FROM PUBLIC"
-                )
-                for principal, _object_id in principals:
-                    quoted = quote_identifier(principal)
-                    await application_connection.execute(
-                        f"REVOKE ALL ON DATABASE opencanvas FROM {quoted}"
-                    )
-                    await application_connection.execute(
-                        f"GRANT CONNECT ON DATABASE opencanvas TO {quoted}"
-                    )
-                    await application_connection.execute(
-                        f"GRANT USAGE ON SCHEMA public TO {quoted}"
-                    )
-                    await application_connection.execute(
-                        "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES "
-                        f"IN SCHEMA public TO {quoted}"
-                    )
-                    await application_connection.execute(
-                        "GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES "
-                        f"IN SCHEMA public TO {quoted}"
-                    )
-                    await application_connection.execute(
-                        f"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO {quoted}"
-                    )
-                    await application_connection.execute(
-                        f"ALTER DEFAULT PRIVILEGES FOR ROLE {quoted_admin} IN SCHEMA public "
-                        f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {quoted}"
-                    )
-                    await application_connection.execute(
-                        f"ALTER DEFAULT PRIVILEGES FOR ROLE {quoted_admin} IN SCHEMA public "
-                        f"GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO {quoted}"
-                    )
-                    await application_connection.execute(
-                        f"ALTER DEFAULT PRIVILEGES FOR ROLE {quoted_admin} IN SCHEMA public "
-                        f"GRANT EXECUTE ON FUNCTIONS TO {quoted}"
-                    )
-        except PhaseFailure:
-            raise
-        except Exception:
-            raise PhaseFailure("observability-bootstrap-runtime-role-grant-failed")
-    finally:
-        await application_connection.close()
-
-
-try:
-    revision = asyncio.run(read_revision("initial"))
-except PhaseFailure as exc:
-    fail(str(exc))
-
-if revision == "base":
-    try:
-        result = run_migration(expected_current="base", target=EXPECTED_DATABASE_REVISION)
-    except Exception:
-        fail("observability-bootstrap-migration-apply-failed")
-    if result != 0:
-        fail("observability-bootstrap-migration-apply-failed")
-elif revision != EXPECTED_DATABASE_REVISION:
-    fail("observability-bootstrap-revision-drift")
-
-try:
-    asyncio.run(grant_runtime_roles())
-except PhaseFailure as exc:
-    fail(str(exc))
-except Exception:
-    fail("observability-bootstrap-runtime-role-grant-failed")
-
-try:
-    final_revision = asyncio.run(read_revision("final"))
-except PhaseFailure as exc:
-    fail(str(exc))
-if final_revision != EXPECTED_DATABASE_REVISION:
-    fail("observability-bootstrap-final-revision-mismatch")
-
-print("observability-bootstrap-migration-succeeded", flush=True)
+raise SystemExit(main())
 '''
 var ownerReadbackProgram = '''
 import asyncio
@@ -665,8 +372,8 @@ resource telemetryContainerApp 'Microsoft.App/containerApps@2026-01-01' = if (ap
   }
 }
 
-resource migrationJob 'Microsoft.App/jobs@2025-01-01' = if (databaseRuntimeEnabled) {
-  name: migrationJobName
+resource databasePrincipalBootstrapJob 'Microsoft.App/jobs@2025-01-01' = if (databaseRuntimeEnabled) {
+  name: databasePrincipalBootstrapJobName
   location: location
   tags: lifecycleTags
   identity: { type: 'UserAssigned', userAssignedIdentities: { '${databaseAdministratorIdentityId}': {} } }
@@ -674,6 +381,53 @@ resource migrationJob 'Microsoft.App/jobs@2025-01-01' = if (databaseRuntimeEnabl
     configuration: {
       manualTriggerConfig: { parallelism: 1, replicaCompletionCount: 1 }
       registries: [{ identity: databaseAdministratorIdentityId, server: registryLoginServer }]
+      replicaRetryLimit: 0
+      replicaTimeout: 900
+      triggerType: 'Manual'
+    }
+    environmentId: effectiveManagedEnvironmentId
+    template: {
+      containers: [
+        {
+          args: ['-c', principalBootstrapProgram]
+          command: ['python']
+          env: concat(ownerBootstrapSettings, [
+            {
+              name: 'OPENCANVAS_DATABASE_URL'
+              value: 'postgresql+asyncpg://${databaseAdministratorName}@${postgresHost}:${postgresPort}/${postgresDatabase}'
+            }
+            { name: 'OPENCANVAS_DATABASE_ROLE', value: 'provisioning' }
+            { name: 'OPENCANVAS_DATABASE_AUTH_MODE', value: 'entra' }
+            { name: 'OPENCANVAS_DATABASE_TLS_MODE', value: 'verify-full' }
+            { name: 'OPENCANVAS_DATABASE_MANAGED_IDENTITY_CLIENT_ID', value: databaseAdministratorClientId }
+            { name: 'OPENCANVAS_DATABASE_EXPECTED_REVISION', value: '20260726_0029' }
+            { name: 'OPENCANVAS_DATABASE_MIGRATION_PRINCIPAL', value: databaseMigrationName }
+            { name: 'OPENCANVAS_DATABASE_MIGRATION_PRINCIPAL_ID', value: databaseMigrationPrincipalId }
+            { name: 'OPENCANVAS_DATABASE_RUNTIME_API_PRINCIPAL', value: apiIdentityName }
+            { name: 'OPENCANVAS_DATABASE_RUNTIME_API_PRINCIPAL_ID', value: apiIdentityPrincipalId }
+            { name: 'OPENCANVAS_DATABASE_RUNTIME_WORKER_PRINCIPAL', value: workerIdentityName }
+            { name: 'OPENCANVAS_DATABASE_RUNTIME_WORKER_PRINCIPAL_ID', value: workerIdentityPrincipalId }
+          ])
+          image: apiImageDigest
+          name: 'database-principal-bootstrap'
+          resources: { cpu: json('0.5'), memory: '1Gi' }
+        }
+      ]
+    }
+    workloadProfileName: 'Consumption'
+  }
+  dependsOn: appEnabled ? [telemetryContainerApp] : []
+}
+
+resource migrationJob 'Microsoft.App/jobs@2025-01-01' = if (databaseRuntimeEnabled) {
+  name: migrationJobName
+  location: location
+  tags: lifecycleTags
+  identity: { type: 'UserAssigned', userAssignedIdentities: { '${databaseMigrationIdentityId}': {} } }
+  properties: {
+    configuration: {
+      manualTriggerConfig: { parallelism: 1, replicaCompletionCount: 1 }
+      registries: [{ identity: databaseMigrationIdentityId, server: registryLoginServer }]
       replicaRetryLimit: 0
       replicaTimeout: 1800
       triggerType: 'Manual'
@@ -687,17 +441,16 @@ resource migrationJob 'Microsoft.App/jobs@2025-01-01' = if (databaseRuntimeEnabl
           env: concat(ownerBootstrapSettings, [
             {
               name: 'OPENCANVAS_DATABASE_URL'
-              value: 'postgresql+asyncpg://${databaseAdministratorName}@${postgresHost}:${postgresPort}/${postgresDatabase}'
+              value: 'postgresql+asyncpg://${databaseMigrationName}@${postgresHost}:${postgresPort}/${postgresDatabase}'
             }
             { name: 'OPENCANVAS_DATABASE_ROLE', value: 'migration' }
             { name: 'OPENCANVAS_DATABASE_AUTH_MODE', value: 'entra' }
             { name: 'OPENCANVAS_DATABASE_TLS_MODE', value: 'verify-full' }
-            { name: 'OPENCANVAS_DATABASE_MANAGED_IDENTITY_CLIENT_ID', value: databaseAdministratorClientId }
-            { name: 'OPENCANVAS_DATABASE_EXPECTED_REVISION', value: '20260726_0028' }
+            { name: 'OPENCANVAS_DATABASE_MANAGED_IDENTITY_CLIENT_ID', value: databaseMigrationClientId }
+            { name: 'OPENCANVAS_DATABASE_EXPECTED_REVISION', value: '20260726_0029' }
+            { name: 'OPENCANVAS_DATABASE_MIGRATION_PRINCIPAL', value: databaseMigrationName }
             { name: 'OPENCANVAS_DATABASE_RUNTIME_API_PRINCIPAL', value: apiIdentityName }
-            { name: 'OPENCANVAS_DATABASE_RUNTIME_API_PRINCIPAL_ID', value: apiIdentityPrincipalId }
             { name: 'OPENCANVAS_DATABASE_RUNTIME_WORKER_PRINCIPAL', value: workerIdentityName }
-            { name: 'OPENCANVAS_DATABASE_RUNTIME_WORKER_PRINCIPAL_ID', value: workerIdentityPrincipalId }
           ])
           image: apiImageDigest
           name: 'migration'
@@ -707,7 +460,7 @@ resource migrationJob 'Microsoft.App/jobs@2025-01-01' = if (databaseRuntimeEnabl
     }
     workloadProfileName: 'Consumption'
   }
-  dependsOn: appEnabled ? [telemetryContainerApp] : []
+  dependsOn: [databasePrincipalBootstrapJob]
 }
 
 resource ownerReadbackJob 'Microsoft.App/jobs@2025-01-01' = if (ownerBootstrapEnabled) {
@@ -891,6 +644,9 @@ output infrastructureResourceGroupName string = infrastructureResourceGroupName
 output apiContainerAppId string = apiEnabled ? apiContainerApp.id : ''
 output workerContainerAppId string = appEnabled ? workerContainerApp.id : ''
 output telemetryContainerAppId string = appEnabled ? telemetryContainerApp.id : ''
+output databasePrincipalBootstrapJobName string = databaseRuntimeEnabled
+  ? databasePrincipalBootstrapJob.name
+  : ''
 output migrationJobName string = databaseRuntimeEnabled ? migrationJob.name : ''
 output ownerReadbackJobName string = ownerBootstrapEnabled ? ownerReadbackJob.name : ''
 output managedEnvironmentDefaultDomain string = enabled ? effectiveManagedEnvironmentDefaultDomain : ''

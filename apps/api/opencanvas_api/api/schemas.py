@@ -32,6 +32,7 @@ class Viewport(Point):
 
 
 class CanvasCreate(ApiModel):
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
     name: str = Field(min_length=1, max_length=120)
     workspace_id: uuid.UUID | None = None
 
@@ -146,6 +147,7 @@ class CitationOut(ApiModel):
 
 
 class NodeCreate(ApiModel):
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
     type: NodeType = "note"
     title: str = Field(default="Untitled note", min_length=1, max_length=160)
     text: str = Field(default="", max_length=100_000)
@@ -189,6 +191,7 @@ class NodePatch(ApiModel):
 
 
 class NodeDuplicate(ApiModel):
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
     revision: int = Field(ge=0)
     position: Point | None = None
 
@@ -210,6 +213,7 @@ class NodeOut(ApiModel):
 
 
 class EdgeCreate(ApiModel):
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
     source_node_id: uuid.UUID
     target_node_id: uuid.UUID
     kind: EdgeKind = "default"

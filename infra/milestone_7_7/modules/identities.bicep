@@ -69,6 +69,12 @@ resource databaseAdministratorIdentity 'Microsoft.ManagedIdentity/userAssignedId
   tags: lifecycleTags
 }
 
+resource databaseMigrationIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = if (workloadIdentityEnabled) {
+  name: 'id-mobius77-db-migration'
+  location: location
+  tags: lifecycleTags
+}
+
 resource cleanupTargetContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enabled) {
   name: guid(targetResourceGroupId, cleanupAutomationPrincipalId, 'b24988ac-6180-42a0-ab88-20f7382dd24c')
   properties: {
@@ -108,3 +114,11 @@ output databaseAdministratorClientId string = workloadIdentityEnabled
   ? databaseAdministratorIdentity.properties.clientId
   : ''
 output databaseAdministratorName string = workloadIdentityEnabled ? databaseAdministratorIdentity.name : ''
+output databaseMigrationIdentityId string = workloadIdentityEnabled ? databaseMigrationIdentity.id : ''
+output databaseMigrationPrincipalId string = workloadIdentityEnabled
+  ? databaseMigrationIdentity.properties.principalId
+  : ''
+output databaseMigrationClientId string = workloadIdentityEnabled
+  ? databaseMigrationIdentity.properties.clientId
+  : ''
+output databaseMigrationName string = workloadIdentityEnabled ? databaseMigrationIdentity.name : ''

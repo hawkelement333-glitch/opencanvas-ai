@@ -66,7 +66,7 @@ def test_shared_governance_migration_cycles_and_compiles_postgresql(tmp_path: Pa
         assert expected <= invocation_columns
     command.downgrade(config, "20260725_0024")
     command.upgrade(config, REVISION)
-    assert ScriptDirectory.from_config(config).get_heads() == ["20260726_0028"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20260726_0029"]
 
     api_directory = Path(__file__).resolve().parents[1]
     buffer = io.StringIO()

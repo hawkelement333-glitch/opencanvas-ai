@@ -67,7 +67,11 @@ async def test_typed_canvas_share_and_revocation_execute_once(
         workspace = await _workspace(owner, api_prefix)
         canvas_response = await owner.post(
             f"{api_prefix}/canvases",
-            json={"name": "Shared canvas", "workspaceId": workspace["id"]},
+            json={
+                "idempotencyKey": str(uuid.uuid4()),
+                "name": "Shared canvas",
+                "workspaceId": workspace["id"],
+            },
             headers=_csrf(owner_session),
         )
         assert canvas_response.status_code == 201, canvas_response.text

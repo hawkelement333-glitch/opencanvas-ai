@@ -216,6 +216,18 @@ async function request<T>(
   }
 }
 
+async function requestCreation<T>(path: string, schema: ZodType<T>, body: string): Promise<T> {
+  const init = { method: "POST", body } satisfies RequestInit;
+  try {
+    return await request(path, schema, init);
+  } catch (error) {
+    if (error instanceof APIError && (error.status === 0 || error.status === 408)) {
+      return request(path, schema, init);
+    }
+    throw error;
+  }
+}
+
 async function requestWithoutBody(path: string, init: RequestInit): Promise<void> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort("timeout"), API_TIMEOUT_MS);
@@ -292,9 +304,13 @@ export const canvasApi = {
     return request(`/canvases${query}`, z.array(canvasSchema), { signal });
   },
 
-  createCanvas(name: string, workspaceId?: string): Promise<Canvas> {
-    const input = createCanvasInputSchema.parse({ name, workspaceId });
-    return request("/canvases", canvasSchema, { method: "POST", body: JSON.stringify(input) });
+  createCanvas(
+    name: string,
+    workspaceId?: string,
+    idempotencyKey = crypto.randomUUID(),
+  ): Promise<Canvas> {
+    const input = createCanvasInputSchema.parse({ idempotencyKey, name, workspaceId });
+    return requestCreation("/canvases", canvasSchema, JSON.stringify(input));
   },
 
   getSnapshot(canvasId: string, signal?: AbortSignal): Promise<CanvasSnapshot> {
@@ -315,10 +331,11 @@ export const canvasApi = {
 
   createNode(canvasId: string, rawInput: CreateNodeInput) {
     const input = createNodeInputSchema.parse(rawInput);
-    return request(`/canvases/${encodeURIComponent(canvasId)}/nodes`, canvasNodeSchema, {
-      method: "POST",
-      body: JSON.stringify(input),
-    });
+    return requestCreation(
+      `/canvases/${encodeURIComponent(canvasId)}/nodes`,
+      canvasNodeSchema,
+      JSON.stringify(input),
+    );
   },
 
   updateNode(canvasId: string, nodeId: string, rawInput: UpdateNodeInput) {
@@ -335,11 +352,12 @@ export const canvasApi = {
     nodeId: string,
     revision: number,
     position: { x: number; y: number },
+    idempotencyKey = crypto.randomUUID(),
   ) {
-    return request(
+    return requestCreation(
       `/canvases/${encodeURIComponent(canvasId)}/nodes/${encodeURIComponent(nodeId)}/duplicate`,
       canvasNodeSchema,
-      { method: "POST", body: JSON.stringify({ revision, position }) },
+      JSON.stringify({ idempotencyKey, revision, position }),
     );
   },
 
@@ -352,10 +370,11 @@ export const canvasApi = {
 
   createEdge(canvasId: string, rawInput: CreateEdgeInput): Promise<CanvasEdge> {
     const input = createEdgeInputSchema.parse(rawInput);
-    return request(`/canvases/${encodeURIComponent(canvasId)}/edges`, canvasEdgeSchema, {
-      method: "POST",
-      body: JSON.stringify(input),
-    });
+    return requestCreation(
+      `/canvases/${encodeURIComponent(canvasId)}/edges`,
+      canvasEdgeSchema,
+      JSON.stringify(input),
+    );
   },
 
   deleteEdge(canvasId: string, edgeId: string, revision: number): Promise<void> {

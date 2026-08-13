@@ -169,7 +169,7 @@ def test_milestone_6_2_is_sole_head_and_postgresql_ddl_compiles() -> None:
     api_directory = Path(__file__).resolve().parents[1]
     config = Config(api_directory / "alembic.ini")
     config.set_main_option("script_location", str(api_directory / "alembic"))
-    assert ScriptDirectory.from_config(config).get_heads() == ["20260726_0028"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20260726_0029"]
 
     buffer = io.StringIO()
     offline = Config(api_directory / "alembic.ini", output_buffer=buffer)

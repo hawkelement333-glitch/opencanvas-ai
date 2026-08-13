@@ -117,7 +117,7 @@ async def test_complete_upload_process_select_query_cite_trace_and_delete_workfl
 
     duplicate_response = await client.post(
         f"{api_prefix}/canvases/{canvas['id']}/nodes/{pdf_upload['node']['id']}/duplicate",
-        json={"revision": pdf_upload["node"]["revision"]},
+        json={"idempotencyKey": str(uuid.uuid4()), "revision": pdf_upload["node"]["revision"]},
     )
     assert duplicate_response.status_code == 201
     duplicate = cast(JsonObject, duplicate_response.json())

@@ -28,6 +28,7 @@ const selectedNode: CanvasNode = {
 describe("canvas contracts", () => {
   it("creates a production-sized text note draft", () => {
     expect(createNodeDraft({ x: 40, y: 80 })).toEqual({
+      idempotencyKey: expect.any(String),
       type: "note",
       title: "Untitled note",
       text: "",

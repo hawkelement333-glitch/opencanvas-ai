@@ -86,6 +86,7 @@ _TERMINAL_JOB_STATUSES: Final = frozenset(
 )
 _MIGRATION_FAILURE_CODES: Final = frozenset(
     {
+        "observability-bootstrap-migration-or-runtime-privilege-reconciliation-failed",
         "observability-bootstrap-final-database-connect-failed",
         "observability-bootstrap-final-managed-identity-token-failed",
         "observability-bootstrap-final-revision-mismatch",
