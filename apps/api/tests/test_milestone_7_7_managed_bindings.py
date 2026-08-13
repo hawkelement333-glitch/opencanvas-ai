@@ -5943,6 +5943,13 @@ def _private_endpoint_adoption_graph() -> tuple[
                 ("blob", "privatelink.blob.core.windows.net"),
             ),
         ),
+        (
+            "pe-mobius77-redis",
+            "redis",
+            "Microsoft.Cache/redisEnterprise/redis-mobius77-11564669",
+            "redisEnterprise",
+            (("redis", "privatelink.redis.azure.net"),),
+        ),
     )
     endpoints: list[JsonValue] = []
     network_interfaces: list[JsonValue] = []
@@ -6059,7 +6066,7 @@ def _execute_private_endpoint_adoption(
     return managed_binding_lifecycle._private_endpoint_network_interfaces(SYNTHETIC_SUBSCRIPTION)
 
 
-def test_private_endpoint_adoption_accepts_exact_authoritative_four_endpoint_graph(
+def test_private_endpoint_adoption_accepts_exact_authoritative_five_endpoint_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
@@ -6105,6 +6112,7 @@ def test_private_endpoint_adoption_rejects_historical_two_endpoint_graph(
         "pe-mobius77-keyvault",
         "pe-mobius77-storage",
         "pe-mobius77-azure-monitor",
+        "pe-mobius77-redis",
     ],
 )
 def test_private_endpoint_adoption_rejects_each_missing_endpoint(
@@ -6128,7 +6136,7 @@ def test_private_endpoint_adoption_rejects_each_missing_endpoint(
         )
 
 
-def test_private_endpoint_adoption_rejects_unexpected_fifth_endpoint(
+def test_private_endpoint_adoption_rejects_unexpected_sixth_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     endpoints, network_interfaces, zone_groups = _private_endpoint_adoption_graph()
@@ -6402,7 +6410,7 @@ def test_target_inventory_accepts_only_exact_managed_binding_identities(
         )
 
 
-def test_target_inventory_adopts_exact_post_bootstrap_database_graph(
+def test_target_inventory_adopts_exact_post_secret_runtime_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     subscription_id = "opaque-subscription"
@@ -6411,7 +6419,10 @@ def test_target_inventory_adopts_exact_post_bootstrap_database_graph(
         f"{managed_binding_lifecycle.TARGET_GROUP}/providers"
     )
     expected = {
+        "microsoft.app/containerapps/ca-mobius77-telemetry": "southcentralus",
+        "microsoft.app/containerapps/ca-mobius77-worker": "southcentralus",
         "microsoft.app/jobs/caj-mobius77-migration": "southcentralus",
+        "microsoft.cache/redisenterprise/redis-mobius77-11564669": "australiacentral",
         ("microsoft.dbforpostgresql/flexibleservers/psql-mobius77-11564669"): "centralus",
         ("microsoft.network/privatednszones/privatelink.postgres.database.azure.com"): "global",
         (
@@ -6423,6 +6434,11 @@ def test_target_inventory_adopts_exact_post_bootstrap_database_graph(
             "microsoft.network/privatednszones/"
             "privatelink.postgres.database.azure.com/virtualnetworklinks/"
             "link-mobius77-staging-postgres"
+        ): "global",
+        "microsoft.network/privatednszones/privatelink.redis.azure.net": "global",
+        (
+            "microsoft.network/privatednszones/privatelink.redis.azure.net/"
+            "virtualnetworklinks/link-mobius77-redis"
         ): "global",
         "microsoft.network/virtualnetworks/vnet-mobius77-postgres": "centralus",
     }

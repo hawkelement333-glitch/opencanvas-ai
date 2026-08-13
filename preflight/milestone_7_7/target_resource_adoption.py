@@ -37,7 +37,13 @@ GENERATION_FOUR_SCANNER_FOUNDATION_RESOURCE_LOCATIONS: Final = (
     ),
 )
 POST_BOOTSTRAP: Final = (
+    ("microsoft.app/containerapps/ca-mobius77-telemetry", "southcentralus"),
+    ("microsoft.app/containerapps/ca-mobius77-worker", "southcentralus"),
     ("microsoft.app/jobs/caj-mobius77-migration", "southcentralus"),
+    (
+        "microsoft.cache/redisenterprise/redis-mobius77-11564669",
+        "australiacentral",
+    ),
     (
         "microsoft.dbforpostgresql/flexibleservers/psql-mobius77-11564669",
         "centralus",
@@ -54,6 +60,15 @@ POST_BOOTSTRAP: Final = (
     (
         "microsoft.network/privatednszones/privatelink.postgres.database.azure.com/"
         "virtualnetworklinks/link-mobius77-staging-postgres",
+        "global",
+    ),
+    (
+        "microsoft.network/privatednszones/privatelink.redis.azure.net",
+        "global",
+    ),
+    (
+        "microsoft.network/privatednszones/privatelink.redis.azure.net/"
+        "virtualnetworklinks/link-mobius77-redis",
         "global",
     ),
     ("microsoft.network/virtualnetworks/vnet-mobius77-postgres", "centralus"),

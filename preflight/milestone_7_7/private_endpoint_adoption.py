@@ -74,6 +74,13 @@ PRIVATE_ENDPOINT_GRAPH: Final = (
             ("blob", "privatelink.blob.core.windows.net"),
         ),
     ),
+    (
+        "pe-mobius77-redis",
+        "redis",
+        "Microsoft.Cache/redisEnterprise/redis-mobius77-11564669",
+        "redisEnterprise",
+        (("redis", "privatelink.redis.azure.net"),),
+    ),
 )
 PRIVATE_ENDPOINT_RESOURCE_LOCATIONS: Final = tuple(
     (
