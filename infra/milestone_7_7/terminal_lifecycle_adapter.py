@@ -1012,13 +1012,16 @@ def cleanup(
             revocation_path = "explicit-revocation-and-denial"
         except (ContractError, lifecycle.LifecycleError, OSError, ValueError):
             revocation_path = "superseded-by-resource-deletion"
-    resource_group_delete_count = 0
+    authorized_groups = (
+        lifecycle.TARGET_GROUP,
+        lifecycle.INFRASTRUCTURE_GROUP,
+        lifecycle.CLEANUP_GROUP,
+    )
     target_group_present = lifecycle._group_exists(
         subscription_id, lifecycle.TARGET_GROUP
     )
 
     def delete_group(group: str) -> None:
-        nonlocal resource_group_delete_count
         try:
             lifecycle._run(
                 (
@@ -1042,7 +1045,6 @@ def cleanup(
                     "cleanup-resource-group-delete-azure-"
                     + exc.sanitized_azure_error_code
                 )
-        resource_group_delete_count += 1
 
     if target_group_present:
         delete_group(lifecycle.TARGET_GROUP)
@@ -1074,11 +1076,15 @@ def cleanup(
             lifecycle._fail("soft-deleted-key-vault-residue-detected")
     elif lifecycle._deleted_vault_present(subscription_id):
         lifecycle._fail("soft-deleted-key-vault-residue-detected")
+    if any(
+        lifecycle._group_exists(subscription_id, group) for group in authorized_groups
+    ):
+        lifecycle._fail("cleanup-resource-group-residue-detected")
     state_path.unlink(missing_ok=True)
     lifecycle._cleanup_authorization_path(receipt_directory).unlink()
     return {
         "authorizationMode": authorization_mode,
-        "resourceGroupDeleteCount": resource_group_delete_count,
+        "resourceGroupDeleteCount": len(authorized_groups),
         "softDeletedVaultAbsent": True,
         "status": "cleanup-completed",
         "temporaryAuthorityRevoked": True,

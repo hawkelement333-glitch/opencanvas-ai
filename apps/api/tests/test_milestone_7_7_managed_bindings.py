@@ -6803,6 +6803,7 @@ def test_cleanup_consumes_authorization_and_rejects_replay(
     first = managed_binding_lifecycle._cleanup("opaque-subscription", tmp_path, ledger=ledger)
 
     assert first["status"] == "cleanup-completed"
+    assert first["resourceGroupDeleteCount"] == 3
     assert first["temporary-authority-cleanup-path"] == "no-transient-state"
     with pytest.raises(
         managed_binding_lifecycle.LifecycleError,
