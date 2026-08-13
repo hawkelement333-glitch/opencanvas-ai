@@ -363,6 +363,19 @@ def test_scanner_foundation_precedes_resolution_and_post_secret_stays_gated():
     assert "scannerResultBridgeResolved" not in storage
 
 
+def test_post_secret_migration_output_uses_explicit_subscription_scope() -> None:
+    main = (ROOT / "main.bicep").read_text(encoding="utf-8")
+
+    assert (
+        "resourceId(subscription().subscriptionId, targetResourceGroupName, "
+        "'Microsoft.App/jobs', compute.outputs.migrationJobName)"
+    ) in main
+    assert (
+        "resourceId(targetResourceGroupName, 'Microsoft.App/jobs', "
+        "compute.outputs.migrationJobName)"
+    ) not in main
+
+
 def test_module_inventory_and_safe_outputs_are_exact():
     names = sorted(path.name for path in (ROOT / "modules").glob("*.bicep"))
     assert names == [
