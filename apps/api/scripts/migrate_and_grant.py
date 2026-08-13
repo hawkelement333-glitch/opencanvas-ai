@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import re
 import sys
 
 from sqlalchemy import text
@@ -12,27 +10,21 @@ from opencanvas_api.core.config import (
     DatabaseRole,
     get_settings,
 )
+from opencanvas_api.db.principal_manifest import PrincipalSlot, load_principal_manifest
 from opencanvas_api.db.role_privileges import runtime_privilege_statements
 from opencanvas_api.db.session import Database
 from scripts.migrate import run as run_migration
 
-_SAFE_MIGRATION_PRINCIPAL = re.compile(r"^id-mobius77-db-migration$")
-_SAFE_RUNTIME_PRINCIPAL = re.compile(r"^id-mobius77-(?:api|worker)$")
 _SAFE_FAILURE_CODE = "observability-bootstrap-migration-or-runtime-privilege-reconciliation-failed"
 
 
 def _principals() -> tuple[str, str, str]:
-    migration = os.getenv("OPENCANVAS_DATABASE_MIGRATION_PRINCIPAL", "")
-    api = os.getenv("OPENCANVAS_DATABASE_RUNTIME_API_PRINCIPAL", "")
-    worker = os.getenv("OPENCANVAS_DATABASE_RUNTIME_WORKER_PRINCIPAL", "")
-    if (
-        _SAFE_MIGRATION_PRINCIPAL.fullmatch(migration) is None
-        or _SAFE_RUNTIME_PRINCIPAL.fullmatch(api) is None
-        or _SAFE_RUNTIME_PRINCIPAL.fullmatch(worker) is None
-        or len({migration, api, worker}) != 3
-    ):
-        raise RuntimeError("database role contract is invalid")
-    return migration, api, worker
+    manifest = load_principal_manifest()
+    return (
+        manifest.principals[PrincipalSlot.MIGRATION].name,
+        manifest.principals[PrincipalSlot.API].name,
+        manifest.principals[PrincipalSlot.WORKER].name,
+    )
 
 
 async def _current_revision() -> str:
@@ -63,12 +55,12 @@ async def apply_runtime_privileges() -> None:
     if settings.database_role is not DatabaseRole.MIGRATION:
         raise RuntimeError("database migration role contract is invalid")
     migration, api, worker = _principals()
+    manifest = load_principal_manifest()
     database = Database.from_settings(settings, expected_role=DatabaseRole.MIGRATION)
     try:
         async with database.engine.begin() as connection:
             current_user = str((await connection.execute(text("SELECT current_user"))).scalar_one())
-            if current_user != migration:
-                raise RuntimeError("migration principal contract is invalid")
+            manifest.require_current(PrincipalSlot.MIGRATION, current_name=current_user)
             migration_flags = (
                 await connection.execute(
                     text(

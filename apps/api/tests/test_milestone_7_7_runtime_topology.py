@@ -111,7 +111,9 @@ def test_postgres_bootstrap_and_migration_are_separated_and_principal_closed() -
         encoding="utf-8"
     )
     assert "pgaadauth_create_principal" in bootstrap
-    assert "id-mobius77-(?:api|worker|db-migration)" in bootstrap
+    assert "load_principal_manifest" in bootstrap
+    assert "id-mobius77" not in bootstrap
+    assert "id-mobius77" not in migration
     assert "REVOKE CREATE ON SCHEMA public FROM PUBLIC" in bootstrap
     assert "EXPECTED_DATABASE_REVISION" in migration
     assert "database migration state is inconsistent" in migration

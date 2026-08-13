@@ -1,21 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import re
 import sys
-import uuid
 from dataclasses import dataclass
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from opencanvas_api.core.config import DatabaseRole, get_settings
+from opencanvas_api.db.principal_manifest import PrincipalSlot, load_principal_manifest
 from opencanvas_api.db.role_privileges import quote_identifier
 from opencanvas_api.db.session import Database
-
-_SAFE_ADMIN_PRINCIPAL = re.compile(r"^id-mobius77-db-admin$")
-_SAFE_PRINCIPAL = re.compile(r"^id-mobius77-(?:api|worker|db-migration)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,30 +20,16 @@ class PrincipalContract:
 
 
 def _principal_contracts() -> tuple[PrincipalContract, ...]:
-    contracts = (
-        PrincipalContract(
-            os.getenv("OPENCANVAS_DATABASE_MIGRATION_PRINCIPAL", ""),
-            os.getenv("OPENCANVAS_DATABASE_MIGRATION_PRINCIPAL_ID", ""),
-        ),
-        PrincipalContract(
-            os.getenv("OPENCANVAS_DATABASE_RUNTIME_API_PRINCIPAL", ""),
-            os.getenv("OPENCANVAS_DATABASE_RUNTIME_API_PRINCIPAL_ID", ""),
-        ),
-        PrincipalContract(
-            os.getenv("OPENCANVAS_DATABASE_RUNTIME_WORKER_PRINCIPAL", ""),
-            os.getenv("OPENCANVAS_DATABASE_RUNTIME_WORKER_PRINCIPAL_ID", ""),
-        ),
+    manifest = load_principal_manifest()
+    return tuple(
+        PrincipalContract(manifest.principals[slot].name, manifest.principals[slot].object_id)
+        for slot in (
+            PrincipalSlot.MIGRATION,
+            PrincipalSlot.API,
+            PrincipalSlot.WORKER,
+            PrincipalSlot.EVIDENCE,
+        )
     )
-    for contract in contracts:
-        if _SAFE_PRINCIPAL.fullmatch(contract.name) is None:
-            raise RuntimeError("database principal contract is invalid")
-        try:
-            uuid.UUID(contract.object_id)
-        except ValueError as exc:
-            raise RuntimeError("database principal contract is invalid") from exc
-    if len({contract.name for contract in contracts}) != len(contracts):
-        raise RuntimeError("database principal contract is invalid")
-    return contracts
 
 
 async def _role_flags(
@@ -140,13 +121,13 @@ async def provision_database_principals() -> None:
     if settings.database_role is not DatabaseRole.PROVISIONING:
         raise RuntimeError("database provisioning role contract is invalid")
     contracts = _principal_contracts()
-    migration, api, worker = contracts
+    manifest = load_principal_manifest()
+    migration, api, worker, evidence = contracts
     database = Database.from_settings(settings, expected_role=DatabaseRole.PROVISIONING)
     try:
         async with database.engine.begin() as connection:
             current_user = str((await connection.execute(text("SELECT current_user"))).scalar_one())
-            if _SAFE_ADMIN_PRINCIPAL.fullmatch(current_user) is None:
-                raise RuntimeError("database administrator principal contract is invalid")
+            manifest.require_current(PrincipalSlot.BOOTSTRAP, current_name=current_user)
             for contract in contracts:
                 await _ensure_principal(connection, contract)
 
@@ -177,6 +158,16 @@ async def provision_database_principals() -> None:
                 )
                 await connection.execute(text(f"GRANT USAGE ON SCHEMA public TO {quoted_runtime}"))
                 await connection.execute(text(f"REVOKE {quoted_migration} FROM {quoted_runtime}"))
+            quoted_evidence = quote_identifier(evidence.name)
+            await connection.execute(
+                text(f"REVOKE ALL PRIVILEGES ON DATABASE opencanvas FROM {quoted_evidence}")
+            )
+            await connection.execute(
+                text(f"GRANT CONNECT ON DATABASE opencanvas TO {quoted_evidence}")
+            )
+            await connection.execute(text(f"REVOKE CREATE ON SCHEMA public FROM {quoted_evidence}"))
+            await connection.execute(text(f"GRANT pg_monitor TO {quoted_evidence}"))
+            await connection.execute(text(f"REVOKE {quoted_migration} FROM {quoted_evidence}"))
     finally:
         await database.dispose()
 

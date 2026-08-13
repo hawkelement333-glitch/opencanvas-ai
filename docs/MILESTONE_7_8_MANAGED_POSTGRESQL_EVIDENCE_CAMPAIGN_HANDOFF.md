@@ -309,3 +309,18 @@ change must parameterize the principal-name contract without weakening its
 role-separation and identifier-safety guarantees; campaign enablement can then
 resume from the resulting clean HEAD. The managed Azure campaign remains
 unauthorized and unexecuted, and the object-storage audit remains unstarted.
+
+## Later authorized resolution cross-reference
+
+This document remains the historical record of the pre-mutation campaign stop.
+A later authorization resumed from clean HEAD
+`9e4b12c04f3882d4530be0e6318e9a46c4ccce12`, remediated M78-PG-005 with a
+campaign/generation-bound semantic principal manifest, and implemented the
+independent deployment, cleanup, lifecycle, ledger, evidence, and operator
+surface described in the
+[managed PostgreSQL campaign-enablement handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_ENABLEMENT_HANDOFF.md).
+
+That later repository-local work did not run the managed campaign and does not
+retroactively change any observation, price, image count, resource count, or
+zero-residue statement above. All five managed evidence gaps remain open, the
+object-storage audit remains unstarted, and Milestone 7.8 remains incomplete.

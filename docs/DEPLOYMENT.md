@@ -10,23 +10,19 @@ object ingestion and malware quarantine, durable work, shared rate limits,
 observability, recovery exercises, capacity/resilience testing, and the final
 production-readiness audit.
 
-Checkpoints 7.1, 7.2, 7.3, and 7.4 are complete locally. This guide is not evidence
-that failover, restore, capacity, or final production security have passed.
-Managed Azure staging prerequisites proved private/versioned storage and
-harmless/EICAR scan outcomes, but no application deployment or production
-certification occurred. Checkpoint 7.5 remains unstarted. Live PostgreSQL 17
-validation previously proved clean-install failures in
-historical migrations `20260718_0005`, `20260725_0021`,
-`20260725_0023`, and `20260725_0024`; no deployment or migration `0026` is
-authorized until the
-[migration 0005 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md),
-the
-[migrations 0023 and 0024 compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATIONS_0023_0024_COMPATIBILITY_AMENDMENT.md),
-[migration 0023 UUID-null compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0023_UUID_NULL_COMPATIBILITY_AMENDMENT.md),
-[trigger-function compatibility amendment](MILESTONE_7_POSTGRESQL_TRIGGER_FUNCTION_COMPATIBILITY_AMENDMENT.md),
-[migration 0021 current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md),
-[migration 0021 owner-backfill current-role compatibility amendment](MILESTONE_7_POSTGRESQL_MIGRATION_0021_BACKFILL_CURRENT_ROLE_COMPATIBILITY_AMENDMENT.md),
-and their combined focused correction checkpoint pass.
+Milestones 7.1 through 7.7 are complete. Milestone 7.8 is the active final
+production-readiness audit and has no numbered internal checkpoints. Revision
+`20260726_0029` is the sole Alembic head; 0030 is absent. The managed
+PostgreSQL High defects are locally remediated, and the independent 7.8
+campaign machinery is repository-ready, but the campaign has not run.
+M78-PG-E01, M78-PG-E02, M78-PG-E03, M78-TI-E01, and M78-PG-E04 remain open.
+This guide is not evidence that managed grants, capacity, failover, credential
+recovery, tenant isolation, or operational configuration have passed.
+
+The historical PostgreSQL compatibility amendments remain the audit trail for
+the earlier 0005/0021/0023/0024 corrections; their combined validation passed
+before later migrations proceeded. They are not active deployment blockers and
+must not be rerun or rewritten as Milestone 7.8 evidence.
 
 SolarPlexus Mobius has five explicit runtime modes: `demo`, `development`, `test`, `staging`, and
 `production`. The API validates the selected mode and all mode-dependent provider configuration at
@@ -42,7 +38,10 @@ never fall back to deterministic providers.
   private-file proxy responses.
 - `worker`: independently scalable database-backed document processor with persisted jobs,
   retries, idempotency keys, and heartbeats.
-- `api-migrate`: one-shot Alembic migration task run before API/worker rollout.
+- `api-bootstrap`: provisioning-only Entra administrator job that creates and
+  verifies semantic database principals, ownership, and grants.
+- `api-migrate`: one-shot migration-identity Alembic task run after bootstrap
+  and before API/worker rollout.
 - PostgreSQL with pgvector: durable relational, vector, session, job, execution, and Trace state.
 - Azure Blob Storage: private, versioned quarantine, clean, rejected, and
   retained containers accessed by workload identity.
@@ -178,25 +177,34 @@ The API and worker grants are reconciled from the literal per-operation table
 matrix after the migration. Neither runtime principal receives sequence or
 function privileges, and no current/default blanket grants are permitted.
 
-The current runner and historical migrations must not be used to claim a
-successful clean PostgreSQL installation. After a migration error, runner
-cleanup can execute inside the aborted transaction and mask the primary
-exception. Migration `0021` also compares session `CURRENT_ROLE` instead of
-the membership-transition row's `current_role` column, and its raw owner
-backfill independently leaves the same target-column identifier bare in an
-`INSERT`, which PostgreSQL rejects as invalid syntax. Migrations `0023` and
-`0024` misread PostgreSQL-canonicalized check expressions, and `0023`'s
-resource backfill exposes independently typed `text` nulls to UUID
-destinations. With those later corrections present, `0023` then fails because
-its mutation trigger references an undefined function; the same name drift
-appears in `0024`. Before the next live attempt, rotate the local PostgreSQL
-test credential that appeared in transient tool output. The combined
-compatibility correction must preserve the original error, prove lock release
-on success and failure, prove `0021` owner/role/session independence,
-migration/ORM parity, quoted raw-target identity, and exact owner-backfill
-values, counts, scope, and atomicity, prove exact closed constraint registries
-and UUID/null backfill values, and prove all affected trigger identities plus
-update/delete rollback through `0025` before deployment validation resumes.
+The historical clean-install defects in 0005/0021/0023/0024 were corrected and
+their combined PostgreSQL/SQLite validation passed before 0026-0029. That
+evidence does not substitute for the still-required 7.8 managed campaign. A
+migration failure must preserve the primary exception, release the advisory
+lock, leave API/worker readiness closed, and be recovered by a reviewed forward
+fix or restore procedure; never broaden a runtime role or run Alembic at API
+startup.
+
+## Milestone 7.8 managed PostgreSQL evidence campaign
+
+The independent campaign surface is documented in
+[`infra/milestone_7_8/README.md`](../infra/milestone_7_8/README.md) and the
+[`MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_OPERATOR_RUNBOOK.md`](MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_OPERATOR_RUNBOOK.md).
+It is dry-run by default and requires a separate execution authorization.
+
+The campaign derives bootstrap, migration, API, worker, evidence, and cleanup
+identities from one campaign/generation. The database manifest binds their
+semantic roles to distinct stable object IDs; labels alone grant no authority.
+Cleanup is armed in a different resource group before the first billable
+resource, the first billable mutation starts an immutable four-hour clock, the
+conservative estimate is USD 25.6832, and USD 50 is a hard ceiling. Workloads
+cannot deploy until one reviewed source digest has one passing source/digest-
+bound admission scan. Every later error enters exact-scope cleanup.
+
+Managed execution must finish by proving both resource groups absent, no
+campaign-tagged resource or role assignment, and every residue counter zero.
+Local implementation and simulation do not close any managed gap. The
+object-storage audit remains a separate, unstarted surface.
 
 ## Database credential replacement
 

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:managed-evidence-execution:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "campaignId",
+    "generationId",
+    "sourceHead",
+    "imageDigest",
+    "controlPlaneEvidenceSha256",
+    "observations"
+  ],
+  "properties": {
+    "version": { "const": "m7.8-managed-evidence-execution-v1" },
+    "campaignId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,47}$" },
+    "generationId": { "type": "string", "pattern": "^g[1-9][0-9]{0,5}-[a-f0-9]{12}$" },
+    "sourceHead": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "imageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "controlPlaneEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "observations": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["identity", "executionName", "terminalStatus", "outputSha256"],
+        "properties": {
+          "identity": { "type": "string", "minLength": 1 },
+          "executionName": { "type": "string", "minLength": 1 },
+          "terminalStatus": { "const": "Succeeded" },
+          "outputSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:image-admission:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "sourceHead",
+    "canonicalBuildInputSha256",
+    "imageDigest",
+    "scanner",
+    "scannerVersion",
+    "scannedAtUtc",
+    "result",
+    "criticalFindings",
+    "highFindings"
+  ],
+  "properties": {
+    "version": { "const": "m7.8-image-admission-v1" },
+    "sourceHead": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "canonicalBuildInputSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "imageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "scanner": { "type": "string", "minLength": 1 },
+    "scannerVersion": { "type": "string", "minLength": 1 },
+    "scannedAtUtc": { "type": "string", "format": "date-time" },
+    "result": { "const": "passed" },
+    "criticalFindings": { "const": 0 },
+    "highFindings": { "const": 0 }
+  }
+}

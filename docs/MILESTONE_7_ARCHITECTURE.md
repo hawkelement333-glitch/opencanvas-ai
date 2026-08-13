@@ -1554,3 +1554,58 @@ later explicitly authorized High-defect remediation created direct child
 head and `0030` is absent. The later role separation, migration identity, and
 validation record are in
 [`MILESTONE_7_8_MANAGED_POSTGRESQL_HIGH_DEFECT_REMEDIATION_HANDOFF.md`](MILESTONE_7_8_MANAGED_POSTGRESQL_HIGH_DEFECT_REMEDIATION_HANDOFF.md).
+
+## 30. Milestone 7.8 independent managed PostgreSQL campaign boundary
+
+A subsequent separately authorized repository-local correction resolved
+M78-PG-005 and implemented the independent campaign surface under
+`infra/milestone_7_8/`. It does not reopen or import the completed Milestone
+7.7 lifecycle. Campaign/generation-derived semantic bindings replace fixed
+principal labels: bootstrap, migration, API, worker, evidence, and cleanup each
+have one distinct stable object-ID binding, and the active database process must
+prove its declared semantic slot before bootstrap, migration, or catalog work.
+
+The database authority remains deliberately split:
+
+- bootstrap is the Entra administrator and performs only principal/ownership/
+  grant provisioning;
+- migration owns the application schema and performs the guarded, direct
+  `NullPool` Alembic run;
+- API and worker retain their distinct literal table-operation matrices, with
+  no sequence/function/DDL or migration-assumption authority;
+- evidence has catalog visibility through `CONNECT` and `pg_monitor`, but no
+  application ownership or creation authority; and
+- cleanup has exact campaign-resource-group deletion authority and no database
+  authority.
+
+The campaign topology is one private PostgreSQL 17 Flexible Server, Premium
+ACR, VNet/DNS, internal Container Apps environment, Log Analytics workspace,
+five workload identities, and bounded runtime/probe/recovery jobs. A separate
+cleanup resource group, identity, published runbook, immutable one-time
+schedule, and exact two-scope cleanup role assignments must be deployed and read back
+before the first billable mutation. The first billable mutation binds a
+four-hour deadline; cost is bounded by a USD 25.6832 conservative estimate and
+USD 50 absolute ceiling. One source/digest-bound admission scan is required
+before the only workload deployment and a second resource or image generation
+is rejected.
+
+The restart ledger advances through local preflight, sanitized correlation,
+capacity/cost, cleanup control, base infrastructure, image decision, bootstrap,
+migration, evidence, disposition, cleanup, residue, and finalization. Any error
+after scope creation enters cleanup. Terminal success requires both campaign
+groups absent, no tagged resource or scoped role assignment, and every residue
+counter zero.
+
+The managed evidence harness covers effective catalog grants, ownership,
+`PUBLIC` restrictions, runtime negative permissions, migration behavior,
+connection capacity/reserve, credential denial/restoration, forced failover,
+stale-pool recovery, all four durable ambiguous-commit replays, and two-tenant
+isolation before and after failover. Local fake-adapter and lifecycle tests
+validate the commands but do not supply managed proof. M78-PG-E01,
+M78-PG-E02, M78-PG-E03, M78-TI-E01, and M78-PG-E04 remain open until the
+separately authorized campaign runs. The exact design and runbook are in
+[`MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_ENABLEMENT_HANDOFF.md`](MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_ENABLEMENT_HANDOFF.md)
+and
+[`MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_OPERATOR_RUNBOOK.md`](MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_OPERATOR_RUNBOOK.md).
+Milestone 7.8 remains incomplete, and the object-storage audit remains
+unstarted.

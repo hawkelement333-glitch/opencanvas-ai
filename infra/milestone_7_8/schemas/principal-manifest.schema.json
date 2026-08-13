@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:principal-manifest:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "campaignId", "generationId", "subscriptionCorrelation", "principals"],
+  "properties": {
+    "version": { "const": "m7.8-principal-manifest-v1" },
+    "campaignId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,47}$" },
+    "generationId": { "type": "string", "pattern": "^g[1-9][0-9]{0,5}-[a-f0-9]{12}$" },
+    "subscriptionCorrelation": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "principals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bootstrap", "migration", "api", "worker", "evidence", "cleanup"],
+      "properties": {
+        "bootstrap": { "$ref": "#/$defs/bootstrap" },
+        "migration": { "$ref": "#/$defs/migration" },
+        "api": { "$ref": "#/$defs/api" },
+        "worker": { "$ref": "#/$defs/worker" },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "cleanup": { "$ref": "#/$defs/cleanup" }
+      }
+    }
+  },
+  "$defs": {
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "name", "objectId"],
+      "properties": {
+        "role": { "type": "string" },
+        "name": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]{2,62}$" },
+        "objectId": { "type": "string", "format": "uuid" }
+      }
+    },
+    "bootstrap": { "allOf": [{ "$ref": "#/$defs/binding" }, { "properties": { "role": { "const": "bootstrap" } } }] },
+    "migration": { "allOf": [{ "$ref": "#/$defs/binding" }, { "properties": { "role": { "const": "migration" } } }] },
+    "api": { "allOf": [{ "$ref": "#/$defs/binding" }, { "properties": { "role": { "const": "api" } } }] },
+    "worker": { "allOf": [{ "$ref": "#/$defs/binding" }, { "properties": { "role": { "const": "worker" } } }] },
+    "evidence": { "allOf": [{ "$ref": "#/$defs/binding" }, { "properties": { "role": { "const": "evidence" } } }] },
+    "cleanup": { "allOf": [{ "$ref": "#/$defs/binding" }, { "properties": { "role": { "const": "cleanup" } } }] }
+  }
+}

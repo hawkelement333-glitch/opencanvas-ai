@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:control-plane-evidence:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "primaryZone", "standbyZone", "haMode", "maintenanceDay", "maintenanceHour",
+    "storageGiB", "storageTier", "backupRetentionDays", "geoBackup", "latencyP95Ms",
+    "azureReservedConnections", "poolCeilings",
+    "rolloutOverlap", "operatorConsumers", "observedPeak", "safetyReserve", "maxConnections"
+  ],
+  "properties": {
+    "primaryZone": { "type": "string", "minLength": 1 },
+    "standbyZone": { "type": "string", "minLength": 1 },
+    "haMode": { "const": "ZoneRedundant" },
+    "maintenanceDay": { "type": "integer", "minimum": 0, "maximum": 6 },
+    "maintenanceHour": { "type": "integer", "minimum": 0, "maximum": 23 },
+    "storageGiB": { "const": 64 },
+    "storageTier": { "const": "P6" },
+    "backupRetentionDays": { "const": 7 },
+    "geoBackup": { "const": false },
+    "latencyP95Ms": { "type": "number", "minimum": 0 },
+    "azureReservedConnections": { "type": "integer", "minimum": 0 },
+    "poolCeilings": { "type": "integer", "minimum": 1 },
+    "rolloutOverlap": { "type": "integer", "minimum": 0 },
+    "operatorConsumers": { "type": "integer", "minimum": 1 },
+    "observedPeak": { "type": "integer", "minimum": 1 },
+    "safetyReserve": { "type": "integer", "minimum": 1 },
+    "maxConnections": { "type": "integer", "minimum": 1 }
+  }
+}

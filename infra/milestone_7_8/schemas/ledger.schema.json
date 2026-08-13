@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign-ledger:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "campaign_id", "generation_id", "phase", "authorized_ceiling_usd",
+    "conservative_estimate_usd", "contingency_percent", "first_billable_mutation_utc",
+    "cleanup_deadline_utc", "original_cleanup_deadline_utc", "resource_generation_count",
+    "image_generation_count", "image_digest", "required_scan_count", "image_scan_count",
+    "image_scan_evidence_sha256", "transitions", "cleanup_started_utc",
+    "cleanup_completed_utc", "actual_cost_usd", "residue"
+  ],
+  "properties": {
+    "campaign_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,47}$" },
+    "generation_id": { "type": "string", "pattern": "^g[1-9][0-9]{0,5}-[a-f0-9]{12}$" },
+    "phase": { "type": "string" },
+    "authorized_ceiling_usd": { "const": "50.00" },
+    "conservative_estimate_usd": { "type": "string" },
+    "contingency_percent": { "type": "string" },
+    "first_billable_mutation_utc": { "type": ["string", "null"], "format": "date-time" },
+    "cleanup_deadline_utc": { "type": ["string", "null"], "format": "date-time" },
+    "original_cleanup_deadline_utc": { "type": ["string", "null"], "format": "date-time" },
+    "resource_generation_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "image_generation_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "image_digest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "required_scan_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "image_scan_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "image_scan_evidence_sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "transitions": { "type": "array" },
+    "cleanup_started_utc": { "type": ["string", "null"], "format": "date-time" },
+    "cleanup_completed_utc": { "type": ["string", "null"], "format": "date-time" },
+    "actual_cost_usd": { "type": ["string", "null"] },
+    "residue": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } }
+  }
+}
