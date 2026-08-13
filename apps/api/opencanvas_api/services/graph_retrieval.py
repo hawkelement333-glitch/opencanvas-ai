@@ -227,6 +227,11 @@ class GraphAwareRetrievalService:
         selected = tuple(dict.fromkeys(command.selected_object_ids))
         seeds = tuple(dict.fromkeys(command.seed_object_ids))
         self._validate(command, normalized_query, selected, seeds)
+        await self._require_owner_scope(
+            user_id=command.user_id,
+            workspace_id=command.workspace_id,
+            canvas_id=command.canvas_id,
+        )
         graph_revision = (
             await self.session.scalar(
                 select(WorkspaceGraphState.revision).where(
@@ -407,6 +412,11 @@ class GraphAwareRetrievalService:
         canvas_id: uuid.UUID,
         retrieval_id: uuid.UUID,
     ) -> RetrievalRecord:
+        await self._require_owner_scope(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            canvas_id=canvas_id,
+        )
         run = await self.session.scalar(
             select(GraphRetrievalRun).where(
                 GraphRetrievalRun.retrieval_id == retrieval_id,
@@ -557,6 +567,27 @@ class GraphAwareRetrievalService:
         if set(entities) != set(selected):
             raise GraphRetrievalNotFoundError()
         return entities
+
+    async def _require_owner_scope(
+        self,
+        *,
+        user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        canvas_id: uuid.UUID,
+    ) -> None:
+        scope = await self.session.scalar(
+            select(Canvas.id)
+            .join(Workspace, Workspace.id == Canvas.workspace_id)
+            .where(
+                Canvas.id == canvas_id,
+                Canvas.workspace_id == workspace_id,
+                Workspace.owner_id == user_id,
+                Workspace.deleted_at.is_(None),
+                Workspace.lifecycle_state != "deleted",
+            )
+        )
+        if scope is None:
+            raise GraphRetrievalNotFoundError()
 
     async def _traverse(
         self,
@@ -1043,6 +1074,19 @@ class TraceEvidenceBundleService:
         workspace_id: uuid.UUID,
         canvas_id: uuid.UUID,
     ) -> TraceEvidenceBundle:
+        scope = await self.session.scalar(
+            select(Canvas.id)
+            .join(Workspace, Workspace.id == Canvas.workspace_id)
+            .where(
+                Canvas.id == canvas_id,
+                Canvas.workspace_id == workspace_id,
+                Workspace.owner_id == user_id,
+                Workspace.deleted_at.is_(None),
+                Workspace.lifecycle_state != "deleted",
+            )
+        )
+        if scope is None:
+            raise GraphRetrievalNotFoundError()
         bundle = await self.session.scalar(
             select(TraceEvidenceBundle).where(
                 TraceEvidenceBundle.bundle_id == bundle_id,

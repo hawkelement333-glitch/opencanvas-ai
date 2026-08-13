@@ -2,16 +2,18 @@
 
 Date: 2026-08-13
 
-Status: active; architecture and checkpoint-scope findings corrected and
-validated; later audit surfaces remain unstarted
+Status: active; architecture and checkpoint-scope findings are corrected;
+managed PostgreSQL and tenant-isolation audit is blocked by unresolved High
+findings and managed-evidence gaps
 
-This register records only defects proved by the Milestone 7.8 audit. A
-historical deferral, known limitation, warning, or missing validation is not
+This register records defects proved by the Milestone 7.8 audit and, in a
+separate section, the evidence gaps the audit contract requires it to preserve.
+A historical deferral, known limitation, warning, or missing validation is not
 silently promoted to a defect. Remediation is mandatory only where the
 governing repository contract says so; otherwise validation is required first
 and remediation remains conditional on proof.
 
-## Confirmed findings
+## Architecture and checkpoint-scope findings
 
 | Identifier  | Source                                                                                                           | Description                                                                                                                                       | Severity       | Affected surface                                | Classification                           | Mandatory in 7.8 | Disposition                         |
 | ----------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- | ----------------------------------------------- | ---------------------------------------- | ---------------- | ----------------------------------- |
@@ -20,6 +22,76 @@ and remediation remains conditional on proof.
 
 No finding in this table claims that Milestone 7.7 was materially false or
 unsafe. Both findings concern the safe entry boundary for new 7.8 work.
+
+## Managed PostgreSQL and tenant-isolation findings
+
+The second ordered audit surface inspected the declared architecture, Bicep
+topology, runtime configuration, connection construction, SQLAlchemy engine
+creation, database runtime gates, PostgreSQL bootstrap, migration runner,
+Alembic environment and chain, recovery records, all 181 API operations, all
+151 ORM tables, central authorization and sharing services, durable workers,
+indexing, ingestion, graph retrieval, workflows, and the affected local test
+suites. A source defect is listed only when current code contradicts an
+authoritative repository requirement or permits a concrete unsafe path.
+
+| Identifier | Exact requirement and source evidence | Affected production path | Severity | Classification and disposition | Changed files and validation | Residual risk |
+| ---------- | ------------------------------------- | ------------------------ | -------- | ------------------------------ | ---------------------------- | ------------- |
+| M78-PG-001 | Architecture section 9.2 requires direct non-pooled migration/maintenance connections; `alembic/env.py` used `Database.from_settings`, which constructed `QueuePool` for every PostgreSQL role. This contradicted the Milestone 7.1 `NullPool` record. | Alembic migration job and non-application role connections | Medium | Proved defect; corrected so only API and worker roles pool and migration, backup, observability, and emergency roles use `NullPool`. | `apps/api/opencanvas_api/db/session.py`; `apps/api/tests/test_database_runtime.py`. Direct-pool regression passes; affected database/migration group passes 138 tests. | No known local residual for pool selection; managed execution under the corrected code remains part of M78-PG-E03. |
+| M78-PG-002 | The implementation plan requires API/worker DML only on required tables. The Bicep bootstrap and `scripts/bootstrap_postgres.py` grant both principals identical CRUD on all tables, sequence write, all-function execution, and matching default privileges. Runtime checks exclude dangerous role flags/schema create but do not narrow these grants. | Every API and worker SQL path, including auth, collaboration, ingestion, indexing, jobs, and workflows | High | Proved defect; unresolved. A reviewed table/function matrix, separate grants, and managed negative tests are required. Broadening or guessing grants locally is unsafe. | None. Source inspection and affected local tests prove behavior above the database-grant layer only; no managed grant test ran. | A compromised or defective API/worker process can DML tables outside its functional need; effective ownership/inheritance remains unproved. |
+| M78-PG-003 | Architecture sections 5 and 9.2-9.3 and `DEPLOYMENT.md` require a distinct least-privilege migration user. Bicep authenticates the job as the configured Entra administrator and the same process provisions principals, grants privileges, and runs Alembic. | One-shot migration/bootstrap job and all schema/extension ownership | High | Proved defect; unresolved. An explicit identity/role and provisioning/migration split plus managed proof is required; Azure mutation is prohibited here. | None. The local runner safety group passes, but it cannot prove an identity separation absent from Bicep. | Migration execution holds administrator authority; a migration/bootstrap defect has a larger blast radius than required. |
+| M78-PG-004 | Architecture section 9.4 requires every mutation to resolve ambiguous commits by durable idempotency key/digest. Canvas, node, duplicate-node, and edge creation accept neither and create server-random UUIDs. | Legacy create operations during disconnect, restart, DNS change, or zone failover | High | Proved defect; unresolved. Durable request identity changes application state and requires the explicit migration amendment this audit forbids. | None. Source inspection proves concrete counterexamples; no failover execution was invented. | A committed request whose response is lost can be retried into a second durable object. |
+| M78-TI-001 | The implementation plan requires server-derived scope and stale-authority denial. Retrieval replay/read/bundle paths and workflow creator-owned read/mutation helpers trusted durable creator/scope columns without checking current workspace/member authority. | Graph retrieval replay/readback, evidence bundles, workflow execution readback, and definition/version mutation | High | Proved defect; corrected with current owner/workspace checks and centralized `workflow.view`/`workflow.edit` authorization. | Graph/workflow services and their two test files. Three exact new regression nodes pass; the affected graph/workflow group is included in 108 passing tests. | Local stale-workspace paths are closed; managed pool/revocation/failover isolation remains M78-TI-E01. |
+
+The two corrected defects are bounded code fixes using existing engine and
+authorization primitives. The three unresolved High defects prevent this
+audit surface from satisfying the Milestone 7.8 completion rule.
+
+## Managed PostgreSQL and tenant-isolation evidence gaps
+
+An evidence gap is not silently labeled as a passing control or an
+implementation defect. These gaps are nevertheless blockers because this
+audit surface expressly requires the associated production-readiness proof.
+
+| Identifier | Evidence inspected and exact missing proof | Affected production path | Severity / classification | Validation and smallest authorized rerun | Residual risk |
+| ---------- | ------------------------------------------ | ------------------------ | ------------------------- | ---------------------------------------- | ------------- |
+| M78-PG-E01 | Pool defaults, replica ceilings, init gates, job shape, and retained receipts prove 40 API + 40 worker + 1 migration + 8 rollout gates = a concrete 89-connection scenario. The deployed `max_connections`, old/new revision overlap, backup/observability/emergency allocations, and operator reserve are absent, so the required budget inequality is unproved. | Scale-out, rollout, pool exhaustion, migration, and operator access | High; unproved claim / evidence gap | Local pool/topology tests pass. Separately record `SHOW max_connections`, per-role activity at ceilings, overlap, every non-application allocation, and explicit reserve; pass only when the full sum is below capacity. | Connection exhaustion can make readiness and work fail despite individually bounded pools. |
+| M78-PG-E02 | Bicep, bootstrap SQL, runtime flags, and a migration receipt do not inventory effective table/sequence/function/database/schema/PUBLIC/ownership privileges or run negative DDL/cross-role DML tests. Backup, observability, and emergency have no deployed principals/grants. | Every managed database role | High; unproved claim / evidence gap | Local role-flag tests pass. After M78-PG-002/003, inventory catalogs and execute positive/negative tests through every exact managed identity without exposing credentials. | Undocumented ownership, inheritance, PUBLIC grants, or missing operator identities can defeat least privilege/recovery. |
+| M78-PG-E03 | Milestone 7.6 proves isolated restore paths; retained 7.7 proves migration/readiness and uninterrupted health. Neither induces failover/disconnect, preserves traffic across recovery, resolves an ambiguous commit, nor proves token expiration/revocation and stale pooled-connection handling. | API/worker pools, readiness, managed-identity rotation, worker claims, retry | High; unproved claim / evidence gap | Local pre-ping/timeout/readiness/idempotency tests pass. After M78-PG-004, induce one bounded failover and credential-rotation case; prove degradation, pool recovery, durable request resolution, and zero duplicate effects. | Provider failover or revoked/stale authentication may produce unknown outcomes or prolonged unready state. |
+| M78-TI-E01 | Central authority, 167 composite FKs, local cross-scope/revocation tests, and managed health are insufficient: no managed campaign combines cross-user/workspace/canvas/resource reads/writes, stale membership, worker/indexer paths, pool reuse, retry, and failover. | All protected API and background database paths | High; unproved claim / evidence gap | Local collaboration and data-path groups pass 24 + 108 tests. In an approved isolated campaign use two users/workspaces, revoke membership, force pool reuse/failover, and require zero cross-scope results or mutations. | Managed-driver, PostgreSQL, pooled-transaction, or background-path behavior could differ from local SQLite proofs. |
+| M78-PG-E04 | Bicep and retained topology prove PostgreSQL 17, pgvector, `centralus`, cross-region private peering to `southcentralus` compute, Entra-only auth, seven-day retention, ZoneRedundant HA, 64-GiB P6 storage, and disabled geo backup/autogrow. Exact assigned zones, maintenance window, connection ceiling, storage-growth rationale, and production capacity claim are absent. | Maintenance/restart, storage exhaustion, regional latency, backup durability | Medium; unproved claim / evidence gap | Focused PostgreSQL/runtime topology contracts pass; the handoff records the separate mixed infrastructure-suite result. Record the approved managed configuration and capacity rationale; no topology mutation is authorized here. | Maintenance timing, storage ceiling, exact zone behavior, and capacity remain operational unknowns. |
+
+## Proved compliant controls on this surface
+
+- The Bicep topology is a single authoritative PostgreSQL 17 Flexible Server
+  with ZoneRedundant high availability, private access, public access disabled,
+  Entra authentication enabled, password authentication disabled, pgvector
+  allowlisted, and no application replica-read path.
+- Deployed connection URLs contain a principal name but no stored password;
+  short-lived managed-identity tokens are supplied at connect time. TLS
+  `verify-full`, `READ COMMITTED`, connection/statement/lock/idle/acquisition
+  timeouts, pool pre-ping, and safe dependency errors are explicit.
+- API and worker each have a separate identity, application name, and bounded
+  `10 + 0` pool per replica. The declared maximum is four replicas per service.
+  Health checks reuse the service database object rather than adding another
+  independent pool.
+- Startup never applies migrations. The one-shot job is manual, single
+  parallel, zero-retry, and bounded to 1,800 seconds. The runner verifies the
+  expected current/target revision, sole repository head, PostgreSQL advisory
+  lock, and final revision; `20260726_0028` remains the sole head and `0029`
+  remains absent.
+- Liveness remains independent of a transient database outage, readiness fails
+  closed, deployment init gates wait for the exact revision and runtime role,
+  and runtime diagnostics do not expose connection details.
+- The schema contains 151 ORM tables; 120 carry `workspace_id`, 54 carry
+  `canvas_id`, and 167 composite foreign keys bind typed parents. The four
+  canvas-scoped tables without direct `workspace_id` are constrained through
+  their canvas/document/node parent chains. Current authorization is derived
+  from the server principal and centralized membership authority; ingestion,
+  indexing, durable jobs, workflows, agents, and object publication carry
+  workspace scope and revocation fences.
+- PostgreSQL row-level security remains out of scope by the deliberate
+  architecture decision. It is neither required nor claimed as a passing
+  control.
 
 ## Located Milestone 7.7 records that are not active defects
 

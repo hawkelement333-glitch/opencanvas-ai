@@ -92,6 +92,10 @@ from opencanvas_api.services.ai import (
 )
 from opencanvas_api.services.auth import Principal
 from opencanvas_api.services.collaboration import CollaborationNotFoundError
+from opencanvas_api.services.collaboration_authority import (
+    CollaborationAuthorizationService,
+    CollaborationPermission,
+)
 from opencanvas_api.services.collaboration_resources import (
     AuthorityBoundary,
     RevocationFenceService,
@@ -1243,6 +1247,11 @@ class ControlledWorkflowService:
         execution_id: uuid.UUID,
         duplicate: bool = False,
     ) -> WorkflowExecutionRecord:
+        await self._require_permission(
+            user_id,
+            workspace_id,
+            CollaborationPermission.WORKFLOW_VIEW,
+        )
         execution = await self.session.scalar(
             select(ControlledWorkflowExecution).where(
                 ControlledWorkflowExecution.execution_id == execution_id,
@@ -3834,6 +3843,8 @@ class ControlledWorkflowService:
                 Canvas.id == canvas_id,
                 Canvas.workspace_id == workspace_id,
                 Workspace.owner_id == user_id,
+                Workspace.deleted_at.is_(None),
+                Workspace.lifecycle_state != "deleted",
             )
         )
         if canvas is None:
@@ -3918,6 +3929,11 @@ class ControlledWorkflowService:
         canvas_id: uuid.UUID,
         definition_id: uuid.UUID,
     ) -> ControlledWorkflowDefinition:
+        await self._require_permission(
+            user_id,
+            workspace_id,
+            CollaborationPermission.WORKFLOW_EDIT,
+        )
         row = await self.session.scalar(
             select(ControlledWorkflowDefinition).where(
                 ControlledWorkflowDefinition.definition_id == definition_id,
@@ -3937,6 +3953,11 @@ class ControlledWorkflowService:
         canvas_id: uuid.UUID,
         version_id: uuid.UUID,
     ) -> ControlledWorkflowVersion:
+        await self._require_permission(
+            user_id,
+            workspace_id,
+            CollaborationPermission.WORKFLOW_EDIT,
+        )
         row = await self.session.scalar(
             select(ControlledWorkflowVersion).where(
                 ControlledWorkflowVersion.version_id == version_id,
@@ -3950,6 +3971,27 @@ class ControlledWorkflowService:
         if _digest(row.normalized_definition) != row.content_digest:
             raise WorkflowConflictError()
         return row
+
+    async def _require_permission(
+        self,
+        user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        permission: CollaborationPermission,
+    ) -> None:
+        decision = await CollaborationAuthorizationService(self.session).evaluate_permission(
+            principal=Principal(
+                user_id=user_id,
+                email="workflow-authority@invalid.local",
+                display_name="Workflow authority",
+                session_id=None,
+                csrf_token_hash=None,
+                synthetic=True,
+            ),
+            workspace_id=workspace_id,
+            permission=permission,
+        )
+        if not decision.allowed:
+            raise WorkflowNotFoundError()
 
     async def _scoped_definition(
         self,

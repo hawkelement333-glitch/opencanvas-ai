@@ -51,6 +51,7 @@ from opencanvas_api.services.workflows import (
     WorkflowExecutionStatus,
     WorkflowFailureClass,
     WorkflowKind,
+    WorkflowNotFoundError,
     WorkflowOutcome,
     WorkflowStepInput,
     WorkflowStepStatus,
@@ -191,6 +192,55 @@ async def _active_workflow(
         )
         await session.commit()
     return canvas_id, objects, version.version_id
+
+
+@pytest.mark.anyio
+async def test_execution_read_revalidates_current_workspace_authority(database: Database) -> None:
+    canvas_id, objects, version_id = await _active_workflow(database, include_bundle=False)
+    selected = (objects["note_one"], objects["note_two"])
+    async with database.sessions() as session:
+        record = await _service(session).start(
+            StartWorkflow(
+                user_id=SYSTEM_USER_ID,
+                workspace_id=SYSTEM_WORKSPACE_ID,
+                canvas_id=canvas_id,
+                version_id=version_id,
+                query="Revalidate authority",
+                selected_object_ids=selected,
+                seed_object_ids=(objects["note_one"],),
+                idempotency_key="workflow-current-authority",
+            )
+        )
+        await session.commit()
+
+    async with database.sessions() as session:
+        workspace = await session.get(Workspace, SYSTEM_WORKSPACE_ID)
+        assert workspace is not None
+        workspace.lifecycle_state = "deleted"
+        workspace.deleted_at = datetime.now(UTC)
+        await session.commit()
+
+    async with database.sessions() as session:
+        with pytest.raises(WorkflowNotFoundError):
+            await _service(session).get_execution(
+                user_id=SYSTEM_USER_ID,
+                workspace_id=SYSTEM_WORKSPACE_ID,
+                canvas_id=canvas_id,
+                execution_id=record.execution.execution_id,
+            )
+        with pytest.raises(WorkflowNotFoundError):
+            await _service(session).create_draft(
+                CreateWorkflowDraft(
+                    user_id=SYSTEM_USER_ID,
+                    workspace_id=SYSTEM_WORKSPACE_ID,
+                    canvas_id=canvas_id,
+                    kind=WorkflowKind.GROUNDED_ANSWER,
+                    name="Denied after workspace deletion",
+                    description="Current workspace state must be authoritative.",
+                    version=_version(include_bundle=False),
+                    idempotency_key="workflow-deleted-workspace",
+                )
+            )
 
 
 def test_closed_workflow_registries_and_schema_contracts() -> None:

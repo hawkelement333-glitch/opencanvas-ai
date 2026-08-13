@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 from opencanvas_api.core.config import DatabaseRole, Settings
 from opencanvas_api.services.managed_identity import ManagedIdentityTokenProvider
@@ -33,6 +34,7 @@ class Database:
         tls_mode: str = "disable",
         application_name: str = "solarplexus-mobius",
         managed_identity: ManagedIdentityTokenProvider | None = None,
+        pooled: bool = True,
     ) -> None:
         options: dict[str, object] = {"pool_pre_ping": True}
         if database_url.startswith("postgresql"):
@@ -47,14 +49,16 @@ class Database:
             }
             if tls_mode != "disable":
                 connect_args["ssl"] = tls_mode
-            options.update(
-                pool_size=pool_size,
-                max_overflow=max_overflow,
-                pool_timeout=pool_timeout_seconds,
-                pool_recycle=pool_recycle_seconds,
-                isolation_level="READ COMMITTED",
-                connect_args=connect_args,
-            )
+            options.update(isolation_level="READ COMMITTED", connect_args=connect_args)
+            if pooled:
+                options.update(
+                    pool_size=pool_size,
+                    max_overflow=max_overflow,
+                    pool_timeout=pool_timeout_seconds,
+                    pool_recycle=pool_recycle_seconds,
+                )
+            else:
+                options["poolclass"] = NullPool
             if managed_identity is not None:
                 url = make_url(database_url)
                 identity_connect_args = dict(connect_args)
@@ -103,6 +107,7 @@ class Database:
             tls_mode=settings.database_tls_mode,
             application_name=f"{settings.database_application_name}-{expected_role.value}",
             managed_identity=managed_identity,
+            pooled=expected_role in {DatabaseRole.API, DatabaseRole.WORKER},
         )
 
     async def dispose(self) -> None:

@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy.pool import NullPool
 
 from opencanvas_api.core.config import DatabaseRole, Settings
 from opencanvas_api.db.runtime import (
@@ -177,6 +178,23 @@ def test_postgresql_engine_has_bounded_pool_transaction_and_timeout_policy() -> 
             "idle_in_transaction_session_timeout": "15000",
         },
     }
+
+
+def test_migration_database_uses_a_direct_non_pooled_connection() -> None:
+    engine = Mock()
+    engine.sync_engine = Mock()
+    settings = _deployed_settings(database_role="migration")
+    with patch("opencanvas_api.db.session.create_async_engine", return_value=engine) as create:
+        database = Database.from_settings(settings, expected_role=DatabaseRole.MIGRATION)
+
+    assert database.engine is engine
+    _, options = create.call_args
+    assert options["poolclass"] is NullPool
+    assert "pool_size" not in options
+    assert "max_overflow" not in options
+    assert "pool_timeout" not in options
+    assert "pool_recycle" not in options
+    assert options["isolation_level"] == "READ COMMITTED"
 
 
 def test_runtime_error_never_includes_connection_details() -> None:

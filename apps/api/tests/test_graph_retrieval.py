@@ -6,6 +6,7 @@ import io
 import uuid
 import zipfile
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -125,6 +126,48 @@ async def test_selected_graph_retrieval_is_deterministic_exact_and_replay_safe(
             )
         ).all()
         assert [item.status for item in traces] == ["started", "succeeded"]
+
+
+@pytest.mark.anyio
+async def test_retrieval_replay_and_read_revalidate_current_workspace_scope(
+    database: Database,
+) -> None:
+    canvas_id, objects = await _retrieval_foundation(database)
+    command = _command(canvas_id, objects, key="revalidate-current-scope")
+    async with database.sessions() as session:
+        service = GraphAwareRetrievalService(session, embedding_provider=MockEmbeddingProvider())
+        record = await service.retrieve(command)
+        bundle = await TraceEvidenceBundleService(session).generate(
+            record,
+            user_id=SYSTEM_USER_ID,
+        )
+        await session.commit()
+
+    async with database.sessions() as session:
+        workspace = await session.get(Workspace, SYSTEM_WORKSPACE_ID)
+        assert workspace is not None
+        workspace.lifecycle_state = "deleted"
+        workspace.deleted_at = datetime.now(UTC)
+        await session.commit()
+
+    async with database.sessions() as session:
+        service = GraphAwareRetrievalService(session, embedding_provider=MockEmbeddingProvider())
+        with pytest.raises(GraphRetrievalNotFoundError):
+            await service.get_owned(
+                user_id=SYSTEM_USER_ID,
+                workspace_id=SYSTEM_WORKSPACE_ID,
+                canvas_id=canvas_id,
+                retrieval_id=record.run.retrieval_id,
+            )
+        with pytest.raises(GraphRetrievalNotFoundError):
+            await service.retrieve(command)
+        with pytest.raises(GraphRetrievalNotFoundError):
+            await TraceEvidenceBundleService(session).get_owned(
+                bundle_id=bundle.bundle_id,
+                user_id=SYSTEM_USER_ID,
+                workspace_id=SYSTEM_WORKSPACE_ID,
+                canvas_id=canvas_id,
+            )
 
 
 @pytest.mark.anyio
