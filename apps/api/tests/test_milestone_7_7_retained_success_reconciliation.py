@@ -260,6 +260,47 @@ def _history(
     }
 
 
+def _prior_retained_binding(
+    authorization: ScannerBridgeRecoveryAuthorization,
+    history: dict[str, JsonValue],
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, JsonValue]:
+    _, _, graph_integrity, _, binding_body = adapter._validate_retained_success_history(
+        authorization=authorization,
+        readback=history,
+        proof_resources_absent=True,
+    )
+    body: dict[str, JsonValue] = {
+        **binding_body,
+        "authorizationReceiptIntegritySha256": "7" * 64,
+        "buildInputSha256": adapter.RETAINED_SUCCESS_BUILD_INPUT,
+        "correctionRepositoryHead": CORRECTION_HEAD,
+        "finalizationEvidenceIntegritySha256": "8" * 64,
+        "imageSourceCommit": adapter.RETAINED_SUCCESS_IMAGE_SOURCE,
+        "ledgerIntegritySha256": adapter.RETAINED_SUCCESS_LEDGER_INTEGRITY,
+        "ociConfigDigest": adapter.RETAINED_SUCCESS_OCI_CONFIG,
+    }
+    artifact = {
+        **body,
+        "integritySha256": adapter._canonical_hash(
+            body,
+            adapter.RETAINED_SUCCESS_BINDING_DOMAIN,
+        ),
+    }
+    assert artifact["deploymentHistoryIntegritySha256"] == graph_integrity
+    monkeypatch.setattr(
+        adapter,
+        "RETAINED_SUCCESS_PRIOR_BINDING_INTEGRITY",
+        artifact["integritySha256"],
+    )
+    monkeypatch.setattr(
+        adapter,
+        "RETAINED_SUCCESS_PRIOR_CORRECTION_HEAD",
+        CORRECTION_HEAD,
+    )
+    return artifact
+
+
 def _foundation() -> adapter._FoundationReadback:
     return adapter._FoundationReadback(
         api_principal_id="11111111-aaaa-4bbb-8ccc-222222222222",
@@ -674,6 +715,107 @@ def test_retained_success_reconciliation_is_one_use(
         adapter.reconcile_retained_successful_scanner_proof(**kwargs)
 
 
+def test_exact_prior_binding_adopts_safely_overwritten_nested_deployment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _authorization()
+    history = _history(authorization)
+    prior = _prior_retained_binding(authorization, history, monkeypatch)
+    nested = cast(dict[str, JsonValue], history["nestedDeployment"])
+    nested["correlationId"] = "11111111-2222-4333-8444-555555555555"
+    nested["timestamp"] = "2026-08-12T23:00:00Z"
+    parameters = cast(dict[str, dict[str, JsonValue]], nested["parameters"])
+    parameters["proofCanarySeed"]["value"] = "9" * 64
+    parameters["scannerProofDeploymentEnabled"]["value"] = False
+    outputs = cast(dict[str, dict[str, JsonValue]], nested["outputs"])
+    outputs.update(
+        _typed(
+            {
+                "bridgeFoundationEnabled": True,
+                "customEventGridTopicCreated": False,
+                "deploymentEnabled": False,
+                "eventSubscriptionCreated": False,
+                "privateEndpointId": authorization.monitorPrivateEndpointId,
+                "privateLinkScopeId": authorization.privateLinkScopeId,
+                "proofDeploymentEnabled": False,
+                "proofJobId": "",
+                "proofJobName": "",
+                "queueCreated": False,
+                "temporaryProofRoleAssignmentId": "",
+                "temporaryProofRoleId": "",
+                "transport": adapter.TRANSPORT,
+                "workerTagWriteAuthorized": False,
+            }
+        )
+    )
+    history["deploymentOperations"] = []
+
+    with pytest.raises(
+        adapter.ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-retained-deployment-invalid",
+    ):
+        adapter._validate_retained_success_history(
+            authorization=authorization,
+            readback=history,
+            proof_resources_absent=True,
+        )
+
+    _, _, graph_integrity, _, _ = adapter._validate_retained_success_history(
+        authorization=authorization,
+        readback=history,
+        proof_resources_absent=True,
+        prior_retained_binding=prior,
+    )
+
+    assert graph_integrity == prior["deploymentHistoryIntegritySha256"]
+
+
+def test_overwritten_nested_deployment_rejects_different_prior_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _authorization()
+    history = _history(authorization)
+    prior = _prior_retained_binding(authorization, history, monkeypatch)
+    nested = cast(dict[str, JsonValue], history["nestedDeployment"])
+    nested["correlationId"] = "11111111-2222-4333-8444-555555555555"
+    nested["timestamp"] = "2026-08-12T23:00:00Z"
+    parameters = cast(dict[str, dict[str, JsonValue]], nested["parameters"])
+    parameters["scannerProofDeploymentEnabled"]["value"] = False
+    outputs = cast(dict[str, dict[str, JsonValue]], nested["outputs"])
+    outputs.update(
+        _typed(
+            {
+                "bridgeFoundationEnabled": True,
+                "customEventGridTopicCreated": False,
+                "deploymentEnabled": False,
+                "eventSubscriptionCreated": False,
+                "privateEndpointId": authorization.monitorPrivateEndpointId,
+                "privateLinkScopeId": authorization.privateLinkScopeId,
+                "proofDeploymentEnabled": False,
+                "proofJobId": "",
+                "proofJobName": "",
+                "queueCreated": False,
+                "temporaryProofRoleAssignmentId": "",
+                "temporaryProofRoleId": "",
+                "transport": adapter.TRANSPORT,
+                "workerTagWriteAuthorized": False,
+            }
+        )
+    )
+    prior["proofExecutionOrdinal"] = 3
+
+    with pytest.raises(
+        adapter.ScannerBridgeRecoveryExecutionError,
+        match="scanner-proof-prior-retained-binding-invalid",
+    ):
+        adapter._validate_retained_success_history(
+            authorization=authorization,
+            readback=history,
+            proof_resources_absent=True,
+            prior_retained_binding=prior,
+        )
+
+
 def test_retained_success_is_wired_to_existing_scanner_recovery_entry_point(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -710,6 +852,8 @@ def test_retained_success_is_wired_to_existing_scanner_recovery_entry_point(
             str(tmp_path / "finalization.json"),
             "--binding-output",
             str(tmp_path / "binding.json"),
+            "--prior-retained-binding",
+            str(tmp_path / "prior-binding.json"),
         ]
     )
 
@@ -717,6 +861,7 @@ def test_retained_success_is_wired_to_existing_scanner_recovery_entry_point(
     assert len(calls) == 1
     assert calls[0]["authorization"] == authorization
     assert calls[0]["correction_repository_head"] == CORRECTION_HEAD
+    assert calls[0]["prior_retained_binding_path"] == tmp_path / "prior-binding.json"
     assert json.loads(capsys.readouterr().out)["marker"] == (
         "PROOF_4_RETAINED_SUCCESS_EVIDENCE_BOUND"
     )

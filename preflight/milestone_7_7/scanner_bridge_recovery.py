@@ -428,6 +428,7 @@ def reconcile_successful_scanner_bridge_recovery(
     correction_repository_head: str,
     binding_output: Path,
     deployment_evidence_output: Path,
+    prior_retained_binding_path: Path | None = None,
 ) -> dict[str, JsonValue]:
     """Invoke the production-only delayed-success reconciliation consumer."""
 
@@ -443,6 +444,7 @@ def reconcile_successful_scanner_bridge_recovery(
         correction_repository_head=correction_repository_head,
         binding_output=binding_output,
         deployment_evidence_output=deployment_evidence_output,
+        prior_retained_binding_path=prior_retained_binding_path,
     )
 
 
@@ -456,6 +458,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--lifecycle-ledger", type=Path)
     parser.add_argument("--finalization-evidence", type=Path)
     parser.add_argument("--binding-output", type=Path)
+    parser.add_argument("--prior-retained-binding", type=Path)
     return parser
 
 
@@ -482,6 +485,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 correction_repository_head=args.repository_head,
                 binding_output=args.binding_output,
                 deployment_evidence_output=args.evidence_output,
+                prior_retained_binding_path=args.prior_retained_binding,
             )
             print(json.dumps(result, separators=(",", ":"), sort_keys=True))
             return 0
@@ -491,6 +495,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.lifecycle_ledger,
                 args.finalization_evidence,
                 args.binding_output,
+                args.prior_retained_binding,
             )
         ):
             raise ScannerBridgeRecoveryError("scanner-bridge-command-contract-invalid")

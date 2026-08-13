@@ -206,6 +206,12 @@ RETAINED_SUCCESS_BINDING_VERSION: Final = (
 RETAINED_SUCCESS_BINDING_DOMAIN: Final = (
     "solarplexus-mobius/milestone-7.7/scanner-proof-retained-success-binding/v1"
 )
+RETAINED_SUCCESS_PRIOR_BINDING_INTEGRITY: Final = (
+    "d23de56e559870d53276d10b3925a80aa00835b43cece7e2ae688945a81689ab"
+)
+RETAINED_SUCCESS_PRIOR_CORRECTION_HEAD: Final = (
+    "97ac3f65537e37708ceadbbdc456b5497165d4b0"
+)
 FINALIZATION_EVIDENCE_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/acr-tag-finalization-evidence/v1\0"
 )
@@ -4119,11 +4125,51 @@ def _validate_retained_publication_binding(
     }
 
 
+def _validate_prior_retained_success_binding(
+    value: Mapping[str, JsonValue],
+    *,
+    authorization: ScannerBridgeRecoveryAuthorization,
+) -> str:
+    body = {key: item for key, item in value.items() if key != "integritySha256"}
+    graph_integrity = value.get("deploymentHistoryIntegritySha256")
+    exact: dict[str, JsonValue] = {
+        "authorizationIntegritySha256": authorization.authorizationIntegritySha256,
+        "authorizationReplayDecision": "deny",
+        "buildInputSha256": RETAINED_SUCCESS_BUILD_INPUT,
+        "correctionRepositoryHead": RETAINED_SUCCESS_PRIOR_CORRECTION_HEAD,
+        "deploymentName": RETAINED_SUCCESS_DEPLOYMENT,
+        "imageSourceCommit": RETAINED_SUCCESS_IMAGE_SOURCE,
+        "immutableImageDigest": RETAINED_SUCCESS_IMAGE,
+        "ledgerIntegritySha256": RETAINED_SUCCESS_LEDGER_INTEGRITY,
+        "markerIntegritySha256": RETAINED_SUCCESS_MARKER_INTEGRITY,
+        "markerParserDecision": "accepted-production-parser",
+        "ociConfigDigest": RETAINED_SUCCESS_OCI_CONFIG,
+        "proofExecutionCount": 1,
+        "proofExecutionOrdinal": 4,
+        "proofJobAbsent": True,
+        "proofRoleAssignmentAbsent": True,
+        "proofRoleDefinitionAbsent": True,
+        "schemaVersion": RETAINED_SUCCESS_BINDING_VERSION,
+        "terminalStatus": "Succeeded",
+    }
+    if (
+        value.get("integritySha256") != RETAINED_SUCCESS_PRIOR_BINDING_INTEGRITY
+        or value.get("integritySha256")
+        != _canonical_hash(cast(JsonValue, body), RETAINED_SUCCESS_BINDING_DOMAIN)
+        or any(value.get(key) != expected for key, expected in exact.items())
+        or not isinstance(graph_integrity, str)
+        or _SHA256.fullmatch(graph_integrity) is None
+    ):
+        _fail("scanner-proof-prior-retained-binding-invalid")
+    return graph_integrity
+
+
 def _validate_retained_success_history(
     *,
     authorization: ScannerBridgeRecoveryAuthorization,
     readback: Mapping[str, JsonValue],
     proof_resources_absent: bool,
+    prior_retained_binding: Mapping[str, JsonValue] | None = None,
 ) -> tuple[
     dict[str, str | None],
     dict[str, JsonValue],
@@ -4171,13 +4217,8 @@ def _validate_retained_success_history(
         "scanner-proof-retained-deployment-time-invalid",
     )
     lifecycle_tags = nested_parameters.get("lifecycleTags")
-    if (
+    nested_is_historical = not (
         top.get("name") != RETAINED_SUCCESS_DEPLOYMENT
-        or top.get("state") != "Succeeded"
-        or top.get("location") != STAGING_LOCATION
-        or top.get("templateHash") != RETAINED_SUCCESS_DEPLOYMENT_TEMPLATE_HASH
-        or not isinstance(correlation_id, str)
-        or _UUID.fullmatch(correlation_id) is None
         or nested.get("name") != RETAINED_SUCCESS_NESTED_DEPLOYMENT
         or nested.get("state") != "Succeeded"
         or nested.get("correlationId") != correlation_id
@@ -4214,39 +4255,101 @@ def _validate_retained_success_history(
         or nested_outputs.get("temporaryProofRoleAssignmentId") != assignment_id
         or nested_outputs.get("proofDeploymentEnabled") is not True
         or nested_outputs.get("workerTagWriteAuthorized") is not False
+    )
+    if (
+        top.get("name") != RETAINED_SUCCESS_DEPLOYMENT
+        or top.get("state") != "Succeeded"
+        or top.get("location") != STAGING_LOCATION
+        or top.get("templateHash") != RETAINED_SUCCESS_DEPLOYMENT_TEMPLATE_HASH
+        or not isinstance(correlation_id, str)
+        or _UUID.fullmatch(correlation_id) is None
+        or top_parameters.get("authorizationLedgerSha256")
+        != authorization.authorizationIntegritySha256
+        or top_parameters.get("deploymentStage") != PROOF_STAGE
+        or top_parameters.get("apiImageDigest") != authorization.apiImageDigest
+        or top_parameters.get("cleanupAtUtc") != authorization.cleanupDeadlineUtc
     ):
         _fail("scanner-proof-retained-deployment-invalid")
 
-    expected_operations = {
-        cast(str, authorization.proofJobId): "Microsoft.App/jobs",
-        cast(str, authorization.proofRoleDefinitionId): (
-            "Microsoft.Authorization/roleDefinitions"
-        ),
-        assignment_id: "Microsoft.Authorization/roleAssignments",
-    }
-    operation_projection: list[dict[str, JsonValue]] = []
-    for resource_id, resource_type in expected_operations.items():
-        matching = [
-            row
-            for row in operations
-            if isinstance(row, Mapping)
-            and _same_resource_id(row.get("id"), resource_id)
-            and row.get("type") == resource_type
-            and row.get("operation") == "Create"
-            and row.get("state") == "Succeeded"
-        ]
-        if len(matching) != 1:
-            _fail("scanner-proof-retained-deployment-operation-ambiguous")
-        row = matching[0]
-        operation_projection.append(
-            {
-                "idSha256": _hash_text(resource_id.casefold()),
-                "state": cast(str, row["state"]),
-                "timestamp": cast(str, row["timestamp"]),
-                "trackingId": cast(str, row["trackingId"]),
-                "type": resource_type,
-            }
+    prior_graph_integrity: str | None = None
+    if not nested_is_historical:
+        replacement_correlation = nested.get("correlationId")
+        replacement_is_inert = not (
+            nested.get("name") != RETAINED_SUCCESS_NESTED_DEPLOYMENT
+            or nested.get("state") != "Succeeded"
+            or nested.get("templateHash") != RETAINED_SUCCESS_NESTED_TEMPLATE_HASH
+            or nested_timestamp <= top_timestamp
+            or not isinstance(replacement_correlation, str)
+            or _UUID.fullmatch(replacement_correlation) is None
+            or replacement_correlation == correlation_id
+            or nested_parameters.get("apiImageDigest") != authorization.apiImageDigest
+            or nested_parameters.get("scannerProofDeploymentEnabled") is not False
+            or nested_parameters.get("deploymentEnabled") is not False
+            or nested_parameters.get("managedBindingDeploymentEnabled") is not True
+            or not _same_resource_id(
+                nested_parameters.get("targetResourceGroupId"),
+                authorization.targetResourceGroupId,
+            )
+            or not _same_resource_id(
+                nested_parameters.get("workerIdentityId"),
+                authorization.workerIdentityId,
+            )
+            or not isinstance(lifecycle_tags, Mapping)
+            or nested_outputs.get("bridgeFoundationEnabled") is not True
+            or nested_outputs.get("customEventGridTopicCreated") is not False
+            or nested_outputs.get("deploymentEnabled") is not False
+            or nested_outputs.get("eventSubscriptionCreated") is not False
+            or nested_outputs.get("proofDeploymentEnabled") is not False
+            or nested_outputs.get("proofJobId") != ""
+            or nested_outputs.get("proofJobName") != ""
+            or nested_outputs.get("queueCreated") is not False
+            or nested_outputs.get("temporaryProofRoleAssignmentId") != ""
+            or nested_outputs.get("temporaryProofRoleId") != ""
+            or nested_outputs.get("transport") != TRANSPORT
+            or nested_outputs.get("privateEndpointId")
+            != authorization.monitorPrivateEndpointId
+            or nested_outputs.get("privateLinkScopeId")
+            != authorization.privateLinkScopeId
+            or nested_outputs.get("workerTagWriteAuthorized") is not False
         )
+        if prior_retained_binding is None or not replacement_is_inert:
+            _fail("scanner-proof-retained-deployment-invalid")
+        prior_graph_integrity = _validate_prior_retained_success_binding(
+            prior_retained_binding,
+            authorization=authorization,
+        )
+
+    operation_projection: list[dict[str, JsonValue]] = []
+    if nested_is_historical:
+        expected_operations = {
+            cast(str, authorization.proofJobId): "Microsoft.App/jobs",
+            cast(str, authorization.proofRoleDefinitionId): (
+                "Microsoft.Authorization/roleDefinitions"
+            ),
+            assignment_id: "Microsoft.Authorization/roleAssignments",
+        }
+        for resource_id, resource_type in expected_operations.items():
+            matching = [
+                row
+                for row in operations
+                if isinstance(row, Mapping)
+                and _same_resource_id(row.get("id"), resource_id)
+                and row.get("type") == resource_type
+                and row.get("operation") == "Create"
+                and row.get("state") == "Succeeded"
+            ]
+            if len(matching) != 1:
+                _fail("scanner-proof-retained-deployment-operation-ambiguous")
+            row = matching[0]
+            operation_projection.append(
+                {
+                    "idSha256": _hash_text(resource_id.casefold()),
+                    "state": cast(str, row["state"]),
+                    "timestamp": cast(str, row["timestamp"]),
+                    "trackingId": cast(str, row["trackingId"]),
+                    "type": resource_type,
+                }
+            )
 
     job_id = cast(str, authorization.proofJobId)
     role_id = cast(str, authorization.proofRoleDefinitionId)
@@ -4413,7 +4516,7 @@ def _validate_retained_success_history(
         "proofCanarySeed": cast(str, nested_parameters["proofCanarySeed"]),
         "temporaryRoleAssignmentIdSha256": _hash_text(assignment_id.casefold()),
     }
-    graph_integrity = _canonical_hash(
+    graph_integrity = prior_graph_integrity or _canonical_hash(
         cast(JsonValue, graph_projection),
         "mobius.scanner-bridge.retained-proof-graph.v1",
     )
@@ -4458,6 +4561,22 @@ def _validate_retained_success_history(
         "terminalStatus": "Succeeded",
         "terminalStatusEvidence": "success-marker-preceded-adapter-terminal-log-read",
     }
+    if prior_retained_binding is not None and prior_graph_integrity is not None:
+        historical_exact: dict[str, JsonValue] = {
+            "activityHistoryIntegritySha256": activity_integrity,
+            "deploymentCorrelationId": correlation_id,
+            "diagnosticIngestionAtUtc": _precise_utc(ingested_at),
+            "executionName": RETAINED_SUCCESS_PROOF_EXECUTION,
+            "executionStartUtc": _format_utc(start_time),
+            "markerEmittedAtUtc": _precise_utc(marker_time),
+            "markerLogSha256": _hash_text(log_output),
+            "revocationIntegritySha256": revocation_integrity,
+        }
+        if any(
+            prior_retained_binding.get(key) != expected
+            for key, expected in historical_exact.items()
+        ):
+            _fail("scanner-proof-prior-retained-history-mismatch")
     execution: dict[str, str | None] = {
         "endTime": None,
         "name": RETAINED_SUCCESS_PROOF_EXECUTION,
@@ -4508,6 +4627,7 @@ def reconcile_retained_successful_scanner_proof(
     correction_repository_head: str,
     binding_output: Path,
     deployment_evidence_output: Path,
+    prior_retained_binding_path: Path | None = None,
     now_utc: datetime | None = None,
 ) -> dict[str, JsonValue]:
     """Admit only the delayed, already-consumed successful Proof #4 execution."""
@@ -4581,11 +4701,23 @@ def reconcile_retained_successful_scanner_proof(
     assignment_id = _validate_deployment_outputs(authorization, outputs)
     if assignment_id is None or not _resource_absent(assignment_id, ROLE_API_VERSION):
         _fail("scanner-proof-retained-residue-present")
+    prior_retained_binding: Mapping[str, JsonValue] | None = None
+    if prior_retained_binding_path is not None:
+        prior_value = load_json(
+            _outside_repository(
+                prior_retained_binding_path,
+                "scanner-proof-prior-retained-binding-inside-repository",
+            )
+        )
+        if not isinstance(prior_value, Mapping):
+            _fail("scanner-proof-prior-retained-binding-malformed")
+        prior_retained_binding = cast(Mapping[str, JsonValue], prior_value)
     execution, marker, graph_integrity, revocation_integrity, binding_body = (
         _validate_retained_success_history(
             authorization=authorization,
             readback=history,
             proof_resources_absent=resources_absent,
+            prior_retained_binding=prior_retained_binding,
         )
     )
     binding = _write_retained_success_binding(
