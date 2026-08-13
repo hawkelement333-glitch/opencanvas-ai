@@ -274,3 +274,38 @@ After that local correction is committed, a new explicit authorization is
 required for one managed PostgreSQL campaign. The next action is not an
 object-storage audit, image retry, Git push, soak, or Milestone 7.7 execution.
 Milestone 7.8 remains incomplete.
+
+## Campaign-enablement resume disposition
+
+The repository-local enablement task resumed on 2026-08-13 from clean HEAD
+`89aafc6d65fbec376bd26796d1a1b74ee3bafd50`. It stopped before creating the new
+`infra/milestone_7_8/` surface because production-path reconstruction proved a
+new High defect, M78-PG-005.
+
+The 7.8 campaign must use identities derived from its independent campaign and
+generation and must contain no retained 7.7 identifier. The canonical API image
+instead ships two database operational entry points whose fail-closed principal
+contracts accept only the exact retained 7.7 names:
+
+- `apps/api/scripts/bootstrap_postgres.py` lines 17-18 and 43-44 reject every
+  migration, API, or worker principal outside `id-mobius77-*`; lines 148-149
+  reject every bootstrap administrator except `id-mobius77-db-admin`.
+- `apps/api/scripts/migrate_and_grant.py` lines 19-20 and 25-34 reject every
+  migration, API, or worker principal outside the same exact name set before
+  migration or privilege reconciliation.
+
+This makes both possible infrastructure choices invalid: 7.8-derived names
+cannot pass the production bootstrap/migration programs, while the accepted
+names would bind the new campaign to retained 7.7 identifiers. The enablement
+authorization expressly forbids changing already-remediated application or
+database behavior and instructs the task to register and stop when harness
+implementation proves such a change necessary. M78-PG-005 is recorded in the
+[defect register](MILESTONE_7_8_DEFECT_REGISTER.md#managed-postgresql-and-tenant-isolation-findings).
+
+No deployment, cleanup controller, lifecycle, ledger, evidence harness, or
+operator runbook implementation was started after this proof. No managed
+evidence gap was closed. A separately authorized minimal production-script
+change must parameterize the principal-name contract without weakening its
+role-separation and identifier-safety guarantees; campaign enablement can then
+resume from the resulting clean HEAD. The managed Azure campaign remains
+unauthorized and unexecuted, and the object-storage audit remains unstarted.
