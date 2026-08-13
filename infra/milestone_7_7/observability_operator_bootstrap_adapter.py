@@ -54,7 +54,6 @@ RECEIPT_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/observability-operator-bootstrap-receipt/v1\0"
 )
 RECEIPT_FILE: Final = "observability-operator-bootstrap.receipt.json"
-RETAINED_MIGRATION_AUTHORIZATION_ID: Final = "bcdc5404-5742-5030-bd02-b4b3a25ef576"
 RETAINED_MIGRATION_AUTHORIZATION_INTEGRITY: Final = (
     "8931d119f6cf930517e29ad7b020c940a2b1e90c37ec4913fd2420ded3852a87"
 )
@@ -1614,7 +1613,7 @@ def reconcile_completed_bootstrap_migration(
         or receipt.get("phase") != "prepared"
         or receipt.get("repositoryHead") != RETAINED_MIGRATION_SOURCE_HEAD
         or receipt.get("subscriptionId") != subscription_id
-        or receipt.get("authorizationId") != RETAINED_MIGRATION_AUTHORIZATION_ID
+        or _UUID.fullmatch(str(receipt.get("authorizationId", ""))) is None
         or receipt.get("authorizationIntegritySha256")
         != RETAINED_MIGRATION_AUTHORIZATION_INTEGRITY
         or receipt.get("receiptIntegritySha256") != RETAINED_MIGRATION_RECEIPT_INTEGRITY

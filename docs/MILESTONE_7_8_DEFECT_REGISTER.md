@@ -162,16 +162,22 @@ role/identity/grant contracts; 12 general migration tests; migration validator
 upgrade/downgrade/re-upgrade; 10 auth/AI/collaboration tests; 78 graph/agent
 tests; strict mypy over eight affected production files; affected Ruff checks;
 web TypeScript, ESLint, and 75 unit tests. The infrastructure contract suite is
-not all green: it is now 93 passed / 1 failed. The corrected
+not all green at remediation commit `ce4543bc`: it was 93 passed / 1 failed. The corrected
 `test_post_secret_migration_output_uses_explicit_subscription_scope` directly
-overlapped this work. The remaining
+overlapped that work. The remaining
 `test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path` failure is
-the inherited allowlist omission for the retained public GUID
-`bcdc5404-5742-5030-bd02-b4b3a25ef576` in
-`observability_operator_bootstrap_adapter.py`; that unrelated later
-infrastructure/governance owner remains responsible. A local Bicep executable
-was not installed, so Bicep compilation was not claimed and no tool was
-downloaded.
+the inherited private retained-authorization UUID embedded in
+`observability_operator_bootstrap_adapter.py`. A later, separately authorized
+local governance correction removed that identifier-specific check. The exact
+historical authorization remains bound by its fixed authorization and receipt
+integrity hashes, while the receipt field is validated semantically as a UUID;
+all other source-head, execution, timestamp, URL, terminal-status, and live
+readback checks remain fail closed. The exact node and full 94-node
+infrastructure suite now pass. The same correction replaced the historical
+audit handoff's workstation-specific receipt path with a repository-local
+evidence link; repository hygiene now passes. No managed evidence gap was
+closed. A local Bicep executable was not installed, so Bicep compilation was
+not claimed and no tool was downloaded.
 
 ## Managed PostgreSQL and tenant-isolation evidence gaps
 

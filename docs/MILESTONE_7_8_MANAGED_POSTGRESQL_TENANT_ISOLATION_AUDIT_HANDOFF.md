@@ -25,8 +25,8 @@ Terminal marker:
 - canonical image-input SHA-256:
   `5f1a5b71c45e7b9183ed09205a5bd815b120e3c278026c4238c05834684b4c81`.
 
-The retained Milestone 7.7 receipts at
-`C:\Users\hawke\AppData\Local\Temp\mobius77-soak-final-b191a39\receipts`
+The retained Milestone 7.7 receipts recorded by the repository-local
+[architecture and scope audit](MILESTONE_7_8_ARCHITECTURE_SCOPE_AUDIT_HANDOFF.md#starting-boundary)
 were reloaded with repository validators. Their nine linked stages terminate
 in `MILESTONE_7_7_COMPLETE` at the required completion HEAD. The soak contains
 91 samples over 5,400 seconds with no interruption, and every defined residue
@@ -35,6 +35,10 @@ topology, one terminal successful migration execution to `0028`, TLS 1.3,
 private DNS, and passing API/worker health. It contains no managed table-grant,
 database-failover, ambiguous-commit, or cross-tenant campaign, so none is
 inferred from the health soak.
+
+Repository-safety correction, 2026-08-13: only the workstation-specific path
+representation above was replaced by a repository-local evidence link; the
+historical findings and conclusions are unchanged.
 
 ## Authority and exclusions
 
@@ -87,13 +91,13 @@ The exact finding ledger is
 
 ## Classification summary
 
-| Class | Count | Result |
-| ----- | ----: | ------ |
-| Proved compliant control groups | 6 | Retained as passing within the stated source/receipt limits |
-| Proved defects corrected locally | 2 | M78-PG-001 and M78-TI-001 |
-| Proved defects unresolved | 3 | M78-PG-002, M78-PG-003, and M78-PG-004; all High |
-| Unproved claims / evidence gaps | 5 | Four High and one Medium |
-| Explicitly out of scope | 5 | RLS amendment, migration `0029`, live managed reruns, topology mutation, and pre-existing Milestone 7.7 test-contract drift |
+| Class                            | Count | Result                                                                                                                      |
+| -------------------------------- | ----: | --------------------------------------------------------------------------------------------------------------------------- |
+| Proved compliant control groups  |     6 | Retained as passing within the stated source/receipt limits                                                                 |
+| Proved defects corrected locally |     2 | M78-PG-001 and M78-TI-001                                                                                                   |
+| Proved defects unresolved        |     3 | M78-PG-002, M78-PG-003, and M78-PG-004; all High                                                                            |
+| Unproved claims / evidence gaps  |     5 | Four High and one Medium                                                                                                    |
+| Explicitly out of scope          |     5 | RLS amendment, migration `0029`, live managed reruns, topology mutation, and pre-existing Milestone 7.7 test-contract drift |
 
 ## Managed topology and connection construction
 
@@ -129,14 +133,14 @@ application names, and pools are separate. The declared per-replica values are
 `pool_size=10` and `max_overflow=0`, with a maximum of four API and four worker
 replicas:
 
-| Consumer | Declared maximum | Connection allocation proved from source |
-| -------- | ---------------- | -----------------------------------------: |
-| API service | 4 replicas x 10 | 40 |
-| Worker service | 4 replicas x 10 | 40 |
-| One-shot migration | direct `NullPool` | 1 active connection |
-| API init gates during rollout | up to 4 x 1 | 4 |
-| Worker init gates during rollout | up to 4 x 1 | 4 |
-| Static scenario subtotal | | 89 |
+| Consumer                         | Declared maximum  | Connection allocation proved from source |
+| -------------------------------- | ----------------- | ---------------------------------------: |
+| API service                      | 4 replicas x 10   |                                       40 |
+| Worker service                   | 4 replicas x 10   |                                       40 |
+| One-shot migration               | direct `NullPool` |                      1 active connection |
+| API init gates during rollout    | up to 4 x 1       |                                        4 |
+| Worker init gates during rollout | up to 4 x 1       |                                        4 |
+| Static scenario subtotal         |                   |                                       89 |
 
 Health checks share the process database object and add no independent pool.
 The table is not an approved service budget: simultaneous old/new application
@@ -166,15 +170,15 @@ observability, and emergency are closed application enum values but have no
 deployed database identity/grant implementation or effective-grant evidence
 (M78-PG-E02).
 
-| Declared role | Deployed principal | Effective source-defined authority | Result |
-| ------------- | ------------------ | ---------------------------------- | ------ |
-| Provisioning administrator | `id-mobius77-db-admin` | PostgreSQL Entra administrator; creates Entra principals and grants | Explicit but excessive for migration use |
-| Migration | Same `id-mobius77-db-admin` | Owns/runs the full Alembic DDL path and extension creation | High defect M78-PG-003 |
-| API | `id-mobius77-api` | Connect/schema usage; CRUD all tables; write sequences; execute all functions; no dangerous role flags/schema create | High defect M78-PG-002 |
-| Worker | `id-mobius77-worker` | Same grants as API | High defect M78-PG-002 |
-| Backup | None defined | Application enum only | Unproved, M78-PG-E02 |
-| Observability | None defined | Application enum only | Unproved, M78-PG-E02 |
-| Emergency | None defined | Application enum only | Unproved, M78-PG-E02 |
+| Declared role              | Deployed principal          | Effective source-defined authority                                                                                   | Result                                   |
+| -------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| Provisioning administrator | `id-mobius77-db-admin`      | PostgreSQL Entra administrator; creates Entra principals and grants                                                  | Explicit but excessive for migration use |
+| Migration                  | Same `id-mobius77-db-admin` | Owns/runs the full Alembic DDL path and extension creation                                                           | High defect M78-PG-003                   |
+| API                        | `id-mobius77-api`           | Connect/schema usage; CRUD all tables; write sequences; execute all functions; no dangerous role flags/schema create | High defect M78-PG-002                   |
+| Worker                     | `id-mobius77-worker`        | Same grants as API                                                                                                   | High defect M78-PG-002                   |
+| Backup                     | None defined                | Application enum only                                                                                                | Unproved, M78-PG-E02                     |
+| Observability              | None defined                | Application enum only                                                                                                | Unproved, M78-PG-E02                     |
+| Emergency                  | None defined                | Application enum only                                                                                                | Unproved, M78-PG-E02                     |
 
 The bootstrap explicitly revokes `CREATE` on schema `public` from `PUBLIC`, but
 the retained evidence has no complete `PUBLIC`, ownership, inheritance, or

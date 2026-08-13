@@ -963,9 +963,6 @@ def test_exact_prepared_receipt_adopts_historical_migration_across_control_head(
     adapter._replace_receipt(receipt_path, receipt)
     retained = adapter._load_receipt(receipt_path)
     monkeypatch.setattr(
-        adapter, "RETAINED_MIGRATION_AUTHORIZATION_ID", authorization.authorizationId
-    )
-    monkeypatch.setattr(
         adapter,
         "RETAINED_MIGRATION_AUTHORIZATION_INTEGRITY",
         authorization.authorizationIntegritySha256,
@@ -1027,9 +1024,6 @@ def test_different_prepared_receipt_cannot_adopt_historical_migration(
     receipt_path = tmp_path / adapter.RECEIPT_FILE
     adapter._replace_receipt(receipt_path, receipt)
     retained = adapter._load_receipt(receipt_path)
-    monkeypatch.setattr(
-        adapter, "RETAINED_MIGRATION_AUTHORIZATION_ID", authorization.authorizationId
-    )
     monkeypatch.setattr(
         adapter,
         "RETAINED_MIGRATION_AUTHORIZATION_INTEGRITY",

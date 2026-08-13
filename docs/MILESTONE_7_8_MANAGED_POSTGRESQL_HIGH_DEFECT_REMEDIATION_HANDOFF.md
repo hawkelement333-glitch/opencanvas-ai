@@ -284,11 +284,44 @@ residue.
 
 The first inherited infrastructure failure, exact node
 `test_post_secret_migration_output_uses_explicit_subscription_scope`, directly
-overlapped the migration job output and is fixed. The remaining exact node is
+overlapped the migration job output and is fixed. At remediation commit
+`ce4543bc`, the remaining exact node was
 `test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path`; its
-production surface is the unrelated retained observability operator bootstrap
-adapter GUID allowlist, and it remains assigned to the later infrastructure
-governance surface.
+production surface was the unrelated retained observability operator bootstrap
+adapter's embedded private authorization UUID. That gate and the historical
+handoff path gate were subsequently cleared under separate, narrow local
+governance authority as recorded below.
+
+## Local governance gate correction
+
+The adapter had redundantly embedded one retained authorization UUID even
+though the exact historical authorization and complete prepared receipt were
+already bound by fixed SHA-256 integrity values. The private literal was
+removed. Historical adoption now requires a semantically valid authorization
+UUID plus the unchanged exact authorization-integrity, receipt-integrity,
+source-HEAD, execution, claim-time, private-URL, terminal-status, and live job
+readback checks. A syntactically valid different authorization still changes
+the receipt integrity and is rejected by the existing negative test.
+
+The historical database audit handoff exposed the local workstation path from
+which the retained receipts had been validated. That representation was
+replaced with a repository-local link to the already recorded architecture and
+scope evidence. Its historical findings, hashes, sample/duration counts, and
+conclusions were not changed.
+
+Focused results after correction:
+
+| Exact repository-relative command                                                                                                                                                                                     | Result                             |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `cd apps/api; $env:PYTHONDONTWRITEBYTECODE='1'; ..\..\.venv\Scripts\python.exe -m pytest -q tests/test_milestone_7_7_infrastructure_contracts.py::test_tracked_contract_text_has_no_private_arm_id_guid_or_user_path` | exit 0; 1 passed                   |
+| `.\.venv\Scripts\python.exe -m pytest -q apps/api/tests/test_milestone_7_7_infrastructure_contracts.py`                                                                                                               | exit 0; all 94 nodes passed        |
+| `.\.venv\Scripts\python.exe -m pytest -q apps/api/tests/test_milestone_7_7_observability_operator_bootstrap.py`                                                                                                       | exit 0; 38 passed                  |
+| `.\.venv\Scripts\python.exe scripts\check_repository_hygiene.py`                                                                                                                                                      | exit 0; 597 source files inspected |
+
+The pre-correction reproduction used the exact recorded commands and produced
+the expected 93-passed/1-failed infrastructure result and the single Windows
+user-path hygiene finding. No canonical API container-image input was changed:
+none of the governance correction files is in `API_IMAGE_BUILD_INPUTS`.
 
 ## Remaining blockers and next action
 
