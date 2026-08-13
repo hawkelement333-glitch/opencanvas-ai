@@ -5002,6 +5002,15 @@ def test_private_revision_ready_requires_healthy_running_revision(
     )
 
     revision = {
+        "health": "Healthy",
+        "provisioning": "Provisioned",
+        "running": "RunningAtMaxScale",
+    }
+    managed_binding_lifecycle._container_app_revision_ready(
+        "opaque-subscription", "ca-mobius77-api"
+    )
+
+    revision = {
         "health": "Unhealthy",
         "provisioning": "Provisioned",
         "running": "ActivationFailed",

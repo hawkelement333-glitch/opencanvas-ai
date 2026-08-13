@@ -121,11 +121,12 @@ def container_app_revision_ready(subscription_id: str, app_name: str) -> str:
                 ),
                 require_json=True,
             )
-            if revision == {
-                "health": "Healthy",
-                "provisioning": "Provisioned",
-                "running": "Running",
-            }:
+            if (
+                isinstance(revision, dict)
+                and revision.get("health") == "Healthy"
+                and revision.get("provisioning") == "Provisioned"
+                and revision.get("running") in {"Running", "RunningAtMaxScale"}
+            ):
                 return latest
             if isinstance(revision, dict) and (
                 revision.get("health") == "Unhealthy"
