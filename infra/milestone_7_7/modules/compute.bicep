@@ -103,7 +103,7 @@ var effectiveManagedEnvironmentId = ownerBootstrapEnabled ? existingOwnerBootstr
 var effectiveManagedEnvironmentDefaultDomain = ownerBootstrapEnabled ? existingOwnerBootstrapEnvironment!.properties.defaultDomain : managedEnvironment!.properties.defaultDomain
 var effectiveManagedEnvironmentStaticIp = ownerBootstrapEnabled ? existingOwnerBootstrapEnvironment!.properties.staticIp : managedEnvironment!.properties.staticIp
 var internalApplicationUrl = 'https://${apiName}.${effectiveManagedEnvironmentDefaultDomain}'
-var telemetryEndpoint = 'https://${telemetryName}.${effectiveManagedEnvironmentDefaultDomain}/v1/signals'
+var telemetryEndpoint = 'https://${telemetryName}.internal.${effectiveManagedEnvironmentDefaultDomain}/v1/signals'
 var keyVaultBaseUrl = 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/'
 var applicationSecretNames = [
   'openai-api-key'

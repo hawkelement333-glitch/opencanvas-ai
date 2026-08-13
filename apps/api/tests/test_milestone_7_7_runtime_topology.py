@@ -7,11 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from scripts.telemetry_gateway import application
 
 from opencanvas_api.core.config import DatabaseRole
 from opencanvas_api.db.runtime import DatabaseRuntimeError
 from scripts import bootstrap_postgres, runtime_dependency_gate
+from scripts.telemetry_gateway import application
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 INFRASTRUCTURE_ROOT = REPOSITORY_ROOT / "infra" / "milestone_7_7"
@@ -42,6 +42,15 @@ def test_root_reaches_every_runtime_module_and_compute_binding() -> None:
         "scripts.runtime_dependency_gate",
     ):
         assert token in compute
+    assert (
+        "var telemetryEndpoint = "
+        "'https://${telemetryName}.internal.${effectiveManagedEnvironmentDefaultDomain}/v1/signals'"
+        in compute
+    )
+    assert (
+        "'https://${telemetryName}.${effectiveManagedEnvironmentDefaultDomain}/v1/signals'"
+        not in compute
+    )
     assert "sqlite" not in compute.casefold()
 
 
