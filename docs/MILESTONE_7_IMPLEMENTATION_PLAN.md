@@ -2,18 +2,18 @@
 
 Date: 2026-07-27
 
-Status: approved architecture plan; checkpoint 7.1 complete locally; combined
-PostgreSQL historical-migration correction and evidence complete locally at
-implementation SHA `a88c6117f6b58137f1014cc8b389f44966c2918f`;
-Mobius Family Architecture Constitution documentation checkpoint complete
-locally; checkpoint 7.2 complete locally on
-`milestone-7-2-implementation-local`; checkpoint 7.3 complete locally on
-`milestone-7-3-implementation-local`; checkpoint 7.4 complete locally on
-`milestone-7-4-implementation-local`; checkpoint 7.5 complete locally on
-`milestone-7-5-implementation-local`; checkpoint 7.6 complete locally on
-`milestone-7-6-recovery-adapter`; checkpoint 7.7 in progress; internal
-Checkpoints 1–7 complete locally; provisioning blocked; no later internal
-checkpoint number defined
+Current status verified 2026-08-13: checkpoints 7.1–7.7 are complete and
+committed. The retained terminal lifecycle chain for checkpoint 7.7 validates
+through `MILESTONE_7_7_COMPLETE` at
+`b191a392922f94557e6ebf5914113b5e229ab00e`. Checkpoint 7.8 has entered its
+first exact audit surface, architecture and checkpoint scope, on the local-only
+`milestone-7-8-production-readiness-audit-local` branch. Entry authorizes no
+Azure mutation, new migration, image build/publication, scanner execution, or
+Git remote operation.
+
+Checkpoint 7.8 records:
+[`MILESTONE_7_8_DEFECT_REGISTER.md`](MILESTONE_7_8_DEFECT_REGISTER.md) and
+[`MILESTONE_7_8_ARCHITECTURE_SCOPE_AUDIT_HANDOFF.md`](MILESTONE_7_8_ARCHITECTURE_SCOPE_AUDIT_HANDOFF.md).
 
 Compatibility gates:
 [`MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md`](MILESTONE_7_POSTGRESQL_MIGRATION_0005_COMPATIBILITY_AMENDMENT.md).
@@ -1017,6 +1017,12 @@ no application/worker/frontend/infrastructure/migration behavior, and does not
 complete formal checkpoint 7.7. All ten infrastructure gates remain blocked,
 all five runtime gates remain unproved, provisioning remains unauthorized,
 and Milestone 7.8 remains unstarted.
+
+The preceding paragraph preserves Internal Checkpoint 7's historical exit
+state. Subsequent separately authorized formal-checkpoint work completed the
+7.7 terminal lifecycle and zero-residue boundary. The validated current state
+is the 2026-08-13 status at the start of this plan; it does not retroactively
+change the scope or claims of Internal Checkpoint 7.
 
 ## 10. Checkpoint 7.8 — Final Production-Readiness Audit
 

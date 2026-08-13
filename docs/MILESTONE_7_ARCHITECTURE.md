@@ -2,12 +2,14 @@
 
 Date: 2026-07-27
 
-Status: architecture complete locally; checkpoint 7.1 implemented locally;
-checkpoint 7.2 implemented locally; checkpoint 7.3 implemented locally;
-checkpoint 7.4 implemented locally; checkpoint 7.5 implemented locally;
-checkpoint 7.6 complete locally; checkpoint 7.7 in progress; internal
-Checkpoints 1–7 complete locally; provisioning blocked; no later internal
-checkpoint number defined
+Current status verified 2026-08-13: architecture and checkpoints 7.1–7.7 are
+complete and committed. The retained checkpoint 7.7 terminal lifecycle chain
+validates through `MILESTONE_7_7_COMPLETE` at
+`b191a392922f94557e6ebf5914113b5e229ab00e`. Checkpoint 7.8 has begun only its
+first authorized audit surface, architecture and checkpoint scope, on the
+local-only `milestone-7-8-production-readiness-audit-local` branch. Historical
+checkpoint sections below retain the status and authority that applied when
+they were written.
 
 Checkpoint 7.2 implementation record: migration `20260726_0026` is the sole
 head and direct child of `20260725_0025`. The deterministic Indexer, immutable
@@ -1520,3 +1522,28 @@ Internal Checkpoint 7 cannot complete formal checkpoint 7.7 or begin Milestone
 7.8. Its smallest later separately authorizable action is one local
 operation-contract implementation pass with focused fail-closed tests and no
 Azure execution.
+
+## 29. Milestone 7.8 entry architecture boundary
+
+The subsequent formal Milestone 7.7 lifecycle completed at
+`b191a392922f94557e6ebf5914113b5e229ab00e`. Its retained local terminal
+evidence validates the complete nine-stage predecessor chain, the uninterrupted
+5,400-second soak with 91 samples, successful cleanup, zero residue, and the
+`MILESTONE_7_7_COMPLETE` marker. That completion does not rewrite or invalidate
+the historical internal-checkpoint decisions above.
+
+Milestone 7.8 is the **Final Production-Readiness Audit** defined by the
+implementation plan and RR-02 of the Mobius Family Architecture Constitution.
+It is an audit plus conditional, targeted remediation and validation: only a
+defect proved inside the approved audit boundary may be corrected. No separate
+numbered internal 7.8 checkpoints are defined. The ordered first audit surface
+is architecture and checkpoint scope; later technical audit surfaces remain
+unstarted.
+
+Entry requires no Azure mutation and authorizes none by default. Migration
+`20260726_0028` remains the sole head, migration `0029` is not planned, and the
+canonical checkpoint 7.7 image inputs remain historical and unchanged. The
+current audit evidence is recorded in
+[`MILESTONE_7_8_ARCHITECTURE_SCOPE_AUDIT_HANDOFF.md`](MILESTONE_7_8_ARCHITECTURE_SCOPE_AUDIT_HANDOFF.md),
+with exact findings in
+[`MILESTONE_7_8_DEFECT_REGISTER.md`](MILESTONE_7_8_DEFECT_REGISTER.md).

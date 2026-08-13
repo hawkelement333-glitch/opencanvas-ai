@@ -262,3 +262,17 @@ Indexer, Librarian, simulation, spatial, federation, or continuity behavior.
 
 Milestone 6.5 was not started. Milestones 8, 8.5, and 9–13 remain
 unimplemented.
+
+## Execution-status addendum — 2026-08-13
+
+The status statements above are the dated architecture-amendment snapshot and
+remain historical. Milestone 7 checkpoints 7.1–7.7 subsequently completed and
+were committed. The retained checkpoint 7.7 terminal lifecycle validates
+through `MILESTONE_7_7_COMPLETE` at
+`b191a392922f94557e6ebf5914113b5e229ab00e`.
+
+Checkpoint 7.8, **Final Production-Readiness Audit**, has now begun only its
+first ordered audit surface, architecture and checkpoint scope. Milestone 8.0,
+optional Milestone 8.5, and Milestones 9–13 remain unstarted. This addendum
+changes execution status only; it does not change the product-family order,
+release boundary, or exclusions established by the amendment.

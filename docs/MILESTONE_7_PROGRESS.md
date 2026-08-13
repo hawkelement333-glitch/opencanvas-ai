@@ -1,17 +1,16 @@
 # Milestone 7 Production Hardening Progress
 
-Date: 2026-07-30
+Date: 2026-08-13
 
-Overall status: architecture and checkpoint 7.1 complete locally; combined
-PostgreSQL historical-migration correction for `0005`, `0021`, `0023`, and
-`0024` and its evidence complete locally at implementation SHA
-`a88c6117f6b58137f1014cc8b389f44966c2918f`; Mobius Family Architecture
-Constitution documentation checkpoint complete locally; checkpoint 7.2
-complete locally; checkpoint 7.3 complete locally; checkpoint 7.4 complete
-locally; checkpoint 7.5 complete locally; checkpoint 7.6 complete locally;
-checkpoint 7.7 in progress with internal Checkpoints 1–7 complete locally;
-provisioning blocked; no later internal checkpoint number defined; checkpoint
-7.8 unstarted
+Overall status: architecture and checkpoints 7.1–7.7 complete and committed.
+The retained checkpoint 7.7 terminal lifecycle chain validates through
+`MILESTONE_7_7_COMPLETE` at
+`b191a392922f94557e6ebf5914113b5e229ab00e`, including the uninterrupted
+5,400-second soak, cleanup, and zero-residue proof. Checkpoint 7.8 entry is
+proved and its first exact audit surface, architecture and checkpoint scope, is
+in progress on `milestone-7-8-production-readiness-audit-local`. No Azure
+mutation, new migration, image/scanner execution, or Git remote operation is
+authorized by this entry.
 
 Architecture status history: in progress during repository inspection and
 decision resolution; complete at this handoff.
@@ -27,6 +26,12 @@ Mobius Family Architecture Constitution:
 
 Architecture handoff:
 [`MILESTONE_7_ARCHITECTURE_HANDOFF.md`](MILESTONE_7_ARCHITECTURE_HANDOFF.md)
+
+Checkpoint 7.8 architecture/scope audit handoff:
+[`MILESTONE_7_8_ARCHITECTURE_SCOPE_AUDIT_HANDOFF.md`](MILESTONE_7_8_ARCHITECTURE_SCOPE_AUDIT_HANDOFF.md)
+
+Checkpoint 7.8 defect register:
+[`MILESTONE_7_8_DEFECT_REGISTER.md`](MILESTONE_7_8_DEFECT_REGISTER.md)
 
 Checkpoint 7.1 handoff:
 [`MILESTONE_7_1_PRODUCTION_RUNTIME_MANAGED_POSTGRESQL_HANDOFF.md`](MILESTONE_7_1_PRODUCTION_RUNTIME_MANAGED_POSTGRESQL_HANDOFF.md)
@@ -680,3 +685,26 @@ deployment boundary to the two approved Milestone 7.7 resource groups in
 an immutable digest, and maps only the canonical `OPENAI_API_KEY` alias plus
 the two approved SMTP bindings. The amendment alone performs no Azure effect,
 spends no budget, and does not start Milestone 7.8.
+
+## Milestone 7.7 terminal completion and Milestone 7.8 entry
+
+The preceding sections are chronological checkpoint records and retain the
+status proved at each historical boundary. Subsequent separately authorized
+formal-checkpoint work completed Milestone 7.7 at
+`b191a392922f94557e6ebf5914113b5e229ab00e`. The retained local terminal chain
+validates all nine stages through `MILESTONE_7_7_COMPLETE`; its soak records 91
+samples over 5,400 uninterrupted seconds, and its final residue inventory is
+zero in every defined category.
+
+Milestone 7.8 entered on the clean, local-only
+`milestone-7-8-production-readiness-audit-local` branch with no upstream. The
+authoritative plan defines no numbered internal 7.8 checkpoints. Its first
+ordered audit surface is architecture and checkpoint scope. The entry audit
+proved the title, purpose, prerequisites, allowed mutation surface, evidence
+requirements, exit rule, migration boundary, Azure default-deny boundary, and
+Milestone 8 separation before any repository edit.
+
+The first audit surface found only the concrete status-boundary defects listed
+in the Milestone 7.8 defect register. It did not reopen 7.7, execute Azure,
+create migration `0029`, alter image inputs, run a scanner, access a secret
+value, mutate a protected stash, or contact a Git remote.
