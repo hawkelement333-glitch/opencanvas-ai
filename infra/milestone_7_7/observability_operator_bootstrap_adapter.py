@@ -54,6 +54,20 @@ RECEIPT_DOMAIN: Final = (
     b"solarplexus-mobius/milestone-7.7/observability-operator-bootstrap-receipt/v1\0"
 )
 RECEIPT_FILE: Final = "observability-operator-bootstrap.receipt.json"
+RETAINED_MIGRATION_AUTHORIZATION_ID: Final = "bcdc5404-5742-5030-bd02-b4b3a25ef576"
+RETAINED_MIGRATION_AUTHORIZATION_INTEGRITY: Final = (
+    "8931d119f6cf930517e29ad7b020c940a2b1e90c37ec4913fd2420ded3852a87"
+)
+RETAINED_MIGRATION_RECEIPT_INTEGRITY: Final = (
+    "7f4dcfd0e7ff61c199b318ee67d4c9797bea3b4a37c18e6ddb910c32b63e9ca2"
+)
+RETAINED_MIGRATION_SOURCE_HEAD: Final = "e44670cb430edd807f5487345472eaa8c0115c2c"
+RETAINED_MIGRATION_EXECUTION: Final = "caj-mobius77-migration-r22ygqj"
+RETAINED_MIGRATION_CLAIMED_AT: Final = "2026-08-12T17:12:59Z"
+RETAINED_MIGRATION_PRIVATE_URL: Final = (
+    "https://ca-mobius77-api.internal.delightfulgrass-bfebe48e."
+    "southcentralus.azurecontainerapps.io"
+)
 STAGING_LOCATION: Final = "southcentralus"
 POSTGRES_API_VERSION: Final = "2024-08-01"
 CONTAINER_APP_API_VERSION: Final = "2026-01-01"
@@ -1584,7 +1598,7 @@ def reconcile_completed_bootstrap_migration(
         return None
     receipt = _load_receipt(path)
     execution = receipt.get("migrationExecutionName")
-    if (
+    current_owner_proved = not (
         receipt.get("phase") != "owner-proved"
         or receipt.get("repositoryHead") != repository_head
         or receipt.get("subscriptionId") != subscription_id
@@ -1593,7 +1607,28 @@ def reconcile_completed_bootstrap_migration(
         or not execution.startswith(f"{MIGRATION_JOB}-")
         or receipt.get("ownerReadbackJobDeleted") is not True
         or _UUID.fullmatch(str(receipt.get("ownerUserId", ""))) is None
-    ):
+    )
+    exact_retained_prepared = not (
+        repository_head == RETAINED_MIGRATION_SOURCE_HEAD
+        or receipt.get("phase") != "prepared"
+        or receipt.get("repositoryHead") != RETAINED_MIGRATION_SOURCE_HEAD
+        or receipt.get("subscriptionId") != subscription_id
+        or receipt.get("authorizationId") != RETAINED_MIGRATION_AUTHORIZATION_ID
+        or receipt.get("authorizationIntegritySha256")
+        != RETAINED_MIGRATION_AUTHORIZATION_INTEGRITY
+        or receipt.get("receiptIntegritySha256") != RETAINED_MIGRATION_RECEIPT_INTEGRITY
+        or receipt.get("claimedAtUtc") != RETAINED_MIGRATION_CLAIMED_AT
+        or receipt.get("bootstrapPrivateApplicationUrl")
+        != RETAINED_MIGRATION_PRIVATE_URL
+        or execution != RETAINED_MIGRATION_EXECUTION
+        or receipt.get("migrationTerminalStatus") != "Succeeded"
+        or receipt.get("ownerReadbackExecutionName") is not None
+        or receipt.get("ownerReadbackJobDeleted") is not False
+        or receipt.get("ownerUserId") is not None
+    )
+    if not current_owner_proved and not exact_retained_prepared:
+        _fail("observability-bootstrap-migration-adoption-receipt-invalid")
+    if not isinstance(execution, str):
         _fail("observability-bootstrap-migration-adoption-receipt-invalid")
     rows = _job_execution_rows(subscription_id, MIGRATION_JOB)
     matches = [row for row in rows if row["name"] == execution]

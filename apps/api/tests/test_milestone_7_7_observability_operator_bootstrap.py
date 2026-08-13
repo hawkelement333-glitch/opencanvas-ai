@@ -984,6 +984,122 @@ def test_terminal_migration_adopts_bootstrap_execution_without_second_start(
     assert replaced[-1]["resumableCheckpoint"] == "readiness-validation"
 
 
+def test_exact_prepared_receipt_adopts_historical_migration_across_control_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    authorization = _authorization()
+    receipt = adapter._new_receipt(authorization, now_utc=NOW)
+    receipt.update(
+        {
+            "bootstrapPrivateApplicationUrl": "https://ca-mobius77-api.private.example",
+            "migrationExecutionName": "caj-mobius77-migration-one",
+            "migrationTerminalStatus": "Succeeded",
+            "phase": "prepared",
+        }
+    )
+    receipt_path = tmp_path / adapter.RECEIPT_FILE
+    adapter._replace_receipt(receipt_path, receipt)
+    retained = adapter._load_receipt(receipt_path)
+    monkeypatch.setattr(
+        adapter, "RETAINED_MIGRATION_AUTHORIZATION_ID", authorization.authorizationId
+    )
+    monkeypatch.setattr(
+        adapter,
+        "RETAINED_MIGRATION_AUTHORIZATION_INTEGRITY",
+        authorization.authorizationIntegritySha256,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "RETAINED_MIGRATION_RECEIPT_INTEGRITY",
+        retained["receiptIntegritySha256"],
+    )
+    monkeypatch.setattr(adapter, "RETAINED_MIGRATION_SOURCE_HEAD", HEAD)
+    monkeypatch.setattr(adapter, "RETAINED_MIGRATION_EXECUTION", "caj-mobius77-migration-one")
+    monkeypatch.setattr(adapter, "RETAINED_MIGRATION_CLAIMED_AT", adapter._format_utc(NOW))
+    monkeypatch.setattr(
+        adapter,
+        "RETAINED_MIGRATION_PRIVATE_URL",
+        "https://ca-mobius77-api.private.example",
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_job_execution_rows",
+        lambda *_args: [
+            {
+                "name": "caj-mobius77-migration-one",
+                "status": "Succeeded",
+                "start": "2026-08-12T12:00:00Z",
+                "end": "2026-08-12T12:01:00Z",
+            },
+            {
+                "name": "caj-mobius77-migration-old",
+                "status": "Failed",
+                "start": "2026-08-12T11:00:00Z",
+                "end": None,
+            },
+        ],
+    )
+
+    execution = adapter.reconcile_completed_bootstrap_migration(
+        receipt_directory=tmp_path,
+        repository_head="b" * 40,
+        subscription_id=SUBSCRIPTION,
+    )
+
+    assert execution == "caj-mobius77-migration-one"
+
+
+def test_different_prepared_receipt_cannot_adopt_historical_migration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    authorization = _authorization()
+    receipt = adapter._new_receipt(authorization, now_utc=NOW)
+    receipt.update(
+        {
+            "bootstrapPrivateApplicationUrl": "https://ca-mobius77-api.private.example",
+            "migrationExecutionName": "caj-mobius77-migration-one",
+            "migrationTerminalStatus": "Succeeded",
+            "phase": "prepared",
+        }
+    )
+    receipt_path = tmp_path / adapter.RECEIPT_FILE
+    adapter._replace_receipt(receipt_path, receipt)
+    retained = adapter._load_receipt(receipt_path)
+    monkeypatch.setattr(
+        adapter, "RETAINED_MIGRATION_AUTHORIZATION_ID", authorization.authorizationId
+    )
+    monkeypatch.setattr(
+        adapter,
+        "RETAINED_MIGRATION_AUTHORIZATION_INTEGRITY",
+        authorization.authorizationIntegritySha256,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "RETAINED_MIGRATION_RECEIPT_INTEGRITY",
+        retained["receiptIntegritySha256"],
+    )
+    monkeypatch.setattr(adapter, "RETAINED_MIGRATION_SOURCE_HEAD", HEAD)
+    monkeypatch.setattr(adapter, "RETAINED_MIGRATION_EXECUTION", "caj-mobius77-migration-one")
+    monkeypatch.setattr(adapter, "RETAINED_MIGRATION_CLAIMED_AT", adapter._format_utc(NOW))
+    monkeypatch.setattr(
+        adapter,
+        "RETAINED_MIGRATION_PRIVATE_URL",
+        "https://ca-mobius77-api.private.example",
+    )
+    receipt["authorizationId"] = "00000000-0000-0000-0000-000000000000"
+    adapter._replace_receipt(receipt_path, receipt)
+
+    with pytest.raises(
+        adapter.ObservabilityOperatorBootstrapExecutionError,
+        match="observability-bootstrap-migration-adoption-receipt-invalid",
+    ):
+        adapter.reconcile_completed_bootstrap_migration(
+            receipt_directory=tmp_path,
+            repository_head="b" * 40,
+            subscription_id=SUBSCRIPTION,
+        )
+
+
 def test_adapter_source_has_no_image_scanner_or_secret_value_operation() -> None:
     text = Path(adapter.__file__).read_text(encoding="utf-8")
 
