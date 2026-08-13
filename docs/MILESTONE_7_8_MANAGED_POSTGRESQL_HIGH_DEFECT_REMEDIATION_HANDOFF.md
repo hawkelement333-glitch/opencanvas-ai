@@ -330,6 +330,16 @@ configuration evidence remain absent. The database audit therefore remains
 blocked from full completion and Milestone 7.8 remains incomplete. The object
 storage audit is unstarted.
 
-The next action is a separately authorized managed PostgreSQL evidence
-campaign using the bounded plan above. It is not an object-storage audit, Git
-push, or deployment implied by this handoff.
+The separately authorized campaign attempt at
+`b0b92c780a4afa2c4d1decfed4ebbd0b6ee7e87d` stopped before its first mutation.
+Its price envelope and local gates passed, but no independently armable 7.8
+cleanup, provisioning lifecycle, or managed evidence probe exists. The only
+executable lifecycle is retained Milestone 7.7 state and cannot be reused or
+modified. No resource or image generation began, actual cost is USD 0.00, and
+all residue counters are zero. See the
+[managed PostgreSQL evidence campaign handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md).
+
+The next action is separately bounded local campaign-enablement remediation,
+followed by a new explicit managed PostgreSQL campaign authorization. It is not
+an object-storage audit, Git push, retry through the 7.7 lifecycle, or
+deployment implied by this handoff.

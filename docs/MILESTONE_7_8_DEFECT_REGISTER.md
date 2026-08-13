@@ -193,6 +193,30 @@ audit surface expressly requires the associated production-readiness proof.
 | M78-TI-E01 | Central authority, 167 composite FKs, local cross-scope/revocation tests, and managed health are insufficient: no managed campaign combines cross-user/workspace/canvas/resource reads/writes, stale membership, worker/indexer paths, pool reuse, retry, and failover.                                                                                                          | All protected API and background database paths                              | High; unproved claim / evidence gap   | Local collaboration and data-path groups pass 24 + 108 tests. In an approved isolated campaign use two users/workspaces, revoke membership, force pool reuse/failover, and require zero cross-scope results or mutations.          | Managed-driver, PostgreSQL, pooled-transaction, or background-path behavior could differ from local SQLite proofs.      |
 | M78-PG-E04 | Bicep and retained topology prove PostgreSQL 17, pgvector, `centralus`, cross-region private peering to `southcentralus` compute, Entra-only auth, seven-day retention, ZoneRedundant HA, 64-GiB P6 storage, and disabled geo backup/autogrow. Exact assigned zones, maintenance window, connection ceiling, storage-growth rationale, and production capacity claim are absent. | Maintenance/restart, storage exhaustion, regional latency, backup durability | Medium; unproved claim / evidence gap | Focused PostgreSQL/runtime topology contracts pass; the handoff records the separate mixed infrastructure-suite result. Record the approved managed configuration and capacity rationale; no topology mutation is authorized here. | Maintenance timing, storage ceiling, exact zone behavior, and capacity remain operational unknowns.                     |
 
+## Managed campaign pre-mutation disposition
+
+A separately authorized campaign at
+`b0b92c780a4afa2c4d1decfed4ebbd0b6ee7e87d` stopped before mutation because
+the mandatory independent-cleanup gate could not be satisfied without
+executing or modifying the completed Milestone 7.7 lifecycle. The 7.8 handoff
+defines commands against an already deployed environment but supplies no 7.8
+provisioning, cleanup, or evidence-probe executable. The retained 7.7 runbook
+targets its deleted 7.7 scope, past deadline, and deleted principal fingerprint.
+
+Sanitized Azure reads proved the account enabled, all nine required providers
+registered, the requested PostgreSQL SKU capable of ZoneRedundant HA, and zero
+relevant deployed database, registry, Container Apps, identity, Automation,
+private-endpoint, private-DNS, or VNet resources. The conservative four-hour
+maximum was USD 25.6832 including 25% contingency, below the USD 50 ceiling.
+Cost therefore was not the blocker.
+
+No resource or image generation began, the billable clock did not start, best
+available actual cost is USD 0.00, and every campaign residue counter is zero.
+No evidence gap in the table above is closed. The exact result, image decision,
+validation ledger, and required campaign-enablement correction are recorded in
+the
+[managed PostgreSQL evidence campaign handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md).
+
 ## Proved compliant controls on this surface
 
 - The Bicep topology is a single authoritative PostgreSQL 17 Flexible Server
