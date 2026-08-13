@@ -9,9 +9,7 @@ while reusing that entry point's established primitives.
 from __future__ import annotations
 
 import hashlib
-import http.client
 import ipaddress
-import json
 import re
 import socket
 import ssl
@@ -589,15 +587,8 @@ def readiness_stage(
     }
 
 
-def _private_https_json(
-    hostname: str, path: str, *, expected_address: str
-) -> tuple[dict[str, JsonValue], str, str]:
-    if (
-        re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]{1,251}[a-z0-9])?", hostname) is None
-        or not path.startswith("/")
-        or "?" in path
-        or "#" in path
-    ):
+def _private_tls_projection(hostname: str, *, expected_address: str) -> tuple[str, str]:
+    if re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]{1,251}[a-z0-9])?", hostname) is None:
         lifecycle._fail("live-validation-endpoint-invalid")
     try:
         resolved = socket.getaddrinfo(
@@ -625,37 +616,14 @@ def _private_https_json(
         or addresses != [expected_address]
     ):
         lifecycle._fail("live-validation-private-dns-unproved")
-    connection = http.client.HTTPSConnection(
-        hostname,
-        443,
-        timeout=15.0,
-        context=ssl.create_default_context(),
-    )
     try:
-        connection.request(
-            "GET",
-            path,
-            headers={
-                "Accept": "application/json",
-                "User-Agent": "mobius77-lifecycle/1",
-            },
-        )
-        response = connection.getresponse()
-        body = response.read(16_385)
-        tls_socket = connection.sock
-        tls_raw = tls_socket.version() if tls_socket is not None else None
-    except (OSError, ssl.SSLError, http.client.HTTPException):
-        lifecycle._fail("live-validation-private-tls-or-http-failed")
-    finally:
-        connection.close()
-    if response.status != 200 or len(body) > 16_384:
-        lifecycle._fail("live-validation-http-status-invalid")
-    try:
-        value = json.loads(body.decode("utf-8", errors="strict"))
-    except (UnicodeError, json.JSONDecodeError):
-        lifecycle._fail("live-validation-response-malformed")
-    if not isinstance(value, dict):
-        lifecycle._fail("live-validation-response-malformed")
+        with socket.create_connection((hostname, 443), timeout=15.0) as raw_socket:
+            with ssl.create_default_context().wrap_socket(
+                raw_socket, server_hostname=hostname
+            ) as tls_socket:
+                tls_raw = tls_socket.version()
+    except (OSError, ssl.SSLError):
+        lifecycle._fail("live-validation-private-tls-failed")
     tls_versions = {"TLSv1.2": "TLS1_2", "TLSv1.3": "TLS1_3"}
     tls_version = None if tls_raw is None else tls_versions.get(tls_raw)
     if tls_version is None:
@@ -664,7 +632,7 @@ def _private_https_json(
         b"solarplexus-mobius/milestone-7.7/live-private-addresses/v1\0"
         + canonical_bytes(cast(JsonValue, addresses))
     ).hexdigest()
-    return cast(dict[str, JsonValue], value), address_integrity, tls_version
+    return address_integrity, tls_version
 
 
 def live_validation_sample(
@@ -693,43 +661,23 @@ def live_validation_sample(
     domain, static_ip = lifecycle._container_apps_private_dns_projection(
         subscription_id
     )
-    api_hostname = f"ca-mobius77-api.{domain}"
-    telemetry_hostname = f"ca-mobius77-telemetry.{domain}"
-    live, address_integrity, tls_version = _private_https_json(
-        api_hostname, "/api/v1/health/live", expected_address=static_ip
+    api_hostname = f"ca-mobius77-api.internal.{domain}"
+    telemetry_hostname = f"ca-mobius77-telemetry.internal.{domain}"
+    # With external=false, Container Apps deliberately rejects ingress requests
+    # originating outside the managed environment. Platform revision readiness is
+    # therefore the authoritative application-health signal; the VPN-side probe
+    # independently proves only the exact private DNS and certificate/TLS path.
+    api_addresses, api_tls = _private_tls_projection(
+        api_hostname, expected_address=static_ip
     )
-    ready, ready_addresses, ready_tls = _private_https_json(
-        api_hostname, "/api/v1/health/ready", expected_address=static_ip
-    )
-    worker, worker_addresses, worker_tls = _private_https_json(
-        api_hostname, "/api/v1/health/worker", expected_address=static_ip
-    )
-    runtime, runtime_addresses, runtime_tls = _private_https_json(
-        api_hostname, "/api/v1/health/runtime", expected_address=static_ip
-    )
-    telemetry, telemetry_addresses, telemetry_tls = _private_https_json(
-        telemetry_hostname, "/health", expected_address=static_ip
+    telemetry_addresses, telemetry_tls = _private_tls_projection(
+        telemetry_hostname, expected_address=static_ip
     )
     if (
-        live != {"service": "opencanvas-api", "status": "ok"}
-        or ready != {"service": "opencanvas-api", "status": "ready"}
-        or worker != {"service": "opencanvas-worker", "status": "ready"}
-        or runtime.get("mode") != "live"
-        or runtime.get("appMode") != "staging"
-        or runtime.get("externalAiEnabled") is not True
-        or telemetry != {"status": "healthy"}
-        or len(
-            {
-                address_integrity,
-                ready_addresses,
-                worker_addresses,
-                runtime_addresses,
-                telemetry_addresses,
-            }
-        )
-        != 1
-        or {tls_version, ready_tls, worker_tls, runtime_tls, telemetry_tls}
-        - {"TLS1_2", "TLS1_3"}
+        set(revisions)
+        != {"ca-mobius77-api", "ca-mobius77-telemetry", "ca-mobius77-worker"}
+        or api_addresses != telemetry_addresses
+        or {api_tls, telemetry_tls} - {"TLS1_2", "TLS1_3"}
     ):
         lifecycle._fail("live-validation-health-contract-failed")
     _expected_cost, maximum_cost = lifecycle._verified_cost()
@@ -750,15 +698,10 @@ def live_validation_sample(
         observed_at_utc=_format_utc(lifecycle._utc_now()),
         runtime_graph_integrity_sha256=runtime_graph,
         private_address_sha256=hashlib.sha256(
-            (address_integrity + telemetry_addresses).encode("ascii")
+            (api_addresses + telemetry_addresses).encode("ascii")
         ).hexdigest(),
         private_dns_proved=True,
-        tls_version=(
-            "TLS1_2"
-            if "TLS1_2"
-            in {tls_version, ready_tls, worker_tls, runtime_tls, telemetry_tls}
-            else "TLS1_3"
-        ),
+        tls_version=("TLS1_2" if "TLS1_2" in {api_tls, telemetry_tls} else "TLS1_3"),
         api_live=True,
         api_ready=True,
         worker_ready=True,

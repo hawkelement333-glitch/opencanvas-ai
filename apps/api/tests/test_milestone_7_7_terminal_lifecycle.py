@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-
 from infra.milestone_7_7 import terminal_lifecycle_adapter
 from infra.milestone_7_7.scripts import managed_binding_lifecycle as lifecycle
 from performance.milestone_7_7.framework import JsonValue
@@ -413,6 +412,65 @@ def test_migration_start_reconciles_ambiguous_response_without_duplicate(
     assert inventory_reads == 2
 
 
+def test_live_validation_probes_exact_private_ingress_hostnames(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deadline = NOW + timedelta(hours=4)
+    probes: list[str] = []
+
+    monkeypatch.setattr(lifecycle, "_utc_now", lambda: NOW)
+    monkeypatch.setattr(
+        lifecycle,
+        "_read_current_transient_state",
+        lambda _path, *, ledger: {
+            "cleanupAtUtc": deadline.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "temporaryKeyVaultAssignmentId": None,
+            "temporaryRegistryAssignmentId": None,
+        },
+    )
+    monkeypatch.setattr(lifecycle, "_verify_cleanup_control", lambda *_args: "binding")
+    monkeypatch.setattr(
+        terminal_lifecycle_adapter,
+        "private_revision_ready",
+        lambda _subscription: {
+            "ca-mobius77-api": "api-revision",
+            "ca-mobius77-telemetry": "telemetry-revision",
+            "ca-mobius77-worker": "worker-revision",
+        },
+    )
+    monkeypatch.setattr(lifecycle, "_reconcile_published_api_image", lambda **_kwargs: IMAGE)
+    monkeypatch.setattr(
+        lifecycle,
+        "_container_apps_private_dns_projection",
+        lambda _subscription: (
+            "delightfulgrass-bfebe48e.southcentralus.azurecontainerapps.io",
+            "10.77.0.87",
+        ),
+    )
+
+    def probe(hostname: str, *, expected_address: str) -> tuple[str, str]:
+        assert expected_address == "10.77.0.87"
+        probes.append(hostname)
+        return "e" * 64, "TLS1_3"
+
+    monkeypatch.setattr(terminal_lifecycle_adapter, "_private_tls_projection", probe)
+    monkeypatch.setattr(lifecycle, "_verified_cost", lambda: (3_110, 20_607))
+
+    sample = terminal_lifecycle_adapter.live_validation_sample(
+        ledger={"ledgerIntegritySha256": LEDGER_INTEGRITY, "repositoryHead": HEAD},
+        subscription_id="opaque-subscription",
+        receipt_directory=tmp_path,
+    )
+
+    domain = "delightfulgrass-bfebe48e.southcentralus.azurecontainerapps.io"
+    assert probes == [
+        f"ca-mobius77-api.internal.{domain}",
+        f"ca-mobius77-telemetry.internal.{domain}",
+    ]
+    assert sample.api_ready is True
+    assert sample.telemetry_ready is True
+
+
 def test_uninterrupted_soak_runs_exactly_90_minutes_and_finishes_progress(
     tmp_path: Path,
 ) -> None:
@@ -438,6 +496,29 @@ def test_uninterrupted_soak_runs_exactly_90_minutes_and_finishes_progress(
     written = json.loads((tmp_path / "progress.json").read_text(encoding="utf-8"))
     assert written["status"] == "COMPLETED"
     assert written["resetRequired"] is False
+
+
+def test_soak_cadence_accounts_for_nonzero_live_readback_duration() -> None:
+    clock = _Clock(NOW)
+    deadline = NOW + timedelta(hours=4)
+
+    def delayed_sample() -> terminal_lifecycle.LiveValidationSample:
+        clock.sleep(20)
+        return _sample(clock, deadline=deadline)
+
+    result = terminal_lifecycle.run_uninterrupted_soak(
+        repository_head=HEAD,
+        ledger_integrity_sha256=LEDGER_INTEGRITY,
+        cleanup_deadline_utc=deadline,
+        sample=delayed_sample,
+        clock=clock.now,
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+        progress=lambda _value: None,
+    )
+
+    assert result.payload["sampleCount"] == 91
+    assert result.completed_at_utc - result.started_at_utc == timedelta(minutes=90, seconds=20)
 
 
 def test_soak_interruption_or_graph_change_invalidates_the_whole_run() -> None:

@@ -20,11 +20,15 @@ from typing import Final, NoReturn, cast
 from performance.milestone_7_7.framework import JsonValue, canonical_bytes, load_json
 
 STAGE_EVIDENCE_VERSION: Final = "mobius.milestone-7.7.terminal-stage-evidence.v1"
-STAGE_EVIDENCE_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/terminal-stage-evidence/v1\0"
+STAGE_EVIDENCE_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/terminal-stage-evidence/v1\0"
+)
 SOAK_PROGRESS_VERSION: Final = "mobius.milestone-7.7.soak-progress.v1"
 SOAK_PROGRESS_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/soak-progress/v1\0"
 CLEANUP_AUTHORIZATION_VERSION: Final = "mobius.milestone-7.7.cleanup-authorization.v1"
-CLEANUP_AUTHORIZATION_DOMAIN: Final = b"solarplexus-mobius/milestone-7.7/cleanup-authorization/v1\0"
+CLEANUP_AUTHORIZATION_DOMAIN: Final = (
+    b"solarplexus-mobius/milestone-7.7/cleanup-authorization/v1\0"
+)
 MILESTONE_COMPLETION_MARKER: Final = "MILESTONE_7_7_COMPLETE"
 MIGRATION_REVISION: Final = "20260726_0028"
 SOAK_DURATION: Final = timedelta(minutes=90)
@@ -59,13 +63,17 @@ STAGE_PREDECESSOR: Final = {
     stage: TERMINAL_STAGE_ORDER[index - 1] if index else None
     for index, stage in enumerate(TERMINAL_STAGE_ORDER)
 }
-STAGE_EVIDENCE_FILES: Final = {stage: f"{stage}.evidence.json" for stage in TERMINAL_STAGE_ORDER}
+STAGE_EVIDENCE_FILES: Final = {
+    stage: f"{stage}.evidence.json" for stage in TERMINAL_STAGE_ORDER
+}
 SOAK_PROGRESS_FILE: Final = "soak.progress.json"
 CLEANUP_AUTHORIZATION_FILE: Final = "cleanup-authorization.json"
 
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_IMAGE_DIGEST = re.compile(r"^acrmobius7711564669\.azurecr\.io/opencanvas-api@sha256:[0-9a-f]{64}$")
+_IMAGE_DIGEST = re.compile(
+    r"^acrmobius7711564669\.azurecr\.io/opencanvas-api@sha256:[0-9a-f]{64}$"
+)
 
 
 class TerminalLifecycleError(ValueError):
@@ -135,7 +143,9 @@ class TerminalStageEvidence:
             "completedAtUtc": self.completed_at_utc,
             "ledgerIntegritySha256": self.ledger_integrity_sha256,
             "payload": self.payload,
-            "previousEvidenceIntegritySha256": (self.previous_evidence_integrity_sha256),
+            "previousEvidenceIntegritySha256": (
+                self.previous_evidence_integrity_sha256
+            ),
             "repositoryHead": self.repository_head,
             "schemaVersion": self.schema_version,
             "stage": self.stage,
@@ -181,7 +191,10 @@ def _validate_post_secret(payload: Mapping[str, JsonValue]) -> None:
     digest = payload["immutableImageDigest"]
     if not isinstance(digest, str) or _IMAGE_DIGEST.fullmatch(digest) is None:
         _fail("post-secret-image-identity-invalid")
-    if _integer(payload["managedSecretCount"], "post-secret-secret-count-invalid") != 11:
+    if (
+        _integer(payload["managedSecretCount"], "post-secret-secret-count-invalid")
+        != 11
+    ):
         _fail("post-secret-secret-count-invalid")
     _sha256(
         payload["scannerEvidenceIntegritySha256"],
@@ -252,12 +265,18 @@ def _validate_live(payload: Mapping[str, JsonValue]) -> None:
         "workerReady",
     ):
         _true(payload[key], "live-validation-check-failed")
-    _parse_utc(payload["cleanupDeadlineUtc"], "live-validation-cleanup-deadline-invalid")
-    maximum = _integer(payload["maximumCostUsdCents"], "live-validation-cost-invalid", minimum=1)
+    _parse_utc(
+        payload["cleanupDeadlineUtc"], "live-validation-cleanup-deadline-invalid"
+    )
+    maximum = _integer(
+        payload["maximumCostUsdCents"], "live-validation-cost-invalid", minimum=1
+    )
     if maximum > ABSOLUTE_COST_CEILING_USD_CENTS:
         _fail("live-validation-cost-ceiling-exceeded")
     _sha256(payload["privateAddressSha256"], "live-validation-private-address-invalid")
-    _sha256(payload["runtimeGraphIntegritySha256"], "live-validation-runtime-graph-invalid")
+    _sha256(
+        payload["runtimeGraphIntegritySha256"], "live-validation-runtime-graph-invalid"
+    )
     if payload["runtimeMode"] != "live-staging":
         _fail("live-validation-runtime-mode-invalid")
     if payload["tlsVersion"] not in {"TLS1_2", "TLS1_3"}:
@@ -283,11 +302,16 @@ def _validate_soak(payload: Mapping[str, JsonValue]) -> None:
         SOAK_DURATION.total_seconds()
     ):
         _fail("soak-duration-invalid")
-    interval = _integer(payload["sampleIntervalSeconds"], "soak-sample-interval-invalid", minimum=1)
+    interval = _integer(
+        payload["sampleIntervalSeconds"], "soak-sample-interval-invalid", minimum=1
+    )
     if interval > SOAK_SAMPLE_INTERVAL_SECONDS:
         _fail("soak-sample-interval-invalid")
     minimum_samples = int(SOAK_DURATION.total_seconds()) // interval + 1
-    if _integer(payload["sampleCount"], "soak-sample-count-invalid", minimum=1) < minimum_samples:
+    if (
+        _integer(payload["sampleCount"], "soak-sample-count-invalid", minimum=1)
+        < minimum_samples
+    ):
         _fail("soak-sample-count-invalid")
     _false(payload["interrupted"], "soak-interrupted")
     _false(payload["resetRequired"], "soak-reset-required")
@@ -335,7 +359,10 @@ def _validate_cleanup(payload: Mapping[str, JsonValue]) -> None:
         _fail("cleanup-evidence-fields-invalid")
     if payload["authorizationMode"] != "successful-closeout":
         _fail("cleanup-success-authorization-missing")
-    if _integer(payload["resourceGroupDeleteCount"], "cleanup-group-count-invalid") != 3:
+    if (
+        _integer(payload["resourceGroupDeleteCount"], "cleanup-group-count-invalid")
+        != 3
+    ):
         _fail("cleanup-group-count-invalid")
     _true(payload["softDeletedVaultAbsent"], "cleanup-vault-absence-unproved")
     _true(payload["temporaryAuthorityRevoked"], "cleanup-authority-revocation-unproved")
@@ -426,7 +453,9 @@ def build_stage_evidence(
             or previous.stage != predecessor
             or previous.repository_head != repository_head
             or previous.ledger_integrity_sha256 != ledger_integrity_sha256
-            or _parse_utc(previous.completed_at_utc, "terminal-stage-predecessor-time-invalid")
+            or _parse_utc(
+                previous.completed_at_utc, "terminal-stage-predecessor-time-invalid"
+            )
             > started
         ):
             _fail("terminal-stage-predecessor-invalid")
@@ -460,7 +489,8 @@ def validate_stage_evidence(evidence: TerminalStageEvidence) -> TerminalStageEvi
         or _SHA40.fullmatch(evidence.repository_head) is None
         or _SHA256.fullmatch(evidence.ledger_integrity_sha256) is None
         or _SHA256.fullmatch(evidence.integrity_sha256) is None
-        or evidence.integrity_sha256 != _integrity(STAGE_EVIDENCE_DOMAIN, evidence.unsigned())
+        or evidence.integrity_sha256
+        != _integrity(STAGE_EVIDENCE_DOMAIN, evidence.unsigned())
     ):
         _fail("terminal-stage-evidence-integrity-invalid")
     started = _parse_utc(evidence.started_at_utc, "terminal-stage-time-invalid")
@@ -507,7 +537,9 @@ def stage_evidence_from_mapping(value: Mapping[str, object]) -> TerminalStageEvi
             previous_evidence_integrity_sha256=cast(
                 str | None, value["previousEvidenceIntegritySha256"]
             ),
-            payload=cast(dict[str, JsonValue], dict(cast(Mapping[str, object], value["payload"]))),
+            payload=cast(
+                dict[str, JsonValue], dict(cast(Mapping[str, object], value["payload"]))
+            ),
             integrity_sha256=cast(str, value["integritySha256"]),
         )
     except (KeyError, TypeError):
@@ -552,7 +584,9 @@ def _write_exclusive(path: Path, value: Mapping[str, JsonValue]) -> None:
         _fail("terminal-stage-evidence-write-failed")
 
 
-def write_stage_evidence(receipt_directory: Path, evidence: TerminalStageEvidence) -> Path:
+def write_stage_evidence(
+    receipt_directory: Path, evidence: TerminalStageEvidence
+) -> Path:
     validate_stage_evidence(evidence)
     path = stage_evidence_path(receipt_directory, evidence.stage)
     _write_exclusive(path, evidence.canonical())
@@ -708,10 +742,15 @@ def run_uninterrupted_soak(
     last_observed = started
     try:
         while True:
-            current = clock().astimezone(UTC).replace(microsecond=0)
+            sample_started = clock().astimezone(UTC).replace(microsecond=0)
             observed = validate_live_sample(sample())
-            observed_at = _parse_utc(observed.observed_at_utc, "soak-sample-time-invalid")
-            if abs((observed_at - current).total_seconds()) > 5:
+            current = clock().astimezone(UTC).replace(microsecond=0)
+            observed_at = _parse_utc(
+                observed.observed_at_utc, "soak-sample-time-invalid"
+            )
+            if observed_at < sample_started - timedelta(
+                seconds=5
+            ) or observed_at > current + timedelta(seconds=5):
                 _fail("soak-sample-time-invalid")
             if observed.cleanup_deadline_utc != _format_utc(deadline):
                 _fail("soak-cleanup-deadline-changed")
@@ -740,12 +779,22 @@ def run_uninterrupted_soak(
                 )
             )
             elapsed = monotonic() - started_monotonic
-            if elapsed >= SOAK_DURATION.total_seconds():
+            minimum_samples = (
+                int(SOAK_DURATION.total_seconds()) // sample_interval_seconds + 1
+            )
+            if (
+                elapsed >= SOAK_DURATION.total_seconds()
+                and sample_count >= minimum_samples
+            ):
                 break
+            next_sample_at = float(sample_count * sample_interval_seconds)
             sleep(
-                min(
-                    float(sample_interval_seconds),
-                    SOAK_DURATION.total_seconds() - elapsed,
+                max(
+                    0.0,
+                    min(
+                        next_sample_at - elapsed,
+                        max(0.0, SOAK_DURATION.total_seconds() - elapsed),
+                    ),
                 )
             )
     except BaseException as exc:
@@ -799,7 +848,9 @@ def run_uninterrupted_soak(
             failure_code=None,
         )
     )
-    return SoakRunResult(started_at_utc=started, completed_at_utc=completed, payload=payload)
+    return SoakRunResult(
+        started_at_utc=started, completed_at_utc=completed, payload=payload
+    )
 
 
 def build_successful_cleanup_authorization(
@@ -842,7 +893,9 @@ def build_successful_cleanup_authorization(
     }
 
 
-def write_cleanup_authorization(receipt_directory: Path, value: Mapping[str, JsonValue]) -> Path:
+def write_cleanup_authorization(
+    receipt_directory: Path, value: Mapping[str, JsonValue]
+) -> Path:
     """Persist one non-replayable cleanup authorization outside the repository."""
 
     path = receipt_directory / CLEANUP_AUTHORIZATION_FILE
@@ -874,13 +927,21 @@ def validate_cleanup_authorization(
     }
     if set(value) != expected:
         _fail("cleanup-authorization-malformed")
-    unsigned = {key: item for key, item in value.items() if key != "authorizationIntegritySha256"}
+    unsigned = {
+        key: item
+        for key, item in value.items()
+        if key != "authorizationIntegritySha256"
+    }
     if value.get("authorizationIntegritySha256") != _integrity(
         CLEANUP_AUTHORIZATION_DOMAIN, unsigned
     ):
         _fail("cleanup-authorization-integrity-mismatch")
-    issued = _parse_utc(value.get("issuedAtUtc"), "cleanup-authorization-time-malformed")
-    expires = _parse_utc(value.get("expiresAtUtc"), "cleanup-authorization-time-malformed")
+    issued = _parse_utc(
+        value.get("issuedAtUtc"), "cleanup-authorization-time-malformed"
+    )
+    expires = _parse_utc(
+        value.get("expiresAtUtc"), "cleanup-authorization-time-malformed"
+    )
     now = now_utc.astimezone(UTC).replace(microsecond=0)
     if (
         now < issued
@@ -920,12 +981,14 @@ def validate_cleanup_authorization(
         if (
             closeout_evidence.stage != "successful-closeout"
             or closeout_evidence.repository_head != repository_head
-            or value.get("authorizationEvidenceSha256") != closeout_evidence.integrity_sha256
+            or value.get("authorizationEvidenceSha256")
+            != closeout_evidence.integrity_sha256
         ):
             _fail("cleanup-success-evidence-incomplete")
     elif mode == "explicit-user":
         if (
-            value.get("lifecycleState") not in {"PAUSED_PRESERVED", "CONTAINED_PRESERVED"}
+            value.get("lifecycleState")
+            not in {"PAUSED_PRESERVED", "CONTAINED_PRESERVED"}
             or any(stages[name] is not False for name in expected_stages)
             or closeout_evidence is not None
         ):
