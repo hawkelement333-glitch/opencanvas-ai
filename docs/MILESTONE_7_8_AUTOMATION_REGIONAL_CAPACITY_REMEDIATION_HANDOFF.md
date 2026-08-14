@@ -240,3 +240,19 @@ M78-PG-E01, M78-PG-E02, M78-PG-E03, M78-TI-E01, and M78-PG-E04 remain open.
 Milestone 7.8 remains incomplete. The next action is a separately reviewed and
 authorized fresh managed PostgreSQL evidence campaign from the final clean
 commit. It is not a GitHub push and not the object-storage audit.
+
+## Later campaign execution cross-reference
+
+The separately authorized fresh campaign from the final clean commit later
+proved that this correction was necessary but incomplete. Preparation and the
+repeated `capacity-check` selected `southcentralus` consistently, but Azure
+rejected the one cleanup-controller deployment because Free Trial and Student
+subscriptions cannot create Automation accounts in that location. The
+subscription-offer allowed-region set was not represented by provider support,
+Azure Policy, active occupancy, or soft-deleted occupancy.
+
+That later result is M78-PG-008, not a rewrite of M78-PG-007's original
+evidence. The campaign stopped at its first failed invariant and completed
+direct zero-residue cleanup without a region hop, retry, image, target
+generation, database, or managed proof. See the
+[corrected regional-capacity campaign execution handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_CORRECTED_REGIONAL_CAPACITY_CAMPAIGN_EXECUTION_HANDOFF.md).
