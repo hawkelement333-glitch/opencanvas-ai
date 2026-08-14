@@ -324,3 +324,19 @@ That later repository-local work did not run the managed campaign and does not
 retroactively change any observation, price, image count, resource count, or
 zero-residue statement above. All five managed evidence gaps remain open, the
 object-storage audit remains unstarted, and Milestone 7.8 remains incomplete.
+
+## Later authorized execution cross-reference
+
+A later separately authorized campaign attempt from clean HEAD
+`e683ab00626fac9a1ac5a483ed4107e4ae47c60f` used the independent Milestone 7.8
+surface but stopped at the committed operator's first executable preflight. On
+the authorized Windows host, Python could not resolve the installed Azure CLI
+command wrapper as the native executable name `az`; the operator failed with
+Windows error 2 before a ledger transition or Azure mutation. Zero-residue
+readback and the complete sanitized disposition are recorded in the
+[campaign execution handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_EXECUTION_HANDOFF.md).
+
+This later result does not alter the historical observations in this document.
+It produced zero resource or image generations, zero scans, USD 0.00 actual
+campaign cost, and no managed evidence. All five managed gaps remain open, the
+object-storage audit remains unstarted, and Milestone 7.8 remains incomplete.

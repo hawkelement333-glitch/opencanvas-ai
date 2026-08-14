@@ -1,0 +1,71 @@
+{
+  "version": "m7.8-managed-postgresql-campaign-execution-v1",
+  "status": "blocked-pre-mutation-zero-residue",
+  "terminalMarker": "MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_BLOCKED_CLEANUP_COMPLETE",
+  "observedAtUtc": "2026-08-14T00:53:48Z",
+  "sourceHead": "e683ab00626fac9a1ac5a483ed4107e4ae47c60f",
+  "campaignCorrelation": "3939e43a719d9410",
+  "generationCorrelation": "1e750d27c68233b3",
+  "blocker": {
+    "code": "operator-python-subprocess-cannot-resolve-windows-azure-cli-launcher",
+    "phase": "preflight",
+    "error": "FileNotFoundError:2",
+    "gitExecutableResolved": true,
+    "azureCliExecutableResolved": false,
+    "ledgerCreated": false
+  },
+  "canonicalImageBoundary": {
+    "buildInputSha256": "533dc8d9a64f2d4b1a8a10d5ac769b11e1bc962741a7637da44c037e34c4dad7",
+    "dockerfileSha256": "1f914420f661e40bcc8e61d149115387042fd3948323b645b9a204390c90a82b",
+    "apiProjectSha256": "b826c6e415e5c836cda5c74696d69b61f517a86556b2fecb82201ca35540868c",
+    "buildLockSha256": "22f8b5d1f0b8521e28470f6097717ff64c9cccc7b6037db7a5c25962e32a7ccb",
+    "runtimeLockSha256": "cdab59f073ff510ff6d8b951d178381650236662b488c06b2d6436063f336aa0"
+  },
+  "counts": {
+    "campaignAttempts": 1,
+    "resourceGenerations": 0,
+    "imageGenerations": 0,
+    "admissionScans": 0,
+    "billableMutations": 0,
+    "unrelatedResourcesBefore": 7,
+    "unrelatedResourcesAfter": 7
+  },
+  "cost": {
+    "committedConservativeMaximumUsd": "25.6832",
+    "authorizedCeilingUsd": "50.00",
+    "bestAvailableActualCostUsd": "0.00",
+    "billableElapsedSeconds": 0,
+    "costGateReached": false
+  },
+  "residue": {
+    "targetResourceGroups": 0,
+    "cleanupResourceGroups": 0,
+    "roleAssignments": 0,
+    "automationAccounts": 0,
+    "cleanupSchedules": 0,
+    "managedIdentities": 0,
+    "postgresServers": 0,
+    "containerRegistries": 0,
+    "containerAppsEnvironments": 0,
+    "containerAppsJobs": 0,
+    "virtualNetworks": 0,
+    "privateEndpoints": 0,
+    "privateDnsZones": 0,
+    "diagnosticSettings": 0,
+    "syntheticRows": 0
+  },
+  "managedEvidenceGaps": {
+    "M78-PG-E01": "open",
+    "M78-PG-E02": "open",
+    "M78-PG-E03": "open",
+    "M78-TI-E01": "open",
+    "M78-PG-E04": "open"
+  },
+  "prohibitedSurfaceConfirmation": {
+    "productionDataUsed": false,
+    "objectStorageAuditStarted": false,
+    "remoteGitUsed": false,
+    "soakRun": false,
+    "milestone77LifecycleUsed": false
+  }
+}

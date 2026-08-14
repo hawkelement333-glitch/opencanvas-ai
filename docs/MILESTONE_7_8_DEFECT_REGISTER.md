@@ -3,9 +3,10 @@
 Date: 2026-08-13
 
 Status: active; architecture and checkpoint-scope findings are corrected; all
-four managed PostgreSQL High defects are locally remediated; the independent
-managed-evidence campaign is repository-ready but unexecuted, so its five
-managed evidence gaps still block completion of this audit surface
+four managed PostgreSQL High defects are locally remediated; the latest
+independent managed-evidence campaign attempt stopped in committed operator
+preflight before Azure mutation, so its five managed evidence gaps still block
+completion of this audit surface
 
 This register records defects proved by the Milestone 7.8 audit and, in a
 separate section, the evidence gaps the audit contract requires it to preserve.
@@ -194,6 +195,31 @@ audit surface expressly requires the associated production-readiness proof.
 | M78-PG-E03 | Milestone 7.6 proves isolated restore paths; retained 7.7 proves migration/readiness and uninterrupted health. Neither induces failover/disconnect, preserves traffic across recovery, resolves an ambiguous commit, nor proves token expiration/revocation and stale pooled-connection handling.                                                                                | API/worker pools, readiness, managed-identity rotation, worker claims, retry | High; unproved claim / evidence gap   | Local pre-ping/timeout/readiness/idempotency tests pass. After M78-PG-004, induce one bounded failover and credential-rotation case; prove degradation, pool recovery, durable request resolution, and zero duplicate effects.     | Provider failover or revoked/stale authentication may produce unknown outcomes or prolonged unready state.              |
 | M78-TI-E01 | Central authority, 167 composite FKs, local cross-scope/revocation tests, and managed health are insufficient: no managed campaign combines cross-user/workspace/canvas/resource reads/writes, stale membership, worker/indexer paths, pool reuse, retry, and failover.                                                                                                          | All protected API and background database paths                              | High; unproved claim / evidence gap   | Local collaboration and data-path groups pass 24 + 108 tests. In an approved isolated campaign use two users/workspaces, revoke membership, force pool reuse/failover, and require zero cross-scope results or mutations.          | Managed-driver, PostgreSQL, pooled-transaction, or background-path behavior could differ from local SQLite proofs.      |
 | M78-PG-E04 | Bicep and retained topology prove PostgreSQL 17, pgvector, `centralus`, cross-region private peering to `southcentralus` compute, Entra-only auth, seven-day retention, ZoneRedundant HA, 64-GiB P6 storage, and disabled geo backup/autogrow. Exact assigned zones, maintenance window, connection ceiling, storage-growth rationale, and production capacity claim are absent. | Maintenance/restart, storage exhaustion, regional latency, backup durability | Medium; unproved claim / evidence gap | Focused PostgreSQL/runtime topology contracts pass; the handoff records the separate mixed infrastructure-suite result. Record the approved managed configuration and capacity rationale; no topology mutation is authorized here. | Maintenance timing, storage ceiling, exact zone behavior, and capacity remain operational unknowns.                     |
+
+### Latest managed campaign execution blocker
+
+The later campaign authorized from clean HEAD
+`e683ab00626fac9a1ac5a483ed4107e4ae47c60f` stopped in the committed operator's
+first executable preflight. `infra/milestone_7_8/operator.py` passes the bare
+executable name `az` to Python `subprocess.run`. The authorized Windows host has
+an enabled AzureCloud login and installed Azure CLI command/batch launchers,
+but no native `az.exe`; the subprocess therefore returned
+`FileNotFoundError:2`. A direct control resolved `git` and reproduced the
+Azure-CLI failure. No ledger transition or Azure mutation occurred.
+
+Read-only post-blocker inventory proved both generated resource groups absent,
+zero campaign- or generation-tagged resources, zero campaign-scope role
+assignments, all 15 campaign residue counters at zero, and seven unrelated
+subscription resources before and after. Resource generations, image
+generations, scans, billable mutations, elapsed billable time, and actual cost
+were 0, 0, 0, 0, 0 seconds, and USD 0.00 respectively. No evidence gap above
+is closed. The sanitized receipt and full command ledger are in the
+[campaign execution handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_EXECUTION_HANDOFF.md).
+
+This blocker requires a separately authorized local correction to the Windows
+Azure CLI launch contract, with focused command-boundary and cleanup tests,
+before a fresh campaign generation can be reviewed and authorized. The failed
+source-bound generation must not be resumed after such a correction.
 
 ## Managed campaign pre-mutation disposition
 

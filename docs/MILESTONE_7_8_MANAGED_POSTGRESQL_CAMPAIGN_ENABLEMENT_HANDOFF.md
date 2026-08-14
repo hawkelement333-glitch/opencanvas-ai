@@ -2,7 +2,8 @@
 
 Date: 2026-08-13
 
-Status: repository-local campaign enablement ready; managed campaign unexecuted
+Status: repository-local campaign enablement implemented; later managed
+campaign attempt blocked in committed operator preflight before Azure mutation
 
 ## Outcome
 
@@ -316,7 +317,19 @@ installation.
 
 ## Remaining boundary
 
-M78-PG-005 is resolved in repository state. The managed campaign remains
-unexecuted and separately authorized; the five managed gaps remain open. The
-next action is that bounded campaign, not an object-storage audit and not a Git
-push. Milestone 7.8 remains incomplete.
+M78-PG-005 is resolved in repository state. The later managed campaign attempt
+stopped before Azure mutation; the five managed gaps remain open. The next
+action is a separately authorized Windows Azure CLI launch-contract correction,
+not an object-storage audit and not a Git push. Milestone 7.8 remains
+incomplete.
+
+## Later execution cross-reference
+
+A later separately authorized campaign attempt from clean HEAD
+`e683ab00626fac9a1ac5a483ed4107e4ae47c60f` prepared one ignored generation but
+stopped in the committed operator's executable preflight because Python could
+not resolve the Windows Azure CLI command wrapper as an executable. No ledger
+transition, Azure mutation, resource generation, image build, scan, billable
+clock, or managed database proof occurred. Post-blocker readback proved zero
+campaign residue and unchanged unrelated resources. See the
+[campaign execution handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_EXECUTION_HANDOFF.md).
