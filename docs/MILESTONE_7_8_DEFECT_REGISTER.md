@@ -3,10 +3,10 @@
 Date: 2026-08-13
 
 Status: active; architecture and checkpoint-scope findings are corrected; all
-five managed PostgreSQL High defects are locally remediated; the retained
-managed-evidence campaign attempt stopped in committed operator preflight
-before Azure mutation, and no later managed campaign has run, so its five
-managed evidence gaps still block completion of this audit surface
+five managed PostgreSQL High defects are locally remediated; a fresh campaign
+proved the corrected Windows launcher and the pre-mutation gates but stopped
+during cleanup-controller deployment, completed direct zero-residue cleanup,
+and left all five managed evidence gaps open
 
 This register records defects proved by the Milestone 7.8 audit and, in a
 separate section, the evidence gaps the audit contract requires it to preserve.
@@ -244,6 +244,36 @@ CLI launch boundary. The historical receipt and zero-residue observations
 above remain unchanged. The failed source-bound generation must not be resumed;
 a fresh campaign generation from the corrected clean HEAD must be separately
 reviewed and authorized.
+
+### Fresh corrected-launcher campaign execution blocker
+
+A separately authorized fresh campaign from clean HEAD
+`15837918c9e17b0bc1ce9e49ebca7bc4f9ae9999` used the corrected centralized
+Windows launcher. The repository, canonical-image, account, provider,
+PostgreSQL SKU/zone, quota, name, collision, seven-resource inventory, and
+refreshed USD 25.6832 cost gates all passed. The lifecycle then created its two
+tagged resource-group boundaries and invoked exactly one independent cleanup
+deployment.
+
+Azure rejected the cleanup Automation account with `BadRequest`: only one
+Automation account is permitted for the subscription per region, and the
+committed `westus` cleanup region already contains an unrelated account. The
+cleanup controller never armed. Per the first-failure rule, target deployment,
+image build, admission scan, PostgreSQL, managed evidence, failover, redesign,
+and retry did not start. The operator entered exact-two-group direct cleanup;
+both groups are absent, unrelated resources remain 7 / 7, all 15 residue
+counters are zero, the billable clock never started, and best available actual
+cost is USD 0.00.
+
+Fresh campaign correlation `7d3af05024f9604f` and generation correlation
+`e7fe6e05df20bfca` are retained only in sanitized evidence. Resource, image,
+scan, managed-evidence, failover, and billable-mutation counts are all zero.
+No evidence gap is closed. The complete result is in the
+[fresh campaign execution handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_FRESH_CAMPAIGN_EXECUTION_HANDOFF.md)
+and its linked machine-readable receipt. A later correction or execution plan
+for the regional Automation-account limit requires separate authorization and
+another fresh campaign; this result does not authorize the object-storage
+audit.
 
 ## Managed campaign pre-mutation disposition
 
