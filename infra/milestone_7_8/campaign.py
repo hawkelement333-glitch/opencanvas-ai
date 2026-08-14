@@ -14,6 +14,12 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Final, Protocol, cast
 
+from infra.milestone_7_8.azure_cli import (
+    AZURE_CLI_TOKEN,
+    AzureCliError,
+    AzureCliLauncher,
+)
+
 HARD_CEILING: Final = Decimal("50.00")
 DEFAULT_ESTIMATE: Final = Decimal("25.6832")
 MAX_HOURS: Final = 4
@@ -421,10 +427,42 @@ class CommandRunner(Protocol):
 
 
 class SubprocessRunner:
+    def __init__(
+        self,
+        *,
+        azure_cli: AzureCliLauncher | None = None,
+        timeout_seconds: int | float = 900,
+        encoding: str = "utf-8",
+    ) -> None:
+        self._azure_cli = azure_cli
+        self._timeout_seconds = timeout_seconds
+        self._encoding = encoding
+
     def run(self, command: tuple[str, ...]) -> dict[str, object]:
-        completed = subprocess.run(
-            command, check=False, capture_output=True, text=True, timeout=900
-        )
+        if command and command[0] == AZURE_CLI_TOKEN:
+            try:
+                if self._azure_cli is None:
+                    self._azure_cli = AzureCliLauncher.resolve()
+                completed = self._azure_cli.run(
+                    command[1:],
+                    timeout=self._timeout_seconds,
+                    encoding=self._encoding,
+                )
+            except AzureCliError:
+                raise
+            except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
+                raise AzureCliError("Azure CLI process failed safely") from exc
+        else:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding=self._encoding,
+                errors="strict",
+                timeout=self._timeout_seconds,
+                shell=False,
+            )
         return {
             "exitCode": completed.returncode,
             "stdout": completed.stdout,

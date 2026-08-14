@@ -39,6 +39,21 @@ production identity is permitted. `M78_SUBSCRIPTION_ID` and `M78_TENANT_ID`
 are held only in process memory and the ignored private runtime file; do not
 paste them into tracked evidence or terminal reports.
 
+All Azure CLI execution in this runbook and the operator must pass through
+`python -m infra.milestone_7_8.azure_cli`. Before preparing a generation, run
+the bounded non-authenticated launcher check:
+
+```powershell
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.azure_cli version
+if ($LASTEXITCODE -ne 0) { throw 'trusted Azure CLI launcher unavailable' }
+```
+
+On Windows, the resolver prefers `az.exe`; otherwise it accepts only a
+canonical installed `az.cmd` or `az.bat` and invokes it through the absolute
+system `cmd.exe` with `shell=False`. Repository, current-directory,
+`.runtime`, and arbitrary launcher substitutions fail closed before a new
+ledger is written.
+
 ## Prepare one generation
 
 Set the exact later-authorized Azure identifiers in memory and choose one
@@ -113,11 +128,13 @@ digest:
 ```powershell
 $rt = Get-Content -LiteralPath $runtime -Raw | ConvertFrom-Json
 $imageName = "mobius-api:m78-$($campaign)"
-az acr build --registry $rt.registryName --image $imageName `
+& .\.venv\Scripts\python.exe -m infra.milestone_7_8.azure_cli invoke -- `
+  acr build --registry $rt.registryName --image $imageName `
   --file apps/api/Dockerfile . --output json
 if ($LASTEXITCODE -ne 0) { throw 'single campaign image build failed' }
-$digest = az acr manifest show-metadata --registry $rt.registryName `
-  --name $imageName --query digest --output tsv
+$digest = (& .\.venv\Scripts\python.exe -m infra.milestone_7_8.azure_cli `
+  invoke -- acr manifest show-metadata --registry $rt.registryName `
+  --name $imageName --query digest --output tsv).Trim()
 if ($LASTEXITCODE -ne 0 -or $digest -notmatch '^sha256:[a-f0-9]{64}$') {
   throw 'immutable image digest readback failed'
 }
@@ -178,10 +195,12 @@ $env:M78_OBSERVED_PEAK = '<observed-positive-integer>'
 $env:M78_SAFETY_RESERVE = '<approved-positive-integer>'
 $env:M78_MAX_CONNECTIONS = '<observed-positive-integer>'
 
-$server = az postgres flexible-server show `
+$serverJson = & .\.venv\Scripts\python.exe -m infra.milestone_7_8.azure_cli `
+  invoke -- postgres flexible-server show `
   --resource-group $rt.resourceGroupName `
-  --name $rt.postgresServerName --output json | ConvertFrom-Json
+  --name $rt.postgresServerName --output json
 if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL configuration readback failed' }
+$server = $serverJson | ConvertFrom-Json
 $control = [ordered]@{
   primaryZone = [string]$server.availabilityZone
   standbyZone = [string]$server.highAvailability.standbyAvailabilityZone

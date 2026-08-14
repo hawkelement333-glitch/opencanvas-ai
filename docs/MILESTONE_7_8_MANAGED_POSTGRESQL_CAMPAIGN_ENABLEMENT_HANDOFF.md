@@ -333,3 +333,12 @@ transition, Azure mutation, resource generation, image build, scan, billable
 clock, or managed database proof occurred. Post-blocker readback proved zero
 campaign residue and unchanged unrelated resources. See the
 [campaign execution handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_EXECUTION_HANDOFF.md).
+
+## Later Windows launcher correction cross-reference
+
+The next action identified above was later authorized and completed locally as
+M78-PG-006. The centralized Windows/native Azure CLI process contract and its
+validation are recorded in the
+[Windows Azure CLI launch-contract handoff](MILESTONE_7_8_WINDOWS_AZURE_CLI_LAUNCH_CONTRACT_HANDOFF.md).
+No managed campaign was executed by that correction, all five managed evidence
+gaps remain open, and this enablement handoff remains historical evidence.

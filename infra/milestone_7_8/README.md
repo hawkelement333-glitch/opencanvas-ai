@@ -30,6 +30,11 @@ existence.
 - `operator.py` is dry-run by default. `--execute` advances one validated,
   persisted phase at a time and starts cleanup after any failure following
   scope creation.
+- `azure_cli.py` is the sole Azure CLI process boundary. It prefers a native
+  launcher, safely supports trusted Windows `az.cmd`/`az.bat` launchers through
+  the absolute system `cmd.exe` with `shell=False`, rejects repository-local or
+  campaign-controlled launchers, and preserves exact arguments and process
+  results.
 - `campaign.py` enforces the USD 50 ceiling, at least 25 percent contingency,
   four-hour immutable deadline, one resource generation, at most one image
   generation, exactly one digest-bound admission scan, ordered resume, and
@@ -70,11 +75,18 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
   apps/api/tests/test_milestone_7_8_campaign_enablement.py `
   apps/api/tests/test_milestone_7_7_runtime_topology.py
 
-az bicep build --file infra/milestone_7_8/main.bicep --stdout | Out-Null
-az bicep build --file infra/milestone_7_8/cleanup.bicep --stdout | Out-Null
+function Invoke-M78LocalAz([string[]]$Arguments) {
+  & .\.venv\Scripts\python.exe -m infra.milestone_7_8.azure_cli invoke -- @Arguments
+  if ($LASTEXITCODE -ne 0) { throw 'local Azure CLI operation failed' }
+}
+
+Invoke-M78LocalAz @('bicep', 'build', '--file',
+  'infra/milestone_7_8/main.bicep', '--stdout') | Out-Null
+Invoke-M78LocalAz @('bicep', 'build', '--file',
+  'infra/milestone_7_8/cleanup.bicep', '--stdout') | Out-Null
 Get-ChildItem infra/milestone_7_8/modules -Filter *.bicep | ForEach-Object {
-  az bicep build --file $_.FullName --stdout | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "Bicep compilation failed: $($_.Name)" }
+  Invoke-M78LocalAz @('bicep', 'build', '--file', $_.FullName, '--stdout') |
+    Out-Null
 }
 ```
 

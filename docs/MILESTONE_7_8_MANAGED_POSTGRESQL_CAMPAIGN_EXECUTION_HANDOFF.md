@@ -238,3 +238,13 @@ The next action is a separately authorized repository-local correction of the
 Windows Azure CLI launch contract, followed by a fresh managed PostgreSQL
 campaign authorization from its reviewed clean HEAD. It is not the
 object-storage audit and not a GitHub push. Milestone 7.8 remains incomplete.
+
+## Later local correction cross-reference
+
+This handoff remains the immutable historical receipt for the blocked
+generation above. A later authorized repository-local change corrected the
+Windows Azure CLI launch boundary and is recorded in the
+[Windows Azure CLI launch-contract handoff](MILESTONE_7_8_WINDOWS_AZURE_CLI_LAUNCH_CONTRACT_HANDOFF.md).
+That correction did not resume this source-bound generation, execute an Azure
+operation other than a non-authenticated local version check, or close any of
+the five managed evidence gaps.
