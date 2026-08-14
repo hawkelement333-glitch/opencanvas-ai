@@ -342,3 +342,17 @@ validation are recorded in the
 [Windows Azure CLI launch-contract handoff](MILESTONE_7_8_WINDOWS_AZURE_CLI_LAUNCH_CONTRACT_HANDOFF.md).
 No managed campaign was executed by that correction, all five managed evidence
 gaps remain open, and this enablement handoff remains historical evidence.
+
+## Later regional-capacity correction cross-reference
+
+The subsequent fresh campaign reached the independent cleanup deployment and
+proved that this enablement's fixed `westus` cleanup default lacked a
+pre-mutation regional-capacity contract. M78-PG-007 later replaced that default
+with a closed, deterministic provider/policy/active/soft-deleted selection and
+revalidation flow while preserving this handoff's cleanup architecture,
+deadline, exact scopes, RBAC, direct fallback, PostgreSQL topology, principal
+model, and evidence harness. See the
+[regional-capacity remediation handoff](MILESTONE_7_8_AUTOMATION_REGIONAL_CAPACITY_REMEDIATION_HANDOFF.md).
+
+No historical campaign result or managed gap is changed by this
+cross-reference.

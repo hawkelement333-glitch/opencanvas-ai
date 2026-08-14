@@ -20,6 +20,11 @@ sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from infra.milestone_7_8 import operator as campaign_operator
 from infra.milestone_7_8 import prepare
+from infra.milestone_7_8.automation_region import (
+    CLEANUP_REGION_CANDIDATES,
+    AutomationRegionSelection,
+    CandidateEvidence,
+)
 from infra.milestone_7_8.campaign import (
     HARD_CEILING,
     ORDER,
@@ -42,6 +47,7 @@ from infra.milestone_7_8.operator import (
     validate_cleanup_readback,
     verify_zero_residue,
 )
+
 from opencanvas_api.db.principal_manifest import (
     CAMPAIGN_ENV,
     CURRENT_PRINCIPAL_ID_ENV,
@@ -98,13 +104,14 @@ def _config(**changes: object) -> CampaignConfig:
         "target_resource_group": "rg-m78-aabbccddee-target",
         "cleanup_resource_group": "rg-m78-aabbccddee-cleanup",
         "target_region": "centralus",
-        "cleanup_region": "westus",
+        "cleanup_region": "eastus2",
         "postgres_region": "centralus",
         "cleanup_deadline_utc": "2030-01-01T04:00:00Z",
         "conservative_estimate_usd": "25.6832",
         "contingency_percent": "25",
         "resource_items": (CostItem("bounded-campaign", "5.13664", 4),),
         "principal_manifest_sha256": "c" * 64,
+        "cleanup_region_selection_sha256": "f" * 64,
         "image_digest": None,
     }
     values.update(changes)
@@ -270,6 +277,8 @@ def test_resume_and_cleanup_binding_reject_substitution() -> None:
         config.cleanup_deadline_utc,
         "50.00",
         1,
+        config.cleanup_region,
+        config.cleanup_region_selection_sha256,
     )
     valid.validate(config)
     with pytest.raises(CampaignError, match="cleanup binding"):
@@ -413,6 +422,8 @@ def test_deployed_principal_manifest_matches_prepared_semantic_plan() -> None:
             "maximumHours": 4,
             "costCeilingCents": 5000,
             "cleanupResourceGroupName": config.cleanup_resource_group,
+            "cleanupLocation": config.cleanup_region,
+            "cleanupRegionSelectionSha256": config.cleanup_region_selection_sha256,
             "principalManifest": json.dumps(manifest),
         }
     }
@@ -483,6 +494,9 @@ def _runtime() -> dict[str, str]:
         "canonicalBuildInputSha256": "b" * 64,
         "dockerfileSha256": "c" * 64,
         "cleanupScriptSha256": "d" * 64,
+        "cleanupRegion": "eastus2",
+        "cleanupRegionSelectionSha256": "f" * 64,
+        "cleanupRegionSelectionFile": "runtime/cleanup-region-selection.json",
         "cleanupDeploymentName": "m78-cleanup",
         "campaignDeploymentName": "m78-campaign",
         "automationAccountName": "aa-m78-proof",
@@ -537,6 +551,8 @@ def _cleanup_deployment_result(config: CampaignConfig) -> dict[str, object]:
         "targetResourceGroupName": config.target_resource_group,
         "cleanupResourceGroupName": config.cleanup_resource_group,
         "cleanupPrincipalId": _object_id(201),
+        "cleanupLocation": config.cleanup_region,
+        "cleanupRegionSelectionSha256": config.cleanup_region_selection_sha256,
         "cleanupDeadlineUtc": config.cleanup_deadline_utc,
         "costCeilingCents": 5000,
         "scheduleCount": 1,
@@ -553,7 +569,7 @@ def test_cleanup_binding_and_readback_reject_substitution() -> None:
     validate_cleanup_deployment(deployment, config)
     results = [
         deployment,
-        _command_result({"identity": {"principalId": _object_id(201)}}),
+        _command_result({"identity": {"principalId": _object_id(201)}, "location": "East US 2"}),
         _command_result({"name": runtime["runbookName"], "state": "Published"}),
         _command_result(
             {
@@ -686,6 +702,7 @@ def test_zero_residue_requires_all_control_plane_reads_to_be_empty() -> None:
 def test_resume_ledger_rejects_substituted_phase() -> None:
     config = _config()
     ledger = Ledger(config.campaign_id, config.generation_id)
+    ledger.bind_cleanup_region(config)
     ledger.phase = Phase.CORRELATED.value
     with pytest.raises(CampaignError, match="transition chain"):
         ledger.validate_resume(config)
@@ -719,6 +736,25 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             "dockerfileSha256": "c" * 64,
         },
     )
+    selection = AutomationRegionSelection(
+        version="m7.8-cleanup-region-selection-v1",
+        candidate_order=CLEANUP_REGION_CANDIDATES,
+        selected_region="eastus2",
+        provider_registration_state="Registered",
+        capacity_basis="provider-policy-zero-active-and-soft-deleted-accounts",
+        policy_assignment_count=0,
+        policy_definition_count=0,
+        provider_locations_sha256="1" * 64,
+        active_occupancy_sha256="2" * 64,
+        soft_deleted_occupancy_sha256="3" * 64,
+        policy_evidence_sha256="4" * 64,
+        observed_at_utc="2030-01-01T00:00:00Z",
+        candidates=tuple(
+            CandidateEvidence(region, True, True, 0, 0, "viable")
+            for region in CLEANUP_REGION_CANDIDATES
+        ),
+    )
+    monkeypatch.setattr(prepare, "discover_automation_region", lambda *_args, **_kwargs: selection)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -739,6 +775,9 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             "canonicalBuildInputSha256",
             "dockerfileSha256",
             "cleanupScriptSha256",
+            "cleanupRegion",
+            "cleanupRegionSelectionSha256",
+            "cleanupRegionSelectionFile",
             "cleanupDeploymentName",
             "campaignDeploymentName",
             "automationAccountName",

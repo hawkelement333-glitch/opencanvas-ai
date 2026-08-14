@@ -25,6 +25,13 @@ required to create the two generated resource groups and the resource types in
 generated resource-group scopes. It must not receive database credentials. The
 deployed identities are narrower:
 
+Before any generation directory exists, preparation also needs read-only
+access to the Automation provider metadata, active and soft-deleted Automation
+account locations, applicable policy assignments/definitions, and the current
+AzureCloud account correlation. Those reads return only locations, counts, and
+sanitized hashes to persisted evidence; account names and ARM identifiers are
+not retained.
+
 | Identity  | Azure authority                                                                                          | PostgreSQL authority                                                                                      |
 | --------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | Bootstrap | ACR pull; Flexible Server Entra administrator binding                                                    | create/verify the four non-cleanup database principals; transfer application ownership; reconcile grants  |
@@ -69,18 +76,30 @@ $env:PYTHONDONTWRITEBYTECODE = '1'
   --campaign-id $campaign `
   --output .runtime/milestone_7_8 `
   --target-region centralus `
-  --postgres-region centralus `
-  --cleanup-region westus
+  --postgres-region centralus
 if ($LASTEXITCODE -ne 0) { throw 'campaign preparation failed' }
 
 $config = '.runtime/milestone_7_8/campaign.json'
 $runtime = '.runtime/milestone_7_8/runtime.json'
 $ledger = '.runtime/milestone_7_8/ledger.json'
+$cleanupRegionEvidence = '.runtime/milestone_7_8/cleanup-region-selection.json'
 ```
 
 Preparation refuses a dirty tree, wrong branch, upstream, stash-count drift,
 malformed UUID/campaign, mismatched target/PostgreSQL region, or an existing
-output directory. It creates exactly one generation and a cleanup deadline
+output directory. It has no caller-supplied cleanup-region override. Before
+creating the output directory, it evaluates the exact order `eastus2`,
+`southcentralus`, `westus2`, `westus` against normalized provider support,
+enforced location policy, active account occupancy, and discoverable
+soft-deleted occupancy. A candidate is armable only when it is supported,
+policy-allowed, and both counts are zero. Discovery failure or no viable
+candidate stops without a generation, ledger, or hard-coded fallback.
+
+The first viable candidate and hashes of provider, active, soft-deleted, and
+policy evidence are written to the closed selection receipt. Its
+domain-separated receipt hash is repeated in campaign configuration, private
+runtime, both Bicep parameter files, lifecycle tags, and later ledger/readback
+evidence. Preparation creates exactly one generation and a cleanup deadline
 four hours in the future. It never prints either raw Azure UUID.
 
 ## Dry-run and execute phases
@@ -109,6 +128,21 @@ Invoke-M78Phase 'cleanup-verify'
 Invoke-M78Phase 'billable-start'
 Invoke-M78Phase 'deploy'
 ```
+
+The `capacity-check` dry-run exposes 15 static Azure commands. Five are the
+subscription-context, Automation-provider, active-account,
+soft-deleted-account, and policy-assignment reads; enforced policy definitions
+and deny-capable initiative members produce explicit generated GETs. Execution
+repeats preparation's selector and requires the same immutable region to remain
+the deterministic first viable candidate. Any change stops before
+`scope-create`.
+
+The complete static operator plan contains 55 commands, 49 of them Azure CLI
+commands. It also has bounded generated Container Apps job polling, failure
+cleanup, and exact-two-group direct cleanup. Preparation's regional selection
+has five static Azure reads plus generated policy-definition GETs. Every Azure
+path uses the centralized launcher; no unrelated Automation account name is a
+command target.
 
 The sequence proves local source/hash/Git state, Azure subscription/tenant
 correlation, six provider registrations, PostgreSQL SKU, regional compute
@@ -261,6 +295,11 @@ The full shape is closed by
 `infra/milestone_7_8/schemas/evidence-execution.schema.json`. `dispose` records
 the pass/fail campaign disposition before deletion.
 
+The cleanup deployment remains exactly one command in exactly the prepared
+region. A deployment failure never selects another candidate, retries in a
+different region, restores or reuses a soft-deleted account, or modifies an
+unrelated Automation account; it enters the existing cleanup path.
+
 ## Cleanup and zero residue
 
 Cleanup is mandatory on success, failure, interruption, or deadline expiry:
@@ -325,6 +364,7 @@ projection over USD 50, expired deadline, cleanup drift, or unready managed
 service; enter cleanup and preserve the sanitized local files:
 
 - `campaign.json`, `runtime.json`, parameter files, and `ledger.json`;
+- the sanitized cleanup-region selection receipt and its bound hashes;
 - the digest-bound image scan receipt;
 - the sanitized control-plane evidence input;
 - the managed execution receipt; and

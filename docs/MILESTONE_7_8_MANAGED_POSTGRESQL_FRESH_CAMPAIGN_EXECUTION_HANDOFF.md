@@ -224,3 +224,18 @@ separately authorized correction or execution plan for the cleanup Automation
 regional-account limit, followed by a separately authorized fresh campaign.
 It is not the object-storage audit and not a GitHub push. Milestone 7.8 remains
 incomplete.
+
+## Later regional-capacity correction cross-reference
+
+The repository defect identified by this historical execution was later
+recorded as M78-PG-007 and corrected locally. Preparation now chooses from a
+closed candidate order only after provider, enforced-policy, active-account,
+and soft-deleted-account reads, and `capacity-check` repeats that proof before
+scope creation. The selected region and sanitized evidence hashes are bound
+immutably through the campaign lifecycle; there is still exactly one cleanup
+deployment and no post-mutation region retry. See the
+[regional-capacity remediation handoff](MILESTONE_7_8_AUTOMATION_REGIONAL_CAPACITY_REMEDIATION_HANDOFF.md).
+
+This cross-reference does not alter the outcome, identifiers, timestamps,
+cost, or zero-residue evidence above. A new campaign remains separately
+authorized work; all five managed evidence gaps remain open.

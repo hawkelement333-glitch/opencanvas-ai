@@ -6,6 +6,7 @@ param subscriptionCorrelation string
 param targetResourceGroupName string
 param cleanupResourceGroupName string
 param cleanupLocation string
+param cleanupRegionSelectionSha256 string
 param cleanupDeadlineUtc string
 param automationAccountName string
 param cleanupRunbookName string
@@ -76,3 +77,5 @@ output cleanupPrincipalId string = account.identity.principalId
 output runbookName string = runbook.name
 output scheduleName string = schedule.name
 output bindingName string = binding.name
+output cleanupLocation string = cleanupLocation
+output cleanupRegionSelectionSha256 string = cleanupRegionSelectionSha256

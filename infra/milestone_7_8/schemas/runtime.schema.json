@@ -9,6 +9,9 @@
     "canonicalBuildInputSha256",
     "dockerfileSha256",
     "cleanupScriptSha256",
+    "cleanupRegion",
+    "cleanupRegionSelectionSha256",
+    "cleanupRegionSelectionFile",
     "cleanupDeploymentName",
     "campaignDeploymentName",
     "automationAccountName",
@@ -34,9 +37,18 @@
   "properties": {
     "subscriptionId": { "type": "string", "minLength": 1 },
     "sourceHead": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
-    "canonicalBuildInputSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "canonicalBuildInputSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "dockerfileSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "cleanupScriptSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "cleanupRegion": { "type": "string", "pattern": "^[a-z][a-z0-9]{2,31}$" },
+    "cleanupRegionSelectionSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "cleanupRegionSelectionFile": { "type": "string", "minLength": 1 },
     "cleanupDeploymentName": { "type": "string", "minLength": 1 },
     "campaignDeploymentName": { "type": "string", "minLength": 1 },
     "automationAccountName": { "type": "string", "minLength": 1 },

@@ -346,13 +346,14 @@ def test_missing_cli_and_invalid_arguments_fail_before_runtime_artifacts(
         target_resource_group="rg-m78-aabbccddee-target",
         cleanup_resource_group="rg-m78-aabbccddee-cleanup",
         target_region="centralus",
-        cleanup_region="westus",
+        cleanup_region="eastus2",
         postgres_region="centralus",
         cleanup_deadline_utc="2030-01-01T04:00:00Z",
         conservative_estimate_usd="25.6832",
         contingency_percent="25",
         resource_items=(CostItem("bounded-campaign", "5.13664", 4),),
         principal_manifest_sha256="c" * 64,
+        cleanup_region_selection_sha256="f" * 64,
     )
     load_ledger(ledger, config)
     assert not ledger.exists()

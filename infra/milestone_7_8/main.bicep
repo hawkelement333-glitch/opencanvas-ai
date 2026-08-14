@@ -9,6 +9,10 @@ param subscriptionCorrelation string
 param targetResourceGroupName string
 param targetLocation string
 param postgresLocation string
+param cleanupLocation string
+@minLength(64)
+@maxLength(64)
+param cleanupRegionSelectionSha256 string
 param cleanupResourceGroupName string
 param cleanupAutomationAccountName string
 param tenantId string
@@ -87,6 +91,8 @@ module campaign './modules/campaign-resources.bicep' = {
     subscriptionCorrelation: subscriptionCorrelation
     targetLocation: targetLocation
     postgresLocation: postgresLocation
+    cleanupLocation: cleanupLocation
+    cleanupRegionSelectionSha256: cleanupRegionSelectionSha256
     cleanupResourceGroupName: cleanupResourceGroupName
     tenantId: tenantId
     postgresServerName: postgresServerName

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:cleanup-region-selection:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "candidateOrder",
+    "selectedRegion",
+    "providerRegistrationState",
+    "capacityBasis",
+    "policyAssignmentCount",
+    "policyDefinitionCount",
+    "providerLocationsSha256",
+    "activeOccupancySha256",
+    "softDeletedOccupancySha256",
+    "policyEvidenceSha256",
+    "observedAtUtc",
+    "candidates"
+  ],
+  "properties": {
+    "version": { "const": "m7.8-cleanup-region-selection-v1" },
+    "candidateOrder": {
+      "const": ["eastus2", "southcentralus", "westus2", "westus"]
+    },
+    "selectedRegion": { "type": "string", "pattern": "^[a-z][a-z0-9]{2,31}$" },
+    "providerRegistrationState": { "const": "Registered" },
+    "capacityBasis": {
+      "const": "provider-policy-zero-active-and-soft-deleted-accounts"
+    },
+    "policyAssignmentCount": { "type": "integer", "minimum": 0 },
+    "policyDefinitionCount": { "type": "integer", "minimum": 0 },
+    "providerLocationsSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "activeOccupancySha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "softDeletedOccupancySha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "policyEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "observedAtUtc": { "type": "string", "format": "date-time" },
+    "candidates": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "region",
+          "providerSupported",
+          "policyAllowed",
+          "activeAccountCount",
+          "softDeletedAccountCount",
+          "status"
+        ],
+        "properties": {
+          "region": { "type": "string", "pattern": "^[a-z][a-z0-9]{2,31}$" },
+          "providerSupported": { "type": "boolean" },
+          "policyAllowed": { "type": "boolean" },
+          "activeAccountCount": { "type": "integer", "minimum": 0 },
+          "softDeletedAccountCount": { "type": "integer", "minimum": 0 },
+          "status": {
+            "enum": ["viable", "unsupported", "policy-disallowed", "occupied"]
+          }
+        }
+      }
+    }
+  }
+}

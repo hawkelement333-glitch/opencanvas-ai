@@ -15,6 +15,9 @@ param subscriptionCorrelation string
 param targetResourceGroupName string
 param cleanupResourceGroupName string
 param cleanupLocation string
+@minLength(64)
+@maxLength(64)
+param cleanupRegionSelectionSha256 string
 param cleanupDeadlineUtc string
 param automationAccountName string
 param cleanupRunbookName string
@@ -42,6 +45,7 @@ module controller './modules/cleanup-controller.bicep' = {
     targetResourceGroupName: targetResourceGroupName
     cleanupResourceGroupName: cleanupResourceGroupName
     cleanupLocation: cleanupLocation
+    cleanupRegionSelectionSha256: cleanupRegionSelectionSha256
     cleanupDeadlineUtc: cleanupDeadlineUtc
     automationAccountName: automationAccountName
     cleanupRunbookName: cleanupRunbookName
@@ -126,5 +130,7 @@ output generationId string = generationId
 output subscriptionCorrelation string = subscriptionCorrelation
 output targetResourceGroupName string = targetResourceGroupName
 output cleanupResourceGroupName string = cleanupResourceGroupName
+output cleanupLocation string = cleanupLocation
+output cleanupRegionSelectionSha256 string = cleanupRegionSelectionSha256
 output costCeilingCents int = costCeilingCents
 output scheduleCount int = 1

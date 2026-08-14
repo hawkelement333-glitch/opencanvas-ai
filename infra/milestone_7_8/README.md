@@ -20,13 +20,18 @@ existence.
   required to remove the campaign RBAC extensions themselves.
 - `modules/` contains the campaign resources, identities, cleanup controller,
   and exact-scope cleanup role assignments.
-- `schemas/` closes the configuration, private runtime, principal manifest,
+- `schemas/` closes the configuration, private runtime, cleanup-region
+  selection receipt, principal manifest,
   control-plane evidence, image admission, managed execution receipt, and
   restart ledger shapes.
 - `prepare.py` creates one untracked `.runtime/milestone_7_8` generation from a
   clean, committed source tree. It refuses an upstream, a stash count other
   than five, a second output directory, a malformed campaign, or a mismatched
-  region.
+  target/PostgreSQL region. Before creating the directory it selects one
+  cleanup region through `automation_region.py` from the closed order
+  `eastus2`, `southcentralus`, `westus2`, `westus`. Provider support, enforced
+  location policy, active occupancy, and discoverable soft-deleted occupancy
+  must prove the candidate armable; discovery failure has no fallback.
 - `operator.py` is dry-run by default. `--execute` advances one validated,
   persisted phase at a time and starts cleanup after any failure following
   scope creation.
@@ -43,8 +48,11 @@ existence.
   it does not depend on historical 7.7 image metadata.
 
 The target and PostgreSQL regions must match because this campaign uses one
-private VNet. Defaults are `centralus` for the target/PostgreSQL resources and
-`westus` for the independent cleanup controller. PostgreSQL is fixed to
+private VNet. Their default is `centralus`. The independent cleanup region has
+no caller-controlled default: preparation selects and hashes the first viable
+reviewed candidate, and `capacity-check` repeats the same proof before scope
+creation. The cleanup deployment runs once in that immutable region; no
+post-mutation retry or region hop is permitted. PostgreSQL is fixed to
 `Standard_D2ds_v5`, PostgreSQL 17, 64 GiB P6 storage, zones 1 and 2,
 ZoneRedundant HA, seven-day backup retention, disabled geo backup, and Sunday
 07:00 UTC maintenance.
@@ -72,6 +80,7 @@ From the repository root, using only installed tools:
 ```powershell
 $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe -m pytest -p no:cacheprovider -q `
+  apps/api/tests/test_milestone_7_8_automation_region.py `
   apps/api/tests/test_milestone_7_8_campaign_enablement.py `
   apps/api/tests/test_milestone_7_7_runtime_topology.py
 
@@ -96,7 +105,11 @@ database. The separately authorized operator procedure is in
 
 ## Current boundary
 
-The campaign has not run. No resource, image, scan, secret, live-database, or
-Azure evidence was produced by this implementation. M78-PG-E01, M78-PG-E02,
-M78-PG-E03, M78-TI-E01, and M78-PG-E04 remain open. Milestone 7.8 remains
-incomplete, and the object-storage audit remains unstarted.
+A fresh campaign previously stopped at the unchecked regional Automation
+capacity boundary and completed direct zero-residue cleanup. M78-PG-007 is now
+corrected locally, including a sanitized read-only observation that selected
+`southcentralus`; this correction did not execute a campaign or mutate Azure.
+No replacement resource, generation, image, scan, secret, or live-database
+operation occurred. M78-PG-E01, M78-PG-E02, M78-PG-E03, M78-TI-E01, and
+M78-PG-E04 remain open. Milestone 7.8 remains incomplete, and the object-storage
+audit remains unstarted.

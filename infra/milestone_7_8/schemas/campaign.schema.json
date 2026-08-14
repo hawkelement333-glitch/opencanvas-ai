@@ -18,23 +18,52 @@
     "contingencyPercent",
     "resourceItems",
     "principalManifestSha256",
+    "cleanupRegionSelectionSha256",
     "imageDigest"
   ],
   "properties": {
     "campaignId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,47}$" },
-    "generationId": { "type": "string", "pattern": "^g[1-9][0-9]{0,5}-[a-f0-9]{12}$" },
-    "subscriptionCorrelation": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "generationId": {
+      "type": "string",
+      "pattern": "^g[1-9][0-9]{0,5}-[a-f0-9]{12}$"
+    },
+    "subscriptionCorrelation": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{16}$"
+    },
     "tenantCorrelation": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
-    "targetResourceGroup": { "type": "string", "pattern": "^rg-m78-[a-f0-9]{10}-target$" },
-    "cleanupResourceGroup": { "type": "string", "pattern": "^rg-m78-[a-f0-9]{10}-cleanup$" },
+    "targetResourceGroup": {
+      "type": "string",
+      "pattern": "^rg-m78-[a-f0-9]{10}-target$"
+    },
+    "cleanupResourceGroup": {
+      "type": "string",
+      "pattern": "^rg-m78-[a-f0-9]{10}-cleanup$"
+    },
     "targetRegion": { "type": "string", "minLength": 1 },
-    "cleanupRegion": { "type": "string", "minLength": 1 },
+    "cleanupRegion": { "type": "string", "pattern": "^[a-z][a-z0-9]{2,31}$" },
     "postgresRegion": { "type": "string", "minLength": 1 },
     "cleanupDeadlineUtc": { "type": "string", "format": "date-time" },
-    "conservativeEstimateUsd": { "type": "string", "pattern": "^[0-9]+(?:\\.[0-9]{1,4})?$" },
-    "contingencyPercent": { "type": "string", "pattern": "^[0-9]+(?:\\.[0-9]{1,2})?$" },
-    "principalManifestSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "imageDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "conservativeEstimateUsd": {
+      "type": "string",
+      "pattern": "^[0-9]+(?:\\.[0-9]{1,4})?$"
+    },
+    "contingencyPercent": {
+      "type": "string",
+      "pattern": "^[0-9]+(?:\\.[0-9]{1,2})?$"
+    },
+    "principalManifestSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "cleanupRegionSelectionSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "imageDigest": {
+      "type": ["string", "null"],
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
     "resourceItems": {
       "type": "array",
       "minItems": 1,
@@ -44,7 +73,10 @@
         "required": ["name", "hourlyUsd", "hours", "fixedUsd", "pricedAtUtc"],
         "properties": {
           "name": { "type": "string", "minLength": 1 },
-          "hourlyUsd": { "type": "string", "pattern": "^[0-9]+(?:\\.[0-9]+)?$" },
+          "hourlyUsd": {
+            "type": "string",
+            "pattern": "^[0-9]+(?:\\.[0-9]+)?$"
+          },
           "hours": { "type": "integer", "minimum": 1, "maximum": 4 },
           "fixedUsd": { "type": "string", "pattern": "^[0-9]+(?:\\.[0-9]+)?$" },
           "pricedAtUtc": { "type": "string", "format": "date-time" }

@@ -11,7 +11,14 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from infra.milestone_7_8.campaign import CAMPAIGN_PATTERN, CampaignError, sanitize, utc
+from infra.milestone_7_8.automation_region import discover_automation_region
+from infra.milestone_7_8.campaign import (
+    CAMPAIGN_PATTERN,
+    CampaignError,
+    SubprocessRunner,
+    sanitize,
+    utc,
+)
 from infra.milestone_7_8.canonical_inputs import canonical_snapshot
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -33,8 +40,12 @@ def _git(*arguments: str) -> str:
 
 def _write_new(path: Path, value: object) -> None:
     if path.exists():
-        raise CampaignError(f"refusing to replace existing generation file: {path.name}")
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        raise CampaignError(
+            f"refusing to replace existing generation file: {path.name}"
+        )
+    path.write_text(
+        json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def _parameters(values: dict[str, object]) -> dict[str, object]:
@@ -53,14 +64,20 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=Path(".runtime/milestone_7_8"))
     parser.add_argument("--target-region", default="centralus")
     parser.add_argument("--postgres-region", default="centralus")
-    parser.add_argument("--cleanup-region", default="westus")
     args = parser.parse_args()
     try:
         if CAMPAIGN_PATTERN.fullmatch(args.campaign_id) is None:
             raise CampaignError("campaign identity is malformed")
+        if args.target_region != args.postgres_region:
+            raise CampaignError("single-VNet campaign resources must share a region")
+        if args.output.exists():
+            raise FileExistsError(args.output)
         if _git("status", "--porcelain=v1"):
             raise CampaignError("campaign preparation requires a clean repository")
-        if _git("branch", "--show-current") != "milestone-7-8-production-readiness-audit-local":
+        if (
+            _git("branch", "--show-current")
+            != "milestone-7-8-production-readiness-audit-local"
+        ):
             raise CampaignError("campaign preparation branch is invalid")
         if _git(
             "for-each-ref",
@@ -73,7 +90,9 @@ def main() -> int:
         source_head = _git("rev-parse", "HEAD")
         image_inputs = canonical_snapshot(source_head)
         cleanup_script_sha256 = hashlib.sha256(
-            (Path(__file__).resolve().parent / "scripts/Remove-M78Campaign.ps1").read_bytes()
+            (
+                Path(__file__).resolve().parent / "scripts/Remove-M78Campaign.ps1"
+            ).read_bytes()
         ).hexdigest()
         subscription_id = os.environ.get("M78_SUBSCRIPTION_ID", "")
         tenant_id = os.environ.get("M78_TENANT_ID", "")
@@ -81,10 +100,20 @@ def main() -> int:
             uuid.UUID(subscription_id)
             uuid.UUID(tenant_id)
         except ValueError as exc:
-            raise CampaignError("runtime subscription or tenant binding is missing") from exc
+            raise CampaignError(
+                "runtime subscription or tenant binding is missing"
+            ) from exc
+        observed_at = datetime.now(UTC).replace(microsecond=0)
+        region_selection = discover_automation_region(
+            SubprocessRunner(), subscription_id, observed_at=observed_at
+        )
+        cleanup_region = region_selection.selected_region
+        region_selection_sha256 = region_selection.sha256()
         generation_id = f"g1-{secrets.token_hex(6)}"
-        suffix = hashlib.sha256(f"{args.campaign_id}\0{generation_id}".encode()).hexdigest()[:10]
-        deadline = utc(datetime.now(UTC).replace(microsecond=0) + timedelta(hours=4))
+        suffix = hashlib.sha256(
+            f"{args.campaign_id}\0{generation_id}".encode()
+        ).hexdigest()[:10]
+        deadline = utc(observed_at + timedelta(hours=4))
         target_rg = f"rg-m78-{suffix}-target"
         cleanup_rg = f"rg-m78-{suffix}-cleanup"
         account = f"aa-m78-{suffix}"
@@ -112,6 +141,7 @@ def main() -> int:
             "mobius.generation": generation_id,
             "mobius.cleanup-deadline-utc": deadline,
             "mobius.cost-ceiling-cents": "5000",
+            "mobius.cleanup-region-selection-sha256": region_selection_sha256,
             "mobius.owner": "managed-postgresql-evidence",
             "mobius.expiry": deadline,
         }
@@ -120,6 +150,7 @@ def main() -> int:
         runtime_path = args.output / "runtime.json"
         cleanup_path = args.output / "cleanup.parameters.json"
         campaign_path = args.output / "campaign.parameters.json"
+        region_selection_path = args.output / "cleanup-region-selection.json"
         ledger_path = args.output / "ledger.json"
         config = {
             "campaignId": args.campaign_id,
@@ -129,7 +160,7 @@ def main() -> int:
             "targetResourceGroup": target_rg,
             "cleanupResourceGroup": cleanup_rg,
             "targetRegion": args.target_region,
-            "cleanupRegion": args.cleanup_region,
+            "cleanupRegion": cleanup_region,
             "postgresRegion": args.postgres_region,
             "cleanupDeadlineUtc": deadline,
             "conservativeEstimateUsd": "25.6832",
@@ -144,6 +175,7 @@ def main() -> int:
                 }
             ],
             "principalManifestSha256": manifest_binding,
+            "cleanupRegionSelectionSha256": region_selection_sha256,
             "imageDigest": None,
         }
         cleanup_parameters = _parameters(
@@ -153,7 +185,8 @@ def main() -> int:
                 "subscriptionCorrelation": config["subscriptionCorrelation"],
                 "targetResourceGroupName": target_rg,
                 "cleanupResourceGroupName": cleanup_rg,
-                "cleanupLocation": args.cleanup_region,
+                "cleanupLocation": cleanup_region,
+                "cleanupRegionSelectionSha256": region_selection_sha256,
                 "cleanupDeadlineUtc": deadline,
                 "automationAccountName": account,
                 "cleanupRunbookName": runbook,
@@ -170,6 +203,8 @@ def main() -> int:
                 "targetResourceGroupName": target_rg,
                 "targetLocation": args.target_region,
                 "postgresLocation": args.postgres_region,
+                "cleanupLocation": cleanup_region,
+                "cleanupRegionSelectionSha256": region_selection_sha256,
                 "cleanupResourceGroupName": cleanup_rg,
                 "cleanupAutomationAccountName": account,
                 "tenantId": tenant_id,
@@ -198,6 +233,9 @@ def main() -> int:
             "canonicalBuildInputSha256": str(image_inputs["buildInputSha256"]),
             "dockerfileSha256": str(image_inputs["dockerfileSha256"]),
             "cleanupScriptSha256": cleanup_script_sha256,
+            "cleanupRegion": cleanup_region,
+            "cleanupRegionSelectionSha256": region_selection_sha256,
+            "cleanupRegionSelectionFile": str(region_selection_path),
             "cleanupDeploymentName": f"m78-cleanup-{suffix}",
             "campaignDeploymentName": f"m78-campaign-{suffix}",
             "automationAccountName": account,
@@ -220,6 +258,7 @@ def main() -> int:
             "cleanupParametersFile": str(cleanup_path),
             "campaignParametersFile": str(campaign_path),
         }
+        _write_new(region_selection_path, region_selection.document())
         _write_new(config_path, config)
         _write_new(runtime_path, runtime)
         _write_new(cleanup_path, cleanup_parameters)
@@ -228,8 +267,12 @@ def main() -> int:
             json.dumps(
                 {
                     "status": "prepared",
-                    "campaignCorrelation": sanitize(args.campaign_id, domain="campaign"),
-                    "generationCorrelation": sanitize(generation_id, domain="generation"),
+                    "campaignCorrelation": sanitize(
+                        args.campaign_id, domain="campaign"
+                    ),
+                    "generationCorrelation": sanitize(
+                        generation_id, domain="generation"
+                    ),
                     "config": str(config_path),
                     "runtime": str(runtime_path),
                     "ledger": str(ledger_path),

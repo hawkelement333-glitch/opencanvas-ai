@@ -12,6 +12,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+from infra.milestone_7_8.automation_region import (
+    automation_region_discovery_commands,
+    generated_policy_read_contract,
+    select_automation_region_from_results,
+    selection_from_document,
+)
 from infra.milestone_7_8.campaign import (
     ORDER,
     RESIDUE_KEYS,
@@ -65,6 +71,9 @@ RUNTIME_FIELDS = {
     "canonicalBuildInputSha256",
     "dockerfileSha256",
     "cleanupScriptSha256",
+    "cleanupRegion",
+    "cleanupRegionSelectionSha256",
+    "cleanupRegionSelectionFile",
     "cleanupDeploymentName",
     "campaignDeploymentName",
     "automationAccountName",
@@ -94,6 +103,7 @@ CLEANUP_PARAMETER_FIELDS = {
     "targetResourceGroupName",
     "cleanupResourceGroupName",
     "cleanupLocation",
+    "cleanupRegionSelectionSha256",
     "cleanupDeadlineUtc",
     "automationAccountName",
     "cleanupRunbookName",
@@ -108,6 +118,8 @@ CAMPAIGN_PARAMETER_FIELDS = {
     "targetResourceGroupName",
     "targetLocation",
     "postgresLocation",
+    "cleanupLocation",
+    "cleanupRegionSelectionSha256",
     "cleanupResourceGroupName",
     "cleanupAutomationAccountName",
     "tenantId",
@@ -205,7 +217,9 @@ def validate_prepared_bundle(
         != config.subscription_correlation
     ):
         raise CampaignError("operator runtime scope or correlation differs")
-    suffix_match = re.fullmatch(r"rg-m78-([a-f0-9]{10})-target", config.target_resource_group)
+    suffix_match = re.fullmatch(
+        r"rg-m78-([a-f0-9]{10})-target", config.target_resource_group
+    )
     if suffix_match is None or config.cleanup_resource_group != (
         f"rg-m78-{suffix_match.group(1)}-cleanup"
     ):
@@ -221,7 +235,9 @@ def validate_prepared_bundle(
             else candidate.resolve()
         )
         if resolved.parent != runtime_directory:
-            raise CampaignError("operator parameter file escaped its private generation")
+            raise CampaignError(
+                "operator parameter file escaped its private generation"
+            )
         return resolved
 
     cleanup = _load_arm_parameter_values(
@@ -230,6 +246,18 @@ def validate_prepared_bundle(
     campaign = _load_arm_parameter_values(
         sibling("campaignParametersFile"), expected=CAMPAIGN_PARAMETER_FIELDS
     )
+    selection_path = sibling("cleanupRegionSelectionFile")
+    selection = selection_from_document(
+        json.loads(selection_path.read_text(encoding="utf-8"))
+    )
+    selection_sha256 = selection.sha256()
+    if (
+        selection.selected_region != config.cleanup_region
+        or selection_sha256 != config.cleanup_region_selection_sha256
+        or runtime["cleanupRegion"] != config.cleanup_region
+        or runtime["cleanupRegionSelectionSha256"] != selection_sha256
+    ):
+        raise CampaignError("operator cleanup region selection binding differs")
     common_expected = {
         "campaignId": config.campaign_id,
         "generationId": config.generation_id,
@@ -238,7 +266,9 @@ def validate_prepared_bundle(
         "cleanupResourceGroupName": config.cleanup_resource_group,
         "cleanupDeadlineUtc": config.cleanup_deadline_utc,
     }
-    if any(cleanup.get(key) != expected for key, expected in common_expected.items()) or any(
+    if any(
+        cleanup.get(key) != expected for key, expected in common_expected.items()
+    ) or any(
         campaign.get(key) != expected for key, expected in common_expected.items()
     ):
         raise CampaignError("operator parameter campaign binding differs")
@@ -273,10 +303,15 @@ def validate_prepared_bundle(
     if (
         campaign.get("resourceNameSuffix") != suffix
         or campaign.get("cleanupIdentityName") != f"cleanup-{suffix}"
-        or any(identity_names[role] != f"id-m78-{suffix}-{role}" for role in identity_names)
+        or any(
+            identity_names[role] != f"id-m78-{suffix}-{role}" for role in identity_names
+        )
         or len(set(identity_names.values())) != 5
         or campaign.get("targetLocation") != config.target_region
         or campaign.get("postgresLocation") != config.postgres_region
+        or campaign.get("cleanupLocation") != config.cleanup_region
+        or campaign.get("cleanupRegionSelectionSha256")
+        != config.cleanup_region_selection_sha256
         or campaign.get("postgresPrimaryZone") != "1"
         or campaign.get("postgresStandbyZone") != "2"
         or campaign.get("maintenanceDay") != 0
@@ -284,13 +319,17 @@ def validate_prepared_bundle(
         or campaign.get("containerAppsEnvironmentName") != f"cae-m78-{suffix}"
         or campaign.get("virtualNetworkName") != f"vnet-m78-{suffix}"
         or cleanup.get("cleanupLocation") != config.cleanup_region
-        or campaign.get("cleanupAutomationAccountName") != runtime["automationAccountName"]
+        or cleanup.get("cleanupRegionSelectionSha256")
+        != config.cleanup_region_selection_sha256
+        or campaign.get("cleanupAutomationAccountName")
+        != runtime["automationAccountName"]
         or cleanup.get("automationAccountName") != runtime["automationAccountName"]
         or cleanup.get("cleanupRunbookName") != runtime["runbookName"]
         or cleanup.get("cleanupScheduleName") != runtime["scheduleName"]
         or campaign.get("postgresServerName") != runtime["postgresServerName"]
         or campaign.get("registryName") != runtime["registryName"]
-        or campaign.get("logAnalyticsWorkspaceName") != runtime["logAnalyticsWorkspaceName"]
+        or campaign.get("logAnalyticsWorkspaceName")
+        != runtime["logAnalyticsWorkspaceName"]
     ):
         raise CampaignError("operator parameter resource or identity binding differs")
     tenant_id = campaign.get("tenantId")
@@ -308,6 +347,7 @@ def validate_prepared_bundle(
         "mobius.generation": config.generation_id,
         "mobius.cleanup-deadline-utc": config.cleanup_deadline_utc,
         "mobius.cost-ceiling-cents": "5000",
+        "mobius.cleanup-region-selection-sha256": config.cleanup_region_selection_sha256,
         "mobius.owner": "managed-postgresql-evidence",
         "mobius.expiry": config.cleanup_deadline_utc,
     }
@@ -385,6 +425,9 @@ def command_plan(
                 "Microsoft.OperationalInsights",
             )
         )
+        automation_region_commands = automation_region_discovery_commands(
+            runtime["subscriptionId"]
+        )
         return (
             *providers,
             (
@@ -438,6 +481,7 @@ def command_plan(
                 "--output",
                 "json",
             ),
+            *automation_region_commands,
         )
     if operation in {"cost-gate", "billable-start", "dispose", "finalize"}:
         return ()
@@ -642,7 +686,9 @@ def command_plan(
         )
     if operation in {"bootstrap", "migrate"}:
         job = (
-            runtime["bootstrapJobName"] if operation == "bootstrap" else runtime["migrationJobName"]
+            runtime["bootstrapJobName"]
+            if operation == "bootstrap"
+            else runtime["migrationJobName"]
         )
         return (
             (
@@ -894,7 +940,13 @@ def command_plan(
                 "list",
                 "--all",
                 "--query",
-                ("[?contains(scope, '" + rg + "') || contains(scope, '" + cleanup_rg + "')]"),
+                (
+                    "[?contains(scope, '"
+                    + rg
+                    + "') || contains(scope, '"
+                    + cleanup_rg
+                    + "')]"
+                ),
                 "--output",
                 "json",
             ),
@@ -912,7 +964,9 @@ def _json_result(result: dict[str, object]) -> object:
         raise CampaignError("operator command output is not valid JSON") from exc
 
 
-def _run_required(runner: SubprocessRunner, command: tuple[str, ...]) -> dict[str, object]:
+def _run_required(
+    runner: SubprocessRunner, command: tuple[str, ...]
+) -> dict[str, object]:
     result = runner.run(command)
     if result.get("exitCode") != 0:
         raise CampaignError("operator command failed safely")
@@ -990,7 +1044,11 @@ def _deployment_outputs(result: dict[str, object]) -> dict[str, object]:
         raise CampaignError("deployment output is missing")
     outputs: dict[str, object] = {}
     for key, item in raw_outputs.items():
-        if not isinstance(key, str) or not isinstance(item, dict) or "value" not in item:
+        if (
+            not isinstance(key, str)
+            or not isinstance(item, dict)
+            or "value" not in item
+        ):
             raise CampaignError("deployment output is malformed")
         outputs[key] = item["value"]
     return outputs
@@ -1016,6 +1074,9 @@ def validate_deployed_principal_manifest(
         or binding.get("maximumHours") != 4
         or binding.get("costCeilingCents") != 5000
         or binding.get("cleanupResourceGroupName") != config.cleanup_resource_group
+        or binding.get("cleanupLocation") != config.cleanup_region
+        or binding.get("cleanupRegionSelectionSha256")
+        != config.cleanup_region_selection_sha256
         or not isinstance(manifest, dict)
         or set(manifest)
         != {
@@ -1049,7 +1110,9 @@ def validate_deployed_principal_manifest(
         try:
             parsed = uuid.UUID(item["objectId"])
         except ValueError as exc:
-            raise CampaignError("deployed principal object binding is malformed") from exc
+            raise CampaignError(
+                "deployed principal object binding is malformed"
+            ) from exc
         if parsed.int == 0:
             raise CampaignError("deployed principal object binding is malformed")
         names[slot] = item["name"]
@@ -1060,7 +1123,8 @@ def validate_deployed_principal_manifest(
         "campaignId": config.campaign_id,
         "generationId": config.generation_id,
         "principals": {
-            slot: names[slot] for slot in ("bootstrap", "migration", "api", "worker", "evidence")
+            slot: names[slot]
+            for slot in ("bootstrap", "migration", "api", "worker", "evidence")
         },
         "cleanup": names["cleanup"],
     }
@@ -1082,11 +1146,15 @@ def validate_cleanup_deployment(
         "targetResourceGroupName",
         "cleanupResourceGroupName",
         "cleanupPrincipalId",
+        "cleanupLocation",
+        "cleanupRegionSelectionSha256",
         "cleanupDeadlineUtc",
         "costCeilingCents",
         "scheduleCount",
     }
-    if not required <= set(outputs) or not isinstance(outputs["cleanupPrincipalId"], str):
+    if not required <= set(outputs) or not isinstance(
+        outputs["cleanupPrincipalId"], str
+    ):
         raise CampaignError("cleanup deployment binding is incomplete")
     cost_ceiling_cents = outputs["costCeilingCents"]
     schedule_count = outputs["scheduleCount"]
@@ -1105,6 +1173,8 @@ def validate_cleanup_deployment(
         deadline_utc=str(outputs["cleanupDeadlineUtc"]),
         ceiling_usd=f"{cost_ceiling_cents / 100:.2f}",
         schedule_count=schedule_count,
+        cleanup_region=str(outputs["cleanupLocation"]),
+        cleanup_region_selection_sha256=str(outputs["cleanupRegionSelectionSha256"]),
     )
     binding.validate(config)
     return binding
@@ -1127,28 +1197,48 @@ def validate_cleanup_readback(
     ):
         raise CampaignError("cleanup readback is malformed")
     identity = account.get("identity") if isinstance(account, dict) else None
-    observed_principal = identity.get("principalId") if isinstance(identity, dict) else None
+    observed_principal = (
+        identity.get("principalId") if isinstance(identity, dict) else None
+    )
     if (
         not isinstance(observed_principal, str)
-        or hashlib.sha256(b"m7.8/cleanup-principal/v1\0" + observed_principal.encode()).hexdigest()
+        or hashlib.sha256(
+            b"m7.8/cleanup-principal/v1\0" + observed_principal.encode()
+        ).hexdigest()
         != expected_binding.cleanup_principal_sha256
     ):
         raise CampaignError("cleanup identity readback was substituted")
+    account_location = account.get("location") if isinstance(account, dict) else None
+    normalized_account_location = (
+        re.sub(r"[^a-z0-9]", "", account_location.casefold())
+        if isinstance(account_location, str)
+        else None
+    )
+    if normalized_account_location != config.cleanup_region:
+        raise CampaignError("cleanup account region readback was substituted")
     runbook_properties = runbook.get("properties", runbook)
     schedule_properties = schedule.get("properties", schedule)
     binding = bindings[0] if len(bindings) == 1 else None
-    binding_properties = binding.get("properties", binding) if isinstance(binding, dict) else None
+    binding_properties = (
+        binding.get("properties", binding) if isinstance(binding, dict) else None
+    )
     bound_runbook = (
-        binding_properties.get("runbook") if isinstance(binding_properties, dict) else None
+        binding_properties.get("runbook")
+        if isinstance(binding_properties, dict)
+        else None
     )
     bound_schedule = (
-        binding_properties.get("schedule") if isinstance(binding_properties, dict) else None
+        binding_properties.get("schedule")
+        if isinstance(binding_properties, dict)
+        else None
     )
     bound_runbook_name = (
         bound_runbook.get("name") if isinstance(bound_runbook, dict) else bound_runbook
     )
     bound_schedule_name = (
-        bound_schedule.get("name") if isinstance(bound_schedule, dict) else bound_schedule
+        bound_schedule.get("name")
+        if isinstance(bound_schedule, dict)
+        else bound_schedule
     )
     if (
         runbook.get("name") != runtime["runbookName"]
@@ -1168,7 +1258,8 @@ def validate_cleanup_readback(
     content = results[5].get("stdout")
     if (
         not isinstance(content, str)
-        or hashlib.sha256(content.encode()).hexdigest() != runtime["cleanupScriptSha256"]
+        or hashlib.sha256(content.encode()).hexdigest()
+        != runtime["cleanupScriptSha256"]
     ):
         raise CampaignError("published cleanup content differs")
 
@@ -1180,7 +1271,9 @@ def load_control_plane_evidence(path: Path) -> dict[str, object]:
     return cast(dict[str, object], value)
 
 
-def _completed_control_plane_evidence(value: dict[str, object], *, recovery_seconds: float) -> str:
+def _completed_control_plane_evidence(
+    value: dict[str, object], *, recovery_seconds: float
+) -> str:
     completed = {
         **value,
         "recoverySeconds": recovery_seconds,
@@ -1250,7 +1343,9 @@ def persist_evidence_execution_receipt(
             execution_name = result.get("executionName")
             terminal_status = result.get("terminalStatus")
             if not isinstance(execution_name, str) or terminal_status != "Succeeded":
-                raise CampaignError("managed evidence job receipt is not terminal-success")
+                raise CampaignError(
+                    "managed evidence job receipt is not terminal-success"
+                )
             identity = f"job:{command[command.index('--name') + 1]}"
             if "--phase" in command:
                 identity += f":{command[command.index('--phase') + 1]}"
@@ -1275,14 +1370,18 @@ def persist_evidence_execution_receipt(
         "sourceHead": runtime["sourceHead"],
         "imageDigest": config.image_digest,
         "controlPlaneEvidenceSha256": hashlib.sha256(
-            json.dumps(control_plane_evidence, separators=(",", ":"), sort_keys=True).encode()
+            json.dumps(
+                control_plane_evidence, separators=(",", ":"), sort_keys=True
+            ).encode()
         ).hexdigest(),
         "observations": observations,
     }
     encoded = json.dumps(receipt, indent=2, sort_keys=True) + "\n"
     if path.exists():
         if path.read_text(encoding="utf-8") != encoded:
-            raise CampaignError("managed evidence execution receipt substitution rejected")
+            raise CampaignError(
+                "managed evidence execution receipt substitution rejected"
+            )
         return
     path.write_text(encoded, encoding="utf-8")
 
@@ -1297,7 +1396,9 @@ def validate_evidence_execution_receipt(
     value = json.loads(path.read_text(encoding="utf-8"))
     observations = value.get("observations") if isinstance(value, dict) else None
     control_sha256 = hashlib.sha256(
-        json.dumps(control_plane_evidence, separators=(",", ":"), sort_keys=True).encode()
+        json.dumps(
+            control_plane_evidence, separators=(",", ":"), sort_keys=True
+        ).encode()
     ).hexdigest()
     if (
         not isinstance(value, dict)
@@ -1321,7 +1422,8 @@ def validate_evidence_execution_receipt(
         or len(observations) != 12
         or any(
             not isinstance(item, dict)
-            or set(item) != {"identity", "executionName", "terminalStatus", "outputSha256"}
+            or set(item)
+            != {"identity", "executionName", "terminalStatus", "outputSha256"}
             or item["terminalStatus"] != "Succeeded"
             or not isinstance(item["identity"], str)
             or not item["identity"]
@@ -1335,7 +1437,9 @@ def validate_evidence_execution_receipt(
         raise CampaignError("managed evidence execution receipt is invalid")
 
 
-def load_image_scan_evidence(path: Path, *, digest: str, runtime: dict[str, str]) -> str:
+def load_image_scan_evidence(
+    path: Path, *, digest: str, runtime: dict[str, str]
+) -> str:
     raw = path.read_bytes()
     value = json.loads(raw)
     if not isinstance(value, dict) or set(value) != IMAGE_SCAN_FIELDS:
@@ -1413,6 +1517,8 @@ def validate_operation_results(
     results: list[dict[str, object]],
     config: CampaignConfig,
     runtime: dict[str, str],
+    *,
+    runner: SubprocessRunner | None = None,
 ) -> None:
     if operation == "preflight":
         if len(results) != 7:
@@ -1421,7 +1527,8 @@ def validate_operation_results(
         if (
             text_values[0] != ""
             or str(text_values[1]).strip() != runtime["sourceHead"]
-            or str(text_values[2]).strip() != "milestone-7-8-production-readiness-audit-local"
+            or str(text_values[2]).strip()
+            != "milestone-7-8-production-readiness-audit-local"
             or str(text_values[3]).strip()
             or len(str(text_values[4]).strip().splitlines()) != 5
             or not isinstance(_json_result(results[5]), dict)
@@ -1445,15 +1552,19 @@ def validate_operation_results(
             or account["id"] != runtime["subscriptionId"]
             or sanitize(str(account["id"]), domain="subscription")
             != config.subscription_correlation
-            or sanitize(str(account["tenantId"]), domain="tenant") != config.tenant_correlation
+            or sanitize(str(account["tenantId"]), domain="tenant")
+            != config.tenant_correlation
         ):
             raise CampaignError("Azure campaign correlation differs")
     elif operation == "capacity-check":
-        if len(results) != 10:
-            raise CampaignError("provider, quota, region, SKU, or name proof is incomplete")
+        if len(results) != 15:
+            raise CampaignError(
+                "provider, quota, region, SKU, or name proof is incomplete"
+            )
         providers = [_json_result(result) for result in results[:6]]
         if any(
-            not isinstance(provider, dict) or provider.get("registrationState") != "Registered"
+            not isinstance(provider, dict)
+            or provider.get("registrationState") != "Registered"
             for provider in providers
         ):
             raise CampaignError("required Azure provider is not registered")
@@ -1472,6 +1583,18 @@ def validate_operation_results(
             or postgres_name.get("nameAvailable") is not True
         ):
             raise CampaignError("campaign-global resource name is unavailable")
+        if runner is None:
+            raise CampaignError(
+                "Automation cleanup policy discovery runner is unavailable"
+            )
+        refreshed_selection = select_automation_region_from_results(
+            runner,
+            tuple(results[10:15]),
+        )
+        if refreshed_selection.selected_region != config.cleanup_region:
+            raise CampaignError(
+                "prepared Automation cleanup region is no longer armable"
+            )
     elif operation == "scope-create":
         if len(results) != 1:
             raise CampaignError("campaign scope creation is unproved")
@@ -1497,14 +1620,19 @@ def validate_operation_results(
             outputs.get("campaignId") != config.campaign_id
             or outputs.get("generationId") != config.generation_id
             or outputs.get("deploymentStage") != expected_stage
-            or (operation == "image-decision" and outputs.get("imageDigest") != config.image_digest)
+            or (
+                operation == "image-decision"
+                and outputs.get("imageDigest") != config.image_digest
+            )
         ):
             raise CampaignError("campaign deployment binding differs")
         validate_deployed_principal_manifest(outputs, config)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Execute one restart-safe M7.8 operator phase")
+    parser = argparse.ArgumentParser(
+        description="Execute one restart-safe M7.8 operator phase"
+    )
     parser.add_argument("operation", choices=tuple(OPERATION_PHASE))
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--runtime", type=Path, required=True)
@@ -1526,10 +1654,12 @@ def main() -> int:
         runtime = load_runtime(args.runtime)
         validate_prepared_bundle(args.runtime, runtime, config)
         ledger = load_ledger(args.ledger, config)
-        if not cleanup_only and parse_utc(config.cleanup_deadline_utc) <= datetime.now(UTC):
-            if ORDER.index(Phase(ledger.phase)) >= ORDER.index(Phase.SCOPE_CREATED) and Phase(
-                ledger.phase
-            ) not in {
+        if not cleanup_only and parse_utc(config.cleanup_deadline_utc) <= datetime.now(
+            UTC
+        ):
+            if ORDER.index(Phase(ledger.phase)) >= ORDER.index(
+                Phase.SCOPE_CREATED
+            ) and Phase(ledger.phase) not in {
                 Phase.CLEANING,
                 Phase.CLEANED,
                 Phase.RESIDUE_VERIFIED,
@@ -1555,12 +1685,20 @@ def main() -> int:
         if args.control_plane_evidence is not None:
             control_evidence = load_control_plane_evidence(args.control_plane_evidence)
         rendered_control_evidence = (
-            "<derived-after-successful-managed-probes>" if control_evidence is not None else None
+            "<derived-after-successful-managed-probes>"
+            if control_evidence is not None
+            else None
         )
         evidence_receipt_path = args.ledger.with_name("managed-evidence-execution.json")
-        if args.execute and args.operation == "evidence" and evidence_receipt_path.exists():
+        if (
+            args.execute
+            and args.operation == "evidence"
+            and evidence_receipt_path.exists()
+        ):
             if control_evidence is None:
-                raise CampaignError("control-plane evidence is required to resume managed evidence")
+                raise CampaignError(
+                    "control-plane evidence is required to resume managed evidence"
+                )
             validate_evidence_execution_receipt(
                 evidence_receipt_path,
                 config=config,
@@ -1598,6 +1736,11 @@ def main() -> int:
                     {
                         "operation": args.operation,
                         "commands": display_commands,
+                        "generatedCommands": (
+                            generated_policy_read_contract()
+                            if args.operation == "capacity-check"
+                            else ()
+                        ),
                         "mutationAuthorized": False,
                     },
                     separators=(",", ":"),
@@ -1609,15 +1752,25 @@ def main() -> int:
             if target is Phase.IMAGE_DECIDED and (
                 args.image_digest is None or image_scan_sha256 is None
             ):
-                raise CampaignError("immutable image decision or admission scan is missing")
+                raise CampaignError(
+                    "immutable image decision or admission scan is missing"
+                )
             if args.operation == "evidence" and control_evidence is None:
-                raise CampaignError("control-plane evidence is required for managed evidence")
+                raise CampaignError(
+                    "control-plane evidence is required for managed evidence"
+                )
             results = (
                 execute_evidence_commands(runner, commands, control_evidence)
                 if args.operation == "evidence" and control_evidence is not None
                 else execute_commands(runner, commands)
             )
-            validate_operation_results(args.operation, results, config, runtime)
+            validate_operation_results(
+                args.operation,
+                results,
+                config,
+                runtime,
+                runner=runner,
+            )
             if args.operation == "evidence" and control_evidence is not None:
                 persist_evidence_execution_receipt(
                     evidence_receipt_path,
@@ -1632,7 +1785,9 @@ def main() -> int:
                 ledger.bind_deadline(config.cleanup_deadline_utc)
             if target is Phase.IMAGE_DECIDED:
                 if args.image_digest is None or image_scan_sha256 is None:
-                    raise CampaignError("immutable image decision or admission scan is missing")
+                    raise CampaignError(
+                        "immutable image decision or admission scan is missing"
+                    )
                 ledger.record_image(args.image_digest, built=args.image_built)
                 ledger.record_image_scan(args.image_digest, image_scan_sha256)
             if target is Phase.CLEANUP_DEPLOYED:
@@ -1653,11 +1808,14 @@ def main() -> int:
             print(json.dumps(output, separators=(",", ":"), sort_keys=True))
             return 0
         except Exception:
-            if args.operation == "cleanup-wait" and Phase(ledger.phase) is Phase.CLEANING:
+            if (
+                args.operation == "cleanup-wait"
+                and Phase(ledger.phase) is Phase.CLEANING
+            ):
                 start_direct_cleanup(runner, config)
-            if ORDER.index(Phase(ledger.phase)) >= ORDER.index(Phase.SCOPE_CREATED) and Phase(
-                ledger.phase
-            ) not in {
+            if ORDER.index(Phase(ledger.phase)) >= ORDER.index(
+                Phase.SCOPE_CREATED
+            ) and Phase(ledger.phase) not in {
                 Phase.CLEANING,
                 Phase.CLEANED,
                 Phase.RESIDUE_VERIFIED,

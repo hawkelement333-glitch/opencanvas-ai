@@ -112,7 +112,9 @@ class CostItem:
         if not self.name or not isinstance(self.hours, int) or self.hours <= 0:
             raise CampaignError("cost item is malformed")
         parse_utc(self.priced_at_utc)
-        rounded_hours = Decimal(self.hours).quantize(Decimal("1"), rounding=ROUND_CEILING)
+        rounded_hours = Decimal(self.hours).quantize(
+            Decimal("1"), rounding=ROUND_CEILING
+        )
         hourly = Decimal(self.hourly_usd)
         fixed = Decimal(self.fixed_usd)
         if not hourly.is_finite() or not fixed.is_finite() or hourly < 0 or fixed < 0:
@@ -136,6 +138,7 @@ class CampaignConfig:
     contingency_percent: str
     resource_items: tuple[CostItem, ...]
     principal_manifest_sha256: str
+    cleanup_region_selection_sha256: str
     image_digest: str | None = None
 
     @classmethod
@@ -156,6 +159,7 @@ class CampaignConfig:
             "contingencyPercent",
             "resourceItems",
             "principalManifestSha256",
+            "cleanupRegionSelectionSha256",
             "imageDigest",
         }
         if not isinstance(raw, dict) or set(raw) != required:
@@ -187,6 +191,7 @@ class CampaignConfig:
             contingency_percent=raw["contingencyPercent"],
             resource_items=items,
             principal_manifest_sha256=raw["principalManifestSha256"],
+            cleanup_region_selection_sha256=raw["cleanupRegionSelectionSha256"],
             image_digest=raw["imageDigest"],
         )
         config.validate(allow_expired=allow_expired)
@@ -206,14 +211,22 @@ class CampaignConfig:
             raise CampaignError("cleanup must be outside the target deletion boundary")
         if (
             TARGET_RESOURCE_GROUP_PATTERN.fullmatch(self.target_resource_group) is None
-            or CLEANUP_RESOURCE_GROUP_PATTERN.fullmatch(self.cleanup_resource_group) is None
+            or CLEANUP_RESOURCE_GROUP_PATTERN.fullmatch(self.cleanup_resource_group)
+            is None
         ):
             raise CampaignError("campaign resource-group scope is malformed")
         if self.target_region != self.postgres_region:
             raise CampaignError("single-VNet campaign resources must share a region")
+        if re.fullmatch(r"[a-z][a-z0-9]{2,31}", self.cleanup_region) is None:
+            raise CampaignError("cleanup region binding is malformed")
         if HASH_PATTERN.fullmatch(self.principal_manifest_sha256) is None:
             raise CampaignError("principal manifest binding is invalid")
-        if self.image_digest is not None and DIGEST_PATTERN.fullmatch(self.image_digest) is None:
+        if HASH_PATTERN.fullmatch(self.cleanup_region_selection_sha256) is None:
+            raise CampaignError("cleanup region selection binding is invalid")
+        if (
+            self.image_digest is not None
+            and DIGEST_PATTERN.fullmatch(self.image_digest) is None
+        ):
             raise CampaignError("image reference is not immutable")
         deadline = parse_utc(self.cleanup_deadline_utc)
         if not allow_expired and deadline <= datetime.now(UTC):
@@ -252,9 +265,32 @@ class Ledger:
     cleanup_started_utc: str | None = None
     cleanup_completed_utc: str | None = None
     actual_cost_usd: str | None = None
-    residue: dict[str, int] = field(default_factory=lambda: dict.fromkeys(RESIDUE_KEYS, 0))
+    residue: dict[str, int] = field(
+        default_factory=lambda: dict.fromkeys(RESIDUE_KEYS, 0)
+    )
+    cleanup_region: str | None = None
+    cleanup_region_selection_sha256: str | None = None
+
+    def bind_cleanup_region(self, config: CampaignConfig) -> None:
+        expected = (config.cleanup_region, config.cleanup_region_selection_sha256)
+        observed = (self.cleanup_region, self.cleanup_region_selection_sha256)
+        if (
+            observed == (None, None)
+            and self.phase == Phase.NEW.value
+            and not self.transitions
+        ):
+            self.cleanup_region, self.cleanup_region_selection_sha256 = expected
+            return
+        if observed != expected:
+            raise CampaignError("resume cleanup region selection was substituted")
 
     def validate_resume(self, config: CampaignConfig) -> None:
+        if (
+            self.cleanup_region != config.cleanup_region
+            or self.cleanup_region_selection_sha256
+            != config.cleanup_region_selection_sha256
+        ):
+            raise CampaignError("resume cleanup region selection was substituted")
         if (self.campaign_id, self.generation_id) != (
             config.campaign_id,
             config.generation_id,
@@ -262,14 +298,18 @@ class Ledger:
             raise CampaignError("resume campaign or generation does not match")
         if (
             Decimal(self.authorized_ceiling_usd) != HARD_CEILING
-            or Decimal(self.conservative_estimate_usd) != Decimal(config.conservative_estimate_usd)
+            or Decimal(self.conservative_estimate_usd)
+            != Decimal(config.conservative_estimate_usd)
             or Decimal(self.contingency_percent) < Decimal("25")
             or self.resource_generation_count not in {0, 1}
             or self.image_generation_count not in {0, 1}
             or self.required_scan_count not in {0, 1}
             or self.image_scan_count not in {0, 1}
             or set(self.residue) != set(RESIDUE_KEYS)
-            or any(not isinstance(value, int) or value < 0 for value in self.residue.values())
+            or any(
+                not isinstance(value, int) or value < 0
+                for value in self.residue.values()
+            )
         ):
             raise CampaignError("resume ledger limits or counters are invalid")
         current = Phase.NEW
@@ -283,9 +323,9 @@ class Ledger:
             if source is not current:
                 raise CampaignError("resume transition chain is discontinuous")
             normal = ORDER.index(target) == ORDER.index(source) + 1
-            cleanup_jump = target is Phase.CLEANING and ORDER.index(source) >= ORDER.index(
-                Phase.SCOPE_CREATED
-            )
+            cleanup_jump = target is Phase.CLEANING and ORDER.index(
+                source
+            ) >= ORDER.index(Phase.SCOPE_CREATED)
             if not normal and not cleanup_jump:
                 raise CampaignError("resume transition chain is invalid")
             current = target
@@ -309,7 +349,10 @@ class Ledger:
             or self.image_scan_evidence_sha256 is None
         ):
             raise CampaignError("resume image scan state is inconsistent")
-        if self.actual_cost_usd is not None and Decimal(self.actual_cost_usd) > HARD_CEILING:
+        if (
+            self.actual_cost_usd is not None
+            and Decimal(self.actual_cost_usd) > HARD_CEILING
+        ):
             raise CampaignError("resume actual cost exceeds the ceiling")
 
     def transition(self, target: Phase, now: datetime) -> None:
@@ -333,7 +376,9 @@ class Ledger:
             cleanup_transition=target
             in {Phase.CLEANING, Phase.CLEANED, Phase.RESIDUE_VERIFIED, Phase.FINALIZED},
         )
-        self.transitions.append({"from": current.value, "to": target.value, "atUtc": utc(now)})
+        self.transitions.append(
+            {"from": current.value, "to": target.value, "atUtc": utc(now)}
+        )
         self.phase = target.value
         if target is Phase.BILLABLE_STARTED:
             if self.resource_generation_count != 0:
@@ -368,8 +413,13 @@ class Ledger:
         self.image_digest = digest
 
     def record_image_scan(self, digest: str, evidence_sha256: str) -> None:
-        if digest != self.image_digest or HASH_PATTERN.fullmatch(evidence_sha256) is None:
-            raise CampaignError("image admission scan is not bound to the selected digest")
+        if (
+            digest != self.image_digest
+            or HASH_PATTERN.fullmatch(evidence_sha256) is None
+        ):
+            raise CampaignError(
+                "image admission scan is not bound to the selected digest"
+            )
         if self.image_scan_count != 0:
             raise CampaignError("second image admission scan rejected")
         self.image_scan_count = 1
@@ -406,6 +456,8 @@ class CleanupBinding:
     deadline_utc: str
     ceiling_usd: str
     schedule_count: int
+    cleanup_region: str
+    cleanup_region_selection_sha256: str
 
     def validate(self, config: CampaignConfig) -> None:
         if (
@@ -418,6 +470,9 @@ class CleanupBinding:
             or Decimal(self.ceiling_usd) != HARD_CEILING
             or self.schedule_count != 1
             or HASH_PATTERN.fullmatch(self.cleanup_principal_sha256) is None
+            or self.cleanup_region != config.cleanup_region
+            or self.cleanup_region_selection_sha256
+            != config.cleanup_region_selection_sha256
         ):
             raise CampaignError("cleanup binding readback is inconsistent")
 
@@ -483,8 +538,11 @@ class SimulatedRunner:
 
 
 class Lifecycle:
-    def __init__(self, config: CampaignConfig, ledger: Ledger, runner: CommandRunner) -> None:
+    def __init__(
+        self, config: CampaignConfig, ledger: Ledger, runner: CommandRunner
+    ) -> None:
         config.validate()
+        ledger.bind_cleanup_region(config)
         ledger.validate_resume(config)
         self.config = config
         self.ledger = ledger
@@ -544,6 +602,8 @@ def terminal_receipt(ledger: Ledger) -> dict[str, object]:
         "resourceGenerationCount": ledger.resource_generation_count,
         "imageGenerationCount": ledger.image_generation_count,
         "cleanupCompletedUtc": ledger.cleanup_completed_utc,
+        "cleanupRegion": ledger.cleanup_region,
+        "cleanupRegionSelectionSha256": ledger.cleanup_region_selection_sha256,
         "residue": ledger.residue,
         "status": "zero-residue",
     }
@@ -575,6 +635,7 @@ def load_ledger(path: Path, config: CampaignConfig) -> Ledger:
     else:
         value = json.loads(path.read_text(encoding="utf-8"))
         ledger = Ledger(**cast(dict[str, object], value))  # type: ignore[arg-type]
+    ledger.bind_cleanup_region(config)
     ledger.validate_resume(config)
     return ledger
 
@@ -590,7 +651,9 @@ def save_ledger(path: Path, ledger: Ledger) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Milestone 7.8 campaign lifecycle")
-    parser.add_argument("operation", choices=("validate", "simulate", "failure-matrix", "receipt"))
+    parser.add_argument(
+        "operation", choices=("validate", "simulate", "failure-matrix", "receipt")
+    )
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--ledger", type=Path, required=True)
     args = parser.parse_args()
@@ -608,9 +671,9 @@ def main() -> int:
             results = {}
             for phase in ORDER[1:-1]:
                 candidate = Ledger(config.campaign_id, config.generation_id)
-                result = Lifecycle(config, candidate, SimulatedRunner()).fail_and_cleanup(
-                    phase, now=now
-                )
+                result = Lifecycle(
+                    config, candidate, SimulatedRunner()
+                ).fail_and_cleanup(phase, now=now)
                 results[phase.value] = result.phase
             output = {"status": "passed", "phases": results}
         else:

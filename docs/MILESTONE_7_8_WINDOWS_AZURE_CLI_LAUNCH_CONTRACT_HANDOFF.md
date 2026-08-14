@@ -189,3 +189,20 @@ generation recorded in the execution handoff must not be resumed.
 The next action is a separately reviewed and authorized fresh managed
 PostgreSQL evidence campaign from the corrected clean commit. It is not a Git
 push and not the object-storage audit. Milestone 7.8 remains incomplete.
+
+## Later regional-capacity correction cross-reference
+
+The fresh campaign that followed this launcher correction proved the launcher
+and stopped later at the cleanup Automation account's unchecked `westus`
+capacity boundary. M78-PG-007 subsequently added five static read-only
+Automation-region commands to `capacity-check` plus generated enforced-policy
+definition reads, all through this same centralized launcher. The current
+static operator plan therefore contains 55 commands, 49 of them Azure CLI
+commands; policy-definition reads, Container Apps polling, failure cleanup,
+and exact-two-group direct cleanup remain generated paths through the same
+process boundary.
+
+See the
+[regional-capacity remediation handoff](MILESTONE_7_8_AUTOMATION_REGIONAL_CAPACITY_REMEDIATION_HANDOFF.md).
+The historical 50 / 44 inventory above remains accurate for this handoff's
+source commit and was not rewritten.
