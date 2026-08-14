@@ -30,6 +30,7 @@ param cleanupDeadlineUtc string
 param automationAccountName string
 param cleanupRunbookName string
 param cleanupScheduleName string
+param cleanupBindingName string
 
 @minValue(5000)
 @maxValue(5000)
@@ -47,11 +48,6 @@ module controller './modules/cleanup-controller.bicep' = {
   name: 'm78-cleanup-${uniqueString(campaignId, generationId)}'
   scope: cleanupResourceGroup
   params: {
-    campaignId: campaignId
-    generationId: generationId
-    subscriptionCorrelation: subscriptionCorrelation
-    targetResourceGroupName: targetResourceGroupName
-    cleanupResourceGroupName: cleanupResourceGroupName
     cleanupLocation: cleanupLocation
     cleanupRegionSelectionSha256: cleanupRegionSelectionSha256
     cleanupCandidateRegions: cleanupCandidateRegions
@@ -60,11 +56,10 @@ module controller './modules/cleanup-controller.bicep' = {
     cleanupOfferEligibleRegions: cleanupOfferEligibleRegions
     cleanupOfferEligibilitySource: cleanupOfferEligibilitySource
     cleanupOfferEligibilitySha256: cleanupOfferEligibilitySha256
-    cleanupDeadlineUtc: cleanupDeadlineUtc
     automationAccountName: automationAccountName
     cleanupRunbookName: cleanupRunbookName
     cleanupScheduleName: cleanupScheduleName
-    costCeilingCents: costCeilingCents
+    cleanupBindingName: cleanupBindingName
     lifecycleTags: lifecycleTags
   }
 }
@@ -153,4 +148,5 @@ output cleanupOfferEligibleRegions string = cleanupOfferEligibleRegions
 output cleanupOfferEligibilitySource string = cleanupOfferEligibilitySource
 output cleanupOfferEligibilitySha256 string = cleanupOfferEligibilitySha256
 output costCeilingCents int = costCeilingCents
-output scheduleCount int = 1
+output scheduleCount int = 0
+output bindingCount int = 0

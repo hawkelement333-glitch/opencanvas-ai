@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:terminal-receipt:v4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "campaignCorrelation",
+    "generationCorrelation",
+    "resourceGenerationCount",
+    "imageGenerationCount",
+    "cleanupCompletedUtc",
+    "cleanupRegion",
+    "cleanupRegionSelectionSha256",
+    "cleanupCandidateRegions",
+    "cleanupOfferClassification",
+    "cleanupOfferEligibilityDisposition",
+    "cleanupOfferEligibleRegions",
+    "cleanupOfferEligibilitySource",
+    "cleanupOfferEligibilitySha256",
+    "cleanupArmEvidenceSha256",
+    "cleanupDisposition",
+    "residueEvidenceSha256",
+    "residue",
+    "status"
+  ],
+  "properties": {
+    "version": { "const": "m7.8-terminal-receipt-v4" },
+    "campaignCorrelation": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "generationCorrelation": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "resourceGenerationCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "imageGenerationCount": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "cleanupCompletedUtc": { "type": "string", "format": "date-time" },
+    "cleanupRegion": { "type": "string" },
+    "cleanupRegionSelectionSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "cleanupCandidateRegions": { "type": "string" },
+    "cleanupOfferClassification": { "type": "string" },
+    "cleanupOfferEligibilityDisposition": { "type": "string" },
+    "cleanupOfferEligibleRegions": { "type": "string" },
+    "cleanupOfferEligibilitySource": { "type": "string" },
+    "cleanupOfferEligibilitySha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "cleanupArmEvidenceSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "cleanupDisposition": { "const": "zero-residue" },
+    "residueEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "residue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetResourceGroups",
+        "cleanupResourceGroups",
+        "roleAssignments",
+        "automationAccounts",
+        "softDeletedAutomationAccounts",
+        "cleanupSchedules",
+        "managedIdentities",
+        "postgresServers",
+        "containerRegistries",
+        "containerAppsEnvironments",
+        "containerAppsJobs",
+        "virtualNetworks",
+        "privateEndpoints",
+        "privateDnsZones",
+        "diagnosticSettings",
+        "syntheticRows"
+      ],
+      "properties": {
+        "targetResourceGroups": { "const": 0 },
+        "cleanupResourceGroups": { "const": 0 },
+        "roleAssignments": { "const": 0 },
+        "automationAccounts": { "const": 0 },
+        "softDeletedAutomationAccounts": { "const": 0 },
+        "cleanupSchedules": { "const": 0 },
+        "managedIdentities": { "const": 0 },
+        "postgresServers": { "const": 0 },
+        "containerRegistries": { "const": 0 },
+        "containerAppsEnvironments": { "const": 0 },
+        "containerAppsJobs": { "const": 0 },
+        "virtualNetworks": { "const": 0 },
+        "privateEndpoints": { "const": 0 },
+        "privateDnsZones": { "const": 0 },
+        "diagnosticSettings": { "const": 0 },
+        "syntheticRows": { "const": 0 }
+      }
+    },
+    "status": { "const": "zero-residue" }
+  }
+}

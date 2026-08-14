@@ -1,0 +1,99 @@
+{
+  "actualCost": {
+    "reason": "single-query-http-429-no-retry",
+    "status": "unavailable"
+  },
+  "armability": "blocked-provider-retention",
+  "azureMutationCount": 0,
+  "campaignCorrelation": "07e350df451c6bec",
+  "campaignDeletedIdentitySha256": "9ddbb427b37f677c6c2fe9b649278e1aedf9e6e00a250cfe7c24df0df475ce4d",
+  "defects": {
+    "M78-PG-010": "locally-remediated",
+    "M78-PG-011": "local-truth-remediated-provider-residue-remains"
+  },
+  "generationCorrelation": "599df8555c0781d9",
+  "inventories": {
+    "active": {
+      "afterCount": 0,
+      "afterPages": 1,
+      "beforeCount": 0,
+      "beforePages": 1
+    },
+    "deleted": {
+      "afterCampaignCount": 1,
+      "afterPages": 1,
+      "afterTotalCount": 5,
+      "beforeCampaignCount": 1,
+      "beforePages": 1,
+      "beforeTotalCount": 5,
+      "unrelatedCount": 4
+    }
+  },
+  "observedAtUtc": "2026-08-14T21:32:11Z",
+  "provider": {
+    "campaignDeletedAtUtc": "2026-08-14T20:09:46Z",
+    "documentedPermanentDelete": false,
+    "expectedRemovalUtc": "2026-09-13T20:09:46Z",
+    "expectedRemovalUtcIsProof": false,
+    "operationCount": 135,
+    "retentionDays": 30,
+    "supportedDeletedAccountOperation": "Microsoft.Automation/deletedAutomationAccounts/read"
+  },
+  "region": "southeastasia",
+  "remediationStartingHead": "db2bafcb59342fbb38543b47461e629ad43f6c89",
+  "residueAfter": {
+    "automationAccounts": 0,
+    "cleanupResourceGroups": 0,
+    "cleanupSchedules": 0,
+    "containerAppsEnvironments": 0,
+    "containerAppsJobs": 0,
+    "containerRegistries": 0,
+    "diagnosticSettings": 0,
+    "managedIdentities": 0,
+    "postgresServers": 0,
+    "privateDnsZones": 0,
+    "privateEndpoints": 0,
+    "roleAssignments": 0,
+    "softDeletedAutomationAccounts": 1,
+    "syntheticRows": 0,
+    "targetResourceGroups": 0,
+    "virtualNetworks": 0
+  },
+  "residueBefore": {
+    "automationAccounts": 0,
+    "cleanupResourceGroups": 0,
+    "cleanupSchedules": 0,
+    "containerAppsEnvironments": 0,
+    "containerAppsJobs": 0,
+    "containerRegistries": 0,
+    "diagnosticSettings": 0,
+    "managedIdentities": 0,
+    "postgresServers": 0,
+    "privateDnsZones": 0,
+    "privateEndpoints": 0,
+    "roleAssignments": 0,
+    "softDeletedAutomationAccounts": 1,
+    "syntheticRows": 0,
+    "targetResourceGroups": 0,
+    "virtualNetworks": 0
+  },
+  "runtimeRetained": true,
+  "runtimeSha256": {
+    "blocked-cleanup-evidence.json": "0b69fdcdd2c61e7935eeaf46648528e9f242a1f8b19db600f80b014f3d3645fa",
+    "campaign.json": "f3742baf9c13336b4efb250266c603ab4493bcd29e10aa0dfa2f378442a95c8a",
+    "campaign.parameters.json": "8919ba298f9f494909ace885834144b1c7e658b123e33fdd84a93249ee19437d",
+    "cleanup-region-selection.json": "2b39c8ec2f8bc100ee8b415d4d59b4b0f23c4392cd4ab06ff7a2332ed118d6f1",
+    "cleanup.parameters.json": "deef017c41c244c8924a45f2a21ffbf21ae0569ed1754cc4284408696b35f07b",
+    "ledger.json": "6711846fd93dca15069dd3aebe08a9885c9accdea0ed3a8ff832a63d19efa29e",
+    "runtime.json": "34f82cfb966a5b94f87fe0597419d05712878ba475c385b4d6e5134cdf6346f2"
+  },
+  "status": "provider-retained-local-remediation-complete",
+  "supportRequestSubmitted": false,
+  "unrelatedDeletedIdentitySha256": [
+    "3d8d0f7ba4f2ff346c706cd695bc5ebc0de57e75fa98c1d509a6592209b3c607",
+    "cb7810aa1914549d1aaa0dc9a607698cac13058fb71fd7d1073cf2fd6e62952a",
+    "ce44ad803aec473df2e9d531aefc17c15496477742d98f9310f7fbe20f3f4c17",
+    "d2408623e8630c089e85c1bb5ec20cd546bc620a5ec53b5f074d054bd28badc8"
+  ],
+  "version": "m7.8-automation-retention-remediation-v1"
+}

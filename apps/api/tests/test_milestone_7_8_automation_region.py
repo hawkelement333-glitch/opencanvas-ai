@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from collections.abc import Sequence
@@ -192,6 +193,7 @@ def _runtime(selection: AutomationRegionSelection) -> dict[str, str]:
         "postgresServerName": "pgm78proof",
         "cleanupDeploymentName": "m78-cleanup-proof",
         "cleanupParametersFile": "runtime/cleanup.parameters.json",
+        "automationApiVersion": "2024-10-23",
         "cleanupRegion": selection.selected_region,
         "cleanupRegionSelectionSha256": selection.sha256(),
         "cleanupCandidateRegions": ",".join(selection.candidate_order),
@@ -720,17 +722,30 @@ def test_discovery_and_cleanup_never_target_unrelated_automation_accounts() -> N
 
         def run(self, command: tuple[str, ...]) -> dict[str, object]:
             self.commands.append(command)
+            if command[:2] == ("az", "rest"):
+                return _result({"value": []})
             return _result({})
 
     selection = _select()
     config = _config(selection)
+    runtime = _runtime(selection)
+    expected_resource_id = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/"
+        f"{config.cleanup_resource_group}/providers/Microsoft.Automation/"
+        f"automationAccounts/{runtime['automationAccountName']}"
+    ).casefold()
+    runtime["deletedAutomationAccountBindingSha256"] = hashlib.sha256(
+        b"m7.8/deleted-automation-account/v1\0" + expected_resource_id.encode()
+    ).hexdigest()
     runner = RecordingRunner()
-    start_direct_cleanup(runner, config)  # type: ignore[arg-type]
-    assert [command[command.index("--name") + 1] for command in runner.commands] == [
+    start_direct_cleanup(runner, config, runtime)  # type: ignore[arg-type]
+    delete_commands = runner.commands[:2]
+    assert [command[command.index("--name") + 1] for command in delete_commands] == [
         config.target_resource_group,
         config.cleanup_resource_group,
     ]
-    assert all(command[:3] == ("az", "group", "delete") for command in runner.commands)
+    assert all(command[:3] == ("az", "group", "delete") for command in delete_commands)
+    assert all(command[:2] == ("az", "rest") for command in runner.commands[2:])
 
 
 def test_selection_receipt_contains_no_resource_or_account_identifier() -> None:

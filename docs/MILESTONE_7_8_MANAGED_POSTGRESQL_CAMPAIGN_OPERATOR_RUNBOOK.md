@@ -1,15 +1,18 @@
 # Milestone 7.8 managed PostgreSQL campaign operator runbook
 
-Date: 2026-08-13
+Date: 2026-08-14
 
-Status: executable repository contract; managed execution requires a separate
-authorization
+Status: **not executable**; campaign arming is blocked because Azure Automation
+account deletion creates provider-retained residue
 
-This runbook is the exact independent path from zero campaign resources to
-zero residue. It does not reuse Milestone 7.7 infrastructure, identifiers,
-deadlines, receipts, or lifecycle state. Do not run it until the managed
-PostgreSQL campaign, one image build/publication, and one image admission scan
-are separately authorized.
+This runbook preserves the intended independent campaign path, but it is not a
+readiness claim or execution authorization. Current preparation writes
+`cleanupControllerArmability=blocked-provider-retention`, and the operator
+rejects `scope-create` and every later campaign mutation. Azure Automation
+retains a deleted account for its provider retention period, so deleting the
+cleanup resource group cannot meet the authoritative zero-residue invariant.
+No new campaign is authorized. The commands below are retained as reviewed
+reference only until a separately proved cleanup mechanism removes this block.
 
 ## Prerequisites and authority
 
@@ -63,6 +66,10 @@ ledger is written.
 
 ## Prepare one generation
 
+**Blocked:** do not execute this section while the status above remains in
+force. Preparation may produce a local bundle for deterministic contract tests,
+but that bundle is deliberately non-armable.
+
 Set the exact later-authorized Azure identifiers in memory and choose one
 campaign label matching `^[a-z][a-z0-9-]{7,47}$`:
 
@@ -114,6 +121,10 @@ four hours in the future. It never prints either raw Azure UUID.
 
 ## Dry-run and execute phases
 
+**Blocked:** do not execute the phase sequence. In particular, `scope-create`
+fails closed before issuing its Azure mutation while runtime armability is
+`blocked-provider-retention`.
+
 Every operator phase is dry-run unless `--execute` is present. Before each
 mutation, inspect the redacted command plan:
 
@@ -148,20 +159,27 @@ and requires the immutable region, ordered candidate-set binding, decision
 hash, offer binding, and every evidence hash to match. Any change stops before
 `scope-create`.
 
-The complete static operator plan contains 56 commands, 50 of them Azure CLI
+The baseline static operator plan contains 70 commands, 64 of them Azure CLI
 commands. It also has bounded generated Container Apps job polling, failure
 cleanup, and exact-two-group direct cleanup. Preparation's regional selection
 has six static Azure reads plus generated policy-definition GETs. Every Azure
 path uses the centralized launcher; no unrelated Automation account name is a
 command target.
 
-The sequence proves local source/hash/Git state, Azure subscription/tenant
+The intended sequence proves local source/hash/Git state, Azure subscription/tenant
 correlation, six provider registrations, PostgreSQL SKU, regional compute
 quota, global names, USD 25.6832 estimate, at least 25 percent contingency,
 the USD 50 ceiling, exact scope tags, cleanup deployment outputs, published
 runbook content, one immutable schedule, one binding, actual cleanup identity,
-and exact cleanup deadline before the billable clock starts. The `deploy`
-phase is base infrastructure only; no application job exists yet.
+and exact cleanup deadline before the billable clock starts. The initial
+cleanup deployment creates only the account, draft runbook, and exact-scope
+RBAC; it creates zero schedules and zero job-schedule bindings. `cleanup-arm`
+then verifies deployment, identity, and authority, replaces content, publishes,
+reads back `Published` state plus the exact content hash, creates and verifies
+the immutable schedule, creates the deterministic binding, and requires one
+exact binding. A failure at any earlier step cannot advance the ledger to
+`cleanup-armed`. The `deploy` phase is base infrastructure only; no application
+job exists yet.
 
 ## One image decision
 
@@ -306,7 +324,7 @@ The full shape is closed by
 `infra/milestone_7_8/schemas/evidence-execution.schema.json`. `dispose` records
 the pass/fail campaign disposition before deletion.
 
-The cleanup deployment remains exactly one command in exactly the prepared
+The intended cleanup deployment remains exactly one command in exactly the prepared
 region. A deployment failure never selects another candidate, retries in a
 different region, restores or reuses a soft-deleted account, or modifies an
 unrelated Automation account; it enters the existing cleanup path.
@@ -325,11 +343,28 @@ Invoke-M78Phase 'finalize'
 The cleanup runbook validates campaign, generation, sanitized subscription
 correlation, exact resource-group names/tags, deadline, and cost ceiling; it
 deletes the target group and then its own cleanup group. `cleanup-wait` requires
-both groups absent. `residue` separately requires zero tagged resources and
-zero role assignments plus all defined residue counters at zero. `finalize`
-prints the sanitized terminal receipt. If the runbook cannot be started, the
+both groups absent. That deletion is not permanent Automation-account removal.
+`residue` completely paginates both active and soft-deleted Automation-account
+inventories, binds the expected account by its domain-separated resource-ID
+hash, preserves unrelated account hashes, and requires zero tagged resources,
+zero role assignments, and all 16 defined residue counters at zero. A matching
+soft-deleted account records `provider-retained`, keeps the ledger at `cleaned`,
+and blocks `finalize`. Only a pagination-complete later read proving absence can
+advance to `residue-verified` and print the v4 terminal receipt. If the runbook
+cannot be started, the
 operator automatically falls back to deletion of only the same two validated
-resource groups. It never broadens the deletion target.
+resource groups and immediately reports exact active and soft-deleted account
+counts from complete inventories. It never broadens the deletion target.
+
+That phase behavior applies only to a future v4 bundle if the architecture is
+separately unblocked and execution is separately authorized. The preserved
+private generation predates the v4 runtime and 16-counter ledger, and its legacy
+`finalized` state is retained as disproved historical evidence. It must not be
+rewritten or passed to this operator as a resumable lifecycle. The next check
+for the existing retained account is a separately authorized read-only
+reconciliation of the complete active and deleted inventories against the
+sanitized binding in the critical-cleanup receipt; it is not a campaign phase,
+does not mutate the private files, and does not authorize a new campaign.
 
 ## Failure and interruption recovery
 
@@ -366,6 +401,9 @@ generation, source, digest, control input, transition chain, deadline, or
 receipt is rejected. Once cleanup starts, resume only cleanup, wait, residue,
 and finalization; cleanup remains allowed after the deadline.
 
+This resume table describes only a conforming v4 ledger. It does not reopen or
+upgrade the preserved legacy finalized ledger described above.
+
 ## Bounded time, cost, artifacts, and stopping rule
 
 The first billable mutation starts a maximum four-hour clock. The conservative
@@ -379,7 +417,9 @@ service; enter cleanup and preserve the sanitized local files:
 - the digest-bound image scan receipt;
 - the sanitized control-plane evidence input;
 - the managed execution receipt; and
-- the finalized zero-residue terminal receipt.
+- the residue disposition and evidence hash; and
+- only after complete absence proof, the finalized zero-residue terminal
+  receipt.
 
 These artifacts contain no secret values or raw tenant/subscription identifiers
 other than the private ignored `runtime.json`, which must not be committed or

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign-ledger:v3",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign-ledger:v4",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -23,6 +23,9 @@
     "cleanup_started_utc",
     "cleanup_completed_utc",
     "actual_cost_usd",
+    "cleanup_arm_evidence_sha256",
+    "cleanup_disposition",
+    "residue_evidence_sha256",
     "residue",
     "cleanup_region",
     "cleanup_region_selection_sha256",
@@ -81,9 +84,61 @@
       "format": "date-time"
     },
     "actual_cost_usd": { "type": ["string", "null"] },
+    "cleanup_arm_evidence_sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "cleanup_disposition": {
+      "enum": [
+        "pending",
+        "zero-residue",
+        "provider-retained",
+        "nonzero-residue"
+      ]
+    },
+    "residue_evidence_sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "residue": {
       "type": "object",
-      "additionalProperties": { "type": "integer", "minimum": 0 }
+      "additionalProperties": false,
+      "required": [
+        "targetResourceGroups",
+        "cleanupResourceGroups",
+        "roleAssignments",
+        "automationAccounts",
+        "softDeletedAutomationAccounts",
+        "cleanupSchedules",
+        "managedIdentities",
+        "postgresServers",
+        "containerRegistries",
+        "containerAppsEnvironments",
+        "containerAppsJobs",
+        "virtualNetworks",
+        "privateEndpoints",
+        "privateDnsZones",
+        "diagnosticSettings",
+        "syntheticRows"
+      ],
+      "properties": {
+        "targetResourceGroups": { "type": "integer", "minimum": 0 },
+        "cleanupResourceGroups": { "type": "integer", "minimum": 0 },
+        "roleAssignments": { "type": "integer", "minimum": 0 },
+        "automationAccounts": { "type": "integer", "minimum": 0 },
+        "softDeletedAutomationAccounts": { "type": "integer", "minimum": 0 },
+        "cleanupSchedules": { "type": "integer", "minimum": 0 },
+        "managedIdentities": { "type": "integer", "minimum": 0 },
+        "postgresServers": { "type": "integer", "minimum": 0 },
+        "containerRegistries": { "type": "integer", "minimum": 0 },
+        "containerAppsEnvironments": { "type": "integer", "minimum": 0 },
+        "containerAppsJobs": { "type": "integer", "minimum": 0 },
+        "virtualNetworks": { "type": "integer", "minimum": 0 },
+        "privateEndpoints": { "type": "integer", "minimum": 0 },
+        "privateDnsZones": { "type": "integer", "minimum": 0 },
+        "diagnosticSettings": { "type": "integer", "minimum": 0 },
+        "syntheticRows": { "type": "integer", "minimum": 0 }
+      }
     },
     "cleanup_region": { "type": "string", "pattern": "^[a-z][a-z0-9]{2,31}$" },
     "cleanup_region_selection_sha256": {

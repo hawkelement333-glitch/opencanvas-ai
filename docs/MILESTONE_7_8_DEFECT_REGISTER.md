@@ -2,10 +2,10 @@
 
 Date: 2026-08-14
 
-Status: active; architecture and checkpoint-scope findings are corrected; all
-eight managed PostgreSQL High defects, including M78-PG-009, are locally
-remediated; the last campaign's direct cleanup completed with zero residue, and
-all five managed evidence gaps remain open
+Status: active; architecture and checkpoint-scope findings are corrected; ten
+managed PostgreSQL High defects are locally remediated, but the last campaign's
+exact Automation account remains provider-retained nonzero residue; campaign
+armability is blocked, and all five managed evidence gaps remain open
 
 This register records defects proved by the Milestone 7.8 audit and, in a
 separate section, the evidence gaps the audit contract requires it to preserve.
@@ -46,11 +46,13 @@ authoritative repository requirement or permits a concrete unsafe path.
 | M78-PG-007 | The fresh corrected-launcher campaign bound the cleanup Automation account to the unchecked `westus` default. Preparation serialized that value into configuration and Bicep parameters, while `capacity-check` proved only provider registration and never proved Automation regional support, location policy, active or soft-deleted account occupancy, or regional capacity before `scope-create`. Azure then rejected the one cleanup deployment because the region's subscription capacity was unavailable. | Preparation, pre-mutation capacity proof, cleanup-controller deployment/readback, restart ledger, failure cleanup, and all future source-bound managed PostgreSQL campaigns  | High     | Proved defect; locally resolved. One closed candidate order is evaluated through provider support, enforced location policy, active-account occupancy, and soft-deleted-account occupancy before a bundle exists and again before scope mutation. The selected region and four evidence hashes are immutable through configuration, runtime, ledger, parameter, Bicep, readback, and receipt surfaces.                                  | `automation_region.py`; preparation/campaign/operator lifecycle; three schemas plus one new closed receipt schema; cleanup and target Bicep; focused regional/campaign/launcher contracts; current runbook/README/handoffs. Synthetic selection, substitution, policy, occupancy, no-hop, exact-cleanup, and leakage proofs pass; sanitized live discovery selected `southcentralus` without mutation. | Azure exposes no reliable exact regional Automation quota endpoint in this repository contract. Zero discoverable occupancy is therefore necessary but not represented as provider reservation; a separately authorized fresh campaign must still stop on the first deployment failure and may not hop regions after mutation. |
 | M78-PG-008 | The corrected regional-capacity selector marked `southcentralus` viable after proving provider support, policy allowance, and zero active/soft-deleted occupancy. The one authorized cleanup deployment then returned `BadRequest`: Azure reported that Free Trial and Student subscriptions cannot create Automation accounts in that location and supplied a narrower allowed-region set. The selector never proved subscription-offer admission before mutation.                                               | Campaign preparation, repeated `capacity-check`, cleanup-controller admission, and every future source-bound managed PostgreSQL campaign on an offer-restricted subscription | High     | Proved defect; locally resolved. Subscription-offer eligibility is now a fourth independent mandatory gate. Free Trial/Student and unclassified public offers receive the reviewed restrictive baseline `eastus,eastus2,northeurope,southeastasia,westus`; `southcentralus` and `westus2` cannot be re-enabled by provider or policy evidence. The unresolved `JapanWest2`/`japanwest` spelling is excluded rather than guessed.        | `automation_region.py`; campaign, preparation, operator, lifecycle, four schemas, cleanup/target Bicep, focused regional/campaign/launcher tests, current runbook/README, and the [offer-region remediation handoff](MILESTONE_7_8_AUTOMATION_OFFER_REGION_ELIGIBILITY_REMEDIATION_HANDOFF.md). Synthetic adversarial tests and sanitized live read-only discovery pass without mutation.              | Offer admission remains locally closed. The later stale candidate-order contradiction is the distinct M78-PG-009 defect and is also corrected. All five managed database evidence gaps remain open.                                                                                                                            |
 | M78-PG-009 | The M78-PG-008 contract declared `eastus`, `eastus2`, `northeurope`, `southeastasia`, and `westus` offer-safe, but the operational order still evaluated only `eastus2`, `southcentralus`, `westus2`, and `westus`. Sanitized complete provider, policy, active, and soft-deleted reads proved `southeastasia` selectable and excluded solely by that stale order.                                                                                                                                                | Preparation, repeated `capacity-check`, configuration/runtime/ledger bindings, Bicep deployment/readback, and every later campaign's pre-mutation Automation selection       | High     | Proved defect; locally resolved. The closed deterministic order now includes all seven reviewed regions and still prohibits caller overrides. Every offer-safe region participates; historical candidates remain to receive explicit offer-ineligible dispositions. The exact ordered set is independently bound in addition to the full selection hash.                                                                                | `automation_region.py`; campaign, preparation, operator, lifecycle; campaign/runtime/ledger/selection schemas; cleanup/target Bicep; focused candidate, capacity, launcher, campaign, runtime, and infrastructure tests; current runbook/README; and the [candidate reconciliation handoff](MILESTONE_7_8_AUTOMATION_OFFER_SAFE_CANDIDATE_RECONCILIATION_HANDOFF.md).                                  | Sanitized current state selects `southeastasia`, but this read-only proof is not a reservation and authorizes no deployment. Azure state can drift, so preparation and `capacity-check` must repeat the complete proof. All five managed database evidence gaps remain open.                                                   |
+| M78-PG-010 | The initial cleanup Bicep declared the one-time schedule and job-schedule binding in the same deployment as a draft runbook. ARM resource dependency proved creation, not publication. The fresh campaign consequently attempted binding before a published runbook version existed.                                                                                                                                                                                                                              | Cleanup deployment, runbook publication, schedule creation, binding, arming ledger, and interruption/restart behavior                                                        | High     | Proved defect; locally resolved. Initial deployment now emits zero schedules and zero bindings. The imperative arming executor validates deployment, identity, exact two-scope RBAC, publication state/content, schedule, and one deterministic binding in strict order; no partial proof advances `cleanup-armed`.                                                                                                                     | `cleanup-controller.bicep`, `cleanup.bicep`, `prepare.py`, `operator.py`, campaign/runtime/ledger/receipt schemas, cleanup script, runbook/README, and focused ordering/failure/restart tests.                                                                                                                                                                                                         | The ordering defect is closed locally. No cleanup deployment was run. The Automation controller remains non-armable for the separate M78-PG-011 provider-retention reason.                                                                                                                                                     |
+| M78-PG-011 | The 15-counter residue model treated cleanup-resource-group deletion as Automation-account absence and omitted the provider's soft-deleted account inventory. Complete readback proved the exact campaign-created account remains soft deleted, contradicting the prior zero-residue statement.                                                                                                                                                                                                                   | Cleanup runbook/direct fallback, active/deleted inventories, ledger disposition, receipt/finalization, runtime preservation, and campaign readiness                          | High     | Proved defect; repository truth is locally resolved. Soft-deleted accounts are a distinct 16th counter; both inventories must paginate completely; exact attribution is hash-bound; unrelated deleted accounts are preserved; provider retention is a distinct nonterminal disposition; finalization requires proven zero. Current preparation is marked `blocked-provider-retention`.                                                  | `campaign.py`, `operator.py`, `prepare.py`, schemas, cleanup script, tests, current runbook/README, sanitized receipt, support draft, and the [critical cleanup handoff](MILESTONE_7_8_CRITICAL_CLEANUP_RETENTION_REMEDIATION_HANDOFF.md).                                                                                                                                                             | The exact account remains provider retained. Microsoft documents 30-day retention and exposes list/read but no self-service permanent-delete operation. Actual cleanup is nonzero, actual cost is unavailable after one HTTP 429, and no new campaign is armable or authorized.                                                |
 | M78-TI-001 | The implementation plan requires server-derived scope and stale-authority denial. Retrieval replay/read/bundle paths and workflow creator-owned read/mutation helpers trusted durable creator/scope columns without checking current workspace/member authority.                                                                                                                                                                                                                                                  | Graph retrieval replay/readback, evidence bundles, workflow execution readback, and definition/version mutation                                                              | High     | Proved defect; corrected with current owner/workspace checks and centralized `workflow.view`/`workflow.edit` authorization.                                                                                                                                                                                                                                                                                                             | Graph/workflow services and their two test files. Three exact new regression nodes pass; the affected graph/workflow group is included in 108 passing tests.                                                                                                                                                                                                                                           | Local stale-workspace paths are closed; managed pool/revocation/failover isolation remains M78-TI-E01.                                                                                                                                                                                                                         |
 
-All proved defects now have coherent local corrections. The managed-evidence
-gaps prevent this audit surface and
-Milestone 7.8 from satisfying their completion rules.
+All proved repository defects now have coherent local corrections. The exact
+provider-retained cleanup residue and the managed-evidence gaps prevent this
+audit surface and Milestone 7.8 from satisfying their completion rules.
 
 ### M78-PG-006 local remediation disposition
 
@@ -167,6 +169,49 @@ enforced policy assignment were evaluated. Seven unrelated subscription
 resources and zero campaign residue were unchanged. Exact per-region evidence,
 hashes, validation, and the no-mutation boundary are in the
 [offer-safe candidate reconciliation handoff](MILESTONE_7_8_AUTOMATION_OFFER_SAFE_CANDIDATE_RECONCILIATION_HANDOFF.md).
+
+### M78-PG-010 and M78-PG-011 critical cleanup disposition
+
+The preserved generation with campaign correlation `07e350df451c6bec` and
+generation correlation `599df8555c0781d9` proved both defects. The deployment
+path created the job-schedule binding while the runbook was still draft. Later,
+both generated groups and all active campaign resources were absent, but a
+complete one-page deleted-account inventory contained exactly one record whose
+generated name, normalized `southeastasia` location, expected account resource
+binding hash, and preserved lifecycle evidence all matched the generation.
+Four pre-existing unrelated deleted-account identity hashes were unchanged.
+
+Current Microsoft Automation contracts document restoration during retention
+and permanent provider removal after 30 days. The current REST surface documents
+listing deleted accounts, and live provider metadata exposes only
+`Microsoft.Automation/deletedAutomationAccounts/read`; neither documents an
+exact permanent-delete operation. No endpoint was guessed and no Azure mutation
+occurred. The provider deletion evidence places the expected (not proved)
+removal boundary at `2026-09-13T20:09:46Z`. The one prior cost query returned
+HTTP 429, so actual cost remains unavailable rather than USD 0.00.
+
+The repository correction makes publication and arming sequential and
+restart-safe, expands residue to 16 counters, persists arming/residue evidence
+hashes and explicit dispositions, and blocks finalization while the exact
+soft-deleted account exists. No locally proved replacement met the immutable
+deadline, interruption survival, exact-scope deletion, least-privilege, and
+no-retained-artifact requirements. The Automation implementation is therefore
+retained with its ordering fixed, but every newly prepared runtime is marked
+`blocked-provider-retention` and executable campaign mutation stops before
+`scope-create`. The private runtime is preserved. The support-request draft is
+not submitted. Its legacy 15-counter `finalized` ledger is retained as
+disproved historical evidence, is not silently upgraded, and is not resumable
+through the v4 operator. No new campaign is authorized.
+
+Final local validation passed 116 Milestone 7.8 tests, 53 preserved topology
+and database-remediation tests, and 94 infrastructure contracts, with no test
+failures or skips. Focused Ruff, strict mypy, both changed Bicep builds,
+PowerShell/JSON parsing, installed Prettier, five-document structure and 12-link
+resolution, the 644-file repository hygiene/private-material guard, the
+0028/0029 upgrade/downgrade/re-upgrade cycle, sole-head/0030 absence, and
+canonical-input verification all passed. The critical-cleanup handoff records
+the exact commands, corrected validation findings, and remaining provider
+blocker.
 
 ## Authorized High-defect remediation plan
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:operator-runtime:v3",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:operator-runtime:v4",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,6 +9,9 @@
     "canonicalBuildInputSha256",
     "dockerfileSha256",
     "cleanupScriptSha256",
+    "automationApiVersion",
+    "cleanupControllerArmability",
+    "deletedAutomationAccountBindingSha256",
     "cleanupRegion",
     "cleanupRegionSelectionSha256",
     "cleanupCandidateRegions",
@@ -23,6 +26,7 @@
     "automationAccountName",
     "runbookName",
     "scheduleName",
+    "bindingName",
     "bootstrapJobName",
     "migrationJobName",
     "workerJobName",
@@ -49,6 +53,14 @@
     },
     "dockerfileSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "cleanupScriptSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "automationApiVersion": { "const": "2024-10-23" },
+    "cleanupControllerArmability": {
+      "enum": ["ready", "blocked-provider-retention"]
+    },
+    "deletedAutomationAccountBindingSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "cleanupRegion": { "type": "string", "pattern": "^[a-z][a-z0-9]{2,31}$" },
     "cleanupRegionSelectionSha256": {
       "type": "string",
@@ -82,6 +94,7 @@
     "automationAccountName": { "type": "string", "minLength": 1 },
     "runbookName": { "type": "string", "minLength": 1 },
     "scheduleName": { "type": "string", "minLength": 1 },
+    "bindingName": { "type": "string", "format": "uuid" },
     "bootstrapJobName": { "type": "string", "minLength": 1 },
     "migrationJobName": { "type": "string", "minLength": 1 },
     "workerJobName": { "type": "string", "minLength": 1 },

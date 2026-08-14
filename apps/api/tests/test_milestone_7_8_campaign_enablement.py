@@ -46,13 +46,15 @@ from infra.milestone_7_8.campaign import (
 from infra.milestone_7_8.operator import (
     OPERATION_PHASE,
     command_plan,
+    execute_cleanup_arm_commands,
     execute_commands,
+    execute_residue_commands,
+    observe_residue,
     validate_cleanup_deployment,
     validate_cleanup_readback,
     validate_operation_results,
     verify_zero_residue,
 )
-
 from opencanvas_api.db.principal_manifest import (
     CAMPAIGN_ENV,
     CURRENT_PRINCIPAL_ID_ENV,
@@ -236,6 +238,8 @@ def test_contingency_deadline_and_generation_limits() -> None:
     with pytest.raises(CampaignError, match="extension"):
         ledger.bind_deadline("2030-01-01T04:01:00Z")
     for phase in ORDER[1 : ORDER.index(Phase.BILLABLE_STARTED) + 1]:
+        if phase is Phase.CLEANUP_ARMED:
+            ledger.record_cleanup_arm_evidence("e" * 64)
         ledger.transition(phase, NOW)
     with pytest.raises(CampaignError, match="generation"):
         ledger.resource_generation_count = 1
@@ -287,7 +291,8 @@ def test_resume_and_cleanup_binding_reject_substitution() -> None:
         cleanup_principal_sha256="d" * 64,
         deadline_utc=config.cleanup_deadline_utc,
         ceiling_usd="50.00",
-        schedule_count=1,
+        schedule_count=0,
+        binding_count=0,
         cleanup_region=config.cleanup_region,
         cleanup_region_selection_sha256=config.cleanup_region_selection_sha256,
         cleanup_candidate_regions=config.cleanup_candidate_regions,
@@ -299,7 +304,7 @@ def test_resume_and_cleanup_binding_reject_substitution() -> None:
     )
     valid.validate(config)
     with pytest.raises(CampaignError, match="cleanup binding"):
-        replace(valid, schedule_count=2).validate(config)
+        replace(valid, schedule_count=1).validate(config)
 
 
 def test_evidence_contract_is_complete_and_redacted() -> None:
@@ -511,12 +516,24 @@ def test_new_bicep_has_no_executable_milestone_7_7_coupling() -> None:
 
 
 def _runtime() -> dict[str, str]:
+    subscription_id = _object_id(100)
+    cleanup_resource_group = "rg-m78-aabbccddee-cleanup"
+    account = "aa-m78-proof"
+    account_resource_id = (
+        f"/subscriptions/{subscription_id}/resourceGroups/{cleanup_resource_group}"
+        f"/providers/Microsoft.Automation/automationAccounts/{account}"
+    ).casefold()
     return {
-        "subscriptionId": _object_id(100),
+        "subscriptionId": subscription_id,
         "sourceHead": "a" * 40,
         "canonicalBuildInputSha256": "b" * 64,
         "dockerfileSha256": "c" * 64,
         "cleanupScriptSha256": "d" * 64,
+        "automationApiVersion": "2024-10-23",
+        "cleanupControllerArmability": "blocked-provider-retention",
+        "deletedAutomationAccountBindingSha256": hashlib.sha256(
+            b"m7.8/deleted-automation-account/v1\0" + account_resource_id.encode()
+        ).hexdigest(),
         "cleanupRegion": "eastus2",
         "cleanupRegionSelectionSha256": "f" * 64,
         "cleanupCandidateRegions": CLEANUP_CANDIDATE_REGIONS_BINDING,
@@ -528,9 +545,10 @@ def _runtime() -> dict[str, str]:
         "cleanupRegionSelectionFile": "runtime/cleanup-region-selection.json",
         "cleanupDeploymentName": "m78-cleanup",
         "campaignDeploymentName": "m78-campaign",
-        "automationAccountName": "aa-m78-proof",
+        "automationAccountName": account,
         "runbookName": "Remove-M78Campaign-proof",
         "scheduleName": "m78-deadline-proof",
+        "bindingName": "11111111-1111-4111-8111-111111111111",
         "bootstrapJobName": "job-proof-bootstrap",
         "migrationJobName": "job-proof-migration",
         "workerJobName": "job-proof-worker",
@@ -544,7 +562,7 @@ def _runtime() -> dict[str, str]:
         "registryName": "acrm78proof",
         "logAnalyticsWorkspaceName": "law-m78-proof",
         "resourceGroupName": "rg-m78-aabbccddee-target",
-        "cleanupResourceGroupName": "rg-m78-aabbccddee-cleanup",
+        "cleanupResourceGroupName": cleanup_resource_group,
         "cleanupParametersFile": "runtime/m78.cleanup.parameters.json",
         "campaignParametersFile": "runtime/m78.campaign.parameters.json",
     }
@@ -576,7 +594,21 @@ def _command_result(value: object) -> dict[str, object]:
     return {"exitCode": 0, "stdout": json.dumps(value), "stderr": ""}
 
 
-def _cleanup_deployment_result(config: CampaignConfig) -> dict[str, object]:
+def _cleanup_deployment_result(
+    config: CampaignConfig, runtime: dict[str, str] | None = None
+) -> dict[str, object]:
+    runtime = runtime or _runtime()
+    subscription_id = runtime["subscriptionId"]
+    target_scope = f"/subscriptions/{subscription_id}/resourceGroups/{config.target_resource_group}"
+    self_scope = f"/subscriptions/{subscription_id}/resourceGroups/{config.cleanup_resource_group}"
+    contributor = (
+        f"/subscriptions/{subscription_id}/providers/Microsoft.Authorization/"
+        "roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c"
+    )
+    rbac = (
+        f"/subscriptions/{subscription_id}/providers/Microsoft.Authorization/"
+        "roleDefinitions/f58310d9-a9f6-439a-9e8d-f62e7b41a168"
+    )
     values = {
         "campaignId": config.campaign_id,
         "generationId": config.generation_id,
@@ -594,7 +626,22 @@ def _cleanup_deployment_result(config: CampaignConfig) -> dict[str, object]:
         "cleanupOfferEligibilitySha256": config.cleanup_offer_eligibility_sha256,
         "cleanupDeadlineUtc": config.cleanup_deadline_utc,
         "costCeilingCents": 5000,
-        "scheduleCount": 1,
+        "scheduleName": runtime["scheduleName"],
+        "bindingName": runtime["bindingName"],
+        "scheduleCount": 0,
+        "bindingCount": 0,
+        "cleanupRoleDefinitionIds": {
+            "contributor": contributor,
+            "rbacAdministrator": rbac,
+        },
+        "targetRoleAssignmentIds": [
+            f"{target_scope}/providers/Microsoft.Authorization/roleAssignments/{_object_id(301)}",
+            f"{target_scope}/providers/Microsoft.Authorization/roleAssignments/{_object_id(302)}",
+        ],
+        "selfRoleAssignmentIds": [
+            f"{self_scope}/providers/Microsoft.Authorization/roleAssignments/{_object_id(303)}",
+            f"{self_scope}/providers/Microsoft.Authorization/roleAssignments/{_object_id(304)}",
+        ],
     }
     return _command_result(
         {"properties": {"outputs": {key: {"value": value} for key, value in values.items()}}}
@@ -604,47 +651,102 @@ def _cleanup_deployment_result(config: CampaignConfig) -> dict[str, object]:
 def test_cleanup_binding_and_readback_reject_substitution() -> None:
     config = _config()
     runtime = _runtime()
-    deployment = _cleanup_deployment_result(config)
+    deployment = _cleanup_deployment_result(config, runtime)
     validate_cleanup_deployment(deployment, config)
-    tampered = _cleanup_deployment_result(config)
+    tampered = _cleanup_deployment_result(config, runtime)
     tampered_payload = json.loads(str(tampered["stdout"]))
     tampered_payload["properties"]["outputs"]["cleanupOfferEligibilitySha256"]["value"] = "0" * 64
     tampered["stdout"] = json.dumps(tampered_payload)
     with pytest.raises(CampaignError, match="cleanup binding"):
         validate_cleanup_deployment(tampered, config)
-    results = [
-        deployment,
-        _command_result({"identity": {"principalId": _object_id(201)}, "location": "East US 2"}),
-        _command_result({"name": runtime["runbookName"], "state": "Published"}),
-        _command_result(
-            {
-                "name": runtime["scheduleName"],
-                "frequency": "OneTime",
-                "startTime": config.cleanup_deadline_utc,
-            }
-        ),
-        _command_result(
+    outputs = campaign_operator._deployment_outputs(deployment)
+    principal_id = _object_id(201)
+    role_definitions = list(outputs["cleanupRoleDefinitionIds"].values())
+
+    def assignments(scope: str, ids: list[str]) -> dict[str, object]:
+        return _command_result(
             [
                 {
-                    "name": "one-bound-job-schedule",
-                    "runbook": {"name": runtime["runbookName"]},
-                    "schedule": {"name": runtime["scheduleName"]},
+                    "id": assignment_id,
+                    "principalId": principal_id,
+                    "roleDefinitionId": role_definition_id,
+                    "scope": scope,
                 }
+                for assignment_id, role_definition_id in zip(ids, role_definitions, strict=True)
             ]
+        )
+
+    target_scope = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.target_resource_group}"
+    )
+    self_scope = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.cleanup_resource_group}"
+    )
+    results = [
+        deployment,
+        _command_result({"identity": {"principalId": principal_id}, "location": "East US 2"}),
+        assignments(target_scope, outputs["targetRoleAssignmentIds"]),
+        assignments(self_scope, outputs["selfRoleAssignmentIds"]),
+        _command_result(
+            {
+                "name": runtime["runbookName"],
+                "properties": {
+                    "state": "Published",
+                    "lastModifiedTime": "2030-01-01T00:01:00Z",
+                },
+            }
         ),
         {
             "exitCode": 0,
             "stdout": "cleanup-content",
             "stderr": "",
         },
+        _command_result(
+            {
+                "name": runtime["scheduleName"],
+                "properties": {
+                    "frequency": "OneTime",
+                    "interval": 1,
+                    "startTime": config.cleanup_deadline_utc,
+                    "timeZone": "Etc/UTC",
+                },
+            }
+        ),
+        _command_result(
+            {
+                "value": [
+                    {
+                        "name": runtime["bindingName"],
+                        "properties": {
+                            "parameters": {
+                                "CampaignId": config.campaign_id,
+                                "GenerationId": config.generation_id,
+                                "SubscriptionCorrelation": config.subscription_correlation,
+                                "TargetResourceGroupName": config.target_resource_group,
+                                "CleanupResourceGroupName": config.cleanup_resource_group,
+                                "CleanupDeadlineUtc": config.cleanup_deadline_utc,
+                                "CostCeilingCents": "5000",
+                                "CleanupAuthorized": "true",
+                            },
+                            "runbook": {"name": runtime["runbookName"]},
+                            "schedule": {"name": runtime["scheduleName"]},
+                        },
+                    }
+                ]
+            }
+        ),
     ]
     runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
     validate_cleanup_readback(results, config, runtime)
-    results[3] = _command_result(
+    results[6] = _command_result(
         {
             "name": runtime["scheduleName"],
-            "frequency": "OneTime",
-            "startTime": "2030-01-01T04:01:00Z",
+            "properties": {
+                "frequency": "OneTime",
+                "interval": 1,
+                "startTime": "2030-01-01T04:01:00Z",
+                "timeZone": "Etc/UTC",
+            },
         }
     )
     with pytest.raises(CampaignError, match="readback drifted"):
@@ -762,16 +864,40 @@ def test_managed_evidence_sequence_derives_recovery_and_persists_receipt(
 
 
 def test_zero_residue_requires_all_control_plane_reads_to_be_empty() -> None:
+    config = _config()
+    runtime = _runtime()
     results = [
         _command_result(False),
         _command_result(False),
         _command_result([]),
         _command_result([]),
+        _command_result({"complete": True, "pageCount": 1, "value": []}),
+        _command_result({"complete": True, "pageCount": 1, "value": []}),
     ]
-    assert set(verify_zero_residue(results).values()) == {0}
-    results[2] = _command_result([{"type": "campaign-residue"}])
+    assert set(verify_zero_residue(results, config, runtime).values()) == {0}
+    results[5] = _command_result(
+        {
+            "complete": True,
+            "pageCount": 1,
+            "value": [
+                {
+                    "name": runtime["automationAccountName"],
+                    "location": config.cleanup_region,
+                    "properties": {
+                        "automationAccountResourceId": (
+                            f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/"
+                            f"{config.cleanup_resource_group}/providers/Microsoft.Automation/"
+                            f"automationAccounts/{runtime['automationAccountName']}"
+                        )
+                    },
+                }
+            ],
+        }
+    )
     with pytest.raises(CampaignError, match="nonzero"):
-        verify_zero_residue(results)
+        verify_zero_residue(results, config, runtime)
+    observation = observe_residue(results, config, runtime)
+    assert observation.counters["softDeletedAutomationAccounts"] == 1
 
 
 def test_resume_ledger_rejects_substituted_phase() -> None:
@@ -860,6 +986,7 @@ def test_prepare_creates_one_private_restart_safe_bundle(
     runtime_path = output / "runtime.json"
     runtime = campaign_operator.load_runtime(runtime_path)
     campaign_operator.validate_prepared_bundle(runtime_path, runtime, config)
+    assert runtime["cleanupControllerArmability"] == "blocked-provider-retention"
     assert set(json.loads(runtime_path.read_text())) == {
         *{
             "subscriptionId",
@@ -867,6 +994,9 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             "canonicalBuildInputSha256",
             "dockerfileSha256",
             "cleanupScriptSha256",
+            "automationApiVersion",
+            "cleanupControllerArmability",
+            "deletedAutomationAccountBindingSha256",
             "cleanupRegion",
             "cleanupRegionSelectionSha256",
             "cleanupCandidateRegions",
@@ -881,6 +1011,7 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             "automationAccountName",
             "runbookName",
             "scheduleName",
+            "bindingName",
             "bootstrapJobName",
             "migrationJobName",
             "workerJobName",
@@ -907,3 +1038,339 @@ def test_prepare_creates_one_private_restart_safe_bundle(
         campaign_operator.validate_prepared_bundle(runtime_path, runtime, config)
     with pytest.raises(FileExistsError):
         output.mkdir()
+
+
+def _cleanup_arm_success_results(
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    *,
+    runbook_state: str = "Published",
+    runbook_name: str | None = None,
+    modified: str | None = "2030-01-01T00:01:00Z",
+    content: str = "cleanup-content",
+    bindings: int = 1,
+) -> list[dict[str, object]]:
+    deployment = _cleanup_deployment_result(config, runtime)
+    outputs = campaign_operator._deployment_outputs(deployment)
+    principal_id = _object_id(201)
+    role_definitions = list(outputs["cleanupRoleDefinitionIds"].values())
+
+    def assignments(scope: str, ids: object) -> dict[str, object]:
+        assert isinstance(ids, list)
+        return _command_result(
+            [
+                {
+                    "id": assignment_id,
+                    "principalId": principal_id,
+                    "roleDefinitionId": role_definition_id,
+                    "scope": scope,
+                }
+                for assignment_id, role_definition_id in zip(ids, role_definitions, strict=True)
+            ]
+        )
+
+    runbook_properties: dict[str, object] = {"state": runbook_state}
+    if modified is not None:
+        runbook_properties["lastModifiedTime"] = modified
+    binding_values = [
+        {
+            "name": runtime["bindingName"],
+            "properties": {
+                "parameters": {
+                    "CampaignId": config.campaign_id,
+                    "GenerationId": config.generation_id,
+                    "SubscriptionCorrelation": config.subscription_correlation,
+                    "TargetResourceGroupName": config.target_resource_group,
+                    "CleanupResourceGroupName": config.cleanup_resource_group,
+                    "CleanupDeadlineUtc": config.cleanup_deadline_utc,
+                    "CostCeilingCents": "5000",
+                    "CleanupAuthorized": "true",
+                },
+                "runbook": {"name": runtime["runbookName"]},
+                "schedule": {"name": runtime["scheduleName"]},
+            },
+        }
+        for _ in range(bindings)
+    ]
+    target_scope = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.target_resource_group}"
+    )
+    self_scope = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.cleanup_resource_group}"
+    )
+    empty_success = {"exitCode": 0, "stdout": "", "stderr": ""}
+    return [
+        deployment,
+        _command_result({"identity": {"principalId": principal_id}, "location": "East US 2"}),
+        assignments(target_scope, outputs["targetRoleAssignmentIds"]),
+        assignments(self_scope, outputs["selfRoleAssignmentIds"]),
+        empty_success,
+        empty_success,
+        _command_result(
+            {
+                "name": runbook_name or runtime["runbookName"],
+                "properties": runbook_properties,
+            }
+        ),
+        {"exitCode": 0, "stdout": content, "stderr": ""},
+        _command_result({"status": "accepted"}),
+        _command_result(
+            {
+                "name": runtime["scheduleName"],
+                "properties": {
+                    "frequency": "OneTime",
+                    "interval": 1,
+                    "startTime": config.cleanup_deadline_utc,
+                    "timeZone": "Etc/UTC",
+                },
+            }
+        ),
+        _command_result({"status": "accepted"}),
+        _command_result({"value": binding_values}),
+    ]
+
+
+class _OrderedCleanupRunner:
+    def __init__(self, results: list[dict[str, object]], *, fail_at: int | None = None) -> None:
+        self.results = results
+        self.fail_at = fail_at
+        self.commands: list[tuple[str, ...]] = []
+
+    def run(self, command: tuple[str, ...]) -> dict[str, object]:
+        index = len(self.commands)
+        self.commands.append(command)
+        if index == self.fail_at:
+            return {"exitCode": 1, "stdout": "", "stderr": "safe failure"}
+        return self.results[index]
+
+
+def test_initial_cleanup_deployment_has_no_schedule_or_binding() -> None:
+    controller = (
+        REPOSITORY_ROOT / "infra/milestone_7_8/modules/cleanup-controller.bicep"
+    ).read_text(encoding="utf-8")
+    cleanup = (REPOSITORY_ROOT / "infra/milestone_7_8/cleanup.bicep").read_text(encoding="utf-8")
+    assert "automationAccounts/schedules@" not in controller
+    assert "automationAccounts/jobSchedules@" not in controller
+    assert "output scheduleCount int = 0" in cleanup
+    assert "output bindingCount int = 0" in cleanup
+
+
+def test_cleanup_arming_is_publication_gated_and_restart_deterministic() -> None:
+    config = _config()
+    runtime = _runtime()
+    runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
+    commands = command_plan("cleanup-arm", config, runtime)
+    rendered = [" ".join(command) for command in commands]
+    publish_index = next(
+        index for index, value in enumerate(rendered) if "runbook publish" in value
+    )
+    schedule_index = next(
+        index
+        for index, value in enumerate(rendered)
+        if "/schedules/" in value and "--method put" in value
+    )
+    binding_index = next(
+        index
+        for index, value in enumerate(rendered)
+        if "/jobSchedules/" in value and "--method put" in value
+    )
+    assert publish_index < schedule_index < binding_index
+    first = _OrderedCleanupRunner(_cleanup_arm_success_results(config, runtime))
+    _, first_hash = execute_cleanup_arm_commands(first, commands, config, runtime)  # type: ignore[arg-type]
+    second = _OrderedCleanupRunner(_cleanup_arm_success_results(config, runtime))
+    _, second_hash = execute_cleanup_arm_commands(second, commands, config, runtime)  # type: ignore[arg-type]
+    assert first.commands == second.commands == list(commands)
+    assert first_hash == second_hash
+
+
+def test_publication_failure_and_draft_readback_stop_before_schedule() -> None:
+    config = _config()
+    runtime = _runtime()
+    runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
+    commands = command_plan("cleanup-arm", config, runtime)
+    publication_failure = _OrderedCleanupRunner(
+        _cleanup_arm_success_results(config, runtime), fail_at=5
+    )
+    with pytest.raises(CampaignError, match="failed safely"):
+        execute_cleanup_arm_commands(publication_failure, commands, config, runtime)  # type: ignore[arg-type]
+    assert len(publication_failure.commands) == 6
+    assert not any("/schedules/" in " ".join(item) for item in publication_failure.commands)
+
+    draft = _OrderedCleanupRunner(
+        _cleanup_arm_success_results(config, runtime, runbook_state="Edit")
+    )
+    with pytest.raises(CampaignError, match="not published"):
+        execute_cleanup_arm_commands(draft, commands, config, runtime)  # type: ignore[arg-type]
+    assert len(draft.commands) == 8
+    assert not any("/schedules/" in " ".join(item) for item in draft.commands)
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"modified": None}, "stale or missing"),
+        ({"runbook_name": "wrong-runbook"}, "identity differs"),
+        ({"content": "wrong-content"}, "content differs"),
+        ({"bindings": 0}, "exactly one"),
+        ({"bindings": 2}, "exactly one"),
+    ],
+)
+def test_cleanup_arming_rejects_missing_stale_mismatched_or_duplicate_proof(
+    changes: dict[str, object], message: str
+) -> None:
+    config = _config()
+    runtime = _runtime()
+    runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
+    runner = _OrderedCleanupRunner(
+        _cleanup_arm_success_results(config, runtime, **changes)  # type: ignore[arg-type]
+    )
+    with pytest.raises(CampaignError, match=message):
+        execute_cleanup_arm_commands(
+            runner,
+            command_plan("cleanup-arm", config, runtime),
+            config,
+            runtime,  # type: ignore[arg-type]
+        )
+
+
+def test_ledger_cannot_record_armed_or_finalized_early() -> None:
+    config = _config()
+    ledger = Ledger(config.campaign_id, config.generation_id)
+    ledger.bind_deadline(config.cleanup_deadline_utc)
+    for phase in ORDER[1 : ORDER.index(Phase.CLEANUP_DEPLOYED) + 1]:
+        ledger.transition(phase, NOW)
+    with pytest.raises(CampaignError, match="arming evidence"):
+        ledger.transition(Phase.CLEANUP_ARMED, NOW)
+    ledger.record_cleanup_arm_evidence("a" * 64)
+    ledger.transition(Phase.CLEANUP_ARMED, NOW)
+    ledger.phase = Phase.RESIDUE_VERIFIED.value
+    with pytest.raises(CampaignError, match="terminal receipt"):
+        terminal_receipt(ledger)
+
+
+def test_residue_inventory_paginates_and_preserves_unrelated_deleted_accounts() -> None:
+    config = _config()
+    runtime = _runtime()
+    commands = command_plan("residue", config, runtime)
+    unrelated_id = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/unrelated/"
+        "providers/Microsoft.Automation/automationAccounts/unrelated-account"
+    )
+    exact_id = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/"
+        f"{config.cleanup_resource_group}/providers/Microsoft.Automation/"
+        f"automationAccounts/{runtime['automationAccountName']}"
+    )
+
+    class PaginatedRunner:
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, ...]] = []
+
+        def run(self, command: tuple[str, ...]) -> dict[str, object]:
+            self.commands.append(command)
+            rendered = " ".join(command)
+            if command[:3] == ("az", "group", "exists"):
+                return _command_result(False)
+            if command[:3] == ("az", "resource", "list"):
+                return _command_result([])
+            if command[:3] == ("az", "role", "assignment"):
+                return _command_result([])
+            if "active-continuation" in rendered:
+                return _command_result({"value": []})
+            if "/automationAccounts?" in rendered:
+                return _command_result(
+                    {
+                        "value": [],
+                        "nextLink": "https://management.azure.com/active-continuation",
+                    }
+                )
+            if "/deletedAutomationAccounts?" in rendered:
+                return _command_result(
+                    {
+                        "value": [
+                            {
+                                "name": "unrelated-account",
+                                "location": "eastus",
+                                "properties": {"automationAccountResourceId": unrelated_id},
+                            },
+                            {
+                                "name": runtime["automationAccountName"],
+                                "location": config.cleanup_region,
+                                "properties": {"automationAccountResourceId": exact_id},
+                            },
+                        ]
+                    }
+                )
+            raise AssertionError(rendered)
+
+    runner = PaginatedRunner()
+    results = execute_residue_commands(runner, commands)  # type: ignore[arg-type]
+    observation = observe_residue(results, config, runtime)
+    assert observation.active_inventory_pages == 2
+    assert observation.deleted_inventory_pages == 1
+    assert observation.counters["softDeletedAutomationAccounts"] == 1
+    assert len(observation.unrelated_deleted_identity_sha256) == 1
+    assert len(runner.commands) == 7
+    ledger = Ledger(config.campaign_id, config.generation_id)
+    disposition = ledger.record_residue(
+        observation.counters, evidence_sha256=observation.evidence_sha256
+    )
+    assert disposition == "provider-retained"
+    ledger.phase = Phase.CLEANED.value
+    with pytest.raises(CampaignError, match="zero-residue"):
+        ledger.transition(Phase.RESIDUE_VERIFIED, NOW)
+
+
+def test_malformed_deleted_attribution_fails_closed_and_no_purge_is_planned() -> None:
+    config = _config()
+    runtime = _runtime()
+    malformed_results = [
+        _command_result(False),
+        _command_result(False),
+        _command_result([]),
+        _command_result([]),
+        _command_result({"complete": True, "pageCount": 1, "value": []}),
+        _command_result(
+            {
+                "complete": True,
+                "pageCount": 1,
+                "value": [
+                    {
+                        "name": runtime["automationAccountName"],
+                        "location": config.cleanup_region,
+                        "properties": {},
+                    }
+                ],
+            }
+        ),
+    ]
+    with pytest.raises(CampaignError, match="attribution is malformed"):
+        observe_residue(malformed_results, config, runtime)
+    for operation in OPERATION_PHASE:
+        for command in command_plan(operation, config, runtime):
+            rendered = " ".join(command)
+            if "deletedAutomationAccounts" in rendered:
+                assert command[command.index("--method") + 1] == "get"
+
+
+def test_retention_receipt_and_terminal_schema_are_closed_and_sanitized() -> None:
+    schema_root = REPOSITORY_ROOT / "infra/milestone_7_8/schemas"
+    for path in schema_root.glob("*.json"):
+        value = json.loads(path.read_text(encoding="utf-8"))
+        assert value["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+        assert value.get("additionalProperties") is False
+    terminal_schema = json.loads(
+        (schema_root / "terminal-receipt.schema.json").read_text(encoding="utf-8")
+    )
+    assert "softDeletedAutomationAccounts" in terminal_schema["properties"]["residue"]["required"]
+    receipt = json.loads(
+        (
+            REPOSITORY_ROOT / "evidence/milestone_7_8/automation-retention-cleanup-remediation.json"
+        ).read_text(encoding="utf-8")
+    )
+    encoded = json.dumps(receipt, sort_keys=True)
+    assert receipt["azureMutationCount"] == 0
+    assert receipt["residueAfter"]["softDeletedAutomationAccounts"] == 1
+    assert receipt["supportRequestSubmitted"] is False
+    assert "C:\\Users" not in encoded
+    assert "/subscriptions/" not in encoded

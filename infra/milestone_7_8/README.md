@@ -13,17 +13,18 @@ existence.
   Server, one private Premium registry, one internal Container Apps
   environment, and the bounded API, worker, bootstrap, migration, recovery,
   and evidence jobs.
-- `cleanup.bicep` creates a cleanup controller in a different resource group,
-  gives its system identity Contributor plus Role Based Access Control
-  Administrator only on the two exact campaign resource groups, and binds one
-  published runbook to one immutable deadline. The second exact-scope role is
-  required to remove the campaign RBAC extensions themselves.
+- `cleanup.bicep` creates a cleanup controller in a different resource group
+  with a draft runbook and zero schedules/bindings, then gives its system
+  identity Contributor plus Role Based Access Control Administrator only on the
+  two exact campaign resource groups. The operator may publish, verify, create
+  the immutable schedule, and bind it only in that order. The second exact-scope
+  role is required to remove the campaign RBAC extensions themselves.
 - `modules/` contains the campaign resources, identities, cleanup controller,
   and exact-scope cleanup role assignments.
 - `schemas/` closes the configuration, private runtime, cleanup-region
   selection receipt, principal manifest,
-  control-plane evidence, image admission, managed execution receipt, and
-  restart ledger shapes.
+  control-plane evidence, image admission, managed execution receipt, restart
+  ledger, and zero-residue terminal receipt shapes.
 - `prepare.py` creates one untracked `.runtime/milestone_7_8` generation from a
   clean, committed source tree. It refuses an upstream, a stash count other
   than five, a second output directory, a malformed campaign, or a mismatched
@@ -37,7 +38,8 @@ existence.
   discovery failure has no provider-only fallback.
 - `operator.py` is dry-run by default. `--execute` advances one validated,
   persisted phase at a time and starts cleanup after any failure following
-  scope creation.
+  scope creation. Current bundles are explicitly blocked before `scope-create`
+  because an Automation-based controller cannot satisfy permanent zero residue.
 - `azure_cli.py` is the sole Azure CLI process boundary. It prefers a native
   launcher, safely supports trusted Windows `az.cmd`/`az.bat` launchers through
   the absolute system `cmd.exe` with `shell=False`, rejects repository-local or
@@ -45,8 +47,9 @@ existence.
   results.
 - `campaign.py` enforces the USD 50 ceiling, at least 25 percent contingency,
   four-hour immutable deadline, one resource generation, at most one image
-  generation, exactly one digest-bound admission scan, ordered resume, and
-  zero-residue terminal receipt.
+  generation, exactly one digest-bound admission scan, ordered resume,
+  completely paginated active/deleted Automation inventory, an explicit
+  provider-retained disposition, and zero-residue terminal receipt.
 - `canonical_inputs.py` hashes the exact Git tree entries used by the API image;
   it does not depend on historical 7.7 image metadata.
 
@@ -118,7 +121,16 @@ public-offer set
 `JapanWest2`/`japanwest` variant rather than guessing. Sanitized read-only
 discovery now selects `southeastasia`: `eastus2`, `westus`, `eastus`, and
 `northeurope` are soft-deleted-account occupied; `southcentralus` and `westus2`
-are offer-ineligible. This correction executed no campaign and made no Azure
-mutation. M78-PG-E01, M78-PG-E02, M78-PG-E03, M78-TI-E01, and M78-PG-E04
-remain open. Milestone 7.8 remains incomplete, and the object-storage audit
-remains unstarted.
+are offer-ineligible.
+
+The later critical cleanup reconciliation proved M78-PG-010 and M78-PG-011:
+the original deployment bound a schedule before publication, and its residue
+model omitted the exact soft-deleted Automation account. Publication is now an
+imperative proof-gated sequence and soft-deleted accounts are explicit residue.
+Microsoft exposes retention/readback but no documented self-service permanent
+delete for `deletedAutomationAccounts`; preparation therefore marks the
+Automation controller `blocked-provider-retention`, and the operator prevents
+a new campaign mutation. The exact retained private runtime remains ignored
+and preserved. M78-PG-E01, M78-PG-E02, M78-PG-E03, M78-TI-E01, and M78-PG-E04
+remain open. No new campaign is authorized, Milestone 7.8 remains incomplete,
+and the object-storage audit remains unstarted.

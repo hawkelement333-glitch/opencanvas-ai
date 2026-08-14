@@ -59,16 +59,20 @@ if (Get-AzResourceGroup -Name $TargetResourceGroupName -ErrorAction SilentlyCont
 }
 
 $receipt = [ordered]@{
-  version = 'm7.8-cleanup-receipt-v1'
+  version = 'm7.8-cleanup-receipt-v2'
   campaignCorrelation = Get-Correlation 'campaign' $CampaignId
   generationCorrelation = Get-Correlation 'generation' $GenerationId
   targetResourceGroups = 0
-  status = 'target-zero-residue-self-removal-started'
+  automationAccounts = 1
+  softDeletedAutomationAccounts = 'pending-independent-readback'
+  cleanupDisposition = 'provider-retention-pending'
+  status = 'target-removed-cleanup-group-delete-started'
   observedAtUtc = [DateTime]::UtcNow.ToString('o')
 }
 $receipt | ConvertTo-Json -Compress
 
-# The ARM delete request survives termination of this runbook and removes the
-# schedule, runbook, identity, and all campaign-scoped role assignments.
+# The ARM delete request survives termination of this runbook. It removes the
+# active cleanup group and scoped RBAC, but Automation account retention remains
+# nonzero until an independently paginated deleted-account readback proves absence.
 $selfDeletePath = "/subscriptions/$($context.Subscription.Id)/resourceGroups/${CleanupResourceGroupName}?api-version=2024-11-01"
 Invoke-AzRestMethod -Path $selfDeletePath -Method DELETE | Out-Null

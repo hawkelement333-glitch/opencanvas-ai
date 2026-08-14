@@ -43,12 +43,8 @@ def _git(*arguments: str) -> str:
 
 def _write_new(path: Path, value: object) -> None:
     if path.exists():
-        raise CampaignError(
-            f"refusing to replace existing generation file: {path.name}"
-        )
-    path.write_text(
-        json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+        raise CampaignError(f"refusing to replace existing generation file: {path.name}")
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _parameters(values: dict[str, object]) -> dict[str, object]:
@@ -77,10 +73,7 @@ def main() -> int:
             raise FileExistsError(args.output)
         if _git("status", "--porcelain=v1"):
             raise CampaignError("campaign preparation requires a clean repository")
-        if (
-            _git("branch", "--show-current")
-            != "milestone-7-8-production-readiness-audit-local"
-        ):
+        if _git("branch", "--show-current") != "milestone-7-8-production-readiness-audit-local":
             raise CampaignError("campaign preparation branch is invalid")
         if _git(
             "for-each-ref",
@@ -93,9 +86,7 @@ def main() -> int:
         source_head = _git("rev-parse", "HEAD")
         image_inputs = canonical_snapshot(source_head)
         cleanup_script_sha256 = hashlib.sha256(
-            (
-                Path(__file__).resolve().parent / "scripts/Remove-M78Campaign.ps1"
-            ).read_bytes()
+            (Path(__file__).resolve().parent / "scripts/Remove-M78Campaign.ps1").read_bytes()
         ).hexdigest()
         subscription_id = os.environ.get("M78_SUBSCRIPTION_ID", "")
         tenant_id = os.environ.get("M78_TENANT_ID", "")
@@ -103,9 +94,7 @@ def main() -> int:
             uuid.UUID(subscription_id)
             uuid.UUID(tenant_id)
         except ValueError as exc:
-            raise CampaignError(
-                "runtime subscription or tenant binding is missing"
-            ) from exc
+            raise CampaignError("runtime subscription or tenant binding is missing") from exc
         observed_at = datetime.now(UTC).replace(microsecond=0)
         region_selection = discover_automation_region(
             SubprocessRunner(), subscription_id, observed_at=observed_at
@@ -117,15 +106,30 @@ def main() -> int:
             raise CampaignError("cleanup candidate region binding differs")
         offer_eligible_regions = ",".join(region_selection.offer_eligible_regions)
         generation_id = f"g1-{secrets.token_hex(6)}"
-        suffix = hashlib.sha256(
-            f"{args.campaign_id}\0{generation_id}".encode()
-        ).hexdigest()[:10]
+        suffix = hashlib.sha256(f"{args.campaign_id}\0{generation_id}".encode()).hexdigest()[:10]
         deadline = utc(observed_at + timedelta(hours=4))
         target_rg = f"rg-m78-{suffix}-target"
         cleanup_rg = f"rg-m78-{suffix}-cleanup"
         account = f"aa-m78-{suffix}"
         runbook = f"Remove-M78Campaign-{suffix}"
         schedule = f"m78-deadline-{suffix}"
+        binding = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                (
+                    "solarplexus-mobius/milestone-7.8/cleanup-binding/"
+                    f"{args.campaign_id}/{generation_id}/{deadline}"
+                ),
+            )
+        )
+        deleted_account_resource_id = (
+            f"/subscriptions/{subscription_id}/resourceGroups/{cleanup_rg}"
+            "/providers/Microsoft.Automation/automationAccounts/"
+            f"{account}"
+        ).casefold()
+        deleted_account_binding_sha256 = hashlib.sha256(
+            b"m7.8/deleted-automation-account/v1\0" + deleted_account_resource_id.encode()
+        ).hexdigest()
         identity_names = {
             role: f"id-m78-{suffix}-{role}"
             for role in ("bootstrap", "migration", "api", "worker", "evidence")
@@ -150,17 +154,11 @@ def main() -> int:
             "mobius.cost-ceiling-cents": "5000",
             "mobius.cleanup-region-selection-sha256": region_selection_sha256,
             "mobius.cleanup-candidate-regions": candidate_regions,
-            "mobius.cleanup-offer-classification": (
-                region_selection.offer_classification
-            ),
-            "mobius.cleanup-offer-disposition": (
-                region_selection.offer_eligibility_disposition
-            ),
+            "mobius.cleanup-offer-classification": (region_selection.offer_classification),
+            "mobius.cleanup-offer-disposition": (region_selection.offer_eligibility_disposition),
             "mobius.cleanup-offer-regions": offer_eligible_regions,
             "mobius.cleanup-offer-source": region_selection.offer_eligibility_source,
-            "mobius.cleanup-offer-eligibility-sha256": (
-                region_selection.offer_eligibility_sha256
-            ),
+            "mobius.cleanup-offer-eligibility-sha256": (region_selection.offer_eligibility_sha256),
             "mobius.owner": "managed-postgresql-evidence",
             "mobius.expiry": deadline,
         }
@@ -197,14 +195,10 @@ def main() -> int:
             "cleanupRegionSelectionSha256": region_selection_sha256,
             "cleanupCandidateRegions": candidate_regions,
             "cleanupOfferClassification": region_selection.offer_classification,
-            "cleanupOfferEligibilityDisposition": (
-                region_selection.offer_eligibility_disposition
-            ),
+            "cleanupOfferEligibilityDisposition": (region_selection.offer_eligibility_disposition),
             "cleanupOfferEligibleRegions": offer_eligible_regions,
             "cleanupOfferEligibilitySource": region_selection.offer_eligibility_source,
-            "cleanupOfferEligibilitySha256": (
-                region_selection.offer_eligibility_sha256
-            ),
+            "cleanupOfferEligibilitySha256": (region_selection.offer_eligibility_sha256),
             "imageDigest": None,
         }
         cleanup_parameters = _parameters(
@@ -222,16 +216,13 @@ def main() -> int:
                     region_selection.offer_eligibility_disposition
                 ),
                 "cleanupOfferEligibleRegions": offer_eligible_regions,
-                "cleanupOfferEligibilitySource": (
-                    region_selection.offer_eligibility_source
-                ),
-                "cleanupOfferEligibilitySha256": (
-                    region_selection.offer_eligibility_sha256
-                ),
+                "cleanupOfferEligibilitySource": (region_selection.offer_eligibility_source),
+                "cleanupOfferEligibilitySha256": (region_selection.offer_eligibility_sha256),
                 "cleanupDeadlineUtc": deadline,
                 "automationAccountName": account,
                 "cleanupRunbookName": runbook,
                 "cleanupScheduleName": schedule,
+                "cleanupBindingName": binding,
                 "lifecycleTags": tags,
             }
         )
@@ -252,12 +243,8 @@ def main() -> int:
                     region_selection.offer_eligibility_disposition
                 ),
                 "cleanupOfferEligibleRegions": offer_eligible_regions,
-                "cleanupOfferEligibilitySource": (
-                    region_selection.offer_eligibility_source
-                ),
-                "cleanupOfferEligibilitySha256": (
-                    region_selection.offer_eligibility_sha256
-                ),
+                "cleanupOfferEligibilitySource": (region_selection.offer_eligibility_source),
+                "cleanupOfferEligibilitySha256": (region_selection.offer_eligibility_sha256),
                 "cleanupResourceGroupName": cleanup_rg,
                 "cleanupAutomationAccountName": account,
                 "tenantId": tenant_id,
@@ -286,24 +273,24 @@ def main() -> int:
             "canonicalBuildInputSha256": str(image_inputs["buildInputSha256"]),
             "dockerfileSha256": str(image_inputs["dockerfileSha256"]),
             "cleanupScriptSha256": cleanup_script_sha256,
+            "automationApiVersion": "2024-10-23",
+            "cleanupControllerArmability": "blocked-provider-retention",
+            "deletedAutomationAccountBindingSha256": (deleted_account_binding_sha256),
             "cleanupRegion": cleanup_region,
             "cleanupRegionSelectionSha256": region_selection_sha256,
             "cleanupCandidateRegions": candidate_regions,
             "cleanupOfferClassification": region_selection.offer_classification,
-            "cleanupOfferEligibilityDisposition": (
-                region_selection.offer_eligibility_disposition
-            ),
+            "cleanupOfferEligibilityDisposition": (region_selection.offer_eligibility_disposition),
             "cleanupOfferEligibleRegions": offer_eligible_regions,
             "cleanupOfferEligibilitySource": region_selection.offer_eligibility_source,
-            "cleanupOfferEligibilitySha256": (
-                region_selection.offer_eligibility_sha256
-            ),
+            "cleanupOfferEligibilitySha256": (region_selection.offer_eligibility_sha256),
             "cleanupRegionSelectionFile": str(region_selection_path),
             "cleanupDeploymentName": f"m78-cleanup-{suffix}",
             "campaignDeploymentName": f"m78-campaign-{suffix}",
             "automationAccountName": account,
             "runbookName": runbook,
             "scheduleName": schedule,
+            "bindingName": binding,
             "bootstrapJobName": f"job-m78-{suffix}-bootstrap",
             "migrationJobName": f"job-m78-{suffix}-migration",
             "workerJobName": f"job-m78-{suffix}-worker",
@@ -330,28 +317,18 @@ def main() -> int:
             json.dumps(
                 {
                     "status": "prepared",
-                    "campaignCorrelation": sanitize(
-                        args.campaign_id, domain="campaign"
-                    ),
-                    "generationCorrelation": sanitize(
-                        generation_id, domain="generation"
-                    ),
+                    "campaignCorrelation": sanitize(args.campaign_id, domain="campaign"),
+                    "generationCorrelation": sanitize(generation_id, domain="generation"),
                     "cleanupRegion": cleanup_region,
                     "cleanupRegionSelectionSha256": region_selection_sha256,
                     "cleanupCandidateRegions": candidate_regions,
-                    "cleanupOfferClassification": (
-                        region_selection.offer_classification
-                    ),
+                    "cleanupOfferClassification": (region_selection.offer_classification),
                     "cleanupOfferEligibilityDisposition": (
                         region_selection.offer_eligibility_disposition
                     ),
                     "cleanupOfferEligibleRegions": offer_eligible_regions,
-                    "cleanupOfferEligibilitySource": (
-                        region_selection.offer_eligibility_source
-                    ),
-                    "cleanupOfferEligibilitySha256": (
-                        region_selection.offer_eligibility_sha256
-                    ),
+                    "cleanupOfferEligibilitySource": (region_selection.offer_eligibility_source),
+                    "cleanupOfferEligibilitySha256": (region_selection.offer_eligibility_sha256),
                     "config": str(config_path),
                     "runtime": str(runtime_path),
                     "ledger": str(ledger_path),
