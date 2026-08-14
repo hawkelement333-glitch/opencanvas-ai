@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign-ledger:v1",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign-ledger:v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -25,7 +25,12 @@
     "actual_cost_usd",
     "residue",
     "cleanup_region",
-    "cleanup_region_selection_sha256"
+    "cleanup_region_selection_sha256",
+    "cleanup_offer_classification",
+    "cleanup_offer_eligibility_disposition",
+    "cleanup_offer_eligible_regions",
+    "cleanup_offer_eligibility_source",
+    "cleanup_offer_eligibility_sha256"
   ],
   "properties": {
     "campaign_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,47}$" },
@@ -81,6 +86,25 @@
     },
     "cleanup_region": { "type": "string", "pattern": "^[a-z][a-z0-9]{2,31}$" },
     "cleanup_region_selection_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "cleanup_offer_classification": {
+      "enum": ["restricted-public-offer", "unclassified"]
+    },
+    "cleanup_offer_eligibility_disposition": {
+      "enum": [
+        "restricted-offer-metadata-confirmed",
+        "restrictive-public-baseline-applied"
+      ]
+    },
+    "cleanup_offer_eligible_regions": {
+      "const": "eastus,eastus2,northeurope,southeastasia,westus"
+    },
+    "cleanup_offer_eligibility_source": {
+      "const": "microsoft-automation-restricted-public-offer-regions-2026-08-v1"
+    },
+    "cleanup_offer_eligibility_sha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     }

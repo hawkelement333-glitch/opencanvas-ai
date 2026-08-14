@@ -18,6 +18,13 @@ param cleanupLocation string
 @minLength(64)
 @maxLength(64)
 param cleanupRegionSelectionSha256 string
+param cleanupOfferClassification string
+param cleanupOfferEligibilityDisposition string
+param cleanupOfferEligibleRegions string
+param cleanupOfferEligibilitySource string
+@minLength(64)
+@maxLength(64)
+param cleanupOfferEligibilitySha256 string
 param cleanupDeadlineUtc string
 param automationAccountName string
 param cleanupRunbookName string
@@ -46,6 +53,11 @@ module controller './modules/cleanup-controller.bicep' = {
     cleanupResourceGroupName: cleanupResourceGroupName
     cleanupLocation: cleanupLocation
     cleanupRegionSelectionSha256: cleanupRegionSelectionSha256
+    cleanupOfferClassification: cleanupOfferClassification
+    cleanupOfferEligibilityDisposition: cleanupOfferEligibilityDisposition
+    cleanupOfferEligibleRegions: cleanupOfferEligibleRegions
+    cleanupOfferEligibilitySource: cleanupOfferEligibilitySource
+    cleanupOfferEligibilitySha256: cleanupOfferEligibilitySha256
     cleanupDeadlineUtc: cleanupDeadlineUtc
     automationAccountName: automationAccountName
     cleanupRunbookName: cleanupRunbookName
@@ -132,5 +144,10 @@ output targetResourceGroupName string = targetResourceGroupName
 output cleanupResourceGroupName string = cleanupResourceGroupName
 output cleanupLocation string = cleanupLocation
 output cleanupRegionSelectionSha256 string = cleanupRegionSelectionSha256
+output cleanupOfferClassification string = cleanupOfferClassification
+output cleanupOfferEligibilityDisposition string = cleanupOfferEligibilityDisposition
+output cleanupOfferEligibleRegions string = cleanupOfferEligibleRegions
+output cleanupOfferEligibilitySource string = cleanupOfferEligibilitySource
+output cleanupOfferEligibilitySha256 string = cleanupOfferEligibilitySha256
 output costCeilingCents int = costCeilingCents
 output scheduleCount int = 1

@@ -17,6 +17,9 @@ sys.path.insert(0, str(REPOSITORY_ROOT))
 # ruff: noqa: E402
 from infra.milestone_7_8.automation_region import (
     CLEANUP_REGION_CANDIDATES,
+    OFFER_ELIGIBILITY_SOURCE,
+    OFFER_ELIGIBLE_REGIONS_BINDING,
+    RESTRICTED_OFFER_ELIGIBLE_REGIONS,
     AutomationRegionSelection,
     automation_region_discovery_commands,
     discover_automation_region,
@@ -62,19 +65,38 @@ def _provider(locations: Sequence[object] | None = None) -> dict[str, object]:
 
 def _discovery_results(
     *,
+    subscription: object | None = None,
     locations: Sequence[object] | None = None,
     active: Sequence[object] | None = None,
+    active_next_link: object = None,
     deleted: Sequence[object] | None = None,
+    deleted_next_link: object = None,
     assignments: Sequence[object] | None = None,
 ) -> tuple[dict[str, object], ...]:
     return (
         _result({"environmentName": "AzureCloud", "state": "Enabled"}),
+        _result(
+            subscription
+            if subscription is not None
+            else {
+                "subscriptionPolicies": {
+                    "locationPlacementId": "Public_2014-09-01",
+                    "quotaId": "AzureForStudents_2018-01-01",
+                    "spendingLimit": "On",
+                }
+            }
+        ),
         _result(_provider(locations)),
-        _result(list(active) if active is not None else []),
+        _result(
+            {
+                "accounts": list(active) if active is not None else [],
+                "nextLink": active_next_link,
+            }
+        ),
         _result(
             {
                 "accounts": list(deleted) if deleted is not None else [],
-                "nextLink": None,
+                "nextLink": deleted_next_link,
             }
         ),
         _result(list(assignments) if assignments is not None else []),
@@ -98,9 +120,12 @@ class FakeRunner:
 
 def _select(
     *,
+    subscription: object | None = None,
     locations: Sequence[object] | None = None,
     active: Sequence[object] | None = None,
+    active_next_link: object = None,
     deleted: Sequence[object] | None = None,
+    deleted_next_link: object = None,
     assignments: Sequence[object] | None = None,
     definitions: dict[str, object] | None = None,
     candidate_order: tuple[str, ...] = CLEANUP_REGION_CANDIDATES,
@@ -108,9 +133,12 @@ def _select(
     return select_automation_region_from_results(
         FakeRunner(definitions),
         _discovery_results(
+            subscription=subscription,
             locations=locations,
             active=active,
+            active_next_link=active_next_link,
             deleted=deleted,
+            deleted_next_link=deleted_next_link,
             assignments=assignments,
         ),
         observed_at=NOW,
@@ -135,6 +163,11 @@ def _config(selection: AutomationRegionSelection) -> CampaignConfig:
         resource_items=(CostItem("bounded", "5.13664", 4),),
         principal_manifest_sha256="c" * 64,
         cleanup_region_selection_sha256=selection.sha256(),
+        cleanup_offer_classification=selection.offer_classification,
+        cleanup_offer_eligibility_disposition=(selection.offer_eligibility_disposition),
+        cleanup_offer_eligible_regions=",".join(selection.offer_eligible_regions),
+        cleanup_offer_eligibility_source=selection.offer_eligibility_source,
+        cleanup_offer_eligibility_sha256=selection.offer_eligibility_sha256,
     )
 
 
@@ -151,6 +184,11 @@ def _runtime(selection: AutomationRegionSelection) -> dict[str, str]:
         "cleanupParametersFile": "runtime/cleanup.parameters.json",
         "cleanupRegion": selection.selected_region,
         "cleanupRegionSelectionSha256": selection.sha256(),
+        "cleanupOfferClassification": selection.offer_classification,
+        "cleanupOfferEligibilityDisposition": (selection.offer_eligibility_disposition),
+        "cleanupOfferEligibleRegions": ",".join(selection.offer_eligible_regions),
+        "cleanupOfferEligibilitySource": selection.offer_eligibility_source,
+        "cleanupOfferEligibilitySha256": selection.offer_eligibility_sha256,
     }
 
 
@@ -200,8 +238,89 @@ def test_supported_policy_allowed_zero_occupancy_alternate_is_deterministic() ->
         definitions={definition_id: definition},
     )
 
-    assert selection.selected_region == "southcentralus"
+    assert selection.selected_region == "westus"
     assert selection.candidates[0].status == "policy-disallowed"
+    assert selection.candidates[1].status == "offer-ineligible"
+    assert selection.candidates[2].status == "offer-ineligible"
+
+
+def test_m78_pg_008_restricted_offer_is_an_independent_mandatory_gate() -> None:
+    selection = _select(
+        locations=["East US 2", "South Central US", "West US 2", "West US"],
+    )
+
+    assert selection.selected_region == "eastus2"
+    by_region = {item.region: item for item in selection.candidates}
+    for region in ("southcentralus", "westus2"):
+        evidence = by_region[region]
+        assert evidence.provider_supported is True
+        assert evidence.offer_eligible is False
+        assert evidence.policy_allowed is True
+        assert evidence.active_account_count == 0
+        assert evidence.soft_deleted_account_count == 0
+        assert evidence.status == "offer-ineligible"
+    assert selection.offer_eligible_regions == RESTRICTED_OFFER_ELIGIBLE_REGIONS
+    assert selection.offer_eligibility_source == OFFER_ELIGIBILITY_SOURCE
+
+
+def test_active_and_soft_deleted_occupancy_are_independent_offer_aware_gates() -> None:
+    active = _select(active=[{"location": "East US 2"}])
+    assert active.selected_region == "westus"
+    eastus2 = active.candidates[0]
+    assert (eastus2.active_account_count, eastus2.soft_deleted_account_count) == (1, 0)
+    assert eastus2.status == "occupied"
+
+    deleted = _select(deleted=[{"location": "East US 2"}])
+    assert deleted.selected_region == "westus"
+    eastus2 = deleted.candidates[0]
+    assert (eastus2.active_account_count, eastus2.soft_deleted_account_count) == (0, 1)
+    assert eastus2.status == "occupied"
+
+
+@pytest.mark.parametrize(
+    "subscription",
+    [
+        {},
+        {"subscriptionPolicies": None},
+        {"subscriptionPolicies": {"quotaId": None}},
+        {"subscriptionPolicies": {"quotaId": "UnknownEnterpriseOffer"}},
+    ],
+)
+def test_unknown_or_malformed_offer_metadata_applies_safe_restrictive_baseline(
+    subscription: object,
+) -> None:
+    selection = _select(subscription=subscription)
+
+    assert selection.offer_classification == "unclassified"
+    assert selection.offer_eligibility_disposition == ("restrictive-public-baseline-applied")
+    assert selection.offer_eligible_regions == RESTRICTED_OFFER_ELIGIBLE_REGIONS
+    assert selection.candidates[1].status == "offer-ineligible"
+    assert selection.candidates[2].status == "offer-ineligible"
+
+
+def test_provider_and_policy_cannot_expand_restricted_offer_eligibility() -> None:
+    with pytest.raises(CampaignError, match="automation-region-offer-ineligible"):
+        _select(locations=["South Central US", "West US 2"])
+
+
+def test_caller_candidate_or_offer_bypass_is_not_accepted() -> None:
+    with pytest.raises(CampaignError, match="reviewed contract"):
+        _select(
+            candidate_order=(
+                "southcentralus",
+                "westus2",
+                "eastus2",
+                "westus",
+            )
+        )
+
+
+def test_documented_japanwest2_alias_is_not_guessed_from_japan_west_provider() -> None:
+    selection = _select(locations=["East US 2", "Japan West"])
+
+    assert "japanwest" not in selection.offer_eligible_regions
+    assert "japanwest2" not in selection.offer_eligible_regions
+    assert selection.selected_region == "eastus2"
 
 
 def test_provider_order_and_case_do_not_change_selection_or_hash() -> None:
@@ -295,13 +414,13 @@ def test_all_candidates_occupied_stops_before_an_armable_selection() -> None:
         _select(active=active)
 
 
-def test_soft_deleted_inventory_pagination_fails_closed() -> None:
+@pytest.mark.parametrize("inventory_index", [3, 4])
+def test_active_and_soft_deleted_inventory_pagination_fail_closed(
+    inventory_index: int,
+) -> None:
     results = list(_discovery_results())
-    results[3] = _result(
-        {
-            "accounts": [],
-            "nextLink": "https://management.azure.com/redacted-next-page",
-        }
+    results[inventory_index] = _result(
+        {"accounts": [], "nextLink": "https://management.azure.com/next-page"}
     )
     with pytest.raises(CampaignError, match="inventory is incomplete"):
         select_automation_region_from_results(FakeRunner(), tuple(results))
@@ -369,8 +488,10 @@ def test_selection_receipt_and_ledger_binding_are_immutable() -> None:
     assert selection_from_document(selection.document()).sha256() == selection.sha256()
     with pytest.raises(CampaignError, match="observation time"):
         replace(selection, observed_at_utc="2030-01-01T01:00:00+01:00").validate()
-    with pytest.raises(CampaignError, match="region selection was substituted"):
+    with pytest.raises(CampaignError, match="selection or offer eligibility"):
         ledger.validate_resume(replace(config, cleanup_region="westus"))
+    with pytest.raises(CampaignError, match="selection or offer eligibility"):
+        ledger.validate_resume(replace(config, cleanup_offer_eligibility_sha256="0" * 64))
 
 
 def test_selection_is_bound_to_plan_bicep_schemas_and_terminal_receipt() -> None:
@@ -389,18 +510,56 @@ def test_selection_is_bound_to_plan_bicep_schemas_and_terminal_receipt() -> None
         "infra/milestone_7_8/schemas/campaign.schema.json",
         "infra/milestone_7_8/schemas/runtime.schema.json",
     ):
-        assert "cleanupRegionSelectionSha256" in (REPOSITORY_ROOT / relative).read_text(
-            encoding="utf-8"
-        )
-    assert "cleanup_region_selection_sha256" in (
-        REPOSITORY_ROOT / "infra/milestone_7_8/schemas/ledger.schema.json"
-    ).read_text(encoding="utf-8")
+        content = (REPOSITORY_ROOT / relative).read_text(encoding="utf-8")
+        for binding in (
+            "cleanupRegionSelectionSha256",
+            "cleanupOfferClassification",
+            "cleanupOfferEligibilityDisposition",
+            "cleanupOfferEligibleRegions",
+            "cleanupOfferEligibilitySource",
+            "cleanupOfferEligibilitySha256",
+        ):
+            assert binding in content
+    ledger_schema = (REPOSITORY_ROOT / "infra/milestone_7_8/schemas/ledger.schema.json").read_text(
+        encoding="utf-8"
+    )
+    for binding in (
+        "cleanup_region_selection_sha256",
+        "cleanup_offer_classification",
+        "cleanup_offer_eligibility_disposition",
+        "cleanup_offer_eligible_regions",
+        "cleanup_offer_eligibility_source",
+        "cleanup_offer_eligibility_sha256",
+    ):
+        assert binding in ledger_schema
 
     receipt_ledger = Ledger(config.campaign_id, config.generation_id)
     result = Lifecycle(config, receipt_ledger, SimulatedRunner()).run_simulation(now=NOW)
     receipt = terminal_receipt(result)
     assert receipt["cleanupRegion"] == selection.selected_region
     assert receipt["cleanupRegionSelectionSha256"] == selection.sha256()
+    assert receipt["cleanupOfferClassification"] == selection.offer_classification
+    assert receipt["cleanupOfferEligibleRegions"] == OFFER_ELIGIBLE_REGIONS_BINDING
+    assert receipt["cleanupOfferEligibilitySha256"] == (selection.offer_eligibility_sha256)
+
+
+def test_configuration_rejects_region_outside_bound_offer_set() -> None:
+    selection = _select()
+    with pytest.raises(CampaignError, match="offer eligibility binding"):
+        replace(_config(selection), cleanup_region="southcentralus").validate(allow_expired=True)
+
+
+def test_cleanup_deployment_plan_has_one_region_and_no_hopping_or_reuse() -> None:
+    selection = _select()
+    config = _config(selection)
+    runtime = _runtime(selection)
+
+    commands = command_plan("cleanup-deploy", config, runtime)
+    assert len(commands) == 1
+    rendered = " ".join(commands[0])
+    assert rendered.count(config.cleanup_region) == 1
+    assert "restore" not in rendered.casefold()
+    assert "update" not in rendered.casefold()
 
 
 def test_capacity_check_revalidates_selection_before_scope_mutation() -> None:
@@ -422,6 +581,19 @@ def test_capacity_check_revalidates_selection_before_scope_mutation() -> None:
         runner=FakeRunner(),  # type: ignore[arg-type]
     )
 
+    changed_offer_results = list(_discovery_results())
+    changed_offer_results[1] = _result(
+        {"subscriptionPolicies": {"quotaId": "FreeTrial_ChangedEvidence"}}
+    )
+    with pytest.raises(CampaignError, match="no longer armable"):
+        validate_operation_results(
+            "capacity-check",
+            [*prefix, *changed_offer_results],
+            config,
+            runtime,
+            runner=FakeRunner(),  # type: ignore[arg-type]
+        )
+
     with pytest.raises(CampaignError, match="no longer armable"):
         validate_operation_results(
             "capacity-check",
@@ -438,17 +610,21 @@ def test_capacity_check_revalidates_selection_before_scope_mutation() -> None:
 def test_discovery_and_cleanup_never_target_unrelated_automation_accounts() -> None:
     commands = automation_region_discovery_commands("00000000-0000-4000-8000-000000000100")
     account_context = commands[0]
-    provider_inventory = commands[1]
-    active_inventory = commands[2]
-    deleted_inventory = commands[3]
-    policy_inventory = commands[4]
+    subscription_metadata = commands[1]
+    provider_inventory = commands[2]
+    active_inventory = commands[3]
+    deleted_inventory = commands[4]
+    policy_inventory = commands[5]
     assert account_context[1:3] == ("account", "show")
     assert "--subscription" in account_context
+    assert subscription_metadata[1:3] == ("rest", "--method")
+    assert any("subscriptionPolicies" in part for part in subscription_metadata)
     assert provider_inventory[1:3] == ("provider", "show")
     assert "--subscription" in provider_inventory
-    assert active_inventory[1:3] == ("resource", "list")
-    assert "[].{location:location}" in active_inventory
-    assert "--subscription" in active_inventory
+    assert active_inventory[1:3] == ("rest", "--method")
+    active_query = active_inventory[active_inventory.index("--query") + 1]
+    assert "accounts:value[].{location:location}" in active_query
+    assert "nextLink:nextLink" in active_query
     assert "--name" not in active_inventory
     deleted_query = deleted_inventory[deleted_inventory.index("--query") + 1]
     assert "accounts:value[].{location:Location}" in deleted_query

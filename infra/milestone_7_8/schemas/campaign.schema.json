@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign:v1",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign:v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,6 +19,11 @@
     "resourceItems",
     "principalManifestSha256",
     "cleanupRegionSelectionSha256",
+    "cleanupOfferClassification",
+    "cleanupOfferEligibilityDisposition",
+    "cleanupOfferEligibleRegions",
+    "cleanupOfferEligibilitySource",
+    "cleanupOfferEligibilitySha256",
     "imageDigest"
   ],
   "properties": {
@@ -57,6 +62,25 @@
       "pattern": "^[a-f0-9]{64}$"
     },
     "cleanupRegionSelectionSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "cleanupOfferClassification": {
+      "enum": ["restricted-public-offer", "unclassified"]
+    },
+    "cleanupOfferEligibilityDisposition": {
+      "enum": [
+        "restricted-offer-metadata-confirmed",
+        "restrictive-public-baseline-applied"
+      ]
+    },
+    "cleanupOfferEligibleRegions": {
+      "const": "eastus,eastus2,northeurope,southeastasia,westus"
+    },
+    "cleanupOfferEligibilitySource": {
+      "const": "microsoft-automation-restricted-public-offer-regions-2026-08-v1"
+    },
+    "cleanupOfferEligibilitySha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },

@@ -10,6 +10,11 @@ param targetLocation string
 param postgresLocation string
 param cleanupLocation string
 param cleanupRegionSelectionSha256 string
+param cleanupOfferClassification string
+param cleanupOfferEligibilityDisposition string
+param cleanupOfferEligibleRegions string
+param cleanupOfferEligibilitySource string
+param cleanupOfferEligibilitySha256 string
 param cleanupResourceGroupName string
 param cleanupPrincipalId string
 param tenantId string
@@ -445,4 +450,4 @@ output identityObjectIds object = {
   worker: workerIdentity.principalId
   evidence: evidenceIdentity.principalId
 }
-output campaignBinding object = { campaignId: campaignId, generationId: generationId, subscriptionCorrelation: subscriptionCorrelation, cleanupDeadlineUtc: cleanupDeadlineUtc, cleanupLocation: cleanupLocation, cleanupRegionSelectionSha256: cleanupRegionSelectionSha256, maximumHours: maximumHours, costCeilingCents: costCeilingCents, cleanupResourceGroupName: cleanupResourceGroupName, registryPrivateEndpointId: registryEndpoint.id, principalManifest: principalManifestJson }
+output campaignBinding object = { campaignId: campaignId, generationId: generationId, subscriptionCorrelation: subscriptionCorrelation, cleanupDeadlineUtc: cleanupDeadlineUtc, cleanupLocation: cleanupLocation, cleanupRegionSelectionSha256: cleanupRegionSelectionSha256, cleanupOfferClassification: cleanupOfferClassification, cleanupOfferEligibilityDisposition: cleanupOfferEligibilityDisposition, cleanupOfferEligibleRegions: cleanupOfferEligibleRegions, cleanupOfferEligibilitySource: cleanupOfferEligibilitySource, cleanupOfferEligibilitySha256: cleanupOfferEligibilitySha256, maximumHours: maximumHours, costCeilingCents: costCeilingCents, cleanupResourceGroupName: cleanupResourceGroupName, registryPrivateEndpointId: registryEndpoint.id, principalManifest: principalManifestJson }

@@ -90,13 +90,20 @@ malformed UUID/campaign, mismatched target/PostgreSQL region, or an existing
 output directory. It has no caller-supplied cleanup-region override. Before
 creating the output directory, it evaluates the exact order `eastus2`,
 `southcentralus`, `westus2`, `westus` against normalized provider support,
-enforced location policy, active account occupancy, and discoverable
-soft-deleted occupancy. A candidate is armable only when it is supported,
-policy-allowed, and both counts are zero. Discovery failure or no viable
-candidate stops without a generation, ledger, or hard-coded fallback.
+subscription-offer eligibility, enforced location policy, active account
+occupancy, and discoverable soft-deleted occupancy. A candidate is armable only
+when all four independent admission dimensions pass. The offer-safe baseline
+is `eastus,eastus2,northeurope,southeastasia,westus`; Free Trial/Student and
+unclassified public offers cannot broaden it. The documented `JapanWest2`
+token is not treated as the provider's `japanwest` token without authoritative
+alias proof. There is no caller-supplied offer class, allowlist, cleanup region,
+or bypass. Discovery failure or an empty intersection stops without a
+generation, ledger, or hard-coded fallback.
 
-The first viable candidate and hashes of provider, active, soft-deleted, and
-policy evidence are written to the closed selection receipt. Its
+The first viable candidate and hashes of provider, offer eligibility, active,
+soft-deleted, and policy evidence are written to the closed selection receipt.
+The offer classification or restrictive-baseline disposition, normalized
+eligible-region set, and source/version identifier are also bound. Its
 domain-separated receipt hash is repeated in campaign configuration, private
 runtime, both Bicep parameter files, lifecycle tags, and later ledger/readback
 evidence. Preparation creates exactly one generation and a cleanup deadline
@@ -129,18 +136,18 @@ Invoke-M78Phase 'billable-start'
 Invoke-M78Phase 'deploy'
 ```
 
-The `capacity-check` dry-run exposes 15 static Azure commands. Five are the
-subscription-context, Automation-provider, active-account,
-soft-deleted-account, and policy-assignment reads; enforced policy definitions
-and deny-capable initiative members produce explicit generated GETs. Execution
-repeats preparation's selector and requires the same immutable region to remain
-the deterministic first viable candidate. Any change stops before
-`scope-create`.
+The `capacity-check` dry-run exposes 16 static Azure commands. Six are the
+subscription context, subscription-policy metadata, Automation provider,
+active-account, soft-deleted-account, and policy-assignment reads; enforced
+policy definitions and deny-capable initiative members produce explicit
+generated GETs. Execution repeats preparation's complete offer-aware selector
+and requires the immutable region, decision hash, offer binding, and every
+evidence hash to match. Any change stops before `scope-create`.
 
-The complete static operator plan contains 55 commands, 49 of them Azure CLI
+The complete static operator plan contains 56 commands, 50 of them Azure CLI
 commands. It also has bounded generated Container Apps job polling, failure
 cleanup, and exact-two-group direct cleanup. Preparation's regional selection
-has five static Azure reads plus generated policy-definition GETs. Every Azure
+has six static Azure reads plus generated policy-definition GETs. Every Azure
 path uses the centralized launcher; no unrelated Automation account name is a
 command target.
 

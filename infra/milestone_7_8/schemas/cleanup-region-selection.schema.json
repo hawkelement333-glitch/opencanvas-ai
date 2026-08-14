@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:cleanup-region-selection:v1",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:cleanup-region-selection:v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,6 +12,11 @@
     "policyAssignmentCount",
     "policyDefinitionCount",
     "providerLocationsSha256",
+    "offerClassification",
+    "offerEligibilityDisposition",
+    "offerEligibleRegions",
+    "offerEligibilitySource",
+    "offerEligibilitySha256",
     "activeOccupancySha256",
     "softDeletedOccupancySha256",
     "policyEvidenceSha256",
@@ -19,18 +24,37 @@
     "candidates"
   ],
   "properties": {
-    "version": { "const": "m7.8-cleanup-region-selection-v1" },
+    "version": { "const": "m7.8-cleanup-region-selection-v2" },
     "candidateOrder": {
       "const": ["eastus2", "southcentralus", "westus2", "westus"]
     },
     "selectedRegion": { "type": "string", "pattern": "^[a-z][a-z0-9]{2,31}$" },
     "providerRegistrationState": { "const": "Registered" },
     "capacityBasis": {
-      "const": "provider-policy-zero-active-and-soft-deleted-accounts"
+      "const": "provider-offer-policy-zero-active-and-soft-deleted-accounts"
     },
     "policyAssignmentCount": { "type": "integer", "minimum": 0 },
     "policyDefinitionCount": { "type": "integer", "minimum": 0 },
     "providerLocationsSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "offerClassification": {
+      "enum": ["restricted-public-offer", "unclassified"]
+    },
+    "offerEligibilityDisposition": {
+      "enum": [
+        "restricted-offer-metadata-confirmed",
+        "restrictive-public-baseline-applied"
+      ]
+    },
+    "offerEligibleRegions": {
+      "const": ["eastus", "eastus2", "northeurope", "southeastasia", "westus"]
+    },
+    "offerEligibilitySource": {
+      "const": "microsoft-automation-restricted-public-offer-regions-2026-08-v1"
+    },
+    "offerEligibilitySha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
@@ -51,6 +75,7 @@
         "required": [
           "region",
           "providerSupported",
+          "offerEligible",
           "policyAllowed",
           "activeAccountCount",
           "softDeletedAccountCount",
@@ -59,11 +84,18 @@
         "properties": {
           "region": { "type": "string", "pattern": "^[a-z][a-z0-9]{2,31}$" },
           "providerSupported": { "type": "boolean" },
+          "offerEligible": { "type": "boolean" },
           "policyAllowed": { "type": "boolean" },
           "activeAccountCount": { "type": "integer", "minimum": 0 },
           "softDeletedAccountCount": { "type": "integer", "minimum": 0 },
           "status": {
-            "enum": ["viable", "unsupported", "policy-disallowed", "occupied"]
+            "enum": [
+              "viable",
+              "unsupported",
+              "offer-ineligible",
+              "policy-disallowed",
+              "occupied"
+            ]
           }
         }
       }

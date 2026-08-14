@@ -73,6 +73,11 @@ RUNTIME_FIELDS = {
     "cleanupScriptSha256",
     "cleanupRegion",
     "cleanupRegionSelectionSha256",
+    "cleanupOfferClassification",
+    "cleanupOfferEligibilityDisposition",
+    "cleanupOfferEligibleRegions",
+    "cleanupOfferEligibilitySource",
+    "cleanupOfferEligibilitySha256",
     "cleanupRegionSelectionFile",
     "cleanupDeploymentName",
     "campaignDeploymentName",
@@ -104,6 +109,11 @@ CLEANUP_PARAMETER_FIELDS = {
     "cleanupResourceGroupName",
     "cleanupLocation",
     "cleanupRegionSelectionSha256",
+    "cleanupOfferClassification",
+    "cleanupOfferEligibilityDisposition",
+    "cleanupOfferEligibleRegions",
+    "cleanupOfferEligibilitySource",
+    "cleanupOfferEligibilitySha256",
     "cleanupDeadlineUtc",
     "automationAccountName",
     "cleanupRunbookName",
@@ -120,6 +130,11 @@ CAMPAIGN_PARAMETER_FIELDS = {
     "postgresLocation",
     "cleanupLocation",
     "cleanupRegionSelectionSha256",
+    "cleanupOfferClassification",
+    "cleanupOfferEligibilityDisposition",
+    "cleanupOfferEligibleRegions",
+    "cleanupOfferEligibilitySource",
+    "cleanupOfferEligibilitySha256",
     "cleanupResourceGroupName",
     "cleanupAutomationAccountName",
     "tenantId",
@@ -251,13 +266,31 @@ def validate_prepared_bundle(
         json.loads(selection_path.read_text(encoding="utf-8"))
     )
     selection_sha256 = selection.sha256()
+    offer_eligible_regions = ",".join(selection.offer_eligible_regions)
     if (
         selection.selected_region != config.cleanup_region
         or selection_sha256 != config.cleanup_region_selection_sha256
+        or selection.offer_classification != config.cleanup_offer_classification
+        or selection.offer_eligibility_disposition
+        != config.cleanup_offer_eligibility_disposition
+        or offer_eligible_regions != config.cleanup_offer_eligible_regions
+        or selection.offer_eligibility_source != config.cleanup_offer_eligibility_source
+        or selection.offer_eligibility_sha256 != config.cleanup_offer_eligibility_sha256
         or runtime["cleanupRegion"] != config.cleanup_region
         or runtime["cleanupRegionSelectionSha256"] != selection_sha256
+        or runtime["cleanupOfferClassification"] != config.cleanup_offer_classification
+        or runtime["cleanupOfferEligibilityDisposition"]
+        != config.cleanup_offer_eligibility_disposition
+        or runtime["cleanupOfferEligibleRegions"]
+        != config.cleanup_offer_eligible_regions
+        or runtime["cleanupOfferEligibilitySource"]
+        != config.cleanup_offer_eligibility_source
+        or runtime["cleanupOfferEligibilitySha256"]
+        != config.cleanup_offer_eligibility_sha256
     ):
-        raise CampaignError("operator cleanup region selection binding differs")
+        raise CampaignError(
+            "operator cleanup region or offer selection binding differs"
+        )
     common_expected = {
         "campaignId": config.campaign_id,
         "generationId": config.generation_id,
@@ -312,6 +345,16 @@ def validate_prepared_bundle(
         or campaign.get("cleanupLocation") != config.cleanup_region
         or campaign.get("cleanupRegionSelectionSha256")
         != config.cleanup_region_selection_sha256
+        or campaign.get("cleanupOfferClassification")
+        != config.cleanup_offer_classification
+        or campaign.get("cleanupOfferEligibilityDisposition")
+        != config.cleanup_offer_eligibility_disposition
+        or campaign.get("cleanupOfferEligibleRegions")
+        != config.cleanup_offer_eligible_regions
+        or campaign.get("cleanupOfferEligibilitySource")
+        != config.cleanup_offer_eligibility_source
+        or campaign.get("cleanupOfferEligibilitySha256")
+        != config.cleanup_offer_eligibility_sha256
         or campaign.get("postgresPrimaryZone") != "1"
         or campaign.get("postgresStandbyZone") != "2"
         or campaign.get("maintenanceDay") != 0
@@ -321,6 +364,16 @@ def validate_prepared_bundle(
         or cleanup.get("cleanupLocation") != config.cleanup_region
         or cleanup.get("cleanupRegionSelectionSha256")
         != config.cleanup_region_selection_sha256
+        or cleanup.get("cleanupOfferClassification")
+        != config.cleanup_offer_classification
+        or cleanup.get("cleanupOfferEligibilityDisposition")
+        != config.cleanup_offer_eligibility_disposition
+        or cleanup.get("cleanupOfferEligibleRegions")
+        != config.cleanup_offer_eligible_regions
+        or cleanup.get("cleanupOfferEligibilitySource")
+        != config.cleanup_offer_eligibility_source
+        or cleanup.get("cleanupOfferEligibilitySha256")
+        != config.cleanup_offer_eligibility_sha256
         or campaign.get("cleanupAutomationAccountName")
         != runtime["automationAccountName"]
         or cleanup.get("automationAccountName") != runtime["automationAccountName"]
@@ -348,6 +401,15 @@ def validate_prepared_bundle(
         "mobius.cleanup-deadline-utc": config.cleanup_deadline_utc,
         "mobius.cost-ceiling-cents": "5000",
         "mobius.cleanup-region-selection-sha256": config.cleanup_region_selection_sha256,
+        "mobius.cleanup-offer-classification": config.cleanup_offer_classification,
+        "mobius.cleanup-offer-disposition": (
+            config.cleanup_offer_eligibility_disposition
+        ),
+        "mobius.cleanup-offer-regions": config.cleanup_offer_eligible_regions,
+        "mobius.cleanup-offer-source": config.cleanup_offer_eligibility_source,
+        "mobius.cleanup-offer-eligibility-sha256": (
+            config.cleanup_offer_eligibility_sha256
+        ),
         "mobius.owner": "managed-postgresql-evidence",
         "mobius.expiry": config.cleanup_deadline_utc,
     }
@@ -501,6 +563,30 @@ def command_plan(
                 f"mobius.generation={config.generation_id}",
                 f"mobius.cleanup-deadline-utc={config.cleanup_deadline_utc}",
                 "mobius.cost-ceiling-cents=5000",
+                (
+                    "mobius.cleanup-region-selection-sha256="
+                    + config.cleanup_region_selection_sha256
+                ),
+                (
+                    "mobius.cleanup-offer-classification="
+                    + config.cleanup_offer_classification
+                ),
+                (
+                    "mobius.cleanup-offer-disposition="
+                    + config.cleanup_offer_eligibility_disposition
+                ),
+                (
+                    "mobius.cleanup-offer-regions="
+                    + config.cleanup_offer_eligible_regions
+                ),
+                (
+                    "mobius.cleanup-offer-source="
+                    + config.cleanup_offer_eligibility_source
+                ),
+                (
+                    "mobius.cleanup-offer-eligibility-sha256="
+                    + config.cleanup_offer_eligibility_sha256
+                ),
                 "mobius.owner=managed-postgresql-evidence",
                 f"mobius.expiry={config.cleanup_deadline_utc}",
                 "--output",
@@ -1077,6 +1163,16 @@ def validate_deployed_principal_manifest(
         or binding.get("cleanupLocation") != config.cleanup_region
         or binding.get("cleanupRegionSelectionSha256")
         != config.cleanup_region_selection_sha256
+        or binding.get("cleanupOfferClassification")
+        != config.cleanup_offer_classification
+        or binding.get("cleanupOfferEligibilityDisposition")
+        != config.cleanup_offer_eligibility_disposition
+        or binding.get("cleanupOfferEligibleRegions")
+        != config.cleanup_offer_eligible_regions
+        or binding.get("cleanupOfferEligibilitySource")
+        != config.cleanup_offer_eligibility_source
+        or binding.get("cleanupOfferEligibilitySha256")
+        != config.cleanup_offer_eligibility_sha256
         or not isinstance(manifest, dict)
         or set(manifest)
         != {
@@ -1148,6 +1244,11 @@ def validate_cleanup_deployment(
         "cleanupPrincipalId",
         "cleanupLocation",
         "cleanupRegionSelectionSha256",
+        "cleanupOfferClassification",
+        "cleanupOfferEligibilityDisposition",
+        "cleanupOfferEligibleRegions",
+        "cleanupOfferEligibilitySource",
+        "cleanupOfferEligibilitySha256",
         "cleanupDeadlineUtc",
         "costCeilingCents",
         "scheduleCount",
@@ -1175,6 +1276,13 @@ def validate_cleanup_deployment(
         schedule_count=schedule_count,
         cleanup_region=str(outputs["cleanupLocation"]),
         cleanup_region_selection_sha256=str(outputs["cleanupRegionSelectionSha256"]),
+        cleanup_offer_classification=str(outputs["cleanupOfferClassification"]),
+        cleanup_offer_eligibility_disposition=str(
+            outputs["cleanupOfferEligibilityDisposition"]
+        ),
+        cleanup_offer_eligible_regions=str(outputs["cleanupOfferEligibleRegions"]),
+        cleanup_offer_eligibility_source=str(outputs["cleanupOfferEligibilitySource"]),
+        cleanup_offer_eligibility_sha256=str(outputs["cleanupOfferEligibilitySha256"]),
     )
     binding.validate(config)
     return binding
@@ -1557,7 +1665,7 @@ def validate_operation_results(
         ):
             raise CampaignError("Azure campaign correlation differs")
     elif operation == "capacity-check":
-        if len(results) != 15:
+        if len(results) != 16:
             raise CampaignError(
                 "provider, quota, region, SKU, or name proof is incomplete"
             )
@@ -1589,11 +1697,24 @@ def validate_operation_results(
             )
         refreshed_selection = select_automation_region_from_results(
             runner,
-            tuple(results[10:15]),
+            tuple(results[10:16]),
         )
-        if refreshed_selection.selected_region != config.cleanup_region:
+        if (
+            refreshed_selection.selected_region != config.cleanup_region
+            or refreshed_selection.sha256() != config.cleanup_region_selection_sha256
+            or refreshed_selection.offer_classification
+            != config.cleanup_offer_classification
+            or refreshed_selection.offer_eligibility_disposition
+            != config.cleanup_offer_eligibility_disposition
+            or ",".join(refreshed_selection.offer_eligible_regions)
+            != config.cleanup_offer_eligible_regions
+            or refreshed_selection.offer_eligibility_source
+            != config.cleanup_offer_eligibility_source
+            or refreshed_selection.offer_eligibility_sha256
+            != config.cleanup_offer_eligibility_sha256
+        ):
             raise CampaignError(
-                "prepared Automation cleanup region is no longer armable"
+                "prepared Automation cleanup region or offer proof is no longer armable"
             )
     elif operation == "scope-create":
         if len(results) != 1:
@@ -1609,6 +1730,18 @@ def validate_operation_results(
             or tags.get("mobius.milestone") != "7.8"
             or tags.get("mobius.cleanup-deadline-utc") != config.cleanup_deadline_utc
             or tags.get("mobius.cost-ceiling-cents") != "5000"
+            or tags.get("mobius.cleanup-region-selection-sha256")
+            != config.cleanup_region_selection_sha256
+            or tags.get("mobius.cleanup-offer-classification")
+            != config.cleanup_offer_classification
+            or tags.get("mobius.cleanup-offer-disposition")
+            != config.cleanup_offer_eligibility_disposition
+            or tags.get("mobius.cleanup-offer-regions")
+            != config.cleanup_offer_eligible_regions
+            or tags.get("mobius.cleanup-offer-source")
+            != config.cleanup_offer_eligibility_source
+            or tags.get("mobius.cleanup-offer-eligibility-sha256")
+            != config.cleanup_offer_eligibility_sha256
         ):
             raise CampaignError("campaign scope readback differs")
     elif operation in {"deploy", "image-decision"}:

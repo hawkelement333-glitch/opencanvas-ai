@@ -16,10 +16,27 @@ CLEANUP_REGION_CANDIDATES: Final = (
     "westus2",
     "westus",
 )
-SELECTION_VERSION: Final = "m7.8-cleanup-region-selection-v1"
+RESTRICTED_OFFER_ELIGIBLE_REGIONS: Final = (
+    "eastus",
+    "eastus2",
+    "northeurope",
+    "southeastasia",
+    "westus",
+)
+OFFER_ELIGIBLE_REGIONS_BINDING: Final = ",".join(RESTRICTED_OFFER_ELIGIBLE_REGIONS)
+OFFER_ELIGIBILITY_SOURCE: Final = (
+    "microsoft-automation-restricted-public-offer-regions-2026-08-v1"
+)
+RESTRICTED_OFFER_CLASSIFICATION: Final = "restricted-public-offer"
+UNCLASSIFIED_OFFER_CLASSIFICATION: Final = "unclassified"
+RESTRICTED_OFFER_DISPOSITION: Final = "restricted-offer-metadata-confirmed"
+BASELINE_OFFER_DISPOSITION: Final = "restrictive-public-baseline-applied"
+SELECTION_VERSION: Final = "m7.8-cleanup-region-selection-v2"
 REGION_PATTERN: Final = re.compile(r"^[a-z][a-z0-9]{2,31}$")
 DEFINITION_API_VERSION: Final = "2023-04-01"
 DELETED_ACCOUNTS_API_VERSION: Final = "2024-10-23"
+SUBSCRIPTION_API_VERSION: Final = "2020-01-01"
+RESOURCES_API_VERSION: Final = "2021-04-01"
 
 
 class RegionCommandRunner(Protocol):
@@ -30,10 +47,20 @@ class RegionCommandRunner(Protocol):
 class CandidateEvidence:
     region: str
     provider_supported: bool
+    offer_eligible: bool
     policy_allowed: bool
     active_account_count: int
     soft_deleted_account_count: int
     status: str
+
+
+@dataclass(frozen=True, slots=True)
+class OfferEligibility:
+    classification: str
+    disposition: str
+    eligible_regions: tuple[str, ...]
+    source: str
+    evidence_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +73,11 @@ class AutomationRegionSelection:
     policy_assignment_count: int
     policy_definition_count: int
     provider_locations_sha256: str
+    offer_classification: str
+    offer_eligibility_disposition: str
+    offer_eligible_regions: tuple[str, ...]
+    offer_eligibility_source: str
+    offer_eligibility_sha256: str
     active_occupancy_sha256: str
     soft_deleted_occupancy_sha256: str
     policy_evidence_sha256: str
@@ -58,7 +90,23 @@ class AutomationRegionSelection:
             self.version != SELECTION_VERSION
             or self.provider_registration_state != "Registered"
             or self.capacity_basis
-            != "provider-policy-zero-active-and-soft-deleted-accounts"
+            != "provider-offer-policy-zero-active-and-soft-deleted-accounts"
+            or self.offer_eligible_regions != RESTRICTED_OFFER_ELIGIBLE_REGIONS
+            or self.offer_eligibility_source != OFFER_ELIGIBILITY_SOURCE
+            or (
+                self.offer_classification,
+                self.offer_eligibility_disposition,
+            )
+            not in {
+                (
+                    RESTRICTED_OFFER_CLASSIFICATION,
+                    RESTRICTED_OFFER_DISPOSITION,
+                ),
+                (
+                    UNCLASSIFIED_OFFER_CLASSIFICATION,
+                    BASELINE_OFFER_DISPOSITION,
+                ),
+            }
             or type(self.policy_assignment_count) is not int
             or type(self.policy_definition_count) is not int
             or self.policy_assignment_count < 0
@@ -67,6 +115,7 @@ class AutomationRegionSelection:
                 re.fullmatch(r"[a-f0-9]{64}", value) is None
                 for value in (
                     self.provider_locations_sha256,
+                    self.offer_eligibility_sha256,
                     self.active_occupancy_sha256,
                     self.soft_deleted_occupancy_sha256,
                     self.policy_evidence_sha256,
@@ -81,6 +130,7 @@ class AutomationRegionSelection:
         allowed_statuses = {
             "viable",
             "unsupported",
+            "offer-ineligible",
             "policy-disallowed",
             "occupied",
         }
@@ -88,6 +138,7 @@ class AutomationRegionSelection:
             if (
                 item.status not in allowed_statuses
                 or type(item.provider_supported) is not bool
+                or type(item.offer_eligible) is not bool
                 or type(item.policy_allowed) is not bool
                 or type(item.active_account_count) is not int
                 or type(item.soft_deleted_account_count) is not int
@@ -100,6 +151,8 @@ class AutomationRegionSelection:
             expected_status = (
                 "unsupported"
                 if not item.provider_supported
+                else "offer-ineligible"
+                if not item.offer_eligible
                 else "policy-disallowed"
                 if not item.policy_allowed
                 else "occupied"
@@ -130,6 +183,11 @@ class AutomationRegionSelection:
             "policyAssignmentCount": self.policy_assignment_count,
             "policyDefinitionCount": self.policy_definition_count,
             "providerLocationsSha256": self.provider_locations_sha256,
+            "offerClassification": self.offer_classification,
+            "offerEligibilityDisposition": self.offer_eligibility_disposition,
+            "offerEligibleRegions": list(self.offer_eligible_regions),
+            "offerEligibilitySource": self.offer_eligibility_source,
+            "offerEligibilitySha256": self.offer_eligibility_sha256,
             "activeOccupancySha256": self.active_occupancy_sha256,
             "softDeletedOccupancySha256": self.soft_deleted_occupancy_sha256,
             "policyEvidenceSha256": self.policy_evidence_sha256,
@@ -138,6 +196,7 @@ class AutomationRegionSelection:
                 {
                     "region": item.region,
                     "providerSupported": item.provider_supported,
+                    "offerEligible": item.offer_eligible,
                     "policyAllowed": item.policy_allowed,
                     "activeAccountCount": item.active_account_count,
                     "softDeletedAccountCount": item.soft_deleted_account_count,
@@ -148,11 +207,14 @@ class AutomationRegionSelection:
         }
 
     def sha256(self) -> str:
-        encoded = json.dumps(
-            self.document(), separators=(",", ":"), sort_keys=True
-        ).encode()
+        document = self.document()
+        # Observation time is retained in the receipt but excluded from the
+        # replay binding so an immediate capacity-check can prove the exact
+        # decision and every evidence hash at a later timestamp.
+        document.pop("observedAtUtc")
+        encoded = json.dumps(document, separators=(",", ":"), sort_keys=True).encode()
         return hashlib.sha256(
-            b"m7.8/cleanup-region-selection/v1\0" + encoded
+            b"m7.8/cleanup-region-selection/v2\0" + encoded
         ).hexdigest()
 
 
@@ -166,6 +228,11 @@ def selection_from_document(value: object) -> AutomationRegionSelection:
         "policyAssignmentCount",
         "policyDefinitionCount",
         "providerLocationsSha256",
+        "offerClassification",
+        "offerEligibilityDisposition",
+        "offerEligibleRegions",
+        "offerEligibilitySource",
+        "offerEligibilitySha256",
         "activeOccupancySha256",
         "softDeletedOccupancySha256",
         "policyEvidenceSha256",
@@ -174,8 +241,10 @@ def selection_from_document(value: object) -> AutomationRegionSelection:
     }:
         raise CampaignError("Automation cleanup region receipt fields are invalid")
     raw_candidates = value["candidates"]
-    if not isinstance(value["candidateOrder"], list) or not isinstance(
-        raw_candidates, list
+    if (
+        not isinstance(value["candidateOrder"], list)
+        or not isinstance(value["offerEligibleRegions"], list)
+        or not isinstance(raw_candidates, list)
     ):
         raise CampaignError("Automation cleanup region receipt arrays are invalid")
     candidates: list[CandidateEvidence] = []
@@ -183,6 +252,7 @@ def selection_from_document(value: object) -> AutomationRegionSelection:
         if not isinstance(item, dict) or set(item) != {
             "region",
             "providerSupported",
+            "offerEligible",
             "policyAllowed",
             "activeAccountCount",
             "softDeletedAccountCount",
@@ -195,6 +265,7 @@ def selection_from_document(value: object) -> AutomationRegionSelection:
             CandidateEvidence(
                 region=cast(str, item["region"]),
                 provider_supported=cast(bool, item["providerSupported"]),
+                offer_eligible=cast(bool, item["offerEligible"]),
                 policy_allowed=cast(bool, item["policyAllowed"]),
                 active_account_count=cast(int, item["activeAccountCount"]),
                 soft_deleted_account_count=cast(int, item["softDeletedAccountCount"]),
@@ -210,6 +281,11 @@ def selection_from_document(value: object) -> AutomationRegionSelection:
         policy_assignment_count=cast(int, value["policyAssignmentCount"]),
         policy_definition_count=cast(int, value["policyDefinitionCount"]),
         provider_locations_sha256=cast(str, value["providerLocationsSha256"]),
+        offer_classification=cast(str, value["offerClassification"]),
+        offer_eligibility_disposition=cast(str, value["offerEligibilityDisposition"]),
+        offer_eligible_regions=tuple(cast(list[str], value["offerEligibleRegions"])),
+        offer_eligibility_source=cast(str, value["offerEligibilitySource"]),
+        offer_eligibility_sha256=cast(str, value["offerEligibilitySha256"]),
         active_occupancy_sha256=cast(str, value["activeOccupancySha256"]),
         soft_deleted_occupancy_sha256=cast(str, value["softDeletedOccupancySha256"]),
         policy_evidence_sha256=cast(str, value["policyEvidenceSha256"]),
@@ -235,6 +311,19 @@ def automation_region_discovery_commands(
         raise CampaignError(
             "automation-region-malformed-unknown: subscription binding is malformed"
         )
+    subscription_url = (
+        "https://management.azure.com/subscriptions/"
+        + subscription_id
+        + f"?api-version={SUBSCRIPTION_API_VERSION}"
+    )
+    active_url = (
+        "https://management.azure.com/subscriptions/"
+        + subscription_id
+        + "/resources"
+        + f"?api-version={RESOURCES_API_VERSION}"
+        + "&$filter=resourceType%20eq%20"
+        + "%27Microsoft.Automation%2FautomationAccounts%27"
+    )
     deleted_url = (
         "https://management.azure.com/subscriptions/"
         + subscription_id
@@ -255,6 +344,18 @@ def automation_region_discovery_commands(
         ),
         (
             "az",
+            "rest",
+            "--method",
+            "get",
+            "--url",
+            subscription_url,
+            "--query",
+            "{subscriptionPolicies:subscriptionPolicies}",
+            "--output",
+            "json",
+        ),
+        (
+            "az",
             "provider",
             "show",
             "--namespace",
@@ -266,14 +367,13 @@ def automation_region_discovery_commands(
         ),
         (
             "az",
-            "resource",
-            "list",
-            "--resource-type",
-            "Microsoft.Automation/automationAccounts",
+            "rest",
+            "--method",
+            "get",
+            "--url",
+            active_url,
             "--query",
-            "[].{location:location}",
-            "--subscription",
-            subscription_id,
+            "{accounts:value[].{location:location},nextLink:nextLink}",
             "--output",
             "json",
         ),
@@ -340,13 +440,14 @@ def select_automation_region_from_results(
     candidate_order: tuple[str, ...] = CLEANUP_REGION_CANDIDATES,
 ) -> AutomationRegionSelection:
     _validate_candidate_order(candidate_order)
-    if len(results) != 5:
+    if len(results) != 6:
         raise CampaignError("Automation cleanup regional discovery is incomplete")
     account = _json_result(results[0])
-    provider = _json_result(results[1])
-    active = _json_result(results[2])
-    deleted = _json_result(results[3])
-    assignments = _json_result(results[4])
+    subscription = _json_result(results[1])
+    provider = _json_result(results[2])
+    active = _json_result(results[3])
+    deleted = _json_result(results[4])
+    assignments = _json_result(results[5])
     if not isinstance(account, dict) or account != {
         "environmentName": "AzureCloud",
         "state": "Enabled",
@@ -375,17 +476,14 @@ def select_automation_region_from_results(
         account_type.get("locations") if isinstance(account_type, dict) else None
     )
     supported = _normalized_region_set(locations, label="provider")
-    active_counts = _location_counts(active, supported=supported, label="active")
-    if (
-        not isinstance(deleted, dict)
-        or set(deleted) != {"accounts", "nextLink"}
-        or (deleted["nextLink"] is not None and deleted["nextLink"] != "")
-    ):
-        raise CampaignError(
-            "automation-region-discovery-failed: soft-deleted account inventory is incomplete"
-        )
+    offer = _subscription_offer_eligibility(subscription)
+    active_accounts = _complete_account_inventory(active, label="active")
+    deleted_accounts = _complete_account_inventory(deleted, label="soft-deleted")
+    active_counts = _location_counts(
+        active_accounts, supported=supported, label="active"
+    )
     deleted_counts = _location_counts(
-        deleted["accounts"], supported=supported, label="soft-deleted"
+        deleted_accounts, supported=supported, label="soft-deleted"
     )
     if not isinstance(assignments, list):
         raise CampaignError("Automation location policy discovery is malformed")
@@ -395,14 +493,18 @@ def select_automation_region_from_results(
         candidate_order=candidate_order,
     )
     evidence: list[CandidateEvidence] = []
+    offer_eligible = set(offer.eligible_regions)
     for region in candidate_order:
         provider_supported = region in supported
+        subscription_offer_eligible = region in offer_eligible
         allowed = policy_allowed[region]
         active_count = active_counts.get(region, 0)
         deleted_count = deleted_counts.get(region, 0)
         status = (
             "unsupported"
             if not provider_supported
+            else "offer-ineligible"
+            if not subscription_offer_eligible
             else "policy-disallowed"
             if not allowed
             else "occupied"
@@ -413,6 +515,7 @@ def select_automation_region_from_results(
             CandidateEvidence(
                 region=region,
                 provider_supported=provider_supported,
+                offer_eligible=subscription_offer_eligible,
                 policy_allowed=allowed,
                 active_account_count=active_count,
                 soft_deleted_account_count=deleted_count,
@@ -427,12 +530,17 @@ def select_automation_region_from_results(
         candidate_order=candidate_order,
         selected_region=viable[0],
         provider_registration_state="Registered",
-        capacity_basis="provider-policy-zero-active-and-soft-deleted-accounts",
+        capacity_basis="provider-offer-policy-zero-active-and-soft-deleted-accounts",
         policy_assignment_count=len(assignments),
         policy_definition_count=definition_count,
         provider_locations_sha256=_evidence_hash(
             "provider-locations", sorted(supported)
         ),
+        offer_classification=offer.classification,
+        offer_eligibility_disposition=offer.disposition,
+        offer_eligible_regions=offer.eligible_regions,
+        offer_eligibility_source=offer.source,
+        offer_eligibility_sha256=offer.evidence_sha256,
         active_occupancy_sha256=_evidence_hash("active-occupancy", active_counts),
         soft_deleted_occupancy_sha256=_evidence_hash(
             "soft-deleted-occupancy", deleted_counts
@@ -474,6 +582,57 @@ def _normalized_region_set(value: object, *, label: str) -> set[str]:
     if not isinstance(value, list) or not value:
         raise CampaignError(f"Automation {label} location discovery is incomplete")
     return {_normalize_region(item) for item in value}
+
+
+def _subscription_offer_eligibility(value: object) -> OfferEligibility:
+    policies = value.get("subscriptionPolicies") if isinstance(value, dict) else None
+    quota = policies.get("quotaId") if isinstance(policies, dict) else None
+    normalized_quota = (
+        re.sub(r"[^a-z0-9]", "", quota.casefold()) if isinstance(quota, str) else ""
+    )
+    restricted_signal = any(
+        marker in normalized_quota for marker in ("freetrial", "student")
+    )
+    classification = (
+        RESTRICTED_OFFER_CLASSIFICATION
+        if restricted_signal
+        else UNCLASSIFIED_OFFER_CLASSIFICATION
+    )
+    disposition = (
+        RESTRICTED_OFFER_DISPOSITION
+        if restricted_signal
+        else BASELINE_OFFER_DISPOSITION
+    )
+    material = {
+        "subscriptionMetadata": value,
+        "classification": classification,
+        "disposition": disposition,
+        "eligibleRegions": list(RESTRICTED_OFFER_ELIGIBLE_REGIONS),
+        "source": OFFER_ELIGIBILITY_SOURCE,
+        # The documented JapanWest2 token normalizes to japanwest2, while current
+        # provider evidence exposes Japan West as japanwest. No alias is guessed.
+        "excludedUnresolvedRegionAliases": ["japanwest2"],
+    }
+    return OfferEligibility(
+        classification=classification,
+        disposition=disposition,
+        eligible_regions=RESTRICTED_OFFER_ELIGIBLE_REGIONS,
+        source=OFFER_ELIGIBILITY_SOURCE,
+        evidence_sha256=_evidence_hash("offer-eligibility", material),
+    )
+
+
+def _complete_account_inventory(value: object, *, label: str) -> list[object]:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"accounts", "nextLink"}
+        or not isinstance(value["accounts"], list)
+        or (value["nextLink"] is not None and value["nextLink"] != "")
+    ):
+        raise CampaignError(
+            f"automation-region-discovery-failed: {label} account inventory is incomplete"
+        )
+    return cast(list[object], value["accounts"])
 
 
 def _location_counts(
@@ -819,10 +978,18 @@ def _raise_no_viable(candidates: tuple[CandidateEvidence, ...]) -> None:
     if statuses == {"unsupported"}:
         code = "automation-region-unsupported"
     elif (
-        statuses <= {"unsupported", "policy-disallowed"}
+        statuses <= {"unsupported", "offer-ineligible"}
+        and "offer-ineligible" in statuses
+    ):
+        code = "automation-region-offer-ineligible"
+    elif (
+        statuses <= {"unsupported", "offer-ineligible", "policy-disallowed"}
         and "policy-disallowed" in statuses
     ):
         code = "automation-region-policy-disallowed"
     else:
         code = "automation-region-occupied-capacity-unproved"
-    raise CampaignError(f"{code}: no reviewed cleanup region is armable")
+    disposition = ",".join(f"{item.region}:{item.status}" for item in candidates)
+    raise CampaignError(
+        f"{code}: no reviewed cleanup region is armable; candidates={disposition}"
+    )

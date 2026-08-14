@@ -242,3 +242,9 @@ separate authorization for another fresh source-bound managed PostgreSQL
 campaign. It is not a GitHub push and not the object-storage audit. A later
 successful managed campaign would complete only this Milestone 7.8 audit
 surface; Milestone 7.8 is not complete.
+
+## Later repository correction cross-reference
+
+The later bounded repository-local remediation corrected M78-PG-008 without
+rewriting this historical campaign outcome. See the
+[Automation offer-region eligibility remediation handoff](MILESTONE_7_8_AUTOMATION_OFFER_REGION_ELIGIBILITY_REMEDIATION_HANDOFF.md).

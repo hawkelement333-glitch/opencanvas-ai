@@ -7,6 +7,11 @@ param targetResourceGroupName string
 param cleanupResourceGroupName string
 param cleanupLocation string
 param cleanupRegionSelectionSha256 string
+param cleanupOfferClassification string
+param cleanupOfferEligibilityDisposition string
+param cleanupOfferEligibleRegions string
+param cleanupOfferEligibilitySource string
+param cleanupOfferEligibilitySha256 string
 param cleanupDeadlineUtc string
 param automationAccountName string
 param cleanupRunbookName string
@@ -79,3 +84,8 @@ output scheduleName string = schedule.name
 output bindingName string = binding.name
 output cleanupLocation string = cleanupLocation
 output cleanupRegionSelectionSha256 string = cleanupRegionSelectionSha256
+output cleanupOfferClassification string = cleanupOfferClassification
+output cleanupOfferEligibilityDisposition string = cleanupOfferEligibilityDisposition
+output cleanupOfferEligibleRegions string = cleanupOfferEligibleRegions
+output cleanupOfferEligibilitySource string = cleanupOfferEligibilitySource
+output cleanupOfferEligibilitySha256 string = cleanupOfferEligibilitySha256

@@ -22,6 +22,9 @@ from infra.milestone_7_8 import operator as campaign_operator
 from infra.milestone_7_8 import prepare
 from infra.milestone_7_8.automation_region import (
     CLEANUP_REGION_CANDIDATES,
+    OFFER_ELIGIBILITY_SOURCE,
+    OFFER_ELIGIBLE_REGIONS_BINDING,
+    RESTRICTED_OFFER_ELIGIBLE_REGIONS,
     AutomationRegionSelection,
     CandidateEvidence,
 )
@@ -45,6 +48,7 @@ from infra.milestone_7_8.operator import (
     execute_commands,
     validate_cleanup_deployment,
     validate_cleanup_readback,
+    validate_operation_results,
     verify_zero_residue,
 )
 
@@ -112,6 +116,11 @@ def _config(**changes: object) -> CampaignConfig:
         "resource_items": (CostItem("bounded-campaign", "5.13664", 4),),
         "principal_manifest_sha256": "c" * 64,
         "cleanup_region_selection_sha256": "f" * 64,
+        "cleanup_offer_classification": "restricted-public-offer",
+        "cleanup_offer_eligibility_disposition": ("restricted-offer-metadata-confirmed"),
+        "cleanup_offer_eligible_regions": OFFER_ELIGIBLE_REGIONS_BINDING,
+        "cleanup_offer_eligibility_source": OFFER_ELIGIBILITY_SOURCE,
+        "cleanup_offer_eligibility_sha256": "e" * 64,
         "image_digest": None,
     }
     values.update(changes)
@@ -268,17 +277,22 @@ def test_resume_and_cleanup_binding_reject_substitution() -> None:
     with pytest.raises(CampaignError, match="resume"):
         Lifecycle(config, Ledger(config.campaign_id, "g2-112233aabbcc"), SimulatedRunner())
     valid = CleanupBinding(
-        config.campaign_id,
-        config.generation_id,
-        config.subscription_correlation,
-        config.target_resource_group,
-        config.cleanup_resource_group,
-        "d" * 64,
-        config.cleanup_deadline_utc,
-        "50.00",
-        1,
-        config.cleanup_region,
-        config.cleanup_region_selection_sha256,
+        campaign_id=config.campaign_id,
+        generation_id=config.generation_id,
+        subscription_correlation=config.subscription_correlation,
+        target_resource_group=config.target_resource_group,
+        cleanup_resource_group=config.cleanup_resource_group,
+        cleanup_principal_sha256="d" * 64,
+        deadline_utc=config.cleanup_deadline_utc,
+        ceiling_usd="50.00",
+        schedule_count=1,
+        cleanup_region=config.cleanup_region,
+        cleanup_region_selection_sha256=config.cleanup_region_selection_sha256,
+        cleanup_offer_classification=config.cleanup_offer_classification,
+        cleanup_offer_eligibility_disposition=(config.cleanup_offer_eligibility_disposition),
+        cleanup_offer_eligible_regions=config.cleanup_offer_eligible_regions,
+        cleanup_offer_eligibility_source=config.cleanup_offer_eligibility_source,
+        cleanup_offer_eligibility_sha256=config.cleanup_offer_eligibility_sha256,
     )
     valid.validate(config)
     with pytest.raises(CampaignError, match="cleanup binding"):
@@ -424,6 +438,11 @@ def test_deployed_principal_manifest_matches_prepared_semantic_plan() -> None:
             "cleanupResourceGroupName": config.cleanup_resource_group,
             "cleanupLocation": config.cleanup_region,
             "cleanupRegionSelectionSha256": config.cleanup_region_selection_sha256,
+            "cleanupOfferClassification": config.cleanup_offer_classification,
+            "cleanupOfferEligibilityDisposition": (config.cleanup_offer_eligibility_disposition),
+            "cleanupOfferEligibleRegions": config.cleanup_offer_eligible_regions,
+            "cleanupOfferEligibilitySource": config.cleanup_offer_eligibility_source,
+            "cleanupOfferEligibilitySha256": config.cleanup_offer_eligibility_sha256,
             "principalManifest": json.dumps(manifest),
         }
     }
@@ -496,6 +515,11 @@ def _runtime() -> dict[str, str]:
         "cleanupScriptSha256": "d" * 64,
         "cleanupRegion": "eastus2",
         "cleanupRegionSelectionSha256": "f" * 64,
+        "cleanupOfferClassification": "restricted-public-offer",
+        "cleanupOfferEligibilityDisposition": ("restricted-offer-metadata-confirmed"),
+        "cleanupOfferEligibleRegions": OFFER_ELIGIBLE_REGIONS_BINDING,
+        "cleanupOfferEligibilitySource": OFFER_ELIGIBILITY_SOURCE,
+        "cleanupOfferEligibilitySha256": "e" * 64,
         "cleanupRegionSelectionFile": "runtime/cleanup-region-selection.json",
         "cleanupDeploymentName": "m78-cleanup",
         "campaignDeploymentName": "m78-campaign",
@@ -537,6 +561,10 @@ def test_operator_runbook_maps_every_phase_to_implemented_commands() -> None:
     assert "mobius.milestone=7.8" in scope
     assert f"mobius.cleanup-deadline-utc={config.cleanup_deadline_utc}" in scope
     assert "mobius.cost-ceiling-cents=5000" in scope
+    assert f"mobius.cleanup-offer-classification={config.cleanup_offer_classification}" in scope
+    assert (
+        f"mobius.cleanup-offer-eligibility-sha256={config.cleanup_offer_eligibility_sha256}"
+    ) in scope
 
 
 def _command_result(value: object) -> dict[str, object]:
@@ -553,6 +581,11 @@ def _cleanup_deployment_result(config: CampaignConfig) -> dict[str, object]:
         "cleanupPrincipalId": _object_id(201),
         "cleanupLocation": config.cleanup_region,
         "cleanupRegionSelectionSha256": config.cleanup_region_selection_sha256,
+        "cleanupOfferClassification": config.cleanup_offer_classification,
+        "cleanupOfferEligibilityDisposition": (config.cleanup_offer_eligibility_disposition),
+        "cleanupOfferEligibleRegions": config.cleanup_offer_eligible_regions,
+        "cleanupOfferEligibilitySource": config.cleanup_offer_eligibility_source,
+        "cleanupOfferEligibilitySha256": config.cleanup_offer_eligibility_sha256,
         "cleanupDeadlineUtc": config.cleanup_deadline_utc,
         "costCeilingCents": 5000,
         "scheduleCount": 1,
@@ -567,6 +600,12 @@ def test_cleanup_binding_and_readback_reject_substitution() -> None:
     runtime = _runtime()
     deployment = _cleanup_deployment_result(config)
     validate_cleanup_deployment(deployment, config)
+    tampered = _cleanup_deployment_result(config)
+    tampered_payload = json.loads(str(tampered["stdout"]))
+    tampered_payload["properties"]["outputs"]["cleanupOfferEligibilitySha256"]["value"] = "0" * 64
+    tampered["stdout"] = json.dumps(tampered_payload)
+    with pytest.raises(CampaignError, match="cleanup binding"):
+        validate_cleanup_deployment(tampered, config)
     results = [
         deployment,
         _command_result({"identity": {"principalId": _object_id(201)}, "location": "East US 2"}),
@@ -604,6 +643,35 @@ def test_cleanup_binding_and_readback_reject_substitution() -> None:
     )
     with pytest.raises(CampaignError, match="readback drifted"):
         validate_cleanup_readback(results, config, runtime)
+
+
+def test_scope_readback_binds_offer_eligibility_tags() -> None:
+    config = _config()
+    runtime = _runtime()
+    tags = {
+        "mobius.campaign": config.campaign_id,
+        "mobius.generation": config.generation_id,
+        "mobius.milestone": "7.8",
+        "mobius.cleanup-deadline-utc": config.cleanup_deadline_utc,
+        "mobius.cost-ceiling-cents": "5000",
+        "mobius.cleanup-region-selection-sha256": (config.cleanup_region_selection_sha256),
+        "mobius.cleanup-offer-classification": config.cleanup_offer_classification,
+        "mobius.cleanup-offer-disposition": (config.cleanup_offer_eligibility_disposition),
+        "mobius.cleanup-offer-regions": config.cleanup_offer_eligible_regions,
+        "mobius.cleanup-offer-source": config.cleanup_offer_eligibility_source,
+        "mobius.cleanup-offer-eligibility-sha256": (config.cleanup_offer_eligibility_sha256),
+    }
+    result = _command_result({"name": config.target_resource_group, "tags": tags})
+    validate_operation_results("scope-create", [result], config, runtime)
+
+    tags["mobius.cleanup-offer-eligibility-sha256"] = "0" * 64
+    with pytest.raises(CampaignError, match="scope readback differs"):
+        validate_operation_results(
+            "scope-create",
+            [_command_result({"name": config.target_resource_group, "tags": tags})],
+            config,
+            runtime,
+        )
 
 
 def test_fake_azure_job_adapter_waits_for_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -737,20 +805,25 @@ def test_prepare_creates_one_private_restart_safe_bundle(
         },
     )
     selection = AutomationRegionSelection(
-        version="m7.8-cleanup-region-selection-v1",
+        version="m7.8-cleanup-region-selection-v2",
         candidate_order=CLEANUP_REGION_CANDIDATES,
         selected_region="eastus2",
         provider_registration_state="Registered",
-        capacity_basis="provider-policy-zero-active-and-soft-deleted-accounts",
+        capacity_basis=("provider-offer-policy-zero-active-and-soft-deleted-accounts"),
         policy_assignment_count=0,
         policy_definition_count=0,
         provider_locations_sha256="1" * 64,
+        offer_classification="restricted-public-offer",
+        offer_eligibility_disposition="restricted-offer-metadata-confirmed",
+        offer_eligible_regions=RESTRICTED_OFFER_ELIGIBLE_REGIONS,
+        offer_eligibility_source=OFFER_ELIGIBILITY_SOURCE,
+        offer_eligibility_sha256="5" * 64,
         active_occupancy_sha256="2" * 64,
         soft_deleted_occupancy_sha256="3" * 64,
         policy_evidence_sha256="4" * 64,
         observed_at_utc="2030-01-01T00:00:00Z",
         candidates=tuple(
-            CandidateEvidence(region, True, True, 0, 0, "viable")
+            CandidateEvidence(region, True, True, True, 0, 0, "viable")
             for region in CLEANUP_REGION_CANDIDATES
         ),
     )
@@ -765,6 +838,9 @@ def test_prepare_creates_one_private_restart_safe_bundle(
     assert subscription not in stdout and tenant not in stdout
     config = CampaignConfig.from_json(output / "campaign.json")
     assert config.campaign_id == "mobius78-managed-proof"
+    assert config.cleanup_offer_classification == selection.offer_classification
+    assert config.cleanup_offer_eligible_regions == OFFER_ELIGIBLE_REGIONS_BINDING
+    assert config.cleanup_offer_eligibility_sha256 == selection.offer_eligibility_sha256
     runtime_path = output / "runtime.json"
     runtime = campaign_operator.load_runtime(runtime_path)
     campaign_operator.validate_prepared_bundle(runtime_path, runtime, config)
@@ -777,6 +853,11 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             "cleanupScriptSha256",
             "cleanupRegion",
             "cleanupRegionSelectionSha256",
+            "cleanupOfferClassification",
+            "cleanupOfferEligibilityDisposition",
+            "cleanupOfferEligibleRegions",
+            "cleanupOfferEligibilitySource",
+            "cleanupOfferEligibilitySha256",
             "cleanupRegionSelectionFile",
             "cleanupDeploymentName",
             "campaignDeploymentName",

@@ -256,3 +256,10 @@ evidence. The campaign stopped at its first failed invariant and completed
 direct zero-residue cleanup without a region hop, retry, image, target
 generation, database, or managed proof. See the
 [corrected regional-capacity campaign execution handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_CORRECTED_REGIONAL_CAPACITY_CAMPAIGN_EXECUTION_HANDOFF.md).
+
+## Later M78-PG-008 repository correction cross-reference
+
+The later bounded repository-local remediation added subscription-offer
+eligibility as the fourth mandatory selection gate without changing this
+handoff's historical M78-PG-007 evidence or campaign outcome. See the
+[Automation offer-region eligibility remediation handoff](MILESTONE_7_8_AUTOMATION_OFFER_REGION_ELIGIBILITY_REMEDIATION_HANDOFF.md).

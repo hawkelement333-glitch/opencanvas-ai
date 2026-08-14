@@ -29,9 +29,10 @@ existence.
   than five, a second output directory, a malformed campaign, or a mismatched
   target/PostgreSQL region. Before creating the directory it selects one
   cleanup region through `automation_region.py` from the closed order
-  `eastus2`, `southcentralus`, `westus2`, `westus`. Provider support, enforced
-  location policy, active occupancy, and discoverable soft-deleted occupancy
-  must prove the candidate armable; discovery failure has no fallback.
+  `eastus2`, `southcentralus`, `westus2`, `westus`. Provider support,
+  subscription-offer eligibility, enforced location policy, active occupancy,
+  and discoverable soft-deleted occupancy are independent mandatory gates;
+  discovery failure has no provider-only fallback.
 - `operator.py` is dry-run by default. `--execute` advances one validated,
   persisted phase at a time and starts cleanup after any failure following
   scope creation.
@@ -105,11 +106,14 @@ database. The separately authorized operator procedure is in
 
 ## Current boundary
 
-A fresh campaign previously stopped at the unchecked regional Automation
-capacity boundary and completed direct zero-residue cleanup. M78-PG-007 is now
-corrected locally, including a sanitized read-only observation that selected
-`southcentralus`; this correction did not execute a campaign or mutate Azure.
-No replacement resource, generation, image, scan, secret, or live-database
-operation occurred. M78-PG-E01, M78-PG-E02, M78-PG-E03, M78-TI-E01, and
-M78-PG-E04 remain open. Milestone 7.8 remains incomplete, and the object-storage
-audit remains unstarted.
+A fresh campaign previously stopped when Azure proved that provider support,
+policy permission, and empty account inventories do not establish
+subscription-offer admission. M78-PG-008 is now corrected locally. The
+selector binds the reviewed restrictive public-offer set
+`eastus,eastus2,northeurope,southeastasia,westus`; it excludes the unresolved
+`JapanWest2`/`japanwest` variant rather than guessing. Sanitized read-only
+discovery now fails closed because `eastus2` and `westus` are occupied while
+`southcentralus` and `westus2` are offer-ineligible. This correction executed
+no campaign and made no Azure mutation. M78-PG-E01, M78-PG-E02, M78-PG-E03,
+M78-TI-E01, and M78-PG-E04 remain open. Milestone 7.8 remains incomplete, and
+the object-storage audit remains unstarted.
