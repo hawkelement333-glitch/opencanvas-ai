@@ -11,7 +11,10 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from infra.milestone_7_8.automation_region import discover_automation_region
+from infra.milestone_7_8.automation_region import (
+    CLEANUP_CANDIDATE_REGIONS_BINDING,
+    discover_automation_region,
+)
 from infra.milestone_7_8.campaign import (
     CAMPAIGN_PATTERN,
     CampaignError,
@@ -109,6 +112,9 @@ def main() -> int:
         )
         cleanup_region = region_selection.selected_region
         region_selection_sha256 = region_selection.sha256()
+        candidate_regions = ",".join(region_selection.candidate_order)
+        if candidate_regions != CLEANUP_CANDIDATE_REGIONS_BINDING:
+            raise CampaignError("cleanup candidate region binding differs")
         offer_eligible_regions = ",".join(region_selection.offer_eligible_regions)
         generation_id = f"g1-{secrets.token_hex(6)}"
         suffix = hashlib.sha256(
@@ -143,6 +149,7 @@ def main() -> int:
             "mobius.cleanup-deadline-utc": deadline,
             "mobius.cost-ceiling-cents": "5000",
             "mobius.cleanup-region-selection-sha256": region_selection_sha256,
+            "mobius.cleanup-candidate-regions": candidate_regions,
             "mobius.cleanup-offer-classification": (
                 region_selection.offer_classification
             ),
@@ -188,6 +195,7 @@ def main() -> int:
             ],
             "principalManifestSha256": manifest_binding,
             "cleanupRegionSelectionSha256": region_selection_sha256,
+            "cleanupCandidateRegions": candidate_regions,
             "cleanupOfferClassification": region_selection.offer_classification,
             "cleanupOfferEligibilityDisposition": (
                 region_selection.offer_eligibility_disposition
@@ -208,6 +216,7 @@ def main() -> int:
                 "cleanupResourceGroupName": cleanup_rg,
                 "cleanupLocation": cleanup_region,
                 "cleanupRegionSelectionSha256": region_selection_sha256,
+                "cleanupCandidateRegions": candidate_regions,
                 "cleanupOfferClassification": region_selection.offer_classification,
                 "cleanupOfferEligibilityDisposition": (
                     region_selection.offer_eligibility_disposition
@@ -237,6 +246,7 @@ def main() -> int:
                 "postgresLocation": args.postgres_region,
                 "cleanupLocation": cleanup_region,
                 "cleanupRegionSelectionSha256": region_selection_sha256,
+                "cleanupCandidateRegions": candidate_regions,
                 "cleanupOfferClassification": region_selection.offer_classification,
                 "cleanupOfferEligibilityDisposition": (
                     region_selection.offer_eligibility_disposition
@@ -278,6 +288,7 @@ def main() -> int:
             "cleanupScriptSha256": cleanup_script_sha256,
             "cleanupRegion": cleanup_region,
             "cleanupRegionSelectionSha256": region_selection_sha256,
+            "cleanupCandidateRegions": candidate_regions,
             "cleanupOfferClassification": region_selection.offer_classification,
             "cleanupOfferEligibilityDisposition": (
                 region_selection.offer_eligibility_disposition
@@ -327,6 +338,7 @@ def main() -> int:
                     ),
                     "cleanupRegion": cleanup_region,
                     "cleanupRegionSelectionSha256": region_selection_sha256,
+                    "cleanupCandidateRegions": candidate_regions,
                     "cleanupOfferClassification": (
                         region_selection.offer_classification
                     ),

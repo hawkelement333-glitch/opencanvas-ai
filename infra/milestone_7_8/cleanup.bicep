@@ -18,6 +18,7 @@ param cleanupLocation string
 @minLength(64)
 @maxLength(64)
 param cleanupRegionSelectionSha256 string
+param cleanupCandidateRegions string
 param cleanupOfferClassification string
 param cleanupOfferEligibilityDisposition string
 param cleanupOfferEligibleRegions string
@@ -53,6 +54,7 @@ module controller './modules/cleanup-controller.bicep' = {
     cleanupResourceGroupName: cleanupResourceGroupName
     cleanupLocation: cleanupLocation
     cleanupRegionSelectionSha256: cleanupRegionSelectionSha256
+    cleanupCandidateRegions: cleanupCandidateRegions
     cleanupOfferClassification: cleanupOfferClassification
     cleanupOfferEligibilityDisposition: cleanupOfferEligibilityDisposition
     cleanupOfferEligibleRegions: cleanupOfferEligibleRegions
@@ -144,6 +146,7 @@ output targetResourceGroupName string = targetResourceGroupName
 output cleanupResourceGroupName string = cleanupResourceGroupName
 output cleanupLocation string = cleanupLocation
 output cleanupRegionSelectionSha256 string = cleanupRegionSelectionSha256
+output cleanupCandidateRegions string = cleanupCandidateRegions
 output cleanupOfferClassification string = cleanupOfferClassification
 output cleanupOfferEligibilityDisposition string = cleanupOfferEligibilityDisposition
 output cleanupOfferEligibleRegions string = cleanupOfferEligibleRegions

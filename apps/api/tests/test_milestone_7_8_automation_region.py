@@ -16,6 +16,7 @@ sys.path.insert(0, str(REPOSITORY_ROOT))
 # contract imports the repository-level campaign package after adding that root.
 # ruff: noqa: E402
 from infra.milestone_7_8.automation_region import (
+    CLEANUP_CANDIDATE_REGIONS_BINDING,
     CLEANUP_REGION_CANDIDATES,
     OFFER_ELIGIBILITY_SOURCE,
     OFFER_ELIGIBLE_REGIONS_BINDING,
@@ -57,7 +58,15 @@ def _provider(locations: Sequence[object] | None = None) -> dict[str, object]:
                 "resourceType": "automationAccounts",
                 "locations": list(locations)
                 if locations is not None
-                else ["East US 2", "South Central US", "West US 2", "West US"],
+                else [
+                    "East US 2",
+                    "South Central US",
+                    "West US 2",
+                    "West US",
+                    "East US",
+                    "North Europe",
+                    "Southeast Asia",
+                ],
             }
         ],
     }
@@ -163,6 +172,7 @@ def _config(selection: AutomationRegionSelection) -> CampaignConfig:
         resource_items=(CostItem("bounded", "5.13664", 4),),
         principal_manifest_sha256="c" * 64,
         cleanup_region_selection_sha256=selection.sha256(),
+        cleanup_candidate_regions=",".join(selection.candidate_order),
         cleanup_offer_classification=selection.offer_classification,
         cleanup_offer_eligibility_disposition=(selection.offer_eligibility_disposition),
         cleanup_offer_eligible_regions=",".join(selection.offer_eligible_regions),
@@ -184,6 +194,7 @@ def _runtime(selection: AutomationRegionSelection) -> dict[str, str]:
         "cleanupParametersFile": "runtime/cleanup.parameters.json",
         "cleanupRegion": selection.selected_region,
         "cleanupRegionSelectionSha256": selection.sha256(),
+        "cleanupCandidateRegions": ",".join(selection.candidate_order),
         "cleanupOfferClassification": selection.offer_classification,
         "cleanupOfferEligibilityDisposition": (selection.offer_eligibility_disposition),
         "cleanupOfferEligibleRegions": ",".join(selection.offer_eligible_regions),
@@ -263,6 +274,38 @@ def test_m78_pg_008_restricted_offer_is_an_independent_mandatory_gate() -> None:
     assert selection.offer_eligibility_source == OFFER_ELIGIBILITY_SOURCE
 
 
+def test_m78_pg_009_previously_omitted_viable_candidate_is_selected() -> None:
+    selection = _select(
+        deleted=[
+            {"location": "East US 2"},
+            {"location": "West US"},
+            {"location": "East US"},
+            {"location": "North Europe"},
+        ]
+    )
+
+    assert selection.selected_region == "southeastasia"
+    assert selection.candidate_order == CLEANUP_REGION_CANDIDATES
+    assert set(RESTRICTED_OFFER_ELIGIBLE_REGIONS) <= set(selection.candidate_order)
+    by_region = {item.region: item for item in selection.candidates}
+    assert len(by_region) == len(CLEANUP_REGION_CANDIDATES) == 7
+    for region in ("eastus2", "westus", "eastus", "northeurope"):
+        assert by_region[region].status == "occupied"
+        assert by_region[region].soft_deleted_account_count == 1
+    for region in ("southcentralus", "westus2"):
+        assert by_region[region].status == "offer-ineligible"
+    assert by_region["southeastasia"].status == "viable"
+
+
+def test_m78_pg_009_offer_safe_candidates_cannot_be_silently_dropped() -> None:
+    assert CLEANUP_CANDIDATE_REGIONS_BINDING == (
+        "eastus2,southcentralus,westus2,westus,eastus,northeurope,southeastasia"
+    )
+    assert set(RESTRICTED_OFFER_ELIGIBLE_REGIONS) <= set(CLEANUP_REGION_CANDIDATES)
+    with pytest.raises(CampaignError, match="reviewed contract"):
+        _select(candidate_order=CLEANUP_REGION_CANDIDATES[:-1])
+
+
 def test_active_and_soft_deleted_occupancy_are_independent_offer_aware_gates() -> None:
     active = _select(active=[{"location": "East US 2"}])
     assert active.selected_region == "westus"
@@ -324,8 +367,28 @@ def test_documented_japanwest2_alias_is_not_guessed_from_japan_west_provider() -
 
 
 def test_provider_order_and_case_do_not_change_selection_or_hash() -> None:
-    first = _select(locations=["West US", "east us 2", "WEST US 2", "South Central US"])
-    second = _select(locations=["southcentralus", "westus2", "EASTUS2", "westus"])
+    first = _select(
+        locations=[
+            "SOUTHEAST ASIA",
+            "North Europe",
+            "East US",
+            "West US",
+            "east us 2",
+            "WEST US 2",
+            "South Central US",
+        ]
+    )
+    second = _select(
+        locations=[
+            "southcentralus",
+            "westus2",
+            "EASTUS2",
+            "westus",
+            "eastus",
+            "NORTHEUROPE",
+            "southeastasia",
+        ]
+    )
 
     assert first.document() == second.document()
     assert first.sha256() == second.sha256()
@@ -412,6 +475,12 @@ def test_all_candidates_occupied_stops_before_an_armable_selection() -> None:
     active = [{"location": region} for region in CLEANUP_REGION_CANDIDATES]
     with pytest.raises(CampaignError, match="automation-region-occupied-capacity-unproved"):
         _select(active=active)
+
+
+def test_m78_pg_009_empty_offer_safe_intersection_remains_fail_closed() -> None:
+    deleted = [{"location": region} for region in RESTRICTED_OFFER_ELIGIBLE_REGIONS]
+    with pytest.raises(CampaignError, match="automation-region-occupied-capacity-unproved"):
+        _select(deleted=deleted)
 
 
 @pytest.mark.parametrize("inventory_index", [3, 4])
@@ -513,6 +582,7 @@ def test_selection_is_bound_to_plan_bicep_schemas_and_terminal_receipt() -> None
         content = (REPOSITORY_ROOT / relative).read_text(encoding="utf-8")
         for binding in (
             "cleanupRegionSelectionSha256",
+            "cleanupCandidateRegions",
             "cleanupOfferClassification",
             "cleanupOfferEligibilityDisposition",
             "cleanupOfferEligibleRegions",
@@ -525,6 +595,7 @@ def test_selection_is_bound_to_plan_bicep_schemas_and_terminal_receipt() -> None
     )
     for binding in (
         "cleanup_region_selection_sha256",
+        "cleanup_candidate_regions",
         "cleanup_offer_classification",
         "cleanup_offer_eligibility_disposition",
         "cleanup_offer_eligible_regions",
@@ -538,6 +609,7 @@ def test_selection_is_bound_to_plan_bicep_schemas_and_terminal_receipt() -> None
     receipt = terminal_receipt(result)
     assert receipt["cleanupRegion"] == selection.selected_region
     assert receipt["cleanupRegionSelectionSha256"] == selection.sha256()
+    assert receipt["cleanupCandidateRegions"] == CLEANUP_CANDIDATE_REGIONS_BINDING
     assert receipt["cleanupOfferClassification"] == selection.offer_classification
     assert receipt["cleanupOfferEligibleRegions"] == OFFER_ELIGIBLE_REGIONS_BINDING
     assert receipt["cleanupOfferEligibilitySha256"] == (selection.offer_eligibility_sha256)
@@ -547,6 +619,15 @@ def test_configuration_rejects_region_outside_bound_offer_set() -> None:
     selection = _select()
     with pytest.raises(CampaignError, match="offer eligibility binding"):
         replace(_config(selection), cleanup_region="southcentralus").validate(allow_expired=True)
+
+
+def test_m78_pg_009_configuration_rejects_dropped_candidate() -> None:
+    selection = _select()
+    with pytest.raises(CampaignError, match="candidate region binding"):
+        replace(
+            _config(selection),
+            cleanup_candidate_regions=",".join(CLEANUP_REGION_CANDIDATES[:-1]),
+        ).validate(allow_expired=True)
 
 
 def test_cleanup_deployment_plan_has_one_region_and_no_hopping_or_reuse() -> None:
@@ -580,6 +661,7 @@ def test_capacity_check_revalidates_selection_before_scope_mutation() -> None:
         runtime,
         runner=FakeRunner(),  # type: ignore[arg-type]
     )
+    assert config.cleanup_candidate_regions == CLEANUP_CANDIDATE_REGIONS_BINDING
 
     changed_offer_results = list(_discovery_results())
     changed_offer_results[1] = _result(

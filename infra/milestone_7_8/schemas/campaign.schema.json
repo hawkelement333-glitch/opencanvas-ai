@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign:v2",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign:v3",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,6 +19,7 @@
     "resourceItems",
     "principalManifestSha256",
     "cleanupRegionSelectionSha256",
+    "cleanupCandidateRegions",
     "cleanupOfferClassification",
     "cleanupOfferEligibilityDisposition",
     "cleanupOfferEligibleRegions",
@@ -64,6 +65,9 @@
     "cleanupRegionSelectionSha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
+    },
+    "cleanupCandidateRegions": {
+      "const": "eastus2,southcentralus,westus2,westus,eastus,northeurope,southeastasia"
     },
     "cleanupOfferClassification": {
       "enum": ["restricted-public-offer", "unclassified"]

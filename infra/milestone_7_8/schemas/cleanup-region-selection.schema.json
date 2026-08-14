@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:cleanup-region-selection:v2",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:cleanup-region-selection:v3",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -24,9 +24,17 @@
     "candidates"
   ],
   "properties": {
-    "version": { "const": "m7.8-cleanup-region-selection-v2" },
+    "version": { "const": "m7.8-cleanup-region-selection-v3" },
     "candidateOrder": {
-      "const": ["eastus2", "southcentralus", "westus2", "westus"]
+      "const": [
+        "eastus2",
+        "southcentralus",
+        "westus2",
+        "westus",
+        "eastus",
+        "northeurope",
+        "southeastasia"
+      ]
     },
     "selectedRegion": { "type": "string", "pattern": "^[a-z][a-z0-9]{2,31}$" },
     "providerRegistrationState": { "const": "Registered" },
@@ -67,8 +75,8 @@
     "observedAtUtc": { "type": "string", "format": "date-time" },
     "candidates": {
       "type": "array",
-      "minItems": 4,
-      "maxItems": 4,
+      "minItems": 7,
+      "maxItems": 7,
       "items": {
         "type": "object",
         "additionalProperties": false,

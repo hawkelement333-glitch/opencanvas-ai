@@ -47,6 +47,9 @@ RESIDUE_KEYS: Final = (
     "diagnosticSettings",
     "syntheticRows",
 )
+CLEANUP_CANDIDATE_REGIONS_BINDING: Final = (
+    "eastus2,southcentralus,westus2,westus,eastus,northeurope,southeastasia"
+)
 
 
 class CampaignError(RuntimeError):
@@ -139,6 +142,7 @@ class CampaignConfig:
     resource_items: tuple[CostItem, ...]
     principal_manifest_sha256: str
     cleanup_region_selection_sha256: str
+    cleanup_candidate_regions: str
     cleanup_offer_classification: str
     cleanup_offer_eligibility_disposition: str
     cleanup_offer_eligible_regions: str
@@ -165,6 +169,7 @@ class CampaignConfig:
             "resourceItems",
             "principalManifestSha256",
             "cleanupRegionSelectionSha256",
+            "cleanupCandidateRegions",
             "cleanupOfferClassification",
             "cleanupOfferEligibilityDisposition",
             "cleanupOfferEligibleRegions",
@@ -202,6 +207,7 @@ class CampaignConfig:
             resource_items=items,
             principal_manifest_sha256=raw["principalManifestSha256"],
             cleanup_region_selection_sha256=raw["cleanupRegionSelectionSha256"],
+            cleanup_candidate_regions=raw["cleanupCandidateRegions"],
             cleanup_offer_classification=raw["cleanupOfferClassification"],
             cleanup_offer_eligibility_disposition=raw[
                 "cleanupOfferEligibilityDisposition"
@@ -240,6 +246,11 @@ class CampaignConfig:
             raise CampaignError("principal manifest binding is invalid")
         if HASH_PATTERN.fullmatch(self.cleanup_region_selection_sha256) is None:
             raise CampaignError("cleanup region selection binding is invalid")
+        if (
+            self.cleanup_candidate_regions != CLEANUP_CANDIDATE_REGIONS_BINDING
+            or self.cleanup_region not in self.cleanup_candidate_regions.split(",")
+        ):
+            raise CampaignError("cleanup candidate region binding is invalid")
         if (
             self.cleanup_offer_eligible_regions
             != "eastus,eastus2,northeurope,southeastasia,westus"
@@ -307,6 +318,7 @@ class Ledger:
     )
     cleanup_region: str | None = None
     cleanup_region_selection_sha256: str | None = None
+    cleanup_candidate_regions: str | None = None
     cleanup_offer_classification: str | None = None
     cleanup_offer_eligibility_disposition: str | None = None
     cleanup_offer_eligible_regions: str | None = None
@@ -317,6 +329,7 @@ class Ledger:
         expected = (
             config.cleanup_region,
             config.cleanup_region_selection_sha256,
+            config.cleanup_candidate_regions,
             config.cleanup_offer_classification,
             config.cleanup_offer_eligibility_disposition,
             config.cleanup_offer_eligible_regions,
@@ -326,6 +339,7 @@ class Ledger:
         observed = (
             self.cleanup_region,
             self.cleanup_region_selection_sha256,
+            self.cleanup_candidate_regions,
             self.cleanup_offer_classification,
             self.cleanup_offer_eligibility_disposition,
             self.cleanup_offer_eligible_regions,
@@ -333,13 +347,14 @@ class Ledger:
             self.cleanup_offer_eligibility_sha256,
         )
         if (
-            observed == (None, None, None, None, None, None, None)
+            observed == (None, None, None, None, None, None, None, None)
             and self.phase == Phase.NEW.value
             and not self.transitions
         ):
             (
                 self.cleanup_region,
                 self.cleanup_region_selection_sha256,
+                self.cleanup_candidate_regions,
                 self.cleanup_offer_classification,
                 self.cleanup_offer_eligibility_disposition,
                 self.cleanup_offer_eligible_regions,
@@ -357,6 +372,7 @@ class Ledger:
             self.cleanup_region != config.cleanup_region
             or self.cleanup_region_selection_sha256
             != config.cleanup_region_selection_sha256
+            or self.cleanup_candidate_regions != config.cleanup_candidate_regions
             or self.cleanup_offer_classification != config.cleanup_offer_classification
             or self.cleanup_offer_eligibility_disposition
             != config.cleanup_offer_eligibility_disposition
@@ -537,6 +553,7 @@ class CleanupBinding:
     schedule_count: int
     cleanup_region: str
     cleanup_region_selection_sha256: str
+    cleanup_candidate_regions: str
     cleanup_offer_classification: str
     cleanup_offer_eligibility_disposition: str
     cleanup_offer_eligible_regions: str
@@ -557,6 +574,7 @@ class CleanupBinding:
             or self.cleanup_region != config.cleanup_region
             or self.cleanup_region_selection_sha256
             != config.cleanup_region_selection_sha256
+            or self.cleanup_candidate_regions != config.cleanup_candidate_regions
             or self.cleanup_offer_classification != config.cleanup_offer_classification
             or self.cleanup_offer_eligibility_disposition
             != config.cleanup_offer_eligibility_disposition
@@ -689,7 +707,7 @@ def terminal_receipt(ledger: Ledger) -> dict[str, object]:
     if Phase(ledger.phase) is not Phase.FINALIZED or any(ledger.residue.values()):
         raise CampaignError("terminal receipt requires finalized zero residue")
     return {
-        "version": "m7.8-terminal-receipt-v2",
+        "version": "m7.8-terminal-receipt-v3",
         "campaignCorrelation": sanitize(ledger.campaign_id, domain="campaign"),
         "generationCorrelation": sanitize(ledger.generation_id, domain="generation"),
         "resourceGenerationCount": ledger.resource_generation_count,
@@ -697,6 +715,7 @@ def terminal_receipt(ledger: Ledger) -> dict[str, object]:
         "cleanupCompletedUtc": ledger.cleanup_completed_utc,
         "cleanupRegion": ledger.cleanup_region,
         "cleanupRegionSelectionSha256": ledger.cleanup_region_selection_sha256,
+        "cleanupCandidateRegions": ledger.cleanup_candidate_regions,
         "cleanupOfferClassification": ledger.cleanup_offer_classification,
         "cleanupOfferEligibilityDisposition": (
             ledger.cleanup_offer_eligibility_disposition

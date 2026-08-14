@@ -29,7 +29,9 @@ existence.
   than five, a second output directory, a malformed campaign, or a mismatched
   target/PostgreSQL region. Before creating the directory it selects one
   cleanup region through `automation_region.py` from the closed order
-  `eastus2`, `southcentralus`, `westus2`, `westus`. Provider support,
+  `eastus2`, `southcentralus`, `westus2`, `westus`, `eastus`, `northeurope`,
+  `southeastasia`. The order includes every reviewed offer-safe region and is
+  separately bound through every campaign artifact. Provider support,
   subscription-offer eligibility, enforced location policy, active occupancy,
   and discoverable soft-deleted occupancy are independent mandatory gates;
   discovery failure has no provider-only fallback.
@@ -108,12 +110,15 @@ database. The separately authorized operator procedure is in
 
 A fresh campaign previously stopped when Azure proved that provider support,
 policy permission, and empty account inventories do not establish
-subscription-offer admission. M78-PG-008 is now corrected locally. The
-selector binds the reviewed restrictive public-offer set
+subscription-offer admission. M78-PG-008 is now corrected locally. M78-PG-009
+also corrected the later contradiction between that offer-safe set and the
+old four-region candidate order. The selector binds the reviewed restrictive
+public-offer set
 `eastus,eastus2,northeurope,southeastasia,westus`; it excludes the unresolved
 `JapanWest2`/`japanwest` variant rather than guessing. Sanitized read-only
-discovery now fails closed because `eastus2` and `westus` are occupied while
-`southcentralus` and `westus2` are offer-ineligible. This correction executed
-no campaign and made no Azure mutation. M78-PG-E01, M78-PG-E02, M78-PG-E03,
-M78-TI-E01, and M78-PG-E04 remain open. Milestone 7.8 remains incomplete, and
-the object-storage audit remains unstarted.
+discovery now selects `southeastasia`: `eastus2`, `westus`, `eastus`, and
+`northeurope` are soft-deleted-account occupied; `southcentralus` and `westus2`
+are offer-ineligible. This correction executed no campaign and made no Azure
+mutation. M78-PG-E01, M78-PG-E02, M78-PG-E03, M78-TI-E01, and M78-PG-E04
+remain open. Milestone 7.8 remains incomplete, and the object-storage audit
+remains unstarted.

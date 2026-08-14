@@ -89,16 +89,19 @@ Preparation refuses a dirty tree, wrong branch, upstream, stash-count drift,
 malformed UUID/campaign, mismatched target/PostgreSQL region, or an existing
 output directory. It has no caller-supplied cleanup-region override. Before
 creating the output directory, it evaluates the exact order `eastus2`,
-`southcentralus`, `westus2`, `westus` against normalized provider support,
-subscription-offer eligibility, enforced location policy, active account
-occupancy, and discoverable soft-deleted occupancy. A candidate is armable only
-when all four independent admission dimensions pass. The offer-safe baseline
-is `eastus,eastus2,northeurope,southeastasia,westus`; Free Trial/Student and
-unclassified public offers cannot broaden it. The documented `JapanWest2`
-token is not treated as the provider's `japanwest` token without authoritative
-alias proof. There is no caller-supplied offer class, allowlist, cleanup region,
-or bypass. Discovery failure or an empty intersection stops without a
-generation, ledger, or hard-coded fallback.
+`southcentralus`, `westus2`, `westus`, `eastus`, `northeurope`,
+`southeastasia` against normalized provider support, subscription-offer
+eligibility, enforced location policy, active account occupancy, and
+discoverable soft-deleted occupancy. The order contains every reviewed
+offer-safe region and is separately bound through configuration, runtime,
+ledger, parameters, tags, Bicep outputs, readback, and receipt. A candidate is
+armable only when all four independent admission dimensions pass. The
+offer-safe baseline is `eastus,eastus2,northeurope,southeastasia,westus`; Free
+Trial/Student and unclassified public offers cannot broaden it. The documented
+`JapanWest2` token is not treated as the provider's `japanwest` token without
+authoritative alias proof. There is no caller-supplied offer class, allowlist,
+cleanup region, candidate order, or bypass. Discovery failure or an empty
+intersection stops without a generation, ledger, or hard-coded fallback.
 
 The first viable candidate and hashes of provider, offer eligibility, active,
 soft-deleted, and policy evidence are written to the closed selection receipt.
@@ -141,8 +144,9 @@ subscription context, subscription-policy metadata, Automation provider,
 active-account, soft-deleted-account, and policy-assignment reads; enforced
 policy definitions and deny-capable initiative members produce explicit
 generated GETs. Execution repeats preparation's complete offer-aware selector
-and requires the immutable region, decision hash, offer binding, and every
-evidence hash to match. Any change stops before `scope-create`.
+and requires the immutable region, ordered candidate-set binding, decision
+hash, offer binding, and every evidence hash to match. Any change stops before
+`scope-create`.
 
 The complete static operator plan contains 56 commands, 50 of them Azure CLI
 commands. It also has bounded generated Container Apps job polling, failure

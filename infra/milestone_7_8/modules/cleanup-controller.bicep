@@ -7,6 +7,7 @@ param targetResourceGroupName string
 param cleanupResourceGroupName string
 param cleanupLocation string
 param cleanupRegionSelectionSha256 string
+param cleanupCandidateRegions string
 param cleanupOfferClassification string
 param cleanupOfferEligibilityDisposition string
 param cleanupOfferEligibleRegions string
@@ -84,6 +85,7 @@ output scheduleName string = schedule.name
 output bindingName string = binding.name
 output cleanupLocation string = cleanupLocation
 output cleanupRegionSelectionSha256 string = cleanupRegionSelectionSha256
+output cleanupCandidateRegions string = cleanupCandidateRegions
 output cleanupOfferClassification string = cleanupOfferClassification
 output cleanupOfferEligibilityDisposition string = cleanupOfferEligibilityDisposition
 output cleanupOfferEligibleRegions string = cleanupOfferEligibleRegions

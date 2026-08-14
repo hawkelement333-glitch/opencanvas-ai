@@ -209,3 +209,13 @@ The only next action is a separately authorized fresh managed PostgreSQL
 evidence campaign from the new clean commit. Preparation must still fail
 before mutation if the offer-aware intersection remains empty. It is not a
 GitHub push and not object-storage work.
+
+## Later candidate-set reconciliation
+
+This handoff preserves the M78-PG-008 state at its correction commit. A later
+sanitized read-only reconciliation proved that `eastus`, `northeurope`, and
+`southeastasia` had not participated in the four-region operational order;
+`southeastasia` was otherwise selectable. M78-PG-009 corrects that separate
+omission and supersedes only the old empty-intersection next-action statement.
+See the
+[offer-safe candidate reconciliation handoff](MILESTONE_7_8_AUTOMATION_OFFER_SAFE_CANDIDATE_RECONCILIATION_HANDOFF.md).

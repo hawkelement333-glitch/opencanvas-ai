@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign-ledger:v2",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign-ledger:v3",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -26,6 +26,7 @@
     "residue",
     "cleanup_region",
     "cleanup_region_selection_sha256",
+    "cleanup_candidate_regions",
     "cleanup_offer_classification",
     "cleanup_offer_eligibility_disposition",
     "cleanup_offer_eligible_regions",
@@ -88,6 +89,9 @@
     "cleanup_region_selection_sha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
+    },
+    "cleanup_candidate_regions": {
+      "const": "eastus2,southcentralus,westus2,westus,eastus,northeurope,southeastasia"
     },
     "cleanup_offer_classification": {
       "enum": ["restricted-public-offer", "unclassified"]

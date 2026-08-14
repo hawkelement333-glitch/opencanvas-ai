@@ -26,6 +26,7 @@ from infra.milestone_7_8.azure_cli import (
     main,
 )
 from infra.milestone_7_8.campaign import (
+    CLEANUP_CANDIDATE_REGIONS_BINDING,
     CampaignConfig,
     CostItem,
     SubprocessRunner,
@@ -354,6 +355,7 @@ def test_missing_cli_and_invalid_arguments_fail_before_runtime_artifacts(
         resource_items=(CostItem("bounded-campaign", "5.13664", 4),),
         principal_manifest_sha256="c" * 64,
         cleanup_region_selection_sha256="f" * 64,
+        cleanup_candidate_regions=CLEANUP_CANDIDATE_REGIONS_BINDING,
         cleanup_offer_classification="restricted-public-offer",
         cleanup_offer_eligibility_disposition=("restricted-offer-metadata-confirmed"),
         cleanup_offer_eligible_regions=("eastus,eastus2,northeurope,southeastasia,westus"),

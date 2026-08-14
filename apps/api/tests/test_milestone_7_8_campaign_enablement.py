@@ -21,6 +21,7 @@ sys.path.insert(0, str(REPOSITORY_ROOT))
 from infra.milestone_7_8 import operator as campaign_operator
 from infra.milestone_7_8 import prepare
 from infra.milestone_7_8.automation_region import (
+    CLEANUP_CANDIDATE_REGIONS_BINDING,
     CLEANUP_REGION_CANDIDATES,
     OFFER_ELIGIBILITY_SOURCE,
     OFFER_ELIGIBLE_REGIONS_BINDING,
@@ -116,6 +117,7 @@ def _config(**changes: object) -> CampaignConfig:
         "resource_items": (CostItem("bounded-campaign", "5.13664", 4),),
         "principal_manifest_sha256": "c" * 64,
         "cleanup_region_selection_sha256": "f" * 64,
+        "cleanup_candidate_regions": CLEANUP_CANDIDATE_REGIONS_BINDING,
         "cleanup_offer_classification": "restricted-public-offer",
         "cleanup_offer_eligibility_disposition": ("restricted-offer-metadata-confirmed"),
         "cleanup_offer_eligible_regions": OFFER_ELIGIBLE_REGIONS_BINDING,
@@ -288,6 +290,7 @@ def test_resume_and_cleanup_binding_reject_substitution() -> None:
         schedule_count=1,
         cleanup_region=config.cleanup_region,
         cleanup_region_selection_sha256=config.cleanup_region_selection_sha256,
+        cleanup_candidate_regions=config.cleanup_candidate_regions,
         cleanup_offer_classification=config.cleanup_offer_classification,
         cleanup_offer_eligibility_disposition=(config.cleanup_offer_eligibility_disposition),
         cleanup_offer_eligible_regions=config.cleanup_offer_eligible_regions,
@@ -438,6 +441,7 @@ def test_deployed_principal_manifest_matches_prepared_semantic_plan() -> None:
             "cleanupResourceGroupName": config.cleanup_resource_group,
             "cleanupLocation": config.cleanup_region,
             "cleanupRegionSelectionSha256": config.cleanup_region_selection_sha256,
+            "cleanupCandidateRegions": config.cleanup_candidate_regions,
             "cleanupOfferClassification": config.cleanup_offer_classification,
             "cleanupOfferEligibilityDisposition": (config.cleanup_offer_eligibility_disposition),
             "cleanupOfferEligibleRegions": config.cleanup_offer_eligible_regions,
@@ -515,6 +519,7 @@ def _runtime() -> dict[str, str]:
         "cleanupScriptSha256": "d" * 64,
         "cleanupRegion": "eastus2",
         "cleanupRegionSelectionSha256": "f" * 64,
+        "cleanupCandidateRegions": CLEANUP_CANDIDATE_REGIONS_BINDING,
         "cleanupOfferClassification": "restricted-public-offer",
         "cleanupOfferEligibilityDisposition": ("restricted-offer-metadata-confirmed"),
         "cleanupOfferEligibleRegions": OFFER_ELIGIBLE_REGIONS_BINDING,
@@ -581,6 +586,7 @@ def _cleanup_deployment_result(config: CampaignConfig) -> dict[str, object]:
         "cleanupPrincipalId": _object_id(201),
         "cleanupLocation": config.cleanup_region,
         "cleanupRegionSelectionSha256": config.cleanup_region_selection_sha256,
+        "cleanupCandidateRegions": config.cleanup_candidate_regions,
         "cleanupOfferClassification": config.cleanup_offer_classification,
         "cleanupOfferEligibilityDisposition": (config.cleanup_offer_eligibility_disposition),
         "cleanupOfferEligibleRegions": config.cleanup_offer_eligible_regions,
@@ -655,6 +661,7 @@ def test_scope_readback_binds_offer_eligibility_tags() -> None:
         "mobius.cleanup-deadline-utc": config.cleanup_deadline_utc,
         "mobius.cost-ceiling-cents": "5000",
         "mobius.cleanup-region-selection-sha256": (config.cleanup_region_selection_sha256),
+        "mobius.cleanup-candidate-regions": config.cleanup_candidate_regions,
         "mobius.cleanup-offer-classification": config.cleanup_offer_classification,
         "mobius.cleanup-offer-disposition": (config.cleanup_offer_eligibility_disposition),
         "mobius.cleanup-offer-regions": config.cleanup_offer_eligible_regions,
@@ -805,7 +812,7 @@ def test_prepare_creates_one_private_restart_safe_bundle(
         },
     )
     selection = AutomationRegionSelection(
-        version="m7.8-cleanup-region-selection-v2",
+        version="m7.8-cleanup-region-selection-v3",
         candidate_order=CLEANUP_REGION_CANDIDATES,
         selected_region="eastus2",
         provider_registration_state="Registered",
@@ -823,7 +830,15 @@ def test_prepare_creates_one_private_restart_safe_bundle(
         policy_evidence_sha256="4" * 64,
         observed_at_utc="2030-01-01T00:00:00Z",
         candidates=tuple(
-            CandidateEvidence(region, True, True, True, 0, 0, "viable")
+            CandidateEvidence(
+                region,
+                True,
+                region in RESTRICTED_OFFER_ELIGIBLE_REGIONS,
+                True,
+                0,
+                0,
+                ("viable" if region in RESTRICTED_OFFER_ELIGIBLE_REGIONS else "offer-ineligible"),
+            )
             for region in CLEANUP_REGION_CANDIDATES
         ),
     )
@@ -838,6 +853,7 @@ def test_prepare_creates_one_private_restart_safe_bundle(
     assert subscription not in stdout and tenant not in stdout
     config = CampaignConfig.from_json(output / "campaign.json")
     assert config.campaign_id == "mobius78-managed-proof"
+    assert config.cleanup_candidate_regions == CLEANUP_CANDIDATE_REGIONS_BINDING
     assert config.cleanup_offer_classification == selection.offer_classification
     assert config.cleanup_offer_eligible_regions == OFFER_ELIGIBLE_REGIONS_BINDING
     assert config.cleanup_offer_eligibility_sha256 == selection.offer_eligibility_sha256
@@ -853,6 +869,7 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             "cleanupScriptSha256",
             "cleanupRegion",
             "cleanupRegionSelectionSha256",
+            "cleanupCandidateRegions",
             "cleanupOfferClassification",
             "cleanupOfferEligibilityDisposition",
             "cleanupOfferEligibleRegions",

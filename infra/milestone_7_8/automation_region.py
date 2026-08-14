@@ -15,7 +15,11 @@ CLEANUP_REGION_CANDIDATES: Final = (
     "southcentralus",
     "westus2",
     "westus",
+    "eastus",
+    "northeurope",
+    "southeastasia",
 )
+CLEANUP_CANDIDATE_REGIONS_BINDING: Final = ",".join(CLEANUP_REGION_CANDIDATES)
 RESTRICTED_OFFER_ELIGIBLE_REGIONS: Final = (
     "eastus",
     "eastus2",
@@ -31,7 +35,7 @@ RESTRICTED_OFFER_CLASSIFICATION: Final = "restricted-public-offer"
 UNCLASSIFIED_OFFER_CLASSIFICATION: Final = "unclassified"
 RESTRICTED_OFFER_DISPOSITION: Final = "restricted-offer-metadata-confirmed"
 BASELINE_OFFER_DISPOSITION: Final = "restrictive-public-baseline-applied"
-SELECTION_VERSION: Final = "m7.8-cleanup-region-selection-v2"
+SELECTION_VERSION: Final = "m7.8-cleanup-region-selection-v3"
 REGION_PATTERN: Final = re.compile(r"^[a-z][a-z0-9]{2,31}$")
 DEFINITION_API_VERSION: Final = "2023-04-01"
 DELETED_ACCOUNTS_API_VERSION: Final = "2024-10-23"
@@ -214,7 +218,7 @@ class AutomationRegionSelection:
         document.pop("observedAtUtc")
         encoded = json.dumps(document, separators=(",", ":"), sort_keys=True).encode()
         return hashlib.sha256(
-            b"m7.8/cleanup-region-selection/v2\0" + encoded
+            b"m7.8/cleanup-region-selection/v3\0" + encoded
         ).hexdigest()
 
 
@@ -557,6 +561,10 @@ def _validate_candidate_order(candidate_order: tuple[str, ...]) -> None:
     if candidate_order != CLEANUP_REGION_CANDIDATES:
         raise CampaignError(
             "automation-region-malformed-unknown: candidate order is not the reviewed contract"
+        )
+    if not set(RESTRICTED_OFFER_ELIGIBLE_REGIONS).issubset(candidate_order):
+        raise CampaignError(
+            "automation-region-malformed-unknown: offer-safe candidate is absent"
         )
     normalized = tuple(_normalize_region(item) for item in candidate_order)
     if normalized != candidate_order or len(set(normalized)) != len(normalized):
