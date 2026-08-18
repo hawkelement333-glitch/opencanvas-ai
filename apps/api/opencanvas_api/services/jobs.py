@@ -23,6 +23,7 @@ from opencanvas_api.services.documents import (
     DocumentProcessor,
     build_document_storage,
     build_embedding_provider,
+    build_versioned_object_storage,
 )
 from opencanvas_api.services.durable_jobs import (
     DurableJobConflictError,
@@ -31,6 +32,7 @@ from opencanvas_api.services.durable_jobs import (
     JobLease,
     RetryClassification,
 )
+from opencanvas_api.services.object_ingestion import ObjectReconciler
 from opencanvas_api.services.observability import OperationalTelemetry, Severity
 from opencanvas_api.services.scanner_bridge import build_private_scanner_result_bridge
 
@@ -312,6 +314,11 @@ class DocumentWorker:
         self.metrics = DurableJobMetrics()
         self.telemetry = telemetry
         self.scanner_bridge = build_private_scanner_result_bridge(settings)
+        self.object_storage = (
+            build_versioned_object_storage(settings)
+            if settings.object_ingestion_mode != "disabled"
+            else None
+        )
         self.processor = DocumentProcessor(
             settings=settings,
             storage=build_document_storage(settings),
@@ -321,6 +328,14 @@ class DocumentWorker:
     async def run_once(self) -> bool:
         async with self.sessions() as session:
             await self._heartbeat(session, "ready")
+            if self.object_storage is not None:
+                deleted = await ObjectReconciler(
+                    session,
+                    settings=self.settings,
+                ).execute_deletion_requests(self.object_storage)
+                if deleted:
+                    await session.commit()
+                    return True
             if self.scanner_bridge is not None and await self.scanner_bridge.consume_once(session):
                 await session.commit()
                 return True

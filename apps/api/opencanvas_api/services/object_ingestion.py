@@ -840,6 +840,16 @@ class UploadLifecycleService:
             )
         )
         if existing is not None:
+            if (
+                existing.workspace_id != workspace_id
+                or existing.requester_user_id != principal.user_id
+                or existing.reason_code != reason_code
+            ):
+                raise ObjectIngestionError(
+                    "The deletion idempotency key has already been used differently.",
+                    code="deletion_request_conflict",
+                    status_code=409,
+                )
             return await self._view(record)
         latest = await self._latest_object_transition(object_version_id)
         if latest.current_state == "deleted":
@@ -1805,6 +1815,71 @@ class ObjectReconciler:
     def __init__(self, session: AsyncSession, *, settings: Settings) -> None:
         self.session = session
         self.settings = settings
+
+    async def execute_deletion_requests(
+        self,
+        storage: VersionedObjectStorage,
+        *,
+        limit: int = 1,
+        now: datetime | None = None,
+    ) -> int:
+        """Delete exact requested versions with durable, retry-safe completion evidence."""
+
+        if limit < 1 or limit > 100:
+            raise ObjectIngestionError("The deletion reconciliation limit is invalid.")
+        completed_versions = select(StorageObjectLifecycleTransition.object_version_id).where(
+            StorageObjectLifecycleTransition.current_state == "deleted"
+        )
+        requests = list(
+            (
+                await self.session.scalars(
+                    select(ObjectDeletionRequest)
+                    .where(~ObjectDeletionRequest.object_version_id.in_(completed_versions))
+                    .order_by(
+                        ObjectDeletionRequest.requested_at,
+                        ObjectDeletionRequest.deletion_request_id,
+                    )
+                    .limit(limit)
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+        )
+        recorded_at = _aware_utc(now or datetime.now(UTC))
+        completed = 0
+        lifecycle = UploadLifecycleService(
+            self.session,
+            settings=self.settings,
+            storage=storage,
+        )
+        for request in requests:
+            version = await self.session.get(StorageObjectVersion, request.object_version_id)
+            if version is None or version.workspace_id != request.workspace_id:
+                raise ObjectIngestionError("The deletion request evidence is incomplete.")
+            latest = await lifecycle._latest_object_transition(version.object_version_id)
+            if latest.current_state == "deleted":
+                continue
+            if latest.current_state != "deletion_requested":
+                raise ObjectIngestionError("The deletion request lifecycle is inconsistent.")
+            await storage.delete_version(
+                physical_key=version.physical_key,
+                provider_version_id=version.provider_version_id,
+            )
+            transition = lifecycle._object_transition(
+                version,
+                sequence=latest.sequence + 1,
+                previous=latest.current_state,
+                current="deleted",
+                reason=request.reason_code,
+                actor_kind="service",
+                actor_user_id=None,
+                service_identity="mobius-object-reconciler",
+                trace_id=request.trace_id,
+                now=recorded_at,
+            )
+            self.session.add(transition)
+            await self.session.flush()
+            completed += 1
+        return completed
 
     async def expire_sessions(self, *, now: datetime | None = None, limit: int = 100) -> int:
         current = _aware_utc(now or datetime.now(UTC))

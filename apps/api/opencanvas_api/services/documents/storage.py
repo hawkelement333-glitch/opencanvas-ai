@@ -724,7 +724,13 @@ class AzureBlobVersionedObjectStorage:
             "HEAD",
             physical_key,
             query={"versionid": provider_version_id},
+            accepted_statuses=frozenset({404}),
         )
+        if exact.status_code == 404:
+            # A retry after an ambiguous successful DELETE sees the exact version
+            # as soft-deleted or permanently absent. Provider/auth failures still
+            # fail inside _request and cannot be mistaken for absence.
+            return
         if exact.headers.get("x-ms-version-id") != provider_version_id:
             raise DocumentStorageError("The exact Azure object version is unavailable.")
         etag = exact.headers.get("etag")

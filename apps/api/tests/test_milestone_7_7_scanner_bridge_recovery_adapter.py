@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+
 from infra.milestone_7_7 import api_image_publication
 from infra.milestone_7_7 import scanner_bridge_recovery_adapter as adapter_module
 from infra.milestone_7_7.scanner_bridge_recovery_adapter import (
@@ -21,6 +22,7 @@ from infra.milestone_7_7.scripts.scanner_bridge_deployment import (
     bicep_parameters,
     load_deployment_evidence,
 )
+from opencanvas_api.services.scanner_bridge import BlobTagReadObservation
 from performance.milestone_7_7.framework import JsonValue
 from preflight.milestone_7_7 import scanner_bridge_recovery
 from preflight.milestone_7_7.remaining_lifecycle_simulation import (
@@ -46,8 +48,6 @@ from preflight.milestone_7_7.scanner_bridge_recovery import (
 from preflight.milestone_7_7.scanner_result_bridge import (
     deployment_evidence_from_mapping,
 )
-
-from opencanvas_api.services.scanner_bridge import BlobTagReadObservation
 from scripts import scanner_bridge_probe
 
 SUBSCRIPTION_ID = "11111111-2222-4333-8444-555555555555"
@@ -58,7 +58,7 @@ CLEANUP_ACCOUNT = (
     "providers/Microsoft.Automation/automationAccounts/aa-mobius77-cleanup-recovery"
 )
 NOW = datetime(2026, 8, 6, 17, 30, tzinfo=UTC)
-DEADLINE = datetime(2026, 8, 12, 22, 15, tzinfo=UTC)
+DEADLINE = datetime(2026, 8, 13, 6, 30, tzinfo=UTC)
 HEAD = "a" * 40
 IMAGE = "acrmobius7711564669.azurecr.io/opencanvas-api@sha256:" + "b" * 64
 BUILD_INPUT = "c" * 64
@@ -79,7 +79,7 @@ def _authorization(stage: str = FOUNDATION_STAGE) -> ScannerBridgeRecoveryAuthor
         subscription_id=SUBSCRIPTION_ID,
         target_resource_group_id=TARGET,
         cleanup_automation_account_id=CLEANUP_ACCOUNT,
-        cleanup_deadline_utc="2026-08-12T22:15:00Z",
+        cleanup_deadline_utc="2026-08-13T06:30:00Z",
         now_utc=NOW,
         api_image_digest=IMAGE if stage == PROOF_STAGE else None,
         build_input_sha256=BUILD_INPUT if stage == PROOF_STAGE else None,

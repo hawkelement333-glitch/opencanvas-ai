@@ -13,8 +13,10 @@ production-readiness audit.
 Milestones 7.1 through 7.7 are complete. Milestone 7.8 is the active final
 production-readiness audit and has no numbered internal checkpoints. Revision
 `20260726_0029` is the sole Alembic head; 0030 is absent. The managed
-PostgreSQL High defects are locally remediated, and the independent 7.8
-campaign machinery is repository-ready, but the campaign has not run.
+PostgreSQL High defects are locally remediated. The independent 7.8 campaign
+machinery is fail-closed and not executable: its Automation cleanup controller
+cannot meet the zero-residue invariant while deleted accounts are provider
+retained. The prior campaign's exact account remains present.
 M78-PG-E01, M78-PG-E02, M78-PG-E03, M78-TI-E01, and M78-PG-E04 remain open.
 This guide is not evidence that managed grants, capacity, failover, credential
 recovery, tenant isolation, or operational configuration have passed.
@@ -203,8 +205,10 @@ bound admission scan. Every later error enters exact-scope cleanup.
 
 Managed execution must finish by proving both resource groups absent, no
 campaign-tagged resource or role assignment, and every residue counter zero.
-Local implementation and simulation do not close any managed gap. The
-object-storage audit remains a separate, unstarted surface.
+Local implementation and simulation do not close any managed gap. The local
+object-storage audit corrected M78-OS-001 by connecting durable exact-version
+deletion requests to the database worker; managed-provider deletion and
+recovery proof remains outstanding.
 
 ## Database credential replacement
 

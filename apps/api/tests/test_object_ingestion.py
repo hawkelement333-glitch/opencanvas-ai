@@ -581,6 +581,16 @@ async def test_timeout_reconciliation_and_deletion_request_block_reads(
         )
         assert deleted.object_transition is not None
         assert deleted.object_transition.current_state == "deletion_requested"
+        with pytest.raises(ObjectIngestionError) as conflict:
+            await lifecycle.request_deletion(
+                principal=_principal(),
+                workspace_id=workspace_2,
+                canvas_id=canvas_2,
+                session_id=completed_2.session.session_id,
+                idempotency_key="delete-clean-object",
+                reason_code="retention_expired",
+            )
+        assert conflict.value.code == "deletion_request_conflict"
         with pytest.raises(ObjectIngestionNotFoundError):
             await lifecycle.clean_bytes(
                 principal=_principal(),
@@ -589,6 +599,93 @@ async def test_timeout_reconciliation_and_deletion_request_block_reads(
                 session_id=completed_2.session.session_id,
             )
         assert await session.scalar(select(func.count()).select_from(ObjectDeletionRequest)) == 1
+
+
+@pytest.mark.asyncio
+async def test_deletion_reconciler_resolves_ambiguous_provider_commit_once(
+    database: Database,
+    tmp_path: Path,
+) -> None:
+    settings, storage, workspace_id, canvas_id, completed = await _completed_upload(
+        database,
+        tmp_path,
+        content=b"durable deletion ambiguity",
+    )
+    clean_result = await _bind_result(database, completed, _scan_result(completed))
+    async with database.sessions() as session:
+        await MalwareScanService(
+            session,
+            settings=settings,
+            storage=storage,
+        ).record_result(
+            result=clean_result,
+            signature=scanner_result_signature(clean_result, settings.scanner_result_secret),
+        )
+        await UploadLifecycleService(
+            session,
+            settings=settings,
+            storage=storage,
+        ).request_deletion(
+            principal=_principal(),
+            workspace_id=workspace_id,
+            canvas_id=canvas_id,
+            session_id=completed.session.session_id,
+            idempotency_key="ambiguous-delete-request",
+            reason_code="user_requested",
+        )
+        await session.commit()
+
+    class AmbiguousDeleteStorage:
+        def __init__(self) -> None:
+            self.failed = False
+
+        async def delete_version(self, *, physical_key: str, provider_version_id: str) -> None:
+            await storage.delete_version(
+                physical_key=physical_key,
+                provider_version_id=provider_version_id,
+            )
+            if not self.failed:
+                self.failed = True
+                raise DocumentStorageError("The committed provider response was ambiguous.")
+
+    ambiguous = AmbiguousDeleteStorage()
+    async with database.sessions() as session:
+        with pytest.raises(DocumentStorageError):
+            await ObjectReconciler(
+                session,
+                settings=settings,
+            ).execute_deletion_requests(ambiguous)  # type: ignore[arg-type]
+        await session.rollback()
+
+    async with database.sessions() as session:
+        reconciler = ObjectReconciler(session, settings=settings)
+        assert await reconciler.execute_deletion_requests(storage) == 1
+        await session.commit()
+
+    async with database.sessions() as session:
+        reconciler = ObjectReconciler(session, settings=settings)
+        assert await reconciler.execute_deletion_requests(storage) == 0
+        states = list(
+            (
+                await session.scalars(
+                    select(StorageObjectLifecycleTransition.current_state)
+                    .where(
+                        StorageObjectLifecycleTransition.object_version_id
+                        == completed.session.object_version_id
+                    )
+                    .order_by(StorageObjectLifecycleTransition.sequence)
+                )
+            ).all()
+        )
+        # The clean target has a different deterministic version ID, so the
+        # source remains retained while its promoted target is deleted.
+        assert states[-1] == "retained"
+        deleted_count = await session.scalar(
+            select(func.count())
+            .select_from(StorageObjectLifecycleTransition)
+            .where(StorageObjectLifecycleTransition.current_state == "deleted")
+        )
+        assert deleted_count == 1
 
 
 @pytest.mark.asyncio

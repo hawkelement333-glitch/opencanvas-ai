@@ -19,6 +19,7 @@ from opencanvas_api.db.models import (
     WorkerHeartbeat,
 )
 from opencanvas_api.db.session import Database
+from opencanvas_api.services import jobs as jobs_module
 from opencanvas_api.services.jobs import (
     DocumentWorker,
     JobQueueError,
@@ -250,5 +251,40 @@ async def test_idle_worker_commits_its_heartbeat(
     assert await worker.run_once() is False
     async with database.sessions() as session:
         heartbeat = await session.get(WorkerHeartbeat, "idle-worker")
+    assert heartbeat is not None
+    assert heartbeat.status == "ready"
+
+
+async def test_worker_executes_durable_object_deletion_before_claiming_jobs(
+    app: FastAPI,
+    database: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = cast(Settings, app.dependency_overrides[get_settings]()).model_copy(
+        update={"object_ingestion_mode": "trusted"}
+    )
+    storage = object()
+    calls: list[object] = []
+
+    class Reconciler:
+        def __init__(self, _session: object, *, settings: Settings) -> None:
+            calls.append(settings)
+
+        async def execute_deletion_requests(self, selected_storage: object) -> int:
+            calls.append(selected_storage)
+            return 1
+
+    monkeypatch.setattr(jobs_module, "build_versioned_object_storage", lambda _settings: storage)
+    monkeypatch.setattr(jobs_module, "ObjectReconciler", Reconciler)
+
+    worker = DocumentWorker(
+        settings=settings,
+        sessions=database.sessions,
+        worker_id="deletion-worker",
+    )
+    assert await worker.run_once() is True
+    assert calls == [settings, storage]
+    async with database.sessions() as session:
+        heartbeat = await session.get(WorkerHeartbeat, "deletion-worker")
     assert heartbeat is not None
     assert heartbeat.status == "ready"

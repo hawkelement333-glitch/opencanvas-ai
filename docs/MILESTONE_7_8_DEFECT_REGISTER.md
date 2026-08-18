@@ -1,11 +1,13 @@
 # Milestone 7.8 Defect Register
 
-Date: 2026-08-14
+Date: 2026-08-18
 
-Status: active; architecture and checkpoint-scope findings are corrected; ten
-managed PostgreSQL High defects are locally remediated, but the last campaign's
-exact Automation account remains provider-retained nonzero residue; campaign
-armability is blocked, and all five managed evidence gaps remain open
+Status: active; architecture and checkpoint-scope findings are corrected;
+managed PostgreSQL defects through M78-PG-012 and the first object-storage
+finding are locally remediated. The exact Automation account remains
+provider-retained nonzero residue, campaign armability remains structurally
+blocked, all five managed database evidence gaps remain open, and Milestone 7.8
+is not complete.
 
 This register records defects proved by the Milestone 7.8 audit and, in a
 separate section, the evidence gaps the audit contract requires it to preserve.
@@ -212,6 +214,95 @@ resolution, the 644-file repository hygiene/private-material guard, the
 canonical-input verification all passed. The critical-cleanup handoff records
 the exact commands, corrected validation findings, and remaining provider
 blocker.
+
+## Pre-expiry continuation findings
+
+### M78-PG-012 — retained-account identity evidence was not replayable
+
+**Severity:** High. **Disposition:** locally resolved; the provider record is
+still present and is not reclassified as zero residue.
+
+The original sanitized retention receipt asserted exact hash-bound attribution,
+but its target hash and four unrelated-record hashes did not match the
+domain-separated SHA-256 values calculated from the documented authoritative
+`properties.automationAccountResourceId` fields returned by the completely
+paginated deleted-account endpoint. Normal verification therefore could not
+prove either continued presence or future absence from that receipt. The raw
+identifiers are intentionally not stored in the repository.
+
+One explicit, one-time legacy reconciliation mode required the exact generated
+name, verified subscription, `southeastasia`, internally related top-level and
+original resource IDs, one target among five records, four unrelated records,
+and the authoritative deletion instant. It emitted the corrected hashes into
+[`automation-retention-live-reconciliation.json`](../evidence/milestone_7_8/automation-retention-live-reconciliation.json).
+The historical receipt remains byte-for-byte unchanged. Normal operation is now
+strictly bound to the corrected receipt; the reconciliation override cannot be
+used for an absence claim.
+
+Changed files are `infra/milestone_7_8/retention.py`, its 16 focused tests, the
+sanitized reconciliation receipt, the current campaign README, and the
+pre-expiry continuation handoff. Local tests cover pagination, subscription and
+ARM-ID binding, provider key casing, the provider's timezone-naive Central
+Daylight timestamp, exact UTC equality, duplicate/drift rejection, safe
+`nextLink`, pre-boundary refusal without an Azure call, strict post-boundary
+absence, and absence of mutation verbs. A final current-presence execution
+proved five records, one exact target, four unchanged unrelated hashes, one
+inventory page, two Azure GET operations, and zero Azure mutations.
+
+Residual risk is external: the exact record remains present until provider
+retention removes it. Its authoritative deletion time is
+`2026-08-15T01:09:46.307Z`; the earliest expected 30-day boundary is
+`2026-09-14T01:09:46.307Z`. Even after absence is proved, the Automation-based
+cleanup controller remains structurally non-armable because creating and then
+deleting a new controller would create a new provider-retained record.
+
+### M78-OS-001 — durable deletion requests had no production executor
+
+**Severity:** High. **Disposition:** locally resolved; managed-provider
+execution remains unproved.
+
+Migration `20260726_0027`, the API, and `UploadLifecycleService` durably created
+exact-version `ObjectDeletionRequest` rows and immediately fenced reads with a
+`deletion_requested` transition. No production API or worker path selected
+those rows, invoked `VersionedObjectStorage.delete_version`, or appended the
+terminal `deleted` transition. A committed request could therefore remain
+forever pending and the checkpoint's claimed deletion/reconciliation control
+was not operational.
+
+The existing schema is sufficient; no migration was added. `DocumentWorker`
+now constructs the already-required versioned provider in trusted ingestion
+mode and services one locked deletion request before ordinary jobs.
+`ObjectReconciler.execute_deletion_requests` uses durable request ordering and
+`FOR UPDATE SKIP LOCKED`, revalidates the workspace/version/lifecycle binding,
+deletes only the recorded physical key plus immutable provider version, and
+appends exactly one deterministic terminal transition in the same database
+transaction. An ambiguous provider success rolls back the database transition;
+the retry accepts only authoritative exact-version 404 readback and then
+commits the original request's completion. Provider authorization and transport
+failures remain errors. Conflicting reuse of the same deletion key and reason
+scope now returns an explicit 409.
+
+Changed production files are `services/object_ingestion.py`,
+`services/documents/storage.py`, and `services/jobs.py`. Focused tests cover
+the request conflict, ambiguous committed response, rollback/retry, repeat-safe
+terminal state, exact Azure version absence, and the production worker entry
+point. The object/scanner/document shard passes 137 tests with one unavailable
+local PostgreSQL fixture skipped. The legacy unlink-before-relational-commit
+path remains an explicit development/demo limitation; staging and production
+require trusted secure ingestion and cannot fall back to it.
+
+### Current validation-contract corrections
+
+Two repository-validation failures were local harness drift rather than
+production behavior. The scanner-bridge recovery fixture still used the
+superseded `2026-08-12T22:15:00Z` cleanup deadline while the authoritative
+managed binding requires `2026-08-13T06:30:00Z`; only the success fixture was
+updated and all 261 affected recovery tests pass. The mocked browser document
+endpoint returned `ready` on its first poll, racing the test's required
+`Extracting text` observation; it now preserves one deterministic processing
+poll, and the browser suite passes 8 tests with two real PostgreSQL scenarios
+explicitly skipped. Neither correction changes production behavior or retained
+Milestone 7.7 evidence.
 
 ## Authorized High-defect remediation plan
 

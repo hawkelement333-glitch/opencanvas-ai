@@ -1,0 +1,36 @@
+{
+  "authoritativeDeletionTimeUtc": "2026-08-15T01:09:46.307Z",
+  "azureGetOperations": 2,
+  "azureMutationCount": 0,
+  "campaignCorrelation": "07e350df451c6bec",
+  "campaignDeletedIdentitySha256": "70802f6e1464afc66bde5466f7b9f3b36892af96eb5de74e6a6560b717e123fc",
+  "deletedInventoryPages": 1,
+  "deletionTimeInterpretation": "provider-naive-central-daylight-time-utc-minus-05",
+  "expectedRemovalBoundaryUtc": "2026-09-14T01:09:46.307Z",
+  "generationCorrelation": "599df8555c0781d9",
+  "inventories": {
+    "deleted": {
+      "afterCampaignCount": 1,
+      "afterTotalCount": 5,
+      "unrelatedCount": 4
+    }
+  },
+  "legacyCampaignIdentityHashMatch": false,
+  "legacyEvidenceVersion": "m7.8-automation-retention-remediation-v1",
+  "legacyUnrelatedIdentityHashMatch": false,
+  "observedAtUtc": "2026-08-18T17:29:08.634Z",
+  "providerReportedDeletionTime": "2026-08-14T20:09:46.307",
+  "region": "southeastasia",
+  "repositoryMutationCount": 0,
+  "status": "provider-retained",
+  "supportTicketOperationCount": 0,
+  "targetCandidates": 1,
+  "unrelatedDeletedIdentitySha256": [
+    "695cbab9b5f3c9c685d3060788b4e3c203322ccc34042f7502e60e9c37925359",
+    "7784599e8675788d8affdbb71f6dbc6f6ae0780ef5898351eeb424298c4ee9e0",
+    "8296a885b417e20d4e0b1ce649a7c7abf94576102b25d159bcd71adfe7add046",
+    "e0d171a6cdad7ca8d6de4c8f6c2df640ff5cce098071838576b5af934aa85e1f"
+  ],
+  "unrelatedDeletedAccountCount": 4,
+  "version": "m7.8-automation-retention-live-reconciliation-v1"
+}

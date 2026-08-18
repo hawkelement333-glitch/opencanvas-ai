@@ -1189,7 +1189,7 @@ async def test_current_version_is_demoted_then_soft_deleted_by_exact_version(
     )
 
     assert calls == [
-        ("HEAD", {"versionid": VERSION_ID}, None, frozenset()),
+        ("HEAD", {"versionid": VERSION_ID}, None, frozenset({404})),
         ("HEAD", None, None, frozenset({404})),
         ("DELETE", None, {"If-Match": ETAG}, frozenset()),
         ("HEAD", None, None, frozenset({404})),
@@ -1253,6 +1253,33 @@ async def test_demoted_version_retry_never_redeletes_the_blob_wide_name(
         ("DELETE", {"versionid": VERSION_ID}),
         ("HEAD", {"versionid": VERSION_ID}),
     ]
+
+
+@pytest.mark.asyncio
+async def test_delete_version_replay_accepts_only_authoritative_exact_absence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = _azure_storage()
+    calls: list[tuple[str, dict[str, str] | None, frozenset[int]]] = []
+
+    async def request(
+        method: str,
+        _physical_key: str,
+        *,
+        query: dict[str, str] | None = None,
+        accepted_statuses: frozenset[int] = frozenset(),
+        **_kwargs: object,
+    ) -> httpx.Response:
+        calls.append((method, query, accepted_statuses))
+        return httpx.Response(404)
+
+    monkeypatch.setattr(storage, "_request", request)
+    await storage.delete_version(
+        physical_key="quarantine/objects/evidence",
+        provider_version_id=VERSION_ID,
+    )
+
+    assert calls == [("HEAD", {"versionid": VERSION_ID}, frozenset({404}))]
 
 
 @pytest.mark.asyncio

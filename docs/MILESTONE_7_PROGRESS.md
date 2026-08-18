@@ -708,3 +708,31 @@ The first audit surface found only the concrete status-boundary defects listed
 in the Milestone 7.8 defect register. It did not reopen 7.7, execute Azure,
 create migration `0029`, alter image inputs, run a scanner, access a secret
 value, mutate a protected stash, or contact a Git remote.
+
+## Milestone 7.8 pre-expiry maximum-safe continuation
+
+The managed PostgreSQL local-remediation sequence later authorized migration
+`20260726_0029`, which remains the sole head; 0030 is absent. The subsequent
+managed campaign proved an exact provider-retained Automation account and left
+the campaign fail-closed. Read-only reconciliation on 2026-08-18 established
+the authoritative deletion instant `2026-08-15T01:09:46.307Z`, earliest
+expected boundary `2026-09-14T01:09:46.307Z`, one exact target among five
+deleted records, four unrelated records, and zero Azure mutations.
+
+The retention condition did not pause independent audit work. M78-PG-012 now
+provides a strict GET-only post-boundary absence verifier using corrected
+sanitized identity hashes. The local object-storage audit proved and corrected
+M78-OS-001: durable exact-version deletion requests are now executed by the
+database worker with locked, ambiguous-commit-safe reconciliation. Indexer,
+durable work, rate limit, observability, recovery-control, authority,
+collaboration, graph, workflow, agent, document, frontend, browser, migration,
+configuration, and repository-governance shards passed locally with exact
+skips recorded in the continuation handoff.
+
+Milestone 7.8 is still incomplete. The retained-account absence check is one
+named external blocker, not the sole blocker. The Automation cleanup design
+remains structurally non-armable because a newly deleted controller would
+create new provider-retained residue. Managed PostgreSQL evidence gaps,
+provider object/scanner proof, Managed Redis, live telemetry, managed recovery,
+and current capacity/failure evidence require later, separately authorized
+Azure mutation campaigns. Milestone 8 remains unstarted.

@@ -114,6 +114,7 @@ async function installDocumentAPI(page: Page): Promise<void> {
   let edges: MockEdge[] = [];
   let preparedInstruction = "";
   let indexState: "queued" | "canceled" = "queued";
+  let documentPolls = 0;
 
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -201,6 +202,11 @@ async function installDocumentAPI(page: Page): Promise<void> {
       return;
     }
     if (path === `/documents/${documentId}` && method === "GET" && document) {
+      documentPolls += 1;
+      if (documentPolls === 1) {
+        await json(route, document);
+        return;
+      }
       document = {
         ...document,
         pageCount: 2,

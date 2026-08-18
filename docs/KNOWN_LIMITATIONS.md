@@ -46,7 +46,11 @@ This register prevents the competition demo and public materials from implying c
   least-privilege staging contributor role. Matching Log Analytics evidence
   validated the staging clean/EICAR prerequisite; the application does not use
   a personal identity or mutable tag as its safety decision.
-- File unlink and relational commit cannot be one atomic transaction. A rare commit failure after unlink requires operational repair; staged trash/outbox cleanup is deferred.
+- Trusted staging/production ingestion now executes durable exact-version
+  deletion requests through the worker and resolves ambiguous provider commits
+  by exact-version readback. The disabled legacy development/demo document path
+  still cannot make file unlink and relational commit atomic; a rare commit
+  failure after unlink requires operational repair.
 
 ## Reliability and scale
 
@@ -117,8 +121,11 @@ This register prevents the competition demo and public materials from implying c
   actions.
 - The proposed `v0.3.0-buildweek-demo` tag has not been created or published.
 
-## Recommended next checkpoint
+## Current production-readiness boundary
 
-Checkpoint 7.5 is complete locally. The next checkpoint is Milestone 7.6 —
-Backup, Restore, Rollback, and Disaster Recovery. Deployment, checkpoints
-7.6–7.8, Milestone 8, and later work remain unstarted.
+Milestones 7.1–7.7 are complete. Milestone 7.8 remains active and incomplete.
+All currently executable local audit work is recorded in the
+[pre-expiry continuation handoff](MILESTONE_7_8_PRE_EXPIRY_MAXIMUM_SAFE_PROGRESS_HANDOFF.md).
+The retained Automation account, the structurally non-armable Automation
+cleanup controller, and the separately authorized managed-provider evidence
+campaigns remain external gates. Milestone 8 has not begun.

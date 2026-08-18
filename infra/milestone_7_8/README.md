@@ -52,6 +52,13 @@ existence.
   provider-retained disposition, and zero-residue terminal receipt.
 - `canonical_inputs.py` hashes the exact Git tree entries used by the API image;
   it does not depend on historical 7.7 image metadata.
+- `retention.py` is a GET-only verifier for the one retained campaign account.
+  It validates the authenticated subscription, completely paginates the
+  documented deleted-account endpoint, binds the exact generated name,
+  location, internal ARM-ID relationships, authoritative deletion instant,
+  corrected target hash, and the four unrelated-record hashes, and emits no
+  raw resource identifier. Normal absence verification refuses to contact
+  Azure before the exact 30-day boundary.
 
 The target and PostgreSQL regions must match because this campaign uses one
 private VNet. Their default is `centralus`. The independent cleanup region has
@@ -109,6 +116,25 @@ These commands are local contract checks. They do not contact Azure or a live
 database. The separately authorized operator procedure is in
 [`docs/MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_OPERATOR_RUNBOOK.md`](../../docs/MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_OPERATOR_RUNBOOK.md).
 
+## Retained-account verification
+
+The authoritative deletion instant is `2026-08-15T01:09:46.307Z`; the earliest
+expected boundary is `2026-09-14T01:09:46.307Z`. At or after that instant, run:
+
+```powershell
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.retention `
+  --runtime .runtime\milestone_7_8\runtime.json `
+  --evidence evidence\milestone_7_8\automation-retention-live-reconciliation.json `
+  --authoritative-deletion-time 2026-08-15T01:09:46.307Z `
+  --expect absent
+```
+
+Success requires exit 0, `status=retained-account-absent`, exactly four deleted
+records, zero target candidates, all four unrelated hashes unchanged, complete
+pagination, and `azureMutationCount=0`. Any mismatch fails closed. This check
+proves only absence of the prior target. It does not authorize a campaign or
+make the Automation cleanup architecture armable.
+
 ## Current boundary
 
 A fresh campaign previously stopped when Azure proved that provider support,
@@ -130,7 +156,10 @@ imperative proof-gated sequence and soft-deleted accounts are explicit residue.
 Microsoft exposes retention/readback but no documented self-service permanent
 delete for `deletedAutomationAccounts`; preparation therefore marks the
 Automation controller `blocked-provider-retention`, and the operator prevents
-a new campaign mutation. The exact retained private runtime remains ignored
-and preserved. M78-PG-E01, M78-PG-E02, M78-PG-E03, M78-TI-E01, and M78-PG-E04
-remain open. No new campaign is authorized, Milestone 7.8 remains incomplete,
-and the object-storage audit remains unstarted.
+a new campaign mutation. M78-PG-012 corrects the sanitized identity binding and
+adds the deterministic post-boundary absence verifier; it does not remove the
+current record or the structural controller block. The exact retained private
+runtime remains ignored and preserved. M78-PG-E01, M78-PG-E02, M78-PG-E03,
+M78-TI-E01, and M78-PG-E04 remain open. No new campaign is authorized, and
+Milestone 7.8 remains incomplete. The local object-storage audit has now found
+and corrected M78-OS-001; managed-provider object proof remains outstanding.
