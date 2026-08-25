@@ -43,18 +43,29 @@ from infra.milestone_7_8.campaign import (
     SimulatedRunner,
     terminal_receipt,
 )
+from infra.milestone_7_8.cleanup_controller import load_execution_authorization
+from infra.milestone_7_8.controller import (
+    ControllerConfig,
+    controller_command_plan,
+    load_controller_authorization,
+    validate_controller_results,
+)
 from infra.milestone_7_8.operator import (
     OPERATION_PHASE,
     command_plan,
     execute_cleanup_arm_commands,
+    execute_cleanup_deploy_commands,
+    execute_cleanup_disarm_commands,
     execute_commands,
     execute_residue_commands,
     observe_residue,
+    required_execution_authorizations,
     validate_cleanup_deployment,
     validate_cleanup_readback,
     validate_operation_results,
     verify_zero_residue,
 )
+
 from opencanvas_api.db.principal_manifest import (
     CAMPAIGN_ENV,
     CURRENT_PRINCIPAL_ID_ENV,
@@ -109,7 +120,7 @@ def _config(**changes: object) -> CampaignConfig:
         "subscription_correlation": "a" * 16,
         "tenant_correlation": "b" * 16,
         "target_resource_group": "rg-m78-aabbccddee-target",
-        "cleanup_resource_group": "rg-m78-aabbccddee-cleanup",
+        "cleanup_resource_group": "rg-m78-controller-aaaaaaaaaa",
         "target_region": "centralus",
         "cleanup_region": "eastus2",
         "postgres_region": "centralus",
@@ -509,20 +520,156 @@ def test_new_bicep_has_no_executable_milestone_7_7_coupling() -> None:
     assert "TODO" not in combined
     assert (root / "main.bicep").is_file()
     assert (root / "cleanup.bicep").is_file()
+    assert (root / "controller.bicep").is_file()
     cleanup = (root / "cleanup.bicep").read_text(encoding="utf-8")
-    assert cleanup.count("./modules/cleanup-rbac.bicep") == 4
+    assert cleanup.count("./modules/cleanup-rbac.bicep") == 2
+    assert "Microsoft.Automation/automationAccounts@" in cleanup
+    assert "existing =" in cleanup
+    assert "resource controllerAccount" in cleanup
+    assert "resource cleanupResourceGroup" not in cleanup
     assert "b24988ac-6180-42a0-ab88-20f7382dd24c" in cleanup
     assert "f58310d9-a9f6-439a-9e8d-f62e7b41a168" in cleanup
 
 
+def _controller_config() -> ControllerConfig:
+    subscription_id = _object_id(100)
+    correlation = campaign_operator.sanitize(subscription_id, domain="subscription")
+    return ControllerConfig(
+        subscription_id=subscription_id,
+        subscription_correlation=correlation,
+        source_head="b" * 40,
+        controller_location="eastus2",
+        controller_resource_group_name=f"rg-m78-controller-{correlation[:10]}",
+        automation_account_name=f"aa-m78-controller-{correlation[:10]}",
+        runbook_name="Remove-M78Campaign",
+        controller_authorized_until_utc="2030-01-02T00:00:00Z",
+        cleanup_script_sha256=hashlib.sha256(b"cleanup-content").hexdigest(),
+        deployment_name=f"m78-controller-{correlation[:10]}",
+    )
+
+
+def test_separate_controller_bootstrap_is_one_time_and_authorization_gated(
+    tmp_path: Path,
+) -> None:
+    config = _controller_config()
+    bootstrap = controller_command_plan("controller-bootstrap", config)
+    verify = controller_command_plan("controller-verify", config)
+    rendered = [" ".join(command).casefold() for command in bootstrap]
+    assert sum("deployment sub create" in item for item in rendered) == 1
+    assert sum("replace-content" in item for item in rendered) == 1
+    assert sum("runbook publish" in item for item in rendered) == 1
+    assert not any("automation account delete" in item for item in rendered)
+    assert all(
+        "--method get" in " ".join(item)
+        or item[1:3] in {("group", "show"), ("automation", "account"), ("role", "assignment")}
+        for item in verify
+    )
+
+    authorization_path = tmp_path / "controller-authorization.json"
+    value: dict[str, object] = {
+        "version": "m7.8-controller-execution-authorization-v1",
+        "disposition": "separately-authorized-controller-execution",
+        "operation": "controller-bootstrap",
+        "subscriptionCorrelation": config.subscription_correlation,
+        "sourceHead": config.source_head,
+        "controllerArchitecture": "reusable-automation-controller-v1",
+        "controllerLocation": config.controller_location,
+        "controllerResourceGroupName": config.controller_resource_group_name,
+        "automationAccountName": config.automation_account_name,
+        "controllerAuthorizedUntilUtc": config.controller_authorized_until_utc,
+        "expiresAtUtc": "2030-01-01T01:00:00Z",
+    }
+    value["authorizationSha256"] = hashlib.sha256(
+        b"m7.8/controller-execution-authorization/v1\0"
+        + json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+    authorization_path.write_text(json.dumps(value), encoding="utf-8")
+    assert (
+        len(
+            load_controller_authorization(
+                authorization_path,
+                config=config,
+                operation="controller-bootstrap",
+                now=NOW,
+            )
+        )
+        == 64
+    )
+    with pytest.raises(CampaignError, match="not exact"):
+        load_controller_authorization(
+            authorization_path,
+            config=config,
+            operation="controller-verify",
+            now=NOW,
+        )
+
+
+def test_controller_baseline_readback_requires_publication_and_empty_bindings() -> None:
+    config = _controller_config()
+    tags = {
+        "mobius.milestone": "7.8",
+        "mobius.owner": "managed-postgresql-evidence",
+        "mobius.cleanup-controller": "reusable-automation-controller-v1",
+        "mobius.subscription-correlation": config.subscription_correlation,
+        "mobius.controller-authorized-until-utc": (config.controller_authorized_until_utc),
+        "mobius.cleanup-script-sha256": config.cleanup_script_sha256,
+    }
+    results = [
+        _command_result(
+            {
+                "name": config.controller_resource_group_name,
+                "location": "East US 2",
+                "tags": tags,
+            }
+        ),
+        _command_result(
+            {
+                "name": config.automation_account_name,
+                "location": "East US 2",
+                "tags": tags,
+                "identity": {"principalId": _object_id(201)},
+                "properties": {"disableLocalAuth": True},
+            }
+        ),
+        _command_result(
+            [
+                {
+                    "principalId": _object_id(201),
+                    "roleDefinitionId": (
+                        f"/subscriptions/{config.subscription_id}/providers/"
+                        "Microsoft.Authorization/roleDefinitions/"
+                        "acdd72a7-3385-48ef-bd42-f606fba81ae7"
+                    ),
+                    "scope": (
+                        f"/subscriptions/{config.subscription_id}/resourceGroups/"
+                        f"{config.controller_resource_group_name}"
+                    ),
+                }
+            ]
+        ),
+        _command_result(
+            {
+                "name": config.runbook_name,
+                "properties": {
+                    "state": "Published",
+                    "lastModifiedTime": "2030-01-01T00:01:00Z",
+                },
+            }
+        ),
+        {"exitCode": 0, "stdout": "cleanup-content", "stderr": ""},
+        _command_result({"value": []}),
+        _command_result({"value": []}),
+    ]
+    assert len(validate_controller_results(results, config)) == 64
+    results[-1] = _command_result({"value": [{"name": "unexpected"}]})
+    with pytest.raises(CampaignError, match="inventory is not empty"):
+        validate_controller_results(results, config)
+
+
 def _runtime() -> dict[str, str]:
     subscription_id = _object_id(100)
-    cleanup_resource_group = "rg-m78-aabbccddee-cleanup"
-    account = "aa-m78-proof"
-    account_resource_id = (
-        f"/subscriptions/{subscription_id}/resourceGroups/{cleanup_resource_group}"
-        f"/providers/Microsoft.Automation/automationAccounts/{account}"
-    ).casefold()
+    cleanup_resource_group = "rg-m78-controller-aaaaaaaaaa"
+    account = "aa-m78-controller-aaaaaaaaaa"
     return {
         "subscriptionId": subscription_id,
         "sourceHead": "a" * 40,
@@ -530,10 +677,15 @@ def _runtime() -> dict[str, str]:
         "dockerfileSha256": "c" * 64,
         "cleanupScriptSha256": "d" * 64,
         "automationApiVersion": "2024-10-23",
-        "cleanupControllerArmability": "blocked-provider-retention",
-        "deletedAutomationAccountBindingSha256": hashlib.sha256(
-            b"m7.8/deleted-automation-account/v1\0" + account_resource_id.encode()
-        ).hexdigest(),
+        "cleanupControllerArchitecture": "reusable-automation-controller-v1",
+        "cleanupControllerArmability": "architecture-corrected-live-execution-not-authorized",
+        "controllerBindingSha256": campaign_operator.controller_binding_sha256(
+            subscription_id,
+            resource_group=cleanup_resource_group,
+            account=account,
+            runbook="Remove-M78Campaign",
+        ),
+        "cleanupAuthorityExpiresUtc": "2030-01-01T05:00:00Z",
         "cleanupRegion": "eastus2",
         "cleanupRegionSelectionSha256": "f" * 64,
         "cleanupCandidateRegions": CLEANUP_CANDIDATE_REGIONS_BINDING,
@@ -546,7 +698,7 @@ def _runtime() -> dict[str, str]:
         "cleanupDeploymentName": "m78-cleanup",
         "campaignDeploymentName": "m78-campaign",
         "automationAccountName": account,
-        "runbookName": "Remove-M78Campaign-proof",
+        "runbookName": "Remove-M78Campaign",
         "scheduleName": "m78-deadline-proof",
         "bindingName": "11111111-1111-4111-8111-111111111111",
         "bootstrapJobName": "job-proof-bootstrap",
@@ -594,13 +746,67 @@ def _command_result(value: object) -> dict[str, object]:
     return {"exitCode": 0, "stdout": json.dumps(value), "stderr": ""}
 
 
+def _controller_tags(config: CampaignConfig, runtime: dict[str, str]) -> dict[str, str]:
+    return {
+        "mobius.milestone": "7.8",
+        "mobius.owner": "managed-postgresql-evidence",
+        "mobius.cleanup-controller": "reusable-automation-controller-v1",
+        "mobius.subscription-correlation": config.subscription_correlation,
+        "mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z",
+        "mobius.cleanup-script-sha256": runtime["cleanupScriptSha256"],
+    }
+
+
+def _controller_account_record(
+    config: CampaignConfig, runtime: dict[str, str]
+) -> dict[str, object]:
+    return {
+        "id": (
+            f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/"
+            f"{config.cleanup_resource_group}/providers/Microsoft.Automation/"
+            f"automationAccounts/{runtime['automationAccountName']}"
+        ),
+        "name": runtime["automationAccountName"],
+        "location": config.cleanup_region,
+        "tags": _controller_tags(config, runtime),
+        "identity": {"principalId": _object_id(201)},
+        "properties": {"disableLocalAuth": True},
+    }
+
+
+def _controller_reader_assignments(
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    *,
+    principal_id: str = _object_id(201),
+) -> dict[str, object]:
+    scope = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.cleanup_resource_group}"
+    )
+    return _command_result(
+        [
+            {
+                "id": (
+                    f"{scope}/providers/Microsoft.Authorization/roleAssignments/{_object_id(203)}"
+                ),
+                "principalId": principal_id,
+                "roleDefinitionId": (
+                    f"/subscriptions/{runtime['subscriptionId']}/providers/"
+                    "Microsoft.Authorization/roleDefinitions/"
+                    "acdd72a7-3385-48ef-bd42-f606fba81ae7"
+                ),
+                "scope": scope,
+            }
+        ]
+    )
+
+
 def _cleanup_deployment_result(
     config: CampaignConfig, runtime: dict[str, str] | None = None
 ) -> dict[str, object]:
     runtime = runtime or _runtime()
     subscription_id = runtime["subscriptionId"]
     target_scope = f"/subscriptions/{subscription_id}/resourceGroups/{config.target_resource_group}"
-    self_scope = f"/subscriptions/{subscription_id}/resourceGroups/{config.cleanup_resource_group}"
     contributor = (
         f"/subscriptions/{subscription_id}/providers/Microsoft.Authorization/"
         "roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c"
@@ -625,6 +831,9 @@ def _cleanup_deployment_result(
         "cleanupOfferEligibilitySource": config.cleanup_offer_eligibility_source,
         "cleanupOfferEligibilitySha256": config.cleanup_offer_eligibility_sha256,
         "cleanupDeadlineUtc": config.cleanup_deadline_utc,
+        "cleanupAuthorityExpiresUtc": runtime["cleanupAuthorityExpiresUtc"],
+        "automationAccountName": runtime["automationAccountName"],
+        "runbookName": runtime["runbookName"],
         "costCeilingCents": 5000,
         "scheduleName": runtime["scheduleName"],
         "bindingName": runtime["bindingName"],
@@ -638,10 +847,6 @@ def _cleanup_deployment_result(
             f"{target_scope}/providers/Microsoft.Authorization/roleAssignments/{_object_id(301)}",
             f"{target_scope}/providers/Microsoft.Authorization/roleAssignments/{_object_id(302)}",
         ],
-        "selfRoleAssignmentIds": [
-            f"{self_scope}/providers/Microsoft.Authorization/roleAssignments/{_object_id(303)}",
-            f"{self_scope}/providers/Microsoft.Authorization/roleAssignments/{_object_id(304)}",
-        ],
     }
     return _command_result(
         {"properties": {"outputs": {key: {"value": value} for key, value in values.items()}}}
@@ -651,6 +856,7 @@ def _cleanup_deployment_result(
 def test_cleanup_binding_and_readback_reject_substitution() -> None:
     config = _config()
     runtime = _runtime()
+    runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
     deployment = _cleanup_deployment_result(config, runtime)
     validate_cleanup_deployment(deployment, config)
     tampered = _cleanup_deployment_result(config, runtime)
@@ -679,14 +885,26 @@ def test_cleanup_binding_and_readback_reject_substitution() -> None:
     target_scope = (
         f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.target_resource_group}"
     )
-    self_scope = (
-        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.cleanup_resource_group}"
-    )
+    controller_tags = {
+        "mobius.milestone": "7.8",
+        "mobius.owner": "managed-postgresql-evidence",
+        "mobius.cleanup-controller": "reusable-automation-controller-v1",
+        "mobius.subscription-correlation": config.subscription_correlation,
+        "mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z",
+        "mobius.cleanup-script-sha256": runtime["cleanupScriptSha256"],
+    }
     results = [
         deployment,
-        _command_result({"identity": {"principalId": principal_id}, "location": "East US 2"}),
+        _command_result(
+            {
+                "name": runtime["automationAccountName"],
+                "identity": {"principalId": principal_id},
+                "location": "East US 2",
+                "tags": controller_tags,
+            }
+        ),
         assignments(target_scope, outputs["targetRoleAssignmentIds"]),
-        assignments(self_scope, outputs["selfRoleAssignmentIds"]),
+        _controller_reader_assignments(config, runtime, principal_id=principal_id),
         _command_result(
             {
                 "name": runtime["runbookName"],
@@ -707,6 +925,7 @@ def test_cleanup_binding_and_readback_reject_substitution() -> None:
                 "properties": {
                     "frequency": "OneTime",
                     "interval": 1,
+                    "isEnabled": True,
                     "startTime": config.cleanup_deadline_utc,
                     "timeZone": "Etc/UTC",
                 },
@@ -718,16 +937,7 @@ def test_cleanup_binding_and_readback_reject_substitution() -> None:
                     {
                         "name": runtime["bindingName"],
                         "properties": {
-                            "parameters": {
-                                "CampaignId": config.campaign_id,
-                                "GenerationId": config.generation_id,
-                                "SubscriptionCorrelation": config.subscription_correlation,
-                                "TargetResourceGroupName": config.target_resource_group,
-                                "CleanupResourceGroupName": config.cleanup_resource_group,
-                                "CleanupDeadlineUtc": config.cleanup_deadline_utc,
-                                "CostCeilingCents": "5000",
-                                "CleanupAuthorized": "true",
-                            },
+                            "parameters": campaign_operator.cleanup_job_parameters(config, runtime),
                             "runbook": {"name": runtime["runbookName"]},
                             "schedule": {"name": runtime["scheduleName"]},
                         },
@@ -736,7 +946,6 @@ def test_cleanup_binding_and_readback_reject_substitution() -> None:
             }
         ),
     ]
-    runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
     validate_cleanup_readback(results, config, runtime)
     results[6] = _command_result(
         {
@@ -868,14 +1077,29 @@ def test_zero_residue_requires_all_control_plane_reads_to_be_empty() -> None:
     runtime = _runtime()
     results = [
         _command_result(False),
-        _command_result(False),
         _command_result([]),
         _command_result([]),
-        _command_result({"complete": True, "pageCount": 1, "value": []}),
+        _command_result(
+            {
+                "name": config.cleanup_resource_group,
+                "location": config.cleanup_region,
+                "tags": _controller_tags(config, runtime),
+            }
+        ),
+        _command_result(_controller_account_record(config, runtime)),
+        _command_result({"value": []}),
+        _command_result({"value": []}),
+        _command_result(
+            {
+                "complete": True,
+                "pageCount": 1,
+                "value": [_controller_account_record(config, runtime)],
+            }
+        ),
         _command_result({"complete": True, "pageCount": 1, "value": []}),
     ]
     assert set(verify_zero_residue(results, config, runtime).values()) == {0}
-    results[5] = _command_result(
+    results[8] = _command_result(
         {
             "complete": True,
             "pageCount": 1,
@@ -894,10 +1118,10 @@ def test_zero_residue_requires_all_control_plane_reads_to_be_empty() -> None:
             ],
         }
     )
-    with pytest.raises(CampaignError, match="nonzero"):
+    with pytest.raises(CampaignError, match="retained exactly once"):
         verify_zero_residue(results, config, runtime)
-    observation = observe_residue(results, config, runtime)
-    assert observation.counters["softDeletedAutomationAccounts"] == 1
+    with pytest.raises(CampaignError, match="retained exactly once"):
+        observe_residue(results, config, runtime)
 
 
 def test_resume_ledger_rejects_substituted_phase() -> None:
@@ -938,11 +1162,13 @@ def test_prepare_creates_one_private_restart_safe_bundle(
         },
     )
     selection = AutomationRegionSelection(
-        version="m7.8-cleanup-region-selection-v3",
+        version="m7.8-cleanup-region-selection-v4",
         candidate_order=CLEANUP_REGION_CANDIDATES,
         selected_region="eastus2",
         provider_registration_state="Registered",
-        capacity_basis=("provider-offer-policy-zero-active-and-soft-deleted-accounts"),
+        capacity_basis=("provider-offer-policy-exact-controller-or-zero-occupancy"),
+        controller_disposition="exact-controller-adoptable",
+        controller_region="eastus2",
         policy_assignment_count=0,
         policy_definition_count=0,
         provider_locations_sha256="1" * 64,
@@ -961,9 +1187,16 @@ def test_prepare_creates_one_private_restart_safe_bundle(
                 True,
                 region in RESTRICTED_OFFER_ELIGIBLE_REGIONS,
                 True,
+                int(region == "eastus2"),
+                int(region == "eastus2"),
                 0,
-                0,
-                ("viable" if region in RESTRICTED_OFFER_ELIGIBLE_REGIONS else "offer-ineligible"),
+                (
+                    "viable"
+                    if region == "eastus2"
+                    else "offer-ineligible"
+                    if region not in RESTRICTED_OFFER_ELIGIBLE_REGIONS
+                    else "controller-region-mismatch"
+                ),
             )
             for region in CLEANUP_REGION_CANDIDATES
         ),
@@ -986,7 +1219,9 @@ def test_prepare_creates_one_private_restart_safe_bundle(
     runtime_path = output / "runtime.json"
     runtime = campaign_operator.load_runtime(runtime_path)
     campaign_operator.validate_prepared_bundle(runtime_path, runtime, config)
-    assert runtime["cleanupControllerArmability"] == "blocked-provider-retention"
+    assert runtime["cleanupControllerArmability"] == (
+        "architecture-corrected-live-execution-not-authorized"
+    )
     assert set(json.loads(runtime_path.read_text())) == {
         *{
             "subscriptionId",
@@ -995,8 +1230,10 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             "dockerfileSha256",
             "cleanupScriptSha256",
             "automationApiVersion",
+            "cleanupControllerArchitecture",
             "cleanupControllerArmability",
-            "deletedAutomationAccountBindingSha256",
+            "controllerBindingSha256",
+            "cleanupAuthorityExpiresUtc",
             "cleanupRegion",
             "cleanupRegionSelectionSha256",
             "cleanupCandidateRegions",
@@ -1049,6 +1286,8 @@ def _cleanup_arm_success_results(
     modified: str | None = "2030-01-01T00:01:00Z",
     content: str = "cleanup-content",
     bindings: int = 1,
+    existing_schedule: bool = False,
+    existing_binding: bool = False,
 ) -> list[dict[str, object]]:
     deployment = _cleanup_deployment_result(config, runtime)
     outputs = campaign_operator._deployment_outputs(deployment)
@@ -1081,10 +1320,7 @@ def _cleanup_arm_success_results(
                     "GenerationId": config.generation_id,
                     "SubscriptionCorrelation": config.subscription_correlation,
                     "TargetResourceGroupName": config.target_resource_group,
-                    "CleanupResourceGroupName": config.cleanup_resource_group,
-                    "CleanupDeadlineUtc": config.cleanup_deadline_utc,
-                    "CostCeilingCents": "5000",
-                    "CleanupAuthorized": "true",
+                    **campaign_operator.cleanup_job_parameters(config, runtime),
                 },
                 "runbook": {"name": runtime["runbookName"]},
                 "schedule": {"name": runtime["scheduleName"]},
@@ -1095,17 +1331,27 @@ def _cleanup_arm_success_results(
     target_scope = (
         f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.target_resource_group}"
     )
-    self_scope = (
-        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.cleanup_resource_group}"
-    )
-    empty_success = {"exitCode": 0, "stdout": "", "stderr": ""}
+    schedule_value = {
+        "name": runtime["scheduleName"],
+        "properties": {
+            "frequency": "OneTime",
+            "interval": 1,
+            "isEnabled": True,
+            "startTime": config.cleanup_deadline_utc,
+            "timeZone": "Etc/UTC",
+        },
+    }
     return [
         deployment,
-        _command_result({"identity": {"principalId": principal_id}, "location": "East US 2"}),
+        _command_result(
+            {
+                **_controller_account_record(config, runtime),
+                "identity": {"principalId": principal_id},
+                "location": "East US 2",
+            }
+        ),
         assignments(target_scope, outputs["targetRoleAssignmentIds"]),
-        assignments(self_scope, outputs["selfRoleAssignmentIds"]),
-        empty_success,
-        empty_success,
+        _controller_reader_assignments(config, runtime, principal_id=principal_id),
         _command_result(
             {
                 "name": runbook_name or runtime["runbookName"],
@@ -1113,18 +1359,10 @@ def _cleanup_arm_success_results(
             }
         ),
         {"exitCode": 0, "stdout": content, "stderr": ""},
+        _command_result({"value": [schedule_value] if existing_schedule else []}),
+        _command_result({"value": binding_values if existing_binding else []}),
         _command_result({"status": "accepted"}),
-        _command_result(
-            {
-                "name": runtime["scheduleName"],
-                "properties": {
-                    "frequency": "OneTime",
-                    "interval": 1,
-                    "startTime": config.cleanup_deadline_utc,
-                    "timeZone": "Etc/UTC",
-                },
-            }
-        ),
+        _command_result(schedule_value),
         _command_result({"status": "accepted"}),
         _command_result({"value": binding_values}),
     ]
@@ -1144,6 +1382,80 @@ class _OrderedCleanupRunner:
         return self.results[index]
 
 
+def _controller_baseline_results(
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    *,
+    schedules: list[object] | None = None,
+    bindings: list[object] | None = None,
+) -> list[dict[str, object]]:
+    return [
+        _command_result(
+            {
+                "name": config.cleanup_resource_group,
+                "location": config.cleanup_region,
+                "tags": _controller_tags(config, runtime),
+            }
+        ),
+        _command_result(_controller_account_record(config, runtime)),
+        _controller_reader_assignments(config, runtime),
+        _command_result(
+            {
+                "name": runtime["runbookName"],
+                "properties": {
+                    "state": "Published",
+                    "lastModifiedTime": "2030-01-01T00:01:00Z",
+                },
+            }
+        ),
+        {"exitCode": 0, "stdout": "cleanup-content", "stderr": ""},
+        _command_result({"value": schedules or []}),
+        _command_result({"value": bindings or []}),
+        _cleanup_deployment_result(config, runtime),
+    ]
+
+
+def test_campaign_path_cannot_create_or_delete_reusable_controller() -> None:
+    config = _config()
+    runtime = _runtime()
+    for operation in OPERATION_PHASE:
+        for command in command_plan(operation, config, runtime):
+            rendered = " ".join(command).casefold()
+            assert "automation account create" not in rendered
+            assert "automation account delete" not in rendered
+            if "--method delete" in rendered and "/automationaccounts/" in rendered:
+                assert "/jobschedules/" in rendered or "/schedules/" in rendered
+    cleanup = (REPOSITORY_ROOT / "infra/milestone_7_8/cleanup.bicep").read_text()
+    assert "automationAccounts@2024-10-23' existing" in cleanup
+    assert "resource controllerResourceGroup" in cleanup
+    assert (
+        "resource controllerResourceGroup 'Microsoft.Resources/resourceGroups@2024-11-01' ="
+        not in cleanup
+    )
+
+
+def test_cleanup_deploy_rejects_busy_controller_before_target_rbac_mutation() -> None:
+    config = _config()
+    runtime = _runtime()
+    runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
+    live_schedule = {
+        "name": "another-schedule",
+        "properties": {"frequency": "OneTime"},
+    }
+    runner = _OrderedCleanupRunner(
+        _controller_baseline_results(config, runtime, schedules=[live_schedule])
+    )
+    with pytest.raises(CampaignError, match="exclusively adoptable"):
+        execute_cleanup_deploy_commands(
+            runner,
+            command_plan("cleanup-deploy", config, runtime),
+            config,
+            runtime,  # type: ignore[arg-type]
+        )
+    assert len(runner.commands) == 7
+    assert not any("deployment sub create" in " ".join(item) for item in runner.commands)
+
+
 def test_initial_cleanup_deployment_has_no_schedule_or_binding() -> None:
     controller = (
         REPOSITORY_ROOT / "infra/milestone_7_8/modules/cleanup-controller.bicep"
@@ -1155,14 +1467,14 @@ def test_initial_cleanup_deployment_has_no_schedule_or_binding() -> None:
     assert "output bindingCount int = 0" in cleanup
 
 
-def test_cleanup_arming_is_publication_gated_and_restart_deterministic() -> None:
+def test_cleanup_arming_adopts_published_controller_and_is_restart_deterministic() -> None:
     config = _config()
     runtime = _runtime()
     runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
     commands = command_plan("cleanup-arm", config, runtime)
     rendered = [" ".join(command) for command in commands]
-    publish_index = next(
-        index for index, value in enumerate(rendered) if "runbook publish" in value
+    runbook_read_index = next(
+        index for index, value in enumerate(rendered) if "/runbooks/" in value
     )
     schedule_index = next(
         index
@@ -1174,7 +1486,8 @@ def test_cleanup_arming_is_publication_gated_and_restart_deterministic() -> None
         for index, value in enumerate(rendered)
         if "/jobSchedules/" in value and "--method put" in value
     )
-    assert publish_index < schedule_index < binding_index
+    assert not any("runbook publish" in value or "replace-content" in value for value in rendered)
+    assert runbook_read_index < schedule_index < binding_index
     first = _OrderedCleanupRunner(_cleanup_arm_success_results(config, runtime))
     _, first_hash = execute_cleanup_arm_commands(first, commands, config, runtime)  # type: ignore[arg-type]
     second = _OrderedCleanupRunner(_cleanup_arm_success_results(config, runtime))
@@ -1183,7 +1496,45 @@ def test_cleanup_arming_is_publication_gated_and_restart_deterministic() -> None
     assert first_hash == second_hash
 
 
-def test_publication_failure_and_draft_readback_stop_before_schedule() -> None:
+def test_cleanup_arming_adopts_exact_existing_schedule_and_binding_without_put() -> None:
+    config = _config()
+    runtime = _runtime()
+    runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
+    all_results = _cleanup_arm_success_results(
+        config, runtime, existing_schedule=True, existing_binding=True
+    )
+    runner = _OrderedCleanupRunner(all_results[:8])
+    _, proof = execute_cleanup_arm_commands(
+        runner,
+        command_plan("cleanup-arm", config, runtime),
+        config,
+        runtime,  # type: ignore[arg-type]
+    )
+    assert len(proof) == 64
+    assert len(runner.commands) == 8
+    assert not any("--method put" in " ".join(item) for item in runner.commands)
+
+
+def test_cleanup_arming_retries_partial_schedule_by_creating_only_binding() -> None:
+    config = _config()
+    runtime = _runtime()
+    runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
+    all_results = _cleanup_arm_success_results(config, runtime, existing_schedule=True)
+    runner = _OrderedCleanupRunner([*all_results[:8], all_results[10], all_results[11]])
+    _, proof = execute_cleanup_arm_commands(
+        runner,
+        command_plan("cleanup-arm", config, runtime),
+        config,
+        runtime,  # type: ignore[arg-type]
+    )
+    rendered = [" ".join(item).casefold() for item in runner.commands]
+    assert len(proof) == 64
+    assert len(rendered) == 10
+    assert not any("/schedules/" in item and "--method put" in item for item in rendered)
+    assert sum("/jobschedules/" in item and "--method put" in item for item in rendered) == 1
+
+
+def test_controller_read_failure_and_draft_readback_stop_before_schedule() -> None:
     config = _config()
     runtime = _runtime()
     runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
@@ -1194,7 +1545,7 @@ def test_publication_failure_and_draft_readback_stop_before_schedule() -> None:
     with pytest.raises(CampaignError, match="failed safely"):
         execute_cleanup_arm_commands(publication_failure, commands, config, runtime)  # type: ignore[arg-type]
     assert len(publication_failure.commands) == 6
-    assert not any("/schedules/" in " ".join(item) for item in publication_failure.commands)
+    assert not any("--method put" in " ".join(item) for item in publication_failure.commands)
 
     draft = _OrderedCleanupRunner(
         _cleanup_arm_success_results(config, runtime, runbook_state="Edit")
@@ -1202,7 +1553,7 @@ def test_publication_failure_and_draft_readback_stop_before_schedule() -> None:
     with pytest.raises(CampaignError, match="not published"):
         execute_cleanup_arm_commands(draft, commands, config, runtime)  # type: ignore[arg-type]
     assert len(draft.commands) == 8
-    assert not any("/schedules/" in " ".join(item) for item in draft.commands)
+    assert not any("--method put" in " ".join(item) for item in draft.commands)
 
 
 @pytest.mark.parametrize(
@@ -1233,6 +1584,166 @@ def test_cleanup_arming_rejects_missing_stale_mismatched_or_duplicate_proof(
         )
 
 
+def test_cleanup_disarm_reconciles_ambiguous_delete_and_requires_absence() -> None:
+    config = _config()
+    runtime = _runtime()
+    commands = command_plan("cleanup-disarm", config, runtime)
+    ambiguous = _OrderedCleanupRunner(
+        [
+            {"exitCode": 1, "stdout": "", "stderr": "ambiguous timeout"},
+            {"exitCode": 1, "stdout": "", "stderr": "not found"},
+            _command_result({"value": []}),
+            _command_result({"value": []}),
+        ]
+    )
+    _, proof = execute_cleanup_disarm_commands(
+        ambiguous,
+        commands,
+        config,
+        runtime,  # type: ignore[arg-type]
+    )
+    assert len(proof) == 64
+
+    residual = _OrderedCleanupRunner(
+        [
+            _command_result({}),
+            _command_result({}),
+            _command_result({"value": [{"name": runtime["scheduleName"]}]}),
+            _command_result({"value": []}),
+        ]
+    )
+    with pytest.raises(CampaignError, match="revocation failed"):
+        execute_cleanup_disarm_commands(
+            residual,
+            commands,
+            config,
+            runtime,  # type: ignore[arg-type]
+        )
+
+
+def _write_execution_authorization(
+    path: Path,
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    *,
+    expires_at: str,
+    operations: list[str],
+) -> None:
+    value: dict[str, object] = {
+        "version": "m7.8-execution-authorization-v1",
+        "disposition": "separately-authorized-azure-execution",
+        "campaignId": config.campaign_id,
+        "generationId": config.generation_id,
+        "subscriptionCorrelation": config.subscription_correlation,
+        "sourceHead": runtime["sourceHead"],
+        "controllerArchitecture": "reusable-automation-controller-v1",
+        "controllerBindingSha256": runtime["controllerBindingSha256"],
+        "cleanupDeadlineUtc": config.cleanup_deadline_utc,
+        "expiresAtUtc": expires_at,
+        "allowedOperations": operations,
+    }
+    value["authorizationSha256"] = hashlib.sha256(
+        b"m7.8/execution-authorization/v1\0"
+        + json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def test_execution_authorization_is_exact_expiring_and_operation_scoped(
+    tmp_path: Path,
+) -> None:
+    config = _config()
+    runtime = _runtime()
+    path = tmp_path / "authorization.json"
+    _write_execution_authorization(
+        path,
+        config,
+        runtime,
+        expires_at="2030-01-01T04:30:00Z",
+        operations=["cleanup-deploy"],
+    )
+    authorization = load_execution_authorization(
+        path,
+        config=config,
+        runtime=runtime,
+        operation="cleanup-deploy",
+        now=datetime(2030, 1, 1, 4, tzinfo=UTC),
+    )
+    assert authorization.allowed_operations == frozenset({"cleanup-deploy"})
+
+    _write_execution_authorization(
+        path,
+        config,
+        runtime,
+        expires_at="2030-01-01T04:30:00Z",
+        operations=["preflight"],
+    )
+    authorization = load_execution_authorization(
+        path,
+        config=config,
+        runtime=runtime,
+        operation="preflight",
+        now=datetime(2030, 1, 1, 4, tzinfo=UTC),
+    )
+    assert authorization.allowed_operations == frozenset({"preflight"})
+
+    _write_execution_authorization(
+        path,
+        config,
+        runtime,
+        expires_at="2030-01-01T04:30:00Z",
+        operations=["cleanup-deploy"],
+    )
+    with pytest.raises(CampaignError, match="not exact"):
+        load_execution_authorization(
+            path,
+            config=config,
+            runtime=runtime,
+            operation="cleanup-arm",
+            now=datetime(2030, 1, 1, 4, tzinfo=UTC),
+        )
+    with pytest.raises(CampaignError, match="expired or overbroad"):
+        load_execution_authorization(
+            path,
+            config=config,
+            runtime=runtime,
+            operation="cleanup-deploy",
+            now=datetime(2030, 1, 1, 4, 30, tzinfo=UTC),
+        )
+
+    _write_execution_authorization(
+        path,
+        config,
+        runtime,
+        expires_at="2030-01-01T05:01:00Z",
+        operations=["cleanup-deploy"],
+    )
+    with pytest.raises(CampaignError, match="expired or overbroad"):
+        load_execution_authorization(
+            path,
+            config=config,
+            runtime=runtime,
+            operation="cleanup-deploy",
+            now=datetime(2030, 1, 1, 4, tzinfo=UTC),
+        )
+
+
+def test_failure_cleanup_requires_authority_even_for_readback_failure() -> None:
+    assert required_execution_authorizations("preflight", Phase.NEW) == frozenset({"preflight"})
+    assert required_execution_authorizations("scope-create", Phase.COST_GATED) == frozenset(
+        {"scope-create", "cleanup"}
+    )
+    assert required_execution_authorizations("cleanup-verify", Phase.CLEANUP_ARMED) == frozenset(
+        {"cleanup-verify", "cleanup"}
+    )
+    assert required_execution_authorizations("cleanup-wait", Phase.CLEANING) == frozenset(
+        {"cleanup-wait", "cleanup"}
+    )
+    assert required_execution_authorizations("residue", Phase.CLEANUP_DISARMED) == frozenset(
+        {"residue"}
+    )
+
+
 def test_ledger_cannot_record_armed_or_finalized_early() -> None:
     config = _config()
     ledger = Ledger(config.campaign_id, config.generation_id)
@@ -1256,11 +1767,6 @@ def test_residue_inventory_paginates_and_preserves_unrelated_deleted_accounts() 
         f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/unrelated/"
         "providers/Microsoft.Automation/automationAccounts/unrelated-account"
     )
-    exact_id = (
-        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/"
-        f"{config.cleanup_resource_group}/providers/Microsoft.Automation/"
-        f"automationAccounts/{runtime['automationAccountName']}"
-    )
 
     class PaginatedRunner:
         def __init__(self) -> None:
@@ -1275,12 +1781,24 @@ def test_residue_inventory_paginates_and_preserves_unrelated_deleted_accounts() 
                 return _command_result([])
             if command[:3] == ("az", "role", "assignment"):
                 return _command_result([])
+            if command[:3] == ("az", "group", "show"):
+                return _command_result(
+                    {
+                        "name": config.cleanup_resource_group,
+                        "location": config.cleanup_region,
+                        "tags": _controller_tags(config, runtime),
+                    }
+                )
+            if command[:3] == ("az", "automation", "account"):
+                return _command_result(_controller_account_record(config, runtime))
+            if "/schedules?" in rendered or "/jobSchedules?" in rendered:
+                return _command_result({"value": []})
             if "active-continuation" in rendered:
                 return _command_result({"value": []})
             if "/automationAccounts?" in rendered:
                 return _command_result(
                     {
-                        "value": [],
+                        "value": [_controller_account_record(config, runtime)],
                         "nextLink": "https://management.azure.com/active-continuation",
                     }
                 )
@@ -1293,11 +1811,6 @@ def test_residue_inventory_paginates_and_preserves_unrelated_deleted_accounts() 
                                 "location": "eastus",
                                 "properties": {"automationAccountResourceId": unrelated_id},
                             },
-                            {
-                                "name": runtime["automationAccountName"],
-                                "location": config.cleanup_region,
-                                "properties": {"automationAccountResourceId": exact_id},
-                            },
                         ]
                     }
                 )
@@ -1308,17 +1821,14 @@ def test_residue_inventory_paginates_and_preserves_unrelated_deleted_accounts() 
     observation = observe_residue(results, config, runtime)
     assert observation.active_inventory_pages == 2
     assert observation.deleted_inventory_pages == 1
-    assert observation.counters["softDeletedAutomationAccounts"] == 1
+    assert set(observation.counters.values()) == {0}
     assert len(observation.unrelated_deleted_identity_sha256) == 1
-    assert len(runner.commands) == 7
+    assert len(runner.commands) == 10
     ledger = Ledger(config.campaign_id, config.generation_id)
     disposition = ledger.record_residue(
         observation.counters, evidence_sha256=observation.evidence_sha256
     )
-    assert disposition == "provider-retained"
-    ledger.phase = Phase.CLEANED.value
-    with pytest.raises(CampaignError, match="zero-residue"):
-        ledger.transition(Phase.RESIDUE_VERIFIED, NOW)
+    assert disposition == "zero-residue"
 
 
 def test_malformed_deleted_attribution_fails_closed_and_no_purge_is_planned() -> None:
@@ -1326,10 +1836,25 @@ def test_malformed_deleted_attribution_fails_closed_and_no_purge_is_planned() ->
     runtime = _runtime()
     malformed_results = [
         _command_result(False),
-        _command_result(False),
         _command_result([]),
         _command_result([]),
-        _command_result({"complete": True, "pageCount": 1, "value": []}),
+        _command_result(
+            {
+                "name": config.cleanup_resource_group,
+                "location": config.cleanup_region,
+                "tags": _controller_tags(config, runtime),
+            }
+        ),
+        _command_result(_controller_account_record(config, runtime)),
+        _command_result({"value": []}),
+        _command_result({"value": []}),
+        _command_result(
+            {
+                "complete": True,
+                "pageCount": 1,
+                "value": [_controller_account_record(config, runtime)],
+            }
+        ),
         _command_result(
             {
                 "complete": True,

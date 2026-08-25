@@ -5,6 +5,15 @@ Date: 2026-08-18
 Status: all currently executable repository-local work completed; the retained
 account remains present; Milestone 7.8 remains incomplete
 
+> **2026-08-25 local architecture correction:** the historical
+> `blocked-provider-retention` controller disposition below is superseded for
+> new source by one stable reusable Automation controller outside campaign
+> deletion scope. Campaign preparation requires exact-controller adoption;
+> ordinary cleanup cannot create or delete the controller. The current state is
+> `architecture-corrected-live-execution-not-authorized`. No Azure operation
+> established live operability. See the
+> [cleanup-controller architecture correction handoff](MILESTONE_7_8_CLEANUP_CONTROLLER_ARCHITECTURE_CORRECTION_HANDOFF.md).
+
 ## Authoritative boundary
 
 - Starting HEAD: `637e7a100a79c03100272bd3c8bafd994289d953`
@@ -28,16 +37,16 @@ durable workers, shared limits, observability, recovery, capacity/security,
 regressions, and documentation. None logically depends on the old deleted
 Automation record.
 
-| Classification                                              | Unfinished requirement at entry                                                                                                                                                        | Disposition in this continuation                                       |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Executable locally now                                      | Retention evidence replayability and post-expiry verifier                                                                                                                              | M78-PG-012 corrected and tested                                        |
-| Executable locally now                                      | Object upload, quarantine, scanner, promotion, deletion, and recovery audit                                                                                                            | Local audit complete; M78-OS-001 corrected                             |
-| Executable locally now                                      | Indexer, durable jobs, rate limits, observability, recovery contracts, authority, graph, workflow, agents, documents, frontend, browser, migration, configuration, and Git regressions | Bounded shards completed; results below                                |
-| Executable through Azure GET now                            | Current retained-account identity, count, location, timestamp, and unrelated-record preservation                                                                                       | One strict current-presence run passed; sanitized receipt retained     |
-| Requires separately authorized Azure mutation               | M78-PG-E01, M78-PG-E02, M78-PG-E03, M78-TI-E01, M78-PG-E04                                                                                                                             | Open; local evidence cannot replace managed execution                  |
-| Requires separately authorized Azure mutation               | Current managed object/scanner, Managed Redis, live telemetry, managed recovery, and capacity/failure evidence                                                                         | Open; no infrastructure was created or changed                         |
-| Strictly blocked by retained-account expiration             | Exact absence of the prior generated Automation account                                                                                                                                | Named external gate; verifier refuses Azure access before the boundary |
-| Requires architecture correction and separate authorization | A cleanup controller able to satisfy zero residue without creating another retained record                                                                                             | Open; current preparation remains `blocked-provider-retention`         |
+| Classification                                              | Unfinished requirement at entry                                                                                                                                                        | Disposition in this continuation                                                                                |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Executable locally now                                      | Retention evidence replayability and post-expiry verifier                                                                                                                              | M78-PG-012 corrected and tested                                                                                 |
+| Executable locally now                                      | Object upload, quarantine, scanner, promotion, deletion, and recovery audit                                                                                                            | Local audit complete; M78-OS-001 corrected                                                                      |
+| Executable locally now                                      | Indexer, durable jobs, rate limits, observability, recovery contracts, authority, graph, workflow, agents, documents, frontend, browser, migration, configuration, and Git regressions | Bounded shards completed; results below                                                                         |
+| Executable through Azure GET now                            | Current retained-account identity, count, location, timestamp, and unrelated-record preservation                                                                                       | One strict current-presence run passed; sanitized receipt retained                                              |
+| Requires separately authorized Azure mutation               | M78-PG-E01, M78-PG-E02, M78-PG-E03, M78-TI-E01, M78-PG-E04                                                                                                                             | Open; local evidence cannot replace managed execution                                                           |
+| Requires separately authorized Azure mutation               | Current managed object/scanner, Managed Redis, live telemetry, managed recovery, and capacity/failure evidence                                                                         | Open; no infrastructure was created or changed                                                                  |
+| Strictly blocked by retained-account expiration             | Exact absence of the prior generated Automation account                                                                                                                                | Named external gate; verifier refuses Azure access before the boundary                                          |
+| Requires architecture correction and separate authorization | A cleanup controller able to satisfy zero residue without creating another retained record                                                                                             | Corrected locally on 2026-08-25; live bootstrap, adoption, and campaign evidence remain separately unauthorized |
 
 Expiration is therefore not the sole remaining blocker. It can prove absence of
 the prior record, but does not make the current Automation-based controller

@@ -13,12 +13,15 @@ existence.
   Server, one private Premium registry, one internal Container Apps
   environment, and the bounded API, worker, bootstrap, migration, recovery,
   and evidence jobs.
-- `cleanup.bicep` creates a cleanup controller in a different resource group
-  with a draft runbook and zero schedules/bindings, then gives its system
-  identity Contributor plus Role Based Access Control Administrator only on the
-  two exact campaign resource groups. The operator may publish, verify, create
-  the immutable schedule, and bind it only in that order. The second exact-scope
-  role is required to remove the campaign RBAC extensions themselves.
+- `controller.bicep` is the separately authorized, one-time stable controller
+  deployment. It creates one subscription-bound controller resource group,
+  Automation account, runbook, and permanent Reader grant on that group.
+  `controller.py` is dry-run by default and requires an exact expiring
+  authorization artifact before bootstrap or live verification.
+- `cleanup.bicep` can only adopt that controller through `existing` resources
+  and grant its system identity Contributor plus Role Based Access Control
+  Administrator on the exact campaign target group. It cannot create, replace,
+  or delete an Automation account, controller group, or runbook.
 - `modules/` contains the campaign resources, identities, cleanup controller,
   and exact-scope cleanup role assignments.
 - `schemas/` closes the configuration, private runtime, cleanup-region
@@ -38,8 +41,12 @@ existence.
   discovery failure has no provider-only fallback.
 - `operator.py` is dry-run by default. `--execute` advances one validated,
   persisted phase at a time and starts cleanup after any failure following
-  scope creation. Current bundles are explicitly blocked before `scope-create`
-  because an Automation-based controller cannot satisfy permanent zero residue.
+  scope creation. Every live phase requires a separate exact expiring execution
+  authorization; phases that can enter failure cleanup must also authorize
+  `cleanup`. Preparation refuses a bundle until the exact stable controller
+  identity and authority are adoptable; `capacity-check` then proves its
+  permanent Reader grant, published content, and empty schedule/binding
+  inventories before `scope-create`.
 - `azure_cli.py` is the sole Azure CLI process boundary. It prefers a native
   launcher, safely supports trusted Windows `az.cmd`/`az.bat` launchers through
   the absolute system `cmd.exe` with `shell=False`, rejects repository-local or
@@ -154,11 +161,14 @@ the original deployment bound a schedule before publication, and its residue
 model omitted the exact soft-deleted Automation account. Publication is now an
 imperative proof-gated sequence and soft-deleted accounts are explicit residue.
 Microsoft exposes retention/readback but no documented self-service permanent
-delete for `deletedAutomationAccounts`; preparation therefore marks the
-Automation controller `blocked-provider-retention`, and the operator prevents
-a new campaign mutation. M78-PG-012 corrects the sanitized identity binding and
-adds the deterministic post-boundary absence verifier; it does not remove the
-current record or the structural controller block. The exact retained private
+delete for `deletedAutomationAccounts`. The local architecture now uses one
+separately provisioned reusable controller outside campaign deletion scope;
+ordinary campaign cleanup cannot create another retained Automation record.
+The reported local state is
+`architecture-corrected-live-execution-not-authorized`. M78-PG-012 corrects the
+sanitized identity binding and adds the deterministic post-boundary absence
+verifier; it does not remove the current record or prove the corrected
+controller live. The exact retained private
 runtime remains ignored and preserved. M78-PG-E01, M78-PG-E02, M78-PG-E03,
 M78-TI-E01, and M78-PG-E04 remain open. No new campaign is authorized, and
 Milestone 7.8 remains incomplete. The local object-storage audit has now found

@@ -29,7 +29,7 @@ DIGEST_PATTERN: Final = re.compile(r"^sha256:[a-f0-9]{64}$")
 HASH_PATTERN: Final = re.compile(r"^[a-f0-9]{64}$")
 CORRELATION_PATTERN: Final = re.compile(r"^[a-f0-9]{16}$")
 TARGET_RESOURCE_GROUP_PATTERN: Final = re.compile(r"^rg-m78-[a-f0-9]{10}-target$")
-CLEANUP_RESOURCE_GROUP_PATTERN: Final = re.compile(r"^rg-m78-[a-f0-9]{10}-cleanup$")
+CLEANUP_RESOURCE_GROUP_PATTERN: Final = re.compile(r"^rg-m78-controller-[a-f0-9]{10}$")
 RESIDUE_KEYS: Final = (
     "targetResourceGroups",
     "cleanupResourceGroups",
@@ -82,6 +82,7 @@ class Phase(StrEnum):
     DISPOSED = "disposed"
     CLEANING = "cleaning"
     CLEANED = "cleaned"
+    CLEANUP_DISARMED = "cleanup-disarmed"
     RESIDUE_VERIFIED = "residue-verified"
     FINALIZED = "finalized"
 
@@ -105,6 +106,7 @@ ORDER: Final = (
     Phase.DISPOSED,
     Phase.CLEANING,
     Phase.CLEANED,
+    Phase.CLEANUP_DISARMED,
     Phase.RESIDUE_VERIFIED,
     Phase.FINALIZED,
 )
@@ -122,7 +124,9 @@ class CostItem:
         if not self.name or not isinstance(self.hours, int) or self.hours <= 0:
             raise CampaignError("cost item is malformed")
         parse_utc(self.priced_at_utc)
-        rounded_hours = Decimal(self.hours).quantize(Decimal("1"), rounding=ROUND_CEILING)
+        rounded_hours = Decimal(self.hours).quantize(
+            Decimal("1"), rounding=ROUND_CEILING
+        )
         hourly = Decimal(self.hourly_usd)
         fixed = Decimal(self.fixed_usd)
         if not hourly.is_finite() or not fixed.is_finite() or hourly < 0 or fixed < 0:
@@ -214,7 +218,9 @@ class CampaignConfig:
             cleanup_region_selection_sha256=raw["cleanupRegionSelectionSha256"],
             cleanup_candidate_regions=raw["cleanupCandidateRegions"],
             cleanup_offer_classification=raw["cleanupOfferClassification"],
-            cleanup_offer_eligibility_disposition=raw["cleanupOfferEligibilityDisposition"],
+            cleanup_offer_eligibility_disposition=raw[
+                "cleanupOfferEligibilityDisposition"
+            ],
             cleanup_offer_eligible_regions=raw["cleanupOfferEligibleRegions"],
             cleanup_offer_eligibility_source=raw["cleanupOfferEligibilitySource"],
             cleanup_offer_eligibility_sha256=raw["cleanupOfferEligibilitySha256"],
@@ -237,7 +243,10 @@ class CampaignConfig:
             raise CampaignError("cleanup must be outside the target deletion boundary")
         if (
             TARGET_RESOURCE_GROUP_PATTERN.fullmatch(self.target_resource_group) is None
-            or CLEANUP_RESOURCE_GROUP_PATTERN.fullmatch(self.cleanup_resource_group) is None
+            or CLEANUP_RESOURCE_GROUP_PATTERN.fullmatch(self.cleanup_resource_group)
+            is None
+            or self.cleanup_resource_group
+            != f"rg-m78-controller-{self.subscription_correlation[:10]}"
         ):
             raise CampaignError("campaign resource-group scope is malformed")
         if self.target_region != self.postgres_region:
@@ -254,7 +263,8 @@ class CampaignConfig:
         ):
             raise CampaignError("cleanup candidate region binding is invalid")
         if (
-            self.cleanup_offer_eligible_regions != "eastus,eastus2,northeurope,southeastasia,westus"
+            self.cleanup_offer_eligible_regions
+            != "eastus,eastus2,northeurope,southeastasia,westus"
             or self.cleanup_region not in self.cleanup_offer_eligible_regions.split(",")
             or self.cleanup_offer_eligibility_source
             != "microsoft-automation-restricted-public-offer-regions-2026-08-v1"
@@ -272,7 +282,10 @@ class CampaignConfig:
             or HASH_PATTERN.fullmatch(self.cleanup_offer_eligibility_sha256) is None
         ):
             raise CampaignError("cleanup offer eligibility binding is invalid")
-        if self.image_digest is not None and DIGEST_PATTERN.fullmatch(self.image_digest) is None:
+        if (
+            self.image_digest is not None
+            and DIGEST_PATTERN.fullmatch(self.image_digest) is None
+        ):
             raise CampaignError("image reference is not immutable")
         deadline = parse_utc(self.cleanup_deadline_utc)
         if not allow_expired and deadline <= datetime.now(UTC):
@@ -312,9 +325,12 @@ class Ledger:
     cleanup_completed_utc: str | None = None
     actual_cost_usd: str | None = None
     cleanup_arm_evidence_sha256: str | None = None
+    cleanup_disarm_evidence_sha256: str | None = None
     cleanup_disposition: str = "pending"
     residue_evidence_sha256: str | None = None
-    residue: dict[str, int] = field(default_factory=lambda: dict.fromkeys(RESIDUE_KEYS, 0))
+    residue: dict[str, int] = field(
+        default_factory=lambda: dict.fromkeys(RESIDUE_KEYS, 0)
+    )
     cleanup_region: str | None = None
     cleanup_region_selection_sha256: str | None = None
     cleanup_candidate_regions: str | None = None
@@ -369,14 +385,18 @@ class Ledger:
     def validate_resume(self, config: CampaignConfig) -> None:
         if (
             self.cleanup_region != config.cleanup_region
-            or self.cleanup_region_selection_sha256 != config.cleanup_region_selection_sha256
+            or self.cleanup_region_selection_sha256
+            != config.cleanup_region_selection_sha256
             or self.cleanup_candidate_regions != config.cleanup_candidate_regions
             or self.cleanup_offer_classification != config.cleanup_offer_classification
             or self.cleanup_offer_eligibility_disposition
             != config.cleanup_offer_eligibility_disposition
-            or self.cleanup_offer_eligible_regions != config.cleanup_offer_eligible_regions
-            or self.cleanup_offer_eligibility_source != config.cleanup_offer_eligibility_source
-            or self.cleanup_offer_eligibility_sha256 != config.cleanup_offer_eligibility_sha256
+            or self.cleanup_offer_eligible_regions
+            != config.cleanup_offer_eligible_regions
+            or self.cleanup_offer_eligibility_source
+            != config.cleanup_offer_eligibility_source
+            or self.cleanup_offer_eligibility_sha256
+            != config.cleanup_offer_eligibility_sha256
         ):
             raise CampaignError(
                 "resume cleanup region selection or offer eligibility was substituted"
@@ -388,7 +408,8 @@ class Ledger:
             raise CampaignError("resume campaign or generation does not match")
         if (
             Decimal(self.authorized_ceiling_usd) != HARD_CEILING
-            or Decimal(self.conservative_estimate_usd) != Decimal(config.conservative_estimate_usd)
+            or Decimal(self.conservative_estimate_usd)
+            != Decimal(config.conservative_estimate_usd)
             or Decimal(self.contingency_percent) < Decimal("25")
             or self.resource_generation_count not in {0, 1}
             or self.image_generation_count not in {0, 1}
@@ -403,8 +424,15 @@ class Ledger:
                 self.residue_evidence_sha256 is not None
                 and HASH_PATTERN.fullmatch(self.residue_evidence_sha256) is None
             )
+            or (
+                self.cleanup_disarm_evidence_sha256 is not None
+                and HASH_PATTERN.fullmatch(self.cleanup_disarm_evidence_sha256) is None
+            )
             or set(self.residue) != set(RESIDUE_KEYS)
-            or any(not isinstance(value, int) or value < 0 for value in self.residue.values())
+            or any(
+                not isinstance(value, int) or value < 0
+                for value in self.residue.values()
+            )
         ):
             raise CampaignError("resume ledger limits or counters are invalid")
         current = Phase.NEW
@@ -418,9 +446,9 @@ class Ledger:
             if source is not current:
                 raise CampaignError("resume transition chain is discontinuous")
             normal = ORDER.index(target) == ORDER.index(source) + 1
-            cleanup_jump = target is Phase.CLEANING and ORDER.index(source) >= ORDER.index(
-                Phase.SCOPE_CREATED
-            )
+            cleanup_jump = target is Phase.CLEANING and ORDER.index(
+                source
+            ) >= ORDER.index(Phase.SCOPE_CREATED)
             if not normal and not cleanup_jump:
                 raise CampaignError("resume transition chain is invalid")
             current = target
@@ -444,11 +472,19 @@ class Ledger:
             or self.image_scan_evidence_sha256 is None
         ):
             raise CampaignError("resume image scan state is inconsistent")
-        if self.actual_cost_usd is not None and Decimal(self.actual_cost_usd) > HARD_CEILING:
+        if (
+            self.actual_cost_usd is not None
+            and Decimal(self.actual_cost_usd) > HARD_CEILING
+        ):
             raise CampaignError("resume actual cost exceeds the ceiling")
         cleanup_armed_reached = Phase.CLEANUP_ARMED in reached
         if cleanup_armed_reached != (self.cleanup_arm_evidence_sha256 is not None):
             raise CampaignError("resume cleanup arming evidence is inconsistent")
+        cleanup_disarmed_reached = Phase.CLEANUP_DISARMED in reached
+        if cleanup_disarmed_reached != (
+            self.cleanup_disarm_evidence_sha256 is not None
+        ):
+            raise CampaignError("resume cleanup disarming evidence is inconsistent")
         residue_verified_reached = Phase.RESIDUE_VERIFIED in reached
         if residue_verified_reached != (
             self.cleanup_disposition == "zero-residue"
@@ -475,6 +511,11 @@ class Ledger:
             raise CampaignError("image digest and one admission scan are required")
         if target is Phase.CLEANUP_ARMED and self.cleanup_arm_evidence_sha256 is None:
             raise CampaignError("cleanup arming evidence is required")
+        if (
+            target is Phase.CLEANUP_DISARMED
+            and self.cleanup_disarm_evidence_sha256 is None
+        ):
+            raise CampaignError("cleanup disarming evidence is required")
         if target is Phase.RESIDUE_VERIFIED and (
             self.cleanup_disposition != "zero-residue"
             or self.residue_evidence_sha256 is None
@@ -484,9 +525,17 @@ class Ledger:
         self._assert_time(
             now,
             cleanup_transition=target
-            in {Phase.CLEANING, Phase.CLEANED, Phase.RESIDUE_VERIFIED, Phase.FINALIZED},
+            in {
+                Phase.CLEANING,
+                Phase.CLEANED,
+                Phase.CLEANUP_DISARMED,
+                Phase.RESIDUE_VERIFIED,
+                Phase.FINALIZED,
+            },
         )
-        self.transitions.append({"from": current.value, "to": target.value, "atUtc": utc(now)})
+        self.transitions.append(
+            {"from": current.value, "to": target.value, "atUtc": utc(now)}
+        )
         self.phase = target.value
         if target is Phase.BILLABLE_STARTED:
             if self.resource_generation_count != 0:
@@ -521,8 +570,13 @@ class Ledger:
         self.image_digest = digest
 
     def record_image_scan(self, digest: str, evidence_sha256: str) -> None:
-        if digest != self.image_digest or HASH_PATTERN.fullmatch(evidence_sha256) is None:
-            raise CampaignError("image admission scan is not bound to the selected digest")
+        if (
+            digest != self.image_digest
+            or HASH_PATTERN.fullmatch(evidence_sha256) is None
+        ):
+            raise CampaignError(
+                "image admission scan is not bound to the selected digest"
+            )
         if self.image_scan_count != 0:
             raise CampaignError("second image admission scan rejected")
         self.image_scan_count = 1
@@ -537,6 +591,16 @@ class Ledger:
         ):
             raise CampaignError("cleanup arming evidence substitution rejected")
         self.cleanup_arm_evidence_sha256 = evidence_sha256
+
+    def record_cleanup_disarm_evidence(self, evidence_sha256: str) -> None:
+        if HASH_PATTERN.fullmatch(evidence_sha256) is None:
+            raise CampaignError("cleanup disarming evidence hash is invalid")
+        if (
+            self.cleanup_disarm_evidence_sha256 is not None
+            and self.cleanup_disarm_evidence_sha256 != evidence_sha256
+        ):
+            raise CampaignError("cleanup disarming evidence substitution rejected")
+        self.cleanup_disarm_evidence_sha256 = evidence_sha256
 
     def record_residue(self, counters: dict[str, int], *, evidence_sha256: str) -> str:
         if set(counters) != set(RESIDUE_KEYS) or any(
@@ -561,7 +625,9 @@ class Ledger:
             b"m7.8/residue-counters/v1\0"
             + json.dumps(counters, separators=(",", ":"), sort_keys=True).encode()
         ).hexdigest()
-        if self.record_residue(counters, evidence_sha256=evidence_sha256) != ("zero-residue"):
+        if self.record_residue(counters, evidence_sha256=evidence_sha256) != (
+            "zero-residue"
+        ):
             raise CampaignError("campaign residue is nonzero")
 
     def _assert_time(self, now: datetime, *, cleanup_transition: bool = False) -> None:
@@ -611,14 +677,18 @@ class CleanupBinding:
             or self.binding_count != 0
             or HASH_PATTERN.fullmatch(self.cleanup_principal_sha256) is None
             or self.cleanup_region != config.cleanup_region
-            or self.cleanup_region_selection_sha256 != config.cleanup_region_selection_sha256
+            or self.cleanup_region_selection_sha256
+            != config.cleanup_region_selection_sha256
             or self.cleanup_candidate_regions != config.cleanup_candidate_regions
             or self.cleanup_offer_classification != config.cleanup_offer_classification
             or self.cleanup_offer_eligibility_disposition
             != config.cleanup_offer_eligibility_disposition
-            or self.cleanup_offer_eligible_regions != config.cleanup_offer_eligible_regions
-            or self.cleanup_offer_eligibility_source != config.cleanup_offer_eligibility_source
-            or self.cleanup_offer_eligibility_sha256 != config.cleanup_offer_eligibility_sha256
+            or self.cleanup_offer_eligible_regions
+            != config.cleanup_offer_eligible_regions
+            or self.cleanup_offer_eligibility_source
+            != config.cleanup_offer_eligibility_source
+            or self.cleanup_offer_eligibility_sha256
+            != config.cleanup_offer_eligibility_sha256
         ):
             raise CampaignError("cleanup binding readback is inconsistent")
 
@@ -684,7 +754,9 @@ class SimulatedRunner:
 
 
 class Lifecycle:
-    def __init__(self, config: CampaignConfig, ledger: Ledger, runner: CommandRunner) -> None:
+    def __init__(
+        self, config: CampaignConfig, ledger: Ledger, runner: CommandRunner
+    ) -> None:
         config.validate()
         ledger.bind_cleanup_region(config)
         ledger.validate_resume(config)
@@ -702,6 +774,8 @@ class Lifecycle:
                 self.ledger.record_image_scan("sha256:" + "a" * 64, "b" * 64)
             if phase is Phase.RESIDUE_VERIFIED:
                 self.ledger.verify_residue(dict.fromkeys(RESIDUE_KEYS, 0))
+            if phase is Phase.CLEANUP_DISARMED:
+                self.ledger.record_cleanup_disarm_evidence("d" * 64)
             self.ledger.transition(phase, now)
             now += timedelta(seconds=1)
         return self.ledger
@@ -713,6 +787,8 @@ class Lifecycle:
                 self.ledger.record_cleanup_arm_evidence("c" * 64)
             if phase is Phase.RESIDUE_VERIFIED:
                 self.ledger.verify_residue(dict.fromkeys(RESIDUE_KEYS, 0))
+            if phase is Phase.CLEANUP_DISARMED:
+                self.ledger.record_cleanup_disarm_evidence("d" * 64)
             if phase is Phase.IMAGE_DECIDED:
                 self.ledger.record_image("sha256:" + "a" * 64, built=True)
                 self.ledger.record_image_scan("sha256:" + "a" * 64, "b" * 64)
@@ -729,6 +805,11 @@ class Lifecycle:
                 current = Phase.CLEANED
                 now += timedelta(seconds=1)
             if ORDER.index(current) < ORDER.index(Phase.RESIDUE_VERIFIED):
+                if ORDER.index(current) < ORDER.index(Phase.CLEANUP_DISARMED):
+                    self.ledger.record_cleanup_disarm_evidence("d" * 64)
+                    self.ledger.transition(Phase.CLEANUP_DISARMED, now)
+                    current = Phase.CLEANUP_DISARMED
+                    now += timedelta(seconds=1)
                 self.ledger.verify_residue(dict.fromkeys(RESIDUE_KEYS, 0))
                 self.ledger.transition(Phase.RESIDUE_VERIFIED, now)
                 current = Phase.RESIDUE_VERIFIED
@@ -746,12 +827,13 @@ def terminal_receipt(ledger: Ledger) -> dict[str, object]:
     if (
         Phase(ledger.phase) is not Phase.FINALIZED
         or ledger.cleanup_disposition != "zero-residue"
+        or ledger.cleanup_disarm_evidence_sha256 is None
         or ledger.residue_evidence_sha256 is None
         or any(ledger.residue.values())
     ):
         raise CampaignError("terminal receipt requires finalized zero residue")
     return {
-        "version": "m7.8-terminal-receipt-v4",
+        "version": "m7.8-terminal-receipt-v5",
         "campaignCorrelation": sanitize(ledger.campaign_id, domain="campaign"),
         "generationCorrelation": sanitize(ledger.generation_id, domain="generation"),
         "resourceGenerationCount": ledger.resource_generation_count,
@@ -761,11 +843,14 @@ def terminal_receipt(ledger: Ledger) -> dict[str, object]:
         "cleanupRegionSelectionSha256": ledger.cleanup_region_selection_sha256,
         "cleanupCandidateRegions": ledger.cleanup_candidate_regions,
         "cleanupOfferClassification": ledger.cleanup_offer_classification,
-        "cleanupOfferEligibilityDisposition": (ledger.cleanup_offer_eligibility_disposition),
+        "cleanupOfferEligibilityDisposition": (
+            ledger.cleanup_offer_eligibility_disposition
+        ),
         "cleanupOfferEligibleRegions": ledger.cleanup_offer_eligible_regions,
         "cleanupOfferEligibilitySource": ledger.cleanup_offer_eligibility_source,
         "cleanupOfferEligibilitySha256": ledger.cleanup_offer_eligibility_sha256,
         "cleanupArmEvidenceSha256": ledger.cleanup_arm_evidence_sha256,
+        "cleanupDisarmEvidenceSha256": ledger.cleanup_disarm_evidence_sha256,
         "cleanupDisposition": ledger.cleanup_disposition,
         "residueEvidenceSha256": ledger.residue_evidence_sha256,
         "residue": ledger.residue,
@@ -815,7 +900,9 @@ def save_ledger(path: Path, ledger: Ledger) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Milestone 7.8 campaign lifecycle")
-    parser.add_argument("operation", choices=("validate", "simulate", "failure-matrix", "receipt"))
+    parser.add_argument(
+        "operation", choices=("validate", "simulate", "failure-matrix", "receipt")
+    )
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--ledger", type=Path, required=True)
     args = parser.parse_args()
@@ -833,9 +920,9 @@ def main() -> int:
             results = {}
             for phase in ORDER[1:-1]:
                 candidate = Ledger(config.campaign_id, config.generation_id)
-                result = Lifecycle(config, candidate, SimulatedRunner()).fail_and_cleanup(
-                    phase, now=now
-                )
+                result = Lifecycle(
+                    config, candidate, SimulatedRunner()
+                ).fail_and_cleanup(phase, now=now)
                 results[phase.value] = result.phase
             output = {"status": "passed", "phases": results}
         else:

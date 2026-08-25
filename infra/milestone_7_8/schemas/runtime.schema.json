@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:operator-runtime:v4",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:operator-runtime:v5",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -10,8 +10,10 @@
     "dockerfileSha256",
     "cleanupScriptSha256",
     "automationApiVersion",
+    "cleanupControllerArchitecture",
     "cleanupControllerArmability",
-    "deletedAutomationAccountBindingSha256",
+    "controllerBindingSha256",
+    "cleanupAuthorityExpiresUtc",
     "cleanupRegion",
     "cleanupRegionSelectionSha256",
     "cleanupCandidateRegions",
@@ -54,13 +56,17 @@
     "dockerfileSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "cleanupScriptSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "automationApiVersion": { "const": "2024-10-23" },
-    "cleanupControllerArmability": {
-      "enum": ["ready", "blocked-provider-retention"]
+    "cleanupControllerArchitecture": {
+      "const": "reusable-automation-controller-v1"
     },
-    "deletedAutomationAccountBindingSha256": {
+    "cleanupControllerArmability": {
+      "const": "architecture-corrected-live-execution-not-authorized"
+    },
+    "controllerBindingSha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
+    "cleanupAuthorityExpiresUtc": { "type": "string", "format": "date-time" },
     "cleanupRegion": { "type": "string", "pattern": "^[a-z][a-z0-9]{2,31}$" },
     "cleanupRegionSelectionSha256": {
       "type": "string",
@@ -91,9 +97,15 @@
     "cleanupRegionSelectionFile": { "type": "string", "minLength": 1 },
     "cleanupDeploymentName": { "type": "string", "minLength": 1 },
     "campaignDeploymentName": { "type": "string", "minLength": 1 },
-    "automationAccountName": { "type": "string", "minLength": 1 },
-    "runbookName": { "type": "string", "minLength": 1 },
-    "scheduleName": { "type": "string", "minLength": 1 },
+    "automationAccountName": {
+      "type": "string",
+      "pattern": "^aa-m78-controller-[a-f0-9]{10}$"
+    },
+    "runbookName": { "const": "Remove-M78Campaign" },
+    "scheduleName": {
+      "type": "string",
+      "pattern": "^m78-deadline-[a-f0-9]{10}$"
+    },
     "bindingName": { "type": "string", "format": "uuid" },
     "bootstrapJobName": { "type": "string", "minLength": 1 },
     "migrationJobName": { "type": "string", "minLength": 1 },
@@ -108,7 +120,10 @@
     "registryName": { "type": "string", "minLength": 5 },
     "logAnalyticsWorkspaceName": { "type": "string", "minLength": 1 },
     "resourceGroupName": { "type": "string", "minLength": 1 },
-    "cleanupResourceGroupName": { "type": "string", "minLength": 1 },
+    "cleanupResourceGroupName": {
+      "type": "string",
+      "pattern": "^rg-m78-controller-[a-f0-9]{10}$"
+    },
     "cleanupParametersFile": { "type": "string", "minLength": 1 },
     "campaignParametersFile": { "type": "string", "minLength": 1 }
   }

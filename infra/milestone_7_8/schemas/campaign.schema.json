@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign:v3",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign:v4",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -44,7 +44,7 @@
     },
     "cleanupResourceGroup": {
       "type": "string",
-      "pattern": "^rg-m78-[a-f0-9]{10}-cleanup$"
+      "pattern": "^rg-m78-controller-[a-f0-9]{10}$"
     },
     "targetRegion": { "type": "string", "minLength": 1 },
     "cleanupRegion": { "type": "string", "pattern": "^[a-z][a-z0-9]{2,31}$" },

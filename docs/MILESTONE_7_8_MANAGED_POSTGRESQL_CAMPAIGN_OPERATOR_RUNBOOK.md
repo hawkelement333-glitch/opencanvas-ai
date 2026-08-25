@@ -1,18 +1,18 @@
 # Milestone 7.8 managed PostgreSQL campaign operator runbook
 
-Date: 2026-08-14
+Date: 2026-08-25
 
-Status: **not executable**; campaign arming is blocked because Azure Automation
-account deletion creates provider-retained residue
+Status: `architecture-corrected-live-execution-not-authorized`
 
 This runbook preserves the intended independent campaign path, but it is not a
-readiness claim or execution authorization. Current preparation writes
-`cleanupControllerArmability=blocked-provider-retention`, and the operator
-rejects `scope-create` and every later campaign mutation. Azure Automation
-retains a deleted account for its provider retention period, so deleting the
-cleanup resource group cannot meet the authoritative zero-residue invariant.
-No new campaign is authorized. The commands below are retained as reviewed
-reference only until a separately proved cleanup mechanism removes this block.
+readiness claim or execution authorization. The corrected path uses one stable
+reusable Automation controller outside campaign deletion scope. Preparation
+refuses a bundle until that exact controller identity is separately
+provisioned and adoptable. Before `scope-create`, `capacity-check` proves its
+permanent Reader grant, published content, and empty schedule/binding
+inventories. Every controller or campaign Azure execution
+requires a separate exact expiring authorization artifact. No new campaign is
+authorized, and no controller is claimed live by this document.
 
 ## Prerequisites and authority
 
@@ -22,10 +22,11 @@ commit, with a clean tree/index, no upstream, and exactly five untouched
 stashes. The output directory `.runtime/milestone_7_8` must not exist.
 
 The interactive deployment operator needs only the Azure control-plane actions
-required to create the two generated resource groups and the resource types in
-`infra/milestone_7_8/main.bicep` and `cleanup.bicep`, plus
-`Microsoft.Authorization/roleAssignments/write/delete` on those exact two
-generated resource-group scopes. It must not receive database credentials. The
+required to create the generated target group and the resource types in
+`infra/milestone_7_8/main.bicep`, plus temporary
+`Microsoft.Authorization/roleAssignments/write/delete` on that exact target
+scope. Stable controller bootstrap is a prior, separately authorized operation
+through `controller.bicep` and `controller.py`. It must not receive database credentials. The
 deployed identities are narrower:
 
 Before any generation directory exists, preparation also needs read-only
@@ -35,14 +36,14 @@ AzureCloud account correlation. Those reads return only locations, counts, and
 sanitized hashes to persisted evidence; account names and ARM identifiers are
 not retained.
 
-| Identity  | Azure authority                                                                                          | PostgreSQL authority                                                                                      |
-| --------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Bootstrap | ACR pull; Flexible Server Entra administrator binding                                                    | create/verify the four non-cleanup database principals; transfer application ownership; reconcile grants  |
-| Migration | ACR pull only                                                                                            | `CONNECT`, database/schema creation needed by reviewed Alembic, and ownership of application objects      |
-| API       | ACR pull only                                                                                            | literal API table matrix: 150 SELECT, 149 INSERT, 17 UPDATE, 9 DELETE; no sequence/function/DDL authority |
-| Worker    | ACR pull only                                                                                            | literal worker table matrix: 55 SELECT, 18 INSERT, 6 UPDATE, 1 DELETE; no sequence/function/DDL authority |
-| Evidence  | ACR pull only                                                                                            | `CONNECT` and `pg_monitor`; no database/schema creation or application ownership                          |
-| Cleanup   | Contributor plus Role Based Access Control Administrator on the two exact generated resource groups only | none                                                                                                      |
+| Identity  | Azure authority                                                                                                                                       | PostgreSQL authority                                                                                      |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Bootstrap | ACR pull; Flexible Server Entra administrator binding                                                                                                 | create/verify the four non-cleanup database principals; transfer application ownership; reconcile grants  |
+| Migration | ACR pull only                                                                                                                                         | `CONNECT`, database/schema creation needed by reviewed Alembic, and ownership of application objects      |
+| API       | ACR pull only                                                                                                                                         | literal API table matrix: 150 SELECT, 149 INSERT, 17 UPDATE, 9 DELETE; no sequence/function/DDL authority |
+| Worker    | ACR pull only                                                                                                                                         | literal worker table matrix: 55 SELECT, 18 INSERT, 6 UPDATE, 1 DELETE; no sequence/function/DDL authority |
+| Evidence  | ACR pull only                                                                                                                                         | `CONNECT` and `pg_monitor`; no database/schema creation or application ownership                          |
+| Cleanup   | Permanent Reader on its stable controller group; temporary Contributor plus Role Based Access Control Administrator on the exact campaign target only | none                                                                                                      |
 
 The operator must use an approved synthetic tenant only. No production data or
 production identity is permitted. `M78_SUBSCRIPTION_ID` and `M78_TENANT_ID`
@@ -66,9 +67,9 @@ ledger is written.
 
 ## Prepare one generation
 
-**Blocked:** do not execute this section while the status above remains in
-force. Preparation may produce a local bundle for deterministic contract tests,
-but that bundle is deliberately non-armable.
+**Separately authorized future step:** do not execute this section from this
+handoff. Before preparation, the one-time controller bootstrap/verification
+must finish with a valid controller authorization and exact baseline readback.
 
 Set the exact later-authorized Azure identifiers in memory and choose one
 campaign label matching `^[a-z][a-z0-9-]{7,47}$`:
@@ -98,8 +99,10 @@ output directory. It has no caller-supplied cleanup-region override. Before
 creating the output directory, it evaluates the exact order `eastus2`,
 `southcentralus`, `westus2`, `westus`, `eastus`, `northeurope`,
 `southeastasia` against normalized provider support, subscription-offer
-eligibility, enforced location policy, active account occupancy, and
-discoverable soft-deleted occupancy. The order contains every reviewed
+eligibility, enforced location policy, exact reusable-controller adoption or
+unrelated active account occupancy, and discoverable soft-deleted occupancy.
+When the exact controller exists, its established region is the only selectable
+controller region. The order contains every reviewed
 offer-safe region and is separately bound through configuration, runtime,
 ledger, parameters, tags, Bicep outputs, readback, and receipt. A candidate is
 armable only when all four independent admission dimensions pass. The
@@ -121,47 +124,44 @@ four hours in the future. It never prints either raw Azure UUID.
 
 ## Dry-run and execute phases
 
-**Blocked:** do not execute the phase sequence. In particular, `scope-create`
-fails closed before issuing its Azure mutation while runtime armability is
-`blocked-provider-retention`.
+**Not currently authorized:** do not execute the phase sequence without one
+exact execution-authorization artifact covering each requested mutation.
 
 Every operator phase is dry-run unless `--execute` is present. Before each
 mutation, inspect the redacted command plan:
 
 ```powershell
-function Invoke-M78Phase([string]$Phase, [string[]]$Extra = @()) {
+function Invoke-M78Phase([string]$Phase, [string]$Authorization, [string[]]$Extra = @()) {
   & .\.venv\Scripts\python.exe -m infra.milestone_7_8.operator $Phase `
     --config $config --runtime $runtime --ledger $ledger @Extra
   if ($LASTEXITCODE -ne 0) { throw "dry-run blocked: $Phase" }
   & .\.venv\Scripts\python.exe -m infra.milestone_7_8.operator $Phase `
-    --config $config --runtime $runtime --ledger $ledger --execute @Extra
+    --config $config --runtime $runtime --ledger $ledger --execute `
+    --authorization $Authorization @Extra
   if ($LASTEXITCODE -ne 0) { throw "execution blocked: $Phase" }
 }
 
-Invoke-M78Phase 'preflight'
-Invoke-M78Phase 'correlate'
-Invoke-M78Phase 'capacity-check'
-Invoke-M78Phase 'cost-gate'
-Invoke-M78Phase 'scope-create'
-Invoke-M78Phase 'cleanup-deploy'
-Invoke-M78Phase 'cleanup-arm'
-Invoke-M78Phase 'cleanup-verify'
-Invoke-M78Phase 'billable-start'
-Invoke-M78Phase 'deploy'
+# Supply a separately reviewed artifact for each live phase. Read-only phases
+# still require exact campaign execution authorization; mutation artifacts
+# must name the requested operation and expire before cleanup authority. Any
+# phase that can enter failure cleanup must also include `cleanup` in the same
+# artifact; the operator rejects execution before Azure otherwise.
 ```
 
-The `capacity-check` dry-run exposes 16 static Azure commands. Six are the
+The `capacity-check` dry-run exposes 23 static Azure commands. Six are the
 subscription context, subscription-policy metadata, Automation provider,
 active-account, soft-deleted-account, and policy-assignment reads; enforced
 policy definitions and deny-capable initiative members produce explicit
 generated GETs. Execution repeats preparation's complete offer-aware selector
 and requires the immutable region, ordered candidate-set binding, decision
 hash, offer binding, and every evidence hash to match. Any change stops before
-`scope-create`.
+`scope-create`. Seven final reads also prove the exact controller group,
+account, permanent Reader grant, published runbook content, and complete empty
+schedule and binding inventories before any target mutation.
 
-The baseline static operator plan contains 70 commands, 64 of them Azure CLI
-commands. It also has bounded generated Container Apps job polling, failure
-cleanup, and exact-two-group direct cleanup. Preparation's regional selection
+The operator plan also has bounded generated Container Apps job polling,
+failure cleanup, exact-target direct cleanup, and deterministic controller
+disarm. Preparation's regional selection
 has six static Azure reads plus generated policy-definition GETs. Every Azure
 path uses the centralized launcher; no unrelated Automation account name is a
 command target.
@@ -171,13 +171,12 @@ correlation, six provider registrations, PostgreSQL SKU, regional compute
 quota, global names, USD 25.6832 estimate, at least 25 percent contingency,
 the USD 50 ceiling, exact scope tags, cleanup deployment outputs, published
 runbook content, one immutable schedule, one binding, actual cleanup identity,
-and exact cleanup deadline before the billable clock starts. The initial
-cleanup deployment creates only the account, draft runbook, and exact-scope
-RBAC; it creates zero schedules and zero job-schedule bindings. `cleanup-arm`
-then verifies deployment, identity, and authority, replaces content, publishes,
-reads back `Published` state plus the exact content hash, creates and verifies
-the immutable schedule, creates the deterministic binding, and requires one
-exact binding. A failure at any earlier step cannot advance the ledger to
+and exact cleanup deadline before the billable clock starts. The campaign
+cleanup deployment creates only exact target-scoped RBAC against the existing
+controller; it creates zero schedules and zero job-schedule bindings.
+`cleanup-arm` verifies deployment, identity, authority, previously published
+state and exact content, reconciles or creates the immutable schedule, and
+reconciles or creates the deterministic binding. A failure at any earlier step cannot advance the ledger to
 `cleanup-armed`. The `deploy` phase is base infrastructure only; no application
 job exists yet.
 
@@ -348,16 +347,17 @@ both groups absent. That deletion is not permanent Automation-account removal.
 inventories, binds the expected account by its domain-separated resource-ID
 hash, preserves unrelated account hashes, and requires zero tagged resources,
 zero role assignments, and all 16 defined residue counters at zero. A matching
-soft-deleted account records `provider-retained`, keeps the ledger at `cleaned`,
-and blocks `finalize`. Only a pagination-complete later read proving absence can
-advance to `residue-verified` and print the v4 terminal receipt. If the runbook
+soft-deleted account records `provider-retained`, keeps the ledger before
+finalization, and blocks `finalize`. Only complete target absence, exact
+schedule/binding disarm, and pagination-complete residue reads can advance to
+`residue-verified` and print the v5 terminal receipt. If the runbook
 cannot be started, the
-operator automatically falls back to deletion of only the same two validated
-resource groups and immediately reports exact active and soft-deleted account
+operator automatically falls back to deletion of only the validated target
+resource group and immediately reports exact active and soft-deleted account
 counts from complete inventories. It never broadens the deletion target.
 
-That phase behavior applies only to a future v4 bundle if the architecture is
-separately unblocked and execution is separately authorized. The preserved
+That phase behavior applies only to a future v5 bundle after the controller is
+separately bootstrapped, proved, and execution is separately authorized. The preserved
 private generation predates the v4 runtime and 16-counter ledger, and its legacy
 `finalized` state is retained as disproved historical evidence. It must not be
 rewritten or passed to this operator as a resumable lifecycle. The next check
@@ -391,7 +391,8 @@ operation that maps to the next state:
 | `evidence-executed`       | `dispose`                                          |
 | `disposed`                | `cleanup`                                          |
 | `cleaning`                | `cleanup-wait`                                     |
-| `cleaned`                 | `residue`                                          |
+| `cleaned`                 | `cleanup-disarm`                                   |
+| `cleanup-disarmed`        | `residue`                                          |
 | `residue-verified`        | `finalize`                                         |
 
 If all managed evidence commands completed but the process stopped before its
@@ -401,7 +402,7 @@ generation, source, digest, control input, transition chain, deadline, or
 receipt is rejected. Once cleanup starts, resume only cleanup, wait, residue,
 and finalization; cleanup remains allowed after the deadline.
 
-This resume table describes only a conforming v4 ledger. It does not reopen or
+This resume table describes only a conforming v5 ledger. It does not reopen or
 upgrade the preserved legacy finalized ledger described above.
 
 ## Bounded time, cost, artifacts, and stopping rule

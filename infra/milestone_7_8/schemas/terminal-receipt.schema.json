@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:terminal-receipt:v4",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:terminal-receipt:v5",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,13 +19,14 @@
     "cleanupOfferEligibilitySource",
     "cleanupOfferEligibilitySha256",
     "cleanupArmEvidenceSha256",
+    "cleanupDisarmEvidenceSha256",
     "cleanupDisposition",
     "residueEvidenceSha256",
     "residue",
     "status"
   ],
   "properties": {
-    "version": { "const": "m7.8-terminal-receipt-v4" },
+    "version": { "const": "m7.8-terminal-receipt-v5" },
     "campaignCorrelation": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
     "generationCorrelation": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
     "resourceGenerationCount": {
@@ -50,6 +51,10 @@
       "pattern": "^[a-f0-9]{64}$"
     },
     "cleanupArmEvidenceSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "cleanupDisarmEvidenceSha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },

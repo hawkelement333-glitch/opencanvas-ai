@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Final, Protocol, cast
 
-from infra.milestone_7_8.campaign import CampaignError, utc
+from infra.milestone_7_8.campaign import CampaignError, parse_utc, utc
 
 CLEANUP_REGION_CANDIDATES: Final = (
     "eastus2",
@@ -35,7 +35,7 @@ RESTRICTED_OFFER_CLASSIFICATION: Final = "restricted-public-offer"
 UNCLASSIFIED_OFFER_CLASSIFICATION: Final = "unclassified"
 RESTRICTED_OFFER_DISPOSITION: Final = "restricted-offer-metadata-confirmed"
 BASELINE_OFFER_DISPOSITION: Final = "restrictive-public-baseline-applied"
-SELECTION_VERSION: Final = "m7.8-cleanup-region-selection-v3"
+SELECTION_VERSION: Final = "m7.8-cleanup-region-selection-v4"
 REGION_PATTERN: Final = re.compile(r"^[a-z][a-z0-9]{2,31}$")
 DEFINITION_API_VERSION: Final = "2023-04-01"
 DELETED_ACCOUNTS_API_VERSION: Final = "2024-10-23"
@@ -54,6 +54,7 @@ class CandidateEvidence:
     offer_eligible: bool
     policy_allowed: bool
     active_account_count: int
+    adoptable_controller_count: int
     soft_deleted_account_count: int
     status: str
 
@@ -74,6 +75,8 @@ class AutomationRegionSelection:
     selected_region: str
     provider_registration_state: str
     capacity_basis: str
+    controller_disposition: str
+    controller_region: str
     policy_assignment_count: int
     policy_definition_count: int
     provider_locations_sha256: str
@@ -94,7 +97,17 @@ class AutomationRegionSelection:
             self.version != SELECTION_VERSION
             or self.provider_registration_state != "Registered"
             or self.capacity_basis
-            != "provider-offer-policy-zero-active-and-soft-deleted-accounts"
+            != "provider-offer-policy-exact-controller-or-zero-occupancy"
+            or self.controller_disposition
+            not in {"controller-absent", "exact-controller-adoptable"}
+            or (
+                self.controller_disposition == "controller-absent"
+                and self.controller_region != ""
+            )
+            or (
+                self.controller_disposition == "exact-controller-adoptable"
+                and REGION_PATTERN.fullmatch(self.controller_region) is None
+            )
             or self.offer_eligible_regions != RESTRICTED_OFFER_ELIGIBLE_REGIONS
             or self.offer_eligibility_source != OFFER_ELIGIBILITY_SOURCE
             or (
@@ -137,6 +150,7 @@ class AutomationRegionSelection:
             "offer-ineligible",
             "policy-disallowed",
             "occupied",
+            "controller-region-mismatch",
         }
         for item in self.candidates:
             if (
@@ -145,13 +159,19 @@ class AutomationRegionSelection:
                 or type(item.offer_eligible) is not bool
                 or type(item.policy_allowed) is not bool
                 or type(item.active_account_count) is not int
+                or type(item.adoptable_controller_count) is not int
                 or type(item.soft_deleted_account_count) is not int
                 or item.active_account_count < 0
+                or item.adoptable_controller_count not in {0, 1}
+                or item.adoptable_controller_count > item.active_account_count
                 or item.soft_deleted_account_count < 0
             ):
                 raise CampaignError(
                     "Automation cleanup candidate evidence is malformed"
                 )
+            unrelated_active_count = (
+                item.active_account_count - item.adoptable_controller_count
+            )
             expected_status = (
                 "unsupported"
                 if not item.provider_supported
@@ -160,7 +180,9 @@ class AutomationRegionSelection:
                 else "policy-disallowed"
                 if not item.policy_allowed
                 else "occupied"
-                if item.active_account_count + item.soft_deleted_account_count > 0
+                if unrelated_active_count + item.soft_deleted_account_count > 0
+                else "controller-region-mismatch"
+                if self.controller_region and item.region != self.controller_region
                 else "viable"
             )
             if item.status != expected_status:
@@ -169,6 +191,27 @@ class AutomationRegionSelection:
                 )
             if item.status == "viable":
                 viable.append(item.region)
+        adoptable_count = sum(
+            item.adoptable_controller_count for item in self.candidates
+        )
+        if (
+            self.controller_disposition == "controller-absent" and adoptable_count != 0
+        ) or (
+            self.controller_disposition == "exact-controller-adoptable"
+            and (
+                adoptable_count != 1
+                or next(
+                    (
+                        item.region
+                        for item in self.candidates
+                        if item.adoptable_controller_count == 1
+                    ),
+                    None,
+                )
+                != self.controller_region
+            )
+        ):
+            raise CampaignError("Automation reusable controller evidence differs")
         if not viable:
             _raise_no_viable(self.candidates)
         if self.selected_region != viable[0]:
@@ -184,6 +227,8 @@ class AutomationRegionSelection:
             "selectedRegion": self.selected_region,
             "providerRegistrationState": self.provider_registration_state,
             "capacityBasis": self.capacity_basis,
+            "controllerDisposition": self.controller_disposition,
+            "controllerRegion": self.controller_region,
             "policyAssignmentCount": self.policy_assignment_count,
             "policyDefinitionCount": self.policy_definition_count,
             "providerLocationsSha256": self.provider_locations_sha256,
@@ -203,6 +248,7 @@ class AutomationRegionSelection:
                     "offerEligible": item.offer_eligible,
                     "policyAllowed": item.policy_allowed,
                     "activeAccountCount": item.active_account_count,
+                    "adoptableControllerCount": item.adoptable_controller_count,
                     "softDeletedAccountCount": item.soft_deleted_account_count,
                     "status": item.status,
                 }
@@ -229,6 +275,8 @@ def selection_from_document(value: object) -> AutomationRegionSelection:
         "selectedRegion",
         "providerRegistrationState",
         "capacityBasis",
+        "controllerDisposition",
+        "controllerRegion",
         "policyAssignmentCount",
         "policyDefinitionCount",
         "providerLocationsSha256",
@@ -259,6 +307,7 @@ def selection_from_document(value: object) -> AutomationRegionSelection:
             "offerEligible",
             "policyAllowed",
             "activeAccountCount",
+            "adoptableControllerCount",
             "softDeletedAccountCount",
             "status",
         }:
@@ -272,6 +321,7 @@ def selection_from_document(value: object) -> AutomationRegionSelection:
                 offer_eligible=cast(bool, item["offerEligible"]),
                 policy_allowed=cast(bool, item["policyAllowed"]),
                 active_account_count=cast(int, item["activeAccountCount"]),
+                adoptable_controller_count=cast(int, item["adoptableControllerCount"]),
                 soft_deleted_account_count=cast(int, item["softDeletedAccountCount"]),
                 status=cast(str, item["status"]),
             )
@@ -282,6 +332,8 @@ def selection_from_document(value: object) -> AutomationRegionSelection:
         selected_region=cast(str, value["selectedRegion"]),
         provider_registration_state=cast(str, value["providerRegistrationState"]),
         capacity_basis=cast(str, value["capacityBasis"]),
+        controller_disposition=cast(str, value["controllerDisposition"]),
+        controller_region=cast(str, value["controllerRegion"]),
         policy_assignment_count=cast(int, value["policyAssignmentCount"]),
         policy_definition_count=cast(int, value["policyDefinitionCount"]),
         provider_locations_sha256=cast(str, value["providerLocationsSha256"]),
@@ -377,7 +429,8 @@ def automation_region_discovery_commands(
             "--url",
             active_url,
             "--query",
-            "{accounts:value[].{location:location},nextLink:nextLink}",
+            "{accounts:value[].{id:id,name:name,resourceGroup:resourceGroup,"
+            "location:location,tags:tags},nextLink:nextLink}",
             "--output",
             "json",
         ),
@@ -423,6 +476,11 @@ def discover_automation_region(
     *,
     observed_at: datetime | None = None,
     candidate_order: tuple[str, ...] = CLEANUP_REGION_CANDIDATES,
+    controller_resource_group: str | None = None,
+    controller_account: str | None = None,
+    subscription_correlation: str | None = None,
+    cleanup_script_sha256: str | None = None,
+    controller_required_until_utc: str | None = None,
 ) -> AutomationRegionSelection:
     results = tuple(
         _run_required(runner, command)
@@ -433,6 +491,11 @@ def discover_automation_region(
         results,
         observed_at=observed_at,
         candidate_order=candidate_order,
+        controller_resource_group=controller_resource_group,
+        controller_account=controller_account,
+        subscription_correlation=subscription_correlation,
+        cleanup_script_sha256=cleanup_script_sha256,
+        controller_required_until_utc=controller_required_until_utc,
     )
 
 
@@ -442,6 +505,11 @@ def select_automation_region_from_results(
     *,
     observed_at: datetime | None = None,
     candidate_order: tuple[str, ...] = CLEANUP_REGION_CANDIDATES,
+    controller_resource_group: str | None = None,
+    controller_account: str | None = None,
+    subscription_correlation: str | None = None,
+    cleanup_script_sha256: str | None = None,
+    controller_required_until_utc: str | None = None,
 ) -> AutomationRegionSelection:
     _validate_candidate_order(candidate_order)
     if len(results) != 6:
@@ -483,6 +551,14 @@ def select_automation_region_from_results(
     offer = _subscription_offer_eligibility(subscription)
     active_accounts = _complete_account_inventory(active, label="active")
     deleted_accounts = _complete_account_inventory(deleted, label="soft-deleted")
+    controller_region = _adoptable_controller_region(
+        active_accounts,
+        controller_resource_group=controller_resource_group,
+        controller_account=controller_account,
+        subscription_correlation=subscription_correlation,
+        cleanup_script_sha256=cleanup_script_sha256,
+        controller_required_until_utc=controller_required_until_utc,
+    )
     active_counts = _location_counts(
         active_accounts, supported=supported, label="active"
     )
@@ -503,6 +579,7 @@ def select_automation_region_from_results(
         subscription_offer_eligible = region in offer_eligible
         allowed = policy_allowed[region]
         active_count = active_counts.get(region, 0)
+        adoptable_controller_count = int(controller_region == region)
         deleted_count = deleted_counts.get(region, 0)
         status = (
             "unsupported"
@@ -512,7 +589,9 @@ def select_automation_region_from_results(
             else "policy-disallowed"
             if not allowed
             else "occupied"
-            if active_count + deleted_count > 0
+            if active_count - adoptable_controller_count + deleted_count > 0
+            else "controller-region-mismatch"
+            if controller_region and region != controller_region
             else "viable"
         )
         evidence.append(
@@ -522,6 +601,7 @@ def select_automation_region_from_results(
                 offer_eligible=subscription_offer_eligible,
                 policy_allowed=allowed,
                 active_account_count=active_count,
+                adoptable_controller_count=adoptable_controller_count,
                 soft_deleted_account_count=deleted_count,
                 status=status,
             )
@@ -534,7 +614,11 @@ def select_automation_region_from_results(
         candidate_order=candidate_order,
         selected_region=viable[0],
         provider_registration_state="Registered",
-        capacity_basis="provider-offer-policy-zero-active-and-soft-deleted-accounts",
+        capacity_basis="provider-offer-policy-exact-controller-or-zero-occupancy",
+        controller_disposition=(
+            "exact-controller-adoptable" if controller_region else "controller-absent"
+        ),
+        controller_region=controller_region or "",
         policy_assignment_count=len(assignments),
         policy_definition_count=definition_count,
         provider_locations_sha256=_evidence_hash(
@@ -641,6 +725,92 @@ def _complete_account_inventory(value: object, *, label: str) -> list[object]:
             f"automation-region-discovery-failed: {label} account inventory is incomplete"
         )
     return cast(list[object], value["accounts"])
+
+
+def _adoptable_controller_region(
+    accounts: list[object],
+    *,
+    controller_resource_group: str | None,
+    controller_account: str | None,
+    subscription_correlation: str | None,
+    cleanup_script_sha256: str | None,
+    controller_required_until_utc: str | None,
+) -> str | None:
+    expected = (
+        controller_resource_group,
+        controller_account,
+        subscription_correlation,
+        cleanup_script_sha256,
+    )
+    if all(value is None for value in expected):
+        return None
+    if any(value is None for value in expected):
+        raise CampaignError("reusable Automation controller expectation is incomplete")
+    if (
+        re.fullmatch(
+            r"^rg-m78-controller-[a-f0-9]{10}$", str(controller_resource_group)
+        )
+        is None
+        or re.fullmatch(r"^aa-m78-controller-[a-f0-9]{10}$", str(controller_account))
+        is None
+        or re.fullmatch(r"^[a-f0-9]{16}$", str(subscription_correlation)) is None
+        or re.fullmatch(r"^[a-f0-9]{64}$", str(cleanup_script_sha256)) is None
+        or controller_resource_group
+        != f"rg-m78-controller-{str(subscription_correlation)[:10]}"
+        or controller_account
+        != f"aa-m78-controller-{str(subscription_correlation)[:10]}"
+    ):
+        raise CampaignError("reusable Automation controller expectation is malformed")
+    matches = [
+        item
+        for item in accounts
+        if isinstance(item, dict)
+        and (
+            item.get("name") == controller_account
+            or item.get("resourceGroup") == controller_resource_group
+        )
+    ]
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise CampaignError("reusable Automation controller identity is ambiguous")
+    match = matches[0]
+    tags = match.get("tags")
+    expected_tags = {
+        "mobius.milestone": "7.8",
+        "mobius.owner": "managed-postgresql-evidence",
+        "mobius.cleanup-controller": "reusable-automation-controller-v1",
+        "mobius.subscription-correlation": subscription_correlation,
+        "mobius.cleanup-script-sha256": cleanup_script_sha256,
+    }
+    resource_id = match.get("id")
+    expected_suffix = (
+        f"/resourcegroups/{controller_resource_group}/providers/microsoft.automation/"
+        f"automationaccounts/{controller_account}"
+    ).casefold()
+    if (
+        match.get("name") != controller_account
+        or match.get("resourceGroup") != controller_resource_group
+        or not isinstance(resource_id, str)
+        or not resource_id.casefold().endswith(expected_suffix)
+        or not isinstance(tags, dict)
+        or any(tags.get(key) != value for key, value in expected_tags.items())
+        or not isinstance(tags.get("mobius.controller-authorized-until-utc"), str)
+    ):
+        raise CampaignError("reusable Automation controller identity or tags drifted")
+    try:
+        authorized_until = parse_utc(
+            str(tags["mobius.controller-authorized-until-utc"])
+        )
+    except CampaignError as exc:
+        raise CampaignError(
+            "reusable Automation controller authorization is malformed"
+        ) from exc
+    if controller_required_until_utc is not None and authorized_until < parse_utc(
+        controller_required_until_utc
+    ):
+        raise CampaignError("reusable Automation controller authority is insufficient")
+    return _normalize_region(match.get("location"))
 
 
 def _location_counts(

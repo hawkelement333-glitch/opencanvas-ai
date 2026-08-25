@@ -163,7 +163,7 @@ def _config(selection: AutomationRegionSelection) -> CampaignConfig:
         subscription_correlation="a" * 16,
         tenant_correlation="b" * 16,
         target_resource_group="rg-m78-aabbccddee-target",
-        cleanup_resource_group="rg-m78-aabbccddee-cleanup",
+        cleanup_resource_group="rg-m78-controller-aaaaaaaaaa",
         target_region="centralus",
         cleanup_region=selection.selected_region,
         postgres_region="centralus",
@@ -186,9 +186,13 @@ def _runtime(selection: AutomationRegionSelection) -> dict[str, str]:
     return {
         "subscriptionId": "00000000-0000-4000-8000-000000000100",
         "resourceGroupName": "rg-m78-aabbccddee-target",
-        "cleanupResourceGroupName": "rg-m78-aabbccddee-cleanup",
-        "automationAccountName": "aa-m78-proof",
-        "runbookName": "Remove-M78Campaign-proof",
+        "cleanupResourceGroupName": "rg-m78-controller-aaaaaaaaaa",
+        "automationAccountName": "aa-m78-controller-aaaaaaaaaa",
+        "runbookName": "Remove-M78Campaign",
+        "scheduleName": "m78-deadline-aabbccddee",
+        "bindingName": "00000000-0000-4000-8000-000000000500",
+        "cleanupScriptSha256": hashlib.sha256(b"cleanup-content").hexdigest(),
+        "cleanupAuthorityExpiresUtc": "2030-01-01T05:00:00Z",
         "registryName": "acrm78proof",
         "postgresServerName": "pgm78proof",
         "cleanupDeploymentName": "m78-cleanup-proof",
@@ -205,6 +209,87 @@ def _runtime(selection: AutomationRegionSelection) -> dict[str, str]:
     }
 
 
+def _active_controller_record() -> dict[str, object]:
+    return {
+        "id": (
+            "/subscriptions/00000000-0000-4000-8000-000000000100/resourceGroups/"
+            "rg-m78-controller-aaaaaaaaaa/providers/Microsoft.Automation/"
+            "automationAccounts/aa-m78-controller-aaaaaaaaaa"
+        ),
+        "name": "aa-m78-controller-aaaaaaaaaa",
+        "resourceGroup": "rg-m78-controller-aaaaaaaaaa",
+        "location": "East US 2",
+        "tags": {
+            "mobius.milestone": "7.8",
+            "mobius.owner": "managed-postgresql-evidence",
+            "mobius.cleanup-controller": "reusable-automation-controller-v1",
+            "mobius.subscription-correlation": "a" * 16,
+            "mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z",
+            "mobius.cleanup-script-sha256": hashlib.sha256(b"cleanup-content").hexdigest(),
+        },
+    }
+
+
+def _controller_baseline_results(
+    config: CampaignConfig, runtime: dict[str, str]
+) -> list[dict[str, object]]:
+    principal_id = "00000000-0000-4000-8000-000000000201"
+    scope = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.cleanup_resource_group}"
+    )
+    tags = {
+        "mobius.milestone": "7.8",
+        "mobius.owner": "managed-postgresql-evidence",
+        "mobius.cleanup-controller": "reusable-automation-controller-v1",
+        "mobius.subscription-correlation": config.subscription_correlation,
+        "mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z",
+        "mobius.cleanup-script-sha256": runtime["cleanupScriptSha256"],
+    }
+    return [
+        _result(
+            {
+                "name": config.cleanup_resource_group,
+                "location": config.cleanup_region,
+                "tags": tags,
+            }
+        ),
+        _result(
+            {
+                "name": runtime["automationAccountName"],
+                "location": config.cleanup_region,
+                "tags": tags,
+                "identity": {"principalId": principal_id},
+                "properties": {"disableLocalAuth": True},
+            }
+        ),
+        _result(
+            [
+                {
+                    "principalId": principal_id,
+                    "roleDefinitionId": (
+                        f"/subscriptions/{runtime['subscriptionId']}/providers/"
+                        "Microsoft.Authorization/roleDefinitions/"
+                        "acdd72a7-3385-48ef-bd42-f606fba81ae7"
+                    ),
+                    "scope": scope,
+                }
+            ]
+        ),
+        _result(
+            {
+                "name": runtime["runbookName"],
+                "properties": {
+                    "state": "Published",
+                    "lastModifiedTime": "2030-01-01T00:01:00Z",
+                },
+            }
+        ),
+        {"exitCode": 0, "stdout": "cleanup-content", "stderr": ""},
+        _result({"value": []}),
+        _result({"value": []}),
+    ]
+
+
 def test_occupied_westus_is_rejected_before_mutation_and_alternate_is_selected() -> None:
     selection = _select(active=[{"location": "WEST US"}])
 
@@ -212,6 +297,63 @@ def test_occupied_westus_is_rejected_before_mutation_and_alternate_is_selected()
     westus = next(item for item in selection.candidates if item.region == "westus")
     assert westus.status == "occupied"
     assert westus.active_account_count == 1
+
+
+def test_exact_reusable_controller_is_adopted_in_its_established_region() -> None:
+    controller = {
+        "id": (
+            "/subscriptions/00000000-0000-4000-8000-000000000100/resourceGroups/"
+            "rg-m78-controller-aaaaaaaaaa/providers/Microsoft.Automation/"
+            "automationAccounts/aa-m78-controller-aaaaaaaaaa"
+        ),
+        "name": "aa-m78-controller-aaaaaaaaaa",
+        "resourceGroup": "rg-m78-controller-aaaaaaaaaa",
+        "location": "Southeast Asia",
+        "tags": {
+            "mobius.milestone": "7.8",
+            "mobius.owner": "managed-postgresql-evidence",
+            "mobius.cleanup-controller": "reusable-automation-controller-v1",
+            "mobius.subscription-correlation": "a" * 16,
+            "mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z",
+            "mobius.cleanup-script-sha256": "9" * 64,
+        },
+    }
+    selection = select_automation_region_from_results(
+        FakeRunner(),
+        _discovery_results(active=[controller]),
+        observed_at=NOW,
+        controller_resource_group="rg-m78-controller-aaaaaaaaaa",
+        controller_account="aa-m78-controller-aaaaaaaaaa",
+        subscription_correlation="a" * 16,
+        cleanup_script_sha256="9" * 64,
+    )
+    assert selection.selected_region == "southeastasia"
+    assert selection.controller_disposition == "exact-controller-adoptable"
+    assert selection.controller_region == "southeastasia"
+    by_region = {item.region: item for item in selection.candidates}
+    assert by_region["southeastasia"].adoptable_controller_count == 1
+    assert by_region["eastus2"].status == "controller-region-mismatch"
+
+    drifted = {**controller, "tags": {**controller["tags"], "mobius.owner": "other"}}
+    with pytest.raises(CampaignError, match="identity or tags drifted"):
+        select_automation_region_from_results(
+            FakeRunner(),
+            _discovery_results(active=[drifted]),
+            controller_resource_group="rg-m78-controller-aaaaaaaaaa",
+            controller_account="aa-m78-controller-aaaaaaaaaa",
+            subscription_correlation="a" * 16,
+            cleanup_script_sha256="9" * 64,
+        )
+    with pytest.raises(CampaignError, match="authority is insufficient"):
+        select_automation_region_from_results(
+            FakeRunner(),
+            _discovery_results(active=[controller]),
+            controller_resource_group="rg-m78-controller-aaaaaaaaaa",
+            controller_account="aa-m78-controller-aaaaaaaaaa",
+            subscription_correlation="a" * 16,
+            cleanup_script_sha256="9" * 64,
+            controller_required_until_utc="2030-01-03T00:00:00Z",
+        )
 
 
 def test_supported_policy_allowed_zero_occupancy_alternate_is_deterministic() -> None:
@@ -569,14 +711,13 @@ def test_selection_is_bound_to_plan_bicep_schemas_and_terminal_receipt() -> None
     selection = _select()
     config = _config(selection)
     runtime = _runtime(selection)
-    deploy = command_plan("cleanup-deploy", config, runtime)[0]
+    deploy = command_plan("cleanup-deploy", config, runtime)[-1]
     assert deploy.count(selection.selected_region) == 1
     assert "@runtime/cleanup.parameters.json" in deploy
 
     for relative in (
         "infra/milestone_7_8/cleanup.bicep",
         "infra/milestone_7_8/main.bicep",
-        "infra/milestone_7_8/modules/cleanup-controller.bicep",
         "infra/milestone_7_8/modules/campaign-resources.bicep",
         "infra/milestone_7_8/schemas/campaign.schema.json",
         "infra/milestone_7_8/schemas/runtime.schema.json",
@@ -632,21 +773,32 @@ def test_m78_pg_009_configuration_rejects_dropped_candidate() -> None:
         ).validate(allow_expired=True)
 
 
-def test_cleanup_deployment_plan_has_one_region_and_no_hopping_or_reuse() -> None:
+def test_cleanup_deployment_plan_adopts_one_controller_region_without_hopping() -> None:
     selection = _select()
     config = _config(selection)
     runtime = _runtime(selection)
 
     commands = command_plan("cleanup-deploy", config, runtime)
-    assert len(commands) == 1
-    rendered = " ".join(commands[0])
+    assert len(commands) == 8
+    rendered = " ".join(commands[-1])
     assert rendered.count(config.cleanup_region) == 1
     assert "restore" not in rendered.casefold()
     assert "update" not in rendered.casefold()
+    assert all("--method delete" not in " ".join(command) for command in commands)
 
 
 def test_capacity_check_revalidates_selection_before_scope_mutation() -> None:
-    selection = _select()
+    active_controller = _active_controller_record()
+    selection = select_automation_region_from_results(
+        FakeRunner(),
+        _discovery_results(active=[active_controller]),
+        observed_at=NOW,
+        controller_resource_group="rg-m78-controller-aaaaaaaaaa",
+        controller_account="aa-m78-controller-aaaaaaaaaa",
+        subscription_correlation="a" * 16,
+        cleanup_script_sha256=hashlib.sha256(b"cleanup-content").hexdigest(),
+        controller_required_until_utc="2030-01-01T05:00:00Z",
+    )
     config = _config(selection)
     runtime = _runtime(selection)
     prefix = [
@@ -658,32 +810,41 @@ def test_capacity_check_revalidates_selection_before_scope_mutation() -> None:
     ]
     validate_operation_results(
         "capacity-check",
-        [*prefix, *_discovery_results()],
+        [
+            *prefix,
+            *_discovery_results(active=[active_controller]),
+            *_controller_baseline_results(config, runtime),
+        ],
         config,
         runtime,
         runner=FakeRunner(),  # type: ignore[arg-type]
     )
     assert config.cleanup_candidate_regions == CLEANUP_CANDIDATE_REGIONS_BINDING
 
-    changed_offer_results = list(_discovery_results())
+    changed_offer_results = list(_discovery_results(active=[active_controller]))
     changed_offer_results[1] = _result(
         {"subscriptionPolicies": {"quotaId": "FreeTrial_ChangedEvidence"}}
     )
-    with pytest.raises(CampaignError, match="no longer armable"):
+    with pytest.raises(CampaignError, match="armable"):
         validate_operation_results(
             "capacity-check",
-            [*prefix, *changed_offer_results],
+            [
+                *prefix,
+                *changed_offer_results,
+                *_controller_baseline_results(config, runtime),
+            ],
             config,
             runtime,
             runner=FakeRunner(),  # type: ignore[arg-type]
         )
 
-    with pytest.raises(CampaignError, match="no longer armable"):
+    with pytest.raises(CampaignError, match="armable"):
         validate_operation_results(
             "capacity-check",
             [
                 *prefix,
-                *_discovery_results(active=[{"location": "eastus2"}]),
+                *_discovery_results(active=[active_controller, {"location": "eastus2"}]),
+                *_controller_baseline_results(config, runtime),
             ],
             config,
             runtime,
@@ -707,7 +868,8 @@ def test_discovery_and_cleanup_never_target_unrelated_automation_accounts() -> N
     assert "--subscription" in provider_inventory
     assert active_inventory[1:3] == ("rest", "--method")
     active_query = active_inventory[active_inventory.index("--query") + 1]
-    assert "accounts:value[].{location:location}" in active_query
+    assert "accounts:value[].{id:id,name:name,resourceGroup:resourceGroup" in active_query
+    assert "location:location,tags:tags" in active_query
     assert "nextLink:nextLink" in active_query
     assert "--name" not in active_inventory
     deleted_query = deleted_inventory[deleted_inventory.index("--query") + 1]
@@ -719,9 +881,30 @@ def test_discovery_and_cleanup_never_target_unrelated_automation_accounts() -> N
     class RecordingRunner:
         def __init__(self) -> None:
             self.commands: list[tuple[str, ...]] = []
+            self.exists_reads = 0
 
         def run(self, command: tuple[str, ...]) -> dict[str, object]:
             self.commands.append(command)
+            if command[:3] == ("az", "account", "show"):
+                return _result({"id": runtime["subscriptionId"]})
+            if command[:3] == ("az", "group", "exists"):
+                self.exists_reads += 1
+                return _result(self.exists_reads == 1)
+            if command[:3] == ("az", "group", "show"):
+                return _result(
+                    {
+                        "name": config.target_resource_group,
+                        "tags": {
+                            "mobius.milestone": "7.8",
+                            "mobius.campaign": config.campaign_id,
+                            "mobius.generation": config.generation_id,
+                            "mobius.cleanup-deadline-utc": config.cleanup_deadline_utc,
+                            "mobius.cost-ceiling-cents": "5000",
+                        },
+                    }
+                )
+            if command[:3] == ("az", "group", "delete"):
+                return {"exitCode": 1, "stdout": "", "stderr": "ambiguous timeout"}
             if command[:2] == ("az", "rest"):
                 return _result({"value": []})
             return _result({})
@@ -729,6 +912,12 @@ def test_discovery_and_cleanup_never_target_unrelated_automation_accounts() -> N
     selection = _select()
     config = _config(selection)
     runtime = _runtime(selection)
+    config = replace(
+        config,
+        subscription_correlation=hashlib.sha256(
+            b"m7.8/subscription\0" + runtime["subscriptionId"].encode()
+        ).hexdigest()[:16],
+    )
     expected_resource_id = (
         f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/"
         f"{config.cleanup_resource_group}/providers/Microsoft.Automation/"
@@ -739,13 +928,14 @@ def test_discovery_and_cleanup_never_target_unrelated_automation_accounts() -> N
     ).hexdigest()
     runner = RecordingRunner()
     start_direct_cleanup(runner, config, runtime)  # type: ignore[arg-type]
-    delete_commands = runner.commands[:2]
+    delete_commands = [
+        command for command in runner.commands if command[:3] == ("az", "group", "delete")
+    ]
     assert [command[command.index("--name") + 1] for command in delete_commands] == [
         config.target_resource_group,
-        config.cleanup_resource_group,
     ]
     assert all(command[:3] == ("az", "group", "delete") for command in delete_commands)
-    assert all(command[:2] == ("az", "rest") for command in runner.commands[2:])
+    assert not any(config.cleanup_resource_group in command for command in delete_commands)
 
 
 def test_selection_receipt_contains_no_resource_or_account_identifier() -> None:

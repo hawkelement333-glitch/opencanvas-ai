@@ -8,7 +8,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -31,6 +31,14 @@ from infra.milestone_7_8.campaign import (
     sanitize,
     save_ledger,
     terminal_receipt,
+)
+from infra.milestone_7_8.cleanup_controller import (
+    ARCHITECTURE,
+    LOCAL_ARCHITECTURE_STATE,
+    cleanup_authority_sha256,
+    controller_binding_sha256,
+    controller_names,
+    load_execution_authorization,
 )
 
 CONTROL_PLANE_FIELDS = {
@@ -72,8 +80,10 @@ RUNTIME_FIELDS = {
     "dockerfileSha256",
     "cleanupScriptSha256",
     "automationApiVersion",
+    "cleanupControllerArchitecture",
     "cleanupControllerArmability",
-    "deletedAutomationAccountBindingSha256",
+    "controllerBindingSha256",
+    "cleanupAuthorityExpiresUtc",
     "cleanupRegion",
     "cleanupRegionSelectionSha256",
     "cleanupCandidateRegions",
@@ -121,11 +131,11 @@ CLEANUP_PARAMETER_FIELDS = {
     "cleanupOfferEligibilitySource",
     "cleanupOfferEligibilitySha256",
     "cleanupDeadlineUtc",
+    "cleanupAuthorityExpiresUtc",
     "automationAccountName",
     "cleanupRunbookName",
     "cleanupScheduleName",
     "cleanupBindingName",
-    "lifecycleTags",
 }
 CAMPAIGN_PARAMETER_FIELDS = {
     "campaignId",
@@ -183,9 +193,30 @@ OPERATION_PHASE = {
     "dispose": Phase.DISPOSED,
     "cleanup": Phase.CLEANING,
     "cleanup-wait": Phase.CLEANED,
+    "cleanup-disarm": Phase.CLEANUP_DISARMED,
     "residue": Phase.RESIDUE_VERIFIED,
     "finalize": Phase.FINALIZED,
 }
+
+
+def required_execution_authorizations(
+    operation: str, current_phase: Phase
+) -> frozenset[str]:
+    required = {operation}
+    target = OPERATION_PHASE[operation]
+    target_can_require_cleanup = (
+        ORDER.index(Phase.SCOPE_CREATED)
+        <= ORDER.index(target)
+        <= ORDER.index(Phase.CLEANED)
+    )
+    current_can_require_cleanup = (
+        ORDER.index(Phase.SCOPE_CREATED)
+        <= ORDER.index(current_phase)
+        < ORDER.index(Phase.CLEANED)
+    )
+    if target_can_require_cleanup or current_can_require_cleanup:
+        required.add("cleanup")
+    return frozenset(required)
 
 
 def load_runtime(path: Path) -> dict[str, str]:
@@ -206,8 +237,11 @@ def load_runtime(path: Path) -> dict[str, str]:
         or re.fullmatch(r"[a-f0-9]{64}", value["dockerfileSha256"]) is None
         or re.fullmatch(r"[a-f0-9]{64}", value["cleanupScriptSha256"]) is None
         or value["automationApiVersion"] != "2024-10-23"
-        or value["cleanupControllerArmability"] not in {"ready", "blocked-provider-retention"}
-        or re.fullmatch(r"[a-f0-9]{64}", value["deletedAutomationAccountBindingSha256"]) is None
+        or value["cleanupControllerArchitecture"] != ARCHITECTURE
+        or value["cleanupControllerArmability"] != LOCAL_ARCHITECTURE_STATE
+        or re.fullmatch(r"[a-f0-9]{64}", value["controllerBindingSha256"]) is None
+        or parse_utc(value["cleanupAuthorityExpiresUtc"])
+        <= parse_utc("2000-01-01T00:00:00Z")
         or re.fullmatch(
             r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
             value["bindingName"],
@@ -248,11 +282,11 @@ def validate_prepared_bundle(
         != config.subscription_correlation
     ):
         raise CampaignError("operator runtime scope or correlation differs")
-    suffix_match = re.fullmatch(r"rg-m78-([a-f0-9]{10})-target", config.target_resource_group)
-    if suffix_match is None or config.cleanup_resource_group != (
-        f"rg-m78-{suffix_match.group(1)}-cleanup"
-    ):
-        raise CampaignError("operator campaign scopes are not one generation")
+    suffix_match = re.fullmatch(
+        r"rg-m78-([a-f0-9]{10})-target", config.target_resource_group
+    )
+    if suffix_match is None:
+        raise CampaignError("operator campaign scope is not one generation")
     suffix = suffix_match.group(1)
     runtime_directory = runtime_path.resolve().parent
 
@@ -264,7 +298,9 @@ def validate_prepared_bundle(
             else candidate.resolve()
         )
         if resolved.parent != runtime_directory:
-            raise CampaignError("operator parameter file escaped its private generation")
+            raise CampaignError(
+                "operator parameter file escaped its private generation"
+            )
         return resolved
 
     cleanup = _load_arm_parameter_values(
@@ -274,7 +310,9 @@ def validate_prepared_bundle(
         sibling("campaignParametersFile"), expected=CAMPAIGN_PARAMETER_FIELDS
     )
     selection_path = sibling("cleanupRegionSelectionFile")
-    selection = selection_from_document(json.loads(selection_path.read_text(encoding="utf-8")))
+    selection = selection_from_document(
+        json.loads(selection_path.read_text(encoding="utf-8"))
+    )
     selection_sha256 = selection.sha256()
     candidate_regions = ",".join(selection.candidate_order)
     offer_eligible_regions = ",".join(selection.offer_eligible_regions)
@@ -283,7 +321,8 @@ def validate_prepared_bundle(
         or selection_sha256 != config.cleanup_region_selection_sha256
         or candidate_regions != config.cleanup_candidate_regions
         or selection.offer_classification != config.cleanup_offer_classification
-        or selection.offer_eligibility_disposition != config.cleanup_offer_eligibility_disposition
+        or selection.offer_eligibility_disposition
+        != config.cleanup_offer_eligibility_disposition
         or offer_eligible_regions != config.cleanup_offer_eligible_regions
         or selection.offer_eligibility_source != config.cleanup_offer_eligibility_source
         or selection.offer_eligibility_sha256 != config.cleanup_offer_eligibility_sha256
@@ -293,11 +332,16 @@ def validate_prepared_bundle(
         or runtime["cleanupOfferClassification"] != config.cleanup_offer_classification
         or runtime["cleanupOfferEligibilityDisposition"]
         != config.cleanup_offer_eligibility_disposition
-        or runtime["cleanupOfferEligibleRegions"] != config.cleanup_offer_eligible_regions
-        or runtime["cleanupOfferEligibilitySource"] != config.cleanup_offer_eligibility_source
-        or runtime["cleanupOfferEligibilitySha256"] != config.cleanup_offer_eligibility_sha256
+        or runtime["cleanupOfferEligibleRegions"]
+        != config.cleanup_offer_eligible_regions
+        or runtime["cleanupOfferEligibilitySource"]
+        != config.cleanup_offer_eligibility_source
+        or runtime["cleanupOfferEligibilitySha256"]
+        != config.cleanup_offer_eligibility_sha256
     ):
-        raise CampaignError("operator cleanup region or offer selection binding differs")
+        raise CampaignError(
+            "operator cleanup region or offer selection binding differs"
+        )
     common_expected = {
         "campaignId": config.campaign_id,
         "generationId": config.generation_id,
@@ -306,15 +350,25 @@ def validate_prepared_bundle(
         "cleanupResourceGroupName": config.cleanup_resource_group,
         "cleanupDeadlineUtc": config.cleanup_deadline_utc,
     }
-    if any(cleanup.get(key) != expected for key, expected in common_expected.items()) or any(
+    if any(
+        cleanup.get(key) != expected for key, expected in common_expected.items()
+    ) or any(
         campaign.get(key) != expected for key, expected in common_expected.items()
     ):
         raise CampaignError("operator parameter campaign binding differs")
+    if cleanup.get("cleanupAuthorityExpiresUtc") != runtime[
+        "cleanupAuthorityExpiresUtc"
+    ] or parse_utc(runtime["cleanupAuthorityExpiresUtc"]) != parse_utc(
+        config.cleanup_deadline_utc
+    ) + timedelta(hours=1):
+        raise CampaignError("operator cleanup authority lifetime differs")
     expected_runtime = {
         "cleanupDeploymentName": f"m78-cleanup-{suffix}",
         "campaignDeploymentName": f"m78-campaign-{suffix}",
-        "automationAccountName": f"aa-m78-{suffix}",
-        "runbookName": f"Remove-M78Campaign-{suffix}",
+        "automationAccountName": controller_names(
+            config.subscription_correlation
+        ).account,
+        "runbookName": controller_names(config.subscription_correlation).runbook,
         "scheduleName": f"m78-deadline-{suffix}",
         "bootstrapJobName": f"job-m78-{suffix}-bootstrap",
         "migrationJobName": f"job-m78-{suffix}-migration",
@@ -331,18 +385,13 @@ def validate_prepared_bundle(
     }
     if any(runtime.get(key) != expected for key, expected in expected_runtime.items()):
         raise CampaignError("operator runtime generation name differs")
-    expected_deleted_account_resource_id = (
-        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/"
-        f"{config.cleanup_resource_group}/providers/Microsoft.Automation/"
-        f"automationAccounts/{runtime['automationAccountName']}"
-    ).casefold()
-    if (
-        runtime["deletedAutomationAccountBindingSha256"]
-        != hashlib.sha256(
-            b"m7.8/deleted-automation-account/v1\0" + expected_deleted_account_resource_id.encode()
-        ).hexdigest()
+    if runtime["controllerBindingSha256"] != controller_binding_sha256(
+        runtime["subscriptionId"],
+        resource_group=config.cleanup_resource_group,
+        account=runtime["automationAccountName"],
+        runbook=runtime["runbookName"],
     ):
-        raise CampaignError("operator deleted Automation binding differs")
+        raise CampaignError("operator reusable controller binding differs")
     identity_names = {
         "bootstrap": campaign.get("administratorIdentityName"),
         "migration": campaign.get("migrationIdentityName"),
@@ -352,20 +401,27 @@ def validate_prepared_bundle(
     }
     if (
         campaign.get("resourceNameSuffix") != suffix
-        or campaign.get("cleanupIdentityName") != f"cleanup-{suffix}"
-        or any(identity_names[role] != f"id-m78-{suffix}-{role}" for role in identity_names)
+        or campaign.get("cleanupIdentityName") != runtime["automationAccountName"]
+        or any(
+            identity_names[role] != f"id-m78-{suffix}-{role}" for role in identity_names
+        )
         or len(set(identity_names.values())) != 5
         or campaign.get("targetLocation") != config.target_region
         or campaign.get("postgresLocation") != config.postgres_region
         or campaign.get("cleanupLocation") != config.cleanup_region
-        or campaign.get("cleanupRegionSelectionSha256") != config.cleanup_region_selection_sha256
+        or campaign.get("cleanupRegionSelectionSha256")
+        != config.cleanup_region_selection_sha256
         or campaign.get("cleanupCandidateRegions") != config.cleanup_candidate_regions
-        or campaign.get("cleanupOfferClassification") != config.cleanup_offer_classification
+        or campaign.get("cleanupOfferClassification")
+        != config.cleanup_offer_classification
         or campaign.get("cleanupOfferEligibilityDisposition")
         != config.cleanup_offer_eligibility_disposition
-        or campaign.get("cleanupOfferEligibleRegions") != config.cleanup_offer_eligible_regions
-        or campaign.get("cleanupOfferEligibilitySource") != config.cleanup_offer_eligibility_source
-        or campaign.get("cleanupOfferEligibilitySha256") != config.cleanup_offer_eligibility_sha256
+        or campaign.get("cleanupOfferEligibleRegions")
+        != config.cleanup_offer_eligible_regions
+        or campaign.get("cleanupOfferEligibilitySource")
+        != config.cleanup_offer_eligibility_source
+        or campaign.get("cleanupOfferEligibilitySha256")
+        != config.cleanup_offer_eligibility_sha256
         or campaign.get("postgresPrimaryZone") != "1"
         or campaign.get("postgresStandbyZone") != "2"
         or campaign.get("maintenanceDay") != 0
@@ -373,22 +429,31 @@ def validate_prepared_bundle(
         or campaign.get("containerAppsEnvironmentName") != f"cae-m78-{suffix}"
         or campaign.get("virtualNetworkName") != f"vnet-m78-{suffix}"
         or cleanup.get("cleanupLocation") != config.cleanup_region
-        or cleanup.get("cleanupRegionSelectionSha256") != config.cleanup_region_selection_sha256
+        or cleanup.get("cleanupRegionSelectionSha256")
+        != config.cleanup_region_selection_sha256
         or cleanup.get("cleanupCandidateRegions") != config.cleanup_candidate_regions
-        or cleanup.get("cleanupOfferClassification") != config.cleanup_offer_classification
+        or cleanup.get("cleanupOfferClassification")
+        != config.cleanup_offer_classification
         or cleanup.get("cleanupOfferEligibilityDisposition")
         != config.cleanup_offer_eligibility_disposition
-        or cleanup.get("cleanupOfferEligibleRegions") != config.cleanup_offer_eligible_regions
-        or cleanup.get("cleanupOfferEligibilitySource") != config.cleanup_offer_eligibility_source
-        or cleanup.get("cleanupOfferEligibilitySha256") != config.cleanup_offer_eligibility_sha256
-        or campaign.get("cleanupAutomationAccountName") != runtime["automationAccountName"]
+        or cleanup.get("cleanupOfferEligibleRegions")
+        != config.cleanup_offer_eligible_regions
+        or cleanup.get("cleanupOfferEligibilitySource")
+        != config.cleanup_offer_eligibility_source
+        or cleanup.get("cleanupOfferEligibilitySha256")
+        != config.cleanup_offer_eligibility_sha256
+        or campaign.get("cleanupAutomationAccountName")
+        != runtime["automationAccountName"]
         or cleanup.get("automationAccountName") != runtime["automationAccountName"]
         or cleanup.get("cleanupRunbookName") != runtime["runbookName"]
         or cleanup.get("cleanupScheduleName") != runtime["scheduleName"]
         or cleanup.get("cleanupBindingName") != runtime["bindingName"]
+        or cleanup.get("cleanupAuthorityExpiresUtc")
+        != runtime["cleanupAuthorityExpiresUtc"]
         or campaign.get("postgresServerName") != runtime["postgresServerName"]
         or campaign.get("registryName") != runtime["registryName"]
-        or campaign.get("logAnalyticsWorkspaceName") != runtime["logAnalyticsWorkspaceName"]
+        or campaign.get("logAnalyticsWorkspaceName")
+        != runtime["logAnalyticsWorkspaceName"]
     ):
         raise CampaignError("operator parameter resource or identity binding differs")
     tenant_id = campaign.get("tenantId")
@@ -409,23 +474,24 @@ def validate_prepared_bundle(
         "mobius.cleanup-region-selection-sha256": config.cleanup_region_selection_sha256,
         "mobius.cleanup-candidate-regions": config.cleanup_candidate_regions,
         "mobius.cleanup-offer-classification": config.cleanup_offer_classification,
-        "mobius.cleanup-offer-disposition": (config.cleanup_offer_eligibility_disposition),
+        "mobius.cleanup-offer-disposition": (
+            config.cleanup_offer_eligibility_disposition
+        ),
         "mobius.cleanup-offer-regions": config.cleanup_offer_eligible_regions,
         "mobius.cleanup-offer-source": config.cleanup_offer_eligibility_source,
-        "mobius.cleanup-offer-eligibility-sha256": (config.cleanup_offer_eligibility_sha256),
+        "mobius.cleanup-offer-eligibility-sha256": (
+            config.cleanup_offer_eligibility_sha256
+        ),
         "mobius.owner": "managed-postgresql-evidence",
         "mobius.expiry": config.cleanup_deadline_utc,
     }
-    if (
-        cleanup.get("lifecycleTags") != expected_tags
-        or campaign.get("lifecycleTags") != expected_tags
-    ):
+    if campaign.get("lifecycleTags") != expected_tags:
         raise CampaignError("operator lifecycle tags differ")
     planned = {
         "campaignId": config.campaign_id,
         "generationId": config.generation_id,
         "principals": identity_names,
-        "cleanup": f"cleanup-{suffix}",
+        "cleanup": runtime["automationAccountName"],
     }
     if (
         hashlib.sha256(
@@ -434,6 +500,28 @@ def validate_prepared_bundle(
         != config.principal_manifest_sha256
     ):
         raise CampaignError("operator prepared principal plan differs")
+
+
+def cleanup_job_parameters(
+    config: CampaignConfig, runtime: dict[str, str]
+) -> dict[str, str]:
+    return {
+        "CampaignId": config.campaign_id,
+        "GenerationId": config.generation_id,
+        "SubscriptionCorrelation": config.subscription_correlation,
+        "TargetResourceGroupName": config.target_resource_group,
+        "ControllerResourceGroupName": config.cleanup_resource_group,
+        "AutomationAccountName": runtime["automationAccountName"],
+        "CleanupRunbookName": runtime["runbookName"],
+        "CleanupScheduleName": runtime["scheduleName"],
+        "CleanupBindingName": runtime["bindingName"],
+        "CleanupDeadlineUtc": config.cleanup_deadline_utc,
+        "CleanupAuthorityExpiresUtc": runtime["cleanupAuthorityExpiresUtc"],
+        "CostCeilingCents": "5000",
+        "ControllerBindingSha256": runtime["controllerBindingSha256"],
+        "CleanupAuthoritySha256": cleanup_authority_sha256(config, runtime),
+        "CleanupAuthorized": "true",
+    }
 
 
 def command_plan(
@@ -449,7 +537,13 @@ def command_plan(
     runbook = runtime["runbookName"]
     automation_base = ""
     api_version = ""
-    if operation in {"cleanup-arm", "cleanup-verify", "residue"}:
+    if operation in {
+        "cleanup-deploy",
+        "cleanup-arm",
+        "cleanup-verify",
+        "cleanup-disarm",
+        "residue",
+    }:
         automation_base = (
             "https://management.azure.com/subscriptions/"
             + runtime["subscriptionId"]
@@ -502,7 +596,82 @@ def command_plan(
                 "Microsoft.OperationalInsights",
             )
         )
-        automation_region_commands = automation_region_discovery_commands(runtime["subscriptionId"])
+        automation_region_commands = automation_region_discovery_commands(
+            runtime["subscriptionId"]
+        )
+        controller_base = (
+            "https://management.azure.com/subscriptions/"
+            + runtime["subscriptionId"]
+            + "/resourceGroups/"
+            + cleanup_rg
+            + "/providers/Microsoft.Automation/automationAccounts/"
+            + account
+        )
+        controller_commands = (
+            ("az", "group", "show", "--name", cleanup_rg, "--output", "json"),
+            (
+                "az",
+                "automation",
+                "account",
+                "show",
+                "--resource-group",
+                cleanup_rg,
+                "--name",
+                account,
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "role",
+                "assignment",
+                "list",
+                "--scope",
+                f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{cleanup_rg}",
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{controller_base}/runbooks/{runbook}?api-version=2024-10-23",
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{controller_base}/runbooks/{runbook}/content?api-version=2024-10-23",
+                "--output",
+                "tsv",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{controller_base}/schedules?api-version=2024-10-23",
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{controller_base}/jobSchedules?api-version=2024-10-23",
+                "--output",
+                "json",
+            ),
+        )
         return (
             *providers,
             (
@@ -557,6 +726,7 @@ def command_plan(
                 "json",
             ),
             *automation_region_commands,
+            *controller_commands,
         )
     if operation in {"cost-gate", "billable-start", "dispose", "finalize"}:
         return ()
@@ -580,14 +750,26 @@ def command_plan(
                     "mobius.cleanup-region-selection-sha256="
                     + config.cleanup_region_selection_sha256
                 ),
-                ("mobius.cleanup-candidate-regions=" + config.cleanup_candidate_regions),
-                ("mobius.cleanup-offer-classification=" + config.cleanup_offer_classification),
+                (
+                    "mobius.cleanup-candidate-regions="
+                    + config.cleanup_candidate_regions
+                ),
+                (
+                    "mobius.cleanup-offer-classification="
+                    + config.cleanup_offer_classification
+                ),
                 (
                     "mobius.cleanup-offer-disposition="
                     + config.cleanup_offer_eligibility_disposition
                 ),
-                ("mobius.cleanup-offer-regions=" + config.cleanup_offer_eligible_regions),
-                ("mobius.cleanup-offer-source=" + config.cleanup_offer_eligibility_source),
+                (
+                    "mobius.cleanup-offer-regions="
+                    + config.cleanup_offer_eligible_regions
+                ),
+                (
+                    "mobius.cleanup-offer-source="
+                    + config.cleanup_offer_eligibility_source
+                ),
                 (
                     "mobius.cleanup-offer-eligibility-sha256="
                     + config.cleanup_offer_eligibility_sha256
@@ -600,6 +782,77 @@ def command_plan(
         )
     if operation == "cleanup-deploy":
         return (
+            (
+                "az",
+                "group",
+                "show",
+                "--name",
+                cleanup_rg,
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "automation",
+                "account",
+                "show",
+                "--resource-group",
+                cleanup_rg,
+                "--name",
+                account,
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "role",
+                "assignment",
+                "list",
+                "--scope",
+                f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{cleanup_rg}",
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{automation_base}/runbooks/{runbook}?api-version={api_version}",
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{automation_base}/runbooks/{runbook}/content?api-version={api_version}",
+                "--output",
+                "tsv",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{automation_base}/schedules?api-version={api_version}",
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{automation_base}/jobSchedules?api-version={api_version}",
+                "--output",
+                "json",
+            ),
             (
                 "az",
                 "deployment",
@@ -657,35 +910,9 @@ def command_plan(
                 "assignment",
                 "list",
                 "--scope",
-                (f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/" + cleanup_rg),
+                f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{cleanup_rg}",
                 "--output",
                 "json",
-            ),
-            (
-                "az",
-                "automation",
-                "runbook",
-                "replace-content",
-                "--resource-group",
-                cleanup_rg,
-                "--automation-account-name",
-                account,
-                "--name",
-                runbook,
-                "--content",
-                "@infra/milestone_7_8/scripts/Remove-M78Campaign.ps1",
-            ),
-            (
-                "az",
-                "automation",
-                "runbook",
-                "publish",
-                "--resource-group",
-                cleanup_rg,
-                "--automation-account-name",
-                account,
-                "--name",
-                runbook,
             ),
             (
                 "az",
@@ -703,9 +930,31 @@ def command_plan(
                 "--method",
                 "get",
                 "--url",
-                (f"{automation_base}/runbooks/{runbook}/content?api-version={api_version}"),
+                (
+                    f"{automation_base}/runbooks/{runbook}/content?api-version={api_version}"
+                ),
                 "--output",
                 "tsv",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{automation_base}/schedules?api-version={api_version}",
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{automation_base}/jobSchedules?api-version={api_version}",
+                "--output",
+                "json",
             ),
             (
                 "az",
@@ -721,9 +970,12 @@ def command_plan(
                 json.dumps(
                     {
                         "properties": {
-                            "description": ("One-time immutable Milestone 7.8 cleanup deadline."),
+                            "description": (
+                                "One-time immutable Milestone 7.8 cleanup deadline."
+                            ),
                             "frequency": "OneTime",
                             "interval": 1,
+                            "isEnabled": True,
                             "startTime": config.cleanup_deadline_utc,
                             "timeZone": "Etc/UTC",
                         },
@@ -761,16 +1013,7 @@ def command_plan(
                 json.dumps(
                     {
                         "properties": {
-                            "parameters": {
-                                "CampaignId": config.campaign_id,
-                                "GenerationId": config.generation_id,
-                                "SubscriptionCorrelation": (config.subscription_correlation),
-                                "TargetResourceGroupName": (config.target_resource_group),
-                                "CleanupResourceGroupName": (config.cleanup_resource_group),
-                                "CleanupDeadlineUtc": config.cleanup_deadline_utc,
-                                "CostCeilingCents": "5000",
-                                "CleanupAuthorized": "true",
-                            },
+                            "parameters": cleanup_job_parameters(config, runtime),
                             "runbook": {"name": runtime["runbookName"]},
                             "schedule": {"name": runtime["scheduleName"]},
                         }
@@ -832,7 +1075,7 @@ def command_plan(
                 "assignment",
                 "list",
                 "--scope",
-                (f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/" + cleanup_rg),
+                f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{cleanup_rg}",
                 "--output",
                 "json",
             ),
@@ -852,7 +1095,9 @@ def command_plan(
                 "--method",
                 "get",
                 "--url",
-                (f"{automation_base}/runbooks/{runbook}/content?api-version={api_version}"),
+                (
+                    f"{automation_base}/runbooks/{runbook}/content?api-version={api_version}"
+                ),
                 "--output",
                 "tsv",
             ),
@@ -926,7 +1171,9 @@ def command_plan(
         )
     if operation in {"bootstrap", "migrate"}:
         job = (
-            runtime["bootstrapJobName"] if operation == "bootstrap" else runtime["migrationJobName"]
+            runtime["bootstrapJobName"]
+            if operation == "bootstrap"
+            else runtime["migrationJobName"]
         )
         return (
             (
@@ -1127,6 +1374,10 @@ def command_plan(
                 account,
                 "--name",
                 runbook,
+                "--parameters",
+                json.dumps(
+                    cleanup_job_parameters(config, runtime), separators=(",", ":")
+                ),
                 "--output",
                 "json",
             ),
@@ -1145,23 +1396,53 @@ def command_plan(
                 "--timeout",
                 "1800",
             ),
+        )
+    if operation == "cleanup-disarm":
+        return (
             (
                 "az",
-                "group",
-                "wait",
-                "--deleted",
-                "--name",
-                cleanup_rg,
-                "--interval",
-                "15",
-                "--timeout",
-                "1800",
+                "rest",
+                "--method",
+                "delete",
+                "--url",
+                f"{automation_base}/jobSchedules/{runtime['bindingName']}?api-version={api_version}",
+                "--output",
+                "none",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "delete",
+                "--url",
+                f"{automation_base}/schedules/{runtime['scheduleName']}?api-version={api_version}",
+                "--output",
+                "none",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{automation_base}/schedules?api-version={api_version}",
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{automation_base}/jobSchedules?api-version={api_version}",
+                "--output",
+                "json",
             ),
         )
     if operation == "residue":
         return (
             ("az", "group", "exists", "--name", rg),
-            ("az", "group", "exists", "--name", cleanup_rg),
             (
                 "az",
                 "resource",
@@ -1178,7 +1459,48 @@ def command_plan(
                 "list",
                 "--all",
                 "--query",
-                ("[?contains(scope, '" + rg + "') || contains(scope, '" + cleanup_rg + "')]"),
+                ("[?contains(scope, '" + rg + "')]"),
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "group",
+                "show",
+                "--name",
+                cleanup_rg,
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "automation",
+                "account",
+                "show",
+                "--resource-group",
+                cleanup_rg,
+                "--name",
+                account,
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{automation_base}/schedules?api-version={api_version}",
+                "--output",
+                "json",
+            ),
+            (
+                "az",
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                f"{automation_base}/jobSchedules?api-version={api_version}",
                 "--output",
                 "json",
             ),
@@ -1226,7 +1548,9 @@ def _json_result(result: dict[str, object]) -> object:
         raise CampaignError("operator command output is not valid JSON") from exc
 
 
-def _run_required(runner: SubprocessRunner, command: tuple[str, ...]) -> dict[str, object]:
+def _run_required(
+    runner: SubprocessRunner, command: tuple[str, ...]
+) -> dict[str, object]:
     result = runner.run(command)
     if result.get("exitCode") != 0:
         raise CampaignError("operator command failed safely")
@@ -1346,10 +1670,12 @@ def _execute_paginated_inventory(
 def execute_residue_commands(
     runner: SubprocessRunner, commands: tuple[tuple[str, ...], ...]
 ) -> list[dict[str, object]]:
-    if len(commands) != 6:
+    if len(commands) != 9:
         raise CampaignError("residue command sequence is incomplete")
-    results = [_run_required(runner, command) for command in commands[:4]]
-    results.extend(_execute_paginated_inventory(runner, command) for command in commands[4:])
+    results = [_run_required(runner, command) for command in commands[:7]]
+    results.extend(
+        _execute_paginated_inventory(runner, command) for command in commands[7:]
+    )
     return results
 
 
@@ -1363,7 +1689,11 @@ def _deployment_outputs(result: dict[str, object]) -> dict[str, object]:
         raise CampaignError("deployment output is missing")
     outputs: dict[str, object] = {}
     for key, item in raw_outputs.items():
-        if not isinstance(key, str) or not isinstance(item, dict) or "value" not in item:
+        if (
+            not isinstance(key, str)
+            or not isinstance(item, dict)
+            or "value" not in item
+        ):
             raise CampaignError("deployment output is malformed")
         outputs[key] = item["value"]
     return outputs
@@ -1390,14 +1720,19 @@ def validate_deployed_principal_manifest(
         or binding.get("costCeilingCents") != 5000
         or binding.get("cleanupResourceGroupName") != config.cleanup_resource_group
         or binding.get("cleanupLocation") != config.cleanup_region
-        or binding.get("cleanupRegionSelectionSha256") != config.cleanup_region_selection_sha256
+        or binding.get("cleanupRegionSelectionSha256")
+        != config.cleanup_region_selection_sha256
         or binding.get("cleanupCandidateRegions") != config.cleanup_candidate_regions
-        or binding.get("cleanupOfferClassification") != config.cleanup_offer_classification
+        or binding.get("cleanupOfferClassification")
+        != config.cleanup_offer_classification
         or binding.get("cleanupOfferEligibilityDisposition")
         != config.cleanup_offer_eligibility_disposition
-        or binding.get("cleanupOfferEligibleRegions") != config.cleanup_offer_eligible_regions
-        or binding.get("cleanupOfferEligibilitySource") != config.cleanup_offer_eligibility_source
-        or binding.get("cleanupOfferEligibilitySha256") != config.cleanup_offer_eligibility_sha256
+        or binding.get("cleanupOfferEligibleRegions")
+        != config.cleanup_offer_eligible_regions
+        or binding.get("cleanupOfferEligibilitySource")
+        != config.cleanup_offer_eligibility_source
+        or binding.get("cleanupOfferEligibilitySha256")
+        != config.cleanup_offer_eligibility_sha256
         or not isinstance(manifest, dict)
         or set(manifest)
         != {
@@ -1431,7 +1766,9 @@ def validate_deployed_principal_manifest(
         try:
             parsed = uuid.UUID(item["objectId"])
         except ValueError as exc:
-            raise CampaignError("deployed principal object binding is malformed") from exc
+            raise CampaignError(
+                "deployed principal object binding is malformed"
+            ) from exc
         if parsed.int == 0:
             raise CampaignError("deployed principal object binding is malformed")
         names[slot] = item["name"]
@@ -1442,7 +1779,8 @@ def validate_deployed_principal_manifest(
         "campaignId": config.campaign_id,
         "generationId": config.generation_id,
         "principals": {
-            slot: names[slot] for slot in ("bootstrap", "migration", "api", "worker", "evidence")
+            slot: names[slot]
+            for slot in ("bootstrap", "migration", "api", "worker", "evidence")
         },
         "cleanup": names["cleanup"],
     }
@@ -1473,11 +1811,16 @@ def validate_cleanup_deployment(
         "cleanupOfferEligibilitySource",
         "cleanupOfferEligibilitySha256",
         "cleanupDeadlineUtc",
+        "cleanupAuthorityExpiresUtc",
+        "automationAccountName",
+        "runbookName",
         "costCeilingCents",
         "scheduleCount",
         "bindingCount",
     }
-    if not required <= set(outputs) or not isinstance(outputs["cleanupPrincipalId"], str):
+    if not required <= set(outputs) or not isinstance(
+        outputs["cleanupPrincipalId"], str
+    ):
         raise CampaignError("cleanup deployment binding is incomplete")
     cost_ceiling_cents = outputs["costCeilingCents"]
     schedule_count = outputs["scheduleCount"]
@@ -1506,13 +1849,31 @@ def validate_cleanup_deployment(
         cleanup_region_selection_sha256=str(outputs["cleanupRegionSelectionSha256"]),
         cleanup_candidate_regions=str(outputs["cleanupCandidateRegions"]),
         cleanup_offer_classification=str(outputs["cleanupOfferClassification"]),
-        cleanup_offer_eligibility_disposition=str(outputs["cleanupOfferEligibilityDisposition"]),
+        cleanup_offer_eligibility_disposition=str(
+            outputs["cleanupOfferEligibilityDisposition"]
+        ),
         cleanup_offer_eligible_regions=str(outputs["cleanupOfferEligibleRegions"]),
         cleanup_offer_eligibility_source=str(outputs["cleanupOfferEligibilitySource"]),
         cleanup_offer_eligibility_sha256=str(outputs["cleanupOfferEligibilitySha256"]),
     )
     binding.validate(config)
+    if (
+        outputs["cleanupAuthorityExpiresUtc"] != runtime_authority_expiry(config)
+        or outputs["automationAccountName"]
+        != controller_names(config.subscription_correlation).account
+        or outputs["runbookName"]
+        != controller_names(config.subscription_correlation).runbook
+    ):
+        raise CampaignError("reusable cleanup controller deployment binding differs")
     return binding
+
+
+def runtime_authority_expiry(config: CampaignConfig) -> str:
+    return (
+        (parse_utc(config.cleanup_deadline_utc) + timedelta(hours=1))
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def validate_cleanup_readback(
@@ -1527,7 +1888,9 @@ def validate_cleanup_readback(
     content = results[5].get("stdout")
     schedule = _json_result(results[6])
     binding_response = _json_result(results[7])
-    published_modified_utc = validate_published_runbook(runbook, content, runtime=runtime)
+    published_modified_utc = validate_published_runbook(
+        runbook, content, runtime=runtime
+    )
     validate_cleanup_schedule(schedule, config=config, runtime=runtime)
     validate_cleanup_bindings(binding_response, config=config, runtime=runtime)
     proof = {
@@ -1537,9 +1900,8 @@ def validate_cleanup_readback(
         "targetRoleAssignmentIdsSha256": _identifier_set_sha256(
             deployment_outputs["targetRoleAssignmentIds"]
         ),
-        "selfRoleAssignmentIdsSha256": _identifier_set_sha256(
-            deployment_outputs["selfRoleAssignmentIds"]
-        ),
+        "controllerBindingSha256": runtime["controllerBindingSha256"],
+        "cleanupAuthoritySha256": cleanup_authority_sha256(config, runtime),
         "publishedModifiedUtc": published_modified_utc,
         "cleanupScriptSha256": runtime["cleanupScriptSha256"],
         "cleanupDeadlineUtc": config.cleanup_deadline_utc,
@@ -1561,7 +1923,9 @@ def _identifier_set_sha256(value: object) -> str:
         raise CampaignError("cleanup assignment identifiers are malformed")
     return hashlib.sha256(
         b"m7.8/role-assignment-set/v1\0"
-        + json.dumps(sorted(item.casefold() for item in value), separators=(",", ":")).encode()
+        + json.dumps(
+            sorted(item.casefold() for item in value), separators=(",", ":")
+        ).encode()
     ).hexdigest()
 
 
@@ -1583,7 +1947,9 @@ def _validate_assignment_set(
     ):
         raise CampaignError("cleanup role assignment readback is incomplete")
     expected_id_set = {str(item).casefold() for item in expected_ids}
-    expected_role_set = {str(item).casefold() for item in expected_role_definition_ids.values()}
+    expected_role_set = {
+        str(item).casefold() for item in expected_role_definition_ids.values()
+    }
     observed_ids: set[str] = set()
     observed_roles: set[str] = set()
     for assignment in value:
@@ -1605,13 +1971,137 @@ def _validate_assignment_set(
             raise CampaignError("cleanup role assignment readback is malformed")
         if (
             str(observed_principal).casefold() != principal_id.casefold()
-            or str(observed_scope).rstrip("/").casefold() != scope.rstrip("/").casefold()
+            or str(observed_scope).rstrip("/").casefold()
+            != scope.rstrip("/").casefold()
         ):
             raise CampaignError("cleanup role assignment scope or principal differs")
         observed_ids.add(str(assignment_id).casefold())
         observed_roles.add(str(role_definition_id).casefold())
     if observed_ids != expected_id_set or observed_roles != expected_role_set:
         raise CampaignError("cleanup role assignment authority differs")
+
+
+def _validate_controller_tags(
+    value: object, *, config: CampaignConfig, runtime: dict[str, str]
+) -> None:
+    if not isinstance(value, dict):
+        raise CampaignError("reusable cleanup controller ownership is missing")
+    expected = {
+        "mobius.milestone": "7.8",
+        "mobius.owner": "managed-postgresql-evidence",
+        "mobius.cleanup-controller": ARCHITECTURE,
+        "mobius.subscription-correlation": config.subscription_correlation,
+        "mobius.cleanup-script-sha256": runtime["cleanupScriptSha256"],
+    }
+    if any(value.get(key) != item for key, item in expected.items()):
+        raise CampaignError("reusable cleanup controller ownership differs")
+    authorized_until = value.get("mobius.controller-authorized-until-utc")
+    if not isinstance(authorized_until, str) or parse_utc(authorized_until) < parse_utc(
+        runtime["cleanupAuthorityExpiresUtc"]
+    ):
+        raise CampaignError("reusable cleanup controller authority is expired")
+
+
+def _collection(value: object, *, label: str) -> list[object]:
+    if (
+        not isinstance(value, dict)
+        or set(value) - {"value", "nextLink"}
+        or value.get("nextLink") not in {None, ""}
+        or not isinstance(value.get("value"), list)
+    ):
+        raise CampaignError(f"{label} collection is incomplete")
+    return cast(list[object], value["value"])
+
+
+def _validate_controller_reader(
+    value: object,
+    *,
+    principal_id: str,
+    config: CampaignConfig,
+    runtime: dict[str, str],
+) -> None:
+    if not isinstance(value, list):
+        raise CampaignError("reusable cleanup controller Reader proof is malformed")
+    principal_assignments = [
+        item
+        for item in value
+        if isinstance(item, dict)
+        and str(item.get("principalId", "")).casefold() == principal_id.casefold()
+    ]
+    expected_scope = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/"
+        f"{config.cleanup_resource_group}"
+    )
+    if (
+        len(principal_assignments) != 1
+        or str(principal_assignments[0].get("scope", "")).casefold()
+        != expected_scope.casefold()
+        or not str(principal_assignments[0].get("roleDefinitionId", ""))
+        .casefold()
+        .endswith("acdd72a7-3385-48ef-bd42-f606fba81ae7")
+    ):
+        raise CampaignError("reusable cleanup controller permanent Reader differs")
+
+
+def validate_controller_baseline(
+    results: list[dict[str, object]], config: CampaignConfig, runtime: dict[str, str]
+) -> None:
+    if len(results) != 7:
+        raise CampaignError("reusable cleanup controller preflight is incomplete")
+    group = _json_result(results[0])
+    account = _json_result(results[1])
+    assignments = _json_result(results[2])
+    runbook = _json_result(results[3])
+    content = results[4].get("stdout")
+    schedules = _collection(_json_result(results[5]), label="cleanup schedule")
+    bindings = _collection(_json_result(results[6]), label="cleanup binding")
+    if (
+        not isinstance(group, dict)
+        or group.get("name") != config.cleanup_resource_group
+        or not isinstance(account, dict)
+        or account.get("name") != runtime["automationAccountName"]
+        or _normalized_region(group.get("location")) != config.cleanup_region
+        or _normalized_region(account.get("location")) != config.cleanup_region
+        or schedules
+        or bindings
+    ):
+        raise CampaignError("reusable cleanup controller is not exclusively adoptable")
+    _validate_controller_tags(group.get("tags"), config=config, runtime=runtime)
+    _validate_controller_tags(account.get("tags"), config=config, runtime=runtime)
+    identity = account.get("identity")
+    properties = account.get("properties")
+    if (
+        not isinstance(identity, dict)
+        or not isinstance(identity.get("principalId"), str)
+        or not isinstance(properties, dict)
+        or properties.get("disableLocalAuth") is not True
+    ):
+        raise CampaignError(
+            "reusable cleanup controller identity or local-auth policy differs"
+        )
+    _validate_controller_reader(
+        assignments,
+        principal_id=str(identity["principalId"]),
+        config=config,
+        runtime=runtime,
+    )
+    validate_published_runbook(runbook, content, runtime=runtime)
+
+
+def execute_cleanup_deploy_commands(
+    runner: SubprocessRunner,
+    commands: tuple[tuple[str, ...], ...],
+    config: CampaignConfig,
+    runtime: dict[str, str],
+) -> list[dict[str, object]]:
+    if len(commands) != 8:
+        raise CampaignError(
+            "reusable cleanup controller deployment sequence is incomplete"
+        )
+    results = [_run_required(runner, command) for command in commands[:7]]
+    validate_controller_baseline(results, config, runtime)
+    results.append(_run_required(runner, commands[7]))
+    return results
 
 
 def validate_cleanup_foundation(
@@ -1625,14 +2115,18 @@ def validate_cleanup_foundation(
     outputs = _deployment_outputs(results[0])
     account = _json_result(results[1])
     target_assignments = _json_result(results[2])
-    self_assignments = _json_result(results[3])
+    controller_assignments = _json_result(results[3])
     if not isinstance(account, dict):
         raise CampaignError("cleanup identity readback is malformed")
     identity = account.get("identity")
-    observed_principal = identity.get("principalId") if isinstance(identity, dict) else None
+    observed_principal = (
+        identity.get("principalId") if isinstance(identity, dict) else None
+    )
     if (
         not isinstance(observed_principal, str)
-        or hashlib.sha256(b"m7.8/cleanup-principal/v1\0" + observed_principal.encode()).hexdigest()
+        or hashlib.sha256(
+            b"m7.8/cleanup-principal/v1\0" + observed_principal.encode()
+        ).hexdigest()
         != expected_binding.cleanup_principal_sha256
     ):
         raise CampaignError("cleanup identity readback was substituted")
@@ -1644,18 +2138,22 @@ def validate_cleanup_foundation(
     )
     if normalized_account_location != config.cleanup_region:
         raise CampaignError("cleanup account region readback was substituted")
+    if account.get("name") != runtime["automationAccountName"]:
+        raise CampaignError("cleanup account identity readback was substituted")
+    _validate_controller_tags(account.get("tags"), config=config, runtime=runtime)
+    _validate_controller_reader(
+        controller_assignments,
+        principal_id=observed_principal,
+        config=config,
+        runtime=runtime,
+    )
     if (
         outputs.get("scheduleName") != runtime["scheduleName"]
         or outputs.get("bindingName") != runtime["bindingName"]
     ):
         raise CampaignError("cleanup schedule or binding identity differs")
     role_definitions = outputs.get("cleanupRoleDefinitionIds")
-    target_scope = (
-        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.target_resource_group}"
-    )
-    self_scope = (
-        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.cleanup_resource_group}"
-    )
+    target_scope = f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.target_resource_group}"
     _validate_assignment_set(
         target_assignments,
         expected_ids=outputs.get("targetRoleAssignmentIds"),
@@ -1663,17 +2161,12 @@ def validate_cleanup_foundation(
         principal_id=observed_principal,
         scope=target_scope,
     )
-    _validate_assignment_set(
-        self_assignments,
-        expected_ids=outputs.get("selfRoleAssignmentIds"),
-        expected_role_definition_ids=role_definitions,
-        principal_id=observed_principal,
-        scope=self_scope,
-    )
     return expected_binding, outputs, account
 
 
-def validate_published_runbook(runbook: object, content: object, *, runtime: dict[str, str]) -> str:
+def validate_published_runbook(
+    runbook: object, content: object, *, runtime: dict[str, str]
+) -> str:
     if not isinstance(runbook, dict) or runbook.get("name") != runtime["runbookName"]:
         raise CampaignError("published runbook identity differs")
     properties = runbook.get("properties", runbook)
@@ -1685,7 +2178,8 @@ def validate_published_runbook(runbook: object, content: object, *, runtime: dic
     published_modified_utc = parse_utc(modified).isoformat().replace("+00:00", "Z")
     if (
         not isinstance(content, str)
-        or hashlib.sha256(content.encode()).hexdigest() != runtime["cleanupScriptSha256"]
+        or hashlib.sha256(content.encode()).hexdigest()
+        != runtime["cleanupScriptSha256"]
     ):
         raise CampaignError("published cleanup content differs")
     return published_modified_utc
@@ -1694,17 +2188,22 @@ def validate_published_runbook(runbook: object, content: object, *, runtime: dic
 def validate_cleanup_schedule(
     schedule: object, *, config: CampaignConfig, runtime: dict[str, str]
 ) -> None:
-    if not isinstance(schedule, dict) or schedule.get("name") != runtime["scheduleName"]:
+    if (
+        not isinstance(schedule, dict)
+        or schedule.get("name") != runtime["scheduleName"]
+    ):
         raise CampaignError("cleanup schedule identity differs")
     properties = schedule.get("properties", schedule)
     if (
         not isinstance(properties, dict)
         or properties.get("frequency") != "OneTime"
         or properties.get("timeZone") != "Etc/UTC"
+        or properties.get("isEnabled") is not True
         or type(properties.get("interval")) is not int
         or properties.get("interval") != 1
         or not isinstance(properties.get("startTime"), str)
-        or parse_utc(str(properties["startTime"])) != parse_utc(config.cleanup_deadline_utc)
+        or parse_utc(str(properties["startTime"]))
+        != parse_utc(config.cleanup_deadline_utc)
     ):
         raise CampaignError("cleanup schedule readback drifted")
 
@@ -1723,34 +2222,33 @@ def validate_cleanup_bindings(
         or str(binding.get("name", "")).casefold() != runtime["bindingName"].casefold()
     ):
         raise CampaignError("exactly one expected cleanup binding is required")
-    binding_properties = binding.get("properties", binding) if isinstance(binding, dict) else None
+    binding_properties = (
+        binding.get("properties", binding) if isinstance(binding, dict) else None
+    )
     bound_runbook = (
-        binding_properties.get("runbook") if isinstance(binding_properties, dict) else None
+        binding_properties.get("runbook")
+        if isinstance(binding_properties, dict)
+        else None
     )
     bound_schedule = (
-        binding_properties.get("schedule") if isinstance(binding_properties, dict) else None
+        binding_properties.get("schedule")
+        if isinstance(binding_properties, dict)
+        else None
     )
     bound_runbook_name = (
         bound_runbook.get("name") if isinstance(bound_runbook, dict) else bound_runbook
     )
     bound_schedule_name = (
-        bound_schedule.get("name") if isinstance(bound_schedule, dict) else bound_schedule
+        bound_schedule.get("name")
+        if isinstance(bound_schedule, dict)
+        else bound_schedule
     )
     if (
         bound_runbook_name != runtime["runbookName"]
         or bound_schedule_name != runtime["scheduleName"]
         or not isinstance(binding_properties, dict)
         or binding_properties.get("parameters")
-        != {
-            "CampaignId": config.campaign_id,
-            "GenerationId": config.generation_id,
-            "SubscriptionCorrelation": config.subscription_correlation,
-            "TargetResourceGroupName": config.target_resource_group,
-            "CleanupResourceGroupName": config.cleanup_resource_group,
-            "CleanupDeadlineUtc": config.cleanup_deadline_utc,
-            "CostCeilingCents": "5000",
-            "CleanupAuthorized": "true",
-        }
+        != cleanup_job_parameters(config, runtime)
     ):
         raise CampaignError("cleanup binding readback drifted")
 
@@ -1763,28 +2261,97 @@ def execute_cleanup_arm_commands(
 ) -> tuple[list[dict[str, object]], str]:
     if len(commands) != 12:
         raise CampaignError("cleanup arming command sequence is incomplete")
-    results: list[dict[str, object]] = []
-    for command in commands[:4]:
-        results.append(_run_required(runner, command))
-    validate_cleanup_foundation(results, config, runtime)
-    results.append(_run_required(runner, commands[4]))
-    results.append(_run_required(runner, commands[5]))
-    results.append(_run_required(runner, commands[6]))
-    results.append(_run_required(runner, commands[7]))
-    validate_published_runbook(_json_result(results[6]), results[7].get("stdout"), runtime=runtime)
-    results.append(_run_required(runner, commands[8]))
-    results.append(_run_required(runner, commands[9]))
-    validate_cleanup_schedule(_json_result(results[9]), config=config, runtime=runtime)
-    results.append(_run_required(runner, commands[10]))
-    results.append(_run_required(runner, commands[11]))
+    results = [_run_required(runner, command) for command in commands[:8]]
+    validate_cleanup_foundation(results[:4], config, runtime)
+    validate_published_runbook(
+        _json_result(results[4]), results[5].get("stdout"), runtime=runtime
+    )
+    existing_schedules = _collection(_json_result(results[6]), label="cleanup schedule")
+    existing_bindings = _collection(_json_result(results[7]), label="cleanup binding")
+    if len(existing_schedules) > 1 or len(existing_bindings) > 1:
+        raise CampaignError("another live cleanup schedule or binding exists")
+    existing_schedule = existing_schedules[0] if existing_schedules else None
+    if existing_schedule is not None:
+        validate_cleanup_schedule(existing_schedule, config=config, runtime=runtime)
+    if existing_bindings:
+        if existing_schedule is None:
+            raise CampaignError("cleanup binding exists without its exact schedule")
+        validate_cleanup_bindings(
+            {"value": existing_bindings}, config=config, runtime=runtime
+        )
+        schedule_result = {
+            "exitCode": 0,
+            "stdout": json.dumps(existing_schedule),
+            "stderr": "",
+        }
+        binding_result = {
+            "exitCode": 0,
+            "stdout": json.dumps({"value": existing_bindings}),
+            "stderr": "",
+        }
+    else:
+        if existing_schedule is None:
+            results.append(_run_required(runner, commands[8]))
+            schedule_result = _run_required(runner, commands[9])
+            results.append(schedule_result)
+        else:
+            schedule_result = {
+                "exitCode": 0,
+                "stdout": json.dumps(existing_schedule),
+                "stderr": "",
+            }
+        validate_cleanup_schedule(
+            _json_result(schedule_result), config=config, runtime=runtime
+        )
+        results.append(_run_required(runner, commands[10]))
+        binding_result = _run_required(runner, commands[11])
+        results.append(binding_result)
+        validate_cleanup_bindings(
+            _json_result(binding_result), config=config, runtime=runtime
+        )
     proof_results = [
         *results[:4],
-        results[6],
-        results[7],
-        results[9],
-        results[11],
+        results[4],
+        results[5],
+        schedule_result,
+        binding_result,
     ]
     return results, validate_cleanup_readback(proof_results, config, runtime)
+
+
+def execute_cleanup_disarm_commands(
+    runner: SubprocessRunner,
+    commands: tuple[tuple[str, ...], ...],
+    config: CampaignConfig,
+    runtime: dict[str, str],
+) -> tuple[list[dict[str, object]], str]:
+    if len(commands) != 4:
+        raise CampaignError("cleanup disarming command sequence is incomplete")
+    results = [runner.run(commands[0]), runner.run(commands[1])]
+    results.extend(_run_required(runner, command) for command in commands[2:])
+    schedules = _collection(_json_result(results[2]), label="cleanup schedule")
+    bindings = _collection(_json_result(results[3]), label="cleanup binding")
+    if schedules or bindings:
+        raise CampaignError("cleanup schedule or binding revocation failed")
+    evidence = {
+        "version": "m7.8-cleanup-disarm-proof-v1",
+        "campaignCorrelation": sanitize(config.campaign_id, domain="campaign"),
+        "generationCorrelation": sanitize(config.generation_id, domain="generation"),
+        "controllerBindingSha256": runtime["controllerBindingSha256"],
+        "scheduleNameSha256": hashlib.sha256(
+            runtime["scheduleName"].encode()
+        ).hexdigest(),
+        "bindingNameSha256": hashlib.sha256(
+            runtime["bindingName"].encode()
+        ).hexdigest(),
+        "scheduleCount": 0,
+        "bindingCount": 0,
+    }
+    evidence_sha256 = hashlib.sha256(
+        b"m7.8/cleanup-disarm-proof/v1\0"
+        + json.dumps(evidence, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+    return results, evidence_sha256
 
 
 def load_control_plane_evidence(path: Path) -> dict[str, object]:
@@ -1794,7 +2361,9 @@ def load_control_plane_evidence(path: Path) -> dict[str, object]:
     return cast(dict[str, object], value)
 
 
-def _completed_control_plane_evidence(value: dict[str, object], *, recovery_seconds: float) -> str:
+def _completed_control_plane_evidence(
+    value: dict[str, object], *, recovery_seconds: float
+) -> str:
     completed = {
         **value,
         "recoverySeconds": recovery_seconds,
@@ -1864,7 +2433,9 @@ def persist_evidence_execution_receipt(
             execution_name = result.get("executionName")
             terminal_status = result.get("terminalStatus")
             if not isinstance(execution_name, str) or terminal_status != "Succeeded":
-                raise CampaignError("managed evidence job receipt is not terminal-success")
+                raise CampaignError(
+                    "managed evidence job receipt is not terminal-success"
+                )
             identity = f"job:{command[command.index('--name') + 1]}"
             if "--phase" in command:
                 identity += f":{command[command.index('--phase') + 1]}"
@@ -1889,14 +2460,18 @@ def persist_evidence_execution_receipt(
         "sourceHead": runtime["sourceHead"],
         "imageDigest": config.image_digest,
         "controlPlaneEvidenceSha256": hashlib.sha256(
-            json.dumps(control_plane_evidence, separators=(",", ":"), sort_keys=True).encode()
+            json.dumps(
+                control_plane_evidence, separators=(",", ":"), sort_keys=True
+            ).encode()
         ).hexdigest(),
         "observations": observations,
     }
     encoded = json.dumps(receipt, indent=2, sort_keys=True) + "\n"
     if path.exists():
         if path.read_text(encoding="utf-8") != encoded:
-            raise CampaignError("managed evidence execution receipt substitution rejected")
+            raise CampaignError(
+                "managed evidence execution receipt substitution rejected"
+            )
         return
     path.write_text(encoded, encoding="utf-8")
 
@@ -1911,7 +2486,9 @@ def validate_evidence_execution_receipt(
     value = json.loads(path.read_text(encoding="utf-8"))
     observations = value.get("observations") if isinstance(value, dict) else None
     control_sha256 = hashlib.sha256(
-        json.dumps(control_plane_evidence, separators=(",", ":"), sort_keys=True).encode()
+        json.dumps(
+            control_plane_evidence, separators=(",", ":"), sort_keys=True
+        ).encode()
     ).hexdigest()
     if (
         not isinstance(value, dict)
@@ -1935,7 +2512,8 @@ def validate_evidence_execution_receipt(
         or len(observations) != 12
         or any(
             not isinstance(item, dict)
-            or set(item) != {"identity", "executionName", "terminalStatus", "outputSha256"}
+            or set(item)
+            != {"identity", "executionName", "terminalStatus", "outputSha256"}
             or item["terminalStatus"] != "Succeeded"
             or not isinstance(item["identity"], str)
             or not item["identity"]
@@ -1949,7 +2527,9 @@ def validate_evidence_execution_receipt(
         raise CampaignError("managed evidence execution receipt is invalid")
 
 
-def load_image_scan_evidence(path: Path, *, digest: str, runtime: dict[str, str]) -> str:
+def load_image_scan_evidence(
+    path: Path, *, digest: str, runtime: dict[str, str]
+) -> str:
     raw = path.read_bytes()
     value = json.loads(raw)
     if not isinstance(value, dict) or set(value) != IMAGE_SCAN_FIELDS:
@@ -1993,7 +2573,9 @@ def _ci_get(value: dict[str, object], name: str) -> object:
 
 
 def _normalized_region(value: object) -> str | None:
-    return re.sub(r"[^a-z0-9]", "", value.casefold()) if isinstance(value, str) else None
+    return (
+        re.sub(r"[^a-z0-9]", "", value.casefold()) if isinstance(value, str) else None
+    )
 
 
 def _account_record(value: object, *, deleted: bool) -> tuple[str, str, str]:
@@ -2036,72 +2618,87 @@ def observe_residue(
     config: CampaignConfig,
     runtime: dict[str, str],
 ) -> ResidueObservation:
-    if len(results) != 6:
+    if len(results) != 9:
         raise CampaignError("residue readback is incomplete")
     target_exists = _json_result(results[0])
-    cleanup_exists = _json_result(results[1])
-    resources = _json_result(results[2])
-    assignments = _json_result(results[3])
-    active, active_pages = _complete_inventory(results[4])
-    deleted, deleted_pages = _complete_inventory(results[5])
+    resources = _json_result(results[1])
+    assignments = _json_result(results[2])
+    controller_group = _json_result(results[3])
+    controller_account = _json_result(results[4])
+    schedules = _collection(_json_result(results[5]), label="cleanup schedule")
+    bindings = _collection(_json_result(results[6]), label="cleanup binding")
+    active, active_pages = _complete_inventory(results[7])
+    deleted, deleted_pages = _complete_inventory(results[8])
     if (
         not isinstance(target_exists, bool)
-        or not isinstance(cleanup_exists, bool)
         or not isinstance(resources, list)
         or not isinstance(assignments, list)
+        or not isinstance(controller_group, dict)
+        or controller_group.get("name") != config.cleanup_resource_group
+        or not isinstance(controller_account, dict)
+        or controller_account.get("name") != runtime["automationAccountName"]
     ):
         raise CampaignError("campaign residue readback is malformed")
-    expected_hash = runtime["deletedAutomationAccountBindingSha256"]
+    _validate_controller_tags(
+        controller_group.get("tags"), config=config, runtime=runtime
+    )
+    _validate_controller_tags(
+        controller_account.get("tags"), config=config, runtime=runtime
+    )
     expected_name = runtime["automationAccountName"].casefold()
     expected_region = config.cleanup_region
-
-    def binding_hash(resource_id: str) -> str:
-        return hashlib.sha256(
-            b"m7.8/deleted-automation-account/v1\0" + resource_id.encode()
-        ).hexdigest()
+    expected_resource_id = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/"
+        f"{config.cleanup_resource_group}/providers/Microsoft.Automation/"
+        f"automationAccounts/{runtime['automationAccountName']}"
+    ).casefold()
 
     active_matches = 0
     for item in active:
         name, region, resource_id = _account_record(item, deleted=False)
-        observed_hash = binding_hash(resource_id)
-        if observed_hash == expected_hash:
+        if resource_id == expected_resource_id:
             if name.casefold() != expected_name or region != expected_region:
-                raise CampaignError("active Automation campaign attribution differs")
+                raise CampaignError(
+                    "reusable Automation controller attribution differs"
+                )
             active_matches += 1
         elif name.casefold() == expected_name and region == expected_region:
-            raise CampaignError("active Automation campaign attribution is ambiguous")
+            raise CampaignError(
+                "reusable Automation controller attribution is ambiguous"
+            )
     deleted_matches = 0
     unrelated_hashes: list[str] = []
     for item in deleted:
         name, region, resource_id = _account_record(item, deleted=True)
-        observed_hash = binding_hash(resource_id)
-        if observed_hash == expected_hash:
+        if resource_id == expected_resource_id:
             if name.casefold() != expected_name or region != expected_region:
-                raise CampaignError("deleted Automation campaign attribution differs")
+                raise CampaignError("deleted reusable controller attribution differs")
             deleted_matches += 1
         else:
             if name.casefold() == expected_name and region == expected_region:
-                raise CampaignError("deleted Automation campaign attribution is ambiguous")
+                raise CampaignError(
+                    "deleted Automation campaign attribution is ambiguous"
+                )
             unrelated_hashes.append(
                 hashlib.sha256(
-                    b"m7.8/unrelated-deleted-automation-account/v1\0" + resource_id.encode()
+                    b"m7.8/unrelated-deleted-automation-account/v1\0"
+                    + resource_id.encode()
                 ).hexdigest()
             )
-    if active_matches > 1 or deleted_matches > 1:
-        raise CampaignError("Automation campaign attribution is not unique")
+    if active_matches != 1 or deleted_matches:
+        raise CampaignError("reusable cleanup controller was not retained exactly once")
     counters = dict.fromkeys(RESIDUE_KEYS, 0)
     counters["targetResourceGroups"] = int(target_exists)
-    counters["cleanupResourceGroups"] = int(cleanup_exists)
     counters["roleAssignments"] = len(assignments)
-    counters["automationAccounts"] = active_matches
-    counters["softDeletedAutomationAccounts"] = deleted_matches
+    counters["cleanupSchedules"] = len(schedules) + len(bindings)
     tagged_types = {
-        str(item.get("type", "")).casefold() for item in resources if isinstance(item, dict)
+        str(item.get("type", "")).casefold()
+        for item in resources
+        if isinstance(item, dict)
     }
     if len(tagged_types) != len(resources):
         raise CampaignError("tagged resource residue is malformed")
     resource_key_types = {
-        "cleanupSchedules": "microsoft.automation/automationaccounts/schedules",
         "managedIdentities": "microsoft.managedidentity/userassignedidentities",
         "postgresServers": "microsoft.dbforpostgresql/flexibleservers",
         "containerRegistries": "microsoft.containerregistry/registries",
@@ -2116,33 +2713,26 @@ def observe_residue(
         counters[key] = sum(
             1
             for item in resources
-            if isinstance(item, dict) and str(item.get("type", "")).casefold() == resource_type
+            if isinstance(item, dict)
+            and str(item.get("type", "")).casefold() == resource_type
         )
-    known_resource_types = {
-        *resource_key_types.values(),
-        "microsoft.automation/automationaccounts",
-    }
+    known_resource_types = {*resource_key_types.values()}
     if not tagged_types <= known_resource_types:
         raise CampaignError("unmodeled tagged campaign residue exists")
-    tagged_automation_count = sum(
-        1
-        for item in resources
-        if isinstance(item, dict)
-        and str(item.get("type", "")).casefold() == "microsoft.automation/automationaccounts"
-    )
-    if tagged_automation_count != active_matches:
-        raise CampaignError("active Automation residue inventories disagree")
     evidence = {
-        "version": "m7.8-residue-readback-v1",
+        "version": "m7.8-residue-readback-v2",
         "campaignCorrelation": sanitize(config.campaign_id, domain="campaign"),
         "generationCorrelation": sanitize(config.generation_id, domain="generation"),
+        "controllerBindingSha256": runtime["controllerBindingSha256"],
+        "controllerActiveCount": active_matches,
+        "controllerDeletedCount": deleted_matches,
         "activeInventoryPages": active_pages,
         "deletedInventoryPages": deleted_pages,
         "unrelatedDeletedIdentitySha256": sorted(unrelated_hashes),
         "counters": counters,
     }
     evidence_sha256 = hashlib.sha256(
-        b"m7.8/residue-readback/v1\0"
+        b"m7.8/residue-readback/v2\0"
         + json.dumps(evidence, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
     return ResidueObservation(
@@ -2180,46 +2770,72 @@ def start_failure_cleanup(
 def start_direct_cleanup(
     runner: SubprocessRunner, config: CampaignConfig, runtime: dict[str, str]
 ) -> None:
-    for group_name in (config.target_resource_group, config.cleanup_resource_group):
+    account = _json_result(
+        _run_required(runner, ("az", "account", "show", "--output", "json"))
+    )
+    if (
+        not isinstance(account, dict)
+        or account.get("id") != runtime["subscriptionId"]
+        or sanitize(str(account.get("id", "")), domain="subscription")
+        != config.subscription_correlation
+    ):
+        raise CampaignError("direct cleanup subscription correlation differs")
+    exists_command = ("az", "group", "exists", "--name", config.target_resource_group)
+    exists = _json_result(_run_required(runner, exists_command))
+    if exists is False:
+        return
+    if exists is not True:
+        raise CampaignError("direct cleanup target existence is malformed")
+    group = _json_result(
         _run_required(
             runner,
             (
                 "az",
                 "group",
-                "delete",
+                "show",
                 "--name",
-                group_name,
-                "--yes",
-                "--no-wait",
+                config.target_resource_group,
                 "--output",
-                "none",
+                "json",
             ),
         )
-    inventory_commands = command_plan("residue", config, runtime)[4:]
-    inventories = [_execute_paginated_inventory(runner, command) for command in inventory_commands]
-    active, active_pages = _complete_inventory(inventories[0])
-    deleted, deleted_pages = _complete_inventory(inventories[1])
-    expected_hash = runtime["deletedAutomationAccountBindingSha256"]
-
-    def exact_count(values: list[object], *, deleted_record: bool) -> int:
-        count = 0
-        for item in values:
-            _, _, resource_id = _account_record(item, deleted=deleted_record)
-            observed = hashlib.sha256(
-                b"m7.8/deleted-automation-account/v1\0" + resource_id.encode()
-            ).hexdigest()
-            count += int(observed == expected_hash)
-        return count
-
+    )
+    tags = group.get("tags") if isinstance(group, dict) else None
+    if (
+        not isinstance(group, dict)
+        or group.get("name") != config.target_resource_group
+        or not isinstance(tags, dict)
+        or tags.get("mobius.milestone") != "7.8"
+        or tags.get("mobius.campaign") != config.campaign_id
+        or tags.get("mobius.generation") != config.generation_id
+        or tags.get("mobius.cleanup-deadline-utc") != config.cleanup_deadline_utc
+        or tags.get("mobius.cost-ceiling-cents") != "5000"
+    ):
+        raise CampaignError("direct cleanup target ownership differs")
+    delete_result = runner.run(
+        (
+            "az",
+            "group",
+            "delete",
+            "--name",
+            config.target_resource_group,
+            "--yes",
+            "--output",
+            "none",
+        )
+    )
+    final_exists = _json_result(_run_required(runner, exists_command))
+    if final_exists is not False:
+        if delete_result.get("exitCode") != 0:
+            raise CampaignError("direct cleanup target delete failed safely")
+        raise CampaignError("direct cleanup target residue is nonzero")
     print(
         json.dumps(
             {
                 "status": "direct-cleanup-started",
-                "automationAccounts": exact_count(active, deleted_record=False),
-                "softDeletedAutomationAccounts": exact_count(deleted, deleted_record=True),
-                "activeInventoryPages": active_pages,
-                "deletedInventoryPages": deleted_pages,
-                "inventoriesComplete": True,
+                "targetResourceGroupDeletionStarted": True,
+                "controllerDeletionStarted": False,
+                "automationAccountDeletionStarted": False,
             },
             separators=(",", ":"),
             sort_keys=True,
@@ -2243,7 +2859,8 @@ def validate_operation_results(
         if (
             text_values[0] != ""
             or str(text_values[1]).strip() != runtime["sourceHead"]
-            or str(text_values[2]).strip() != "milestone-7-8-production-readiness-audit-local"
+            or str(text_values[2]).strip()
+            != "milestone-7-8-production-readiness-audit-local"
             or str(text_values[3]).strip()
             or len(str(text_values[4]).strip().splitlines()) != 5
             or not isinstance(_json_result(results[5]), dict)
@@ -2267,15 +2884,19 @@ def validate_operation_results(
             or account["id"] != runtime["subscriptionId"]
             or sanitize(str(account["id"]), domain="subscription")
             != config.subscription_correlation
-            or sanitize(str(account["tenantId"]), domain="tenant") != config.tenant_correlation
+            or sanitize(str(account["tenantId"]), domain="tenant")
+            != config.tenant_correlation
         ):
             raise CampaignError("Azure campaign correlation differs")
     elif operation == "capacity-check":
-        if len(results) != 16:
-            raise CampaignError("provider, quota, region, SKU, or name proof is incomplete")
+        if len(results) != 23:
+            raise CampaignError(
+                "provider, quota, region, SKU, or name proof is incomplete"
+            )
         providers = [_json_result(result) for result in results[:6]]
         if any(
-            not isinstance(provider, dict) or provider.get("registrationState") != "Registered"
+            not isinstance(provider, dict)
+            or provider.get("registrationState") != "Registered"
             for provider in providers
         ):
             raise CampaignError("required Azure provider is not registered")
@@ -2295,16 +2916,26 @@ def validate_operation_results(
         ):
             raise CampaignError("campaign-global resource name is unavailable")
         if runner is None:
-            raise CampaignError("Automation cleanup policy discovery runner is unavailable")
+            raise CampaignError(
+                "Automation cleanup policy discovery runner is unavailable"
+            )
         refreshed_selection = select_automation_region_from_results(
             runner,
             tuple(results[10:16]),
+            controller_resource_group=config.cleanup_resource_group,
+            controller_account=runtime["automationAccountName"],
+            subscription_correlation=config.subscription_correlation,
+            cleanup_script_sha256=runtime["cleanupScriptSha256"],
+            controller_required_until_utc=runtime["cleanupAuthorityExpiresUtc"],
         )
         if (
-            refreshed_selection.selected_region != config.cleanup_region
+            refreshed_selection.controller_disposition != "exact-controller-adoptable"
+            or refreshed_selection.selected_region != config.cleanup_region
             or refreshed_selection.sha256() != config.cleanup_region_selection_sha256
-            or ",".join(refreshed_selection.candidate_order) != config.cleanup_candidate_regions
-            or refreshed_selection.offer_classification != config.cleanup_offer_classification
+            or ",".join(refreshed_selection.candidate_order)
+            != config.cleanup_candidate_regions
+            or refreshed_selection.offer_classification
+            != config.cleanup_offer_classification
             or refreshed_selection.offer_eligibility_disposition
             != config.cleanup_offer_eligibility_disposition
             or ",".join(refreshed_selection.offer_eligible_regions)
@@ -2317,6 +2948,7 @@ def validate_operation_results(
             raise CampaignError(
                 "prepared Automation cleanup region or offer proof is no longer armable"
             )
+        validate_controller_baseline(results[16:23], config, runtime)
     elif operation == "scope-create":
         if len(results) != 1:
             raise CampaignError("campaign scope creation is unproved")
@@ -2333,13 +2965,16 @@ def validate_operation_results(
             or tags.get("mobius.cost-ceiling-cents") != "5000"
             or tags.get("mobius.cleanup-region-selection-sha256")
             != config.cleanup_region_selection_sha256
-            or tags.get("mobius.cleanup-candidate-regions") != config.cleanup_candidate_regions
+            or tags.get("mobius.cleanup-candidate-regions")
+            != config.cleanup_candidate_regions
             or tags.get("mobius.cleanup-offer-classification")
             != config.cleanup_offer_classification
             or tags.get("mobius.cleanup-offer-disposition")
             != config.cleanup_offer_eligibility_disposition
-            or tags.get("mobius.cleanup-offer-regions") != config.cleanup_offer_eligible_regions
-            or tags.get("mobius.cleanup-offer-source") != config.cleanup_offer_eligibility_source
+            or tags.get("mobius.cleanup-offer-regions")
+            != config.cleanup_offer_eligible_regions
+            or tags.get("mobius.cleanup-offer-source")
+            != config.cleanup_offer_eligibility_source
             or tags.get("mobius.cleanup-offer-eligibility-sha256")
             != config.cleanup_offer_eligibility_sha256
         ):
@@ -2353,19 +2988,25 @@ def validate_operation_results(
             outputs.get("campaignId") != config.campaign_id
             or outputs.get("generationId") != config.generation_id
             or outputs.get("deploymentStage") != expected_stage
-            or (operation == "image-decision" and outputs.get("imageDigest") != config.image_digest)
+            or (
+                operation == "image-decision"
+                and outputs.get("imageDigest") != config.image_digest
+            )
         ):
             raise CampaignError("campaign deployment binding differs")
         validate_deployed_principal_manifest(outputs, config)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Execute one restart-safe M7.8 operator phase")
+    parser = argparse.ArgumentParser(
+        description="Execute one restart-safe M7.8 operator phase"
+    )
     parser.add_argument("operation", choices=tuple(OPERATION_PHASE))
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--runtime", type=Path, required=True)
     parser.add_argument("--ledger", type=Path, required=True)
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--authorization", type=Path)
     parser.add_argument("--image-digest")
     parser.add_argument("--image-built", action="store_true")
     parser.add_argument("--image-scan-evidence", type=Path)
@@ -2375,6 +3016,7 @@ def main() -> int:
         cleanup_only = args.operation in {
             "cleanup",
             "cleanup-wait",
+            "cleanup-disarm",
             "residue",
             "finalize",
         }
@@ -2382,31 +3024,31 @@ def main() -> int:
         runtime = load_runtime(args.runtime)
         validate_prepared_bundle(args.runtime, runtime, config)
         ledger = load_ledger(args.ledger, config)
-        blocked_campaign_operations = {
-            "scope-create",
-            "cleanup-deploy",
-            "cleanup-arm",
-            "cleanup-verify",
-            "billable-start",
-            "deploy",
-            "image-decision",
-            "bootstrap",
-            "migrate",
-            "evidence",
-            "dispose",
-        }
-        if (
-            args.execute
-            and args.operation in blocked_campaign_operations
-            and runtime["cleanupControllerArmability"] != "ready"
+        target = OPERATION_PHASE[args.operation]
+        required_authorizations = required_execution_authorizations(
+            args.operation, Phase(ledger.phase)
+        )
+        if args.execute and required_authorizations:
+            if args.authorization is None:
+                raise CampaignError(
+                    "separate Azure execution authorization is required"
+                )
+            for authorized_operation in sorted(required_authorizations):
+                load_execution_authorization(
+                    args.authorization,
+                    config=config,
+                    runtime=runtime,
+                    operation=authorized_operation,
+                )
+        if not cleanup_only and parse_utc(config.cleanup_deadline_utc) <= datetime.now(
+            UTC
         ):
-            raise CampaignError("campaign mutation is blocked by provider-retained cleanup residue")
-        if not cleanup_only and parse_utc(config.cleanup_deadline_utc) <= datetime.now(UTC):
-            if ORDER.index(Phase(ledger.phase)) >= ORDER.index(Phase.SCOPE_CREATED) and Phase(
-                ledger.phase
-            ) not in {
+            if ORDER.index(Phase(ledger.phase)) >= ORDER.index(
+                Phase.SCOPE_CREATED
+            ) and Phase(ledger.phase) not in {
                 Phase.CLEANING,
                 Phase.CLEANED,
+                Phase.CLEANUP_DISARMED,
                 Phase.RESIDUE_VERIFIED,
                 Phase.FINALIZED,
             }:
@@ -2415,7 +3057,6 @@ def main() -> int:
                 ledger.transition(Phase.CLEANING, datetime.now(UTC))
                 save_ledger(args.ledger, ledger)
             raise CampaignError("cleanup deadline is expired; cleanup is required")
-        target = OPERATION_PHASE[args.operation]
         image_scan_sha256 = None
         if target is Phase.IMAGE_DECIDED and args.image_digest is not None:
             config = replace(config, image_digest=args.image_digest)
@@ -2430,12 +3071,20 @@ def main() -> int:
         if args.control_plane_evidence is not None:
             control_evidence = load_control_plane_evidence(args.control_plane_evidence)
         rendered_control_evidence = (
-            "<derived-after-successful-managed-probes>" if control_evidence is not None else None
+            "<derived-after-successful-managed-probes>"
+            if control_evidence is not None
+            else None
         )
         evidence_receipt_path = args.ledger.with_name("managed-evidence-execution.json")
-        if args.execute and args.operation == "evidence" and evidence_receipt_path.exists():
+        if (
+            args.execute
+            and args.operation == "evidence"
+            and evidence_receipt_path.exists()
+        ):
             if control_evidence is None:
-                raise CampaignError("control-plane evidence is required to resume managed evidence")
+                raise CampaignError(
+                    "control-plane evidence is required to resume managed evidence"
+                )
             validate_evidence_execution_receipt(
                 evidence_receipt_path,
                 config=config,
@@ -2487,17 +3136,30 @@ def main() -> int:
         runner = SubprocessRunner()
         try:
             cleanup_arm_evidence_sha256: str | None = None
+            cleanup_disarm_evidence_sha256: str | None = None
             if target is Phase.IMAGE_DECIDED and (
                 args.image_digest is None or image_scan_sha256 is None
             ):
-                raise CampaignError("immutable image decision or admission scan is missing")
+                raise CampaignError(
+                    "immutable image decision or admission scan is missing"
+                )
             if args.operation == "evidence" and control_evidence is None:
-                raise CampaignError("control-plane evidence is required for managed evidence")
+                raise CampaignError(
+                    "control-plane evidence is required for managed evidence"
+                )
             if args.operation == "evidence" and control_evidence is not None:
                 results = execute_evidence_commands(runner, commands, control_evidence)
+            elif args.operation == "cleanup-deploy":
+                results = execute_cleanup_deploy_commands(
+                    runner, commands, config, runtime
+                )
             elif args.operation == "cleanup-arm":
                 results, cleanup_arm_evidence_sha256 = execute_cleanup_arm_commands(
                     runner, commands, config, runtime
+                )
+            elif args.operation == "cleanup-disarm":
+                results, cleanup_disarm_evidence_sha256 = (
+                    execute_cleanup_disarm_commands(runner, commands, config, runtime)
                 )
             elif args.operation == "residue":
                 results = execute_residue_commands(runner, commands)
@@ -2524,21 +3186,29 @@ def main() -> int:
                 ledger.bind_deadline(config.cleanup_deadline_utc)
             if target is Phase.IMAGE_DECIDED:
                 if args.image_digest is None or image_scan_sha256 is None:
-                    raise CampaignError("immutable image decision or admission scan is missing")
+                    raise CampaignError(
+                        "immutable image decision or admission scan is missing"
+                    )
                 ledger.record_image(args.image_digest, built=args.image_built)
                 ledger.record_image_scan(args.image_digest, image_scan_sha256)
             if target is Phase.CLEANUP_DEPLOYED:
-                if len(results) != 1:
+                if len(results) != 8:
                     raise CampaignError("cleanup deployment result is missing")
-                validate_cleanup_deployment(results[0], config)
+                validate_cleanup_deployment(results[-1], config)
             if target is Phase.CLEANUP_ARMED:
                 if cleanup_arm_evidence_sha256 is None:
                     raise CampaignError("cleanup arming proof is missing")
                 ledger.record_cleanup_arm_evidence(cleanup_arm_evidence_sha256)
             if target is Phase.CLEANUP_VERIFIED:
-                verified_arm_evidence = validate_cleanup_readback(results, config, runtime)
+                verified_arm_evidence = validate_cleanup_readback(
+                    results, config, runtime
+                )
                 if verified_arm_evidence != ledger.cleanup_arm_evidence_sha256:
                     raise CampaignError("cleanup arming evidence changed after arming")
+            if target is Phase.CLEANUP_DISARMED:
+                if cleanup_disarm_evidence_sha256 is None:
+                    raise CampaignError("cleanup disarming proof is missing")
+                ledger.record_cleanup_disarm_evidence(cleanup_disarm_evidence_sha256)
             if target is Phase.RESIDUE_VERIFIED:
                 observation = observe_residue(results, config, runtime)
                 disposition = ledger.record_residue(
@@ -2555,8 +3225,12 @@ def main() -> int:
                                 "cleanupDisposition": disposition,
                                 "residue": observation.counters,
                                 "residueEvidenceSha256": (observation.evidence_sha256),
-                                "activeInventoryPages": (observation.active_inventory_pages),
-                                "deletedInventoryPages": (observation.deleted_inventory_pages),
+                                "activeInventoryPages": (
+                                    observation.active_inventory_pages
+                                ),
+                                "deletedInventoryPages": (
+                                    observation.deleted_inventory_pages
+                                ),
                             },
                             separators=(",", ":"),
                             sort_keys=True,
@@ -2573,13 +3247,18 @@ def main() -> int:
             print(json.dumps(output, separators=(",", ":"), sort_keys=True))
             return 0
         except Exception:
-            if args.operation == "cleanup-wait" and Phase(ledger.phase) is Phase.CLEANING:
+            if (
+                args.operation == "cleanup-wait"
+                and Phase(ledger.phase) is Phase.CLEANING
+            ):
                 start_direct_cleanup(runner, config, runtime)
-            if ORDER.index(Phase(ledger.phase)) >= ORDER.index(Phase.SCOPE_CREATED) and Phase(
-                ledger.phase
-            ) not in {
+            if (
+                target is Phase.SCOPE_CREATED
+                or ORDER.index(Phase(ledger.phase)) >= ORDER.index(Phase.SCOPE_CREATED)
+            ) and Phase(ledger.phase) not in {
                 Phase.CLEANING,
                 Phase.CLEANED,
+                Phase.CLEANUP_DISARMED,
                 Phase.RESIDUE_VERIFIED,
                 Phase.FINALIZED,
             }:

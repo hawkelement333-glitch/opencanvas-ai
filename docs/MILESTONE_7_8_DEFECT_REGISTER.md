@@ -1,13 +1,15 @@
 # Milestone 7.8 Defect Register
 
-Date: 2026-08-18
+Date: 2026-08-25
 
 Status: active; architecture and checkpoint-scope findings are corrected;
 managed PostgreSQL defects through M78-PG-012 and the first object-storage
-finding are locally remediated. The exact Automation account remains
-provider-retained nonzero residue, campaign armability remains structurally
-blocked, all five managed database evidence gaps remain open, and Milestone 7.8
-is not complete.
+finding are locally remediated. The exact prior Automation account remains
+provider-retained nonzero residue. The disposable-controller architecture is
+superseded locally by one stable reusable controller outside campaign deletion
+scope; its state is `architecture-corrected-live-execution-not-authorized`.
+All five managed database evidence gaps remain open, and Milestone 7.8 is not
+complete.
 
 This register records defects proved by the Milestone 7.8 audit and, in a
 separate section, the evidence gaps the audit contract requires it to preserve.
@@ -55,6 +57,16 @@ authoritative repository requirement or permits a concrete unsafe path.
 All proved repository defects now have coherent local corrections. The exact
 provider-retained cleanup residue and the managed-evidence gaps prevent this
 audit surface and Milestone 7.8 from satisfying their completion rules.
+
+The M78-PG-010 and M78-PG-011 table rows preserve the disposition proved at
+their original correction boundary. On 2026-08-25 the structurally disposable
+controller was replaced locally by the single architecture recorded in the
+[cleanup-controller architecture correction handoff](MILESTONE_7_8_CLEANUP_CONTROLLER_ARCHITECTURE_CORRECTION_HANDOFF.md).
+The stable controller is separately bootstrapped and published outside target
+scope; new campaigns can only adopt it, grant exact target-scoped temporary
+authority, create/adopt one schedule and binding, delete only the target, and
+prove schedule/binding revocation. This correction used no Azure operation and
+does not prove a controller live or authorize a campaign.
 
 ### M78-PG-006 local remediation disposition
 

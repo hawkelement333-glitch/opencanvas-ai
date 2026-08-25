@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:controller:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "subscriptionId",
+    "subscriptionCorrelation",
+    "sourceHead",
+    "controllerLocation",
+    "controllerResourceGroupName",
+    "automationAccountName",
+    "runbookName",
+    "controllerAuthorizedUntilUtc",
+    "cleanupScriptSha256",
+    "deploymentName"
+  ],
+  "properties": {
+    "subscriptionId": { "type": "string", "format": "uuid" },
+    "subscriptionCorrelation": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{16}$"
+    },
+    "sourceHead": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "controllerLocation": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]{2,31}$"
+    },
+    "controllerResourceGroupName": {
+      "type": "string",
+      "pattern": "^rg-m78-controller-[a-f0-9]{10}$"
+    },
+    "automationAccountName": {
+      "type": "string",
+      "pattern": "^aa-m78-controller-[a-f0-9]{10}$"
+    },
+    "runbookName": { "const": "Remove-M78Campaign" },
+    "controllerAuthorizedUntilUtc": { "type": "string", "format": "date-time" },
+    "cleanupScriptSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "deploymentName": {
+      "type": "string",
+      "pattern": "^m78-controller-[a-f0-9]{10}$"
+    }
+  }
+}

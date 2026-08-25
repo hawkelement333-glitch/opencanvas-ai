@@ -730,9 +730,13 @@ configuration, and repository-governance shards passed locally with exact
 skips recorded in the continuation handoff.
 
 Milestone 7.8 is still incomplete. The retained-account absence check is one
-named external blocker, not the sole blocker. The Automation cleanup design
-remains structurally non-armable because a newly deleted controller would
-create new provider-retained residue. Managed PostgreSQL evidence gaps,
+named external blocker, not the sole blocker. On 2026-08-25 the Automation
+cleanup design was corrected locally to use one stable reusable controller
+outside campaign deletion scope. New campaign preparation requires exact
+adoption, and ordinary cleanup cannot create or delete the controller. The
+state is `architecture-corrected-live-execution-not-authorized`; no live
+controller, arming, provider, or campaign evidence was produced. Managed
+PostgreSQL evidence gaps,
 provider object/scanner proof, Managed Redis, live telemetry, managed recovery,
 and current capacity/failure evidence require later, separately authorized
 Azure mutation campaigns. Milestone 8 remains unstarted.

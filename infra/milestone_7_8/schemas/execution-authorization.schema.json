@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:execution-authorization:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "disposition",
+    "campaignId",
+    "generationId",
+    "subscriptionCorrelation",
+    "sourceHead",
+    "controllerArchitecture",
+    "controllerBindingSha256",
+    "cleanupDeadlineUtc",
+    "expiresAtUtc",
+    "allowedOperations",
+    "authorizationSha256"
+  ],
+  "properties": {
+    "version": { "const": "m7.8-execution-authorization-v1" },
+    "disposition": { "const": "separately-authorized-azure-execution" },
+    "campaignId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,47}$" },
+    "generationId": {
+      "type": "string",
+      "pattern": "^g[1-9][0-9]{0,5}-[a-f0-9]{12}$"
+    },
+    "subscriptionCorrelation": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{16}$"
+    },
+    "sourceHead": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "controllerArchitecture": { "const": "reusable-automation-controller-v1" },
+    "controllerBindingSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "cleanupDeadlineUtc": { "type": "string", "format": "date-time" },
+    "expiresAtUtc": { "type": "string", "format": "date-time" },
+    "allowedOperations": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "preflight",
+          "correlate",
+          "capacity-check",
+          "cost-gate",
+          "scope-create",
+          "cleanup-deploy",
+          "cleanup-arm",
+          "cleanup-verify",
+          "billable-start",
+          "deploy",
+          "image-decision",
+          "bootstrap",
+          "migrate",
+          "evidence",
+          "dispose",
+          "cleanup",
+          "cleanup-wait",
+          "cleanup-disarm",
+          "residue",
+          "finalize"
+        ]
+      }
+    },
+    "authorizationSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

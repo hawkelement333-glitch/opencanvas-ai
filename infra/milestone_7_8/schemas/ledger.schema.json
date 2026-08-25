@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign-ledger:v4",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign-ledger:v5",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -24,6 +24,7 @@
     "cleanup_completed_utc",
     "actual_cost_usd",
     "cleanup_arm_evidence_sha256",
+    "cleanup_disarm_evidence_sha256",
     "cleanup_disposition",
     "residue_evidence_sha256",
     "residue",
@@ -85,6 +86,10 @@
     },
     "actual_cost_usd": { "type": ["string", "null"] },
     "cleanup_arm_evidence_sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "cleanup_disarm_evidence_sha256": {
       "type": ["string", "null"],
       "pattern": "^[a-f0-9]{64}$"
     },

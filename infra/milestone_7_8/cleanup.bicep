@@ -27,6 +27,7 @@ param cleanupOfferEligibilitySource string
 @maxLength(64)
 param cleanupOfferEligibilitySha256 string
 param cleanupDeadlineUtc string
+param cleanupAuthorityExpiresUtc string
 param automationAccountName string
 param cleanupRunbookName string
 param cleanupScheduleName string
@@ -36,41 +37,30 @@ param cleanupBindingName string
 @maxValue(5000)
 param costCeilingCents int = 5000
 
-param lifecycleTags object
-
-resource cleanupResourceGroup 'Microsoft.Resources/resourceGroups@2024-11-01' = {
+// The campaign path may only adopt the one separately provisioned reusable
+// controller. This template cannot create, delete, or replace an Automation
+// account, controller resource group, or runbook.
+resource controllerResourceGroup 'Microsoft.Resources/resourceGroups@2024-11-01' existing = {
   name: cleanupResourceGroupName
-  location: cleanupLocation
-  tags: lifecycleTags
 }
 
-module controller './modules/cleanup-controller.bicep' = {
-  name: 'm78-cleanup-${uniqueString(campaignId, generationId)}'
-  scope: cleanupResourceGroup
-  params: {
-    cleanupLocation: cleanupLocation
-    cleanupRegionSelectionSha256: cleanupRegionSelectionSha256
-    cleanupCandidateRegions: cleanupCandidateRegions
-    cleanupOfferClassification: cleanupOfferClassification
-    cleanupOfferEligibilityDisposition: cleanupOfferEligibilityDisposition
-    cleanupOfferEligibleRegions: cleanupOfferEligibleRegions
-    cleanupOfferEligibilitySource: cleanupOfferEligibilitySource
-    cleanupOfferEligibilitySha256: cleanupOfferEligibilitySha256
-    automationAccountName: automationAccountName
-    cleanupRunbookName: cleanupRunbookName
-    cleanupScheduleName: cleanupScheduleName
-    cleanupBindingName: cleanupBindingName
-    lifecycleTags: lifecycleTags
-  }
+resource controllerAccount 'Microsoft.Automation/automationAccounts@2024-10-23' existing = {
+  scope: controllerResourceGroup
+  name: automationAccountName
+}
+
+resource controllerRunbook 'Microsoft.Automation/automationAccounts/runbooks@2024-10-23' existing = {
+  parent: controllerAccount
+  name: cleanupRunbookName
 }
 
 resource targetResourceGroup 'Microsoft.Resources/resourceGroups@2024-11-01' existing = {
   name: targetResourceGroupName
 }
 
-// The cleanup identity receives resource deletion plus RBAC-extension deletion only
-// at the two exact campaign resource-group scopes. Built-ins avoid a persistent
-// subscription custom-role definition after the campaign groups are gone.
+// Temporary authority exists only at the exact campaign target scope. The
+// target resource-group deletion removes both grants. The persistent controller
+// has no permission to delete or mutate its own control plane.
 var contributorRoleDefinitionId = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions',
   'b24988ac-6180-42a0-ab88-20f7382dd24c'
@@ -84,7 +74,7 @@ module targetContributorAssignment './modules/cleanup-rbac.bicep' = {
   name: 'm78-target-cleanup-contributor-${uniqueString(campaignId, generationId)}'
   scope: targetResourceGroup
   params: {
-    principalId: controller.outputs.cleanupPrincipalId
+    principalId: controllerAccount.identity.principalId
     roleDefinitionId: contributorRoleDefinitionId
   }
 }
@@ -93,34 +83,16 @@ module targetRbacAssignment './modules/cleanup-rbac.bicep' = {
   name: 'm78-target-cleanup-rbac-${uniqueString(campaignId, generationId)}'
   scope: targetResourceGroup
   params: {
-    principalId: controller.outputs.cleanupPrincipalId
+    principalId: controllerAccount.identity.principalId
     roleDefinitionId: rbacAdministratorRoleDefinitionId
   }
 }
 
-module selfContributorAssignment './modules/cleanup-rbac.bicep' = {
-  name: 'm78-self-cleanup-contributor-${uniqueString(campaignId, generationId)}'
-  scope: cleanupResourceGroup
-  params: {
-    principalId: controller.outputs.cleanupPrincipalId
-    roleDefinitionId: contributorRoleDefinitionId
-  }
-}
-
-module selfRbacAssignment './modules/cleanup-rbac.bicep' = {
-  name: 'm78-self-cleanup-rbac-${uniqueString(campaignId, generationId)}'
-  scope: cleanupResourceGroup
-  params: {
-    principalId: controller.outputs.cleanupPrincipalId
-    roleDefinitionId: rbacAdministratorRoleDefinitionId
-  }
-}
-
-output automationAccountName string = controller.outputs.automationAccountName
-output cleanupPrincipalId string = controller.outputs.cleanupPrincipalId
-output runbookName string = controller.outputs.runbookName
-output scheduleName string = controller.outputs.scheduleName
-output bindingName string = controller.outputs.bindingName
+output automationAccountName string = controllerAccount.name
+output cleanupPrincipalId string = controllerAccount.identity.principalId
+output runbookName string = controllerRunbook.name
+output scheduleName string = cleanupScheduleName
+output bindingName string = cleanupBindingName
 output cleanupRoleDefinitionIds object = {
   contributor: contributorRoleDefinitionId
   rbacAdministrator: rbacAdministratorRoleDefinitionId
@@ -129,11 +101,6 @@ output targetRoleAssignmentIds array = [
   targetContributorAssignment.outputs.roleAssignmentId
   targetRbacAssignment.outputs.roleAssignmentId
 ]
-output selfRoleAssignmentIds array = [
-  selfContributorAssignment.outputs.roleAssignmentId
-  selfRbacAssignment.outputs.roleAssignmentId
-]
-output cleanupDeadlineUtc string = cleanupDeadlineUtc
 output campaignId string = campaignId
 output generationId string = generationId
 output subscriptionCorrelation string = subscriptionCorrelation
@@ -147,6 +114,8 @@ output cleanupOfferEligibilityDisposition string = cleanupOfferEligibilityDispos
 output cleanupOfferEligibleRegions string = cleanupOfferEligibleRegions
 output cleanupOfferEligibilitySource string = cleanupOfferEligibilitySource
 output cleanupOfferEligibilitySha256 string = cleanupOfferEligibilitySha256
+output cleanupDeadlineUtc string = cleanupDeadlineUtc
+output cleanupAuthorityExpiresUtc string = cleanupAuthorityExpiresUtc
 output costCeilingCents int = costCeilingCents
 output scheduleCount int = 0
 output bindingCount int = 0
