@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:retention-absence-evidence:v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "evidenceClass",
+    "status",
+    "subscriptionCorrelation",
+    "campaignCorrelation",
+    "generationCorrelation",
+    "region",
+    "observedAtUtc",
+    "authoritativeDeletionTimeUtc",
+    "expectedRemovalBoundaryUtc",
+    "providerReportedDeletionTime",
+    "deletionTimeInterpretation",
+    "paginationComplete",
+    "deletedInventoryPages",
+    "deletedAccountCount",
+    "targetCandidates",
+    "unrelatedDeletedAccountCount",
+    "campaignDeletedIdentitySha256",
+    "legacyCampaignIdentityHashMatch",
+    "unrelatedDeletedIdentitySha256",
+    "legacyUnrelatedIdentityHashMatch",
+    "azureGetOperations",
+    "azureMutationCount",
+    "repositoryMutationCount",
+    "supportTicketOperationCount"
+  ],
+  "properties": {
+    "version": { "const": "m7.8-retained-automation-absence-verification-v2" },
+    "evidenceClass": {
+      "enum": ["managed-provider-get-only", "synthetic-test-fixture"]
+    },
+    "status": { "const": "retained-account-absent" },
+    "subscriptionCorrelation": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "campaignCorrelation": { "const": "07e350df451c6bec" },
+    "generationCorrelation": { "const": "599df8555c0781d9" },
+    "region": { "const": "southeastasia" },
+    "observedAtUtc": { "type": "string", "format": "date-time" },
+    "authoritativeDeletionTimeUtc": { "const": "2026-08-15T01:09:46.307Z" },
+    "expectedRemovalBoundaryUtc": { "const": "2026-09-14T01:09:46.307Z" },
+    "providerReportedDeletionTime": { "type": "null" },
+    "deletionTimeInterpretation": { "type": "null" },
+    "paginationComplete": { "const": true },
+    "deletedInventoryPages": { "type": "integer", "minimum": 1 },
+    "deletedAccountCount": { "const": 4 },
+    "targetCandidates": { "const": 0 },
+    "unrelatedDeletedAccountCount": { "const": 4 },
+    "campaignDeletedIdentitySha256": {
+      "const": "70802f6e1464afc66bde5466f7b9f3b36892af96eb5de74e6a6560b717e123fc"
+    },
+    "legacyCampaignIdentityHashMatch": { "const": true },
+    "unrelatedDeletedIdentitySha256": {
+      "const": [
+        "695cbab9b5f3c9c685d3060788b4e3c203322ccc34042f7502e60e9c37925359",
+        "7784599e8675788d8affdbb71f6dbc6f6ae0780ef5898351eeb424298c4ee9e0",
+        "8296a885b417e20d4e0b1ce649a7c7abf94576102b25d159bcd71adfe7add046",
+        "e0d171a6cdad7ca8d6de4c8f6c2df640ff5cce098071838576b5af934aa85e1f"
+      ]
+    },
+    "legacyUnrelatedIdentityHashMatch": { "const": true },
+    "azureGetOperations": { "type": "integer", "minimum": 2 },
+    "azureMutationCount": { "const": 0 },
+    "repositoryMutationCount": { "const": 0 },
+    "supportTicketOperationCount": { "const": 0 }
+  }
+}

@@ -179,6 +179,7 @@ def _config(selection: AutomationRegionSelection) -> CampaignConfig:
         cleanup_offer_eligible_regions=",".join(selection.offer_eligible_regions),
         cleanup_offer_eligibility_source=selection.offer_eligibility_source,
         cleanup_offer_eligibility_sha256=selection.offer_eligibility_sha256,
+        retention_absence_evidence_sha256=(selection.retention_absence_evidence_sha256),
     )
 
 
@@ -206,6 +207,7 @@ def _runtime(selection: AutomationRegionSelection) -> dict[str, str]:
         "cleanupOfferEligibleRegions": ",".join(selection.offer_eligible_regions),
         "cleanupOfferEligibilitySource": selection.offer_eligibility_source,
         "cleanupOfferEligibilitySha256": selection.offer_eligibility_sha256,
+        "retentionAbsenceEvidenceSha256": (selection.retention_absence_evidence_sha256),
     }
 
 
@@ -226,6 +228,7 @@ def _active_controller_record() -> dict[str, object]:
             "mobius.subscription-correlation": "a" * 16,
             "mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z",
             "mobius.cleanup-script-sha256": hashlib.sha256(b"cleanup-content").hexdigest(),
+            "mobius.retention-absence-sha256": "0" * 64,
         },
     }
 
@@ -244,6 +247,7 @@ def _controller_baseline_results(
         "mobius.subscription-correlation": config.subscription_correlation,
         "mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z",
         "mobius.cleanup-script-sha256": runtime["cleanupScriptSha256"],
+        "mobius.retention-absence-sha256": (config.retention_absence_evidence_sha256),
     }
     return [
         _result(
@@ -316,6 +320,7 @@ def test_exact_reusable_controller_is_adopted_in_its_established_region() -> Non
             "mobius.subscription-correlation": "a" * 16,
             "mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z",
             "mobius.cleanup-script-sha256": "9" * 64,
+            "mobius.retention-absence-sha256": "8" * 64,
         },
     }
     selection = select_automation_region_from_results(
@@ -326,6 +331,7 @@ def test_exact_reusable_controller_is_adopted_in_its_established_region() -> Non
         controller_account="aa-m78-controller-aaaaaaaaaa",
         subscription_correlation="a" * 16,
         cleanup_script_sha256="9" * 64,
+        retention_absence_evidence_sha256="8" * 64,
     )
     assert selection.selected_region == "southeastasia"
     assert selection.controller_disposition == "exact-controller-adoptable"
@@ -343,6 +349,7 @@ def test_exact_reusable_controller_is_adopted_in_its_established_region() -> Non
             controller_account="aa-m78-controller-aaaaaaaaaa",
             subscription_correlation="a" * 16,
             cleanup_script_sha256="9" * 64,
+            retention_absence_evidence_sha256="8" * 64,
         )
     with pytest.raises(CampaignError, match="authority is insufficient"):
         select_automation_region_from_results(
@@ -352,6 +359,7 @@ def test_exact_reusable_controller_is_adopted_in_its_established_region() -> Non
             controller_account="aa-m78-controller-aaaaaaaaaa",
             subscription_correlation="a" * 16,
             cleanup_script_sha256="9" * 64,
+            retention_absence_evidence_sha256="8" * 64,
             controller_required_until_utc="2030-01-03T00:00:00Z",
         )
 
@@ -797,6 +805,7 @@ def test_capacity_check_revalidates_selection_before_scope_mutation() -> None:
         controller_account="aa-m78-controller-aaaaaaaaaa",
         subscription_correlation="a" * 16,
         cleanup_script_sha256=hashlib.sha256(b"cleanup-content").hexdigest(),
+        retention_absence_evidence_sha256="0" * 64,
         controller_required_until_utc="2030-01-01T05:00:00Z",
     )
     config = _config(selection)

@@ -16,6 +16,7 @@ param cleanupOfferEligibilityDisposition string
 param cleanupOfferEligibleRegions string
 param cleanupOfferEligibilitySource string
 param cleanupOfferEligibilitySha256 string
+param retentionAbsenceEvidenceSha256 string
 param cleanupResourceGroupName string
 param cleanupPrincipalId string
 param tenantId string
@@ -451,4 +452,4 @@ output identityObjectIds object = {
   worker: workerIdentity.principalId
   evidence: evidenceIdentity.principalId
 }
-output campaignBinding object = { campaignId: campaignId, generationId: generationId, subscriptionCorrelation: subscriptionCorrelation, cleanupDeadlineUtc: cleanupDeadlineUtc, cleanupLocation: cleanupLocation, cleanupRegionSelectionSha256: cleanupRegionSelectionSha256, cleanupCandidateRegions: cleanupCandidateRegions, cleanupOfferClassification: cleanupOfferClassification, cleanupOfferEligibilityDisposition: cleanupOfferEligibilityDisposition, cleanupOfferEligibleRegions: cleanupOfferEligibleRegions, cleanupOfferEligibilitySource: cleanupOfferEligibilitySource, cleanupOfferEligibilitySha256: cleanupOfferEligibilitySha256, maximumHours: maximumHours, costCeilingCents: costCeilingCents, cleanupResourceGroupName: cleanupResourceGroupName, registryPrivateEndpointId: registryEndpoint.id, principalManifest: principalManifestJson }
+output campaignBinding object = { campaignId: campaignId, generationId: generationId, subscriptionCorrelation: subscriptionCorrelation, cleanupDeadlineUtc: cleanupDeadlineUtc, cleanupLocation: cleanupLocation, cleanupRegionSelectionSha256: cleanupRegionSelectionSha256, cleanupCandidateRegions: cleanupCandidateRegions, cleanupOfferClassification: cleanupOfferClassification, cleanupOfferEligibilityDisposition: cleanupOfferEligibilityDisposition, cleanupOfferEligibleRegions: cleanupOfferEligibleRegions, cleanupOfferEligibilitySource: cleanupOfferEligibilitySource, cleanupOfferEligibilitySha256: cleanupOfferEligibilitySha256, retentionAbsenceEvidenceSha256: retentionAbsenceEvidenceSha256, maximumHours: maximumHours, costCeilingCents: costCeilingCents, cleanupResourceGroupName: cleanupResourceGroupName, registryPrivateEndpointId: registryEndpoint.id, principalManifest: principalManifestJson }

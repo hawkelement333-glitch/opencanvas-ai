@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:controller:v1",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:controller:v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,6 +13,7 @@
     "runbookName",
     "controllerAuthorizedUntilUtc",
     "cleanupScriptSha256",
+    "retentionAbsenceEvidenceSha256",
     "deploymentName"
   ],
   "properties": {
@@ -37,6 +38,10 @@
     "runbookName": { "const": "Remove-M78Campaign" },
     "controllerAuthorizedUntilUtc": { "type": "string", "format": "date-time" },
     "cleanupScriptSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "retentionAbsenceEvidenceSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "deploymentName": {
       "type": "string",
       "pattern": "^m78-controller-[a-f0-9]{10}$"

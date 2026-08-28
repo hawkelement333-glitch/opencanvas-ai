@@ -19,7 +19,10 @@ authorized, and no controller is claimed live by this document.
 Run from the repository root on branch
 `milestone-7-8-production-readiness-audit-local`, at the reviewed campaign
 commit, with a clean tree/index, no upstream, and exactly five untouched
-stashes. The output directory `.runtime/milestone_7_8` must not exist.
+stashes. The output directory `.runtime/milestone_7_8` must not exist. A strict
+post-boundary `retained-account-absent` artifact from M78-PG-012 must already
+exist, and controller or campaign execution still requires a separate Azure
+authorization. Elapsed time alone is never an admission fact.
 
 The interactive deployment operator needs only the Azure control-plane actions
 required to create the generated target group and the resource types in
@@ -78,22 +81,31 @@ campaign label matching `^[a-z][a-z0-9-]{7,47}$`:
 $env:M78_SUBSCRIPTION_ID = '<authorized-subscription-uuid>'
 $env:M78_TENANT_ID = '<authorized-tenant-uuid>'
 $campaign = 'mobius78-pg-evidence'
+$retentionAbsence = '<reviewed-sanitized-retention-absence-evidence.json>'
 
 $env:PYTHONDONTWRITEBYTECODE = '1'
 .\.venv\Scripts\python.exe -m infra.milestone_7_8.prepare `
   --campaign-id $campaign `
   --output .runtime/milestone_7_8 `
   --target-region centralus `
-  --postgres-region centralus
+  --postgres-region centralus `
+  --retention-absence-evidence $retentionAbsence
 if ($LASTEXITCODE -ne 0) { throw 'campaign preparation failed' }
 
 $config = '.runtime/milestone_7_8/campaign.json'
 $runtime = '.runtime/milestone_7_8/runtime.json'
 $ledger = '.runtime/milestone_7_8/ledger.json'
 $cleanupRegionEvidence = '.runtime/milestone_7_8/cleanup-region-selection.json'
+$retentionAbsenceCopy = '.runtime/milestone_7_8/retention-absence-evidence.json'
 ```
 
-Preparation refuses a dirty tree, wrong branch, upstream, stash-count drift,
+Preparation refuses missing, present, pre-boundary, wrong-subscription,
+wrong-campaign/generation, wrong-location, incomplete-pagination,
+changed-unrelated-record, target-present, nonzero-mutation, malformed, or
+hash-mismatched retention evidence before regional discovery. A fixture marked
+`synthetic-test-fixture` may exercise local preparation only; every live
+controller or operator entry rejects it. Preparation also refuses a dirty tree,
+wrong branch, upstream, stash-count drift,
 malformed UUID/campaign, mismatched target/PostgreSQL region, or an existing
 output directory. It has no caller-supplied cleanup-region override. Before
 creating the output directory, it evaluates the exact order `eastus2`,
@@ -335,14 +347,18 @@ Cleanup is mandatory on success, failure, interruption, or deadline expiry:
 ```powershell
 Invoke-M78Phase 'cleanup'
 Invoke-M78Phase 'cleanup-wait'
+Invoke-M78Phase 'cleanup-disarm'
 Invoke-M78Phase 'residue'
 Invoke-M78Phase 'finalize'
 ```
 
 The cleanup runbook validates campaign, generation, sanitized subscription
-correlation, exact resource-group names/tags, deadline, and cost ceiling; it
-deletes the target group and then its own cleanup group. `cleanup-wait` requires
-both groups absent. That deletion is not permanent Automation-account removal.
+correlation, exact resource-group names/tags, deadline, cost ceiling, and the
+bound retention-absence hash; it deletes only the target group. The stable
+controller group and Automation account are deliberately retained.
+`cleanup-wait` requires authoritative target absence. `cleanup-disarm` then
+deletes the exact one-use binding and schedule and proves both collections
+empty before residue verification.
 `residue` completely paginates both active and soft-deleted Automation-account
 inventories, binds the expected account by its domain-separated resource-ID
 hash, preserves unrelated account hashes, and requires zero tagged resources,
@@ -350,14 +366,15 @@ zero role assignments, and all 16 defined residue counters at zero. A matching
 soft-deleted account records `provider-retained`, keeps the ledger before
 finalization, and blocks `finalize`. Only complete target absence, exact
 schedule/binding disarm, and pagination-complete residue reads can advance to
-`residue-verified` and print the v5 terminal receipt. If the runbook
+`residue-verified` and print the v6 terminal receipt. If the runbook
 cannot be started, the
 operator automatically falls back to deletion of only the validated target
 resource group and immediately reports exact active and soft-deleted account
 counts from complete inventories. It never broadens the deletion target.
 
-That phase behavior applies only to a future v5 bundle after the controller is
-separately bootstrapped, proved, and execution is separately authorized. The preserved
+That phase behavior applies only to a future v6 bundle after retention absence
+is proved and the controller is separately bootstrapped, proved, and execution
+is separately authorized. The preserved
 private generation predates the v4 runtime and 16-counter ledger, and its legacy
 `finalized` state is retained as disproved historical evidence. It must not be
 rewritten or passed to this operator as a resumable lifecycle. The next check
@@ -399,10 +416,10 @@ If all managed evidence commands completed but the process stopped before its
 ledger write, rerunning `evidence` validates and consumes the immutable local
 execution receipt without rerunning the managed probes. A changed campaign,
 generation, source, digest, control input, transition chain, deadline, or
-receipt is rejected. Once cleanup starts, resume only cleanup, wait, residue,
-and finalization; cleanup remains allowed after the deadline.
+receipt is rejected. Once cleanup starts, resume only cleanup, wait, disarm,
+residue, and finalization; cleanup remains allowed after the deadline.
 
-This resume table describes only a conforming v5 ledger. It does not reopen or
+This resume table describes only a conforming v6 ledger. It does not reopen or
 upgrade the preserved legacy finalized ledger described above.
 
 ## Bounded time, cost, artifacts, and stopping rule
@@ -414,6 +431,7 @@ projection over USD 50, expired deadline, cleanup drift, or unready managed
 service; enter cleanup and preserve the sanitized local files:
 
 - `campaign.json`, `runtime.json`, parameter files, and `ledger.json`;
+- the copied strict retention-absence artifact and its domain-separated hash;
 - the sanitized cleanup-region selection receipt and its bound hashes;
 - the digest-bound image scan receipt;
 - the sanitized control-plane evidence input;

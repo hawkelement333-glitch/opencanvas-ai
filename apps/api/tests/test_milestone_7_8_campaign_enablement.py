@@ -18,8 +18,9 @@ import pytest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPOSITORY_ROOT))
 
+from infra.milestone_7_8 import controller as controller_operator
 from infra.milestone_7_8 import operator as campaign_operator
-from infra.milestone_7_8 import prepare
+from infra.milestone_7_8 import prepare, retention
 from infra.milestone_7_8.automation_region import (
     CLEANUP_CANDIDATE_REGIONS_BINDING,
     CLEANUP_REGION_CANDIDATES,
@@ -84,6 +85,40 @@ def _object_id(value: int) -> str:
     return f"00000000-0000-4000-8000-{value:012d}"
 
 
+def _retention_absence_document(
+    subscription_correlation: str,
+    *,
+    evidence_class: str = "synthetic-test-fixture",
+) -> dict[str, object]:
+    return {
+        "version": retention.ABSENCE_EVIDENCE_VERSION,
+        "evidenceClass": evidence_class,
+        "status": "retained-account-absent",
+        "subscriptionCorrelation": subscription_correlation,
+        "campaignCorrelation": retention.RETENTION_CAMPAIGN_CORRELATION,
+        "generationCorrelation": retention.RETENTION_GENERATION_CORRELATION,
+        "region": retention.RETENTION_REGION,
+        "observedAtUtc": retention.EXPECTED_REMOVAL_BOUNDARY_UTC,
+        "authoritativeDeletionTimeUtc": (retention.AUTHORITATIVE_DELETION_TIME_UTC),
+        "expectedRemovalBoundaryUtc": retention.EXPECTED_REMOVAL_BOUNDARY_UTC,
+        "providerReportedDeletionTime": None,
+        "deletionTimeInterpretation": None,
+        "paginationComplete": True,
+        "deletedInventoryPages": 1,
+        "deletedAccountCount": 4,
+        "targetCandidates": 0,
+        "unrelatedDeletedAccountCount": 4,
+        "campaignDeletedIdentitySha256": (retention.RETENTION_TARGET_IDENTITY_SHA256),
+        "legacyCampaignIdentityHashMatch": True,
+        "unrelatedDeletedIdentitySha256": list(retention.RETENTION_UNRELATED_IDENTITY_SHA256),
+        "legacyUnrelatedIdentityHashMatch": True,
+        "azureGetOperations": 2,
+        "azureMutationCount": 0,
+        "repositoryMutationCount": 0,
+        "supportTicketOperationCount": 0,
+    }
+
+
 def _manifest(
     *,
     campaign: str = "mobius78-pg-proof",
@@ -136,6 +171,7 @@ def _config(**changes: object) -> CampaignConfig:
         "cleanup_offer_eligible_regions": OFFER_ELIGIBLE_REGIONS_BINDING,
         "cleanup_offer_eligibility_source": OFFER_ELIGIBILITY_SOURCE,
         "cleanup_offer_eligibility_sha256": "e" * 64,
+        "retention_absence_evidence_sha256": "0" * 64,
         "image_digest": None,
     }
     values.update(changes)
@@ -312,6 +348,7 @@ def test_resume_and_cleanup_binding_reject_substitution() -> None:
         cleanup_offer_eligible_regions=config.cleanup_offer_eligible_regions,
         cleanup_offer_eligibility_source=config.cleanup_offer_eligibility_source,
         cleanup_offer_eligibility_sha256=config.cleanup_offer_eligibility_sha256,
+        retention_absence_evidence_sha256=(config.retention_absence_evidence_sha256),
     )
     valid.validate(config)
     with pytest.raises(CampaignError, match="cleanup binding"):
@@ -463,6 +500,7 @@ def test_deployed_principal_manifest_matches_prepared_semantic_plan() -> None:
             "cleanupOfferEligibleRegions": config.cleanup_offer_eligible_regions,
             "cleanupOfferEligibilitySource": config.cleanup_offer_eligibility_source,
             "cleanupOfferEligibilitySha256": config.cleanup_offer_eligibility_sha256,
+            "retentionAbsenceEvidenceSha256": (config.retention_absence_evidence_sha256),
             "principalManifest": json.dumps(manifest),
         }
     }
@@ -544,6 +582,7 @@ def _controller_config() -> ControllerConfig:
         runbook_name="Remove-M78Campaign",
         controller_authorized_until_utc="2030-01-02T00:00:00Z",
         cleanup_script_sha256=hashlib.sha256(b"cleanup-content").hexdigest(),
+        retention_absence_evidence_sha256="0" * 64,
         deployment_name=f"m78-controller-{correlation[:10]}",
     )
 
@@ -567,7 +606,7 @@ def test_separate_controller_bootstrap_is_one_time_and_authorization_gated(
 
     authorization_path = tmp_path / "controller-authorization.json"
     value: dict[str, object] = {
-        "version": "m7.8-controller-execution-authorization-v1",
+        "version": "m7.8-controller-execution-authorization-v2",
         "disposition": "separately-authorized-controller-execution",
         "operation": "controller-bootstrap",
         "subscriptionCorrelation": config.subscription_correlation,
@@ -577,10 +616,11 @@ def test_separate_controller_bootstrap_is_one_time_and_authorization_gated(
         "controllerResourceGroupName": config.controller_resource_group_name,
         "automationAccountName": config.automation_account_name,
         "controllerAuthorizedUntilUtc": config.controller_authorized_until_utc,
+        "retentionAbsenceEvidenceSha256": (config.retention_absence_evidence_sha256),
         "expiresAtUtc": "2030-01-01T01:00:00Z",
     }
     value["authorizationSha256"] = hashlib.sha256(
-        b"m7.8/controller-execution-authorization/v1\0"
+        b"m7.8/controller-execution-authorization/v2\0"
         + json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
     authorization_path.write_text(json.dumps(value), encoding="utf-8")
@@ -602,6 +642,89 @@ def test_separate_controller_bootstrap_is_one_time_and_authorization_gated(
             operation="controller-verify",
             now=NOW,
         )
+    with pytest.raises(CampaignError, match="not exact"):
+        load_controller_authorization(
+            authorization_path,
+            config=replace(config, retention_absence_evidence_sha256="1" * 64),
+            operation="controller-bootstrap",
+            now=NOW,
+        )
+
+
+def test_controller_execute_rejects_missing_or_synthetic_retention_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = _controller_config()
+    evidence = _retention_absence_document(
+        config.subscription_correlation,
+        evidence_class=retention.SYNTHETIC_EVIDENCE_CLASS,
+    )
+    evidence_path = tmp_path / "retention-absence.json"
+    evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+    config = replace(
+        config,
+        retention_absence_evidence_sha256=(retention.retention_absence_evidence_sha256(evidence)),
+    )
+    config_path = tmp_path / "controller.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "subscriptionId": config.subscription_id,
+                "subscriptionCorrelation": config.subscription_correlation,
+                "sourceHead": config.source_head,
+                "controllerLocation": config.controller_location,
+                "controllerResourceGroupName": config.controller_resource_group_name,
+                "automationAccountName": config.automation_account_name,
+                "runbookName": config.runbook_name,
+                "controllerAuthorizedUntilUtc": config.controller_authorized_until_utc,
+                "cleanupScriptSha256": config.cleanup_script_sha256,
+                "retentionAbsenceEvidenceSha256": (config.retention_absence_evidence_sha256),
+                "deploymentName": config.deployment_name,
+            }
+        ),
+        encoding="utf-8",
+    )
+    authorization_path = tmp_path / "authorization.json"
+
+    def unexpected_runner() -> object:
+        raise AssertionError("Azure runner must not be created")
+
+    monkeypatch.setattr(controller_operator, "SubprocessRunner", unexpected_runner)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "controller",
+            "controller-bootstrap",
+            "--config",
+            str(config_path),
+            "--authorization",
+            str(authorization_path),
+            "--execute",
+        ],
+    )
+    assert controller_operator.main() == 2
+    assert "requires retention absence evidence" in capsys.readouterr().out
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "controller",
+            "controller-bootstrap",
+            "--config",
+            str(config_path),
+            "--authorization",
+            str(authorization_path),
+            "--retention-absence-evidence",
+            str(evidence_path),
+            "--execute",
+        ],
+    )
+    assert controller_operator.main() == 2
+    assert "retention-absence-evidence-not-exact" in capsys.readouterr().out
 
 
 def test_controller_baseline_readback_requires_publication_and_empty_bindings() -> None:
@@ -613,6 +736,7 @@ def test_controller_baseline_readback_requires_publication_and_empty_bindings() 
         "mobius.subscription-correlation": config.subscription_correlation,
         "mobius.controller-authorized-until-utc": (config.controller_authorized_until_utc),
         "mobius.cleanup-script-sha256": config.cleanup_script_sha256,
+        "mobius.retention-absence-sha256": (config.retention_absence_evidence_sha256),
     }
     results = [
         _command_result(
@@ -694,6 +818,10 @@ def _runtime() -> dict[str, str]:
         "cleanupOfferEligibleRegions": OFFER_ELIGIBLE_REGIONS_BINDING,
         "cleanupOfferEligibilitySource": OFFER_ELIGIBILITY_SOURCE,
         "cleanupOfferEligibilitySha256": "e" * 64,
+        "retentionAbsenceEvidenceSha256": "0" * 64,
+        "retentionAbsenceEvidenceClass": "synthetic-test-fixture",
+        "retentionAbsenceObservedAtUtc": "2026-09-14T01:09:46.307Z",
+        "retentionAbsenceEvidenceFile": "runtime/retention-absence-evidence.json",
         "cleanupRegionSelectionFile": "runtime/cleanup-region-selection.json",
         "cleanupDeploymentName": "m78-cleanup",
         "campaignDeploymentName": "m78-campaign",
@@ -754,6 +882,7 @@ def _controller_tags(config: CampaignConfig, runtime: dict[str, str]) -> dict[st
         "mobius.subscription-correlation": config.subscription_correlation,
         "mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z",
         "mobius.cleanup-script-sha256": runtime["cleanupScriptSha256"],
+        "mobius.retention-absence-sha256": (config.retention_absence_evidence_sha256),
     }
 
 
@@ -830,6 +959,7 @@ def _cleanup_deployment_result(
         "cleanupOfferEligibleRegions": config.cleanup_offer_eligible_regions,
         "cleanupOfferEligibilitySource": config.cleanup_offer_eligibility_source,
         "cleanupOfferEligibilitySha256": config.cleanup_offer_eligibility_sha256,
+        "retentionAbsenceEvidenceSha256": (config.retention_absence_evidence_sha256),
         "cleanupDeadlineUtc": config.cleanup_deadline_utc,
         "cleanupAuthorityExpiresUtc": runtime["cleanupAuthorityExpiresUtc"],
         "automationAccountName": runtime["automationAccountName"],
@@ -892,6 +1022,7 @@ def test_cleanup_binding_and_readback_reject_substitution() -> None:
         "mobius.subscription-correlation": config.subscription_correlation,
         "mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z",
         "mobius.cleanup-script-sha256": runtime["cleanupScriptSha256"],
+        "mobius.retention-absence-sha256": (config.retention_absence_evidence_sha256),
     }
     results = [
         deployment,
@@ -978,6 +1109,7 @@ def test_scope_readback_binds_offer_eligibility_tags() -> None:
         "mobius.cleanup-offer-regions": config.cleanup_offer_eligible_regions,
         "mobius.cleanup-offer-source": config.cleanup_offer_eligibility_source,
         "mobius.cleanup-offer-eligibility-sha256": (config.cleanup_offer_eligibility_sha256),
+        "mobius.retention-absence-sha256": (config.retention_absence_evidence_sha256),
     }
     result = _command_result({"name": config.target_resource_group, "tags": tags})
     validate_operation_results("scope-create", [result], config, runtime)
@@ -1141,6 +1273,11 @@ def test_prepare_creates_one_private_restart_safe_bundle(
     output = tmp_path / "runtime"
     monkeypatch.setenv("M78_SUBSCRIPTION_ID", subscription)
     monkeypatch.setenv("M78_TENANT_ID", tenant)
+    subscription_correlation = campaign_operator.sanitize(subscription, domain="subscription")
+    retention_evidence = _retention_absence_document(subscription_correlation)
+    retention_path = tmp_path / "retention-absence.json"
+    retention_path.write_text(json.dumps(retention_evidence), encoding="utf-8")
+    retention_sha256 = retention.retention_absence_evidence_sha256(retention_evidence)
     git_values = {
         ("status", "--porcelain=v1"): "",
         ("branch", "--show-current"): "milestone-7-8-production-readiness-audit-local",
@@ -1162,7 +1299,7 @@ def test_prepare_creates_one_private_restart_safe_bundle(
         },
     )
     selection = AutomationRegionSelection(
-        version="m7.8-cleanup-region-selection-v4",
+        version="m7.8-cleanup-region-selection-v5",
         candidate_order=CLEANUP_REGION_CANDIDATES,
         selected_region="eastus2",
         provider_registration_state="Registered",
@@ -1180,6 +1317,7 @@ def test_prepare_creates_one_private_restart_safe_bundle(
         active_occupancy_sha256="2" * 64,
         soft_deleted_occupancy_sha256="3" * 64,
         policy_evidence_sha256="4" * 64,
+        retention_absence_evidence_sha256=retention_sha256,
         observed_at_utc="2030-01-01T00:00:00Z",
         candidates=tuple(
             CandidateEvidence(
@@ -1205,7 +1343,15 @@ def test_prepare_creates_one_private_restart_safe_bundle(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["prepare", "--campaign-id", "mobius78-managed-proof", "--output", str(output)],
+        [
+            "prepare",
+            "--campaign-id",
+            "mobius78-managed-proof",
+            "--output",
+            str(output),
+            "--retention-absence-evidence",
+            str(retention_path),
+        ],
     )
     assert prepare.main() == 0
     stdout = capsys.readouterr().out
@@ -1242,6 +1388,10 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             "cleanupOfferEligibleRegions",
             "cleanupOfferEligibilitySource",
             "cleanupOfferEligibilitySha256",
+            "retentionAbsenceEvidenceSha256",
+            "retentionAbsenceEvidenceClass",
+            "retentionAbsenceObservedAtUtc",
+            "retentionAbsenceEvidenceFile",
             "cleanupRegionSelectionFile",
             "cleanupDeploymentName",
             "campaignDeploymentName",
@@ -1630,7 +1780,7 @@ def _write_execution_authorization(
     operations: list[str],
 ) -> None:
     value: dict[str, object] = {
-        "version": "m7.8-execution-authorization-v1",
+        "version": "m7.8-execution-authorization-v2",
         "disposition": "separately-authorized-azure-execution",
         "campaignId": config.campaign_id,
         "generationId": config.generation_id,
@@ -1638,12 +1788,13 @@ def _write_execution_authorization(
         "sourceHead": runtime["sourceHead"],
         "controllerArchitecture": "reusable-automation-controller-v1",
         "controllerBindingSha256": runtime["controllerBindingSha256"],
+        "retentionAbsenceEvidenceSha256": (config.retention_absence_evidence_sha256),
         "cleanupDeadlineUtc": config.cleanup_deadline_utc,
         "expiresAtUtc": expires_at,
         "allowedOperations": operations,
     }
     value["authorizationSha256"] = hashlib.sha256(
-        b"m7.8/execution-authorization/v1\0"
+        b"m7.8/execution-authorization/v2\0"
         + json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
     path.write_text(json.dumps(value), encoding="utf-8")
@@ -1670,6 +1821,14 @@ def test_execution_authorization_is_exact_expiring_and_operation_scoped(
         now=datetime(2030, 1, 1, 4, tzinfo=UTC),
     )
     assert authorization.allowed_operations == frozenset({"cleanup-deploy"})
+    with pytest.raises(CampaignError, match="not exact"):
+        load_execution_authorization(
+            path,
+            config=replace(config, retention_absence_evidence_sha256="1" * 64),
+            runtime=runtime,
+            operation="cleanup-deploy",
+            now=datetime(2030, 1, 1, 4, tzinfo=UTC),
+        )
 
     _write_execution_authorization(
         path,
@@ -1726,6 +1885,52 @@ def test_execution_authorization_is_exact_expiring_and_operation_scoped(
             operation="cleanup-deploy",
             now=datetime(2030, 1, 1, 4, tzinfo=UTC),
         )
+
+
+def test_retention_absence_binding_blocks_synthetic_live_and_cross_bundle_replay(
+    tmp_path: Path,
+) -> None:
+    value = _retention_absence_document("a" * 16)
+    evidence_path = tmp_path / "retention-absence-evidence.json"
+    evidence_path.write_text(json.dumps(value), encoding="utf-8")
+    evidence_sha256 = retention.retention_absence_evidence_sha256(value)
+    config = replace(_config(), retention_absence_evidence_sha256=evidence_sha256)
+    runtime = _runtime()
+    runtime.update(
+        {
+            "retentionAbsenceEvidenceSha256": evidence_sha256,
+            "retentionAbsenceEvidenceClass": "synthetic-test-fixture",
+            "retentionAbsenceObservedAtUtc": retention.EXPECTED_REMOVAL_BOUNDARY_UTC,
+            "retentionAbsenceEvidenceFile": str(evidence_path),
+        }
+    )
+    runtime_path = tmp_path / "runtime.json"
+
+    campaign_operator.load_bound_retention_absence(
+        runtime_path,
+        runtime,
+        config,
+        allow_synthetic=True,
+    )
+    with pytest.raises(CampaignError, match="not-exact"):
+        campaign_operator.load_bound_retention_absence(
+            runtime_path,
+            runtime,
+            config,
+            allow_synthetic=False,
+        )
+    with pytest.raises(CampaignError, match="binding differs"):
+        campaign_operator.load_bound_retention_absence(
+            runtime_path,
+            runtime,
+            replace(config, retention_absence_evidence_sha256="1" * 64),
+            allow_synthetic=True,
+        )
+    assert campaign_operator.cleanup_authority_sha256(
+        config, runtime
+    ) != campaign_operator.cleanup_authority_sha256(
+        replace(config, retention_absence_evidence_sha256="1" * 64), runtime
+    )
 
 
 def test_failure_cleanup_requires_authority_even_for_readback_failure() -> None:

@@ -22,6 +22,10 @@ from infra.milestone_7_8.cleanup_controller import (
     CONTROLLER_RUNBOOK_NAME,
     controller_names,
 )
+from infra.milestone_7_8.retention import (
+    RetentionVerificationError,
+    validate_retention_absence_evidence,
+)
 
 OPERATIONS = frozenset({"controller-bootstrap", "controller-verify"})
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -38,6 +42,7 @@ class ControllerConfig:
     runbook_name: str
     controller_authorized_until_utc: str
     cleanup_script_sha256: str
+    retention_absence_evidence_sha256: str
     deployment_name: str
 
     @classmethod
@@ -56,6 +61,7 @@ class ControllerConfig:
             "runbookName",
             "controllerAuthorizedUntilUtc",
             "cleanupScriptSha256",
+            "retentionAbsenceEvidenceSha256",
             "deploymentName",
         }
         if (
@@ -78,6 +84,9 @@ class ControllerConfig:
                 str, value["controllerAuthorizedUntilUtc"]
             ),
             cleanup_script_sha256=cast(str, value["cleanupScriptSha256"]),
+            retention_absence_evidence_sha256=cast(
+                str, value["retentionAbsenceEvidenceSha256"]
+            ),
             deployment_name=cast(str, value["deploymentName"]),
         )
         config.validate()
@@ -99,6 +108,8 @@ class ControllerConfig:
             or self.automation_account_name != expected_names.account
             or self.runbook_name != CONTROLLER_RUNBOOK_NAME
             or re.fullmatch(r"[a-f0-9]{64}", self.cleanup_script_sha256) is None
+            or re.fullmatch(r"[a-f0-9]{64}", self.retention_absence_evidence_sha256)
+            is None
             or self.deployment_name
             != f"m78-controller-{self.subscription_correlation[:10]}"
         ):
@@ -128,6 +139,7 @@ def load_controller_authorization(
         "controllerResourceGroupName",
         "automationAccountName",
         "controllerAuthorizedUntilUtc",
+        "retentionAbsenceEvidenceSha256",
         "expiresAtUtc",
         "authorizationSha256",
     }
@@ -137,14 +149,14 @@ def load_controller_authorization(
         else {}
     )
     expected_hash = hashlib.sha256(
-        b"m7.8/controller-execution-authorization/v1\0"
+        b"m7.8/controller-execution-authorization/v2\0"
         + json.dumps(unsigned, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
     if (
         not isinstance(value, dict)
         or set(value) != fields
         or operation not in OPERATIONS
-        or value.get("version") != "m7.8-controller-execution-authorization-v1"
+        or value.get("version") != "m7.8-controller-execution-authorization-v2"
         or value.get("disposition") != "separately-authorized-controller-execution"
         or value.get("operation") != operation
         or value.get("subscriptionCorrelation") != config.subscription_correlation
@@ -156,6 +168,8 @@ def load_controller_authorization(
         or value.get("automationAccountName") != config.automation_account_name
         or value.get("controllerAuthorizedUntilUtc")
         != config.controller_authorized_until_utc
+        or value.get("retentionAbsenceEvidenceSha256")
+        != config.retention_absence_evidence_sha256
         or value.get("authorizationSha256") != expected_hash
     ):
         raise CampaignError("controller execution authorization is not exact")
@@ -315,6 +329,8 @@ def controller_command_plan(
             f"cleanupRunbookName={config.runbook_name}",
             f"controllerAuthorizedUntilUtc={config.controller_authorized_until_utc}",
             f"cleanupScriptSha256={config.cleanup_script_sha256}",
+            "retentionAbsenceEvidenceSha256="
+            f"{config.retention_absence_evidence_sha256}",
             "--output",
             "json",
         ),
@@ -388,6 +404,7 @@ def validate_controller_results(
             config.controller_authorized_until_utc
         ),
         "mobius.cleanup-script-sha256": config.cleanup_script_sha256,
+        "mobius.retention-absence-sha256": (config.retention_absence_evidence_sha256),
     }
     if not isinstance(group, dict) or not isinstance(account, dict):
         raise CampaignError("controller group or account readback is malformed")
@@ -470,6 +487,7 @@ def validate_controller_results(
         "controllerLocation": config.controller_location,
         "controllerAuthorizedUntilUtc": config.controller_authorized_until_utc,
         "cleanupScriptSha256": config.cleanup_script_sha256,
+        "retentionAbsenceEvidenceSha256": (config.retention_absence_evidence_sha256),
         "scheduleCount": 0,
         "bindingCount": 0,
     }
@@ -486,6 +504,7 @@ def main() -> int:
     parser.add_argument("operation", choices=sorted(OPERATIONS))
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--authorization", type=Path)
+    parser.add_argument("--retention-absence-evidence", type=Path)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     try:
@@ -507,6 +526,20 @@ def main() -> int:
             return 0
         if args.authorization is None:
             raise CampaignError("controller execution requires separate authorization")
+        if args.retention_absence_evidence is None:
+            raise CampaignError(
+                "controller execution requires retention absence evidence"
+            )
+        try:
+            retention = validate_retention_absence_evidence(
+                args.retention_absence_evidence,
+                subscription_correlation=config.subscription_correlation,
+                allow_synthetic=False,
+            )
+        except RetentionVerificationError as exc:
+            raise CampaignError(str(exc)) from exc
+        if retention.evidence_sha256 != config.retention_absence_evidence_sha256:
+            raise CampaignError("controller retention absence binding differs")
         validate_local_boundary(config)
         authorization_sha256 = load_controller_authorization(
             args.authorization, config=config, operation=args.operation

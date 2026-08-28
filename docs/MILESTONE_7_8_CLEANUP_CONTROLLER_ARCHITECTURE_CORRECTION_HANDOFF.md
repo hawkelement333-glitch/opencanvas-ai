@@ -4,6 +4,13 @@ Date: 2026-08-25
 Repository state: local source correction only
 Controller state: `architecture-corrected-live-execution-not-authorized`
 
+> **2026-08-27 admission correction:** the architecture below is now also
+> gated by the exact M78-PG-012 post-boundary absence artifact. Its canonical
+> hash is bound through controller selection/configuration, campaign/runtime,
+> cleanup parameters and authority, execution authorizations, ledger, and
+> terminal receipt. Synthetic fixtures cannot enter live execution. No
+> managed-provider absence artifact or Azure authorization was produced.
+
 This handoff records a local architecture correction. It is not evidence that
 the controller exists in Azure, is armed, is provider-proved, or is production
 ready. No Azure operation, campaign, generation, deployment, or cleanup was
@@ -41,8 +48,9 @@ every campaign target scope.
    ID suffix, architecture tags, subscription correlation, script hash, and
    authorization timestamp. When it exists, its established region is the only
    selectable controller region. Drift fails closed.
-4. Campaign preparation refuses to create a runtime bundle until the exact
-   controller identity and bounded authority are adoptable. `capacity-check`
+4. Campaign preparation first requires strict `retained-account-absent`
+   evidence for the prior account, then refuses to create a runtime bundle
+   until the exact controller identity and bounded authority are adoptable. `capacity-check`
    then proves the permanent Reader grant, published script, and empty complete
    schedule/binding inventories before `scope-create`.
 5. `cleanup.bicep` references the controller account and runbook as `existing`.
@@ -115,23 +123,24 @@ The alternatives are rejected:
 
 ## Future authorization and evidence gates
 
-A future authorization must separately name and approve:
+A future authorization must separately name and approve, in this order:
 
-1. complete read-only regional/provider/policy/inventory discovery;
-2. one controller bootstrap or exact-controller adoption in the selected region;
-3. published script hash, stable identity, local-auth policy, empty schedule and
+1. the unchanged M78-PG-012 post-boundary GET-only absence verification at or
+   after `2026-09-14T01:09:46.307Z`, producing the exact sanitized admission
+   artifact with four unchanged unrelated hashes and zero mutations;
+2. complete read-only regional/provider/policy/inventory discovery;
+3. one controller bootstrap or exact-controller adoption in the selected region;
+4. published script hash, stable identity, local-auth policy, empty schedule and
    binding inventories, and permanent Reader readback;
-4. a new clean-source campaign preparation and exact execution authorization;
+5. a new clean-source campaign preparation and exact execution authorization;
    every operation that can enter failure cleanup must authorize both that
    operation and `cleanup`, including readback failure after scope creation;
-5. live failure injection for interrupted bootstrap, publication failure,
+6. live failure injection for interrupted bootstrap, publication failure,
    schedule-only recovery, duplicate invocation, expired authority, cleanup
    failure, ambiguous deletion, disarm failure, and evidence failure;
-6. one bounded managed campaign, target zero-residue proof, schedule/binding
+7. one bounded managed campaign, target zero-residue proof, schedule/binding
    revocation proof, cost evidence, and all still-open managed PostgreSQL
-   evidence contracts; and
-7. the unchanged M78-PG-012 post-boundary absence verification at or after
-   `2026-09-14T01:09:46.307Z`.
+   evidence contracts.
 
 None of those live gates is authorized or satisfied by this local correction.
 Migration `0030` is not required and remains absent.

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign:v4",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign:v5",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -25,6 +25,7 @@
     "cleanupOfferEligibleRegions",
     "cleanupOfferEligibilitySource",
     "cleanupOfferEligibilitySha256",
+    "retentionAbsenceEvidenceSha256",
     "imageDigest"
   ],
   "properties": {
@@ -85,6 +86,10 @@
       "const": "microsoft-automation-restricted-public-offer-regions-2026-08-v1"
     },
     "cleanupOfferEligibilitySha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "retentionAbsenceEvidenceSha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },

@@ -11,6 +11,9 @@ param controllerAuthorizedUntilUtc string
 @minLength(64)
 @maxLength(64)
 param cleanupScriptSha256 string
+@minLength(64)
+@maxLength(64)
+param retentionAbsenceEvidenceSha256 string
 
 var controllerTags = {
   'mobius.milestone': '7.8'
@@ -19,6 +22,7 @@ var controllerTags = {
   'mobius.subscription-correlation': subscriptionCorrelation
   'mobius.controller-authorized-until-utc': controllerAuthorizedUntilUtc
   'mobius.cleanup-script-sha256': cleanupScriptSha256
+  'mobius.retention-absence-sha256': retentionAbsenceEvidenceSha256
 }
 
 resource controllerResourceGroup 'Microsoft.Resources/resourceGroups@2024-11-01' = {
@@ -63,3 +67,4 @@ output readerRoleAssignmentId string = controllerReaderAssignment.outputs.roleAs
 output controllerLocation string = controllerLocation
 output controllerAuthorizedUntilUtc string = controllerAuthorizedUntilUtc
 output cleanupScriptSha256 string = cleanupScriptSha256
+output retentionAbsenceEvidenceSha256 string = retentionAbsenceEvidenceSha256

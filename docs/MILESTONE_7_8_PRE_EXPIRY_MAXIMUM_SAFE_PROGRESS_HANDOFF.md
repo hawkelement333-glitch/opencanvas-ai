@@ -13,6 +13,9 @@ account remains present; Milestone 7.8 remains incomplete
 > `architecture-corrected-live-execution-not-authorized`. No Azure operation
 > established live operability. See the
 > [cleanup-controller architecture correction handoff](MILESTONE_7_8_CLEANUP_CONTROLLER_ARCHITECTURE_CORRECTION_HANDOFF.md).
+> A 2026-08-27 local follow-up now also binds the eventual exact M78-PG-012
+> absence artifact to controller and campaign admission. No absence check,
+> Azure operation, controller action, or campaign occurred in that correction.
 
 ## Authoritative boundary
 
@@ -143,9 +146,10 @@ current-state evidence.
 
 ## Remaining gates
 
-1. At or after the boundary, prove exact absence with the command below.
-2. Correct or replace the structurally non-armable Automation cleanup
-   controller under separate architecture and Azure authorization.
+1. At or after the boundary, prove exact absence with the command below and
+   preserve its strict sanitized output as the admission artifact.
+2. Under separate Azure authorization, bootstrap or adopt the locally corrected
+   stable Automation controller using that exact artifact binding.
 3. Separately authorize and execute managed PostgreSQL evidence for
    M78-PG-E01/E02/E03, M78-TI-E01, and M78-PG-E04.
 4. Separately authorize current managed-provider proofs for object/scanner,

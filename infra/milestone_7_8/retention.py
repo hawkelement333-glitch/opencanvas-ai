@@ -26,6 +26,50 @@ SUBSCRIPTION_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
+ABSENCE_EVIDENCE_VERSION = "m7.8-retained-automation-absence-verification-v2"
+MANAGED_EVIDENCE_CLASS = "managed-provider-get-only"
+SYNTHETIC_EVIDENCE_CLASS = "synthetic-test-fixture"
+AUTHORITATIVE_DELETION_TIME_UTC = "2026-08-15T01:09:46.307Z"
+EXPECTED_REMOVAL_BOUNDARY_UTC = "2026-09-14T01:09:46.307Z"
+RETENTION_CAMPAIGN_CORRELATION = "07e350df451c6bec"
+RETENTION_GENERATION_CORRELATION = "599df8555c0781d9"
+RETENTION_REGION = "southeastasia"
+RETENTION_TARGET_IDENTITY_SHA256 = (
+    "70802f6e1464afc66bde5466f7b9f3b36892af96eb5de74e6a6560b717e123fc"
+)
+RETENTION_UNRELATED_IDENTITY_SHA256 = (
+    "695cbab9b5f3c9c685d3060788b4e3c203322ccc34042f7502e60e9c37925359",
+    "7784599e8675788d8affdbb71f6dbc6f6ae0780ef5898351eeb424298c4ee9e0",
+    "8296a885b417e20d4e0b1ce649a7c7abf94576102b25d159bcd71adfe7add046",
+    "e0d171a6cdad7ca8d6de4c8f6c2df640ff5cce098071838576b5af934aa85e1f",
+)
+ABSENCE_EVIDENCE_FIELDS = {
+    "version",
+    "evidenceClass",
+    "status",
+    "subscriptionCorrelation",
+    "campaignCorrelation",
+    "generationCorrelation",
+    "region",
+    "observedAtUtc",
+    "authoritativeDeletionTimeUtc",
+    "expectedRemovalBoundaryUtc",
+    "providerReportedDeletionTime",
+    "deletionTimeInterpretation",
+    "paginationComplete",
+    "deletedInventoryPages",
+    "deletedAccountCount",
+    "targetCandidates",
+    "unrelatedDeletedAccountCount",
+    "campaignDeletedIdentitySha256",
+    "legacyCampaignIdentityHashMatch",
+    "unrelatedDeletedIdentitySha256",
+    "legacyUnrelatedIdentityHashMatch",
+    "azureGetOperations",
+    "azureMutationCount",
+    "repositoryMutationCount",
+    "supportTicketOperationCount",
+}
 
 
 class RetentionVerificationError(RuntimeError):
@@ -67,6 +111,15 @@ class DeletedAccountRecord:
     deletion_time: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class RetentionAbsenceBinding:
+    evidence_sha256: str
+    evidence_class: str
+    observed_at_utc: str
+    subscription_correlation: str
+    document: dict[str, object]
+
+
 def _require_dict(value: object, code: str) -> dict[str, object]:
     if not isinstance(value, dict):
         raise RetentionVerificationError(code)
@@ -100,14 +153,88 @@ def _parse_instant(value: str, code: str) -> datetime:
 
 
 def _utc_text(value: datetime) -> str:
-    return value.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return (
+        value.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    )
+
+
+def _correlation(value: str, *, domain: str) -> str:
+    return hashlib.sha256(f"m7.8/{domain}\0{value}".encode()).hexdigest()[:16]
+
+
+def retention_absence_evidence_sha256(value: dict[str, object]) -> str:
+    encoded = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(b"m7.8/retention-absence-evidence/v2\0" + encoded).hexdigest()
+
+
+def validate_retention_absence_evidence(
+    path: Path,
+    *,
+    subscription_correlation: str,
+    allow_synthetic: bool,
+) -> RetentionAbsenceBinding:
+    value = _load_json(path, "retention-absence-evidence-invalid")
+    unrelated = value.get("unrelatedDeletedIdentitySha256")
+    observed_at = value.get("observedAtUtc")
+    evidence_class = value.get("evidenceClass")
+    if (
+        set(value) != ABSENCE_EVIDENCE_FIELDS
+        or CORRELATION_PATTERN.fullmatch(subscription_correlation) is None
+        or value.get("version") != ABSENCE_EVIDENCE_VERSION
+        or evidence_class not in {MANAGED_EVIDENCE_CLASS, SYNTHETIC_EVIDENCE_CLASS}
+        or (not allow_synthetic and evidence_class != MANAGED_EVIDENCE_CLASS)
+        or value.get("status") != "retained-account-absent"
+        or value.get("subscriptionCorrelation") != subscription_correlation
+        or value.get("campaignCorrelation") != RETENTION_CAMPAIGN_CORRELATION
+        or value.get("generationCorrelation") != RETENTION_GENERATION_CORRELATION
+        or value.get("region") != RETENTION_REGION
+        or not isinstance(observed_at, str)
+        or value.get("authoritativeDeletionTimeUtc") != AUTHORITATIVE_DELETION_TIME_UTC
+        or value.get("expectedRemovalBoundaryUtc") != EXPECTED_REMOVAL_BOUNDARY_UTC
+        or value.get("providerReportedDeletionTime") is not None
+        or value.get("deletionTimeInterpretation") is not None
+        or value.get("paginationComplete") is not True
+        or type(value.get("deletedInventoryPages")) is not int
+        or cast(int, value["deletedInventoryPages"]) < 1
+        or value.get("deletedAccountCount") != 4
+        or value.get("targetCandidates") != 0
+        or value.get("unrelatedDeletedAccountCount") != 4
+        or value.get("campaignDeletedIdentitySha256")
+        != RETENTION_TARGET_IDENTITY_SHA256
+        or value.get("legacyCampaignIdentityHashMatch") is not True
+        or not isinstance(unrelated, list)
+        or tuple(unrelated) != RETENTION_UNRELATED_IDENTITY_SHA256
+        or value.get("legacyUnrelatedIdentityHashMatch") is not True
+        or type(value.get("azureGetOperations")) is not int
+        or cast(int, value["azureGetOperations"]) < 2
+        or value.get("azureMutationCount") != 0
+        or value.get("repositoryMutationCount") != 0
+        or value.get("supportTicketOperationCount") != 0
+    ):
+        raise RetentionVerificationError("retention-absence-evidence-not-exact")
+    if _parse_instant(
+        observed_at, "retention-absence-observed-time-invalid"
+    ) < _parse_instant(
+        EXPECTED_REMOVAL_BOUNDARY_UTC,
+        "retention-absence-boundary-invalid",
+    ):
+        raise RetentionVerificationError("retention-absence-observed-before-boundary")
+    return RetentionAbsenceBinding(
+        evidence_sha256=retention_absence_evidence_sha256(value),
+        evidence_class=evidence_class,
+        observed_at_utc=observed_at,
+        subscription_correlation=subscription_correlation,
+        document=value,
+    )
 
 
 def _target_deletion_instant(value: str) -> tuple[datetime, str]:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
-        raise RetentionVerificationError("retention-target-deletion-time-invalid") from exc
+        raise RetentionVerificationError(
+            "retention-target-deletion-time-invalid"
+        ) from exc
     if parsed.tzinfo is None:
         return (
             parsed.replace(tzinfo=timezone(timedelta(hours=-5))).astimezone(UTC),
@@ -130,7 +257,9 @@ def load_contract(
     account_name = _require_string(
         runtime.get("automationAccountName"), "retention-runtime-account-invalid"
     ).casefold()
-    region = _require_string(runtime.get("cleanupRegion"), "retention-runtime-region-invalid")
+    region = _require_string(
+        runtime.get("cleanupRegion"), "retention-runtime-region-invalid"
+    )
     if (
         SUBSCRIPTION_PATTERN.fullmatch(subscription_id) is None
         or ACCOUNT_NAME_PATTERN.fullmatch(account_name) is None
@@ -141,7 +270,8 @@ def load_contract(
         evidence.get("campaignCorrelation"), "retention-campaign-correlation-invalid"
     )
     generation_correlation = _require_string(
-        evidence.get("generationCorrelation"), "retention-generation-correlation-invalid"
+        evidence.get("generationCorrelation"),
+        "retention-generation-correlation-invalid",
     )
     identity_hash = _require_string(
         evidence.get("campaignDeletedIdentitySha256"), "retention-target-hash-invalid"
@@ -169,8 +299,12 @@ def load_contract(
         or len(set(unrelated_value)) != 4
     ):
         raise RetentionVerificationError("retention-evidence-binding-invalid")
-    inventories = _require_dict(evidence.get("inventories"), "retention-evidence-inventory-invalid")
-    deleted = _require_dict(inventories.get("deleted"), "retention-evidence-inventory-invalid")
+    inventories = _require_dict(
+        evidence.get("inventories"), "retention-evidence-inventory-invalid"
+    )
+    deleted = _require_dict(
+        inventories.get("deleted"), "retention-evidence-inventory-invalid"
+    )
     if (
         deleted.get("afterTotalCount") != 5
         or deleted.get("afterCampaignCount") != 1
@@ -243,8 +377,12 @@ def _validate_arm_id(
 
 def _record(value: object, contract: RetentionContract) -> DeletedAccountRecord:
     item = _require_dict(value, "retention-record-invalid")
-    properties = _require_dict(_ci_get(item, "properties"), "retention-record-properties-invalid")
-    name = _require_string(_ci_get(item, "name"), "retention-record-name-invalid").casefold()
+    properties = _require_dict(
+        _ci_get(item, "properties"), "retention-record-properties-invalid"
+    )
+    name = _require_string(
+        _ci_get(item, "name"), "retention-record-name-invalid"
+    ).casefold()
     if ACCOUNT_NAME_PATTERN.fullmatch(name) is None:
         raise RetentionVerificationError("retention-record-name-invalid")
     deleted_id = _validate_arm_id(
@@ -272,7 +410,9 @@ def _record(value: object, contract: RetentionContract) -> DeletedAccountRecord:
         raise RetentionVerificationError("retention-deletion-time-conflict")
     if deletion_time_value is None:
         deletion_time_value = deleted_time_value
-    deletion_time = deletion_time_value if isinstance(deletion_time_value, str) else None
+    deletion_time = (
+        deletion_time_value if isinstance(deletion_time_value, str) else None
+    )
     return DeletedAccountRecord(
         name=name,
         location=_normalized_region(location_value),
@@ -332,14 +472,25 @@ class RetentionVerifier:
             result = self.runner.run(arguments, timeout=120)
         except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
             raise RetentionVerificationError(code) from exc
-        if result.returncode != 0 or len(result.stdout.encode("utf-8")) > MAX_RESPONSE_BYTES:
+        if (
+            result.returncode != 0
+            or len(result.stdout.encode("utf-8")) > MAX_RESPONSE_BYTES
+        ):
             raise RetentionVerificationError(code)
         self.azure_get_operations += 1
         return result.stdout
 
     def _verify_subscription(self, contract: RetentionContract) -> None:
         observed = self._run(
-            ("account", "show", "--query", "id", "--output", "tsv", "--only-show-errors"),
+            (
+                "account",
+                "show",
+                "--query",
+                "id",
+                "--output",
+                "tsv",
+                "--only-show-errors",
+            ),
             "retention-subscription-read-failed",
         ).strip()
         if observed.casefold() != contract.subscription_id:
@@ -347,15 +498,30 @@ class RetentionVerifier:
 
     def _page(self, url: str) -> dict[str, object]:
         raw = self._run(
-            ("rest", "--method", "get", "--url", url, "--output", "json", "--only-show-errors"),
+            (
+                "rest",
+                "--method",
+                "get",
+                "--url",
+                url,
+                "--output",
+                "json",
+                "--only-show-errors",
+            ),
             "retention-deleted-inventory-read-failed",
         )
         try:
-            return _require_dict(json.loads(raw), "retention-deleted-inventory-malformed")
+            return _require_dict(
+                json.loads(raw), "retention-deleted-inventory-malformed"
+            )
         except json.JSONDecodeError as exc:
-            raise RetentionVerificationError("retention-deleted-inventory-malformed") from exc
+            raise RetentionVerificationError(
+                "retention-deleted-inventory-malformed"
+            ) from exc
 
-    def _inventory(self, contract: RetentionContract) -> tuple[list[DeletedAccountRecord], int]:
+    def _inventory(
+        self, contract: RetentionContract
+    ) -> tuple[list[DeletedAccountRecord], int]:
         url = (
             f"https://{MANAGEMENT_HOST}/subscriptions/{contract.subscription_id}/providers/"
             f"Microsoft.Automation/deletedAutomationAccounts?api-version={API_VERSION}"
@@ -371,7 +537,9 @@ class RetentionVerifier:
             page = self._page(url)
             page_values = page.get("value")
             if not isinstance(page_values, list):
-                raise RetentionVerificationError("retention-deleted-inventory-malformed")
+                raise RetentionVerificationError(
+                    "retention-deleted-inventory-malformed"
+                )
             values.extend(page_values)
             pages += 1
             next_link = page.get("nextLink")
@@ -405,16 +573,21 @@ class RetentionVerifier:
         target_by_hash = [
             record
             for record in records
-            if _target_hash(record.original_resource_id) == contract.campaign_identity_sha256
+            if _target_hash(record.original_resource_id)
+            == contract.campaign_identity_sha256
         ]
-        target_by_name = [record for record in records if record.name == contract.account_name]
+        target_by_name = [
+            record for record in records if record.name == contract.account_name
+        ]
         if len(target_by_hash) > 1 or len(target_by_name) > 1:
             raise RetentionVerificationError("retention-target-not-unique")
         binding_matches = {record.deleted_record_id for record in target_by_hash} == {
             record.deleted_record_id for record in target_by_name
         }
         if not binding_matches and not (
-            reconcile_legacy_binding and len(target_by_hash) == 0 and len(target_by_name) == 1
+            reconcile_legacy_binding
+            and len(target_by_hash) == 0
+            and len(target_by_name) == 1
         ):
             raise RetentionVerificationError("retention-target-attribution-conflict")
         targets = target_by_name if reconcile_legacy_binding else target_by_hash
@@ -441,24 +614,36 @@ class RetentionVerifier:
             if target.location != contract.region:
                 raise RetentionVerificationError("retention-target-location-mismatch")
             if target.deletion_time is None:
-                raise RetentionVerificationError("retention-target-deletion-time-invalid")
-            observed_deletion_time, deletion_time_interpretation = _target_deletion_instant(
-                target.deletion_time
+                raise RetentionVerificationError(
+                    "retention-target-deletion-time-invalid"
+                )
+            observed_deletion_time, deletion_time_interpretation = (
+                _target_deletion_instant(target.deletion_time)
             )
             if observed_deletion_time != contract.authoritative_deletion_time:
-                raise RetentionVerificationError("retention-target-deletion-time-mismatch")
+                raise RetentionVerificationError(
+                    "retention-target-deletion-time-mismatch"
+                )
             provider_reported_deletion_time = target.deletion_time
             corrected_identity_hash = _target_hash(target.original_resource_id)
         return {
-            "version": "m7.8-retained-automation-absence-verification-v1",
+            "version": ABSENCE_EVIDENCE_VERSION,
+            "evidenceClass": MANAGED_EVIDENCE_CLASS,
             "status": "provider-retained" if targets else "retained-account-absent",
+            "subscriptionCorrelation": _correlation(
+                contract.subscription_id, domain="subscription"
+            ),
             "campaignCorrelation": contract.campaign_correlation,
             "generationCorrelation": contract.generation_correlation,
+            "region": contract.region,
             "observedAtUtc": _utc_text(observed_at),
-            "authoritativeDeletionTimeUtc": _utc_text(contract.authoritative_deletion_time),
+            "authoritativeDeletionTimeUtc": _utc_text(
+                contract.authoritative_deletion_time
+            ),
             "expectedRemovalBoundaryUtc": _utc_text(contract.expected_removal_boundary),
             "providerReportedDeletionTime": provider_reported_deletion_time,
             "deletionTimeInterpretation": deletion_time_interpretation,
+            "paginationComplete": True,
             "deletedInventoryPages": pages,
             "deletedAccountCount": len(records),
             "targetCandidates": len(targets),

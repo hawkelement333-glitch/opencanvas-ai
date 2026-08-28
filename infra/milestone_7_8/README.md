@@ -24,8 +24,8 @@ existence.
   or delete an Automation account, controller group, or runbook.
 - `modules/` contains the campaign resources, identities, cleanup controller,
   and exact-scope cleanup role assignments.
-- `schemas/` closes the configuration, private runtime, cleanup-region
-  selection receipt, principal manifest,
+- `schemas/` closes the strict retention-absence admission artifact,
+  configuration, private runtime, cleanup-region selection receipt, principal manifest,
   control-plane evidence, image admission, managed execution receipt, restart
   ledger, and zero-residue terminal receipt shapes.
 - `prepare.py` creates one untracked `.runtime/milestone_7_8` generation from a
@@ -38,7 +38,10 @@ existence.
   separately bound through every campaign artifact. Provider support,
   subscription-offer eligibility, enforced location policy, active occupancy,
   and discoverable soft-deleted occupancy are independent mandatory gates;
-  discovery failure has no provider-only fallback.
+  discovery failure has no provider-only fallback. It first validates and
+  copies one strict post-boundary absence artifact; its canonical hash is bound
+  through selection, controller, campaign, runtime, parameters, authorization,
+  cleanup authority, ledger, and terminal receipt.
 - `operator.py` is dry-run by default. `--execute` advances one validated,
   persisted phase at a time and starts cleanup after any failure following
   scope creation. Every live phase requires a separate exact expiring execution
@@ -46,7 +49,8 @@ existence.
   `cleanup`. Preparation refuses a bundle until the exact stable controller
   identity and authority are adoptable; `capacity-check` then proves its
   permanent Reader grant, published content, and empty schedule/binding
-  inventories before `scope-create`.
+  inventories before `scope-create`. Live execution revalidates the copied
+  absence artifact and rejects synthetic fixture evidence.
 - `azure_cli.py` is the sole Azure CLI process boundary. It prefers a native
   launcher, safely supports trusted Windows `az.cmd`/`az.bat` launchers through
   the absolute system `cmd.exe` with `shell=False`, rejects repository-local or
@@ -138,9 +142,10 @@ expected boundary is `2026-09-14T01:09:46.307Z`. At or after that instant, run:
 
 Success requires exit 0, `status=retained-account-absent`, exactly four deleted
 records, zero target candidates, all four unrelated hashes unchanged, complete
-pagination, and `azureMutationCount=0`. Any mismatch fails closed. This check
-proves only absence of the prior target. It does not authorize a campaign or
-make the Automation cleanup architecture armable.
+pagination, and `azureMutationCount=0`. Preserve the sanitized JSON output as
+the separately reviewed admission artifact. Any mismatch fails closed. This
+check proves only absence of the prior target. It does not authorize controller
+bootstrap, deployment, arming, a campaign, or any other Azure operation.
 
 ## Current boundary
 
@@ -168,7 +173,9 @@ The reported local state is
 `architecture-corrected-live-execution-not-authorized`. M78-PG-012 corrects the
 sanitized identity binding and adds the deterministic post-boundary absence
 verifier; it does not remove the current record or prove the corrected
-controller live. The exact retained private
+controller live. M78-PG-013 now binds the eventual exact absence artifact into
+every executable cleanup-admission surface and rejects synthetic evidence at
+live entry. No passing managed-provider absence artifact exists yet. The exact retained private
 runtime remains ignored and preserved. M78-PG-E01, M78-PG-E02, M78-PG-E03,
 M78-TI-E01, and M78-PG-E04 remain open. No new campaign is authorized, and
 Milestone 7.8 remains incomplete. The local object-storage audit has now found

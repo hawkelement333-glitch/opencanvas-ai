@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:operator-runtime:v5",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:operator-runtime:v6",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -22,6 +22,10 @@
     "cleanupOfferEligibleRegions",
     "cleanupOfferEligibilitySource",
     "cleanupOfferEligibilitySha256",
+    "retentionAbsenceEvidenceSha256",
+    "retentionAbsenceEvidenceClass",
+    "retentionAbsenceObservedAtUtc",
+    "retentionAbsenceEvidenceFile",
     "cleanupRegionSelectionFile",
     "cleanupDeploymentName",
     "campaignDeploymentName",
@@ -94,6 +98,18 @@
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
+    "retentionAbsenceEvidenceSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "retentionAbsenceEvidenceClass": {
+      "enum": ["managed-provider-get-only", "synthetic-test-fixture"]
+    },
+    "retentionAbsenceObservedAtUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "retentionAbsenceEvidenceFile": { "type": "string", "minLength": 1 },
     "cleanupRegionSelectionFile": { "type": "string", "minLength": 1 },
     "cleanupDeploymentName": { "type": "string", "minLength": 1 },
     "campaignDeploymentName": { "type": "string", "minLength": 1 },

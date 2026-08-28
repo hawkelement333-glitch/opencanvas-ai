@@ -19,6 +19,9 @@ param cleanupOfferEligibilityDisposition string
 param cleanupOfferEligibleRegions string
 param cleanupOfferEligibilitySource string
 param cleanupOfferEligibilitySha256 string
+@minLength(64)
+@maxLength(64)
+param retentionAbsenceEvidenceSha256 string
 param cleanupResourceGroupName string
 param cleanupAutomationAccountName string
 param tenantId string
@@ -105,6 +108,7 @@ module campaign './modules/campaign-resources.bicep' = {
     cleanupOfferEligibleRegions: cleanupOfferEligibleRegions
     cleanupOfferEligibilitySource: cleanupOfferEligibilitySource
     cleanupOfferEligibilitySha256: cleanupOfferEligibilitySha256
+    retentionAbsenceEvidenceSha256: retentionAbsenceEvidenceSha256
     cleanupResourceGroupName: cleanupResourceGroupName
     tenantId: tenantId
     postgresServerName: postgresServerName

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import re
 import subprocess
@@ -8,7 +9,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 from infra.milestone_7_8 import retention
 
 SUBSCRIPTION = "11111111-2222-3333-4444-555555555555"
@@ -134,6 +134,40 @@ def _contract(tmp_path: Path) -> tuple[retention.RetentionContract, list[dict[st
     )
 
 
+def _absence_document(
+    *,
+    subscription_correlation: str = "a" * 16,
+    evidence_class: str = retention.MANAGED_EVIDENCE_CLASS,
+) -> dict[str, object]:
+    return {
+        "version": retention.ABSENCE_EVIDENCE_VERSION,
+        "evidenceClass": evidence_class,
+        "status": "retained-account-absent",
+        "subscriptionCorrelation": subscription_correlation,
+        "campaignCorrelation": retention.RETENTION_CAMPAIGN_CORRELATION,
+        "generationCorrelation": retention.RETENTION_GENERATION_CORRELATION,
+        "region": retention.RETENTION_REGION,
+        "observedAtUtc": retention.EXPECTED_REMOVAL_BOUNDARY_UTC,
+        "authoritativeDeletionTimeUtc": (retention.AUTHORITATIVE_DELETION_TIME_UTC),
+        "expectedRemovalBoundaryUtc": retention.EXPECTED_REMOVAL_BOUNDARY_UTC,
+        "providerReportedDeletionTime": None,
+        "deletionTimeInterpretation": None,
+        "paginationComplete": True,
+        "deletedInventoryPages": 1,
+        "deletedAccountCount": 4,
+        "targetCandidates": 0,
+        "unrelatedDeletedAccountCount": 4,
+        "campaignDeletedIdentitySha256": (retention.RETENTION_TARGET_IDENTITY_SHA256),
+        "legacyCampaignIdentityHashMatch": True,
+        "unrelatedDeletedIdentitySha256": list(retention.RETENTION_UNRELATED_IDENTITY_SHA256),
+        "legacyUnrelatedIdentityHashMatch": True,
+        "azureGetOperations": 2,
+        "azureMutationCount": 0,
+        "repositoryMutationCount": 0,
+        "supportTicketOperationCount": 0,
+    }
+
+
 def _first_url() -> str:
     return (
         f"https://management.azure.com/subscriptions/{SUBSCRIPTION}/providers/"
@@ -160,15 +194,19 @@ def test_presence_reconciliation_follows_pagination_and_returns_only_sanitized_c
     result = verifier.verify(contract, expect="present")
 
     assert result == {
-        "version": "m7.8-retained-automation-absence-verification-v1",
+        "version": "m7.8-retained-automation-absence-verification-v2",
+        "evidenceClass": "managed-provider-get-only",
         "status": "provider-retained",
+        "subscriptionCorrelation": retention._correlation(SUBSCRIPTION, domain="subscription"),
         "campaignCorrelation": "0123456789abcdef",
         "generationCorrelation": "fedcba9876543210",
+        "region": REGION,
         "observedAtUtc": "2026-08-18T00:00:00.000Z",
         "authoritativeDeletionTimeUtc": DELETION_TIME,
         "expectedRemovalBoundaryUtc": "2026-09-14T01:09:46.307Z",
         "providerReportedDeletionTime": DELETION_TIME,
         "deletionTimeInterpretation": "provider-rfc3339-instant",
+        "paginationComplete": True,
         "deletedInventoryPages": 2,
         "deletedAccountCount": 5,
         "targetCandidates": 1,
@@ -209,6 +247,92 @@ def test_post_boundary_absence_accepts_only_the_same_four_unrelated_records(
     assert result["deletedAccountCount"] == 4
     assert result["targetCandidates"] == 0
     assert result["azureGetOperations"] == 2
+
+
+def test_exact_absence_artifact_is_canonical_and_live_admissible(tmp_path: Path) -> None:
+    value = _absence_document()
+    path = tmp_path / "retention-absence.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    first = retention.validate_retention_absence_evidence(
+        path,
+        subscription_correlation="a" * 16,
+        allow_synthetic=False,
+    )
+    second = retention.validate_retention_absence_evidence(
+        path,
+        subscription_correlation="a" * 16,
+        allow_synthetic=False,
+    )
+
+    assert first.evidence_sha256 == second.evidence_sha256
+    assert first.document == value
+    assert first.evidence_class == retention.MANAGED_EVIDENCE_CLASS
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    [
+        (lambda value: value.pop("status"), "not-exact"),
+        (lambda value: value.update(status="provider-retained"), "not-exact"),
+        (
+            lambda value: value.update(observedAtUtc="2026-09-14T01:09:46.306Z"),
+            "observed-before-boundary",
+        ),
+        (lambda value: value.update(subscriptionCorrelation="b" * 16), "not-exact"),
+        (lambda value: value.update(campaignCorrelation="b" * 16), "not-exact"),
+        (lambda value: value.update(generationCorrelation="b" * 16), "not-exact"),
+        (lambda value: value.update(region="westus"), "not-exact"),
+        (lambda value: value.update(paginationComplete=False), "not-exact"),
+        (lambda value: value.update(targetCandidates=1), "not-exact"),
+        (lambda value: value.update(azureMutationCount=1), "not-exact"),
+        (
+            lambda value: value.update(campaignDeletedIdentitySha256="0" * 64),
+            "not-exact",
+        ),
+        (
+            lambda value: value.update(unrelatedDeletedIdentitySha256=[]),
+            "not-exact",
+        ),
+        (lambda value: value.update(unexpected=True), "not-exact"),
+    ],
+)
+def test_absence_admission_rejects_incomplete_drifted_or_unsafe_evidence(
+    tmp_path: Path,
+    mutation: Callable[[dict[str, object]], object],
+    error: str,
+) -> None:
+    value = _absence_document()
+    mutation(value)
+    path = tmp_path / "retention-absence.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    with pytest.raises(retention.RetentionVerificationError, match=error):
+        retention.validate_retention_absence_evidence(
+            path,
+            subscription_correlation="a" * 16,
+            allow_synthetic=False,
+        )
+
+
+def test_synthetic_absence_can_prepare_but_cannot_authorize_live_execution(
+    tmp_path: Path,
+) -> None:
+    value = _absence_document(evidence_class=retention.SYNTHETIC_EVIDENCE_CLASS)
+    path = tmp_path / "retention-absence.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    retention.validate_retention_absence_evidence(
+        path,
+        subscription_correlation="a" * 16,
+        allow_synthetic=True,
+    )
+    with pytest.raises(retention.RetentionVerificationError, match="not-exact"):
+        retention.validate_retention_absence_evidence(
+            path,
+            subscription_correlation="a" * 16,
+            allow_synthetic=False,
+        )
 
 
 def test_provider_deleted_time_alias_is_normalized_for_the_target(tmp_path: Path) -> None:
@@ -429,9 +553,29 @@ def test_contract_loader_rejects_incomplete_retained_inventory(tmp_path: Path) -
 
 def test_production_module_contains_no_azure_mutation_verb() -> None:
     source = Path(retention.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    rest_methods: list[tuple[object, ...]] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "_run"
+            and node.args
+            and isinstance(node.args[0], ast.Tuple)
+            and len(node.args[0].elts) >= 3
+        ):
+            prefix = tuple(
+                item.value if isinstance(item, ast.Constant) else None
+                for item in node.args[0].elts[:3]
+            )
+            if prefix[:1] == ("rest",):
+                rest_methods.append(prefix)
 
-    assert '("rest", "--method", "get"' in source
-    assert '"--method", "put"' not in source.casefold()
-    assert '"--method", "patch"' not in source.casefold()
-    assert '"--method", "post"' not in source.casefold()
-    assert '"--method", "delete"' not in source.casefold()
+    assert rest_methods
+    assert all(method == ("rest", "--method", "get") for method in rest_methods)
+    tokens = {
+        node.value.casefold()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    assert {"put", "patch", "post", "delete"}.isdisjoint(tokens)

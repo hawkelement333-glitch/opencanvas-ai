@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:controller-execution-authorization:v1",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:controller-execution-authorization:v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,11 +14,12 @@
     "controllerResourceGroupName",
     "automationAccountName",
     "controllerAuthorizedUntilUtc",
+    "retentionAbsenceEvidenceSha256",
     "expiresAtUtc",
     "authorizationSha256"
   ],
   "properties": {
-    "version": { "const": "m7.8-controller-execution-authorization-v1" },
+    "version": { "const": "m7.8-controller-execution-authorization-v2" },
     "disposition": { "const": "separately-authorized-controller-execution" },
     "operation": { "enum": ["controller-bootstrap", "controller-verify"] },
     "subscriptionCorrelation": {
@@ -40,6 +41,10 @@
       "pattern": "^aa-m78-controller-[a-f0-9]{10}$"
     },
     "controllerAuthorizedUntilUtc": { "type": "string", "format": "date-time" },
+    "retentionAbsenceEvidenceSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "expiresAtUtc": { "type": "string", "format": "date-time" },
     "authorizationSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
   }

@@ -26,6 +26,9 @@ param cleanupOfferEligibilitySource string
 @minLength(64)
 @maxLength(64)
 param cleanupOfferEligibilitySha256 string
+@minLength(64)
+@maxLength(64)
+param retentionAbsenceEvidenceSha256 string
 param cleanupDeadlineUtc string
 param cleanupAuthorityExpiresUtc string
 param automationAccountName string
@@ -114,6 +117,7 @@ output cleanupOfferEligibilityDisposition string = cleanupOfferEligibilityDispos
 output cleanupOfferEligibleRegions string = cleanupOfferEligibleRegions
 output cleanupOfferEligibilitySource string = cleanupOfferEligibilitySource
 output cleanupOfferEligibilitySha256 string = cleanupOfferEligibilitySha256
+output retentionAbsenceEvidenceSha256 string = retentionAbsenceEvidenceSha256
 output cleanupDeadlineUtc string = cleanupDeadlineUtc
 output cleanupAuthorityExpiresUtc string = cleanupAuthorityExpiresUtc
 output costCeilingCents int = costCeilingCents

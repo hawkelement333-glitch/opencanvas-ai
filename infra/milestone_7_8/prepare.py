@@ -29,6 +29,10 @@ from infra.milestone_7_8.cleanup_controller import (
     controller_binding_sha256,
     controller_names,
 )
+from infra.milestone_7_8.retention import (
+    RetentionVerificationError,
+    validate_retention_absence_evidence,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
@@ -73,6 +77,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=Path(".runtime/milestone_7_8"))
     parser.add_argument("--target-region", default="centralus")
     parser.add_argument("--postgres-region", default="centralus")
+    parser.add_argument("--retention-absence-evidence", type=Path, required=True)
     args = parser.parse_args()
     try:
         if CAMPAIGN_PATTERN.fullmatch(args.campaign_id) is None:
@@ -113,6 +118,11 @@ def main() -> int:
                 "runtime subscription or tenant binding is missing"
             ) from exc
         subscription_correlation = sanitize(subscription_id, domain="subscription")
+        retention = validate_retention_absence_evidence(
+            args.retention_absence_evidence,
+            subscription_correlation=subscription_correlation,
+            allow_synthetic=True,
+        )
         names = controller_names(subscription_correlation)
         observed_at = datetime.now(UTC).replace(microsecond=0)
         cleanup_authority_expires = utc(observed_at + timedelta(hours=5))
@@ -124,6 +134,7 @@ def main() -> int:
             controller_account=names.account,
             subscription_correlation=subscription_correlation,
             cleanup_script_sha256=cleanup_script_sha256,
+            retention_absence_evidence_sha256=retention.evidence_sha256,
             controller_required_until_utc=cleanup_authority_expires,
         )
         if region_selection.controller_disposition != "exact-controller-adoptable":
@@ -133,6 +144,11 @@ def main() -> int:
             )
         cleanup_region = region_selection.selected_region
         region_selection_sha256 = region_selection.sha256()
+        if (
+            region_selection.retention_absence_evidence_sha256
+            != retention.evidence_sha256
+        ):
+            raise CampaignError("retention absence region-selection binding differs")
         candidate_regions = ",".join(region_selection.candidate_order)
         if candidate_regions != CLEANUP_CANDIDATE_REGIONS_BINDING:
             raise CampaignError("cleanup candidate region binding differs")
@@ -197,6 +213,7 @@ def main() -> int:
             "mobius.cleanup-offer-eligibility-sha256": (
                 region_selection.offer_eligibility_sha256
             ),
+            "mobius.retention-absence-sha256": retention.evidence_sha256,
             "mobius.owner": "managed-postgresql-evidence",
             "mobius.expiry": deadline,
         }
@@ -206,6 +223,7 @@ def main() -> int:
         cleanup_path = args.output / "cleanup.parameters.json"
         campaign_path = args.output / "campaign.parameters.json"
         region_selection_path = args.output / "cleanup-region-selection.json"
+        retention_path = args.output / "retention-absence-evidence.json"
         ledger_path = args.output / "ledger.json"
         config = {
             "campaignId": args.campaign_id,
@@ -241,6 +259,7 @@ def main() -> int:
             "cleanupOfferEligibilitySha256": (
                 region_selection.offer_eligibility_sha256
             ),
+            "retentionAbsenceEvidenceSha256": retention.evidence_sha256,
             "imageDigest": None,
         }
         cleanup_parameters = _parameters(
@@ -264,6 +283,7 @@ def main() -> int:
                 "cleanupOfferEligibilitySha256": (
                     region_selection.offer_eligibility_sha256
                 ),
+                "retentionAbsenceEvidenceSha256": retention.evidence_sha256,
                 "cleanupDeadlineUtc": deadline,
                 "cleanupAuthorityExpiresUtc": cleanup_authority_expires,
                 "automationAccountName": account,
@@ -295,6 +315,7 @@ def main() -> int:
                 "cleanupOfferEligibilitySha256": (
                     region_selection.offer_eligibility_sha256
                 ),
+                "retentionAbsenceEvidenceSha256": retention.evidence_sha256,
                 "cleanupResourceGroupName": cleanup_rg,
                 "cleanupAutomationAccountName": account,
                 "tenantId": tenant_id,
@@ -340,6 +361,10 @@ def main() -> int:
             "cleanupOfferEligibilitySha256": (
                 region_selection.offer_eligibility_sha256
             ),
+            "retentionAbsenceEvidenceSha256": retention.evidence_sha256,
+            "retentionAbsenceEvidenceClass": retention.evidence_class,
+            "retentionAbsenceObservedAtUtc": retention.observed_at_utc,
+            "retentionAbsenceEvidenceFile": str(retention_path),
             "cleanupRegionSelectionFile": str(region_selection_path),
             "cleanupDeploymentName": f"m78-cleanup-{suffix}",
             "campaignDeploymentName": f"m78-campaign-{suffix}",
@@ -364,6 +389,7 @@ def main() -> int:
             "cleanupParametersFile": str(cleanup_path),
             "campaignParametersFile": str(campaign_path),
         }
+        _write_new(retention_path, retention.document)
         _write_new(region_selection_path, region_selection.document())
         _write_new(config_path, config)
         _write_new(runtime_path, runtime)
@@ -396,6 +422,7 @@ def main() -> int:
                     "cleanupOfferEligibilitySha256": (
                         region_selection.offer_eligibility_sha256
                     ),
+                    "retentionAbsenceEvidenceSha256": retention.evidence_sha256,
                     "config": str(config_path),
                     "runtime": str(runtime_path),
                     "ledger": str(ledger_path),
@@ -405,7 +432,12 @@ def main() -> int:
             )
         )
         return 0
-    except (CampaignError, FileExistsError, OSError) as exc:
+    except (
+        CampaignError,
+        FileExistsError,
+        OSError,
+        RetentionVerificationError,
+    ) as exc:
         print(
             json.dumps({"status": "blocked", "error": str(exc)}, sort_keys=True),
             file=sys.stderr,

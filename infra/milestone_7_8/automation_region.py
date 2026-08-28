@@ -35,7 +35,7 @@ RESTRICTED_OFFER_CLASSIFICATION: Final = "restricted-public-offer"
 UNCLASSIFIED_OFFER_CLASSIFICATION: Final = "unclassified"
 RESTRICTED_OFFER_DISPOSITION: Final = "restricted-offer-metadata-confirmed"
 BASELINE_OFFER_DISPOSITION: Final = "restrictive-public-baseline-applied"
-SELECTION_VERSION: Final = "m7.8-cleanup-region-selection-v4"
+SELECTION_VERSION: Final = "m7.8-cleanup-region-selection-v5"
 REGION_PATTERN: Final = re.compile(r"^[a-z][a-z0-9]{2,31}$")
 DEFINITION_API_VERSION: Final = "2023-04-01"
 DELETED_ACCOUNTS_API_VERSION: Final = "2024-10-23"
@@ -88,6 +88,7 @@ class AutomationRegionSelection:
     active_occupancy_sha256: str
     soft_deleted_occupancy_sha256: str
     policy_evidence_sha256: str
+    retention_absence_evidence_sha256: str
     observed_at_utc: str
     candidates: tuple[CandidateEvidence, ...]
 
@@ -136,6 +137,7 @@ class AutomationRegionSelection:
                     self.active_occupancy_sha256,
                     self.soft_deleted_occupancy_sha256,
                     self.policy_evidence_sha256,
+                    self.retention_absence_evidence_sha256,
                 )
             )
         ):
@@ -240,6 +242,7 @@ class AutomationRegionSelection:
             "activeOccupancySha256": self.active_occupancy_sha256,
             "softDeletedOccupancySha256": self.soft_deleted_occupancy_sha256,
             "policyEvidenceSha256": self.policy_evidence_sha256,
+            "retentionAbsenceEvidenceSha256": self.retention_absence_evidence_sha256,
             "observedAtUtc": self.observed_at_utc,
             "candidates": [
                 {
@@ -264,7 +267,7 @@ class AutomationRegionSelection:
         document.pop("observedAtUtc")
         encoded = json.dumps(document, separators=(",", ":"), sort_keys=True).encode()
         return hashlib.sha256(
-            b"m7.8/cleanup-region-selection/v3\0" + encoded
+            b"m7.8/cleanup-region-selection/v4\0" + encoded
         ).hexdigest()
 
 
@@ -288,6 +291,7 @@ def selection_from_document(value: object) -> AutomationRegionSelection:
         "activeOccupancySha256",
         "softDeletedOccupancySha256",
         "policyEvidenceSha256",
+        "retentionAbsenceEvidenceSha256",
         "observedAtUtc",
         "candidates",
     }:
@@ -345,6 +349,9 @@ def selection_from_document(value: object) -> AutomationRegionSelection:
         active_occupancy_sha256=cast(str, value["activeOccupancySha256"]),
         soft_deleted_occupancy_sha256=cast(str, value["softDeletedOccupancySha256"]),
         policy_evidence_sha256=cast(str, value["policyEvidenceSha256"]),
+        retention_absence_evidence_sha256=cast(
+            str, value["retentionAbsenceEvidenceSha256"]
+        ),
         observed_at_utc=cast(str, value["observedAtUtc"]),
         candidates=tuple(candidates),
     )
@@ -480,6 +487,7 @@ def discover_automation_region(
     controller_account: str | None = None,
     subscription_correlation: str | None = None,
     cleanup_script_sha256: str | None = None,
+    retention_absence_evidence_sha256: str | None = None,
     controller_required_until_utc: str | None = None,
 ) -> AutomationRegionSelection:
     results = tuple(
@@ -495,6 +503,7 @@ def discover_automation_region(
         controller_account=controller_account,
         subscription_correlation=subscription_correlation,
         cleanup_script_sha256=cleanup_script_sha256,
+        retention_absence_evidence_sha256=retention_absence_evidence_sha256,
         controller_required_until_utc=controller_required_until_utc,
     )
 
@@ -509,6 +518,7 @@ def select_automation_region_from_results(
     controller_account: str | None = None,
     subscription_correlation: str | None = None,
     cleanup_script_sha256: str | None = None,
+    retention_absence_evidence_sha256: str | None = None,
     controller_required_until_utc: str | None = None,
 ) -> AutomationRegionSelection:
     _validate_candidate_order(candidate_order)
@@ -557,6 +567,7 @@ def select_automation_region_from_results(
         controller_account=controller_account,
         subscription_correlation=subscription_correlation,
         cleanup_script_sha256=cleanup_script_sha256,
+        retention_absence_evidence_sha256=retention_absence_evidence_sha256,
         controller_required_until_utc=controller_required_until_utc,
     )
     active_counts = _location_counts(
@@ -634,6 +645,9 @@ def select_automation_region_from_results(
             "soft-deleted-occupancy", deleted_counts
         ),
         policy_evidence_sha256=policy_evidence_sha256,
+        retention_absence_evidence_sha256=(
+            retention_absence_evidence_sha256 or "0" * 64
+        ),
         observed_at_utc=utc(observed_at or datetime.now(UTC)),
         candidates=tuple(evidence),
     )
@@ -734,6 +748,7 @@ def _adoptable_controller_region(
     controller_account: str | None,
     subscription_correlation: str | None,
     cleanup_script_sha256: str | None,
+    retention_absence_evidence_sha256: str | None,
     controller_required_until_utc: str | None,
 ) -> str | None:
     expected = (
@@ -741,6 +756,7 @@ def _adoptable_controller_region(
         controller_account,
         subscription_correlation,
         cleanup_script_sha256,
+        retention_absence_evidence_sha256,
     )
     if all(value is None for value in expected):
         return None
@@ -755,6 +771,8 @@ def _adoptable_controller_region(
         is None
         or re.fullmatch(r"^[a-f0-9]{16}$", str(subscription_correlation)) is None
         or re.fullmatch(r"^[a-f0-9]{64}$", str(cleanup_script_sha256)) is None
+        or re.fullmatch(r"^[a-f0-9]{64}$", str(retention_absence_evidence_sha256))
+        is None
         or controller_resource_group
         != f"rg-m78-controller-{str(subscription_correlation)[:10]}"
         or controller_account
@@ -782,6 +800,7 @@ def _adoptable_controller_region(
         "mobius.cleanup-controller": "reusable-automation-controller-v1",
         "mobius.subscription-correlation": subscription_correlation,
         "mobius.cleanup-script-sha256": cleanup_script_sha256,
+        "mobius.retention-absence-sha256": retention_absence_evidence_sha256,
     }
     resource_id = match.get("id")
     expected_suffix = (

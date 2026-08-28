@@ -735,8 +735,12 @@ cleanup design was corrected locally to use one stable reusable controller
 outside campaign deletion scope. New campaign preparation requires exact
 adoption, and ordinary cleanup cannot create or delete the controller. The
 state is `architecture-corrected-live-execution-not-authorized`; no live
-controller, arming, provider, or campaign evidence was produced. Managed
-PostgreSQL evidence gaps,
+controller, arming, provider, or campaign evidence was produced.
+The 2026-08-27 local admission correction additionally requires the exact
+post-boundary absence artifact before controller or campaign execution and
+binds its canonical hash through the full cleanup lifecycle. This local rule
+does not constitute the unavailable managed-provider absence proof or Azure
+authorization. Managed PostgreSQL evidence gaps,
 provider object/scanner proof, Managed Redis, live telemetry, managed recovery,
 and current capacity/failure evidence require later, separately authorized
 Azure mutation campaigns. Milestone 8 remains unstarted.

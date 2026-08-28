@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:cleanup-region-selection:v4",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:cleanup-region-selection:v5",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -22,11 +22,12 @@
     "activeOccupancySha256",
     "softDeletedOccupancySha256",
     "policyEvidenceSha256",
+    "retentionAbsenceEvidenceSha256",
     "observedAtUtc",
     "candidates"
   ],
   "properties": {
-    "version": { "const": "m7.8-cleanup-region-selection-v4" },
+    "version": { "const": "m7.8-cleanup-region-selection-v5" },
     "candidateOrder": {
       "const": [
         "eastus2",
@@ -81,6 +82,10 @@
       "pattern": "^[a-f0-9]{64}$"
     },
     "policyEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "retentionAbsenceEvidenceSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "observedAtUtc": { "type": "string", "format": "date-time" },
     "candidates": {
       "type": "array",
