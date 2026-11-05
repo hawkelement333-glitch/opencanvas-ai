@@ -27,6 +27,7 @@ SUBSCRIPTION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ABSENCE_EVIDENCE_VERSION = "m7.8-retained-automation-absence-verification-v2"
+CURRENT_ABSENCE_EVIDENCE_VERSION = "m7.8-retained-automation-absence-verification-v3"
 MANAGED_EVIDENCE_CLASS = "managed-provider-get-only"
 SYNTHETIC_EVIDENCE_CLASS = "synthetic-test-fixture"
 AUTHORITATIVE_DELETION_TIME_UTC = "2026-08-15T01:09:46.307Z"
@@ -162,12 +163,12 @@ def _correlation(value: str, *, domain: str) -> str:
     return hashlib.sha256(f"m7.8/{domain}\0{value}".encode()).hexdigest()[:16]
 
 
-def retention_absence_evidence_sha256(value: dict[str, object]) -> str:
+def retention_absence_evidence_v2_sha256(value: dict[str, object]) -> str:
     encoded = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
     return hashlib.sha256(b"m7.8/retention-absence-evidence/v2\0" + encoded).hexdigest()
 
 
-def validate_retention_absence_evidence(
+def validate_retention_absence_evidence_v2(
     path: Path,
     *,
     subscription_correlation: str,
@@ -220,11 +221,34 @@ def validate_retention_absence_evidence(
     ):
         raise RetentionVerificationError("retention-absence-observed-before-boundary")
     return RetentionAbsenceBinding(
-        evidence_sha256=retention_absence_evidence_sha256(value),
+        evidence_sha256=retention_absence_evidence_v2_sha256(value),
         evidence_class=evidence_class,
         observed_at_utc=observed_at,
         subscription_correlation=subscription_correlation,
         document=value,
+    )
+
+
+def retention_absence_evidence_sha256(value: dict[str, object]) -> str:
+    from infra.milestone_7_8.retention_v3 import evidence_sha256
+
+    return evidence_sha256(value)
+
+
+def validate_retention_absence_evidence(
+    path: Path,
+    *,
+    subscription_correlation: str,
+    subscription_id: str,
+    allow_synthetic: bool,
+) -> RetentionAbsenceBinding:
+    from infra.milestone_7_8.retention_v3 import validate_evidence
+
+    return validate_evidence(
+        path,
+        subscription_id=subscription_id,
+        subscription_correlation=subscription_correlation,
+        allow_synthetic=allow_synthetic,
     )
 
 
@@ -338,6 +362,8 @@ def load_contract(
 
 def _ci_get(value: dict[str, object], name: str) -> object:
     expected = name.casefold()
+    if len({key.casefold() for key in value}) != len(value):
+        raise RetentionVerificationError("retention-record-ambiguous-fields")
     for key, item in value.items():
         if key.casefold() == expected:
             return item
@@ -397,6 +423,18 @@ def _record(value: object, contract: RetentionContract) -> DeletedAccountRecord:
         suffix=f"/automationAccounts/{name}",
         code="retention-original-resource-id-invalid",
     )
+    expected_deleted = (
+        f"/subscriptions/{contract.subscription_id}/providers/"
+        f"microsoft.automation/deletedautomationaccounts/{name}"
+    )
+    if deleted_id != expected_deleted:
+        raise RetentionVerificationError("retention-deleted-record-id-invalid")
+    if re.fullmatch(
+        rf"/subscriptions/{re.escape(contract.subscription_id)}/resourcegroups/"
+        rf"[^/]+/providers/microsoft\.automation/automationaccounts/{re.escape(name)}",
+        original_id,
+    ) is None:
+        raise RetentionVerificationError("retention-original-resource-id-invalid")
     location_value = _ci_get(properties, "location")
     if location_value is None:
         location_value = _ci_get(item, "location")
@@ -560,6 +598,12 @@ class RetentionVerifier:
         expect: str,
         reconcile_legacy_binding: bool = False,
     ) -> dict[str, object]:
+        if expect == "absent":
+            from infra.milestone_7_8.retention_v3 import verify_absence
+
+            if reconcile_legacy_binding:
+                raise RetentionVerificationError("retention-reconciliation-mode-invalid")
+            return verify_absence(self, contract)
         observed_at = self.clock().astimezone(UTC)
         if reconcile_legacy_binding and (
             expect != "present"

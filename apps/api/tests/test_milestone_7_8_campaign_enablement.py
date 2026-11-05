@@ -20,7 +20,7 @@ sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from infra.milestone_7_8 import controller as controller_operator
 from infra.milestone_7_8 import operator as campaign_operator
-from infra.milestone_7_8 import prepare, retention
+from infra.milestone_7_8 import prepare, retention, retention_v3
 from infra.milestone_7_8.automation_region import (
     CLEANUP_CANDIDATE_REGIONS_BINDING,
     CLEANUP_REGION_CANDIDATES,
@@ -86,37 +86,23 @@ def _object_id(value: int) -> str:
 
 
 def _retention_absence_document(
-    subscription_correlation: str,
+    subscription_id: str,
     *,
     evidence_class: str = "synthetic-test-fixture",
 ) -> dict[str, object]:
-    return {
-        "version": retention.ABSENCE_EVIDENCE_VERSION,
-        "evidenceClass": evidence_class,
-        "status": "retained-account-absent",
-        "subscriptionCorrelation": subscription_correlation,
-        "campaignCorrelation": retention.RETENTION_CAMPAIGN_CORRELATION,
-        "generationCorrelation": retention.RETENTION_GENERATION_CORRELATION,
-        "region": retention.RETENTION_REGION,
-        "observedAtUtc": retention.EXPECTED_REMOVAL_BOUNDARY_UTC,
-        "authoritativeDeletionTimeUtc": (retention.AUTHORITATIVE_DELETION_TIME_UTC),
-        "expectedRemovalBoundaryUtc": retention.EXPECTED_REMOVAL_BOUNDARY_UTC,
-        "providerReportedDeletionTime": None,
-        "deletionTimeInterpretation": None,
-        "paginationComplete": True,
-        "deletedInventoryPages": 1,
-        "deletedAccountCount": 4,
-        "targetCandidates": 0,
-        "unrelatedDeletedAccountCount": 4,
-        "campaignDeletedIdentitySha256": (retention.RETENTION_TARGET_IDENTITY_SHA256),
-        "legacyCampaignIdentityHashMatch": True,
-        "unrelatedDeletedIdentitySha256": list(retention.RETENTION_UNRELATED_IDENTITY_SHA256),
-        "legacyUnrelatedIdentityHashMatch": True,
-        "azureGetOperations": 2,
-        "azureMutationCount": 0,
-        "repositoryMutationCount": 0,
-        "supportTicketOperationCount": 0,
-    }
+    endpoint = retention_v3.endpoint(subscription_id)
+    return retention_v3.build_document(
+        subscription_id=subscription_id,
+        observed_at=datetime(2026, 9, 14, 1, 9, 46, 308000, tzinfo=UTC),
+        pages=[
+            {
+                "requestSha256": retention_v3.request_sha256(endpoint),
+                "recordIdentitySha256": list(retention.RETENTION_UNRELATED_IDENTITY_SHA256),
+                "nextRequestSha256": None,
+            }
+        ],
+        evidence_class=evidence_class,
+    )
 
 
 def _manifest(
@@ -583,6 +569,7 @@ def _controller_config() -> ControllerConfig:
         controller_authorized_until_utc="2030-01-02T00:00:00Z",
         cleanup_script_sha256=hashlib.sha256(b"cleanup-content").hexdigest(),
         retention_absence_evidence_sha256="0" * 64,
+        retention_absence_evidence_version=retention.CURRENT_ABSENCE_EVIDENCE_VERSION,
         deployment_name=f"m78-controller-{correlation[:10]}",
     )
 
@@ -606,7 +593,7 @@ def test_separate_controller_bootstrap_is_one_time_and_authorization_gated(
 
     authorization_path = tmp_path / "controller-authorization.json"
     value: dict[str, object] = {
-        "version": "m7.8-controller-execution-authorization-v2",
+        "version": "m7.8-controller-execution-authorization-v3",
         "disposition": "separately-authorized-controller-execution",
         "operation": "controller-bootstrap",
         "subscriptionCorrelation": config.subscription_correlation,
@@ -617,10 +604,11 @@ def test_separate_controller_bootstrap_is_one_time_and_authorization_gated(
         "automationAccountName": config.automation_account_name,
         "controllerAuthorizedUntilUtc": config.controller_authorized_until_utc,
         "retentionAbsenceEvidenceSha256": (config.retention_absence_evidence_sha256),
+        "retentionAbsenceEvidenceVersion": config.retention_absence_evidence_version,
         "expiresAtUtc": "2030-01-01T01:00:00Z",
     }
     value["authorizationSha256"] = hashlib.sha256(
-        b"m7.8/controller-execution-authorization/v2\0"
+        b"m7.8/controller-execution-authorization/v3\0"
         + json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
     authorization_path.write_text(json.dumps(value), encoding="utf-8")
@@ -658,7 +646,7 @@ def test_controller_execute_rejects_missing_or_synthetic_retention_evidence(
 ) -> None:
     config = _controller_config()
     evidence = _retention_absence_document(
-        config.subscription_correlation,
+        config.subscription_id,
         evidence_class=retention.SYNTHETIC_EVIDENCE_CLASS,
     )
     evidence_path = tmp_path / "retention-absence.json"
@@ -681,6 +669,7 @@ def test_controller_execute_rejects_missing_or_synthetic_retention_evidence(
                 "controllerAuthorizedUntilUtc": config.controller_authorized_until_utc,
                 "cleanupScriptSha256": config.cleanup_script_sha256,
                 "retentionAbsenceEvidenceSha256": (config.retention_absence_evidence_sha256),
+                "retentionAbsenceEvidenceVersion": config.retention_absence_evidence_version,
                 "deploymentName": config.deployment_name,
             }
         ),
@@ -737,6 +726,7 @@ def test_controller_baseline_readback_requires_publication_and_empty_bindings() 
         "mobius.controller-authorized-until-utc": (config.controller_authorized_until_utc),
         "mobius.cleanup-script-sha256": config.cleanup_script_sha256,
         "mobius.retention-absence-sha256": (config.retention_absence_evidence_sha256),
+        "mobius.retention-absence-version": config.retention_absence_evidence_version,
     }
     results = [
         _command_result(
@@ -819,6 +809,7 @@ def _runtime() -> dict[str, str]:
         "cleanupOfferEligibilitySource": OFFER_ELIGIBILITY_SOURCE,
         "cleanupOfferEligibilitySha256": "e" * 64,
         "retentionAbsenceEvidenceSha256": "0" * 64,
+        "retentionAbsenceEvidenceVersion": retention.CURRENT_ABSENCE_EVIDENCE_VERSION,
         "retentionAbsenceEvidenceClass": "synthetic-test-fixture",
         "retentionAbsenceObservedAtUtc": "2026-09-14T01:09:46.307Z",
         "retentionAbsenceEvidenceFile": "runtime/retention-absence-evidence.json",
@@ -1273,8 +1264,9 @@ def test_prepare_creates_one_private_restart_safe_bundle(
     output = tmp_path / "runtime"
     monkeypatch.setenv("M78_SUBSCRIPTION_ID", subscription)
     monkeypatch.setenv("M78_TENANT_ID", tenant)
-    subscription_correlation = campaign_operator.sanitize(subscription, domain="subscription")
-    retention_evidence = _retention_absence_document(subscription_correlation)
+    retention_evidence = _retention_absence_document(
+        subscription, evidence_class=retention.MANAGED_EVIDENCE_CLASS
+    )
     retention_path = tmp_path / "retention-absence.json"
     retention_path.write_text(json.dumps(retention_evidence), encoding="utf-8")
     retention_sha256 = retention.retention_absence_evidence_sha256(retention_evidence)
@@ -1388,8 +1380,9 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             "cleanupOfferEligibleRegions",
             "cleanupOfferEligibilitySource",
             "cleanupOfferEligibilitySha256",
-            "retentionAbsenceEvidenceSha256",
-            "retentionAbsenceEvidenceClass",
+                "retentionAbsenceEvidenceSha256",
+                "retentionAbsenceEvidenceVersion",
+                "retentionAbsenceEvidenceClass",
             "retentionAbsenceObservedAtUtc",
             "retentionAbsenceEvidenceFile",
             "cleanupRegionSelectionFile",
@@ -1780,7 +1773,7 @@ def _write_execution_authorization(
     operations: list[str],
 ) -> None:
     value: dict[str, object] = {
-        "version": "m7.8-execution-authorization-v2",
+        "version": "m7.8-execution-authorization-v3",
         "disposition": "separately-authorized-azure-execution",
         "campaignId": config.campaign_id,
         "generationId": config.generation_id,
@@ -1789,12 +1782,13 @@ def _write_execution_authorization(
         "controllerArchitecture": "reusable-automation-controller-v1",
         "controllerBindingSha256": runtime["controllerBindingSha256"],
         "retentionAbsenceEvidenceSha256": (config.retention_absence_evidence_sha256),
+        "retentionAbsenceEvidenceVersion": runtime["retentionAbsenceEvidenceVersion"],
         "cleanupDeadlineUtc": config.cleanup_deadline_utc,
         "expiresAtUtc": expires_at,
         "allowedOperations": operations,
     }
     value["authorizationSha256"] = hashlib.sha256(
-        b"m7.8/execution-authorization/v2\0"
+        b"m7.8/execution-authorization/v3\0"
         + json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
     path.write_text(json.dumps(value), encoding="utf-8")
@@ -1890,17 +1884,24 @@ def test_execution_authorization_is_exact_expiring_and_operation_scoped(
 def test_retention_absence_binding_blocks_synthetic_live_and_cross_bundle_replay(
     tmp_path: Path,
 ) -> None:
-    value = _retention_absence_document("a" * 16)
+    runtime = _runtime()
+    value = _retention_absence_document(runtime["subscriptionId"])
     evidence_path = tmp_path / "retention-absence-evidence.json"
     evidence_path.write_text(json.dumps(value), encoding="utf-8")
     evidence_sha256 = retention.retention_absence_evidence_sha256(value)
-    config = replace(_config(), retention_absence_evidence_sha256=evidence_sha256)
-    runtime = _runtime()
+    config = replace(
+        _config(),
+        subscription_correlation=campaign_operator.sanitize(
+            runtime["subscriptionId"], domain="subscription"
+        ),
+        retention_absence_evidence_sha256=evidence_sha256,
+    )
     runtime.update(
         {
             "retentionAbsenceEvidenceSha256": evidence_sha256,
+            "retentionAbsenceEvidenceVersion": retention.CURRENT_ABSENCE_EVIDENCE_VERSION,
             "retentionAbsenceEvidenceClass": "synthetic-test-fixture",
-            "retentionAbsenceObservedAtUtc": retention.EXPECTED_REMOVAL_BOUNDARY_UTC,
+            "retentionAbsenceObservedAtUtc": str(value["observedAtUtc"]),
             "retentionAbsenceEvidenceFile": str(evidence_path),
         }
     )

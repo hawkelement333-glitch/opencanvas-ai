@@ -106,9 +106,10 @@ def cleanup_authority_sha256(
         "5000",
         runtime["controllerBindingSha256"],
         config.retention_absence_evidence_sha256,
+        runtime["retentionAbsenceEvidenceVersion"],
     )
     return hashlib.sha256(
-        b"m7.8/cleanup-authority/v2\0" + "\0".join(values).encode()
+        b"m7.8/cleanup-authority/v3\0" + "\0".join(values).encode()
     ).hexdigest()
 
 
@@ -141,6 +142,7 @@ def load_execution_authorization(
         "controllerArchitecture",
         "controllerBindingSha256",
         "retentionAbsenceEvidenceSha256",
+        "retentionAbsenceEvidenceVersion",
         "cleanupDeadlineUtc",
         "expiresAtUtc",
         "allowedOperations",
@@ -153,11 +155,11 @@ def load_execution_authorization(
         key: item for key, item in value.items() if key != "authorizationSha256"
     }
     expected_hash = hashlib.sha256(
-        b"m7.8/execution-authorization/v2\0"
+        b"m7.8/execution-authorization/v3\0"
         + json.dumps(unsigned, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
     if (
-        value.get("version") != "m7.8-execution-authorization-v2"
+        value.get("version") != "m7.8-execution-authorization-v3"
         or value.get("disposition") != "separately-authorized-azure-execution"
         or value.get("campaignId") != config.campaign_id
         or value.get("generationId") != config.generation_id
@@ -167,6 +169,8 @@ def load_execution_authorization(
         or value.get("controllerBindingSha256") != runtime["controllerBindingSha256"]
         or value.get("retentionAbsenceEvidenceSha256")
         != config.retention_absence_evidence_sha256
+        or value.get("retentionAbsenceEvidenceVersion")
+        != runtime["retentionAbsenceEvidenceVersion"]
         or value.get("cleanupDeadlineUtc") != config.cleanup_deadline_utc
         or not isinstance(operations, list)
         or not operations

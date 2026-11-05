@@ -41,6 +41,7 @@ from infra.milestone_7_8.cleanup_controller import (
     load_execution_authorization,
 )
 from infra.milestone_7_8.retention import (
+    CURRENT_ABSENCE_EVIDENCE_VERSION,
     RetentionVerificationError,
     validate_retention_absence_evidence,
 )
@@ -97,6 +98,7 @@ RUNTIME_FIELDS = {
     "cleanupOfferEligibilitySource",
     "cleanupOfferEligibilitySha256",
     "retentionAbsenceEvidenceSha256",
+    "retentionAbsenceEvidenceVersion",
     "retentionAbsenceEvidenceClass",
     "retentionAbsenceObservedAtUtc",
     "retentionAbsenceEvidenceFile",
@@ -252,6 +254,7 @@ def load_runtime(path: Path) -> dict[str, str]:
         or re.fullmatch(r"[a-f0-9]{64}", value["controllerBindingSha256"]) is None
         or re.fullmatch(r"[a-f0-9]{64}", value["retentionAbsenceEvidenceSha256"])
         is None
+        or value["retentionAbsenceEvidenceVersion"] != CURRENT_ABSENCE_EVIDENCE_VERSION
         or value["retentionAbsenceEvidenceClass"]
         not in {"managed-provider-get-only", "synthetic-test-fixture"}
         or parse_utc(value["retentionAbsenceObservedAtUtc"])
@@ -305,6 +308,7 @@ def load_bound_retention_absence(
         binding = validate_retention_absence_evidence(
             resolved,
             subscription_correlation=config.subscription_correlation,
+            subscription_id=runtime["subscriptionId"],
             allow_synthetic=allow_synthetic,
         )
     except RetentionVerificationError as exc:
@@ -312,6 +316,8 @@ def load_bound_retention_absence(
     if (
         binding.evidence_sha256 != config.retention_absence_evidence_sha256
         or runtime["retentionAbsenceEvidenceSha256"] != binding.evidence_sha256
+        or runtime["retentionAbsenceEvidenceVersion"]
+        != binding.document.get("version")
         or runtime["retentionAbsenceEvidenceClass"] != binding.evidence_class
         or runtime["retentionAbsenceObservedAtUtc"] != binding.observed_at_utc
     ):
@@ -327,7 +333,7 @@ def validate_prepared_bundle(
         runtime_path,
         runtime,
         config,
-        allow_synthetic=True,
+        allow_synthetic=False,
     )
     if (
         runtime["resourceGroupName"] != config.target_resource_group
@@ -546,6 +552,7 @@ def validate_prepared_bundle(
             config.cleanup_offer_eligibility_sha256
         ),
         "mobius.retention-absence-sha256": (config.retention_absence_evidence_sha256),
+        "mobius.retention-absence-version": runtime["retentionAbsenceEvidenceVersion"],
         "mobius.owner": "managed-postgresql-evidence",
         "mobius.expiry": config.cleanup_deadline_utc,
     }
@@ -584,6 +591,7 @@ def cleanup_job_parameters(
         "CostCeilingCents": "5000",
         "ControllerBindingSha256": runtime["controllerBindingSha256"],
         "RetentionAbsenceEvidenceSha256": (config.retention_absence_evidence_sha256),
+        "RetentionAbsenceEvidenceVersion": runtime["retentionAbsenceEvidenceVersion"],
         "CleanupAuthoritySha256": cleanup_authority_sha256(config, runtime),
         "CleanupAuthorized": "true",
     }

@@ -16,6 +16,12 @@ account remains present; Milestone 7.8 remains incomplete
 > A 2026-08-27 local follow-up now also binds the eventual exact M78-PG-012
 > absence artifact to controller and campaign admission. No absence check,
 > Azure operation, controller action, or campaign occurred in that correction.
+> A later local contract repair supersedes only the v2 exact-four-unrelated
+> current-inventory predicate: current baseline observations are now v3
+> `present-unchanged` or `absent-unattributed`, never an inferred expiration.
+> Exact target absence, full pagination, zero current-only records, and zero
+> mutations remain mandatory. This amendment did not create or preserve a live
+> absence artifact and did not authorize Azure work.
 
 ## Authoritative boundary
 

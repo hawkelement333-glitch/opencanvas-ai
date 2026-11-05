@@ -71,6 +71,17 @@ existence.
   raw resource identifier. Normal absence verification refuses to contact
   Azure before the exact 30-day boundary.
 
+The historical v2 absence format remains available only for audit parsing. Live
+admission uses v3: it proves exact target absence while recording the complete
+current paginated inventory as hashes. Each of the four historical unrelated
+baseline hashes is therefore either `present-unchanged` or
+`absent-unattributed`; v3 does not infer a deletion time or cause for an
+absent baseline record. Unknown, duplicate, colliding, malformed, or
+ambiguous current records fail closed. The inventory page chain, observed
+baseline status set, and current-inventory digest are all included in the
+domain-separated admission digest. A v2 artifact, authorization, or
+controller tag cannot be used at a v3 live entry point.
+
 The target and PostgreSQL regions must match because this campaign uses one
 private VNet. Their default is `centralus`. The independent cleanup region has
 no caller-controlled default: preparation selects and hashes the first viable
@@ -140,12 +151,14 @@ expected boundary is `2026-09-14T01:09:46.307Z`. At or after that instant, run:
   --expect absent
 ```
 
-Success requires exit 0, `status=retained-account-absent`, exactly four deleted
-records, zero target candidates, all four unrelated hashes unchanged, complete
-pagination, and `azureMutationCount=0`. Preserve the sanitized JSON output as
-the separately reviewed admission artifact. Any mismatch fails closed. This
-check proves only absence of the prior target. It does not authorize controller
-bootstrap, deployment, arming, a campaign, or any other Azure operation.
+Success requires exit 0, a v3 `status=retained-account-absent`, zero target
+candidates, a complete paginated inventory, zero current-only records, and
+`azureMutationCount=0`. Each historical unrelated baseline hash must be
+represented exactly once as `present-unchanged` or `absent-unattributed`.
+Preserve only the sanitized JSON output as the separately reviewed admission
+artifact. Any mismatch fails closed. This check proves only absence of the
+prior target; it does not authorize controller bootstrap, deployment, arming,
+a campaign, or any other Azure operation.
 
 ## Current boundary
 

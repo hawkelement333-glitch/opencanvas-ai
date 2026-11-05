@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:controller:v2",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:controller:v3",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,6 +14,7 @@
     "controllerAuthorizedUntilUtc",
     "cleanupScriptSha256",
     "retentionAbsenceEvidenceSha256",
+    "retentionAbsenceEvidenceVersion",
     "deploymentName"
   ],
   "properties": {
@@ -41,6 +42,9 @@
     "retentionAbsenceEvidenceSha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
+    },
+    "retentionAbsenceEvidenceVersion": {
+      "const": "m7.8-retained-automation-absence-verification-v3"
     },
     "deploymentName": {
       "type": "string",

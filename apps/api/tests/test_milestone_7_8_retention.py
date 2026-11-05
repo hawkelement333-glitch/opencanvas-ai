@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from infra.milestone_7_8 import retention
+from infra.milestone_7_8 import retention, retention_v3
 
 SUBSCRIPTION = "11111111-2222-3333-4444-555555555555"
 ACCOUNT = "aa-m78-0123456789"
@@ -136,36 +136,22 @@ def _contract(tmp_path: Path) -> tuple[retention.RetentionContract, list[dict[st
 
 def _absence_document(
     *,
-    subscription_correlation: str = "a" * 16,
+    subscription_correlation: str | None = None,
     evidence_class: str = retention.MANAGED_EVIDENCE_CLASS,
 ) -> dict[str, object]:
-    return {
-        "version": retention.ABSENCE_EVIDENCE_VERSION,
-        "evidenceClass": evidence_class,
-        "status": "retained-account-absent",
-        "subscriptionCorrelation": subscription_correlation,
-        "campaignCorrelation": retention.RETENTION_CAMPAIGN_CORRELATION,
-        "generationCorrelation": retention.RETENTION_GENERATION_CORRELATION,
-        "region": retention.RETENTION_REGION,
-        "observedAtUtc": retention.EXPECTED_REMOVAL_BOUNDARY_UTC,
-        "authoritativeDeletionTimeUtc": (retention.AUTHORITATIVE_DELETION_TIME_UTC),
-        "expectedRemovalBoundaryUtc": retention.EXPECTED_REMOVAL_BOUNDARY_UTC,
-        "providerReportedDeletionTime": None,
-        "deletionTimeInterpretation": None,
-        "paginationComplete": True,
-        "deletedInventoryPages": 1,
-        "deletedAccountCount": 4,
-        "targetCandidates": 0,
-        "unrelatedDeletedAccountCount": 4,
-        "campaignDeletedIdentitySha256": (retention.RETENTION_TARGET_IDENTITY_SHA256),
-        "legacyCampaignIdentityHashMatch": True,
-        "unrelatedDeletedIdentitySha256": list(retention.RETENTION_UNRELATED_IDENTITY_SHA256),
-        "legacyUnrelatedIdentityHashMatch": True,
-        "azureGetOperations": 2,
-        "azureMutationCount": 0,
-        "repositoryMutationCount": 0,
-        "supportTicketOperationCount": 0,
-    }
+    del subscription_correlation
+    return retention_v3.build_document(
+        subscription_id=SUBSCRIPTION,
+        observed_at=BOUNDARY.replace(microsecond=308000),
+        evidence_class=evidence_class,
+        pages=[
+            {
+                "requestSha256": retention_v3.request_sha256(_first_url()),
+                "recordIdentitySha256": list(retention.RETENTION_UNRELATED_IDENTITY_SHA256),
+                "nextRequestSha256": None,
+            }
+        ],
+    )
 
 
 def _first_url() -> str:
@@ -238,7 +224,7 @@ def test_post_boundary_absence_accepts_only_the_same_four_unrelated_records(
     runner = FakeRunner(pages={_first_url(): {"value": records[1:]}})
     verifier = retention.RetentionVerifier(
         runner,
-        clock=lambda: datetime(2026, 9, 14, 1, 9, 46, 307000, tzinfo=UTC),
+        clock=lambda: datetime(2026, 9, 14, 1, 9, 46, 308000, tzinfo=UTC),
     )
 
     result = verifier.verify(contract, expect="absent")
@@ -256,18 +242,131 @@ def test_exact_absence_artifact_is_canonical_and_live_admissible(tmp_path: Path)
 
     first = retention.validate_retention_absence_evidence(
         path,
-        subscription_correlation="a" * 16,
+        subscription_correlation=retention._correlation(SUBSCRIPTION, domain="subscription"),
+        subscription_id=SUBSCRIPTION,
         allow_synthetic=False,
     )
     second = retention.validate_retention_absence_evidence(
         path,
-        subscription_correlation="a" * 16,
+        subscription_correlation=retention._correlation(SUBSCRIPTION, domain="subscription"),
+        subscription_id=SUBSCRIPTION,
         allow_synthetic=False,
     )
 
     assert first.evidence_sha256 == second.evidence_sha256
     assert first.document == value
     assert first.evidence_class == retention.MANAGED_EVIDENCE_CLASS
+
+
+@pytest.mark.parametrize("present_count", [0, 1, 2, 3, 4])
+def test_v3_admission_accepts_each_observable_unrelated_baseline_subset(
+    tmp_path: Path, present_count: int
+) -> None:
+    value = retention_v3.build_document(
+        subscription_id=SUBSCRIPTION,
+        observed_at=BOUNDARY.replace(microsecond=308000),
+        evidence_class=retention.MANAGED_EVIDENCE_CLASS,
+        pages=[
+            {
+                "requestSha256": retention_v3.request_sha256(_first_url()),
+                "recordIdentitySha256": list(
+                    retention.RETENTION_UNRELATED_IDENTITY_SHA256[:present_count]
+                ),
+                "nextRequestSha256": None,
+            }
+        ],
+    )
+    path = tmp_path / f"retention-{present_count}.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    binding = retention.validate_retention_absence_evidence(
+        path,
+        subscription_correlation=retention._correlation(SUBSCRIPTION, domain="subscription"),
+        subscription_id=SUBSCRIPTION,
+        allow_synthetic=False,
+    )
+
+    observations = binding.document["unrelatedObservations"]
+    assert isinstance(observations, list)
+    assert [item["status"] for item in observations] == [
+        "present-unchanged" if index < present_count else "absent-unattributed"
+        for index in range(4)
+    ]
+
+
+def test_v3_observed_inventory_changes_the_admission_digest() -> None:
+    empty = retention_v3.build_document(
+        subscription_id=SUBSCRIPTION,
+        observed_at=BOUNDARY.replace(microsecond=308000),
+        evidence_class=retention.MANAGED_EVIDENCE_CLASS,
+        pages=[
+            {
+                "requestSha256": retention_v3.request_sha256(_first_url()),
+                "recordIdentitySha256": [],
+                "nextRequestSha256": None,
+            }
+        ],
+    )
+    one_present = _absence_document()
+    one_present["inventoryPages"][0]["recordIdentitySha256"] = [  # type: ignore[index]
+        retention.RETENTION_UNRELATED_IDENTITY_SHA256[0]
+    ]
+    one_present["currentInventorySha256"] = retention_v3.digest(
+        "retention-current-inventory", [retention.RETENTION_UNRELATED_IDENTITY_SHA256[0]]
+    )
+    one_present["deletedAccountCount"] = 1
+    one_present["unrelatedObservations"][0]["status"] = "present-unchanged"  # type: ignore[index]
+
+    assert retention.retention_absence_evidence_sha256(empty) != (
+        retention.retention_absence_evidence_sha256(one_present)
+    )
+
+
+def test_v2_document_cannot_cross_the_v3_live_admission_boundary(tmp_path: Path) -> None:
+    value = {
+        "version": retention.ABSENCE_EVIDENCE_VERSION,
+        "evidenceClass": retention.MANAGED_EVIDENCE_CLASS,
+        "status": "retained-account-absent",
+        "subscriptionCorrelation": "a" * 16,
+        "campaignCorrelation": retention.RETENTION_CAMPAIGN_CORRELATION,
+        "generationCorrelation": retention.RETENTION_GENERATION_CORRELATION,
+        "region": retention.RETENTION_REGION,
+        "observedAtUtc": "2026-09-14T01:09:46.308Z",
+        "authoritativeDeletionTimeUtc": retention.AUTHORITATIVE_DELETION_TIME_UTC,
+        "expectedRemovalBoundaryUtc": retention.EXPECTED_REMOVAL_BOUNDARY_UTC,
+        "providerReportedDeletionTime": None,
+        "deletionTimeInterpretation": None,
+        "paginationComplete": True,
+        "deletedInventoryPages": 1,
+        "deletedAccountCount": 4,
+        "targetCandidates": 0,
+        "unrelatedDeletedAccountCount": 4,
+        "campaignDeletedIdentitySha256": retention.RETENTION_TARGET_IDENTITY_SHA256,
+        "legacyCampaignIdentityHashMatch": True,
+        "unrelatedDeletedIdentitySha256": list(
+            retention.RETENTION_UNRELATED_IDENTITY_SHA256
+        ),
+        "legacyUnrelatedIdentityHashMatch": True,
+        "azureGetOperations": 2,
+        "azureMutationCount": 0,
+        "repositoryMutationCount": 0,
+        "supportTicketOperationCount": 0,
+    }
+    path = tmp_path / "v2.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    legacy = retention.validate_retention_absence_evidence_v2(
+        path, subscription_correlation="a" * 16, allow_synthetic=False
+    )
+    assert legacy.document == value
+
+    with pytest.raises(retention.RetentionVerificationError, match="not-exact"):
+        retention.validate_retention_absence_evidence(
+            path,
+            subscription_correlation=retention._correlation(SUBSCRIPTION, domain="subscription"),
+            subscription_id=SUBSCRIPTION,
+            allow_synthetic=False,
+        )
 
 
 @pytest.mark.parametrize(
@@ -291,7 +390,7 @@ def test_exact_absence_artifact_is_canonical_and_live_admissible(tmp_path: Path)
             "not-exact",
         ),
         (
-            lambda value: value.update(unrelatedDeletedIdentitySha256=[]),
+            lambda value: value.update(unrelatedBaselineIdentitySha256=[]),
             "not-exact",
         ),
         (lambda value: value.update(unexpected=True), "not-exact"),
@@ -310,12 +409,13 @@ def test_absence_admission_rejects_incomplete_drifted_or_unsafe_evidence(
     with pytest.raises(retention.RetentionVerificationError, match=error):
         retention.validate_retention_absence_evidence(
             path,
-            subscription_correlation="a" * 16,
+            subscription_correlation=retention._correlation(SUBSCRIPTION, domain="subscription"),
+            subscription_id=SUBSCRIPTION,
             allow_synthetic=False,
         )
 
 
-def test_synthetic_absence_can_prepare_but_cannot_authorize_live_execution(
+def test_synthetic_absence_supports_local_fixtures_but_cannot_authorize_live_execution(
     tmp_path: Path,
 ) -> None:
     value = _absence_document(evidence_class=retention.SYNTHETIC_EVIDENCE_CLASS)
@@ -324,13 +424,15 @@ def test_synthetic_absence_can_prepare_but_cannot_authorize_live_execution(
 
     retention.validate_retention_absence_evidence(
         path,
-        subscription_correlation="a" * 16,
+        subscription_correlation=retention._correlation(SUBSCRIPTION, domain="subscription"),
+        subscription_id=SUBSCRIPTION,
         allow_synthetic=True,
     )
     with pytest.raises(retention.RetentionVerificationError, match="not-exact"):
         retention.validate_retention_absence_evidence(
             path,
-            subscription_correlation="a" * 16,
+            subscription_correlation=retention._correlation(SUBSCRIPTION, domain="subscription"),
+            subscription_id=SUBSCRIPTION,
             allow_synthetic=False,
         )
 

@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:retention-absence-evidence:v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "evidenceClass",
+    "status",
+    "subscriptionCorrelation",
+    "subscriptionIdentitySha256",
+    "campaignCorrelation",
+    "generationCorrelation",
+    "region",
+    "observedAtUtc",
+    "authoritativeDeletionTimeUtc",
+    "expectedRemovalBoundaryUtc",
+    "campaignDeletedIdentitySha256",
+    "providerResourceType",
+    "providerEndpointTemplate",
+    "providerApiVersion",
+    "providerEndpointSha256",
+    "httpMethods",
+    "paginationComplete",
+    "deletedInventoryPages",
+    "continuationCount",
+    "inventoryPages",
+    "currentInventorySha256",
+    "deletedAccountCount",
+    "targetCandidates",
+    "currentOnlyRecordCount",
+    "unrelatedBaselineIdentitySha256",
+    "unrelatedBaselineSha256",
+    "unrelatedObservations",
+    "azureGetOperations",
+    "azureMutationCount",
+    "repositoryMutationCount",
+    "supportTicketOperationCount",
+    "controllerMutationCount",
+    "campaignMutationCount",
+    "remoteGitMutationCount",
+    "milestone8MutationCount"
+  ],
+  "properties": {
+    "version": {
+      "const": "m7.8-retained-automation-absence-verification-v3"
+    },
+    "evidenceClass": {
+      "enum": [
+        "managed-provider-get-only",
+        "synthetic-test-fixture"
+      ]
+    },
+    "status": {
+      "const": "retained-account-absent"
+    },
+    "subscriptionCorrelation": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{16}$"
+    },
+    "subscriptionIdentitySha256": {
+      "$ref": "#/$defs/hash"
+    },
+    "campaignCorrelation": {
+      "$ref": "retention-absence-evidence.schema.json#/properties/campaignCorrelation"
+    },
+    "generationCorrelation": {
+      "$ref": "retention-absence-evidence.schema.json#/properties/generationCorrelation"
+    },
+    "region": {
+      "$ref": "retention-absence-evidence.schema.json#/properties/region"
+    },
+    "observedAtUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "authoritativeDeletionTimeUtc": {
+      "$ref": "retention-absence-evidence.schema.json#/properties/authoritativeDeletionTimeUtc"
+    },
+    "expectedRemovalBoundaryUtc": {
+      "$ref": "retention-absence-evidence.schema.json#/properties/expectedRemovalBoundaryUtc"
+    },
+    "campaignDeletedIdentitySha256": {
+      "$ref": "retention-absence-evidence.schema.json#/properties/campaignDeletedIdentitySha256"
+    },
+    "providerResourceType": {
+      "const": "Microsoft.Automation/deletedAutomationAccounts"
+    },
+    "providerEndpointTemplate": {
+      "const": "https://management.azure.com/subscriptions/{subscriptionId}/providers/Microsoft.Automation/deletedAutomationAccounts?api-version=2024-10-23"
+    },
+    "providerApiVersion": {
+      "const": "2024-10-23"
+    },
+    "providerEndpointSha256": {
+      "$ref": "#/$defs/hash"
+    },
+    "httpMethods": {
+      "const": [
+        "GET"
+      ]
+    },
+    "paginationComplete": {
+      "const": true
+    },
+    "deletedInventoryPages": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "continuationCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 99
+    },
+    "inventoryPages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requestSha256",
+          "recordIdentitySha256",
+          "nextRequestSha256"
+        ],
+        "properties": {
+          "requestSha256": {
+            "$ref": "#/$defs/hash"
+          },
+          "recordIdentitySha256": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/$defs/hash"
+            }
+          },
+          "nextRequestSha256": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/hash"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "currentInventorySha256": {
+      "$ref": "#/$defs/hash"
+    },
+    "deletedAccountCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4
+    },
+    "targetCandidates": {
+      "type": "integer",
+      "const": 0
+    },
+    "currentOnlyRecordCount": {
+      "type": "integer",
+      "const": 0
+    },
+    "unrelatedBaselineIdentitySha256": {
+      "$ref": "retention-absence-evidence.schema.json#/properties/unrelatedDeletedIdentitySha256"
+    },
+    "unrelatedBaselineSha256": {
+      "$ref": "#/$defs/hash"
+    },
+    "unrelatedObservations": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "baselineIdentitySha256",
+          "status"
+        ],
+        "properties": {
+          "baselineIdentitySha256": {
+            "$ref": "#/$defs/hash"
+          },
+          "status": {
+            "enum": [
+              "present-unchanged",
+              "absent-unattributed"
+            ]
+          }
+        }
+      }
+    },
+    "azureGetOperations": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 101
+    },
+    "azureMutationCount": {
+      "type": "integer",
+      "const": 0
+    },
+    "repositoryMutationCount": {
+      "type": "integer",
+      "const": 0
+    },
+    "supportTicketOperationCount": {
+      "type": "integer",
+      "const": 0
+    },
+    "controllerMutationCount": {
+      "type": "integer",
+      "const": 0
+    },
+    "campaignMutationCount": {
+      "type": "integer",
+      "const": 0
+    },
+    "remoteGitMutationCount": {
+      "type": "integer",
+      "const": 0
+    },
+    "milestone8MutationCount": {
+      "type": "integer",
+      "const": 0
+    }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

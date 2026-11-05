@@ -30,6 +30,7 @@ from infra.milestone_7_8.cleanup_controller import (
     controller_names,
 )
 from infra.milestone_7_8.retention import (
+    CURRENT_ABSENCE_EVIDENCE_VERSION,
     RetentionVerificationError,
     validate_retention_absence_evidence,
 )
@@ -121,7 +122,8 @@ def main() -> int:
         retention = validate_retention_absence_evidence(
             args.retention_absence_evidence,
             subscription_correlation=subscription_correlation,
-            allow_synthetic=True,
+            subscription_id=subscription_id,
+            allow_synthetic=False,
         )
         names = controller_names(subscription_correlation)
         observed_at = datetime.now(UTC).replace(microsecond=0)
@@ -214,6 +216,7 @@ def main() -> int:
                 region_selection.offer_eligibility_sha256
             ),
             "mobius.retention-absence-sha256": retention.evidence_sha256,
+            "mobius.retention-absence-version": CURRENT_ABSENCE_EVIDENCE_VERSION,
             "mobius.owner": "managed-postgresql-evidence",
             "mobius.expiry": deadline,
         }
@@ -362,6 +365,7 @@ def main() -> int:
                 region_selection.offer_eligibility_sha256
             ),
             "retentionAbsenceEvidenceSha256": retention.evidence_sha256,
+            "retentionAbsenceEvidenceVersion": CURRENT_ABSENCE_EVIDENCE_VERSION,
             "retentionAbsenceEvidenceClass": retention.evidence_class,
             "retentionAbsenceObservedAtUtc": retention.observed_at_utc,
             "retentionAbsenceEvidenceFile": str(retention_path),

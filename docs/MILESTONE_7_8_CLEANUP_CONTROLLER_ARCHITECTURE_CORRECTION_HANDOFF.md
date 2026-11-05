@@ -125,9 +125,11 @@ The alternatives are rejected:
 
 A future authorization must separately name and approve, in this order:
 
-1. the unchanged M78-PG-012 post-boundary GET-only absence verification at or
-   after `2026-09-14T01:09:46.307Z`, producing the exact sanitized admission
-   artifact with four unchanged unrelated hashes and zero mutations;
+1. the v3 M78-PG-012 post-boundary GET-only absence verification, producing
+   the exact sanitized admission artifact with zero target candidates, full
+   pagination, zero current-only records, zero mutations, and each historical
+   unrelated baseline observed only as `present-unchanged` or
+   `absent-unattributed`;
 2. complete read-only regional/provider/policy/inventory discovery;
 3. one controller bootstrap or exact-controller adoption in the selected region;
 4. published script hash, stable identity, local-auth policy, empty schedule and

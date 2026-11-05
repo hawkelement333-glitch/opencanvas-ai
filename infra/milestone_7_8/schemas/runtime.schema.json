@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:operator-runtime:v6",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:operator-runtime:v7",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -23,6 +23,7 @@
     "cleanupOfferEligibilitySource",
     "cleanupOfferEligibilitySha256",
     "retentionAbsenceEvidenceSha256",
+    "retentionAbsenceEvidenceVersion",
     "retentionAbsenceEvidenceClass",
     "retentionAbsenceObservedAtUtc",
     "retentionAbsenceEvidenceFile",
@@ -101,6 +102,9 @@
     "retentionAbsenceEvidenceSha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
+    },
+    "retentionAbsenceEvidenceVersion": {
+      "const": "m7.8-retained-automation-absence-verification-v3"
     },
     "retentionAbsenceEvidenceClass": {
       "enum": ["managed-provider-get-only", "synthetic-test-fixture"]

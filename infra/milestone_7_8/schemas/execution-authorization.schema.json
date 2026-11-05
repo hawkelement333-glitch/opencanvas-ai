@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:execution-authorization:v2",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:execution-authorization:v3",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,13 +13,14 @@
     "controllerArchitecture",
     "controllerBindingSha256",
     "retentionAbsenceEvidenceSha256",
+    "retentionAbsenceEvidenceVersion",
     "cleanupDeadlineUtc",
     "expiresAtUtc",
     "allowedOperations",
     "authorizationSha256"
   ],
   "properties": {
-    "version": { "const": "m7.8-execution-authorization-v2" },
+    "version": { "const": "m7.8-execution-authorization-v3" },
     "disposition": { "const": "separately-authorized-azure-execution" },
     "campaignId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,47}$" },
     "generationId": {
@@ -39,6 +40,9 @@
     "retentionAbsenceEvidenceSha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
+    },
+    "retentionAbsenceEvidenceVersion": {
+      "const": "m7.8-retained-automation-absence-verification-v3"
     },
     "cleanupDeadlineUtc": { "type": "string", "format": "date-time" },
     "expiresAtUtc": { "type": "string", "format": "date-time" },

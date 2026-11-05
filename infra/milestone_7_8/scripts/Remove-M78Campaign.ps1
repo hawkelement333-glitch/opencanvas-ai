@@ -13,6 +13,7 @@ param(
   [Parameter(Mandatory = $true)][ValidateRange(5000, 5000)][int]$CostCeilingCents,
   [Parameter(Mandatory = $true)][ValidatePattern('^[a-f0-9]{64}$')][string]$ControllerBindingSha256,
   [Parameter(Mandatory = $true)][ValidatePattern('^[a-f0-9]{64}$')][string]$RetentionAbsenceEvidenceSha256,
+  [Parameter(Mandatory = $true)][ValidateSet('m7.8-retained-automation-absence-verification-v3')][string]$RetentionAbsenceEvidenceVersion,
   [Parameter(Mandatory = $true)][ValidatePattern('^[a-f0-9]{64}$')][string]$CleanupAuthoritySha256,
   [Parameter(Mandatory = $true)][ValidateSet('true')][string]$CleanupAuthorized
 )
@@ -104,8 +105,9 @@ $authorityValues = @(
   [string]$CostCeilingCents,
   $ControllerBindingSha256
   $RetentionAbsenceEvidenceSha256
+  $RetentionAbsenceEvidenceVersion
 )
-$observedAuthoritySha256 = Get-Sha256 ("m7.8/cleanup-authority/v2`0" + ($authorityValues -join "`0"))
+$observedAuthoritySha256 = Get-Sha256 ("m7.8/cleanup-authority/v3`0" + ($authorityValues -join "`0"))
 if ($observedAuthoritySha256 -ne $CleanupAuthoritySha256) {
   throw 'cleanup-authority-hash-mismatch'
 }
@@ -123,6 +125,7 @@ $controllerTags = @{
   'mobius.cleanup-controller' = 'reusable-automation-controller-v1'
   'mobius.subscription-correlation' = $SubscriptionCorrelation
   'mobius.retention-absence-sha256' = $RetentionAbsenceEvidenceSha256
+  'mobius.retention-absence-version' = $RetentionAbsenceEvidenceVersion
 }
 foreach ($key in $controllerTags.Keys) {
   if ($controllerGroup.Tags[$key] -ne $controllerTags[$key]) {
@@ -160,6 +163,7 @@ $expectedBindingParameters = @{
   CostCeilingCents = [string]$CostCeilingCents
   ControllerBindingSha256 = $ControllerBindingSha256
   RetentionAbsenceEvidenceSha256 = $RetentionAbsenceEvidenceSha256
+  RetentionAbsenceEvidenceVersion = $RetentionAbsenceEvidenceVersion
   CleanupAuthoritySha256 = $CleanupAuthoritySha256
   CleanupAuthorized = $CleanupAuthorized
 }
@@ -210,6 +214,7 @@ $requiredTags = @{
   'mobius.cleanup-deadline-utc' = $CleanupDeadlineUtc
   'mobius.cost-ceiling-cents' = [string]$CostCeilingCents
   'mobius.retention-absence-sha256' = $RetentionAbsenceEvidenceSha256
+  'mobius.retention-absence-version' = $RetentionAbsenceEvidenceVersion
 }
 foreach ($key in $requiredTags.Keys) {
   if ($targetGroup.Tags[$key] -ne $requiredTags[$key]) { throw 'cleanup-resource-tag-mismatch' }
@@ -246,6 +251,7 @@ if (Get-AzResourceGroup -Name $TargetResourceGroupName -ErrorAction SilentlyCont
   controllerDisposition = 'reusable-controller-retained-disarm-required'
   cleanupDisposition = 'target-zero-residue-controller-retained'
   retentionAbsenceEvidenceSha256 = $RetentionAbsenceEvidenceSha256
+  retentionAbsenceEvidenceVersion = $RetentionAbsenceEvidenceVersion
   status = 'target-removed-controller-disarm-required'
   observedAtUtc = [DateTime]::UtcNow.ToString('o')
 } | ConvertTo-Json -Compress

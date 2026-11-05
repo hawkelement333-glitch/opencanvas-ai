@@ -287,8 +287,38 @@ through region selection, controller configuration/tags, campaign/runtime,
 both parameter files, cleanup authority and runbook parameters, both execution
 authorizations, ledger, recovery/replay validation, and terminal receipt.
 Controller and operator live entry revalidate the artifact and reject
-`synthetic-test-fixture`; tests may use that class only for local preparation.
+`synthetic-test-fixture`; that class is limited to isolated local test
+validation and cannot enter preparation or execution.
 No managed-provider absence artifact was added to the repository.
+
+### M78-PG-014 — v2 unrelated-record equality made absence admission non-live
+
+**Severity:** High. **Disposition:** locally resolved; no managed-provider
+absence, controller deployment, arming, or campaign execution is claimed.
+
+The v2 absence contract required all four unrelated historical deleted-record
+hashes to remain currently observable. That requirement correctly protected
+against drift while the records existed, but it made the exact target-absence
+gate permanently unsatisfiable when any unrelated record independently stopped
+appearing in the provider's current deleted inventory. Historical evidence does
+not include each unrelated record's deletion time, so its absence cannot safely
+be called natural or timely expiration.
+
+The v3 contract retains immutable target, subscription, campaign, generation,
+region, deletion-boundary, GET-only, pagination, and zero-mutation bindings.
+It preserves the four unrelated hashes as historical context and records each
+current observation only as `present-unchanged` or `absent-unattributed`.
+Unknown, changed, duplicate, colliding, malformed, ambiguous, or current-only
+records reject admission. The hashed page chain, baseline observation set, and
+current inventory digest are included in the canonical v3 digest. Runtime and
+controller admission require the v3 version and digest; controller tags and
+controller execution authorizations bind the version as well. The retained v2
+format remains audit-only and cannot enter live preparation, controller,
+operator, recovery, cleanup, finalization, or authorization paths.
+
+The historical four hashes are unchanged. No provider observation from the
+diagnostic was stored as an admission artifact, and no claim about individual
+unrelated-record retention or deletion timing is made.
 
 ### M78-OS-001 — durable deletion requests had no production executor
 
