@@ -2,6 +2,9 @@ name: Verify Azure CLI provenance
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - verify-azure-cli-provenance
 
 permissions: {}
 
