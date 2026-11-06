@@ -18,7 +18,7 @@ jobs:
 
           $msiUrl = 'https://azcliprod.blob.core.windows.net/msi/azure-cli-2.88.0-x64.msi'
           $expectedMsiHash = '9146F0EDE206E09E17D66770FB2245B1B21F0BBA65DBE1D1B9F8C6CC9E0D3E6B'
-          $expectedModuleHash = 'a794b66ee32b453393aad700825659434ff346a3832ff2fe7fa7ee86d2c545b0'
+          $expectedModuleHash = 'a794b66ee32b453393aad700825659434ff346a3832ff2fe7fa7ee86d2c545b0'.ToUpperInvariant()
           $msiPath = Join-Path $env:RUNNER_TEMP 'azure-cli-2.88.0-x64.msi'
           $extractPath = Join-Path $env:RUNNER_TEMP 'azure-cli-2.88.0-extracted'
 
@@ -60,7 +60,7 @@ jobs:
               throw "Expected exactly one pymsalruntime.cp314-win_amd64.pyd; found $($modules.Count)"
             }
 
-            $moduleHash = (Get-FileHash -Path $modules[0].FullName -Algorithm SHA256).Hash
+            $moduleHash = (Get-FileHash -Path $modules[0].FullName -Algorithm SHA256).Hash.ToUpperInvariant()
             if ($moduleHash -cne $expectedModuleHash) {
               throw "Module SHA-256 mismatch: $moduleHash"
             }
