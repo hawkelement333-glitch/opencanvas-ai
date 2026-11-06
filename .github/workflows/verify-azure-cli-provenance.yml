@@ -1,0 +1,77 @@
+name: Verify Azure CLI provenance
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Verify Azure CLI MSI provenance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $msiUrl = 'https://azcliprod.blob.core.windows.net/msi/azure-cli-2.88.0-x64.msi'
+          $expectedMsiHash = '9146F0EDE206E09E17D66770FB2245B1B21F0BBA65DBE1D1B9F8C6CC9E0D3E6B'
+          $expectedModuleHash = 'a794b66ee32b453393aad700825659434ff346a3832ff2fe7fa7ee86d2c545b0'
+          $msiPath = Join-Path $env:RUNNER_TEMP 'azure-cli-2.88.0-x64.msi'
+          $extractPath = Join-Path $env:RUNNER_TEMP 'azure-cli-2.88.0-extracted'
+
+          try {
+            Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath -UseBasicParsing
+
+            $msiHash = (Get-FileHash -Path $msiPath -Algorithm SHA256).Hash
+            if ($msiHash -cne $expectedMsiHash) {
+              throw "MSI SHA-256 mismatch: $msiHash"
+            }
+
+            $signature = Get-AuthenticodeSignature -FilePath $msiPath
+            if ($signature.Status -ne 'Valid') {
+              throw "MSI Authenticode status is $($signature.Status)"
+            }
+
+            $signerSubject = $signature.SignerCertificate.Subject
+            if ($signerSubject -notmatch 'Microsoft Corporation') {
+              throw "Unexpected MSI signer subject: $signerSubject"
+            }
+
+            New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
+            $extractProcess = Start-Process `
+              -FilePath "$env:WINDIR\System32\msiexec.exe" `
+              -ArgumentList @('/a', $msiPath, '/qn', "TARGETDIR=$extractPath") `
+              -Wait `
+              -PassThru
+            if ($extractProcess.ExitCode -ne 0) {
+              throw "MSI administrative extraction failed with exit code $($extractProcess.ExitCode)"
+            }
+
+            $modules = @(Get-ChildItem `
+              -Path $extractPath `
+              -Filter 'pymsalruntime.cp314-win_amd64.pyd' `
+              -File `
+              -Recurse `
+              -ErrorAction Stop)
+            if ($modules.Count -ne 1) {
+              throw "Expected exactly one pymsalruntime.cp314-win_amd64.pyd; found $($modules.Count)"
+            }
+
+            $moduleHash = (Get-FileHash -Path $modules[0].FullName -Algorithm SHA256).Hash
+            if ($moduleHash -cne $expectedModuleHash) {
+              throw "Module SHA-256 mismatch: $moduleHash"
+            }
+
+            Write-Output "MSI SHA-256: $msiHash"
+            Write-Output "Signer: $signerSubject"
+            Write-Output "Issuer: $($signature.SignerCertificate.Issuer)"
+            Write-Output "Timestamp signer: $($signature.TimeStamperCertificate.Subject)"
+            Write-Output "Module SHA-256: $moduleHash"
+            Write-Output 'Verification: PASS'
+          }
+          finally {
+            Remove-Item -Path $msiPath, $extractPath -Recurse -Force -ErrorAction SilentlyContinue
+          }
