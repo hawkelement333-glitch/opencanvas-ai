@@ -799,7 +799,25 @@ def test_controller_execute_rejects_missing_fresh_admission_evidence(
     assert "requires fresh controller admission evidence" in capsys.readouterr().out
 
 
-def test_controller_baseline_readback_requires_publication_and_empty_bindings() -> None:
+@pytest.mark.parametrize(
+    ("auth_shape", "accepted"),
+    [
+        ({"properties": {"disableLocalAuth": True}}, True),
+        ({"disableLocalAuth": True}, True),
+        ({"disableLocalAuth": True, "properties": {"disableLocalAuth": True}}, True),
+        ({}, False),
+        ({"disableLocalAuth": False}, False),
+        ({"properties": {"disableLocalAuth": False}}, False),
+        ({"disableLocalAuth": "true"}, False),
+        ({"disableLocalAuth": 1}, False),
+        ({"disableLocalAuth": True, "properties": {"disableLocalAuth": False}}, False),
+        ({"disableLocalAuth": False, "properties": {"disableLocalAuth": True}}, False),
+        ({"disableLocalAuth": True, "properties": None}, False),
+    ],
+)
+def test_controller_baseline_readback_requires_publication_and_empty_bindings(
+    auth_shape: dict[str, object], accepted: bool
+) -> None:
     config = _controller_config()
     tags = {
         "mobius.milestone": "7.8",
@@ -829,7 +847,7 @@ def test_controller_baseline_readback_requires_publication_and_empty_bindings() 
                 "location": "East US 2",
                 "tags": tags,
                 "identity": {"principalId": _object_id(201)},
-                "properties": {"disableLocalAuth": True},
+                **auth_shape,
             }
         ),
         _command_result(
@@ -861,6 +879,10 @@ def test_controller_baseline_readback_requires_publication_and_empty_bindings() 
         _command_result({"value": []}),
         _command_result({"value": []}),
     ]
+    if not accepted:
+        with pytest.raises(CampaignError, match="identity or publication readback differs"):
+            validate_controller_results(results, config)
+        return
     assert len(validate_controller_results(results, config)) == 64
     results[-1] = _command_result({"value": [{"name": "unexpected"}]})
     with pytest.raises(CampaignError, match="inventory is not empty"):

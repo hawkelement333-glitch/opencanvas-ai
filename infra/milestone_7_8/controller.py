@@ -577,6 +577,11 @@ def validate_controller_results(
             raise CampaignError("controller ownership or location readback differs")
     identity = account.get("identity")
     properties = account.get("properties")
+    local_auth_values: list[object] = []
+    if "disableLocalAuth" in account:
+        local_auth_values.append(account["disableLocalAuth"])
+    if isinstance(properties, dict) and "disableLocalAuth" in properties:
+        local_auth_values.append(properties["disableLocalAuth"])
     principal_id = identity.get("principalId") if isinstance(identity, dict) else None
     try:
         parsed_principal = uuid.UUID(str(principal_id))
@@ -584,8 +589,9 @@ def validate_controller_results(
         raise CampaignError("controller principal readback is malformed") from exc
     if (
         parsed_principal.int == 0
-        or not isinstance(properties, dict)
-        or properties.get("disableLocalAuth") is not True
+        or ("properties" in account and not isinstance(properties, dict))
+        or not local_auth_values
+        or any(value is not True for value in local_auth_values)
         or not isinstance(runbook, dict)
         or runbook.get("name") != config.runbook_name
         or not isinstance(runbook.get("properties"), dict)
