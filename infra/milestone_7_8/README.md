@@ -18,6 +18,10 @@ existence.
   Automation account, runbook, and permanent Reader grant on that group.
   `controller.py` is dry-run by default and requires an exact expiring
   authorization artifact before bootstrap or live verification.
+  The shared config and live execution source check requires the clean audit
+  branch, its exact `origin/milestone-7-8-production-readiness-audit-local`
+  upstream, and five protected stashes. Bootstrap also rechecks the config's
+  source HEAD and cleanup-script digest.
 - `cleanup.bicep` can only adopt that controller through `existing` resources
   and grant its system identity Contributor plus Role Based Access Control
   Administrator on the exact campaign target group. It cannot create, replace,
@@ -28,9 +32,11 @@ existence.
   admission, configuration, private runtime, cleanup-region selection receipt, principal manifest,
   control-plane evidence, image admission, managed execution receipt, restart
   ledger, and zero-residue terminal receipt shapes.
-- `prepare.py` creates one untracked `.runtime/milestone_7_8` generation from a
-  clean, committed source tree. It refuses an upstream, a stash count other
-  than five, a second output directory, a malformed campaign, or a mismatched
+- `prepare.py` creates one untracked generation from a clean, committed source
+  tree with the exact approved audit-branch upstream. Its `--output` selects a
+  new private subdirectory under `.runtime/milestone_7_8`, preserving existing
+  evidence; it refuses an existing output directory, an unexpected upstream,
+  a stash count other than five, a malformed campaign, or a mismatched
   target/PostgreSQL region. Before creating the directory it selects one
   cleanup region through `automation_region.py` from the closed order
   `eastus2`, `southcentralus`, `westus2`, `westus`, `eastus`, `northeurope`,

@@ -105,8 +105,8 @@ def main() -> int:
             "for-each-ref",
             "--format=%(upstream)",
             "refs/heads/milestone-7-8-production-readiness-audit-local",
-        ):
-            raise CampaignError("campaign preparation refuses an upstream")
+        ) != "refs/remotes/origin/milestone-7-8-production-readiness-audit-local":
+            raise CampaignError("campaign preparation upstream is invalid")
         if len(_git("stash", "list", "--format=%H").splitlines()) != 5:
             raise CampaignError("protected stash boundary differs")
         source_head = _git("rev-parse", "HEAD")

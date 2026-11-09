@@ -81,6 +81,97 @@ from scripts import bootstrap_postgres, managed_postgres_evidence, migrate_and_g
 NOW = datetime(2030, 1, 1, tzinfo=UTC)
 
 
+@pytest.mark.parametrize(
+    ("upstream", "branch", "status", "stash_count", "accepted"),
+    [
+        (
+            "refs/remotes/origin/milestone-7-8-production-readiness-audit-local",
+            "milestone-7-8-production-readiness-audit-local",
+            "",
+            5,
+            True,
+        ),
+        ("", "milestone-7-8-production-readiness-audit-local", "", 5, False),
+        (
+            "refs/remotes/origin/other",
+            "milestone-7-8-production-readiness-audit-local",
+            "",
+            5,
+            False,
+        ),
+        (
+            "refs/remotes/origin/milestone-7-8-production-readiness-audit-local",
+            "other",
+            "",
+            5,
+            False,
+        ),
+        (
+            "refs/remotes/origin/milestone-7-8-production-readiness-audit-local",
+            "milestone-7-8-production-readiness-audit-local",
+            " M tracked",
+            5,
+            False,
+        ),
+        (
+            "refs/remotes/origin/milestone-7-8-production-readiness-audit-local",
+            "milestone-7-8-production-readiness-audit-local",
+            "",
+            4,
+            False,
+        ),
+    ],
+)
+def test_controller_source_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    upstream: str,
+    branch: str,
+    status: str,
+    stash_count: int,
+    accepted: bool,
+) -> None:
+    def fake_run(args: tuple[str, ...], **_kwargs: object) -> object:
+        from types import SimpleNamespace
+
+        command = args[1:]
+        values = {
+            ("rev-parse", "HEAD"): "a" * 40,
+            ("status", "--porcelain=v1"): status,
+            ("branch", "--show-current"): branch,
+            (
+                "for-each-ref",
+                "--format=%(upstream)",
+                "refs/heads/milestone-7-8-production-readiness-audit-local",
+            ): upstream,
+            ("stash", "list", "--format=%H"): "\n".join(str(i) for i in range(stash_count)),
+        }
+        return SimpleNamespace(returncode=0, stdout=values[command])
+
+    monkeypatch.setattr(controller_operator.subprocess, "run", fake_run)
+    if accepted:
+        head, digest = controller_operator.local_source_binding()
+        assert head == "a" * 40
+        assert len(digest) == 64
+    else:
+        with pytest.raises(CampaignError, match="source boundary differs"):
+            controller_operator.local_source_binding()
+
+
+def test_controller_execution_rechecks_head_and_script(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _controller_config()
+    for source_head, script_hash in (
+        ("0" * 40, config.cleanup_script_sha256),
+        (config.source_head, "0" * 64),
+    ):
+        monkeypatch.setattr(
+            controller_operator,
+            "local_source_binding",
+            lambda source_head=source_head, script_hash=script_hash: (source_head, script_hash),
+        )
+        with pytest.raises(CampaignError, match="source boundary differs"):
+            controller_operator.validate_local_boundary(config)
+
+
 def _object_id(value: int) -> str:
     return f"00000000-0000-4000-8000-{value:012d}"
 
@@ -1266,12 +1357,77 @@ def test_resume_ledger_rejects_substituted_phase() -> None:
         ledger.validate_resume(config)
 
 
+@pytest.mark.parametrize(
+    "failure", ["dirty", "branch", "no-upstream", "other-upstream", "stashes", "output"]
+)
+def test_prepare_rejects_invalid_local_boundary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str
+) -> None:
+    output = tmp_path / "existing" if failure == "output" else tmp_path / "new"
+    if failure == "output":
+        output.mkdir()
+        (output / "sentinel").write_text("preserved", encoding="utf-8")
+    values = {
+        ("status", "--porcelain=v1"): " M tracked" if failure == "dirty" else "",
+        ("branch", "--show-current"): (
+            "wrong" if failure == "branch" else "milestone-7-8-production-readiness-audit-local"
+        ),
+        (
+            "for-each-ref",
+            "--format=%(upstream)",
+            "refs/heads/milestone-7-8-production-readiness-audit-local",
+        ): {
+            "no-upstream": "",
+            "other-upstream": "refs/remotes/origin/other",
+        }.get(failure, "refs/remotes/origin/milestone-7-8-production-readiness-audit-local"),
+        ("stash", "list", "--format=%H"): "\n".join(
+            str(i) for i in range(4 if failure == "stashes" else 5)
+        ),
+    }
+    monkeypatch.setattr(prepare, "_git", lambda *args: values[args])
+    monkeypatch.setattr(
+        prepare,
+        "discover_automation_region",
+        lambda *_args, **_kwargs: pytest.fail("invalid boundary reached provider discovery"),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "prepare",
+            "--campaign-id",
+            "mobius78-managed-proof",
+            "--generation-id",
+            "g1-aabbccddeeff",
+            "--output",
+            str(output),
+            "--controller-region",
+            "eastus",
+            "--fresh-subscription-runtime",
+            "unused",
+            "--fresh-subscription-authorization",
+            "unused",
+            "--fresh-subscription-evidence",
+            "unused",
+        ],
+    )
+    assert prepare.main() != 0
+    if failure == "output":
+        assert (output / "sentinel").read_text(encoding="utf-8") == "preserved"
+    else:
+        assert not output.exists()
+
+
 def test_prepare_creates_one_private_restart_safe_bundle(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     subscription = _object_id(101)
     tenant = _object_id(102)
-    output = tmp_path / "runtime"
+    parent = tmp_path / "runtime"
+    parent.mkdir()
+    existing_evidence = parent / "existing-private-evidence.json"
+    existing_evidence.write_text('{"preserved":true}', encoding="utf-8")
+    output = parent / "new-campaign"
     monkeypatch.setenv("M78_SUBSCRIPTION_ID", subscription)
     monkeypatch.setenv("M78_TENANT_ID", tenant)
     fresh_scope_document = predeployment.build_runtime_document(
@@ -1297,9 +1453,7 @@ def test_prepare_creates_one_private_restart_safe_bundle(
         observed_at=NOW,
         pages=[
             {
-                "requestSha256": predeployment.request_sha256(
-                    predeployment.endpoint(subscription)
-                ),
+                "requestSha256": predeployment.request_sha256(predeployment.endpoint(subscription)),
                 "recordIdentitySha256": [],
                 "nextRequestSha256": None,
             }
@@ -1315,7 +1469,7 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             "for-each-ref",
             "--format=%(upstream)",
             "refs/heads/milestone-7-8-production-readiness-audit-local",
-        ): "",
+        ): "refs/remotes/origin/milestone-7-8-production-readiness-audit-local",
         ("stash", "list", "--format=%H"): "\n".join(str(index) for index in range(5)),
         ("rev-parse", "HEAD"): "a" * 40,
     }
@@ -1396,6 +1550,7 @@ def test_prepare_creates_one_private_restart_safe_bundle(
         ],
     )
     assert prepare.main() == 0
+    assert existing_evidence.read_text(encoding="utf-8") == '{"preserved":true}'
     stdout = capsys.readouterr().out
     assert subscription not in stdout and tenant not in stdout
     config = CampaignConfig.from_json(output / "campaign.json")
@@ -2221,8 +2376,7 @@ def test_retention_receipt_and_terminal_schema_are_closed_and_sanitized() -> Non
         (schema_root / "terminal-receipt.schema.json").read_text(encoding="utf-8")
     )
     assert (
-        "softDeletedAutomationAccounts"
-        not in terminal_schema["properties"]["residue"]["required"]
+        "softDeletedAutomationAccounts" not in terminal_schema["properties"]["residue"]["required"]
     )
     receipt = json.loads(
         (

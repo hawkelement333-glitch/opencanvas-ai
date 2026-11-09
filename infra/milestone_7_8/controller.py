@@ -350,6 +350,7 @@ def local_source_binding() -> tuple[str, str]:
             "--format=%(upstream)",
             "refs/heads/milestone-7-8-production-readiness-audit-local",
         )
+        != "refs/remotes/origin/milestone-7-8-production-readiness-audit-local"
         or len(git("stash", "list", "--format=%H").splitlines()) != 5
     ):
         raise CampaignError("controller local source boundary differs")

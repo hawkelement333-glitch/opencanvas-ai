@@ -18,8 +18,11 @@ authorized, and no controller is claimed live by this document.
 
 Run from the repository root on branch
 `milestone-7-8-production-readiness-audit-local`, at the reviewed campaign
-commit, with a clean tree/index, no upstream, and exactly five untouched
-stashes. The output directory `.runtime/milestone_7_8` must not exist. For a
+commit, with a clean tree/index and exactly five untouched stashes. Controller
+configuration, bootstrap, and campaign preparation require the exact upstream
+`origin/milestone-7-8-production-readiness-audit-local`. Campaign preparation
+requires a new `--output` subdirectory, while existing private evidence under
+`.runtime/milestone_7_8` remains untouched. For a
 fresh replacement subscription, the exact planned controller must instead have
 a complete, hash-bound `fresh-subscription-predeployment-inventory-clear`
 artifact, and controller or campaign execution still requires a separate Azure
@@ -195,7 +198,7 @@ if ($LASTEXITCODE -ne 0) { throw 'local controller config creation failed' }
 .\.venv\Scripts\python.exe -m infra.milestone_7_8.prepare `
   --campaign-id $campaign `
   --generation-id $generation `
-  --output .runtime/milestone_7_8 `
+  --output '.runtime/milestone_7_8/campaigns/<new-generation-directory>' `
   --target-region centralus `
   --postgres-region centralus `
   --controller-region $controllerRegion `
