@@ -369,6 +369,50 @@ def test_v2_document_cannot_cross_the_v3_live_admission_boundary(tmp_path: Path)
         )
 
 
+def test_historical_subscription_retirement_cannot_cross_the_v3_live_admission_boundary(
+    tmp_path: Path,
+) -> None:
+    value = {
+        "version": "m7.8-historical-subscription-retirement-evidence-v1",
+        "status": "historical-subscription-retired",
+        "evidenceClass": "sanitized-historical-subscription-retirement",
+        "formerSubscriptionCorrelation": retention._correlation(
+            SUBSCRIPTION, domain="subscription"
+        ),
+        "formerSubscriptionIdentitySha256": "a" * 64,
+        "bindingEvidenceClass": "retained-private-runtime",
+        "bindingEvidenceSha256": "b" * 64,
+        "sourceClass": "authenticated-microsoft-notice",
+        "sourceDocumentSha256": "c" * 64,
+        "sourceAuthenticationSha256": "d" * 64,
+        "deletionConfirmedAtUtc": "2026-10-01T00:00:00Z",
+        "providerInventoryReadCompleted": False,
+        "v3AbsenceEvidenceProduced": False,
+        "liveSubscriptionAdmissionAuthorized": False,
+        "controllerBootstrapAuthorized": False,
+        "campaignExecutionAuthorized": False,
+        "replacementSubscriptionRequired": True,
+        "azureGetOperations": 0,
+        "azureMutationCount": 0,
+        "repositoryMutationCount": 0,
+        "supportTicketOperationCount": 0,
+        "controllerMutationCount": 0,
+        "campaignMutationCount": 0,
+        "remoteGitMutationCount": 0,
+        "milestone8MutationCount": 0,
+    }
+    path = tmp_path / "historical-subscription-retirement.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    with pytest.raises(retention.RetentionVerificationError, match="not-exact"):
+        retention.validate_retention_absence_evidence(
+            path,
+            subscription_correlation=retention._correlation(SUBSCRIPTION, domain="subscription"),
+            subscription_id=SUBSCRIPTION,
+            allow_synthetic=False,
+        )
+
+
 @pytest.mark.parametrize(
     ("mutation", "error"),
     [

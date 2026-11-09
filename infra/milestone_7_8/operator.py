@@ -40,10 +40,11 @@ from infra.milestone_7_8.cleanup_controller import (
     controller_names,
     load_execution_authorization,
 )
-from infra.milestone_7_8.retention import (
-    CURRENT_ABSENCE_EVIDENCE_VERSION,
-    RetentionVerificationError,
-    validate_retention_absence_evidence,
+from infra.milestone_7_8.predeployment import (
+    EVIDENCE_CLASS as FRESH_CONTROLLER_ADMISSION_EVIDENCE_CLASS,
+    EVIDENCE_VERSION as FRESH_CONTROLLER_ADMISSION_EVIDENCE_VERSION,
+    PredeploymentVerificationError,
+    load_validated_admission,
 )
 
 CONTROL_PLANE_FIELDS = {
@@ -97,11 +98,13 @@ RUNTIME_FIELDS = {
     "cleanupOfferEligibleRegions",
     "cleanupOfferEligibilitySource",
     "cleanupOfferEligibilitySha256",
-    "retentionAbsenceEvidenceSha256",
-    "retentionAbsenceEvidenceVersion",
-    "retentionAbsenceEvidenceClass",
-    "retentionAbsenceObservedAtUtc",
-    "retentionAbsenceEvidenceFile",
+    "freshControllerAdmissionEvidenceSha256",
+    "freshControllerAdmissionEvidenceVersion",
+    "freshControllerAdmissionEvidenceClass",
+    "freshControllerAdmissionEvidenceObservedAtUtc",
+    "freshControllerAdmissionRuntimeFile",
+    "freshControllerAdmissionAuthorizationFile",
+    "freshControllerAdmissionEvidenceFile",
     "cleanupRegionSelectionFile",
     "cleanupDeploymentName",
     "campaignDeploymentName",
@@ -140,7 +143,7 @@ CLEANUP_PARAMETER_FIELDS = {
     "cleanupOfferEligibleRegions",
     "cleanupOfferEligibilitySource",
     "cleanupOfferEligibilitySha256",
-    "retentionAbsenceEvidenceSha256",
+    "freshControllerAdmissionEvidenceSha256",
     "cleanupDeadlineUtc",
     "cleanupAuthorityExpiresUtc",
     "automationAccountName",
@@ -164,7 +167,7 @@ CAMPAIGN_PARAMETER_FIELDS = {
     "cleanupOfferEligibleRegions",
     "cleanupOfferEligibilitySource",
     "cleanupOfferEligibilitySha256",
-    "retentionAbsenceEvidenceSha256",
+    "freshControllerAdmissionEvidenceSha256",
     "cleanupResourceGroupName",
     "cleanupAutomationAccountName",
     "tenantId",
@@ -252,13 +255,16 @@ def load_runtime(path: Path) -> dict[str, str]:
         or value["cleanupControllerArchitecture"] != ARCHITECTURE
         or value["cleanupControllerArmability"] != LOCAL_ARCHITECTURE_STATE
         or re.fullmatch(r"[a-f0-9]{64}", value["controllerBindingSha256"]) is None
-        or re.fullmatch(r"[a-f0-9]{64}", value["retentionAbsenceEvidenceSha256"])
+        or re.fullmatch(
+            r"[a-f0-9]{64}", value["freshControllerAdmissionEvidenceSha256"]
+        )
         is None
-        or value["retentionAbsenceEvidenceVersion"] != CURRENT_ABSENCE_EVIDENCE_VERSION
-        or value["retentionAbsenceEvidenceClass"]
-        not in {"managed-provider-get-only", "synthetic-test-fixture"}
-        or parse_utc(value["retentionAbsenceObservedAtUtc"])
-        < parse_utc("2026-09-14T01:09:46.307Z")
+        or value["freshControllerAdmissionEvidenceVersion"]
+        != FRESH_CONTROLLER_ADMISSION_EVIDENCE_VERSION
+        or value["freshControllerAdmissionEvidenceClass"]
+        != FRESH_CONTROLLER_ADMISSION_EVIDENCE_CLASS
+        or parse_utc(value["freshControllerAdmissionEvidenceObservedAtUtc"])
+        <= parse_utc("2000-01-01T00:00:00Z")
         or parse_utc(value["cleanupAuthorityExpiresUtc"])
         <= parse_utc("2000-01-01T00:00:00Z")
         or re.fullmatch(
@@ -289,39 +295,70 @@ def _load_arm_parameter_values(path: Path, *, expected: set[str]) -> dict[str, o
     return result
 
 
-def load_bound_retention_absence(
+def load_bound_fresh_controller_admission(
     runtime_path: Path,
     runtime: dict[str, str],
     config: CampaignConfig,
-    *,
-    allow_synthetic: bool,
 ) -> None:
-    candidate = Path(runtime["retentionAbsenceEvidenceFile"])
-    resolved = (
-        (Path.cwd() / candidate).resolve()
-        if not candidate.is_absolute()
-        else candidate.resolve()
-    )
-    if resolved.parent != runtime_path.resolve().parent:
-        raise CampaignError("retention absence evidence escaped its private generation")
-    try:
-        binding = validate_retention_absence_evidence(
-            resolved,
-            subscription_correlation=config.subscription_correlation,
-            subscription_id=runtime["subscriptionId"],
-            allow_synthetic=allow_synthetic,
+    runtime_directory = runtime_path.resolve().parent
+
+    def sibling(name: str) -> Path:
+        candidate = Path(runtime[name])
+        resolved = (
+            (Path.cwd() / candidate).resolve()
+            if not candidate.is_absolute()
+            else candidate.resolve()
         )
-    except RetentionVerificationError as exc:
+        if resolved.parent != runtime_directory:
+            raise CampaignError(
+                "fresh controller admission evidence escaped its private generation"
+            )
+        return resolved
+
+    try:
+        binding = load_validated_admission(
+            runtime_path=sibling("freshControllerAdmissionRuntimeFile"),
+            authorization_path=sibling("freshControllerAdmissionAuthorizationFile"),
+            evidence_path=sibling("freshControllerAdmissionEvidenceFile"),
+            subscription_id=runtime["subscriptionId"],
+            tenant_id=_load_fresh_scope_tenant(
+                sibling("freshControllerAdmissionRuntimeFile")
+            ),
+            campaign_id=config.campaign_id,
+            generation_id=config.generation_id,
+            region=config.cleanup_region,
+            controller_resource_group_name=runtime["cleanupResourceGroupName"],
+            automation_account_name=runtime["automationAccountName"],
+        )
+    except (
+        OSError,
+        KeyError,
+        json.JSONDecodeError,
+        PredeploymentVerificationError,
+    ) as exc:
         raise CampaignError(str(exc)) from exc
     if (
-        binding.evidence_sha256 != config.retention_absence_evidence_sha256
-        or runtime["retentionAbsenceEvidenceSha256"] != binding.evidence_sha256
-        or runtime["retentionAbsenceEvidenceVersion"]
+        binding.evidence_sha256 != config.fresh_controller_admission_evidence_sha256
+        or runtime["freshControllerAdmissionEvidenceSha256"] != binding.evidence_sha256
+        or runtime["freshControllerAdmissionEvidenceVersion"]
         != binding.document.get("version")
-        or runtime["retentionAbsenceEvidenceClass"] != binding.evidence_class
-        or runtime["retentionAbsenceObservedAtUtc"] != binding.observed_at_utc
+        or runtime["freshControllerAdmissionEvidenceClass"]
+        != binding.document.get("evidenceClass")
+        or runtime["freshControllerAdmissionEvidenceObservedAtUtc"]
+        != binding.observed_at_utc
     ):
-        raise CampaignError("retention absence evidence binding differs")
+        raise CampaignError("fresh controller admission evidence binding differs")
+
+
+def _load_fresh_scope_tenant(path: Path) -> str:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CampaignError("fresh controller admission runtime is unreadable") from exc
+    tenant_id = value.get("tenantId") if isinstance(value, dict) else None
+    if not isinstance(tenant_id, str):
+        raise CampaignError("fresh controller admission runtime is malformed")
+    return tenant_id
 
 
 def validate_prepared_bundle(
@@ -329,11 +366,10 @@ def validate_prepared_bundle(
     runtime: dict[str, str],
     config: CampaignConfig,
 ) -> None:
-    load_bound_retention_absence(
+    load_bound_fresh_controller_admission(
         runtime_path,
         runtime,
         config,
-        allow_synthetic=False,
     )
     if (
         runtime["resourceGroupName"] != config.target_resource_group
@@ -386,8 +422,8 @@ def validate_prepared_bundle(
         or offer_eligible_regions != config.cleanup_offer_eligible_regions
         or selection.offer_eligibility_source != config.cleanup_offer_eligibility_source
         or selection.offer_eligibility_sha256 != config.cleanup_offer_eligibility_sha256
-        or selection.retention_absence_evidence_sha256
-        != config.retention_absence_evidence_sha256
+        or selection.fresh_controller_admission_evidence_sha256
+        != config.fresh_controller_admission_evidence_sha256
         or runtime["cleanupRegion"] != config.cleanup_region
         or runtime["cleanupRegionSelectionSha256"] != selection_sha256
         or runtime["cleanupCandidateRegions"] != config.cleanup_candidate_regions
@@ -400,8 +436,8 @@ def validate_prepared_bundle(
         != config.cleanup_offer_eligibility_source
         or runtime["cleanupOfferEligibilitySha256"]
         != config.cleanup_offer_eligibility_sha256
-        or runtime["retentionAbsenceEvidenceSha256"]
-        != config.retention_absence_evidence_sha256
+        or runtime["freshControllerAdmissionEvidenceSha256"]
+        != config.fresh_controller_admission_evidence_sha256
     ):
         raise CampaignError(
             "operator cleanup region or offer selection binding differs"
@@ -413,7 +449,9 @@ def validate_prepared_bundle(
         "targetResourceGroupName": config.target_resource_group,
         "cleanupResourceGroupName": config.cleanup_resource_group,
         "cleanupDeadlineUtc": config.cleanup_deadline_utc,
-        "retentionAbsenceEvidenceSha256": (config.retention_absence_evidence_sha256),
+        "freshControllerAdmissionEvidenceSha256": (
+            config.fresh_controller_admission_evidence_sha256
+        ),
     }
     if any(
         cleanup.get(key) != expected for key, expected in common_expected.items()
@@ -487,8 +525,8 @@ def validate_prepared_bundle(
         != config.cleanup_offer_eligibility_source
         or campaign.get("cleanupOfferEligibilitySha256")
         != config.cleanup_offer_eligibility_sha256
-        or campaign.get("retentionAbsenceEvidenceSha256")
-        != config.retention_absence_evidence_sha256
+        or campaign.get("freshControllerAdmissionEvidenceSha256")
+        != config.fresh_controller_admission_evidence_sha256
         or campaign.get("postgresPrimaryZone") != "1"
         or campaign.get("postgresStandbyZone") != "2"
         or campaign.get("maintenanceDay") != 0
@@ -509,8 +547,8 @@ def validate_prepared_bundle(
         != config.cleanup_offer_eligibility_source
         or cleanup.get("cleanupOfferEligibilitySha256")
         != config.cleanup_offer_eligibility_sha256
-        or cleanup.get("retentionAbsenceEvidenceSha256")
-        != config.retention_absence_evidence_sha256
+        or cleanup.get("freshControllerAdmissionEvidenceSha256")
+        != config.fresh_controller_admission_evidence_sha256
         or campaign.get("cleanupAutomationAccountName")
         != runtime["automationAccountName"]
         or cleanup.get("automationAccountName") != runtime["automationAccountName"]
@@ -551,8 +589,12 @@ def validate_prepared_bundle(
         "mobius.cleanup-offer-eligibility-sha256": (
             config.cleanup_offer_eligibility_sha256
         ),
-        "mobius.retention-absence-sha256": (config.retention_absence_evidence_sha256),
-        "mobius.retention-absence-version": runtime["retentionAbsenceEvidenceVersion"],
+        "mobius.fresh-controller-admission-sha256": (
+            config.fresh_controller_admission_evidence_sha256
+        ),
+        "mobius.fresh-controller-admission-version": (
+            runtime["freshControllerAdmissionEvidenceVersion"]
+        ),
         "mobius.owner": "managed-postgresql-evidence",
         "mobius.expiry": config.cleanup_deadline_utc,
     }
@@ -590,8 +632,12 @@ def cleanup_job_parameters(
         "CleanupAuthorityExpiresUtc": runtime["cleanupAuthorityExpiresUtc"],
         "CostCeilingCents": "5000",
         "ControllerBindingSha256": runtime["controllerBindingSha256"],
-        "RetentionAbsenceEvidenceSha256": (config.retention_absence_evidence_sha256),
-        "RetentionAbsenceEvidenceVersion": runtime["retentionAbsenceEvidenceVersion"],
+        "FreshControllerAdmissionEvidenceSha256": (
+            config.fresh_controller_admission_evidence_sha256
+        ),
+        "FreshControllerAdmissionEvidenceVersion": (
+            runtime["freshControllerAdmissionEvidenceVersion"]
+        ),
         "CleanupAuthoritySha256": cleanup_authority_sha256(config, runtime),
         "CleanupAuthorized": "true",
     }
@@ -1806,8 +1852,8 @@ def validate_deployed_principal_manifest(
         != config.cleanup_offer_eligibility_source
         or binding.get("cleanupOfferEligibilitySha256")
         != config.cleanup_offer_eligibility_sha256
-        or binding.get("retentionAbsenceEvidenceSha256")
-        != config.retention_absence_evidence_sha256
+        or binding.get("freshControllerAdmissionEvidenceSha256")
+        != config.fresh_controller_admission_evidence_sha256
         or not isinstance(manifest, dict)
         or set(manifest)
         != {
@@ -1885,7 +1931,7 @@ def validate_cleanup_deployment(
         "cleanupOfferEligibleRegions",
         "cleanupOfferEligibilitySource",
         "cleanupOfferEligibilitySha256",
-        "retentionAbsenceEvidenceSha256",
+        "freshControllerAdmissionEvidenceSha256",
         "cleanupDeadlineUtc",
         "cleanupAuthorityExpiresUtc",
         "automationAccountName",
@@ -1931,8 +1977,8 @@ def validate_cleanup_deployment(
         cleanup_offer_eligible_regions=str(outputs["cleanupOfferEligibleRegions"]),
         cleanup_offer_eligibility_source=str(outputs["cleanupOfferEligibilitySource"]),
         cleanup_offer_eligibility_sha256=str(outputs["cleanupOfferEligibilitySha256"]),
-        retention_absence_evidence_sha256=str(
-            outputs["retentionAbsenceEvidenceSha256"]
+        fresh_controller_admission_evidence_sha256=str(
+            outputs["freshControllerAdmissionEvidenceSha256"]
         ),
     )
     binding.validate(config)
@@ -1980,7 +2026,9 @@ def validate_cleanup_readback(
             deployment_outputs["targetRoleAssignmentIds"]
         ),
         "controllerBindingSha256": runtime["controllerBindingSha256"],
-        "retentionAbsenceEvidenceSha256": (config.retention_absence_evidence_sha256),
+        "freshControllerAdmissionEvidenceSha256": (
+            config.fresh_controller_admission_evidence_sha256
+        ),
         "cleanupAuthoritySha256": cleanup_authority_sha256(config, runtime),
         "publishedModifiedUtc": published_modified_utc,
         "cleanupScriptSha256": runtime["cleanupScriptSha256"],
@@ -2072,7 +2120,9 @@ def _validate_controller_tags(
         "mobius.cleanup-controller": ARCHITECTURE,
         "mobius.subscription-correlation": config.subscription_correlation,
         "mobius.cleanup-script-sha256": runtime["cleanupScriptSha256"],
-        "mobius.retention-absence-sha256": (config.retention_absence_evidence_sha256),
+        "mobius.fresh-controller-admission-sha256": (
+            config.fresh_controller_admission_evidence_sha256
+        ),
     }
     if any(value.get(key) != item for key, item in expected.items()):
         raise CampaignError("reusable cleanup controller ownership differs")
@@ -3003,12 +3053,13 @@ def validate_operation_results(
         refreshed_selection = select_automation_region_from_results(
             runner,
             tuple(results[10:16]),
+            subscription_id=runtime["subscriptionId"],
             controller_resource_group=config.cleanup_resource_group,
             controller_account=runtime["automationAccountName"],
             subscription_correlation=config.subscription_correlation,
             cleanup_script_sha256=runtime["cleanupScriptSha256"],
-            retention_absence_evidence_sha256=(
-                config.retention_absence_evidence_sha256
+            fresh_controller_admission_evidence_sha256=(
+                config.fresh_controller_admission_evidence_sha256
             ),
             controller_required_until_utc=runtime["cleanupAuthorityExpiresUtc"],
         )
@@ -3028,8 +3079,8 @@ def validate_operation_results(
             != config.cleanup_offer_eligibility_source
             or refreshed_selection.offer_eligibility_sha256
             != config.cleanup_offer_eligibility_sha256
-            or refreshed_selection.retention_absence_evidence_sha256
-            != config.retention_absence_evidence_sha256
+            or refreshed_selection.fresh_controller_admission_evidence_sha256
+            != config.fresh_controller_admission_evidence_sha256
         ):
             raise CampaignError(
                 "prepared Automation cleanup region or offer proof is no longer armable"
@@ -3063,8 +3114,8 @@ def validate_operation_results(
             != config.cleanup_offer_eligibility_source
             or tags.get("mobius.cleanup-offer-eligibility-sha256")
             != config.cleanup_offer_eligibility_sha256
-            or tags.get("mobius.retention-absence-sha256")
-            != config.retention_absence_evidence_sha256
+            or tags.get("mobius.fresh-controller-admission-sha256")
+            != config.fresh_controller_admission_evidence_sha256
         ):
             raise CampaignError("campaign scope readback differs")
     elif operation in {"deploy", "image-decision"}:
@@ -3112,11 +3163,10 @@ def main() -> int:
         runtime = load_runtime(args.runtime)
         validate_prepared_bundle(args.runtime, runtime, config)
         if args.execute:
-            load_bound_retention_absence(
+            load_bound_fresh_controller_admission(
                 args.runtime,
                 runtime,
                 config,
-                allow_synthetic=False,
             )
         ledger = load_ledger(args.ledger, config)
         target = OPERATION_PHASE[args.operation]

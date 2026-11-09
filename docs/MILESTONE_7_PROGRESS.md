@@ -736,11 +736,34 @@ outside campaign deletion scope. New campaign preparation requires exact
 adoption, and ordinary cleanup cannot create or delete the controller. The
 state is `architecture-corrected-live-execution-not-authorized`; no live
 controller, arming, provider, or campaign evidence was produced.
-The 2026-08-27 local admission correction additionally requires the exact
-post-boundary absence artifact before controller or campaign execution and
-binds its canonical hash through the full cleanup lifecycle. This local rule
-does not constitute the unavailable managed-provider absence proof or Azure
-authorization. Managed PostgreSQL evidence gaps,
+The 2026-08-27 local admission correction bound the exact post-boundary absence
+artifact through the then-proposed disposable-controller lifecycle. The
+2026-11-08 retained-controller correction supersedes that universal live-path
+requirement: v3 remains historical audit evidence only, while a fresh scope
+uses its exact planned-controller predeployment observation. Neither evidence
+class is Azure execution authority. Managed PostgreSQL evidence gaps,
 provider object/scanner proof, Managed Redis, live telemetry, managed recovery,
 and current capacity/failure evidence require later, separately authorized
 Azure mutation campaigns. Milestone 8 remains unstarted.
+
+If authoritative, hash-bound evidence later confirms that the former
+subscription itself was deleted before v3 readback could run, the only allowed
+record is the terminal `historical-subscription-retired` disposition. It is not
+`retained-account-absent`, does not claim a provider GET or inventory read, and
+cannot authorize controller bootstrap, deployment, arming, cleanup, or campaign
+execution. Any replacement subscription is a new scope with fresh bindings,
+authorization, and provider evidence. Its mandatory admission evidence is the
+fresh planned-controller predeployment observation, not the historical v3
+absence artifact.
+
+On 2026-11-08, local source added a distinct fresh-subscription predeployment
+inventory contract. It accepts a complete zero-record deleted-account inventory
+only as sanitized, exact-planned-controller predeployment evidence under an
+expiring read authorization. It is not a v3 result and does not alter the
+retired scope. Once hash-bound it is required for fresh preparation and
+controller/campaign admission, but it never grants Azure execution authority.
+The stable controller remains active throughout campaign cleanup; completion
+does not wait for its soft-deleted inventory record to disappear. This source
+correction adds a local-only `controller-config` writer to break the former
+bootstrap/configuration cycle, but itself created no controller or campaign
+evidence.

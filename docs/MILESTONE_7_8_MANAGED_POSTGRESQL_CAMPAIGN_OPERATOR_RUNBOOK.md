@@ -19,10 +19,33 @@ authorized, and no controller is claimed live by this document.
 Run from the repository root on branch
 `milestone-7-8-production-readiness-audit-local`, at the reviewed campaign
 commit, with a clean tree/index, no upstream, and exactly five untouched
-stashes. The output directory `.runtime/milestone_7_8` must not exist. A strict
-post-boundary `retained-account-absent` artifact from M78-PG-012 must already
-exist, and controller or campaign execution still requires a separate Azure
+stashes. The output directory `.runtime/milestone_7_8` must not exist. For a
+fresh replacement subscription, the exact planned controller must instead have
+a complete, hash-bound `fresh-subscription-predeployment-inventory-clear`
+artifact, and controller or campaign execution still requires a separate Azure
 authorization. Elapsed time alone is never an admission fact.
+
+This runbook applies only to a live, authenticated subscription. If the former
+subscription is retired and cannot run the v3 authenticated-subscription and
+deleted-account inventory reads, stop: do not mark the GET as passed and do not
+substitute a deletion notice. A separately reviewed
+`historical-subscription-retired` document may record that former scope only
+when the sanitized authenticated-notice or authoritative-account-record hashes
+are bound to its retained private runtime or authorization evidence. That
+terminal historical disposition authorizes no controller bootstrap, deployment,
+arming, cleanup, or campaign. Any replacement subscription is a fresh scope
+with fresh bindings, authorization, and fresh predeployment evidence.
+
+> **2026-11-08 fresh-subscription predeployment amendment:** an active
+> replacement subscription may first use only the separate
+> `fresh-subscription-predeployment-inventory-clear` read path. It requires a
+> new ignored runtime, exact expiring read authorization, authenticated
+> subscription read, and complete paginated deleted-account GET inventory bound
+> to the exact planned reusable-controller account. A zero-record inventory is
+> valid for that narrow check. It is not M78-PG-012 or
+> `retained-account-absent`. Once locally hash-bound to the exact fresh scope,
+> it is the required controller/bootstrap and campaign-preparation admission
+> evidence; it is never Azure execution authority.
 
 The interactive deployment operator needs only the Azure control-plane actions
 required to create the generated target group and the resource types in
@@ -68,11 +91,65 @@ system `cmd.exe` with `shell=False`. Repository, current-directory,
 `.runtime`, and arbitrary launcher substitutions fail closed before a new
 ledger is written.
 
+## Fresh subscription predeployment inventory
+
+This is a separate, read-only prerequisite for a replacement scope. It creates
+no campaign runtime, controller, resource group, ledger, schedule, role, or
+deployment. Never copy `.runtime/milestone_7_8/runtime.json` or any former
+retention evidence into this directory.
+
+Set only actual, reviewed private values in process memory, then create the
+new private binding and narrow read authorization. The values are intentionally
+not supplied by this runbook:
+
+```powershell
+$env:M78_FRESH_SUBSCRIPTION_ID = '<active-subscription-uuid>'
+$env:M78_FRESH_TENANT_ID = '<active-tenant-uuid>'
+$env:M78_FRESH_CAMPAIGN_ID = '<reviewed-campaign-id>'
+$env:M78_FRESH_GENERATION_ID = '<reviewed-generation-id>'
+$env:M78_FRESH_REGION = '<reviewed-controller-region>'
+$fresh = '.runtime/milestone_7_8/fresh-subscription'
+
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.predeployment initialize `
+  --runtime "$fresh/fresh-subscription-runtime.json"
+```
+
+After separate review, issue one authorization expiring within one hour. This
+is local proof of read scope only; it grants no Azure role or execution
+authority:
+
+```powershell
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.predeployment authorize-read `
+  --runtime "$fresh/fresh-subscription-runtime.json" `
+  --authorization "$fresh/predeployment-read-authorization.json" `
+  --expires-at '<reviewed-rfc3339-utc-expiry>'
+```
+
+The only Azure-touching command in this path is the following verifier. It
+performs the authenticated subscription read and exactly the paginated GET
+inventory; its output is sanitized and written only beside the fresh private
+runtime:
+
+```powershell
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.predeployment verify `
+  --runtime "$fresh/fresh-subscription-runtime.json" `
+  --authorization "$fresh/predeployment-read-authorization.json" `
+  --output "$fresh/predeployment-absence-evidence.json"
+```
+
+The fresh scope must pass this exact artifact to `prepare`; historical v3
+M78-PG-012 evidence is rejected from that fresh path.
+
 ## Prepare one generation
 
 **Separately authorized future step:** do not execute this section from this
-handoff. Before preparation, the one-time controller bootstrap/verification
-must finish with a valid controller authorization and exact baseline readback.
+handoff. The local `controller-config` writer first creates only a private
+bootstrap configuration from the completed fresh-scope proof. It creates no
+Azure resource, authorization, or campaign bundle. A separately authorized
+controller bootstrap/verification must then finish with exact baseline readback
+before campaign preparation can succeed. The predeployment read authorization
+must still be current when the local config is written and when bootstrap starts;
+it is proof freshness, not controller execution authority.
 
 Set the exact later-authorized Azure identifiers in memory and choose one
 campaign label matching `^[a-z][a-z0-9-]{7,47}$`:
@@ -81,30 +158,64 @@ campaign label matching `^[a-z][a-z0-9-]{7,47}$`:
 $env:M78_SUBSCRIPTION_ID = '<authorized-subscription-uuid>'
 $env:M78_TENANT_ID = '<authorized-tenant-uuid>'
 $campaign = 'mobius78-pg-evidence'
-$retentionAbsence = '<reviewed-sanitized-retention-absence-evidence.json>'
+$generation = 'g1-aabbccddeeff'
+$fresh = '.runtime/milestone_7_8/fresh-subscription/approved-scope'
+$controllerRegion = '<reviewed-controller-region>'
+$controllerConfig = "$fresh/controller-bootstrap.json"
 
 $env:PYTHONDONTWRITEBYTECODE = '1'
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.controller controller-config `
+  --campaign-id $campaign `
+  --generation-id $generation `
+  --controller-region $controllerRegion `
+  --output $controllerConfig `
+  --fresh-subscription-runtime "$fresh/fresh-subscription-runtime.json" `
+  --fresh-subscription-authorization "$fresh/predeployment-read-authorization.json" `
+  --fresh-subscription-evidence "$fresh/predeployment-absence-evidence.json"
+if ($LASTEXITCODE -ne 0) { throw 'local controller config creation failed' }
+
+# Obtain separate, exact controller-bootstrap authorization outside this command.
+# The two commands below are not authorized by this handoff; each revalidates
+# this config and the same fresh evidence before it can contact Azure.
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.controller controller-bootstrap `
+  --config $controllerConfig `
+  --authorization '<separately-authorized-controller-bootstrap.json>' `
+  --fresh-subscription-runtime "$fresh/fresh-subscription-runtime.json" `
+  --fresh-subscription-authorization "$fresh/predeployment-read-authorization.json" `
+  --fresh-subscription-evidence "$fresh/predeployment-absence-evidence.json" `
+  --execute
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.controller controller-verify `
+  --config $controllerConfig `
+  --authorization '<separately-authorized-controller-verify.json>' `
+  --fresh-subscription-runtime "$fresh/fresh-subscription-runtime.json" `
+  --fresh-subscription-authorization "$fresh/predeployment-read-authorization.json" `
+  --fresh-subscription-evidence "$fresh/predeployment-absence-evidence.json" `
+  --execute
+
 .\.venv\Scripts\python.exe -m infra.milestone_7_8.prepare `
   --campaign-id $campaign `
+  --generation-id $generation `
   --output .runtime/milestone_7_8 `
   --target-region centralus `
   --postgres-region centralus `
-  --retention-absence-evidence $retentionAbsence
+  --controller-region $controllerRegion `
+  --fresh-subscription-runtime "$fresh/fresh-subscription-runtime.json" `
+  --fresh-subscription-authorization "$fresh/predeployment-read-authorization.json" `
+  --fresh-subscription-evidence "$fresh/predeployment-absence-evidence.json"
 if ($LASTEXITCODE -ne 0) { throw 'campaign preparation failed' }
 
 $config = '.runtime/milestone_7_8/campaign.json'
 $runtime = '.runtime/milestone_7_8/runtime.json'
 $ledger = '.runtime/milestone_7_8/ledger.json'
 $cleanupRegionEvidence = '.runtime/milestone_7_8/cleanup-region-selection.json'
-$retentionAbsenceCopy = '.runtime/milestone_7_8/retention-absence-evidence.json'
+$freshAdmissionCopy = '.runtime/milestone_7_8/predeployment-absence-evidence.json'
 ```
 
-Preparation refuses missing, present, pre-boundary, wrong-subscription,
-wrong-campaign/generation, wrong-location, incomplete-pagination,
-changed-unrelated-record, target-present, nonzero-mutation, malformed, or
-hash-mismatched retention evidence before regional discovery. A fixture marked
-`synthetic-test-fixture` may exercise local preparation only; every live
-controller or operator entry rejects it. Preparation also refuses a dirty tree,
+Preparation refuses missing, wrong-subscription/tenant, wrong-campaign or
+generation, wrong-region/controller identity, incomplete pagination,
+planned-account presence, nonzero mutation, malformed, or hash-mismatched
+fresh evidence before regional discovery. The evidence is a completed GET-only
+predeployment proof, not execution authorization. Preparation also refuses a dirty tree,
 wrong branch, upstream, stash-count drift,
 malformed UUID/campaign, mismatched target/PostgreSQL region, or an existing
 output directory. It has no caller-supplied cleanup-region override. Before
@@ -354,34 +465,34 @@ Invoke-M78Phase 'finalize'
 
 The cleanup runbook validates campaign, generation, sanitized subscription
 correlation, exact resource-group names/tags, deadline, cost ceiling, and the
-bound retention-absence hash; it deletes only the target group. The stable
+bound fresh-controller-admission hash; it deletes only the target group. The stable
 controller group and Automation account are deliberately retained.
 `cleanup-wait` requires authoritative target absence. `cleanup-disarm` then
 deletes the exact one-use binding and schedule and proves both collections
 empty before residue verification.
 `residue` completely paginates both active and soft-deleted Automation-account
-inventories, binds the expected account by its domain-separated resource-ID
-hash, preserves unrelated account hashes, and requires zero tagged resources,
-zero role assignments, and all 16 defined residue counters at zero. A matching
-soft-deleted account records `provider-retained`, keeps the ledger before
-finalization, and blocks `finalize`. Only complete target absence, exact
-schedule/binding disarm, and pagination-complete residue reads can advance to
-`residue-verified` and print the v6 terminal receipt. If the runbook
-cannot be started, the
-operator automatically falls back to deletion of only the validated target
-resource group and immediately reports exact active and soft-deleted account
-counts from complete inventories. It never broadens the deletion target.
+inventories, then proves the exact stable controller is active exactly once and
+has no matching deleted record. Unrelated deleted-account identities are
+hashed only as observations. Campaign zero residue requires target absence,
+exact schedule/binding disarm, zero tagged campaign resources, zero
+target-scoped role assignments, and all 14 campaign-owned residue counters at
+zero. It never treats the retained controller as campaign residue and never
+requires any deleted-account record to age out. Only that complete proof can
+advance to `residue-verified` and print the v7 terminal receipt. If the runbook
+cannot be started, the operator automatically falls back to deletion of only
+the validated target resource group and immediately reports exact active and
+soft-deleted account counts from complete inventories. It never broadens the
+deletion target.
 
-That phase behavior applies only to a future v6 bundle after retention absence
-is proved and the controller is separately bootstrapped, proved, and execution
-is separately authorized. The preserved
-private generation predates the v4 runtime and 16-counter ledger, and its legacy
-`finalized` state is retained as disproved historical evidence. It must not be
-rewritten or passed to this operator as a resumable lifecycle. The next check
-for the existing retained account is a separately authorized read-only
-reconciliation of the complete active and deleted inventories against the
-sanitized binding in the critical-cleanup receipt; it is not a campaign phase,
-does not mutate the private files, and does not authorize a new campaign.
+That phase behavior applies only to a future v7 bundle after fresh-scope
+predeployment evidence is hash-bound, the controller is separately
+bootstrapped or adopted, and execution is separately authorized. The preserved
+private generation predates the retained-controller and campaign-only-residue
+contracts; its legacy `finalized` state is retained as disproved historical
+evidence. It must not be rewritten or passed to this operator as a resumable
+lifecycle. The historical retained account may be reconciled only under its
+historical audit contract; that read is not a campaign phase, does not mutate
+the private files, and cannot become a fresh controller-admission gate.
 
 ## Failure and interruption recovery
 
@@ -431,7 +542,7 @@ projection over USD 50, expired deadline, cleanup drift, or unready managed
 service; enter cleanup and preserve the sanitized local files:
 
 - `campaign.json`, `runtime.json`, parameter files, and `ledger.json`;
-- the copied strict retention-absence artifact and its domain-separated hash;
+- the copied fresh-controller-admission artifact and its domain-separated hash;
 - the sanitized cleanup-region selection receipt and its bound hashes;
 - the digest-bound image scan receipt;
 - the sanitized control-plane evidence input;

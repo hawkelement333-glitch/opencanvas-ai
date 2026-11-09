@@ -2,8 +2,29 @@
 
 Date: 2026-08-14
 
-Status: repository-local remediation complete; exact provider-retained
-Automation-account residue remains nonzero; campaign armability blocked
+Status: immutable historical remediation record. The exact former account's
+provider-retained residue remains historical evidence; M78-PG-017 controls the
+fresh retained-controller lifecycle and does not use that residue as a campaign
+armability gate.
+
+> **2026-11-06 historical-subscription retirement amendment:** if later
+> authoritative, hash-bound evidence shows that this former subscription itself
+> was deleted, record only `historical-subscription-retired` under the separate
+> sanitized schema. It is not proof that the retained Automation account became
+> absent, does not claim that the v3 GET-only verifier ran, and cannot authorize
+> any live controller or campaign work. A replacement subscription must start
+> with fresh bindings, fresh planned-controller predeployment evidence, and
+> separate execution authorization.
+>
+> **2026-11-08 retained-controller lifecycle correction:** this handoff remains
+> the immutable historical record of the deleted former account. Its 30-day
+> retention discussion and 16-counter provider-retained disposition do not
+> govern a fresh scope. A fresh controller is retained through Milestone 7.8,
+> uses its exact planned-controller predeployment inventory evidence for
+> admission, and never requires post-delete absence. The historical v3 parser
+> and retirement disposition remain audit-only. If a later separately authorized
+> controller deletion occurs, provider-confirmed deletion or soft-deleted status
+> is terminal disposition evidence immediately, never a 30-day wait.
 
 ## Scope and authoritative boundary
 
@@ -74,8 +95,11 @@ The provider deletion evidence is `2026-08-14T20:09:46Z`. Adding the documented
 30-day period gives `2026-09-13T20:09:46Z` as the earliest expected provider
 removal boundary. That date is an expectation, not absence proof. The private
 runtime must remain preserved until independent, complete readback proves the
-account absent. The single prior cost query returned HTTP 429 and was not
-retried; actual cost therefore remains unavailable, not USD 0.00.
+account absent, or until a reviewer can bind a separately recorded
+`historical-subscription-retired` disposition to it. The latter remains
+terminal historical recordkeeping, not absence proof or live authority. The
+single prior cost query returned HTTP 429 and was not retried; actual cost
+therefore remains unavailable, not USD 0.00.
 
 ## Residue before and after reconciliation
 
@@ -161,20 +185,21 @@ privilege, and no provider-retained artifact. Choosing Logic Apps, Container
 Apps, Functions, or another service without a deployed authoritative contract
 would be a redesign, not evidence.
 
-The Automation implementation is retained with M78-PG-010 fixed, but every new
-runtime is marked `blocked-provider-retention`. Executable campaign phases from
-`scope-create` through disposition reject that runtime before mutation. The
-repository no longer labels this controller or campaign ready.
+At this handoff's historical boundary, the Automation implementation was
+retained with M78-PG-010 fixed, but every proposed new runtime was marked
+`blocked-provider-retention`. M78-PG-017 supersedes that fresh-scope block: the
+stable controller stays active and campaign zero-residue is campaign-owned only.
+The repository still does not label this controller or campaign ready; every
+Azure execution remains separately authorized.
 
 ## Evidence gaps and next action
 
 M78-PG-E01, M78-PG-E02, M78-PG-E03, M78-TI-E01, and M78-PG-E04 all remain open.
-No managed PostgreSQL result was generated or reclassified. The bounded next
-action is provider removal or quota relief for the exact retained account,
-followed by a separately authorized, complete read-only active/deleted
-inventory reconciliation against the sanitized receipt. That reconciliation
-is not a resume of the frozen legacy ledger and cannot create a campaign. The
-sanitized
+No managed PostgreSQL result was generated or reclassified. The historical
+retained-account reconciliation remains audit-only and cannot create a campaign.
+A fresh scope instead needs its own approved bindings, completed predeployment
+inventory evidence, separately authorized retained-controller bootstrap/adoption,
+and separate campaign execution authorization. The sanitized
 [support-request draft](MILESTONE_7_8_AZURE_AUTOMATION_RETENTION_SUPPORT_REQUEST_DRAFT.md)
 is prepared but not submitted. A new campaign is not authorized and cannot be
 armed by the current repository. The object-storage audit remains unstarted,

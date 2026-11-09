@@ -1,10 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:controller:v3",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:controller:v4",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "subscriptionId",
+    "tenantId",
+    "campaignId",
+    "generationId",
     "subscriptionCorrelation",
     "sourceHead",
     "controllerLocation",
@@ -13,12 +16,15 @@
     "runbookName",
     "controllerAuthorizedUntilUtc",
     "cleanupScriptSha256",
-    "retentionAbsenceEvidenceSha256",
-    "retentionAbsenceEvidenceVersion",
+    "freshControllerAdmissionEvidenceSha256",
+    "freshControllerAdmissionEvidenceVersion",
     "deploymentName"
   ],
   "properties": {
     "subscriptionId": { "type": "string", "format": "uuid" },
+    "tenantId": { "type": "string", "format": "uuid" },
+    "campaignId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,47}$" },
+    "generationId": { "type": "string", "pattern": "^g[1-9][0-9]{0,5}-[a-f0-9]{12}$" },
     "subscriptionCorrelation": {
       "type": "string",
       "pattern": "^[a-f0-9]{16}$"
@@ -39,12 +45,12 @@
     "runbookName": { "const": "Remove-M78Campaign" },
     "controllerAuthorizedUntilUtc": { "type": "string", "format": "date-time" },
     "cleanupScriptSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "retentionAbsenceEvidenceSha256": {
+    "freshControllerAdmissionEvidenceSha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
-    "retentionAbsenceEvidenceVersion": {
-      "const": "m7.8-retained-automation-absence-verification-v3"
+    "freshControllerAdmissionEvidenceVersion": {
+      "const": "m7.8-fresh-subscription-predeployment-absence-evidence-v1"
     },
     "deploymentName": {
       "type": "string",

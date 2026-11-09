@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:historical-subscription-retirement-evidence:v1",
+  "title": "Milestone 7.8 historical subscription retirement evidence",
+  "description": "Sanitized, non-authorizing evidence that an exact former subscription is retired. This is not retention-absence evidence and cannot authorize live work.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "status",
+    "evidenceClass",
+    "formerSubscriptionCorrelation",
+    "formerSubscriptionIdentitySha256",
+    "bindingEvidenceClass",
+    "bindingEvidenceSha256",
+    "sourceClass",
+    "sourceDocumentSha256",
+    "sourceAuthenticationSha256",
+    "deletionConfirmedAtUtc",
+    "providerInventoryReadCompleted",
+    "v3AbsenceEvidenceProduced",
+    "liveSubscriptionAdmissionAuthorized",
+    "controllerBootstrapAuthorized",
+    "campaignExecutionAuthorized",
+    "replacementSubscriptionRequired",
+    "azureGetOperations",
+    "azureMutationCount",
+    "repositoryMutationCount",
+    "supportTicketOperationCount",
+    "controllerMutationCount",
+    "campaignMutationCount",
+    "remoteGitMutationCount",
+    "milestone8MutationCount"
+  ],
+  "properties": {
+    "version": {
+      "const": "m7.8-historical-subscription-retirement-evidence-v1"
+    },
+    "status": {
+      "const": "historical-subscription-retired"
+    },
+    "evidenceClass": {
+      "const": "sanitized-historical-subscription-retirement"
+    },
+    "formerSubscriptionCorrelation": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{16}$"
+    },
+    "formerSubscriptionIdentitySha256": {
+      "$ref": "#/$defs/hash"
+    },
+    "bindingEvidenceClass": {
+      "enum": [
+        "retained-private-runtime",
+        "retained-authorization-evidence"
+      ]
+    },
+    "bindingEvidenceSha256": {
+      "$ref": "#/$defs/hash"
+    },
+    "sourceClass": {
+      "enum": [
+        "authenticated-microsoft-notice",
+        "authoritative-account-record"
+      ]
+    },
+    "sourceDocumentSha256": {
+      "$ref": "#/$defs/hash"
+    },
+    "sourceAuthenticationSha256": {
+      "$ref": "#/$defs/hash"
+    },
+    "deletionConfirmedAtUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "providerInventoryReadCompleted": {
+      "const": false
+    },
+    "v3AbsenceEvidenceProduced": {
+      "const": false
+    },
+    "liveSubscriptionAdmissionAuthorized": {
+      "const": false
+    },
+    "controllerBootstrapAuthorized": {
+      "const": false
+    },
+    "campaignExecutionAuthorized": {
+      "const": false
+    },
+    "replacementSubscriptionRequired": {
+      "const": true
+    },
+    "azureGetOperations": {
+      "const": 0
+    },
+    "azureMutationCount": {
+      "const": 0
+    },
+    "repositoryMutationCount": {
+      "const": 0
+    },
+    "supportTicketOperationCount": {
+      "const": 0
+    },
+    "controllerMutationCount": {
+      "const": 0
+    },
+    "campaignMutationCount": {
+      "const": 0
+    },
+    "remoteGitMutationCount": {
+      "const": 0
+    },
+    "milestone8MutationCount": {
+      "const": 0
+    }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

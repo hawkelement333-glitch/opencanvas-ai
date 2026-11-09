@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:terminal-receipt:v6",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:terminal-receipt:v7",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -18,7 +18,7 @@
     "cleanupOfferEligibleRegions",
     "cleanupOfferEligibilitySource",
     "cleanupOfferEligibilitySha256",
-    "retentionAbsenceEvidenceSha256",
+    "freshControllerAdmissionEvidenceSha256",
     "cleanupArmEvidenceSha256",
     "cleanupDisarmEvidenceSha256",
     "cleanupDisposition",
@@ -27,7 +27,7 @@
     "status"
   ],
   "properties": {
-    "version": { "const": "m7.8-terminal-receipt-v6" },
+    "version": { "const": "m7.8-terminal-receipt-v7" },
     "campaignCorrelation": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
     "generationCorrelation": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
     "resourceGenerationCount": {
@@ -51,7 +51,7 @@
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
-    "retentionAbsenceEvidenceSha256": {
+    "freshControllerAdmissionEvidenceSha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
@@ -72,8 +72,6 @@
         "targetResourceGroups",
         "cleanupResourceGroups",
         "roleAssignments",
-        "automationAccounts",
-        "softDeletedAutomationAccounts",
         "cleanupSchedules",
         "managedIdentities",
         "postgresServers",
@@ -90,8 +88,6 @@
         "targetResourceGroups": { "const": 0 },
         "cleanupResourceGroups": { "const": 0 },
         "roleAssignments": { "const": 0 },
-        "automationAccounts": { "const": 0 },
-        "softDeletedAutomationAccounts": { "const": 0 },
         "cleanupSchedules": { "const": 0 },
         "managedIdentities": { "const": 0 },
         "postgresServers": { "const": 0 },

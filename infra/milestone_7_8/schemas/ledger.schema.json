@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign-ledger:v6",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign-ledger:v7",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -36,7 +36,7 @@
     "cleanup_offer_eligible_regions",
     "cleanup_offer_eligibility_source",
     "cleanup_offer_eligibility_sha256",
-    "retention_absence_evidence_sha256"
+    "fresh_controller_admission_evidence_sha256"
   ],
   "properties": {
     "campaign_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,47}$" },
@@ -98,7 +98,6 @@
       "enum": [
         "pending",
         "zero-residue",
-        "provider-retained",
         "nonzero-residue"
       ]
     },
@@ -113,8 +112,6 @@
         "targetResourceGroups",
         "cleanupResourceGroups",
         "roleAssignments",
-        "automationAccounts",
-        "softDeletedAutomationAccounts",
         "cleanupSchedules",
         "managedIdentities",
         "postgresServers",
@@ -131,8 +128,6 @@
         "targetResourceGroups": { "type": "integer", "minimum": 0 },
         "cleanupResourceGroups": { "type": "integer", "minimum": 0 },
         "roleAssignments": { "type": "integer", "minimum": 0 },
-        "automationAccounts": { "type": "integer", "minimum": 0 },
-        "softDeletedAutomationAccounts": { "type": "integer", "minimum": 0 },
         "cleanupSchedules": { "type": "integer", "minimum": 0 },
         "managedIdentities": { "type": "integer", "minimum": 0 },
         "postgresServers": { "type": "integer", "minimum": 0 },
@@ -173,7 +168,7 @@
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
-    "retention_absence_evidence_sha256": {
+    "fresh_controller_admission_evidence_sha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     }

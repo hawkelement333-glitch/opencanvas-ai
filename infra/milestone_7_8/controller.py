@@ -3,16 +3,19 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
 from infra.milestone_7_8.campaign import (
+    CAMPAIGN_PATTERN,
     CampaignError,
+    GENERATION_PATTERN,
     SubprocessRunner,
     parse_utc,
     sanitize,
@@ -22,19 +25,23 @@ from infra.milestone_7_8.cleanup_controller import (
     CONTROLLER_RUNBOOK_NAME,
     controller_names,
 )
-from infra.milestone_7_8.retention import (
-    CURRENT_ABSENCE_EVIDENCE_VERSION,
-    RetentionVerificationError,
-    validate_retention_absence_evidence,
+from infra.milestone_7_8.predeployment import (
+    EVIDENCE_VERSION as FRESH_CONTROLLER_ADMISSION_EVIDENCE_VERSION,
+    PredeploymentVerificationError,
+    load_validated_admission,
 )
 
 OPERATIONS = frozenset({"controller-bootstrap", "controller-verify"})
+CONFIG_OPERATION = "controller-config"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True, slots=True)
 class ControllerConfig:
     subscription_id: str
+    tenant_id: str
+    campaign_id: str
+    generation_id: str
     subscription_correlation: str
     source_head: str
     controller_location: str
@@ -43,8 +50,8 @@ class ControllerConfig:
     runbook_name: str
     controller_authorized_until_utc: str
     cleanup_script_sha256: str
-    retention_absence_evidence_sha256: str
-    retention_absence_evidence_version: str
+    fresh_controller_admission_evidence_sha256: str
+    fresh_controller_admission_evidence_version: str
     deployment_name: str
 
     @classmethod
@@ -55,6 +62,9 @@ class ControllerConfig:
             raise CampaignError("controller configuration is unreadable") from exc
         fields = {
             "subscriptionId",
+            "tenantId",
+            "campaignId",
+            "generationId",
             "subscriptionCorrelation",
             "sourceHead",
             "controllerLocation",
@@ -63,8 +73,8 @@ class ControllerConfig:
             "runbookName",
             "controllerAuthorizedUntilUtc",
             "cleanupScriptSha256",
-            "retentionAbsenceEvidenceSha256",
-            "retentionAbsenceEvidenceVersion",
+            "freshControllerAdmissionEvidenceSha256",
+            "freshControllerAdmissionEvidenceVersion",
             "deploymentName",
         }
         if (
@@ -75,6 +85,9 @@ class ControllerConfig:
             raise CampaignError("controller configuration fields are invalid")
         config = cls(
             subscription_id=cast(str, value["subscriptionId"]),
+            tenant_id=cast(str, value["tenantId"]),
+            campaign_id=cast(str, value["campaignId"]),
+            generation_id=cast(str, value["generationId"]),
             subscription_correlation=cast(str, value["subscriptionCorrelation"]),
             source_head=cast(str, value["sourceHead"]),
             controller_location=cast(str, value["controllerLocation"]),
@@ -87,11 +100,11 @@ class ControllerConfig:
                 str, value["controllerAuthorizedUntilUtc"]
             ),
             cleanup_script_sha256=cast(str, value["cleanupScriptSha256"]),
-            retention_absence_evidence_sha256=cast(
-                str, value["retentionAbsenceEvidenceSha256"]
+            fresh_controller_admission_evidence_sha256=cast(
+                str, value["freshControllerAdmissionEvidenceSha256"]
             ),
-            retention_absence_evidence_version=cast(
-                str, value["retentionAbsenceEvidenceVersion"]
+            fresh_controller_admission_evidence_version=cast(
+                str, value["freshControllerAdmissionEvidenceVersion"]
             ),
             deployment_name=cast(str, value["deploymentName"]),
         )
@@ -114,15 +127,124 @@ class ControllerConfig:
             or self.automation_account_name != expected_names.account
             or self.runbook_name != CONTROLLER_RUNBOOK_NAME
             or re.fullmatch(r"[a-f0-9]{64}", self.cleanup_script_sha256) is None
-            or re.fullmatch(r"[a-f0-9]{64}", self.retention_absence_evidence_sha256)
+            or re.fullmatch(
+                r"[a-f0-9]{64}", self.fresh_controller_admission_evidence_sha256
+            )
             is None
-            or self.retention_absence_evidence_version
-            != CURRENT_ABSENCE_EVIDENCE_VERSION
+            or self.fresh_controller_admission_evidence_version
+            != FRESH_CONTROLLER_ADMISSION_EVIDENCE_VERSION
             or self.deployment_name
             != f"m78-controller-{self.subscription_correlation[:10]}"
         ):
             raise CampaignError("controller configuration binding is malformed")
+        try:
+            tenant = uuid.UUID(self.tenant_id)
+        except ValueError as exc:
+            raise CampaignError("controller tenant is malformed") from exc
+        if (
+            tenant.int == 0
+            or CAMPAIGN_PATTERN.fullmatch(self.campaign_id) is None
+            or GENERATION_PATTERN.fullmatch(self.generation_id) is None
+        ):
+            raise CampaignError("controller fresh admission binding is malformed")
         parse_utc(self.controller_authorized_until_utc)
+
+
+def controller_config_document(config: ControllerConfig) -> dict[str, str]:
+    """Return the closed private configuration payload for one controller."""
+
+    config.validate()
+    return {
+        "subscriptionId": config.subscription_id,
+        "tenantId": config.tenant_id,
+        "campaignId": config.campaign_id,
+        "generationId": config.generation_id,
+        "subscriptionCorrelation": config.subscription_correlation,
+        "sourceHead": config.source_head,
+        "controllerLocation": config.controller_location,
+        "controllerResourceGroupName": config.controller_resource_group_name,
+        "automationAccountName": config.automation_account_name,
+        "runbookName": config.runbook_name,
+        "controllerAuthorizedUntilUtc": config.controller_authorized_until_utc,
+        "cleanupScriptSha256": config.cleanup_script_sha256,
+        "freshControllerAdmissionEvidenceSha256": (
+            config.fresh_controller_admission_evidence_sha256
+        ),
+        "freshControllerAdmissionEvidenceVersion": (
+            config.fresh_controller_admission_evidence_version
+        ),
+        "deploymentName": config.deployment_name,
+    }
+
+
+def controller_config_sha256(config: ControllerConfig) -> str:
+    return hashlib.sha256(
+        b"m7.8/controller-config/v1\0"
+        + json.dumps(
+            controller_config_document(config), sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+
+
+def build_controller_config(
+    *,
+    subscription_id: str,
+    tenant_id: str,
+    campaign_id: str,
+    generation_id: str,
+    controller_location: str,
+    source_head: str,
+    cleanup_script_sha256: str,
+    controller_authorized_until_utc: str,
+    fresh_subscription_runtime: Path,
+    fresh_subscription_authorization: Path,
+    fresh_subscription_evidence: Path,
+    require_current_admission: bool = False,
+) -> ControllerConfig:
+    """Build the pre-bootstrap controller config from exact fresh evidence.
+
+    This is deliberately a local writer step.  It creates no campaign bundle,
+    no authorization, and no Azure operation; the later bootstrap remains
+    separately authorized and must revalidate this exact config.
+    """
+
+    correlation = sanitize(subscription_id, domain="subscription")
+    names = controller_names(correlation)
+    try:
+        admission = load_validated_admission(
+            runtime_path=fresh_subscription_runtime,
+            authorization_path=fresh_subscription_authorization,
+            evidence_path=fresh_subscription_evidence,
+            subscription_id=subscription_id,
+            tenant_id=tenant_id,
+            campaign_id=campaign_id,
+            generation_id=generation_id,
+            region=controller_location,
+            controller_resource_group_name=names.resource_group,
+            automation_account_name=names.account,
+            require_current=require_current_admission,
+        )
+    except PredeploymentVerificationError as exc:
+        raise CampaignError(str(exc)) from exc
+    config = ControllerConfig(
+        subscription_id=subscription_id,
+        tenant_id=tenant_id,
+        campaign_id=campaign_id,
+        generation_id=generation_id,
+        subscription_correlation=correlation,
+        source_head=source_head,
+        controller_location=controller_location,
+        controller_resource_group_name=names.resource_group,
+        automation_account_name=names.account,
+        runbook_name=CONTROLLER_RUNBOOK_NAME,
+        controller_authorized_until_utc=controller_authorized_until_utc,
+        cleanup_script_sha256=cleanup_script_sha256,
+        fresh_controller_admission_evidence_sha256=admission.evidence_sha256,
+        fresh_controller_admission_evidence_version=FRESH_CONTROLLER_ADMISSION_EVIDENCE_VERSION,
+        deployment_name=f"m78-controller-{correlation[:10]}",
+    )
+    config.validate()
+    return config
 
 
 def load_controller_authorization(
@@ -147,8 +269,8 @@ def load_controller_authorization(
         "controllerResourceGroupName",
         "automationAccountName",
         "controllerAuthorizedUntilUtc",
-        "retentionAbsenceEvidenceSha256",
-        "retentionAbsenceEvidenceVersion",
+        "freshControllerAdmissionEvidenceSha256",
+        "freshControllerAdmissionEvidenceVersion",
         "expiresAtUtc",
         "authorizationSha256",
     }
@@ -158,14 +280,14 @@ def load_controller_authorization(
         else {}
     )
     expected_hash = hashlib.sha256(
-        b"m7.8/controller-execution-authorization/v3\0"
+        b"m7.8/controller-execution-authorization/v4\0"
         + json.dumps(unsigned, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
     if (
         not isinstance(value, dict)
         or set(value) != fields
         or operation not in OPERATIONS
-        or value.get("version") != "m7.8-controller-execution-authorization-v3"
+        or value.get("version") != "m7.8-controller-execution-authorization-v4"
         or value.get("disposition") != "separately-authorized-controller-execution"
         or value.get("operation") != operation
         or value.get("subscriptionCorrelation") != config.subscription_correlation
@@ -177,10 +299,10 @@ def load_controller_authorization(
         or value.get("automationAccountName") != config.automation_account_name
         or value.get("controllerAuthorizedUntilUtc")
         != config.controller_authorized_until_utc
-        or value.get("retentionAbsenceEvidenceSha256")
-        != config.retention_absence_evidence_sha256
-        or value.get("retentionAbsenceEvidenceVersion")
-        != config.retention_absence_evidence_version
+        or value.get("freshControllerAdmissionEvidenceSha256")
+        != config.fresh_controller_admission_evidence_sha256
+        or value.get("freshControllerAdmissionEvidenceVersion")
+        != config.fresh_controller_admission_evidence_version
         or value.get("authorizationSha256") != expected_hash
     ):
         raise CampaignError("controller execution authorization is not exact")
@@ -197,7 +319,9 @@ def load_controller_authorization(
     return expected_hash
 
 
-def validate_local_boundary(config: ControllerConfig) -> None:
+def local_source_binding() -> tuple[str, str]:
+    """Return the clean source head and cleanup-script digest for a live plan."""
+
     def git(*arguments: str) -> str:
         completed = subprocess.run(
             ("git", *arguments),
@@ -211,6 +335,7 @@ def validate_local_boundary(config: ControllerConfig) -> None:
             raise CampaignError("controller Git preflight failed")
         return completed.stdout.strip()
 
+    source_head = git("rev-parse", "HEAD")
     script_sha256 = hashlib.sha256(
         (
             REPOSITORY_ROOT / "infra/milestone_7_8/scripts/Remove-M78Campaign.ps1"
@@ -218,7 +343,6 @@ def validate_local_boundary(config: ControllerConfig) -> None:
     ).hexdigest()
     if (
         git("status", "--porcelain=v1")
-        or git("rev-parse", "HEAD") != config.source_head
         or git("branch", "--show-current")
         != "milestone-7-8-production-readiness-audit-local"
         or git(
@@ -227,6 +351,15 @@ def validate_local_boundary(config: ControllerConfig) -> None:
             "refs/heads/milestone-7-8-production-readiness-audit-local",
         )
         or len(git("stash", "list", "--format=%H").splitlines()) != 5
+    ):
+        raise CampaignError("controller local source boundary differs")
+    return source_head, script_sha256
+
+
+def validate_local_boundary(config: ControllerConfig) -> None:
+    source_head, script_sha256 = local_source_binding()
+    if (
+        source_head != config.source_head
         or script_sha256 != config.cleanup_script_sha256
     ):
         raise CampaignError("controller local source boundary differs")
@@ -340,10 +473,10 @@ def controller_command_plan(
             f"cleanupRunbookName={config.runbook_name}",
             f"controllerAuthorizedUntilUtc={config.controller_authorized_until_utc}",
             f"cleanupScriptSha256={config.cleanup_script_sha256}",
-            "retentionAbsenceEvidenceSha256="
-            f"{config.retention_absence_evidence_sha256}",
-            "retentionAbsenceEvidenceVersion="
-            f"{config.retention_absence_evidence_version}",
+            "freshControllerAdmissionEvidenceSha256="
+            f"{config.fresh_controller_admission_evidence_sha256}",
+            "freshControllerAdmissionEvidenceVersion="
+            f"{config.fresh_controller_admission_evidence_version}",
             "--output",
             "json",
         ),
@@ -417,8 +550,12 @@ def validate_controller_results(
             config.controller_authorized_until_utc
         ),
         "mobius.cleanup-script-sha256": config.cleanup_script_sha256,
-        "mobius.retention-absence-sha256": (config.retention_absence_evidence_sha256),
-        "mobius.retention-absence-version": config.retention_absence_evidence_version,
+        "mobius.fresh-controller-admission-sha256": (
+            config.fresh_controller_admission_evidence_sha256
+        ),
+        "mobius.fresh-controller-admission-version": (
+            config.fresh_controller_admission_evidence_version
+        ),
     }
     if not isinstance(group, dict) or not isinstance(account, dict):
         raise CampaignError("controller group or account readback is malformed")
@@ -501,8 +638,12 @@ def validate_controller_results(
         "controllerLocation": config.controller_location,
         "controllerAuthorizedUntilUtc": config.controller_authorized_until_utc,
         "cleanupScriptSha256": config.cleanup_script_sha256,
-        "retentionAbsenceEvidenceSha256": (config.retention_absence_evidence_sha256),
-        "retentionAbsenceEvidenceVersion": config.retention_absence_evidence_version,
+        "freshControllerAdmissionEvidenceSha256": (
+            config.fresh_controller_admission_evidence_sha256
+        ),
+        "freshControllerAdmissionEvidenceVersion": (
+            config.fresh_controller_admission_evidence_version
+        ),
         "scheduleCount": 0,
         "bindingCount": 0,
     }
@@ -512,17 +653,108 @@ def validate_controller_results(
     ).hexdigest()
 
 
+def write_controller_config(
+    output: Path,
+    *,
+    campaign_id: str,
+    generation_id: str,
+    controller_region: str,
+    fresh_subscription_runtime: Path,
+    fresh_subscription_authorization: Path,
+    fresh_subscription_evidence: Path,
+    now: datetime | None = None,
+) -> ControllerConfig:
+    """Write exactly one private bootstrap config from the fresh admission proof."""
+
+    if output.exists():
+        raise CampaignError("refusing to replace existing controller configuration")
+    subscription_id = os.environ.get("M78_SUBSCRIPTION_ID", "")
+    tenant_id = os.environ.get("M78_TENANT_ID", "")
+    try:
+        if uuid.UUID(subscription_id).int == 0 or uuid.UUID(tenant_id).int == 0:
+            raise ValueError
+    except ValueError as exc:
+        raise CampaignError("controller subscription or tenant binding is missing") from exc
+    source_head, cleanup_script_sha256 = local_source_binding()
+    issued_at = (now or datetime.now(UTC)).astimezone(UTC)
+    config = build_controller_config(
+        subscription_id=subscription_id,
+        tenant_id=tenant_id,
+        campaign_id=campaign_id,
+        generation_id=generation_id,
+        controller_location=controller_region,
+        source_head=source_head,
+        cleanup_script_sha256=cleanup_script_sha256,
+        controller_authorized_until_utc=(
+            (issued_at + timedelta(hours=1))
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z")
+        ),
+        fresh_subscription_runtime=fresh_subscription_runtime,
+        fresh_subscription_authorization=fresh_subscription_authorization,
+        fresh_subscription_evidence=fresh_subscription_evidence,
+        require_current_admission=True,
+    )
+    output.write_text(
+        json.dumps(controller_config_document(config), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return config
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Plan or separately authorize the reusable M7.8 cleanup controller"
     )
-    parser.add_argument("operation", choices=sorted(OPERATIONS))
-    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("operation", choices=sorted({*OPERATIONS, CONFIG_OPERATION}))
+    parser.add_argument("--config", type=Path)
     parser.add_argument("--authorization", type=Path)
-    parser.add_argument("--retention-absence-evidence", type=Path)
+    parser.add_argument("--fresh-subscription-runtime", type=Path)
+    parser.add_argument("--fresh-subscription-authorization", type=Path)
+    parser.add_argument("--fresh-subscription-evidence", type=Path)
+    parser.add_argument("--campaign-id")
+    parser.add_argument("--generation-id")
+    parser.add_argument("--controller-region")
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     try:
+        if args.operation == CONFIG_OPERATION:
+            if args.execute or args.authorization is not None:
+                raise CampaignError("controller config creation cannot execute Azure work")
+            if (
+                args.output is None
+                or args.campaign_id is None
+                or args.generation_id is None
+                or args.controller_region is None
+                or args.fresh_subscription_runtime is None
+                or args.fresh_subscription_authorization is None
+                or args.fresh_subscription_evidence is None
+            ):
+                raise CampaignError("controller config creation inputs are incomplete")
+            config = write_controller_config(
+                args.output,
+                campaign_id=args.campaign_id,
+                generation_id=args.generation_id,
+                controller_region=args.controller_region,
+                fresh_subscription_runtime=args.fresh_subscription_runtime,
+                fresh_subscription_authorization=args.fresh_subscription_authorization,
+                fresh_subscription_evidence=args.fresh_subscription_evidence,
+            )
+            print(
+                json.dumps(
+                    {
+                        "status": "controller-config-written-local-only",
+                        "controllerConfigSha256": controller_config_sha256(config),
+                        "controllerAuthorizedUntilUtc": config.controller_authorized_until_utc,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+            return 0
+        if args.config is None:
+            raise CampaignError("controller operation requires a configuration")
         config = ControllerConfig.load(args.config)
         commands = controller_command_plan(args.operation, config)
         if not args.execute:
@@ -541,23 +773,34 @@ def main() -> int:
             return 0
         if args.authorization is None:
             raise CampaignError("controller execution requires separate authorization")
-        if args.retention_absence_evidence is None:
+        if (
+            args.fresh_subscription_runtime is None
+            or args.fresh_subscription_authorization is None
+            or args.fresh_subscription_evidence is None
+        ):
             raise CampaignError(
-                "controller execution requires retention absence evidence"
+                "controller execution requires fresh controller admission evidence"
             )
         try:
-            retention = validate_retention_absence_evidence(
-                args.retention_absence_evidence,
-                subscription_correlation=config.subscription_correlation,
+            admission = load_validated_admission(
+                runtime_path=args.fresh_subscription_runtime,
+                authorization_path=args.fresh_subscription_authorization,
+                evidence_path=args.fresh_subscription_evidence,
                 subscription_id=config.subscription_id,
-                allow_synthetic=False,
+                tenant_id=config.tenant_id,
+                campaign_id=config.campaign_id,
+                generation_id=config.generation_id,
+                region=config.controller_location,
+                controller_resource_group_name=config.controller_resource_group_name,
+                automation_account_name=config.automation_account_name,
+                require_current=args.operation == "controller-bootstrap",
             )
-        except RetentionVerificationError as exc:
+        except PredeploymentVerificationError as exc:
             raise CampaignError(str(exc)) from exc
-        if retention.evidence_sha256 != config.retention_absence_evidence_sha256:
-            raise CampaignError("controller retention absence binding differs")
-        if retention.document.get("version") != config.retention_absence_evidence_version:
-            raise CampaignError("controller retention absence version differs")
+        if admission.evidence_sha256 != config.fresh_controller_admission_evidence_sha256:
+            raise CampaignError("controller fresh admission binding differs")
+        if admission.document.get("version") != config.fresh_controller_admission_evidence_version:
+            raise CampaignError("controller fresh admission version differs")
         validate_local_boundary(config)
         authorization_sha256 = load_controller_authorization(
             args.authorization, config=config, operation=args.operation

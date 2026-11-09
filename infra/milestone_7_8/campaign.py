@@ -34,8 +34,6 @@ RESIDUE_KEYS: Final = (
     "targetResourceGroups",
     "cleanupResourceGroups",
     "roleAssignments",
-    "automationAccounts",
-    "softDeletedAutomationAccounts",
     "cleanupSchedules",
     "managedIdentities",
     "postgresServers",
@@ -51,7 +49,6 @@ RESIDUE_KEYS: Final = (
 RESIDUE_DISPOSITIONS: Final = {
     "pending",
     "zero-residue",
-    "provider-retained",
     "nonzero-residue",
 }
 CLEANUP_CANDIDATE_REGIONS_BINDING: Final = (
@@ -157,7 +154,7 @@ class CampaignConfig:
     cleanup_offer_eligible_regions: str
     cleanup_offer_eligibility_source: str
     cleanup_offer_eligibility_sha256: str
-    retention_absence_evidence_sha256: str
+    fresh_controller_admission_evidence_sha256: str
     image_digest: str | None = None
 
     @classmethod
@@ -185,7 +182,7 @@ class CampaignConfig:
             "cleanupOfferEligibleRegions",
             "cleanupOfferEligibilitySource",
             "cleanupOfferEligibilitySha256",
-            "retentionAbsenceEvidenceSha256",
+            "freshControllerAdmissionEvidenceSha256",
             "imageDigest",
         }
         if not isinstance(raw, dict) or set(raw) != required:
@@ -226,7 +223,9 @@ class CampaignConfig:
             cleanup_offer_eligible_regions=raw["cleanupOfferEligibleRegions"],
             cleanup_offer_eligibility_source=raw["cleanupOfferEligibilitySource"],
             cleanup_offer_eligibility_sha256=raw["cleanupOfferEligibilitySha256"],
-            retention_absence_evidence_sha256=raw["retentionAbsenceEvidenceSha256"],
+            fresh_controller_admission_evidence_sha256=raw[
+                "freshControllerAdmissionEvidenceSha256"
+            ],
             image_digest=raw["imageDigest"],
         )
         config.validate(allow_expired=allow_expired)
@@ -260,8 +259,11 @@ class CampaignConfig:
             raise CampaignError("principal manifest binding is invalid")
         if HASH_PATTERN.fullmatch(self.cleanup_region_selection_sha256) is None:
             raise CampaignError("cleanup region selection binding is invalid")
-        if HASH_PATTERN.fullmatch(self.retention_absence_evidence_sha256) is None:
-            raise CampaignError("retention absence evidence binding is invalid")
+        if (
+            HASH_PATTERN.fullmatch(self.fresh_controller_admission_evidence_sha256)
+            is None
+        ):
+            raise CampaignError("fresh controller admission evidence binding is invalid")
         if (
             self.cleanup_candidate_regions != CLEANUP_CANDIDATE_REGIONS_BINDING
             or self.cleanup_region not in self.cleanup_candidate_regions.split(",")
@@ -344,7 +346,7 @@ class Ledger:
     cleanup_offer_eligible_regions: str | None = None
     cleanup_offer_eligibility_source: str | None = None
     cleanup_offer_eligibility_sha256: str | None = None
-    retention_absence_evidence_sha256: str | None = None
+    fresh_controller_admission_evidence_sha256: str | None = None
 
     def bind_cleanup_region(self, config: CampaignConfig) -> None:
         expected = (
@@ -356,7 +358,7 @@ class Ledger:
             config.cleanup_offer_eligible_regions,
             config.cleanup_offer_eligibility_source,
             config.cleanup_offer_eligibility_sha256,
-            config.retention_absence_evidence_sha256,
+            config.fresh_controller_admission_evidence_sha256,
         )
         observed = (
             self.cleanup_region,
@@ -367,7 +369,7 @@ class Ledger:
             self.cleanup_offer_eligible_regions,
             self.cleanup_offer_eligibility_source,
             self.cleanup_offer_eligibility_sha256,
-            self.retention_absence_evidence_sha256,
+            self.fresh_controller_admission_evidence_sha256,
         )
         if (
             observed == (None, None, None, None, None, None, None, None, None)
@@ -383,7 +385,7 @@ class Ledger:
                 self.cleanup_offer_eligible_regions,
                 self.cleanup_offer_eligibility_source,
                 self.cleanup_offer_eligibility_sha256,
-                self.retention_absence_evidence_sha256,
+                self.fresh_controller_admission_evidence_sha256,
             ) = expected
             return
         if observed != expected:
@@ -406,8 +408,8 @@ class Ledger:
             != config.cleanup_offer_eligibility_source
             or self.cleanup_offer_eligibility_sha256
             != config.cleanup_offer_eligibility_sha256
-            or self.retention_absence_evidence_sha256
-            != config.retention_absence_evidence_sha256
+            or self.fresh_controller_admission_evidence_sha256
+            != config.fresh_controller_admission_evidence_sha256
         ):
             raise CampaignError(
                 "resume cleanup region selection or offer eligibility was substituted"
@@ -625,8 +627,6 @@ class Ledger:
         nonzero = {name for name, value in counters.items() if value != 0}
         if not nonzero:
             self.cleanup_disposition = "zero-residue"
-        elif nonzero == {"softDeletedAutomationAccounts"}:
-            self.cleanup_disposition = "provider-retained"
         else:
             self.cleanup_disposition = "nonzero-residue"
         return self.cleanup_disposition
@@ -674,7 +674,7 @@ class CleanupBinding:
     cleanup_offer_eligible_regions: str
     cleanup_offer_eligibility_source: str
     cleanup_offer_eligibility_sha256: str
-    retention_absence_evidence_sha256: str
+    fresh_controller_admission_evidence_sha256: str
 
     def validate(self, config: CampaignConfig) -> None:
         if (
@@ -701,8 +701,8 @@ class CleanupBinding:
             != config.cleanup_offer_eligibility_source
             or self.cleanup_offer_eligibility_sha256
             != config.cleanup_offer_eligibility_sha256
-            or self.retention_absence_evidence_sha256
-            != config.retention_absence_evidence_sha256
+            or self.fresh_controller_admission_evidence_sha256
+            != config.fresh_controller_admission_evidence_sha256
         ):
             raise CampaignError("cleanup binding readback is inconsistent")
 
@@ -847,7 +847,7 @@ def terminal_receipt(ledger: Ledger) -> dict[str, object]:
     ):
         raise CampaignError("terminal receipt requires finalized zero residue")
     return {
-        "version": "m7.8-terminal-receipt-v6",
+        "version": "m7.8-terminal-receipt-v7",
         "campaignCorrelation": sanitize(ledger.campaign_id, domain="campaign"),
         "generationCorrelation": sanitize(ledger.generation_id, domain="generation"),
         "resourceGenerationCount": ledger.resource_generation_count,
@@ -863,7 +863,9 @@ def terminal_receipt(ledger: Ledger) -> dict[str, object]:
         "cleanupOfferEligibleRegions": ledger.cleanup_offer_eligible_regions,
         "cleanupOfferEligibilitySource": ledger.cleanup_offer_eligibility_source,
         "cleanupOfferEligibilitySha256": ledger.cleanup_offer_eligibility_sha256,
-        "retentionAbsenceEvidenceSha256": (ledger.retention_absence_evidence_sha256),
+        "freshControllerAdmissionEvidenceSha256": (
+            ledger.fresh_controller_admission_evidence_sha256
+        ),
         "cleanupArmEvidenceSha256": ledger.cleanup_arm_evidence_sha256,
         "cleanupDisarmEvidenceSha256": ledger.cleanup_disarm_evidence_sha256,
         "cleanupDisposition": ledger.cleanup_disposition,

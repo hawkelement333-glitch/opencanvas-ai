@@ -24,8 +24,8 @@ existence.
   or delete an Automation account, controller group, or runbook.
 - `modules/` contains the campaign resources, identities, cleanup controller,
   and exact-scope cleanup role assignments.
-- `schemas/` closes the strict retention-absence admission artifact,
-  configuration, private runtime, cleanup-region selection receipt, principal manifest,
+- `schemas/` closes the historical retention-audit artifact, fresh-controller
+  admission, configuration, private runtime, cleanup-region selection receipt, principal manifest,
   control-plane evidence, image admission, managed execution receipt, restart
   ledger, and zero-residue terminal receipt shapes.
 - `prepare.py` creates one untracked `.runtime/milestone_7_8` generation from a
@@ -38,10 +38,10 @@ existence.
   separately bound through every campaign artifact. Provider support,
   subscription-offer eligibility, enforced location policy, active occupancy,
   and discoverable soft-deleted occupancy are independent mandatory gates;
-  discovery failure has no provider-only fallback. It first validates and
-  copies one strict post-boundary absence artifact; its canonical hash is bound
-  through selection, controller, campaign, runtime, parameters, authorization,
-  cleanup authority, ledger, and terminal receipt.
+  discovery failure has no provider-only fallback. It validates and copies the
+  exact fresh-scope predeployment artifact for the planned controller; its
+  canonical hash is bound through selection, controller, campaign, runtime,
+  parameters, authorization, cleanup authority, ledger, and terminal receipt.
 - `operator.py` is dry-run by default. `--execute` advances one validated,
   persisted phase at a time and starts cleanup after any failure following
   scope creation. Every live phase requires a separate exact expiring execution
@@ -50,7 +50,8 @@ existence.
   identity and authority are adoptable; `capacity-check` then proves its
   permanent Reader grant, published content, and empty schedule/binding
   inventories before `scope-create`. Live execution revalidates the copied
-  absence artifact and rejects synthetic fixture evidence.
+  fresh-controller admission artifact and rejects any unbound or mismatched
+  evidence.
 - `azure_cli.py` is the sole Azure CLI process boundary. It prefers a native
   launcher, safely supports trusted Windows `az.cmd`/`az.bat` launchers through
   the absolute system `cmd.exe` with `shell=False`, rejects repository-local or
@@ -59,8 +60,8 @@ existence.
 - `campaign.py` enforces the USD 50 ceiling, at least 25 percent contingency,
   four-hour immutable deadline, one resource generation, at most one image
   generation, exactly one digest-bound admission scan, ordered resume,
-  completely paginated active/deleted Automation inventory, an explicit
-  provider-retained disposition, and zero-residue terminal receipt.
+  completely paginated active/deleted Automation inventory, a retained stable
+  controller disposition, and a campaign-only zero-residue terminal receipt.
 - `canonical_inputs.py` hashes the exact Git tree entries used by the API image;
   it does not depend on historical 7.7 image metadata.
 - `retention.py` is a GET-only verifier for the one retained campaign account.
@@ -71,16 +72,16 @@ existence.
   raw resource identifier. Normal absence verification refuses to contact
   Azure before the exact 30-day boundary.
 
-The historical v2 absence format remains available only for audit parsing. Live
-admission uses v3: it proves exact target absence while recording the complete
-current paginated inventory as hashes. Each of the four historical unrelated
+The historical v2 and v3 absence formats remain available only for audit
+parsing and historical-scope reconciliation. They are not fresh-scope live
+admission contracts. Each of the four historical unrelated
 baseline hashes is therefore either `present-unchanged` or
 `absent-unattributed`; v3 does not infer a deletion time or cause for an
 absent baseline record. Unknown, duplicate, colliding, malformed, or
 ambiguous current records fail closed. The inventory page chain, observed
 baseline status set, and current-inventory digest are all included in the
-domain-separated admission digest. A v2 artifact, authorization, or
-controller tag cannot be used at a v3 live entry point.
+domain-separated audit digest. A historical artifact, authorization, or
+controller tag cannot be used at a fresh-scope live entry point.
 
 The target and PostgreSQL regions must match because this campaign uses one
 private VNet. Their default is `centralus`. The independent cleanup region has
@@ -160,6 +161,75 @@ artifact. Any mismatch fails closed. This check proves only absence of the
 prior target; it does not authorize controller bootstrap, deployment, arming,
 a campaign, or any other Azure operation.
 
+## Fresh subscription predeployment inventory
+
+`predeployment.py` is a separate path for one replacement subscription before
+anything has been deployed there. It takes an ignored private runtime binding
+for the exact subscription, tenant, campaign/generation, region, and derived
+reusable-controller account identity; a distinct expiring read authorization;
+then performs only the authenticated-subscription read and complete paginated
+`deletedAutomationAccounts` GET inventory. It saves a sanitized record with
+the full inventory hash, page/request hashes, zero planned-account candidates,
+and zero mutation counters.
+
+A one-page inventory with zero deleted accounts is valid evidence for this
+separate predeployment check. It is named
+`fresh-subscription-predeployment-inventory-clear`, never
+`retained-account-absent`, and is not a v3 retention artifact. Once it is
+locally hash-bound to the exact fresh scope, it is the required controller and
+campaign admission evidence; it is not Azure execution authority. Existing v3
+M78-PG-012 rules remain unchanged for historical scopes that require
+post-deletion retention verification.
+
+The private runtime is initialized only from actual operator-held values in a
+new ignored directory, never by copying the retired runtime. The read
+authorization is hash-bound to that same runtime and permits exactly
+`authenticated-subscription-read` and `deleted-automation-inventory-read` for
+at most one hour. Raw subscription and tenant IDs remain only in that ignored
+runtime. The verifier output, authorization, and runtime use the three
+`fresh-subscription-predeployment-*.schema.json` contracts.
+
+`controller.py controller-config` is the only local pre-bootstrap writer. It
+validates that fresh proof and writes one closed private controller config for
+the reviewed controller region; it creates neither an Azure resource nor an
+execution authorization. It requires the proof's read authorization to still be
+current when the config is written, and bootstrap rechecks that same freshness.
+A separately authorized bootstrap and verification use that config first. Only
+then can `prepare.py` recheck exact controller adoption and produce a campaign
+bundle. This order prevents a bootstrap/config cycle without allowing target
+deployment before controller proof.
+
+The controller is retained for the entire fresh-scope campaign lifecycle.
+Campaign cleanup removes only campaign-owned target resources, schedules,
+job-schedule bindings, temporary grants, and runtime bindings; zero-residue
+proof requires the controller to remain active exactly once and not appear in
+the deleted inventory. Controller deletion is not a Milestone 7.8 campaign
+operation. If it is separately designed and authorized later, provider-confirmed
+deletion or a matching soft-deleted disposition is terminal controller evidence
+immediately; no completion path may wait for provider retention to expire.
+
+## Retired historical subscription
+
+`historical-subscription-retired` is a separate, terminal historical
+disposition for a former subscription that can no longer authenticate or expose
+the deleted-account inventory. It is not `retained-account-absent`, is not a
+v3 provider GET result, and cannot enter any controller, deployment, arming,
+cleanup, or campaign admission path.
+
+It may be recorded only as a document conforming to
+`schemas/historical-subscription-retirement-evidence.schema.json`. A reviewer
+must verify either an authenticated Microsoft notice or an authoritative account
+record, then bind its sanitized document and authentication hashes to the exact
+former subscription using retained private runtime or authorization evidence.
+Raw subscription identifiers, notice contents, and account records are never
+committed. Unknown, unauthenticated, or unbound notices fail closed.
+
+The historical v3 artifact remains mandatory only for a scope whose accepted
+contract actually requires post-deletion retention verification. A replacement
+subscription is a new scope: it needs fresh private bindings, separate
+authorization, and fresh predeployment evidence; it inherits neither this
+historical disposition nor any former-subscription admission state.
+
 ## Current boundary
 
 A fresh campaign previously stopped when Azure proved that provider support,
@@ -175,21 +245,26 @@ discovery now selects `southeastasia`: `eastus2`, `westus`, `eastus`, and
 are offer-ineligible.
 
 The later critical cleanup reconciliation proved M78-PG-010 and M78-PG-011:
-the original deployment bound a schedule before publication, and its residue
-model omitted the exact soft-deleted Automation account. Publication is now an
-imperative proof-gated sequence and soft-deleted accounts are explicit residue.
-Microsoft exposes retention/readback but no documented self-service permanent
-delete for `deletedAutomationAccounts`. The local architecture now uses one
+the original deployment bound a schedule before publication and confused the
+stable controller with campaign residue. Publication is now an imperative
+proof-gated sequence. The stable controller is retained throughout Milestone
+7.8; campaign residue covers only campaign-owned schedules, bindings, grants,
+identities, jobs, and target resources. Microsoft retention behavior is never
+a completion wait for that retained controller. The local architecture uses one
 separately provisioned reusable controller outside campaign deletion scope;
 ordinary campaign cleanup cannot create another retained Automation record.
 The reported local state is
 `architecture-corrected-live-execution-not-authorized`. M78-PG-012 corrects the
 sanitized identity binding and adds the deterministic post-boundary absence
 verifier; it does not remove the current record or prove the corrected
-controller live. M78-PG-013 now binds the eventual exact absence artifact into
-every executable cleanup-admission surface and rejects synthetic evidence at
-live entry. No passing managed-provider absence artifact exists yet. The exact retained private
-runtime remains ignored and preserved. M78-PG-E01, M78-PG-E02, M78-PG-E03,
+controller live. The fresh-scope admission binds the exact predeployment
+inventory proof into every executable cleanup-admission surface and rejects
+unbound evidence at live entry. No controller bootstrap, campaign, or managed
+execution has occurred. If the former subscription is independently verified
+retired, only the separate non-authorizing historical disposition may be
+recorded; it cannot replace fresh-scope evidence. The exact retained private
+runtime remains ignored and preserved.
+M78-PG-E01, M78-PG-E02, M78-PG-E03,
 M78-TI-E01, and M78-PG-E04 remain open. No new campaign is authorized, and
 Milestone 7.8 remains incomplete. The local object-storage audit has now found
 and corrected M78-OS-001; managed-provider object proof remains outstanding.

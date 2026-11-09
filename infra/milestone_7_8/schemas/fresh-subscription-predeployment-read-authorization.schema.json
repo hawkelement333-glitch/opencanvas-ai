@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:fresh-subscription-predeployment-read-authorization:v1",
+  "title": "Milestone 7.8 fresh subscription predeployment read authorization",
+  "description": "Sanitized, expiring authorization for only the authenticated-subscription read and paginated deleted Automation-account inventory GETs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "disposition",
+    "subscriptionCorrelation",
+    "subscriptionIdentitySha256",
+    "tenantCorrelation",
+    "campaignCorrelation",
+    "generationCorrelation",
+    "region",
+    "plannedAccountIdentitySha256",
+    "runtimeBindingSha256",
+    "allowedOperations",
+    "issuedAtUtc",
+    "expiresAtUtc",
+    "authorizationSha256"
+  ],
+  "properties": {
+    "version": { "const": "m7.8-fresh-subscription-predeployment-read-authorization-v1" },
+    "disposition": { "const": "separately-authorized-fresh-subscription-predeployment-read" },
+    "subscriptionCorrelation": { "$ref": "#/$defs/correlation" },
+    "subscriptionIdentitySha256": { "$ref": "#/$defs/hash" },
+    "tenantCorrelation": { "$ref": "#/$defs/correlation" },
+    "campaignCorrelation": { "$ref": "#/$defs/correlation" },
+    "generationCorrelation": { "$ref": "#/$defs/correlation" },
+    "region": { "type": "string", "pattern": "^[a-z][a-z0-9]{2,31}$" },
+    "plannedAccountIdentitySha256": { "$ref": "#/$defs/hash" },
+    "runtimeBindingSha256": { "$ref": "#/$defs/hash" },
+    "allowedOperations": {
+      "const": [
+        "authenticated-subscription-read",
+        "deleted-automation-inventory-read"
+      ]
+    },
+    "issuedAtUtc": { "type": "string", "format": "date-time" },
+    "expiresAtUtc": { "type": "string", "format": "date-time" },
+    "authorizationSha256": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "correlation": { "type": "string", "pattern": "^[a-f0-9]{16}$" }
+  }
+}

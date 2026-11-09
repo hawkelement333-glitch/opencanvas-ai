@@ -363,7 +363,7 @@ def test_missing_cli_and_invalid_arguments_fail_before_runtime_artifacts(
             "microsoft-automation-restricted-public-offer-regions-2026-08-v1"
         ),
         cleanup_offer_eligibility_sha256="e" * 64,
-        retention_absence_evidence_sha256="0" * 64,
+        fresh_controller_admission_evidence_sha256="0" * 64,
     )
     load_ledger(ledger, config)
     assert not ledger.exists()

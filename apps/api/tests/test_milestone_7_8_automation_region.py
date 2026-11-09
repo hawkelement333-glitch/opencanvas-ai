@@ -45,6 +45,8 @@ from infra.milestone_7_8.operator import (
 )
 
 NOW = datetime(2030, 1, 1, tzinfo=UTC)
+SUBSCRIPTION_ID = "00000000-0000-4000-8000-000000000100"
+TENANT_ID = "00000000-0000-4000-8000-000000000101"
 
 
 def _result(value: object, *, exit_code: int = 0) -> dict[str, object]:
@@ -75,6 +77,7 @@ def _provider(locations: Sequence[object] | None = None) -> dict[str, object]:
 
 def _discovery_results(
     *,
+    account: object | None = None,
     subscription: object | None = None,
     locations: Sequence[object] | None = None,
     active: Sequence[object] | None = None,
@@ -84,16 +87,27 @@ def _discovery_results(
     assignments: Sequence[object] | None = None,
 ) -> tuple[dict[str, object], ...]:
     return (
-        _result({"environmentName": "AzureCloud", "state": "Enabled"}),
+        _result(
+            account
+            if account is not None
+            else {
+                "id": SUBSCRIPTION_ID,
+                "tenantId": TENANT_ID,
+                "environmentName": "AzureCloud",
+                "state": "Enabled",
+            }
+        ),
         _result(
             subscription
             if subscription is not None
             else {
+                "id": f"/subscriptions/{SUBSCRIPTION_ID}",
+                "subscriptionId": SUBSCRIPTION_ID,
                 "subscriptionPolicies": {
                     "locationPlacementId": "Public_2014-09-01",
                     "quotaId": "AzureForStudents_2018-01-01",
                     "spendingLimit": "On",
-                }
+                },
             }
         ),
         _result(_provider(locations)),
@@ -130,6 +144,7 @@ class FakeRunner:
 
 def _select(
     *,
+    account: object | None = None,
     subscription: object | None = None,
     locations: Sequence[object] | None = None,
     active: Sequence[object] | None = None,
@@ -143,6 +158,7 @@ def _select(
     return select_automation_region_from_results(
         FakeRunner(definitions),
         _discovery_results(
+            account=account,
             subscription=subscription,
             locations=locations,
             active=active,
@@ -151,9 +167,46 @@ def _select(
             deleted_next_link=deleted_next_link,
             assignments=assignments,
         ),
+        subscription_id=SUBSCRIPTION_ID,
         observed_at=NOW,
         candidate_order=candidate_order,
     )
+
+
+def _inventory_page(accounts: Sequence[object], next_link: str | None = None) -> dict[str, object]:
+    return _result({"accounts": list(accounts), "nextLink": next_link})
+
+
+def _subscription_metadata(policies: object) -> dict[str, object]:
+    return {
+        "id": f"/subscriptions/{SUBSCRIPTION_ID}",
+        "subscriptionId": SUBSCRIPTION_ID,
+        "subscriptionPolicies": policies,
+    }
+
+
+class ScriptedDiscoveryRunner:
+    def __init__(self, responses: dict[tuple[str, ...], dict[str, object]]) -> None:
+        self.responses = responses
+        self.commands: list[tuple[str, ...]] = []
+
+    def run(self, command: tuple[str, ...]) -> dict[str, object]:
+        self.commands.append(command)
+        return self.responses.get(command, _result({}, exit_code=1))
+
+
+def _discovery_response_map(
+    *,
+    active: dict[str, object],
+    deleted: dict[str, object],
+    subscription: object | None = None,
+) -> tuple[tuple[tuple[str, ...], ...], dict[tuple[str, ...], dict[str, object]]]:
+    commands = automation_region_discovery_commands(SUBSCRIPTION_ID)
+    results = _discovery_results(subscription=subscription)
+    responses = dict(zip(commands, results, strict=True))
+    responses[commands[3]] = active
+    responses[commands[4]] = deleted
+    return commands, responses
 
 
 def _config(selection: AutomationRegionSelection) -> CampaignConfig:
@@ -179,7 +232,9 @@ def _config(selection: AutomationRegionSelection) -> CampaignConfig:
         cleanup_offer_eligible_regions=",".join(selection.offer_eligible_regions),
         cleanup_offer_eligibility_source=selection.offer_eligibility_source,
         cleanup_offer_eligibility_sha256=selection.offer_eligibility_sha256,
-        retention_absence_evidence_sha256=(selection.retention_absence_evidence_sha256),
+        fresh_controller_admission_evidence_sha256=(
+            selection.fresh_controller_admission_evidence_sha256
+        ),
     )
 
 
@@ -207,7 +262,9 @@ def _runtime(selection: AutomationRegionSelection) -> dict[str, str]:
         "cleanupOfferEligibleRegions": ",".join(selection.offer_eligible_regions),
         "cleanupOfferEligibilitySource": selection.offer_eligibility_source,
         "cleanupOfferEligibilitySha256": selection.offer_eligibility_sha256,
-        "retentionAbsenceEvidenceSha256": (selection.retention_absence_evidence_sha256),
+        "freshControllerAdmissionEvidenceSha256": (
+            selection.fresh_controller_admission_evidence_sha256
+        ),
     }
 
 
@@ -228,7 +285,7 @@ def _active_controller_record() -> dict[str, object]:
             "mobius.subscription-correlation": "a" * 16,
             "mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z",
             "mobius.cleanup-script-sha256": hashlib.sha256(b"cleanup-content").hexdigest(),
-            "mobius.retention-absence-sha256": "0" * 64,
+            "mobius.fresh-controller-admission-sha256": "0" * 64,
         },
     }
 
@@ -247,7 +304,9 @@ def _controller_baseline_results(
         "mobius.subscription-correlation": config.subscription_correlation,
         "mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z",
         "mobius.cleanup-script-sha256": runtime["cleanupScriptSha256"],
-        "mobius.retention-absence-sha256": (config.retention_absence_evidence_sha256),
+        "mobius.fresh-controller-admission-sha256": (
+            config.fresh_controller_admission_evidence_sha256
+        ),
     }
     return [
         _result(
@@ -320,18 +379,19 @@ def test_exact_reusable_controller_is_adopted_in_its_established_region() -> Non
             "mobius.subscription-correlation": "a" * 16,
             "mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z",
             "mobius.cleanup-script-sha256": "9" * 64,
-            "mobius.retention-absence-sha256": "8" * 64,
+            "mobius.fresh-controller-admission-sha256": "8" * 64,
         },
     }
     selection = select_automation_region_from_results(
         FakeRunner(),
         _discovery_results(active=[controller]),
+        subscription_id=SUBSCRIPTION_ID,
         observed_at=NOW,
         controller_resource_group="rg-m78-controller-aaaaaaaaaa",
         controller_account="aa-m78-controller-aaaaaaaaaa",
         subscription_correlation="a" * 16,
         cleanup_script_sha256="9" * 64,
-        retention_absence_evidence_sha256="8" * 64,
+        fresh_controller_admission_evidence_sha256="8" * 64,
     )
     assert selection.selected_region == "southeastasia"
     assert selection.controller_disposition == "exact-controller-adoptable"
@@ -345,21 +405,23 @@ def test_exact_reusable_controller_is_adopted_in_its_established_region() -> Non
         select_automation_region_from_results(
             FakeRunner(),
             _discovery_results(active=[drifted]),
+            subscription_id=SUBSCRIPTION_ID,
             controller_resource_group="rg-m78-controller-aaaaaaaaaa",
             controller_account="aa-m78-controller-aaaaaaaaaa",
             subscription_correlation="a" * 16,
             cleanup_script_sha256="9" * 64,
-            retention_absence_evidence_sha256="8" * 64,
+            fresh_controller_admission_evidence_sha256="8" * 64,
         )
     with pytest.raises(CampaignError, match="authority is insufficient"):
         select_automation_region_from_results(
             FakeRunner(),
             _discovery_results(active=[controller]),
+            subscription_id=SUBSCRIPTION_ID,
             controller_resource_group="rg-m78-controller-aaaaaaaaaa",
             controller_account="aa-m78-controller-aaaaaaaaaa",
             subscription_correlation="a" * 16,
             cleanup_script_sha256="9" * 64,
-            retention_absence_evidence_sha256="8" * 64,
+            fresh_controller_admission_evidence_sha256="8" * 64,
             controller_required_until_utc="2030-01-03T00:00:00Z",
         )
 
@@ -472,13 +534,135 @@ def test_active_and_soft_deleted_occupancy_are_independent_offer_aware_gates() -
     assert eastus2.status == "occupied"
 
 
+def test_discovery_accepts_complete_zero_record_inventories() -> None:
+    _commands, responses = _discovery_response_map(
+        active=_inventory_page([]),
+        deleted=_inventory_page([]),
+    )
+    selection = discover_automation_region(
+        ScriptedDiscoveryRunner(responses), SUBSCRIPTION_ID, observed_at=NOW
+    )
+
+    assert selection.selected_region == "eastus2"
+    assert all(
+        item.active_account_count == 0 and item.soft_deleted_account_count == 0
+        for item in selection.candidates
+    )
+
+
+def test_discovery_counts_deleted_account_lowercase_location() -> None:
+    _commands, responses = _discovery_response_map(
+        active=_inventory_page([]),
+        deleted=_inventory_page([{"location": "eastus"}]),
+    )
+    selection = discover_automation_region(
+        ScriptedDiscoveryRunner(responses), SUBSCRIPTION_ID, observed_at=NOW
+    )
+
+    eastus = next(item for item in selection.candidates if item.region == "eastus")
+    assert eastus.soft_deleted_account_count == 1
+    assert eastus.status == "occupied"
+
+
+def test_discovery_follows_same_subscription_inventory_continuation() -> None:
+    commands, responses = _discovery_response_map(
+        active=_inventory_page([]),
+        deleted=_inventory_page([]),
+    )
+    initial_active = commands[3]
+    active_url = initial_active[initial_active.index("--url") + 1]
+    active_query = initial_active[initial_active.index("--query") + 1]
+    continuation_url = active_url + "&$skipToken=page-two"
+    responses[initial_active] = _inventory_page([], continuation_url)
+    continuation = (
+        "az",
+        "rest",
+        "--method",
+        "get",
+        "--url",
+        continuation_url,
+        "--query",
+        active_query,
+        "--output",
+        "json",
+    )
+    responses[continuation] = _inventory_page([{"location": "eastus2"}])
+    initial_deleted = commands[4]
+    deleted_url = initial_deleted[initial_deleted.index("--url") + 1]
+    deleted_query = initial_deleted[initial_deleted.index("--query") + 1]
+    deleted_continuation_url = deleted_url + "&$skipToken=page-two"
+    responses[initial_deleted] = _inventory_page([], deleted_continuation_url)
+    deleted_continuation = (
+        "az",
+        "rest",
+        "--method",
+        "get",
+        "--url",
+        deleted_continuation_url,
+        "--query",
+        deleted_query,
+        "--output",
+        "json",
+    )
+    responses[deleted_continuation] = _inventory_page([{"location": "eastus"}])
+    runner = ScriptedDiscoveryRunner(responses)
+
+    selection = discover_automation_region(runner, SUBSCRIPTION_ID, observed_at=NOW)
+
+    eastus2 = next(item for item in selection.candidates if item.region == "eastus2")
+    eastus = next(item for item in selection.candidates if item.region == "eastus")
+    assert eastus2.active_account_count == 1
+    assert eastus.soft_deleted_account_count == 1
+    assert continuation in runner.commands
+    assert deleted_continuation in runner.commands
+
+
+def test_discovery_rejects_malformed_inventory_continuation_before_following() -> None:
+    _commands, responses = _discovery_response_map(
+        active=_inventory_page(
+            [],
+            "https://example.invalid/subscriptions/other/resources?api-version=2021-04-01",
+        ),
+        deleted=_inventory_page([]),
+    )
+    runner = ScriptedDiscoveryRunner(responses)
+
+    with pytest.raises(CampaignError, match="active account pagination is invalid"):
+        discover_automation_region(runner, SUBSCRIPTION_ID, observed_at=NOW)
+
+    assert len(runner.commands) == 4
+
+
+def test_discovery_rejects_subscription_metadata_bound_to_another_subscription() -> None:
+    other_subscription = "00000000-0000-4000-8000-000000000102"
+    _commands, responses = _discovery_response_map(
+        active=_inventory_page([]),
+        deleted=_inventory_page([]),
+        subscription={
+            "id": f"/subscriptions/{other_subscription}",
+            "subscriptionId": other_subscription,
+            "subscriptionPolicies": {
+                "locationPlacementId": "Public_2014-09-01",
+                "quotaId": "AzureForStudents_2018-01-01",
+                "spendingLimit": "On",
+            },
+        },
+    )
+    runner = ScriptedDiscoveryRunner(responses)
+
+    with pytest.raises(CampaignError, match="subscription metadata binding differs"):
+        discover_automation_region(runner, SUBSCRIPTION_ID, observed_at=NOW)
+
+    assert len(runner.commands) == 2
+
+
 @pytest.mark.parametrize(
     "subscription",
     [
-        {},
-        {"subscriptionPolicies": None},
-        {"subscriptionPolicies": {"quotaId": None}},
-        {"subscriptionPolicies": {"quotaId": "UnknownEnterpriseOffer"}},
+        _subscription_metadata({}),
+        _subscription_metadata(None),
+        _subscription_metadata({"quotaId": None}),
+        _subscription_metadata({"quotaId": "UnknownEnterpriseOffer"}),
     ],
 )
 def test_unknown_or_malformed_offer_metadata_applies_safe_restrictive_baseline(
@@ -644,7 +828,9 @@ def test_active_and_soft_deleted_inventory_pagination_fail_closed(
         {"accounts": [], "nextLink": "https://management.azure.com/next-page"}
     )
     with pytest.raises(CampaignError, match="inventory is incomplete"):
-        select_automation_region_from_results(FakeRunner(), tuple(results))
+        select_automation_region_from_results(
+            FakeRunner(), tuple(results), subscription_id=SUBSCRIPTION_ID
+        )
 
 
 def test_all_candidates_policy_disallowed_has_a_classified_failure() -> None:
@@ -696,7 +882,9 @@ def test_disabled_or_non_public_subscription_context_fails_closed() -> None:
         results = list(_discovery_results())
         results[0] = _result(context)
         with pytest.raises(CampaignError, match="subscription context"):
-            select_automation_region_from_results(FakeRunner(), tuple(results))
+            select_automation_region_from_results(
+                FakeRunner(), tuple(results), subscription_id=SUBSCRIPTION_ID
+            )
 
 
 def test_selection_receipt_and_ledger_binding_are_immutable() -> None:
@@ -800,12 +988,13 @@ def test_capacity_check_revalidates_selection_before_scope_mutation() -> None:
     selection = select_automation_region_from_results(
         FakeRunner(),
         _discovery_results(active=[active_controller]),
+        subscription_id=SUBSCRIPTION_ID,
         observed_at=NOW,
         controller_resource_group="rg-m78-controller-aaaaaaaaaa",
         controller_account="aa-m78-controller-aaaaaaaaaa",
         subscription_correlation="a" * 16,
         cleanup_script_sha256=hashlib.sha256(b"cleanup-content").hexdigest(),
-        retention_absence_evidence_sha256="0" * 64,
+        fresh_controller_admission_evidence_sha256="0" * 64,
         controller_required_until_utc="2030-01-01T05:00:00Z",
     )
     config = _config(selection)
@@ -832,7 +1021,7 @@ def test_capacity_check_revalidates_selection_before_scope_mutation() -> None:
 
     changed_offer_results = list(_discovery_results(active=[active_controller]))
     changed_offer_results[1] = _result(
-        {"subscriptionPolicies": {"quotaId": "FreeTrial_ChangedEvidence"}}
+        _subscription_metadata({"quotaId": "FreeTrial_ChangedEvidence"})
     )
     with pytest.raises(CampaignError, match="armable"):
         validate_operation_results(
@@ -871,8 +1060,13 @@ def test_discovery_and_cleanup_never_target_unrelated_automation_accounts() -> N
     policy_inventory = commands[5]
     assert account_context[1:3] == ("account", "show")
     assert "--subscription" in account_context
+    assert "id:id" in account_context[account_context.index("--query") + 1]
+    assert "tenantId:tenantId" in account_context[account_context.index("--query") + 1]
     assert subscription_metadata[1:3] == ("rest", "--method")
-    assert any("subscriptionPolicies" in part for part in subscription_metadata)
+    subscription_query = subscription_metadata[subscription_metadata.index("--query") + 1]
+    assert "id:id" in subscription_query
+    assert "subscriptionId:subscriptionId" in subscription_query
+    assert "subscriptionPolicies" in subscription_query
     assert provider_inventory[1:3] == ("provider", "show")
     assert "--subscription" in provider_inventory
     assert active_inventory[1:3] == ("rest", "--method")
@@ -882,7 +1076,7 @@ def test_discovery_and_cleanup_never_target_unrelated_automation_accounts() -> N
     assert "nextLink:nextLink" in active_query
     assert "--name" not in active_inventory
     deleted_query = deleted_inventory[deleted_inventory.index("--query") + 1]
-    assert "accounts:value[].{location:Location}" in deleted_query
+    assert "accounts:value[].{location:location}" in deleted_query
     assert "nextLink:nextLink" in deleted_query
     assert policy_inventory[1:4] == ("policy", "assignment", "list")
     assert "/subscriptions/00000000-0000-4000-8000-000000000100" in policy_inventory

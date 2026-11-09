@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:fresh-subscription-predeployment-absence-evidence:v1",
+  "title": "Milestone 7.8 fresh subscription predeployment account absence evidence",
+  "description": "Sanitized, non-execution evidence that the exact planned controller account is absent from one complete deleted-account inventory. This is a distinct predeployment contract, not a retention contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "evidenceClass",
+    "status",
+    "subscriptionCorrelation",
+    "subscriptionIdentitySha256",
+    "tenantCorrelation",
+    "campaignCorrelation",
+    "generationCorrelation",
+    "region",
+    "plannedAccountIdentitySha256",
+    "runtimeBindingSha256",
+    "authorizationSha256",
+    "authorizationExpiresAtUtc",
+    "observedAtUtc",
+    "providerResourceType",
+    "providerEndpointTemplate",
+    "providerApiVersion",
+    "providerEndpointSha256",
+    "httpMethods",
+    "paginationComplete",
+    "deletedInventoryPages",
+    "continuationCount",
+    "inventoryPages",
+    "deletedInventorySha256",
+    "deletedAccountCount",
+    "plannedAccountCandidates",
+    "azureGetOperations",
+    "azureMutationCount",
+    "repositoryMutationCount",
+    "supportTicketOperationCount",
+    "controllerMutationCount",
+    "campaignMutationCount",
+    "remoteGitMutationCount",
+    "milestone8MutationCount"
+  ],
+  "properties": {
+    "version": { "const": "m7.8-fresh-subscription-predeployment-absence-evidence-v1" },
+    "evidenceClass": { "const": "managed-provider-predeployment-get-only" },
+    "status": { "const": "fresh-subscription-predeployment-inventory-clear" },
+    "subscriptionCorrelation": { "$ref": "#/$defs/correlation" },
+    "subscriptionIdentitySha256": { "$ref": "#/$defs/hash" },
+    "tenantCorrelation": { "$ref": "#/$defs/correlation" },
+    "campaignCorrelation": { "$ref": "#/$defs/correlation" },
+    "generationCorrelation": { "$ref": "#/$defs/correlation" },
+    "region": { "type": "string", "pattern": "^[a-z][a-z0-9]{2,31}$" },
+    "plannedAccountIdentitySha256": { "$ref": "#/$defs/hash" },
+    "runtimeBindingSha256": { "$ref": "#/$defs/hash" },
+    "authorizationSha256": { "$ref": "#/$defs/hash" },
+    "authorizationExpiresAtUtc": { "type": "string", "format": "date-time" },
+    "observedAtUtc": { "type": "string", "format": "date-time" },
+    "providerResourceType": { "const": "Microsoft.Automation/deletedAutomationAccounts" },
+    "providerEndpointTemplate": {
+      "const": "https://management.azure.com/subscriptions/{subscriptionId}/providers/Microsoft.Automation/deletedAutomationAccounts?api-version=2024-10-23"
+    },
+    "providerApiVersion": { "const": "2024-10-23" },
+    "providerEndpointSha256": { "$ref": "#/$defs/hash" },
+    "httpMethods": { "const": ["GET"] },
+    "paginationComplete": { "const": true },
+    "deletedInventoryPages": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "continuationCount": { "type": "integer", "minimum": 0, "maximum": 99 },
+    "inventoryPages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/inventoryPage" }
+    },
+    "deletedInventorySha256": { "$ref": "#/$defs/hash" },
+    "deletedAccountCount": { "type": "integer", "minimum": 0 },
+    "plannedAccountCandidates": { "const": 0 },
+    "azureGetOperations": { "type": "integer", "minimum": 2, "maximum": 101 },
+    "azureMutationCount": { "const": 0 },
+    "repositoryMutationCount": { "const": 0 },
+    "supportTicketOperationCount": { "const": 0 },
+    "controllerMutationCount": { "const": 0 },
+    "campaignMutationCount": { "const": 0 },
+    "remoteGitMutationCount": { "const": 0 },
+    "milestone8MutationCount": { "const": 0 }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "correlation": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "inventoryPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestSha256", "recordIdentitySha256", "nextRequestSha256"],
+      "properties": {
+        "requestSha256": { "$ref": "#/$defs/hash" },
+        "recordIdentitySha256": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/hash" }
+        },
+        "nextRequestSha256": {
+          "oneOf": [
+            { "$ref": "#/$defs/hash" },
+            { "type": "null" }
+          ]
+        }
+      }
+    }
+  }
+}

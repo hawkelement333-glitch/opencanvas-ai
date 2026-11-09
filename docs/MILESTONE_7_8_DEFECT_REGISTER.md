@@ -3,11 +3,12 @@
 Date: 2026-08-27
 
 Status: active; architecture and checkpoint-scope findings are corrected;
-managed PostgreSQL defects through M78-PG-013 and the first object-storage
+managed PostgreSQL defects through M78-PG-017 and the first object-storage
 finding are locally remediated. The exact prior Automation account remains
-provider-retained nonzero residue. The disposable-controller architecture is
-superseded locally by one stable reusable controller outside campaign deletion
-scope; its state is `architecture-corrected-live-execution-not-authorized`.
+historical provider-retention evidence only. The disposable-controller
+architecture is superseded locally by one stable reusable controller outside
+campaign deletion scope; its state is
+`architecture-corrected-live-execution-not-authorized`.
 All five managed database evidence gaps remain open, and Milestone 7.8 is not
 complete.
 
@@ -58,6 +59,12 @@ authoritative repository requirement or permits a concrete unsafe path.
 All proved repository defects now have coherent local corrections. The exact
 provider-retained cleanup residue and the managed-evidence gaps prevent this
 audit surface and Milestone 7.8 from satisfying their completion rules.
+
+The M78-PG-010, M78-PG-011, and M78-PG-013 table cells preserve the local state
+at their original audit boundaries. M78-PG-017 is the controlling disposition
+for a fresh scope: a retained controller is required, the historical v3
+post-delete artifact is not fresh-path admission, and a 30-day disappearance is
+not a fresh completion condition.
 
 The M78-PG-010 and M78-PG-011 table rows preserve the disposition proved at
 their original correction boundary. On 2026-08-25 the structurally disposable
@@ -271,8 +278,10 @@ claiming that absence or a live controller has been proved.
 
 ### M78-PG-013 — retention absence was not an executable admission fact
 
-**Severity:** High. **Disposition:** locally resolved; managed-provider absence
-and every Azure execution remain separately unavailable or unauthorized.
+**Severity:** High. **Disposition:** locally resolved for the historical
+post-deletion audit contract; its later use as universal fresh-scope admission
+is superseded by M78-PG-017. Managed-provider absence and every Azure execution
+remain separately unavailable or unauthorized.
 
 The post-boundary verifier had a strict success result, but no controller or
 campaign executable required that result. The correction promotes only the
@@ -282,14 +291,13 @@ subscription and historical correlations, four unchanged unrelated hashes,
 zero target candidates, complete pagination, and zero mutations, and computes
 one canonical domain-separated hash.
 
-Preparation copies that artifact into the private generation and binds its hash
-through region selection, controller configuration/tags, campaign/runtime,
-both parameter files, cleanup authority and runbook parameters, both execution
-authorizations, ledger, recovery/replay validation, and terminal receipt.
-Controller and operator live entry revalidate the artifact and reject
-`synthetic-test-fixture`; that class is limited to isolated local test
-validation and cannot enter preparation or execution.
-No managed-provider absence artifact was added to the repository.
+That was necessary to prevent a bypass of the original historical retention
+contract. The later retained-controller review proved that carrying this
+historical artifact through every fresh controller and campaign lifecycle would
+recreate the prohibited create-delete-retain loop. The v3 parser, schema, and
+historical verification rules are therefore retained for audit compatibility,
+but are excluded from fresh preparation, controller bootstrap/adoption,
+campaign admission, cleanup completion, and terminal receipt.
 
 ### M78-PG-014 — v2 unrelated-record equality made absence admission non-live
 
@@ -319,6 +327,86 @@ operator, recovery, cleanup, finalization, or authorization paths.
 The historical four hashes are unchanged. No provider observation from the
 diagnostic was stored as an admission artifact, and no claim about individual
 unrelated-record retention or deletion timing is made.
+
+### M78-PG-015 — former subscription retirement is not target-absence evidence
+
+**Severity:** High. **Disposition:** locally bounded; no authenticated notice,
+private binding, v3 absence artifact, controller action, deployment, arming,
+cleanup, or campaign execution is claimed by this repository change.
+
+If a former subscription can no longer authenticate or expose the exact v3
+deleted-account inventory, a reviewer may record only the separate terminal
+`historical-subscription-retired` disposition. The record must conform to
+`historical-subscription-retirement-evidence.schema.json`, preserve only
+sanitized hashes, identify either an authenticated Microsoft notice or an
+authoritative account record, and bind that source to the exact former
+subscription through retained private runtime or authorization evidence.
+
+The disposition has explicit zero provider-GET and mutation counts, denies all
+live authority, and requires a replacement subscription to establish fresh
+scope bindings, authorization, and fresh planned-controller predeployment
+evidence. An unknown, unauthenticated, or unbound deletion notice fails closed.
+It is never `retained-account-absent` and cannot replace the mandatory
+fresh-scope admission evidence.
+
+### M78-PG-016 — replacement scope lacked a non-admitting predeployment inventory path
+
+**Severity:** High. **Disposition:** locally corrected; no active-subscription
+provider evidence, controller, role, deployment, arming, cleanup, campaign, or
+v3 absence result is claimed. The original v3 verifier is intentionally bound
+to prior post-deletion history, so an active replacement scope with no deleted
+accounts could not previously preserve a complete zero-record inventory without
+mislabeling it as M78-PG-012.
+
+`predeployment.py` now introduces a separate private runtime binding and
+expiring read authorization for one exact planned controller account. Its
+closed schemas require subscription/tenant/campaign/generation/region bindings,
+complete paginated GET inventory, request and inventory hashes, and explicit
+zero mutation counters. `fresh-subscription-predeployment-inventory-clear`
+never claims `retained-account-absent` and is rejected by v3 validation.
+M78-PG-017 makes it the mandatory exact-hash admission fact for fresh
+preparation, controller/bootstrap adoption, and campaign admission; it remains
+distinct from the separate authorization required for every Azure execution. A
+real replacement scope still needs actual private input values and a separately
+authorized read before any provider claim exists.
+
+### M78-PG-017 — universal post-delete admission recreated the retention loop
+
+**Severity:** High. **Disposition:** locally corrected; no controller,
+deployment, campaign, deletion, or provider confirmation is claimed.
+
+The prior universal binding of M78-PG-012 v3 evidence made a fresh scope require
+the stable Automation controller to be deleted and then disappear from the
+provider's soft-deleted inventory before controller/campaign admission or
+completion. That contradicts the selected architecture: the controller must
+remain active while it supplies cleanup, disarm, readback, recovery, and
+terminal evidence. Deleting it would recreate a provider-retention wait and
+could not prove a coherent lifecycle.
+
+The correction retains the controller through Milestone 7.8. Fresh admission is
+instead bound to the exact planned controller's complete, paginated GET-only
+predeployment inventory evidence. Campaign cleanup deletes only campaign-owned
+target resources and revokes schedule, binding, identity, grant, and runtime
+bindings. Residue proof requires the controller active exactly once and absent
+from the deleted inventory; unrelated deleted records remain hashed
+observations. Fresh terminal receipts contain only campaign-owned zero-residue
+counters. If controller deletion is separately designed and authorized later,
+an exact provider-confirmed deletion or soft-deleted disposition is terminal
+controller evidence immediately; no fresh path may wait for a 30-day
+disappearance.
+
+The same review found a bootstrap/configuration circle: campaign preparation
+required an already-adoptable controller, but was the only prior path that could
+describe the exact controller bootstrap configuration. The local-only
+`controller-config` writer now binds one private bootstrap config directly to
+the fresh proof while its read authorization is still current. It creates no
+Azure resource or execution authorization. Only separately authorized
+bootstrap/verification can make later campaign preparation admissible.
+
+The change spans fresh admission, controller/operator/cleanup authority,
+campaign/ledger/receipt schemas, Bicep parameters/tags, residue verification,
+runbook, handoffs, and regression coverage. M78-PG-012/v3 and
+`historical-subscription-retired` remain historical audit contracts only.
 
 ### M78-OS-001 — durable deletion requests had no production executor
 

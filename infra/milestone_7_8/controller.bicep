@@ -13,11 +13,11 @@ param controllerAuthorizedUntilUtc string
 param cleanupScriptSha256 string
 @minLength(64)
 @maxLength(64)
-param retentionAbsenceEvidenceSha256 string
+param freshControllerAdmissionEvidenceSha256 string
 @allowed([
-  'm7.8-retained-automation-absence-verification-v3'
+  'm7.8-fresh-subscription-predeployment-absence-evidence-v1'
 ])
-param retentionAbsenceEvidenceVersion string
+param freshControllerAdmissionEvidenceVersion string
 
 var controllerTags = {
   'mobius.milestone': '7.8'
@@ -26,8 +26,8 @@ var controllerTags = {
   'mobius.subscription-correlation': subscriptionCorrelation
   'mobius.controller-authorized-until-utc': controllerAuthorizedUntilUtc
   'mobius.cleanup-script-sha256': cleanupScriptSha256
-  'mobius.retention-absence-sha256': retentionAbsenceEvidenceSha256
-  'mobius.retention-absence-version': retentionAbsenceEvidenceVersion
+  'mobius.fresh-controller-admission-sha256': freshControllerAdmissionEvidenceSha256
+  'mobius.fresh-controller-admission-version': freshControllerAdmissionEvidenceVersion
 }
 
 resource controllerResourceGroup 'Microsoft.Resources/resourceGroups@2024-11-01' = {
@@ -72,5 +72,5 @@ output readerRoleAssignmentId string = controllerReaderAssignment.outputs.roleAs
 output controllerLocation string = controllerLocation
 output controllerAuthorizedUntilUtc string = controllerAuthorizedUntilUtc
 output cleanupScriptSha256 string = cleanupScriptSha256
-output retentionAbsenceEvidenceSha256 string = retentionAbsenceEvidenceSha256
-output retentionAbsenceEvidenceVersion string = retentionAbsenceEvidenceVersion
+output freshControllerAdmissionEvidenceSha256 string = freshControllerAdmissionEvidenceSha256
+output freshControllerAdmissionEvidenceVersion string = freshControllerAdmissionEvidenceVersion

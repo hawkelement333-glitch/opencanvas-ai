@@ -22,6 +22,28 @@ account remains present; Milestone 7.8 remains incomplete
 > Exact target absence, full pagination, zero current-only records, and zero
 > mutations remain mandatory. This amendment did not create or preserve a live
 > absence artifact and did not authorize Azure work.
+>
+> **2026-11-06 historical-subscription retirement amendment:** if the former
+> subscription can no longer authenticate or expose the v3 inventory endpoint,
+> the former scope may be recorded only as `historical-subscription-retired`
+> after a reviewer binds a sanitized authenticated Microsoft notice or
+> authoritative account record to retained private runtime or authorization
+> evidence. This is not `retained-account-absent`, does not claim a provider
+> GET, authorizes no live operation, and does not waive v3 for a live
+> replacement subscription.
+>
+> **2026-11-08 fresh-subscription predeployment amendment:** a replacement
+> subscription now has a distinct, read-only predeployment inventory contract.
+> It binds new private subscription/tenant/campaign/generation/region and exact
+> planned-controller identity to an expiring two-operation read authorization
+> and complete paginated deleted-account inventory. Zero records is valid only
+> for `fresh-subscription-predeployment-inventory-clear`; it is neither v3 nor
+> `retained-account-absent`. The later retained-controller correction makes it
+> mandatory fresh-scope admission evidence for preparation, controller
+> bootstrap/adoption, and campaign admission, while preserving the separate
+> execution-authorization requirement. It never by itself authorizes Azure work.
+> Ordinary fresh-scope cleanup retains the controller and never waits for a
+> deleted-account inventory record to disappear.
 
 ## Authoritative boundary
 
@@ -152,8 +174,10 @@ current-state evidence.
 
 ## Remaining gates
 
-1. At or after the boundary, prove exact absence with the command below and
-   preserve its strict sanitized output as the admission artifact.
+1. For a live subscription, at or after the boundary, prove exact absence with
+   the command below and preserve its strict sanitized output as the admission
+   artifact. A retired former subscription instead remains non-admissible and
+   may receive only the separate terminal historical disposition.
 2. Under separate Azure authorization, bootstrap or adopt the locally corrected
    stable Automation controller using that exact artifact binding.
 3. Separately authorize and execute managed PostgreSQL evidence for
@@ -173,10 +197,14 @@ current-state evidence.
   --expect absent
 ```
 
-Success is exit 0 with `status=retained-account-absent`, four deleted records,
-zero target candidates, four unchanged unrelated hashes, complete pagination,
-and zero Azure mutations. Failure is nonzero and must not be waived. Success
-does not authorize campaign execution.
+For a historical scope whose accepted contract requires post-deletion retention
+verification, success is exit 0 with the current v3
+`status=retained-account-absent`, zero target candidates, complete pagination,
+zero current-only records, baseline observations, and zero Azure mutations.
+Failure is nonzero and must not be waived. A retired former subscription cannot
+run this command and cannot be reclassified as a passing v3 result. Success
+does not authorize campaign execution and is not a requirement for a fresh
+retained-controller scope.
 
 ## Prohibited operations and exit
 

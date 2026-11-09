@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import os
-import secrets
 import subprocess
 import sys
 import uuid
@@ -18,6 +17,7 @@ from infra.milestone_7_8.automation_region import (
 from infra.milestone_7_8.campaign import (
     CAMPAIGN_PATTERN,
     CampaignError,
+    GENERATION_PATTERN,
     SubprocessRunner,
     sanitize,
     utc,
@@ -29,10 +29,11 @@ from infra.milestone_7_8.cleanup_controller import (
     controller_binding_sha256,
     controller_names,
 )
-from infra.milestone_7_8.retention import (
-    CURRENT_ABSENCE_EVIDENCE_VERSION,
-    RetentionVerificationError,
-    validate_retention_absence_evidence,
+from infra.milestone_7_8.predeployment import (
+    EVIDENCE_CLASS as FRESH_CONTROLLER_ADMISSION_EVIDENCE_CLASS,
+    EVIDENCE_VERSION as FRESH_CONTROLLER_ADMISSION_EVIDENCE_VERSION,
+    PredeploymentVerificationError,
+    load_validated_admission,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -75,14 +76,20 @@ def main() -> int:
         description="Create one immutable untracked M7.8 runtime bundle"
     )
     parser.add_argument("--campaign-id", required=True)
+    parser.add_argument("--generation-id", required=True)
     parser.add_argument("--output", type=Path, default=Path(".runtime/milestone_7_8"))
     parser.add_argument("--target-region", default="centralus")
     parser.add_argument("--postgres-region", default="centralus")
-    parser.add_argument("--retention-absence-evidence", type=Path, required=True)
+    parser.add_argument("--controller-region", required=True)
+    parser.add_argument("--fresh-subscription-runtime", type=Path, required=True)
+    parser.add_argument("--fresh-subscription-authorization", type=Path, required=True)
+    parser.add_argument("--fresh-subscription-evidence", type=Path, required=True)
     args = parser.parse_args()
     try:
         if CAMPAIGN_PATTERN.fullmatch(args.campaign_id) is None:
             raise CampaignError("campaign identity is malformed")
+        if GENERATION_PATTERN.fullmatch(args.generation_id) is None:
+            raise CampaignError("generation identity is malformed")
         if args.target_region != args.postgres_region:
             raise CampaignError("single-VNet campaign resources must share a region")
         if args.output.exists():
@@ -119,13 +126,22 @@ def main() -> int:
                 "runtime subscription or tenant binding is missing"
             ) from exc
         subscription_correlation = sanitize(subscription_id, domain="subscription")
-        retention = validate_retention_absence_evidence(
-            args.retention_absence_evidence,
-            subscription_correlation=subscription_correlation,
-            subscription_id=subscription_id,
-            allow_synthetic=False,
-        )
         names = controller_names(subscription_correlation)
+        try:
+            admission = load_validated_admission(
+                runtime_path=args.fresh_subscription_runtime,
+                authorization_path=args.fresh_subscription_authorization,
+                evidence_path=args.fresh_subscription_evidence,
+                subscription_id=subscription_id,
+                tenant_id=tenant_id,
+                campaign_id=args.campaign_id,
+                generation_id=args.generation_id,
+                region=args.controller_region,
+                controller_resource_group_name=names.resource_group,
+                automation_account_name=names.account,
+            )
+        except PredeploymentVerificationError as exc:
+            raise CampaignError(str(exc)) from exc
         observed_at = datetime.now(UTC).replace(microsecond=0)
         cleanup_authority_expires = utc(observed_at + timedelta(hours=5))
         region_selection = discover_automation_region(
@@ -136,7 +152,7 @@ def main() -> int:
             controller_account=names.account,
             subscription_correlation=subscription_correlation,
             cleanup_script_sha256=cleanup_script_sha256,
-            retention_absence_evidence_sha256=retention.evidence_sha256,
+            fresh_controller_admission_evidence_sha256=admission.evidence_sha256,
             controller_required_until_utc=cleanup_authority_expires,
         )
         if region_selection.controller_disposition != "exact-controller-adoptable":
@@ -145,17 +161,21 @@ def main() -> int:
                 "before campaign preparation"
             )
         cleanup_region = region_selection.selected_region
+        if cleanup_region != args.controller_region:
+            raise CampaignError(
+                "fresh controller region differs from deterministic region selection"
+            )
         region_selection_sha256 = region_selection.sha256()
         if (
-            region_selection.retention_absence_evidence_sha256
-            != retention.evidence_sha256
+            region_selection.fresh_controller_admission_evidence_sha256
+            != admission.evidence_sha256
         ):
-            raise CampaignError("retention absence region-selection binding differs")
+            raise CampaignError("fresh controller admission region-selection binding differs")
         candidate_regions = ",".join(region_selection.candidate_order)
         if candidate_regions != CLEANUP_CANDIDATE_REGIONS_BINDING:
             raise CampaignError("cleanup candidate region binding differs")
         offer_eligible_regions = ",".join(region_selection.offer_eligible_regions)
-        generation_id = f"g1-{secrets.token_hex(6)}"
+        generation_id = args.generation_id
         suffix = hashlib.sha256(
             f"{args.campaign_id}\0{generation_id}".encode()
         ).hexdigest()[:10]
@@ -215,8 +235,10 @@ def main() -> int:
             "mobius.cleanup-offer-eligibility-sha256": (
                 region_selection.offer_eligibility_sha256
             ),
-            "mobius.retention-absence-sha256": retention.evidence_sha256,
-            "mobius.retention-absence-version": CURRENT_ABSENCE_EVIDENCE_VERSION,
+            "mobius.fresh-controller-admission-sha256": admission.evidence_sha256,
+            "mobius.fresh-controller-admission-version": (
+                FRESH_CONTROLLER_ADMISSION_EVIDENCE_VERSION
+            ),
             "mobius.owner": "managed-postgresql-evidence",
             "mobius.expiry": deadline,
         }
@@ -226,7 +248,9 @@ def main() -> int:
         cleanup_path = args.output / "cleanup.parameters.json"
         campaign_path = args.output / "campaign.parameters.json"
         region_selection_path = args.output / "cleanup-region-selection.json"
-        retention_path = args.output / "retention-absence-evidence.json"
+        fresh_runtime_path = args.output / "fresh-subscription-runtime.json"
+        fresh_authorization_path = args.output / "predeployment-read-authorization.json"
+        fresh_evidence_path = args.output / "predeployment-absence-evidence.json"
         ledger_path = args.output / "ledger.json"
         config = {
             "campaignId": args.campaign_id,
@@ -262,7 +286,7 @@ def main() -> int:
             "cleanupOfferEligibilitySha256": (
                 region_selection.offer_eligibility_sha256
             ),
-            "retentionAbsenceEvidenceSha256": retention.evidence_sha256,
+            "freshControllerAdmissionEvidenceSha256": admission.evidence_sha256,
             "imageDigest": None,
         }
         cleanup_parameters = _parameters(
@@ -286,7 +310,7 @@ def main() -> int:
                 "cleanupOfferEligibilitySha256": (
                     region_selection.offer_eligibility_sha256
                 ),
-                "retentionAbsenceEvidenceSha256": retention.evidence_sha256,
+                "freshControllerAdmissionEvidenceSha256": admission.evidence_sha256,
                 "cleanupDeadlineUtc": deadline,
                 "cleanupAuthorityExpiresUtc": cleanup_authority_expires,
                 "automationAccountName": account,
@@ -318,7 +342,7 @@ def main() -> int:
                 "cleanupOfferEligibilitySha256": (
                     region_selection.offer_eligibility_sha256
                 ),
-                "retentionAbsenceEvidenceSha256": retention.evidence_sha256,
+                "freshControllerAdmissionEvidenceSha256": admission.evidence_sha256,
                 "cleanupResourceGroupName": cleanup_rg,
                 "cleanupAutomationAccountName": account,
                 "tenantId": tenant_id,
@@ -364,11 +388,17 @@ def main() -> int:
             "cleanupOfferEligibilitySha256": (
                 region_selection.offer_eligibility_sha256
             ),
-            "retentionAbsenceEvidenceSha256": retention.evidence_sha256,
-            "retentionAbsenceEvidenceVersion": CURRENT_ABSENCE_EVIDENCE_VERSION,
-            "retentionAbsenceEvidenceClass": retention.evidence_class,
-            "retentionAbsenceObservedAtUtc": retention.observed_at_utc,
-            "retentionAbsenceEvidenceFile": str(retention_path),
+            "freshControllerAdmissionEvidenceSha256": admission.evidence_sha256,
+            "freshControllerAdmissionEvidenceVersion": (
+                FRESH_CONTROLLER_ADMISSION_EVIDENCE_VERSION
+            ),
+            "freshControllerAdmissionEvidenceClass": (
+                FRESH_CONTROLLER_ADMISSION_EVIDENCE_CLASS
+            ),
+            "freshControllerAdmissionEvidenceObservedAtUtc": admission.observed_at_utc,
+            "freshControllerAdmissionRuntimeFile": str(fresh_runtime_path),
+            "freshControllerAdmissionAuthorizationFile": str(fresh_authorization_path),
+            "freshControllerAdmissionEvidenceFile": str(fresh_evidence_path),
             "cleanupRegionSelectionFile": str(region_selection_path),
             "cleanupDeploymentName": f"m78-cleanup-{suffix}",
             "campaignDeploymentName": f"m78-campaign-{suffix}",
@@ -393,7 +423,17 @@ def main() -> int:
             "cleanupParametersFile": str(cleanup_path),
             "campaignParametersFile": str(campaign_path),
         }
-        _write_new(retention_path, retention.document)
+        _write_new(
+            fresh_runtime_path,
+            json.loads(args.fresh_subscription_runtime.read_text(encoding="utf-8")),
+        )
+        _write_new(
+            fresh_authorization_path,
+            json.loads(
+                args.fresh_subscription_authorization.read_text(encoding="utf-8")
+            ),
+        )
+        _write_new(fresh_evidence_path, admission.document)
         _write_new(region_selection_path, region_selection.document())
         _write_new(config_path, config)
         _write_new(runtime_path, runtime)
@@ -426,7 +466,7 @@ def main() -> int:
                     "cleanupOfferEligibilitySha256": (
                         region_selection.offer_eligibility_sha256
                     ),
-                    "retentionAbsenceEvidenceSha256": retention.evidence_sha256,
+                    "freshControllerAdmissionEvidenceSha256": admission.evidence_sha256,
                     "config": str(config_path),
                     "runtime": str(runtime_path),
                     "ledger": str(ledger_path),
@@ -440,7 +480,7 @@ def main() -> int:
         CampaignError,
         FileExistsError,
         OSError,
-        RetentionVerificationError,
+        PredeploymentVerificationError,
     ) as exc:
         print(
             json.dumps({"status": "blocked", "error": str(exc)}, sort_keys=True),

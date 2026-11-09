@@ -14,13 +14,13 @@
     "controllerResourceGroupName",
     "automationAccountName",
     "controllerAuthorizedUntilUtc",
-    "retentionAbsenceEvidenceSha256",
-    "retentionAbsenceEvidenceVersion",
+    "freshControllerAdmissionEvidenceSha256",
+    "freshControllerAdmissionEvidenceVersion",
     "expiresAtUtc",
     "authorizationSha256"
   ],
   "properties": {
-    "version": { "const": "m7.8-controller-execution-authorization-v3" },
+    "version": { "const": "m7.8-controller-execution-authorization-v4" },
     "disposition": { "const": "separately-authorized-controller-execution" },
     "operation": { "enum": ["controller-bootstrap", "controller-verify"] },
     "subscriptionCorrelation": {
@@ -42,12 +42,12 @@
       "pattern": "^aa-m78-controller-[a-f0-9]{10}$"
     },
     "controllerAuthorizedUntilUtc": { "type": "string", "format": "date-time" },
-    "retentionAbsenceEvidenceSha256": {
+    "freshControllerAdmissionEvidenceSha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
-    "retentionAbsenceEvidenceVersion": {
-      "const": "m7.8-retained-automation-absence-verification-v3"
+    "freshControllerAdmissionEvidenceVersion": {
+      "const": "m7.8-fresh-subscription-predeployment-absence-evidence-v1"
     },
     "expiresAtUtc": { "type": "string", "format": "date-time" },
     "authorizationSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }

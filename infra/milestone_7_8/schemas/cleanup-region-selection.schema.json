@@ -22,7 +22,7 @@
     "activeOccupancySha256",
     "softDeletedOccupancySha256",
     "policyEvidenceSha256",
-    "retentionAbsenceEvidenceSha256",
+    "freshControllerAdmissionEvidenceSha256",
     "observedAtUtc",
     "candidates"
   ],
@@ -82,7 +82,7 @@
       "pattern": "^[a-f0-9]{64}$"
     },
     "policyEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "retentionAbsenceEvidenceSha256": {
+    "freshControllerAdmissionEvidenceSha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },

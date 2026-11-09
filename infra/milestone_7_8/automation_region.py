@@ -7,6 +7,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Final, Protocol, cast
+from urllib.parse import parse_qs, urlparse
 
 from infra.milestone_7_8.campaign import CampaignError, parse_utc, utc
 
@@ -41,6 +42,15 @@ DEFINITION_API_VERSION: Final = "2023-04-01"
 DELETED_ACCOUNTS_API_VERSION: Final = "2024-10-23"
 SUBSCRIPTION_API_VERSION: Final = "2020-01-01"
 RESOURCES_API_VERSION: Final = "2021-04-01"
+MANAGEMENT_HOST: Final = "management.azure.com"
+MAX_INVENTORY_PAGES: Final = 100
+ACTIVE_INVENTORY_QUERY: Final = (
+    "{accounts:value[].{id:id,name:name,resourceGroup:resourceGroup,"
+    "location:location,tags:tags},nextLink:nextLink}"
+)
+DELETED_INVENTORY_QUERY: Final = (
+    "{accounts:value[].{location:location},nextLink:nextLink}"
+)
 
 
 class RegionCommandRunner(Protocol):
@@ -88,7 +98,7 @@ class AutomationRegionSelection:
     active_occupancy_sha256: str
     soft_deleted_occupancy_sha256: str
     policy_evidence_sha256: str
-    retention_absence_evidence_sha256: str
+    fresh_controller_admission_evidence_sha256: str
     observed_at_utc: str
     candidates: tuple[CandidateEvidence, ...]
 
@@ -137,7 +147,7 @@ class AutomationRegionSelection:
                     self.active_occupancy_sha256,
                     self.soft_deleted_occupancy_sha256,
                     self.policy_evidence_sha256,
-                    self.retention_absence_evidence_sha256,
+                    self.fresh_controller_admission_evidence_sha256,
                 )
             )
         ):
@@ -242,7 +252,9 @@ class AutomationRegionSelection:
             "activeOccupancySha256": self.active_occupancy_sha256,
             "softDeletedOccupancySha256": self.soft_deleted_occupancy_sha256,
             "policyEvidenceSha256": self.policy_evidence_sha256,
-            "retentionAbsenceEvidenceSha256": self.retention_absence_evidence_sha256,
+            "freshControllerAdmissionEvidenceSha256": (
+                self.fresh_controller_admission_evidence_sha256
+            ),
             "observedAtUtc": self.observed_at_utc,
             "candidates": [
                 {
@@ -291,7 +303,7 @@ def selection_from_document(value: object) -> AutomationRegionSelection:
         "activeOccupancySha256",
         "softDeletedOccupancySha256",
         "policyEvidenceSha256",
-        "retentionAbsenceEvidenceSha256",
+        "freshControllerAdmissionEvidenceSha256",
         "observedAtUtc",
         "candidates",
     }:
@@ -349,8 +361,8 @@ def selection_from_document(value: object) -> AutomationRegionSelection:
         active_occupancy_sha256=cast(str, value["activeOccupancySha256"]),
         soft_deleted_occupancy_sha256=cast(str, value["softDeletedOccupancySha256"]),
         policy_evidence_sha256=cast(str, value["policyEvidenceSha256"]),
-        retention_absence_evidence_sha256=cast(
-            str, value["retentionAbsenceEvidenceSha256"]
+        fresh_controller_admission_evidence_sha256=cast(
+            str, value["freshControllerAdmissionEvidenceSha256"]
         ),
         observed_at_utc=cast(str, value["observedAtUtc"]),
         candidates=tuple(candidates),
@@ -401,7 +413,7 @@ def automation_region_discovery_commands(
             "--subscription",
             subscription_id,
             "--query",
-            "{environmentName:environmentName,state:state}",
+            "{id:id,tenantId:tenantId,environmentName:environmentName,state:state}",
             "--output",
             "json",
         ),
@@ -413,7 +425,7 @@ def automation_region_discovery_commands(
             "--url",
             subscription_url,
             "--query",
-            "{subscriptionPolicies:subscriptionPolicies}",
+            "{id:id,subscriptionId:subscriptionId,subscriptionPolicies:subscriptionPolicies}",
             "--output",
             "json",
         ),
@@ -436,8 +448,7 @@ def automation_region_discovery_commands(
             "--url",
             active_url,
             "--query",
-            "{accounts:value[].{id:id,name:name,resourceGroup:resourceGroup,"
-            "location:location,tags:tags},nextLink:nextLink}",
+            ACTIVE_INVENTORY_QUERY,
             "--output",
             "json",
         ),
@@ -449,7 +460,7 @@ def automation_region_discovery_commands(
             "--url",
             deleted_url,
             "--query",
-            "{accounts:value[].{location:Location},nextLink:nextLink}",
+            DELETED_INVENTORY_QUERY,
             "--output",
             "json",
         ),
@@ -477,6 +488,164 @@ def generated_policy_read_contract() -> tuple[str, ...]:
     )
 
 
+def _validate_account_context(value: object, *, subscription_id: str) -> None:
+    if not isinstance(value, dict) or set(value) != {
+        "id",
+        "tenantId",
+        "environmentName",
+        "state",
+    }:
+        raise CampaignError(
+            "automation-region-discovery-failed: Azure subscription context is unavailable"
+        )
+    try:
+        account_subscription = uuid.UUID(str(value["id"]))
+        tenant_id = uuid.UUID(str(value["tenantId"]))
+        expected_subscription = uuid.UUID(subscription_id)
+    except (KeyError, ValueError, AttributeError) as exc:
+        raise CampaignError(
+            "automation-region-discovery-failed: Azure subscription context is unavailable"
+        ) from exc
+    if (
+        account_subscription.int == 0
+        or tenant_id.int == 0
+        or account_subscription != expected_subscription
+        or value.get("environmentName") != "AzureCloud"
+        or value.get("state") != "Enabled"
+    ):
+        raise CampaignError(
+            "automation-region-discovery-failed: Azure subscription context is unavailable"
+        )
+
+
+def _validate_subscription_metadata(value: object, *, subscription_id: str) -> None:
+    expected_id = f"/subscriptions/{subscription_id}".casefold()
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"id", "subscriptionId", "subscriptionPolicies"}
+        or not isinstance(value.get("id"), str)
+        or not isinstance(value.get("subscriptionId"), str)
+        or value["id"].casefold().rstrip("/") != expected_id
+        or value["subscriptionId"].casefold() != subscription_id.casefold()
+    ):
+        raise CampaignError(
+            "automation-region-discovery-failed: subscription metadata binding differs"
+        )
+
+
+def _inventory_page(value: object, *, label: str) -> tuple[list[object], str | None]:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"accounts", "nextLink"}
+        or not isinstance(value.get("accounts"), list)
+    ):
+        raise CampaignError(
+            f"automation-region-discovery-failed: {label} account inventory is incomplete"
+        )
+    next_link = value["nextLink"]
+    if next_link in {None, ""}:
+        return cast(list[object], value["accounts"]), None
+    if not isinstance(next_link, str):
+        raise CampaignError(
+            f"automation-region-discovery-failed: {label} account pagination is invalid"
+        )
+    return cast(list[object], value["accounts"]), next_link
+
+
+def _safe_inventory_next_link(
+    value: str,
+    *,
+    subscription_id: str,
+    expected_path: str,
+    api_version: str,
+    label: str,
+) -> str:
+    try:
+        parsed = urlparse(value)
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        port = parsed.port
+    except ValueError as exc:
+        raise CampaignError(
+            f"automation-region-discovery-failed: {label} account pagination is invalid"
+        ) from exc
+    if (
+        parsed.scheme.casefold() != "https"
+        or parsed.hostname is None
+        or parsed.hostname.casefold() != MANAGEMENT_HOST
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in {None, 443}
+        or parsed.params
+        or parsed.fragment
+        or parsed.path.casefold() != expected_path.casefold()
+        or query.get("api-version") != [api_version]
+        or f"/subscriptions/{subscription_id.casefold()}/"
+        not in (parsed.path.casefold() + "/")
+    ):
+        raise CampaignError(
+            f"automation-region-discovery-failed: {label} account pagination is invalid"
+        )
+    return value
+
+
+def _complete_discovery_inventory(
+    runner: RegionCommandRunner,
+    initial_result: dict[str, object],
+    *,
+    subscription_id: str,
+    initial_url: str,
+    expected_path: str,
+    api_version: str,
+    query: str,
+    label: str,
+) -> dict[str, object]:
+    current_url = initial_url
+    current = _json_result(initial_result)
+    seen_urls: set[str] = set()
+    accounts: list[object] = []
+    pages = 0
+    while True:
+        normalized_url = current_url.casefold()
+        if normalized_url in seen_urls or pages >= MAX_INVENTORY_PAGES:
+            raise CampaignError(
+                f"automation-region-discovery-failed: {label} account pagination is invalid"
+            )
+        seen_urls.add(normalized_url)
+        page_accounts, next_link = _inventory_page(current, label=label)
+        accounts.extend(page_accounts)
+        pages += 1
+        if next_link is None:
+            return {
+                "exitCode": 0,
+                "stdout": json.dumps({"accounts": accounts, "nextLink": None}),
+                "stderr": "",
+            }
+        current_url = _safe_inventory_next_link(
+            next_link,
+            subscription_id=subscription_id,
+            expected_path=expected_path,
+            api_version=api_version,
+            label=label,
+        )
+        current = _json_result(
+            _run_required(
+                runner,
+                (
+                    "az",
+                    "rest",
+                    "--method",
+                    "get",
+                    "--url",
+                    current_url,
+                    "--query",
+                    query,
+                    "--output",
+                    "json",
+                ),
+            )
+        )
+
+
 def discover_automation_region(
     runner: RegionCommandRunner,
     subscription_id: str,
@@ -487,23 +656,66 @@ def discover_automation_region(
     controller_account: str | None = None,
     subscription_correlation: str | None = None,
     cleanup_script_sha256: str | None = None,
-    retention_absence_evidence_sha256: str | None = None,
+    fresh_controller_admission_evidence_sha256: str | None = None,
     controller_required_until_utc: str | None = None,
 ) -> AutomationRegionSelection:
-    results = tuple(
-        _run_required(runner, command)
-        for command in automation_region_discovery_commands(subscription_id)
+    commands = automation_region_discovery_commands(subscription_id)
+    account_context = _run_required(runner, commands[0])
+    subscription_metadata = _run_required(runner, commands[1])
+    _validate_account_context(
+        _json_result(account_context), subscription_id=subscription_id
+    )
+    _validate_subscription_metadata(
+        _json_result(subscription_metadata), subscription_id=subscription_id
+    )
+    provider = _run_required(runner, commands[2])
+    active_url = commands[3][commands[3].index("--url") + 1]
+    active = _complete_discovery_inventory(
+        runner,
+        _run_required(runner, commands[3]),
+        subscription_id=subscription_id,
+        initial_url=active_url,
+        expected_path=f"/subscriptions/{subscription_id}/resources",
+        api_version=RESOURCES_API_VERSION,
+        query=ACTIVE_INVENTORY_QUERY,
+        label="active",
+    )
+    deleted_url = commands[4][commands[4].index("--url") + 1]
+    deleted = _complete_discovery_inventory(
+        runner,
+        _run_required(runner, commands[4]),
+        subscription_id=subscription_id,
+        initial_url=deleted_url,
+        expected_path=(
+            f"/subscriptions/{subscription_id}/providers/"
+            "Microsoft.Automation/deletedAutomationAccounts"
+        ),
+        api_version=DELETED_ACCOUNTS_API_VERSION,
+        query=DELETED_INVENTORY_QUERY,
+        label="soft-deleted",
+    )
+    assignments = _run_required(runner, commands[5])
+    results = (
+        account_context,
+        subscription_metadata,
+        provider,
+        active,
+        deleted,
+        assignments,
     )
     return select_automation_region_from_results(
         runner,
         results,
+        subscription_id=subscription_id,
         observed_at=observed_at,
         candidate_order=candidate_order,
         controller_resource_group=controller_resource_group,
         controller_account=controller_account,
         subscription_correlation=subscription_correlation,
         cleanup_script_sha256=cleanup_script_sha256,
-        retention_absence_evidence_sha256=retention_absence_evidence_sha256,
+        fresh_controller_admission_evidence_sha256=(
+            fresh_controller_admission_evidence_sha256
+        ),
         controller_required_until_utc=controller_required_until_utc,
     )
 
@@ -512,13 +724,14 @@ def select_automation_region_from_results(
     runner: RegionCommandRunner,
     results: tuple[dict[str, object], ...],
     *,
+    subscription_id: str,
     observed_at: datetime | None = None,
     candidate_order: tuple[str, ...] = CLEANUP_REGION_CANDIDATES,
     controller_resource_group: str | None = None,
     controller_account: str | None = None,
     subscription_correlation: str | None = None,
     cleanup_script_sha256: str | None = None,
-    retention_absence_evidence_sha256: str | None = None,
+    fresh_controller_admission_evidence_sha256: str | None = None,
     controller_required_until_utc: str | None = None,
 ) -> AutomationRegionSelection:
     _validate_candidate_order(candidate_order)
@@ -530,13 +743,8 @@ def select_automation_region_from_results(
     active = _json_result(results[3])
     deleted = _json_result(results[4])
     assignments = _json_result(results[5])
-    if not isinstance(account, dict) or account != {
-        "environmentName": "AzureCloud",
-        "state": "Enabled",
-    }:
-        raise CampaignError(
-            "automation-region-discovery-failed: Azure subscription context is unavailable"
-        )
+    _validate_account_context(account, subscription_id=subscription_id)
+    _validate_subscription_metadata(subscription, subscription_id=subscription_id)
     if (
         not isinstance(provider, dict)
         or provider.get("registrationState") != "Registered"
@@ -567,7 +775,9 @@ def select_automation_region_from_results(
         controller_account=controller_account,
         subscription_correlation=subscription_correlation,
         cleanup_script_sha256=cleanup_script_sha256,
-        retention_absence_evidence_sha256=retention_absence_evidence_sha256,
+        fresh_controller_admission_evidence_sha256=(
+            fresh_controller_admission_evidence_sha256
+        ),
         controller_required_until_utc=controller_required_until_utc,
     )
     active_counts = _location_counts(
@@ -645,8 +855,8 @@ def select_automation_region_from_results(
             "soft-deleted-occupancy", deleted_counts
         ),
         policy_evidence_sha256=policy_evidence_sha256,
-        retention_absence_evidence_sha256=(
-            retention_absence_evidence_sha256 or "0" * 64
+        fresh_controller_admission_evidence_sha256=(
+            fresh_controller_admission_evidence_sha256 or "0" * 64
         ),
         observed_at_utc=utc(observed_at or datetime.now(UTC)),
         candidates=tuple(evidence),
@@ -729,16 +939,12 @@ def _subscription_offer_eligibility(value: object) -> OfferEligibility:
 
 
 def _complete_account_inventory(value: object, *, label: str) -> list[object]:
-    if (
-        not isinstance(value, dict)
-        or set(value) != {"accounts", "nextLink"}
-        or not isinstance(value["accounts"], list)
-        or (value["nextLink"] is not None and value["nextLink"] != "")
-    ):
+    accounts, next_link = _inventory_page(value, label=label)
+    if next_link is not None:
         raise CampaignError(
             f"automation-region-discovery-failed: {label} account inventory is incomplete"
         )
-    return cast(list[object], value["accounts"])
+    return accounts
 
 
 def _adoptable_controller_region(
@@ -748,7 +954,7 @@ def _adoptable_controller_region(
     controller_account: str | None,
     subscription_correlation: str | None,
     cleanup_script_sha256: str | None,
-    retention_absence_evidence_sha256: str | None,
+    fresh_controller_admission_evidence_sha256: str | None,
     controller_required_until_utc: str | None,
 ) -> str | None:
     expected = (
@@ -756,7 +962,7 @@ def _adoptable_controller_region(
         controller_account,
         subscription_correlation,
         cleanup_script_sha256,
-        retention_absence_evidence_sha256,
+        fresh_controller_admission_evidence_sha256,
     )
     if all(value is None for value in expected):
         return None
@@ -771,7 +977,9 @@ def _adoptable_controller_region(
         is None
         or re.fullmatch(r"^[a-f0-9]{16}$", str(subscription_correlation)) is None
         or re.fullmatch(r"^[a-f0-9]{64}$", str(cleanup_script_sha256)) is None
-        or re.fullmatch(r"^[a-f0-9]{64}$", str(retention_absence_evidence_sha256))
+        or re.fullmatch(
+            r"^[a-f0-9]{64}$", str(fresh_controller_admission_evidence_sha256)
+        )
         is None
         or controller_resource_group
         != f"rg-m78-controller-{str(subscription_correlation)[:10]}"
@@ -800,7 +1008,9 @@ def _adoptable_controller_region(
         "mobius.cleanup-controller": "reusable-automation-controller-v1",
         "mobius.subscription-correlation": subscription_correlation,
         "mobius.cleanup-script-sha256": cleanup_script_sha256,
-        "mobius.retention-absence-sha256": retention_absence_evidence_sha256,
+        "mobius.fresh-controller-admission-sha256": (
+            fresh_controller_admission_evidence_sha256
+        ),
     }
     resource_id = match.get("id")
     expected_suffix = (

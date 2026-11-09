@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:operator-runtime:v7",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:operator-runtime:v8",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -22,11 +22,13 @@
     "cleanupOfferEligibleRegions",
     "cleanupOfferEligibilitySource",
     "cleanupOfferEligibilitySha256",
-    "retentionAbsenceEvidenceSha256",
-    "retentionAbsenceEvidenceVersion",
-    "retentionAbsenceEvidenceClass",
-    "retentionAbsenceObservedAtUtc",
-    "retentionAbsenceEvidenceFile",
+    "freshControllerAdmissionEvidenceSha256",
+    "freshControllerAdmissionEvidenceVersion",
+    "freshControllerAdmissionEvidenceClass",
+    "freshControllerAdmissionEvidenceObservedAtUtc",
+    "freshControllerAdmissionRuntimeFile",
+    "freshControllerAdmissionAuthorizationFile",
+    "freshControllerAdmissionEvidenceFile",
     "cleanupRegionSelectionFile",
     "cleanupDeploymentName",
     "campaignDeploymentName",
@@ -99,21 +101,23 @@
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
-    "retentionAbsenceEvidenceSha256": {
+    "freshControllerAdmissionEvidenceSha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
-    "retentionAbsenceEvidenceVersion": {
-      "const": "m7.8-retained-automation-absence-verification-v3"
+    "freshControllerAdmissionEvidenceVersion": {
+      "const": "m7.8-fresh-subscription-predeployment-absence-evidence-v1"
     },
-    "retentionAbsenceEvidenceClass": {
-      "enum": ["managed-provider-get-only", "synthetic-test-fixture"]
+    "freshControllerAdmissionEvidenceClass": {
+      "const": "managed-provider-predeployment-get-only"
     },
-    "retentionAbsenceObservedAtUtc": {
+    "freshControllerAdmissionEvidenceObservedAtUtc": {
       "type": "string",
       "format": "date-time"
     },
-    "retentionAbsenceEvidenceFile": { "type": "string", "minLength": 1 },
+    "freshControllerAdmissionRuntimeFile": { "type": "string", "minLength": 1 },
+    "freshControllerAdmissionAuthorizationFile": { "type": "string", "minLength": 1 },
+    "freshControllerAdmissionEvidenceFile": { "type": "string", "minLength": 1 },
     "cleanupRegionSelectionFile": { "type": "string", "minLength": 1 },
     "cleanupDeploymentName": { "type": "string", "minLength": 1 },
     "campaignDeploymentName": { "type": "string", "minLength": 1 },

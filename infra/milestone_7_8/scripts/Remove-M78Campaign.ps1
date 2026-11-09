@@ -12,8 +12,8 @@ param(
   [Parameter(Mandatory = $true)][ValidatePattern('^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$')][string]$CleanupAuthorityExpiresUtc,
   [Parameter(Mandatory = $true)][ValidateRange(5000, 5000)][int]$CostCeilingCents,
   [Parameter(Mandatory = $true)][ValidatePattern('^[a-f0-9]{64}$')][string]$ControllerBindingSha256,
-  [Parameter(Mandatory = $true)][ValidatePattern('^[a-f0-9]{64}$')][string]$RetentionAbsenceEvidenceSha256,
-  [Parameter(Mandatory = $true)][ValidateSet('m7.8-retained-automation-absence-verification-v3')][string]$RetentionAbsenceEvidenceVersion,
+  [Parameter(Mandatory = $true)][ValidatePattern('^[a-f0-9]{64}$')][string]$FreshControllerAdmissionEvidenceSha256,
+  [Parameter(Mandatory = $true)][ValidateSet('m7.8-fresh-subscription-predeployment-absence-evidence-v1')][string]$FreshControllerAdmissionEvidenceVersion,
   [Parameter(Mandatory = $true)][ValidatePattern('^[a-f0-9]{64}$')][string]$CleanupAuthoritySha256,
   [Parameter(Mandatory = $true)][ValidateSet('true')][string]$CleanupAuthorized
 )
@@ -104,10 +104,10 @@ $authorityValues = @(
   $CleanupAuthorityExpiresUtc,
   [string]$CostCeilingCents,
   $ControllerBindingSha256
-  $RetentionAbsenceEvidenceSha256
-  $RetentionAbsenceEvidenceVersion
+  $FreshControllerAdmissionEvidenceSha256
+  $FreshControllerAdmissionEvidenceVersion
 )
-$observedAuthoritySha256 = Get-Sha256 ("m7.8/cleanup-authority/v3`0" + ($authorityValues -join "`0"))
+$observedAuthoritySha256 = Get-Sha256 ("m7.8/cleanup-authority/v4`0" + ($authorityValues -join "`0"))
 if ($observedAuthoritySha256 -ne $CleanupAuthoritySha256) {
   throw 'cleanup-authority-hash-mismatch'
 }
@@ -124,8 +124,8 @@ $controllerTags = @{
   'mobius.owner' = 'managed-postgresql-evidence'
   'mobius.cleanup-controller' = 'reusable-automation-controller-v1'
   'mobius.subscription-correlation' = $SubscriptionCorrelation
-  'mobius.retention-absence-sha256' = $RetentionAbsenceEvidenceSha256
-  'mobius.retention-absence-version' = $RetentionAbsenceEvidenceVersion
+  'mobius.fresh-controller-admission-sha256' = $FreshControllerAdmissionEvidenceSha256
+  'mobius.fresh-controller-admission-version' = $FreshControllerAdmissionEvidenceVersion
 }
 foreach ($key in $controllerTags.Keys) {
   if ($controllerGroup.Tags[$key] -ne $controllerTags[$key]) {
@@ -162,8 +162,8 @@ $expectedBindingParameters = @{
   CleanupAuthorityExpiresUtc = $CleanupAuthorityExpiresUtc
   CostCeilingCents = [string]$CostCeilingCents
   ControllerBindingSha256 = $ControllerBindingSha256
-  RetentionAbsenceEvidenceSha256 = $RetentionAbsenceEvidenceSha256
-  RetentionAbsenceEvidenceVersion = $RetentionAbsenceEvidenceVersion
+  FreshControllerAdmissionEvidenceSha256 = $FreshControllerAdmissionEvidenceSha256
+  FreshControllerAdmissionEvidenceVersion = $FreshControllerAdmissionEvidenceVersion
   CleanupAuthoritySha256 = $CleanupAuthoritySha256
   CleanupAuthorized = $CleanupAuthorized
 }
@@ -213,8 +213,8 @@ $requiredTags = @{
   'mobius.generation' = $GenerationId
   'mobius.cleanup-deadline-utc' = $CleanupDeadlineUtc
   'mobius.cost-ceiling-cents' = [string]$CostCeilingCents
-  'mobius.retention-absence-sha256' = $RetentionAbsenceEvidenceSha256
-  'mobius.retention-absence-version' = $RetentionAbsenceEvidenceVersion
+  'mobius.fresh-controller-admission-sha256' = $FreshControllerAdmissionEvidenceSha256
+  'mobius.fresh-controller-admission-version' = $FreshControllerAdmissionEvidenceVersion
 }
 foreach ($key in $requiredTags.Keys) {
   if ($targetGroup.Tags[$key] -ne $requiredTags[$key]) { throw 'cleanup-resource-tag-mismatch' }
@@ -244,14 +244,14 @@ if (Get-AzResourceGroup -Name $TargetResourceGroupName -ErrorAction SilentlyCont
 }
 
 [ordered]@{
-  version = 'm7.8-cleanup-receipt-v3'
+  version = 'm7.8-cleanup-receipt-v4'
   campaignCorrelation = Get-Correlation 'campaign' $CampaignId
   generationCorrelation = Get-Correlation 'generation' $GenerationId
   targetResourceGroups = 0
   controllerDisposition = 'reusable-controller-retained-disarm-required'
   cleanupDisposition = 'target-zero-residue-controller-retained'
-  retentionAbsenceEvidenceSha256 = $RetentionAbsenceEvidenceSha256
-  retentionAbsenceEvidenceVersion = $RetentionAbsenceEvidenceVersion
+  freshControllerAdmissionEvidenceSha256 = $FreshControllerAdmissionEvidenceSha256
+  freshControllerAdmissionEvidenceVersion = $FreshControllerAdmissionEvidenceVersion
   status = 'target-removed-controller-disarm-required'
   observedAtUtc = [DateTime]::UtcNow.ToString('o')
 } | ConvertTo-Json -Compress

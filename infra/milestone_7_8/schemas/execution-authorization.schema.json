@@ -12,15 +12,15 @@
     "sourceHead",
     "controllerArchitecture",
     "controllerBindingSha256",
-    "retentionAbsenceEvidenceSha256",
-    "retentionAbsenceEvidenceVersion",
+    "freshControllerAdmissionEvidenceSha256",
+    "freshControllerAdmissionEvidenceVersion",
     "cleanupDeadlineUtc",
     "expiresAtUtc",
     "allowedOperations",
     "authorizationSha256"
   ],
   "properties": {
-    "version": { "const": "m7.8-execution-authorization-v3" },
+    "version": { "const": "m7.8-execution-authorization-v4" },
     "disposition": { "const": "separately-authorized-azure-execution" },
     "campaignId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,47}$" },
     "generationId": {
@@ -37,12 +37,12 @@
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
-    "retentionAbsenceEvidenceSha256": {
+    "freshControllerAdmissionEvidenceSha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
-    "retentionAbsenceEvidenceVersion": {
-      "const": "m7.8-retained-automation-absence-verification-v3"
+    "freshControllerAdmissionEvidenceVersion": {
+      "const": "m7.8-fresh-subscription-predeployment-absence-evidence-v1"
     },
     "cleanupDeadlineUtc": { "type": "string", "format": "date-time" },
     "expiresAtUtc": { "type": "string", "format": "date-time" },

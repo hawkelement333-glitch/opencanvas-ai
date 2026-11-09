@@ -10,6 +10,28 @@ Controller state: `architecture-corrected-live-execution-not-authorized`
 > cleanup parameters and authority, execution authorizations, ledger, and
 > terminal receipt. Synthetic fixtures cannot enter live execution. No
 > managed-provider absence artifact or Azure authorization was produced.
+>
+> **2026-11-06 historical-subscription retirement amendment:** when the former
+> subscription cannot authenticate or expose the v3 deleted-account inventory,
+> a hash-bound `historical-subscription-retired` record may preserve that former
+> scope only after review of an authenticated Microsoft notice or authoritative
+> account record against retained private runtime or authorization evidence. It
+> is not `retained-account-absent`, does not claim a GET, grants no live
+> authority, and cannot replace the v3 artifact required by any live
+> subscription or fresh replacement scope.
+>
+> **2026-11-08 retained-controller lifecycle correction:** the 2026-08-27
+> universal v3 admission binding is preserved only for historical audit scopes.
+> It must not gate a fresh controller that the architecture requires to remain
+> active. A fresh subscription instead binds the exact planned controller to the
+> completed `fresh-subscription-predeployment-inventory-clear` GET-only
+> evidence. That evidence is required for fresh preparation, controller
+> bootstrap/adoption, and campaign admission, but is never execution authority.
+> Ordinary Milestone 7.8 cleanup retains the controller and never waits for a
+> deleted-account record to disappear. Controller deletion is not a Milestone
+> 7.8 campaign operation; if a later separately designed disposition deletes it,
+> exact provider-confirmed deletion or soft-deleted status is terminal evidence
+> immediately, not a 30-day absence prerequisite.
 
 This handoff records a local architecture correction. It is not evidence that
 the controller exists in Azure, is armed, is provider-proved, or is production
@@ -48,11 +70,14 @@ every campaign target scope.
    ID suffix, architecture tags, subscription correlation, script hash, and
    authorization timestamp. When it exists, its established region is the only
    selectable controller region. Drift fails closed.
-4. Campaign preparation first requires strict `retained-account-absent`
-   evidence for the prior account, then refuses to create a runtime bundle
-   until the exact controller identity and bounded authority are adoptable. `capacity-check`
-   then proves the permanent Reader grant, published script, and empty complete
-   schedule/binding inventories before `scope-create`.
+4. For a fresh subscription, campaign preparation first requires the exact,
+   hash-bound predeployment inventory evidence for the planned controller, then
+   uses the local-only `controller-config` writer to emit one private bootstrap
+   config. It refuses to create a campaign runtime bundle until that identity
+   and bounded authority are adoptable. `capacity-check` then proves the
+   permanent Reader grant, published script, and empty complete
+   schedule/binding inventories before `scope-create`. Historical v3 evidence
+   is not a fresh-path requirement.
 5. `cleanup.bicep` references the controller account and runbook as `existing`.
    It can create only two temporary assignments at the exact target resource
    group: Contributor and Role Based Access Control Administrator.
@@ -125,13 +150,12 @@ The alternatives are rejected:
 
 A future authorization must separately name and approve, in this order:
 
-1. the v3 M78-PG-012 post-boundary GET-only absence verification, producing
-   the exact sanitized admission artifact with zero target candidates, full
-   pagination, zero current-only records, zero mutations, and each historical
-   unrelated baseline observed only as `present-unchanged` or
-   `absent-unattributed`;
+1. for a fresh subscription, one completed, exact planned-controller
+   `fresh-subscription-predeployment-inventory-clear` observation with full
+   pagination, zero planned-controller candidates, and zero mutations;
 2. complete read-only regional/provider/policy/inventory discovery;
-3. one controller bootstrap or exact-controller adoption in the selected region;
+3. one separately authorized controller bootstrap or exact-controller adoption
+   in the selected region;
 4. published script hash, stable identity, local-auth policy, empty schedule and
    binding inventories, and permanent Reader readback;
 5. a new clean-source campaign preparation and exact execution authorization;
@@ -144,5 +168,10 @@ A future authorization must separately name and approve, in this order:
    revocation proof, cost evidence, and all still-open managed PostgreSQL
    evidence contracts.
 
-None of those live gates is authorized or satisfied by this local correction.
-Migration `0030` is not required and remains absent.
+For a retired former subscription, the separate historical disposition is
+terminal recordkeeping only and satisfies none of those live gates. A v3
+post-boundary absence proof remains an audit requirement only for a scope whose
+accepted historical contract expressly requires it; it cannot be imported into
+a fresh scope. A replacement subscription restarts this ordered sequence with
+fresh bindings. None of those live gates is authorized or satisfied by this
+local correction. Migration `0030` is not required and remains absent.
