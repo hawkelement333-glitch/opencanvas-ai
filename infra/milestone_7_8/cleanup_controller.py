@@ -49,6 +49,96 @@ class ControllerNames:
     runbook: str = CONTROLLER_RUNBOOK_NAME
 
 
+def controller_local_auth_disabled(account: dict[str, object]) -> bool:
+    """Accept CLI/REST shapes only when every supplied setting is boolean true."""
+    properties = account.get("properties")
+    if "properties" in account and not isinstance(properties, dict):
+        return False
+    values = []
+    if "disableLocalAuth" in account:
+        values.append(account["disableLocalAuth"])
+    if isinstance(properties, dict) and "disableLocalAuth" in properties:
+        values.append(properties["disableLocalAuth"])
+    return bool(values) and all(value is True for value in values)
+
+
+def validate_controller_deadline_consistency(
+    group: object,
+    account: object,
+    runbook: object,
+    *,
+    names: ControllerNames,
+    expected_deadline: str,
+) -> None:
+    """Require the exact controller's three authority tags to agree."""
+    parse_utc(expected_deadline)
+    for resource, name in (
+        (group, names.resource_group),
+        (account, names.account),
+        (runbook, names.runbook),
+    ):
+        if not isinstance(resource, dict) or resource.get("name") != name:
+            raise CampaignError("controller deadline identity differs")
+        tags = resource.get("tags")
+        if (
+            not isinstance(tags, dict)
+            or tags.get("mobius.controller-authorized-until-utc") != expected_deadline
+        ):
+            raise CampaignError("controller authority deadlines differ")
+
+
+def validate_renewal_completion_receipt(
+    receipt: object,
+    *,
+    controller_binding: str,
+    original_config_sha256: str,
+    renewed_config_sha256: str,
+    renewal_approval_sha256: str,
+    baseline_preservation_sha256: str,
+    original_deadline: str,
+    observed_deadline: str,
+) -> str:
+    """Validate an exact, completed private renewal record; never infer completion."""
+    expected = {
+        "version": "m7.8-controller-renewal-completion-v1",
+        "status": "complete",
+        "controllerBindingSha256": controller_binding,
+        "originalConfigSha256": original_config_sha256,
+        "renewedConfigSha256": renewed_config_sha256,
+        "renewalApprovalSha256": renewal_approval_sha256,
+        "baselinePreservationSha256": baseline_preservation_sha256,
+        "originalDeadlineUtc": original_deadline,
+        "observedDeadlineUtc": observed_deadline,
+        "allResourcesReadBack": True,
+        "otherTagsAndPropertiesPreserved": True,
+    }
+    hashes = (
+        controller_binding,
+        original_config_sha256,
+        renewed_config_sha256,
+        renewal_approval_sha256,
+        baseline_preservation_sha256,
+    )
+    if any(re.fullmatch(r"[a-f0-9]{64}", item) is None for item in hashes):
+        raise CampaignError("controller renewal binding is malformed")
+    if parse_utc(observed_deadline) <= parse_utc(original_deadline):
+        raise CampaignError("controller renewal deadline is invalid")
+    if not isinstance(receipt, dict) or set(receipt) != {*expected, "receiptSha256"}:
+        raise CampaignError("controller renewal completion is incomplete")
+    if any(
+        type(receipt[key]) is not type(value) or receipt[key] != value
+        for key, value in expected.items()
+    ):
+        raise CampaignError("controller renewal completion binding differs")
+    digest = hashlib.sha256(
+        b"m7.8/controller-renewal-completion/v1\0"
+        + json.dumps(expected, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if receipt["receiptSha256"] != digest:
+        raise CampaignError("controller renewal completion hash differs")
+    return digest
+
+
 def controller_names(subscription_correlation: str) -> ControllerNames:
     if re.fullmatch(r"[a-f0-9]{16}", subscription_correlation) is None:
         raise CampaignError("controller subscription correlation is malformed")
@@ -141,6 +231,7 @@ def load_execution_authorization(
         "sourceHead",
         "controllerArchitecture",
         "controllerBindingSha256",
+        "controllerAuthorityEvidenceSha256",
         "freshControllerAdmissionEvidenceSha256",
         "freshControllerAdmissionEvidenceVersion",
         "cleanupDeadlineUtc",
@@ -155,11 +246,11 @@ def load_execution_authorization(
         key: item for key, item in value.items() if key != "authorizationSha256"
     }
     expected_hash = hashlib.sha256(
-        b"m7.8/execution-authorization/v4\0"
+        b"m7.8/execution-authorization/v5\0"
         + json.dumps(unsigned, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
     if (
-        value.get("version") != "m7.8-execution-authorization-v4"
+        value.get("version") != "m7.8-execution-authorization-v5"
         or value.get("disposition") != "separately-authorized-azure-execution"
         or value.get("campaignId") != config.campaign_id
         or value.get("generationId") != config.generation_id
@@ -167,6 +258,8 @@ def load_execution_authorization(
         or value.get("sourceHead") != runtime["sourceHead"]
         or value.get("controllerArchitecture") != ARCHITECTURE
         or value.get("controllerBindingSha256") != runtime["controllerBindingSha256"]
+        or value.get("controllerAuthorityEvidenceSha256")
+        != runtime["controllerAuthorityEvidenceSha256"]
         or value.get("freshControllerAdmissionEvidenceSha256")
         != config.fresh_controller_admission_evidence_sha256
         or value.get("freshControllerAdmissionEvidenceVersion")

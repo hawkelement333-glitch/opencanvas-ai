@@ -23,7 +23,9 @@ from infra.milestone_7_8.campaign import (
 from infra.milestone_7_8.cleanup_controller import (
     ARCHITECTURE,
     CONTROLLER_RUNBOOK_NAME,
+    controller_local_auth_disabled,
     controller_names,
+    validate_controller_deadline_consistency,
 )
 from infra.milestone_7_8.predeployment import (
     EVIDENCE_VERSION as FRESH_CONTROLLER_ADMISSION_EVIDENCE_VERSION,
@@ -60,6 +62,11 @@ class ControllerConfig:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise CampaignError("controller configuration is unreadable") from exc
+        return cls.from_document(value)
+
+    @classmethod
+    def from_document(cls, value: object) -> ControllerConfig:
+        """Validate the same closed contract for retained private documents."""
         fields = {
             "subscriptionId",
             "tenantId",
@@ -258,6 +265,19 @@ def load_controller_authorization(
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise CampaignError("controller execution authorization is unreadable") from exc
+    return validate_controller_authorization_document(
+        value, config=config, operation=operation, now=now
+    )
+
+
+def validate_controller_authorization_document(
+    value: object,
+    *,
+    config: ControllerConfig,
+    operation: str,
+    now: datetime | None = None,
+) -> str:
+    """Apply the file loader's exact authorization checks to a retained document."""
     fields = {
         "version",
         "disposition",
@@ -542,6 +562,13 @@ def validate_controller_results(
     content = results[4].get("stdout")
     schedules = _json_result(results[5])
     bindings = _json_result(results[6])
+    validate_controller_deadline_consistency(
+        group,
+        account,
+        runbook,
+        names=controller_names(config.subscription_correlation),
+        expected_deadline=config.controller_authorized_until_utc,
+    )
     expected_tags = {
         "mobius.milestone": "7.8",
         "mobius.owner": "managed-postgresql-evidence",
@@ -576,12 +603,6 @@ def validate_controller_results(
         ):
             raise CampaignError("controller ownership or location readback differs")
     identity = account.get("identity")
-    properties = account.get("properties")
-    local_auth_values: list[object] = []
-    if "disableLocalAuth" in account:
-        local_auth_values.append(account["disableLocalAuth"])
-    if isinstance(properties, dict) and "disableLocalAuth" in properties:
-        local_auth_values.append(properties["disableLocalAuth"])
     principal_id = identity.get("principalId") if isinstance(identity, dict) else None
     try:
         parsed_principal = uuid.UUID(str(principal_id))
@@ -589,9 +610,7 @@ def validate_controller_results(
         raise CampaignError("controller principal readback is malformed") from exc
     if (
         parsed_principal.int == 0
-        or ("properties" in account and not isinstance(properties, dict))
-        or not local_auth_values
-        or any(value is not True for value in local_auth_values)
+        or not controller_local_auth_disabled(account)
         or not isinstance(runbook, dict)
         or runbook.get("name") != config.runbook_name
         or not isinstance(runbook.get("properties"), dict)
@@ -681,7 +700,9 @@ def write_controller_config(
         if uuid.UUID(subscription_id).int == 0 or uuid.UUID(tenant_id).int == 0:
             raise ValueError
     except ValueError as exc:
-        raise CampaignError("controller subscription or tenant binding is missing") from exc
+        raise CampaignError(
+            "controller subscription or tenant binding is missing"
+        ) from exc
     source_head, cleanup_script_sha256 = local_source_binding()
     issued_at = (now or datetime.now(UTC)).astimezone(UTC)
     config = build_controller_config(
@@ -728,7 +749,9 @@ def main() -> int:
     try:
         if args.operation == CONFIG_OPERATION:
             if args.execute or args.authorization is not None:
-                raise CampaignError("controller config creation cannot execute Azure work")
+                raise CampaignError(
+                    "controller config creation cannot execute Azure work"
+                )
             if (
                 args.output is None
                 or args.campaign_id is None
@@ -804,9 +827,15 @@ def main() -> int:
             )
         except PredeploymentVerificationError as exc:
             raise CampaignError(str(exc)) from exc
-        if admission.evidence_sha256 != config.fresh_controller_admission_evidence_sha256:
+        if (
+            admission.evidence_sha256
+            != config.fresh_controller_admission_evidence_sha256
+        ):
             raise CampaignError("controller fresh admission binding differs")
-        if admission.document.get("version") != config.fresh_controller_admission_evidence_version:
+        if (
+            admission.document.get("version")
+            != config.fresh_controller_admission_evidence_version
+        ):
             raise CampaignError("controller fresh admission version differs")
         validate_local_boundary(config)
         authorization_sha256 = load_controller_authorization(

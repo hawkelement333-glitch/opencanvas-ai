@@ -204,7 +204,8 @@ if ($LASTEXITCODE -ne 0) { throw 'local controller config creation failed' }
   --controller-region $controllerRegion `
   --fresh-subscription-runtime "$fresh/fresh-subscription-runtime.json" `
   --fresh-subscription-authorization "$fresh/predeployment-read-authorization.json" `
-  --fresh-subscription-evidence "$fresh/predeployment-absence-evidence.json"
+  --fresh-subscription-evidence "$fresh/predeployment-absence-evidence.json" `
+  --controller-authority-evidence '<reviewed-private-controller-authority-evidence.json>'
 if ($LASTEXITCODE -ne 0) { throw 'campaign preparation failed' }
 
 $config = '.runtime/milestone_7_8/campaign.json'
@@ -347,6 +348,81 @@ Invoke-M78Phase 'image-decision' @(
 The operator validates the receipt before issuing the workload deployment. It
 records the receipt SHA-256, selected digest, one image generation, and exactly
 one required scan. A second digest, build, or scan is rejected.
+
+## Retained controller authority records
+
+Campaign discovery must not derive the original controller deadline from current
+tags. Preserve the previously verified config, its `controller-verify`
+authorization, its sanitized successful result, and the seven retained command
+results in order: group, account, Reader assignments, runbook metadata, exact
+runbook content, schedules, and job-schedule bindings. Each command result is
+`{"exitCode":0,"stdout":"...","stderr":"..."}`; `stdout` contains the actual
+retained response, with content at index four preserved as text. Do not fabricate
+responses or reuse a failed bootstrap result as a verification result.
+
+The local-only assembler validates these inputs and refuses to replace an output:
+
+```powershell
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.controller_admission `
+  --verified-config '<preserved-verified-config.json>' `
+  --verification-authorization '<preserved-verification-authorization.json>' `
+  --verification-result '<preserved-successful-verification-result.json>' `
+  --baseline-readback '<retained-seven-command-results.json>' `
+  --output '<new-ignored-private-directory>/controller-authority-evidence.json'
+```
+
+For a renewed deadline the assembler additionally requires `--renewal` pointing
+to a reviewed record conforming to
+`controller-authority-evidence.schema.json#/properties/renewal`. It contains the
+renewed config, exact approval, actual seven-command before/after readbacks,
+start/completion times within the approval window, and completion receipt.
+Only `sourceHead` and `controllerAuthorizedUntilUtc` may differ between configs.
+The approval binds both configs, the original deadline, proposed deadline, and
+before-readback digest. All preservation and completion hashes are independently
+recomputed; the two success booleans are insufficient without the responses.
+Approval of an exact old/new transition can explicitly cover an already-expired
+old deadline, but historical approval never becomes current execution authority.
+
+The locally tested renewal executor is dispatch-only. The separate read-only
+snapshot and reconciliation paths below have synthetic tests only and are not
+ready for live renewal. Do not perform manual tag changes using this assembler.
+Failed, indeterminate,
+partial, or unrecorded renewals cannot enter campaign adoption. A lost final
+response remains blocked until its actual dispatch journal and complete
+preservation readback validate. Existing original artifacts remain immutable.
+Raw responses belong only in ignored private storage.
+
+After separate review, the following paths name private, ignored inputs and new
+outputs. `snapshotAuth` is an exact current `controller-verify` authorization
+bound to the plan's renewed config. `reconcileAuth` is the separately reviewed
+GET-only reconciliation authorization produced by `build_reconciliation_approval`
+from the exact original plan, mutation approval, before-readback and executor
+journal. Supplying `--execute` below authorizes only the documented readbacks:
+
+```powershell
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.controller_renewal `
+  --operation before-snapshot --authority-evidence $anchor --plan $plan `
+  --read-authorization $snapshotAuth --output $before --execute
+
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.controller_renewal `
+  --operation reconcile --authority-evidence $anchor --plan $plan `
+  --approval $mutationAuth --before-readback $before --journal-dir $journal `
+  --read-authorization $reconcileAuth --output $newReconciliationDirectory --execute
+```
+
+Reconciliation reads the actual executor records and never repeats a mutation.
+An early lost response, missing dispatch record, incomplete journal, nonzero
+final response without a complete journal, or any changed unrelated field stays
+blocked; matching tags do not reconstruct dispatch history. A process crash
+after dispatch but before the dispatch record likewise needs manual investigation
+and remains inadmissible. File contents are flushed and fsynced; directory-entry
+crash durability and Windows ACL privacy have not been independently tested.
+
+Preparation copies and hash-binds this evidence in runtime v9. All subsequent
+campaign execution authorizations use v5 and bind
+`controllerAuthorityEvidenceSha256`; an authorization for another receipt is
+rejected. Capacity checks reload the bound record and recheck live deadline
+consistency on all three resources. The retained controller is not deleted.
 
 ## Bootstrap, migrate, and prepare observed inputs
 

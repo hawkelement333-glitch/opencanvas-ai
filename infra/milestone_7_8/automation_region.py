@@ -10,6 +10,14 @@ from typing import Final, Protocol, cast
 from urllib.parse import parse_qs, urlparse
 
 from infra.milestone_7_8.campaign import CampaignError, parse_utc, utc
+from infra.milestone_7_8.cleanup_controller import (
+    controller_names,
+    validate_controller_deadline_consistency,
+)
+from infra.milestone_7_8.controller_admission import (
+    validate_authority_evidence,
+    validate_controller_admission,
+)
 
 CLEANUP_REGION_CANDIDATES: Final = (
     "eastus2",
@@ -658,7 +666,10 @@ def discover_automation_region(
     cleanup_script_sha256: str | None = None,
     fresh_controller_admission_evidence_sha256: str | None = None,
     controller_required_until_utc: str | None = None,
+    controller_authority_evidence: object = None,
 ) -> AutomationRegionSelection:
+    if controller_authority_evidence is not None:
+        validate_authority_evidence(controller_authority_evidence)
     commands = automation_region_discovery_commands(subscription_id)
     account_context = _run_required(runner, commands[0])
     subscription_metadata = _run_required(runner, commands[1])
@@ -717,6 +728,7 @@ def discover_automation_region(
             fresh_controller_admission_evidence_sha256
         ),
         controller_required_until_utc=controller_required_until_utc,
+        controller_authority_evidence=controller_authority_evidence,
     )
 
 
@@ -733,6 +745,7 @@ def select_automation_region_from_results(
     cleanup_script_sha256: str | None = None,
     fresh_controller_admission_evidence_sha256: str | None = None,
     controller_required_until_utc: str | None = None,
+    controller_authority_evidence: object = None,
 ) -> AutomationRegionSelection:
     _validate_candidate_order(candidate_order)
     if len(results) != 6:
@@ -780,6 +793,66 @@ def select_automation_region_from_results(
         ),
         controller_required_until_utc=controller_required_until_utc,
     )
+    if controller_region:
+        names = controller_names(str(subscription_correlation))
+        controller_account_record = next(
+            item
+            for item in active_accounts
+            if isinstance(item, dict) and item.get("name") == names.account
+        )
+        account_tags = cast(dict[str, object], controller_account_record["tags"])
+        deadline = str(account_tags["mobius.controller-authorized-until-utc"])
+        validate_controller_admission(
+            controller_authority_evidence,
+            subscription_id=subscription_id,
+            subscription_correlation=str(subscription_correlation),
+            resource_group=names.resource_group,
+            account=names.account,
+            cleanup_script_sha256=str(cleanup_script_sha256),
+            fresh_evidence_sha256=str(fresh_controller_admission_evidence_sha256),
+            location=controller_region,
+            observed_deadline=deadline,
+            observed_at=observed_at or datetime.now(UTC),
+        )
+        group_url = (
+            f"https://management.azure.com/subscriptions/{subscription_id}/resourcegroups/"
+            f"{names.resource_group}?api-version=2024-11-01"
+        )
+        runbook_url = (
+            f"https://management.azure.com/subscriptions/{subscription_id}/resourcegroups/"
+            f"{names.resource_group}/providers/Microsoft.Automation/automationAccounts/"
+            f"{names.account}/runbooks/{names.runbook}?api-version=2024-10-23"
+        )
+        observations = [
+            _json_result(
+                _run_required(
+                    runner,
+                    ("az", "rest", "--method", "get", "--url", url, "--output", "json"),
+                )
+            )
+            for url in (group_url, runbook_url)
+        ]
+        group_id = f"/subscriptions/{subscription_id}/resourceGroups/{names.resource_group}"
+        account_id = (
+            f"{group_id}/providers/Microsoft.Automation/automationAccounts/{names.account}"
+        )
+        for resource, resource_id in (
+            (observations[0], group_id),
+            (controller_account_record, account_id),
+            (observations[1], f"{account_id}/runbooks/{names.runbook}"),
+        ):
+            if (
+                not isinstance(resource, dict)
+                or str(resource.get("id", "")).casefold() != resource_id.casefold()
+            ):
+                raise CampaignError("controller adoption resource identity differs")
+        validate_controller_deadline_consistency(
+            observations[0],
+            controller_account_record,
+            observations[1],
+            names=names,
+            expected_deadline=deadline,
+        )
     active_counts = _location_counts(
         active_accounts, supported=supported, label="active"
     )

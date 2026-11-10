@@ -66,6 +66,7 @@ from infra.milestone_7_8.operator import (
     validate_operation_results,
     verify_zero_residue,
 )
+from test_milestone_7_8_controller_admission import authority_fixture
 
 from opencanvas_api.db.principal_manifest import (
     CAMPAIGN_ENV,
@@ -674,6 +675,79 @@ def _controller_config() -> ControllerConfig:
     )
 
 
+@pytest.mark.parametrize("changed_index", range(3))
+def test_controller_deadline_rejects_each_mixed_resource(changed_index: int) -> None:
+    from infra.milestone_7_8.cleanup_controller import (
+        controller_names,
+        validate_controller_deadline_consistency,
+    )
+
+    config = _controller_config()
+    names = controller_names(config.subscription_correlation)
+    resources = [
+        {
+            "name": name,
+            "tags": {
+                "mobius.controller-authorized-until-utc": config.controller_authorized_until_utc
+            },
+        }
+        for name in (names.resource_group, names.account, names.runbook)
+    ]
+    validate_controller_deadline_consistency(
+        *resources, names=names, expected_deadline=config.controller_authorized_until_utc
+    )
+    resources[changed_index]["tags"] = {
+        "mobius.controller-authorized-until-utc": "2030-01-03T00:00:00Z"
+    }
+    with pytest.raises(CampaignError, match="deadlines differ"):
+        validate_controller_deadline_consistency(
+            *resources, names=names, expected_deadline=config.controller_authorized_until_utc
+        )
+
+
+def test_renewal_completion_receipt_rejects_missing_or_mismatched_evidence() -> None:
+    from infra.milestone_7_8.cleanup_controller import validate_renewal_completion_receipt
+
+    bindings = {
+        "controller_binding": "a" * 64,
+        "original_config_sha256": "b" * 64,
+        "renewed_config_sha256": "c" * 64,
+        "renewal_approval_sha256": "d" * 64,
+        "baseline_preservation_sha256": "e" * 64,
+        "original_deadline": "2030-01-01T00:00:00Z",
+        "observed_deadline": "2030-01-02T00:00:00Z",
+    }
+    receipt: dict[str, object] = {
+        "version": "m7.8-controller-renewal-completion-v1",
+        "status": "complete",
+        "controllerBindingSha256": bindings["controller_binding"],
+        "originalConfigSha256": bindings["original_config_sha256"],
+        "renewedConfigSha256": bindings["renewed_config_sha256"],
+        "renewalApprovalSha256": bindings["renewal_approval_sha256"],
+        "baselinePreservationSha256": bindings["baseline_preservation_sha256"],
+        "originalDeadlineUtc": bindings["original_deadline"],
+        "observedDeadlineUtc": bindings["observed_deadline"],
+        "allResourcesReadBack": True,
+        "otherTagsAndPropertiesPreserved": True,
+    }
+    receipt["receiptSha256"] = hashlib.sha256(
+        b"m7.8/controller-renewal-completion/v1\0"
+        + json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    assert validate_renewal_completion_receipt(receipt, **bindings) == receipt["receiptSha256"]
+    for invalid in (
+        None,
+        {},
+        {**receipt, "status": "indeterminate"},
+        {**receipt, "allResourcesReadBack": False},
+        {**receipt, "otherTagsAndPropertiesPreserved": False},
+        {**receipt, "observedDeadlineUtc": "2030-01-03T00:00:00Z"},
+        {**receipt, "receiptSha256": "0" * 64},
+    ):
+        with pytest.raises(CampaignError):
+            validate_renewal_completion_receipt(invalid, **bindings)
+
+
 def test_separate_controller_bootstrap_is_one_time_and_authorization_gated(
     tmp_path: Path,
 ) -> None:
@@ -869,6 +943,7 @@ def test_controller_baseline_readback_requires_publication_and_empty_bindings(
         _command_result(
             {
                 "name": config.runbook_name,
+                "tags": tags,
                 "properties": {
                     "state": "Published",
                     "lastModifiedTime": "2030-01-01T00:01:00Z",
@@ -908,6 +983,9 @@ def _runtime() -> dict[str, str]:
             account=account,
             runbook="Remove-M78Campaign",
         ),
+        "controllerAuthorityEvidenceFile": "runtime/controller-authority-evidence.json",
+        "controllerAuthorityEvidenceSha256": "6" * 64,
+        "controllerAuthorizedUntilUtc": "2030-01-02T00:00:00Z",
         "cleanupAuthorityExpiresUtc": "2030-01-01T05:00:00Z",
         "cleanupRegion": "eastus2",
         "cleanupRegionSelectionSha256": "f" * 64,
@@ -1431,6 +1509,8 @@ def test_prepare_rejects_invalid_local_boundary(
             "unused",
             "--fresh-subscription-evidence",
             "unused",
+            "--controller-authority-evidence",
+            "unused",
         ],
     )
     assert prepare.main() != 0
@@ -1484,6 +1564,16 @@ def test_prepare_creates_one_private_restart_safe_bundle(
     fresh_evidence_path = tmp_path / "predeployment-absence-evidence.json"
     fresh_evidence_path.write_text(json.dumps(fresh_evidence), encoding="utf-8")
     fresh_evidence_sha256 = predeployment.evidence_sha256(fresh_evidence)
+    authority = authority_fixture(
+        subscription=subscription, tenant=tenant,
+        campaign="mobius78-managed-proof", region="eastus2",
+        evidence_hash=fresh_evidence_sha256,
+        cleanup_hash=hashlib.sha256(
+            (REPOSITORY_ROOT / "infra/milestone_7_8/scripts/Remove-M78Campaign.ps1").read_bytes()
+        ).hexdigest(),
+    )
+    authority_path = tmp_path / "controller-authority-evidence.json"
+    authority_path.write_text(json.dumps(authority), encoding="utf-8")
     git_values = {
         ("status", "--porcelain=v1"): "",
         ("branch", "--show-current"): "milestone-7-8-production-readiness-audit-local",
@@ -1569,6 +1659,8 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             str(fresh_authorization_path),
             "--fresh-subscription-evidence",
             str(fresh_evidence_path),
+            "--controller-authority-evidence",
+            str(authority_path),
         ],
     )
     assert prepare.main() == 0
@@ -1598,6 +1690,9 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             "cleanupControllerArchitecture",
             "cleanupControllerArmability",
             "controllerBindingSha256",
+            "controllerAuthorityEvidenceFile",
+            "controllerAuthorityEvidenceSha256",
+            "controllerAuthorizedUntilUtc",
             "cleanupAuthorityExpiresUtc",
             "cleanupRegion",
             "cleanupRegionSelectionSha256",
@@ -1774,6 +1869,7 @@ def _controller_baseline_results(
         _command_result(
             {
                 "name": runtime["runbookName"],
+                "tags": _controller_tags(config, runtime),
                 "properties": {
                     "state": "Published",
                     "lastModifiedTime": "2030-01-01T00:01:00Z",
@@ -2002,7 +2098,7 @@ def _write_execution_authorization(
     operations: list[str],
 ) -> None:
     value: dict[str, object] = {
-        "version": "m7.8-execution-authorization-v4",
+        "version": "m7.8-execution-authorization-v5",
         "disposition": "separately-authorized-azure-execution",
         "campaignId": config.campaign_id,
         "generationId": config.generation_id,
@@ -2010,6 +2106,7 @@ def _write_execution_authorization(
         "sourceHead": runtime["sourceHead"],
         "controllerArchitecture": "reusable-automation-controller-v1",
         "controllerBindingSha256": runtime["controllerBindingSha256"],
+        "controllerAuthorityEvidenceSha256": runtime["controllerAuthorityEvidenceSha256"],
         "freshControllerAdmissionEvidenceSha256": (
             config.fresh_controller_admission_evidence_sha256
         ),
@@ -2021,7 +2118,7 @@ def _write_execution_authorization(
         "allowedOperations": operations,
     }
     value["authorizationSha256"] = hashlib.sha256(
-        b"m7.8/execution-authorization/v4\0"
+        b"m7.8/execution-authorization/v5\0"
         + json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
     path.write_text(json.dumps(value), encoding="utf-8")

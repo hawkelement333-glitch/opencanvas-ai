@@ -43,6 +43,11 @@ from infra.milestone_7_8.operator import (
     start_direct_cleanup,
     validate_operation_results,
 )
+from test_milestone_7_8_controller_admission import (
+    DiscoveryRunner,
+    authority_fixture,
+    campaign_fixture,
+)
 
 NOW = datetime(2030, 1, 1, tzinfo=UTC)
 SUBSCRIPTION_ID = "00000000-0000-4000-8000-000000000100"
@@ -139,6 +144,20 @@ class FakeRunner:
             for definition_id, value in self.definitions.items():
                 if definition_id in url:
                     return _result(value)
+            if "/runbooks/Remove-M78Campaign?" in url:
+                return _result(
+                    {
+                        "name": "Remove-M78Campaign",
+                        "tags": {"mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z"},
+                    }
+                )
+            if "/resourcegroups/rg-m78-controller-aaaaaaaaaa?" in url:
+                return _result(
+                    {
+                        "name": "rg-m78-controller-aaaaaaaaaa",
+                        "tags": {"mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z"},
+                    }
+                )
         return _result({})
 
 
@@ -362,12 +381,12 @@ def test_occupied_westus_is_rejected_before_mutation_and_alternate_is_selected()
     assert westus.active_account_count == 1
 
 
-def test_exact_reusable_controller_is_adopted_in_its_established_region() -> None:
+def test_renewed_controller_without_completion_receipt_is_rejected() -> None:
+    deadline = "2030-01-03T00:00:00Z"
     controller = {
         "id": (
-            "/subscriptions/00000000-0000-4000-8000-000000000100/resourceGroups/"
-            "rg-m78-controller-aaaaaaaaaa/providers/Microsoft.Automation/"
-            "automationAccounts/aa-m78-controller-aaaaaaaaaa"
+            f"/subscriptions/{SUBSCRIPTION_ID}/resourceGroups/rg-m78-controller-aaaaaaaaaa/"
+            "providers/Microsoft.Automation/automationAccounts/aa-m78-controller-aaaaaaaaaa"
         ),
         "name": "aa-m78-controller-aaaaaaaaaa",
         "resourceGroup": "rg-m78-controller-aaaaaaaaaa",
@@ -377,22 +396,41 @@ def test_exact_reusable_controller_is_adopted_in_its_established_region() -> Non
             "mobius.owner": "managed-postgresql-evidence",
             "mobius.cleanup-controller": "reusable-automation-controller-v1",
             "mobius.subscription-correlation": "a" * 16,
-            "mobius.controller-authorized-until-utc": "2030-01-02T00:00:00Z",
+            "mobius.controller-authorized-until-utc": deadline,
             "mobius.cleanup-script-sha256": "9" * 64,
             "mobius.fresh-controller-admission-sha256": "8" * 64,
         },
     }
-    selection = select_automation_region_from_results(
-        FakeRunner(),
-        _discovery_results(active=[controller]),
-        subscription_id=SUBSCRIPTION_ID,
-        observed_at=NOW,
-        controller_resource_group="rg-m78-controller-aaaaaaaaaa",
-        controller_account="aa-m78-controller-aaaaaaaaaa",
-        subscription_correlation="a" * 16,
-        cleanup_script_sha256="9" * 64,
-        fresh_controller_admission_evidence_sha256="8" * 64,
+    runner = FakeRunner(
+        {
+            "/resourcegroups/rg-m78-controller-aaaaaaaaaa?": {
+                "name": "rg-m78-controller-aaaaaaaaaa",
+                "tags": {"mobius.controller-authorized-until-utc": deadline},
+            },
+            "/runbooks/Remove-M78Campaign?": {
+                "name": "Remove-M78Campaign",
+                "tags": {"mobius.controller-authorized-until-utc": deadline},
+            },
+        }
     )
+    with pytest.raises(CampaignError, match=r"renewal|bootstrap|completion|anchor"):
+        select_automation_region_from_results(
+            runner,
+            _discovery_results(active=[controller]),
+            subscription_id=SUBSCRIPTION_ID,
+            observed_at=NOW,
+            controller_resource_group="rg-m78-controller-aaaaaaaaaa",
+            controller_account="aa-m78-controller-aaaaaaaaaa",
+            subscription_correlation="a" * 16,
+            cleanup_script_sha256="9" * 64,
+            fresh_controller_admission_evidence_sha256="8" * 64,
+        )
+
+
+def test_exact_reusable_controller_is_adopted_in_its_established_region() -> None:
+    authority = authority_fixture(region="southeastasia", evidence_hash="8" * 64)
+    runner = DiscoveryRunner(authority)
+    selection = runner.select(authority)
     assert selection.selected_region == "southeastasia"
     assert selection.controller_disposition == "exact-controller-adoptable"
     assert selection.controller_region == "southeastasia"
@@ -400,30 +438,17 @@ def test_exact_reusable_controller_is_adopted_in_its_established_region() -> Non
     assert by_region["southeastasia"].adoptable_controller_count == 1
     assert by_region["eastus2"].status == "controller-region-mismatch"
 
-    drifted = {**controller, "tags": {**controller["tags"], "mobius.owner": "other"}}
+    for index in (0, 2):
+        changed = DiscoveryRunner(authority)
+        changed.resources[index]["tags"]["mobius.controller-authorized-until-utc"] = (
+            "2030-01-03T00:00:00Z"
+        )
+        with pytest.raises(CampaignError, match="controller authority deadlines differ"):
+            changed.select(authority)
+    drifted = DiscoveryRunner(authority)
+    drifted.resources[1]["tags"]["mobius.owner"] = "other"
     with pytest.raises(CampaignError, match="identity or tags drifted"):
-        select_automation_region_from_results(
-            FakeRunner(),
-            _discovery_results(active=[drifted]),
-            subscription_id=SUBSCRIPTION_ID,
-            controller_resource_group="rg-m78-controller-aaaaaaaaaa",
-            controller_account="aa-m78-controller-aaaaaaaaaa",
-            subscription_correlation="a" * 16,
-            cleanup_script_sha256="9" * 64,
-            fresh_controller_admission_evidence_sha256="8" * 64,
-        )
-    with pytest.raises(CampaignError, match="authority is insufficient"):
-        select_automation_region_from_results(
-            FakeRunner(),
-            _discovery_results(active=[controller]),
-            subscription_id=SUBSCRIPTION_ID,
-            controller_resource_group="rg-m78-controller-aaaaaaaaaa",
-            controller_account="aa-m78-controller-aaaaaaaaaa",
-            subscription_correlation="a" * 16,
-            cleanup_script_sha256="9" * 64,
-            fresh_controller_admission_evidence_sha256="8" * 64,
-            controller_required_until_utc="2030-01-03T00:00:00Z",
-        )
+        drifted.select(authority)
 
 
 def test_supported_policy_allowed_zero_occupancy_alternate_is_deterministic() -> None:
@@ -984,21 +1009,9 @@ def test_cleanup_deployment_plan_adopts_one_controller_region_without_hopping() 
 
 
 def test_capacity_check_revalidates_selection_before_scope_mutation() -> None:
-    active_controller = _active_controller_record()
-    selection = select_automation_region_from_results(
-        FakeRunner(),
-        _discovery_results(active=[active_controller]),
-        subscription_id=SUBSCRIPTION_ID,
-        observed_at=NOW,
-        controller_resource_group="rg-m78-controller-aaaaaaaaaa",
-        controller_account="aa-m78-controller-aaaaaaaaaa",
-        subscription_correlation="a" * 16,
-        cleanup_script_sha256=hashlib.sha256(b"cleanup-content").hexdigest(),
-        fresh_controller_admission_evidence_sha256="0" * 64,
-        controller_required_until_utc="2030-01-01T05:00:00Z",
-    )
-    config = _config(selection)
-    runtime = _runtime(selection)
+    authority = authority_fixture()
+    config, runtime = campaign_fixture(authority)
+    runner = DiscoveryRunner(authority)
     prefix = [
         *[_result({"registrationState": "Registered"}) for _ in range(6)],
         _result([{"name": "Standard_D2ds_v5"}]),
@@ -1008,45 +1021,28 @@ def test_capacity_check_revalidates_selection_before_scope_mutation() -> None:
     ]
     validate_operation_results(
         "capacity-check",
-        [
-            *prefix,
-            *_discovery_results(active=[active_controller]),
-            *_controller_baseline_results(config, runtime),
-        ],
-        config,
-        runtime,
-        runner=FakeRunner(),  # type: ignore[arg-type]
+        [*prefix, *runner.discovery_results(), *authority["baselineReadback"]],
+        config, runtime, runner=runner, controller_authority_evidence=authority,
     )
     assert config.cleanup_candidate_regions == CLEANUP_CANDIDATE_REGIONS_BINDING
-
-    changed_offer_results = list(_discovery_results(active=[active_controller]))
+    changed_offer_results = list(runner.discovery_results())
     changed_offer_results[1] = _result(
         _subscription_metadata({"quotaId": "FreeTrial_ChangedEvidence"})
     )
     with pytest.raises(CampaignError, match="armable"):
         validate_operation_results(
             "capacity-check",
-            [
-                *prefix,
-                *changed_offer_results,
-                *_controller_baseline_results(config, runtime),
-            ],
-            config,
-            runtime,
-            runner=FakeRunner(),  # type: ignore[arg-type]
+            [*prefix, *changed_offer_results, *authority["baselineReadback"]],
+            config, runtime, runner=runner, controller_authority_evidence=authority,
         )
-
+    occupied = list(runner.discovery_results())
+    occupied[3] = _result(
+        {"accounts": [runner.resources[1], {"location": "eastus2"}], "nextLink": None}
+    )
     with pytest.raises(CampaignError, match="armable"):
         validate_operation_results(
-            "capacity-check",
-            [
-                *prefix,
-                *_discovery_results(active=[active_controller, {"location": "eastus2"}]),
-                *_controller_baseline_results(config, runtime),
-            ],
-            config,
-            runtime,
-            runner=FakeRunner(),  # type: ignore[arg-type]
+            "capacity-check", [*prefix, *occupied, *authority["baselineReadback"]],
+            config, runtime, runner=runner, controller_authority_evidence=authority,
         )
 
 

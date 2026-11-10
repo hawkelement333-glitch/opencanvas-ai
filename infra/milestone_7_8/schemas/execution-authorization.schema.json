@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:execution-authorization:v3",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:execution-authorization:v5",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,6 +12,7 @@
     "sourceHead",
     "controllerArchitecture",
     "controllerBindingSha256",
+    "controllerAuthorityEvidenceSha256",
     "freshControllerAdmissionEvidenceSha256",
     "freshControllerAdmissionEvidenceVersion",
     "cleanupDeadlineUtc",
@@ -20,7 +21,8 @@
     "authorizationSha256"
   ],
   "properties": {
-    "version": { "const": "m7.8-execution-authorization-v4" },
+    "version": { "const": "m7.8-execution-authorization-v5" },
+    "controllerAuthorityEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "disposition": { "const": "separately-authorized-azure-execution" },
     "campaignId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,47}$" },
     "generationId": {

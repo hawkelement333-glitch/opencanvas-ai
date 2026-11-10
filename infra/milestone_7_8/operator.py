@@ -37,8 +37,15 @@ from infra.milestone_7_8.cleanup_controller import (
     LOCAL_ARCHITECTURE_STATE,
     cleanup_authority_sha256,
     controller_binding_sha256,
+    controller_local_auth_disabled,
     controller_names,
     load_execution_authorization,
+    validate_controller_deadline_consistency,
+)
+from infra.milestone_7_8.controller_admission import (
+    load_authority_evidence,
+    validate_authority_evidence,
+    validate_controller_admission,
 )
 from infra.milestone_7_8.predeployment import (
     EVIDENCE_CLASS as FRESH_CONTROLLER_ADMISSION_EVIDENCE_CLASS,
@@ -89,6 +96,9 @@ RUNTIME_FIELDS = {
     "cleanupControllerArchitecture",
     "cleanupControllerArmability",
     "controllerBindingSha256",
+    "controllerAuthorityEvidenceFile",
+    "controllerAuthorityEvidenceSha256",
+    "controllerAuthorizedUntilUtc",
     "cleanupAuthorityExpiresUtc",
     "cleanupRegion",
     "cleanupRegionSelectionSha256",
@@ -255,6 +265,9 @@ def load_runtime(path: Path) -> dict[str, str]:
         or value["cleanupControllerArchitecture"] != ARCHITECTURE
         or value["cleanupControllerArmability"] != LOCAL_ARCHITECTURE_STATE
         or re.fullmatch(r"[a-f0-9]{64}", value["controllerBindingSha256"]) is None
+        or re.fullmatch(r"[a-f0-9]{64}", value["controllerAuthorityEvidenceSha256"]) is None
+        or parse_utc(value["controllerAuthorizedUntilUtc"])
+        < parse_utc(value["cleanupAuthorityExpiresUtc"])
         or re.fullmatch(
             r"[a-f0-9]{64}", value["freshControllerAdmissionEvidenceSha256"]
         )
@@ -361,6 +374,44 @@ def _load_fresh_scope_tenant(path: Path) -> str:
     return tenant_id
 
 
+def validate_bound_controller_authority(
+    value: object, runtime: dict[str, str], config: CampaignConfig
+) -> dict[str, object]:
+    anchor = validate_authority_evidence(value)
+    authority_hash = validate_controller_admission(
+        value,
+        subscription_id=runtime["subscriptionId"],
+        subscription_correlation=config.subscription_correlation,
+        resource_group=config.cleanup_resource_group,
+        account=runtime["automationAccountName"],
+        cleanup_script_sha256=runtime["cleanupScriptSha256"],
+        fresh_evidence_sha256=config.fresh_controller_admission_evidence_sha256,
+        location=config.cleanup_region,
+        observed_deadline=anchor.controller_authorized_until_utc,
+    )
+    if (
+        authority_hash != runtime["controllerAuthorityEvidenceSha256"]
+        or anchor.controller_authorized_until_utc != runtime["controllerAuthorizedUntilUtc"]
+        or anchor.runbook_name != runtime["runbookName"]
+        or anchor.campaign_id != config.campaign_id
+        or anchor.generation_id != config.generation_id
+        or sanitize(anchor.tenant_id, domain="tenant") != config.tenant_correlation
+    ):
+        raise CampaignError("controller authority evidence binding differs")
+    return cast(dict[str, object], value)
+
+
+def load_bound_controller_authority(
+    runtime_path: Path, runtime: dict[str, str], config: CampaignConfig
+) -> dict[str, object]:
+    candidate = Path(runtime["controllerAuthorityEvidenceFile"]).resolve()
+    if candidate.parent != runtime_path.resolve().parent:
+        raise CampaignError("controller authority evidence escaped its private generation")
+    return validate_bound_controller_authority(
+        load_authority_evidence(candidate), runtime, config
+    )
+
+
 def validate_prepared_bundle(
     runtime_path: Path,
     runtime: dict[str, str],
@@ -371,6 +422,7 @@ def validate_prepared_bundle(
         runtime,
         config,
     )
+    load_bound_controller_authority(runtime_path, runtime, config)
     if (
         runtime["resourceGroupName"] != config.target_resource_group
         or runtime["cleanupResourceGroupName"] != config.cleanup_resource_group
@@ -2186,6 +2238,11 @@ def validate_controller_baseline(
     content = results[4].get("stdout")
     schedules = _collection(_json_result(results[5]), label="cleanup schedule")
     bindings = _collection(_json_result(results[6]), label="cleanup binding")
+    validate_controller_deadline_consistency(
+        group, account, runbook,
+        names=controller_names(config.subscription_correlation),
+        expected_deadline=runtime["controllerAuthorizedUntilUtc"],
+    )
     if (
         not isinstance(group, dict)
         or group.get("name") != config.cleanup_resource_group
@@ -2200,12 +2257,10 @@ def validate_controller_baseline(
     _validate_controller_tags(group.get("tags"), config=config, runtime=runtime)
     _validate_controller_tags(account.get("tags"), config=config, runtime=runtime)
     identity = account.get("identity")
-    properties = account.get("properties")
     if (
         not isinstance(identity, dict)
         or not isinstance(identity.get("principalId"), str)
-        or not isinstance(properties, dict)
-        or properties.get("disableLocalAuth") is not True
+        or not controller_local_auth_disabled(account)
     ):
         raise CampaignError(
             "reusable cleanup controller identity or local-auth policy differs"
@@ -2982,6 +3037,7 @@ def validate_operation_results(
     runtime: dict[str, str],
     *,
     runner: SubprocessRunner | None = None,
+    controller_authority_evidence: object = None,
 ) -> None:
     if operation == "preflight":
         if len(results) != 7:
@@ -2993,6 +3049,7 @@ def validate_operation_results(
             or str(text_values[2]).strip()
             != "milestone-7-8-production-readiness-audit-local"
             or str(text_values[3]).strip()
+            != "refs/remotes/origin/milestone-7-8-production-readiness-audit-local"
             or len(str(text_values[4]).strip().splitlines()) != 5
             or not isinstance(_json_result(results[5]), dict)
         ):
@@ -3020,6 +3077,7 @@ def validate_operation_results(
         ):
             raise CampaignError("Azure campaign correlation differs")
     elif operation == "capacity-check":
+        validate_bound_controller_authority(controller_authority_evidence, runtime, config)
         if len(results) != 23:
             raise CampaignError(
                 "provider, quota, region, SKU, or name proof is incomplete"
@@ -3062,6 +3120,7 @@ def validate_operation_results(
                 config.fresh_controller_admission_evidence_sha256
             ),
             controller_required_until_utc=runtime["cleanupAuthorityExpiresUtc"],
+            controller_authority_evidence=controller_authority_evidence,
         )
         if (
             refreshed_selection.controller_disposition != "exact-controller-adoptable"
@@ -3162,6 +3221,11 @@ def main() -> int:
         config = CampaignConfig.from_json(args.config, allow_expired=True)
         runtime = load_runtime(args.runtime)
         validate_prepared_bundle(args.runtime, runtime, config)
+        controller_authority = (
+            load_bound_controller_authority(args.runtime, runtime, config)
+            if args.operation == "capacity-check"
+            else None
+        )
         if args.execute:
             load_bound_fresh_controller_admission(
                 args.runtime,
@@ -3316,6 +3380,7 @@ def main() -> int:
                 config,
                 runtime,
                 runner=runner,
+                controller_authority_evidence=controller_authority,
             )
             if args.operation == "evidence" and control_evidence is not None:
                 persist_evidence_execution_receipt(

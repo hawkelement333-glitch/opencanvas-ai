@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:controller-authority-evidence:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "verifiedConfig", "verificationAuthorization", "verificationResult", "baselineReadback", "renewal"],
+  "properties": {
+    "version": {"const": "m7.8-controller-authority-evidence-v1"},
+    "verifiedConfig": {"$ref": "controller.schema.json"},
+    "verificationAuthorization": {"$ref": "controller-execution-authorization.schema.json"},
+    "verificationResult": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "operation", "commandCount", "authorizationSha256", "controllerProofSha256"],
+      "properties": {
+        "status": {"const": "controller-baseline-verified"},
+        "operation": {"const": "controller-verify"},
+        "commandCount": {"const": 7},
+        "authorizationSha256": {"$ref": "#/$defs/hash"},
+        "controllerProofSha256": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "baselineReadback": {"$ref": "#/$defs/readback"},
+    "renewal": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["renewedConfig", "approval", "beforeReadback", "afterReadback", "completion", "startedAtUtc", "completedAtUtc"],
+          "properties": {
+            "renewedConfig": {"$ref": "controller.schema.json"},
+            "beforeReadback": {"$ref": "#/$defs/readback"},
+            "afterReadback": {"$ref": "#/$defs/readback"},
+            "startedAtUtc": {"type": "string", "format": "date-time"},
+            "completedAtUtc": {"type": "string", "format": "date-time"},
+            "reconciliation": {
+              "type": "object", "additionalProperties": false,
+              "required": ["plan", "attemptJournal", "authorization", "observationSha256"],
+              "properties": {
+                "plan": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["version", "operation", "controllerBindingSha256", "originalConfigSha256", "renewedConfigSha256", "originalDeadlineUtc", "renewedDeadlineUtc", "baselineReadbackSha256", "renewedConfig", "requests", "planSha256"],
+                  "properties": {
+                    "version": {"const": "m7.8-controller-renewal-plan-v1"},
+                    "operation": {"const": "controller-renew-deadline-tags"},
+                    "controllerBindingSha256": {"$ref": "#/$defs/hash"},
+                    "originalConfigSha256": {"$ref": "#/$defs/hash"},
+                    "renewedConfigSha256": {"$ref": "#/$defs/hash"},
+                    "originalDeadlineUtc": {"type": "string", "format": "date-time"},
+                    "renewedDeadlineUtc": {"type": "string", "format": "date-time"},
+                    "baselineReadbackSha256": {"$ref": "#/$defs/hash"},
+                    "renewedConfig": {"$ref": "controller.schema.json"},
+                    "planSha256": {"$ref": "#/$defs/hash"},
+                    "requests": {"type": "array", "minItems": 3, "maxItems": 3,
+                      "items": {"type": "object", "additionalProperties": false,
+                        "required": ["method", "url", "body"],
+                        "properties": {"method": {"const": "PATCH"}, "url": {"type": "string"},
+                          "body": {"type": "object", "additionalProperties": false,
+                            "required": ["operation", "properties"],
+                            "properties": {"operation": {"const": "Merge"},
+                              "properties": {"type": "object", "additionalProperties": false,
+                                "required": ["tags"], "properties": {"tags": {"type": "object",
+                                  "additionalProperties": false,
+                                  "required": ["mobius.controller-authorized-until-utc"],
+                                  "properties": {"mobius.controller-authorized-until-utc": {"type": "string", "format": "date-time"}}}}}}}}}}
+                  }
+                },
+                "attemptJournal": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["version", "renewalPlanSha256", "renewalApprovalSha256", "attempts"],
+                  "properties": {
+                    "version": {"const": "m7.8-controller-renewal-attempt-journal-v1"},
+                    "renewalPlanSha256": {"$ref": "#/$defs/hash"},
+                    "renewalApprovalSha256": {"$ref": "#/$defs/hash"},
+                    "attempts": {"type": "array", "minItems": 3, "maxItems": 3,
+                      "items": {"type": "object", "additionalProperties": false,
+                        "required": ["index", "requestSha256", "dispatchedAtUtc", "outcome"],
+                        "properties": {"index": {"type": "integer", "minimum": 0, "maximum": 2},
+                          "requestSha256": {"$ref": "#/$defs/hash"},
+                          "dispatchedAtUtc": {"type": "string", "format": "date-time"},
+                          "outcome": {"enum": ["success", "indeterminate"]}}}}
+                  }
+                },
+                "authorization": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["version", "operation", "controllerBindingSha256", "renewalPlanSha256", "renewalApprovalSha256", "attemptJournalSha256", "issuedAtUtc", "expiresAtUtc", "authorizationSha256"],
+                  "properties": {
+                    "version": {"const": "m7.8-controller-renewal-reconciliation-approval-v1"},
+                    "operation": {"const": "controller-renewal-reconcile-get-only"},
+                    "controllerBindingSha256": {"$ref": "#/$defs/hash"},
+                    "renewalPlanSha256": {"$ref": "#/$defs/hash"},
+                    "renewalApprovalSha256": {"$ref": "#/$defs/hash"},
+                    "attemptJournalSha256": {"$ref": "#/$defs/hash"},
+                    "issuedAtUtc": {"type": "string", "format": "date-time"},
+                    "expiresAtUtc": {"type": "string", "format": "date-time"},
+                    "authorizationSha256": {"$ref": "#/$defs/hash"}
+                  }
+                },
+                "observationSha256": {"$ref": "#/$defs/hash"}
+              }
+            },
+            "approval": {
+              "type": "object", "additionalProperties": false,
+              "required": ["version", "operation", "controllerBindingSha256", "originalConfigSha256", "renewedConfigSha256", "originalDeadlineUtc", "renewedDeadlineUtc", "baselineReadbackSha256", "issuedAtUtc", "expiresAtUtc", "authorizationSha256"],
+              "properties": {
+                "version": {"const": "m7.8-controller-renewal-approval-v1"},
+                "operation": {"const": "controller-renew-deadline-tags"},
+                "controllerBindingSha256": {"$ref": "#/$defs/hash"},
+                "originalConfigSha256": {"$ref": "#/$defs/hash"},
+                "renewedConfigSha256": {"$ref": "#/$defs/hash"},
+                "originalDeadlineUtc": {"type": "string", "format": "date-time"},
+                "renewedDeadlineUtc": {"type": "string", "format": "date-time"},
+                "baselineReadbackSha256": {"$ref": "#/$defs/hash"},
+                "issuedAtUtc": {"type": "string", "format": "date-time"},
+                "expiresAtUtc": {"type": "string", "format": "date-time"},
+                "authorizationSha256": {"$ref": "#/$defs/hash"}
+              }
+            },
+            "completion": {
+              "type": "object", "additionalProperties": false,
+              "required": ["version", "status", "controllerBindingSha256", "originalConfigSha256", "renewedConfigSha256", "renewalApprovalSha256", "baselinePreservationSha256", "originalDeadlineUtc", "observedDeadlineUtc", "allResourcesReadBack", "otherTagsAndPropertiesPreserved", "receiptSha256"],
+              "properties": {
+                "version": {"const": "m7.8-controller-renewal-completion-v1"},
+                "status": {"const": "complete"},
+                "controllerBindingSha256": {"$ref": "#/$defs/hash"},
+                "originalConfigSha256": {"$ref": "#/$defs/hash"},
+                "renewedConfigSha256": {"$ref": "#/$defs/hash"},
+                "renewalApprovalSha256": {"$ref": "#/$defs/hash"},
+                "baselinePreservationSha256": {"$ref": "#/$defs/hash"},
+                "originalDeadlineUtc": {"type": "string", "format": "date-time"},
+                "observedDeadlineUtc": {"type": "string", "format": "date-time"},
+                "allResourcesReadBack": {"const": true},
+                "otherTagsAndPropertiesPreserved": {"const": true},
+                "receiptSha256": {"$ref": "#/$defs/hash"}
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "readback": {
+      "type": "array", "minItems": 7, "maxItems": 7,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["exitCode", "stdout", "stderr"],
+        "properties": {"exitCode": {"const": 0}, "stdout": {"type": "string"}, "stderr": {"type": "string"}}
+      }
+    }
+  }
+}

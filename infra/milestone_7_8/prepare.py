@@ -29,6 +29,11 @@ from infra.milestone_7_8.cleanup_controller import (
     controller_binding_sha256,
     controller_names,
 )
+from infra.milestone_7_8.controller_admission import (
+    digest,
+    load_authority_evidence,
+    validate_authority_evidence,
+)
 from infra.milestone_7_8.predeployment import (
     EVIDENCE_CLASS as FRESH_CONTROLLER_ADMISSION_EVIDENCE_CLASS,
     EVIDENCE_VERSION as FRESH_CONTROLLER_ADMISSION_EVIDENCE_VERSION,
@@ -84,6 +89,7 @@ def main() -> int:
     parser.add_argument("--fresh-subscription-runtime", type=Path, required=True)
     parser.add_argument("--fresh-subscription-authorization", type=Path, required=True)
     parser.add_argument("--fresh-subscription-evidence", type=Path, required=True)
+    parser.add_argument("--controller-authority-evidence", type=Path, required=True)
     args = parser.parse_args()
     try:
         if CAMPAIGN_PATTERN.fullmatch(args.campaign_id) is None:
@@ -143,6 +149,14 @@ def main() -> int:
         except PredeploymentVerificationError as exc:
             raise CampaignError(str(exc)) from exc
         observed_at = datetime.now(UTC).replace(microsecond=0)
+        controller_authority = load_authority_evidence(args.controller_authority_evidence)
+        verified_controller = validate_authority_evidence(controller_authority)
+        if (
+            verified_controller.tenant_id != tenant_id
+            or verified_controller.campaign_id != args.campaign_id
+            or verified_controller.generation_id != args.generation_id
+        ):
+            raise CampaignError("controller authority scope differs from fresh scope")
         cleanup_authority_expires = utc(observed_at + timedelta(hours=5))
         region_selection = discover_automation_region(
             SubprocessRunner(),
@@ -154,6 +168,7 @@ def main() -> int:
             cleanup_script_sha256=cleanup_script_sha256,
             fresh_controller_admission_evidence_sha256=admission.evidence_sha256,
             controller_required_until_utc=cleanup_authority_expires,
+            controller_authority_evidence=controller_authority,
         )
         if region_selection.controller_disposition != "exact-controller-adoptable":
             raise CampaignError(
@@ -375,6 +390,13 @@ def main() -> int:
             "cleanupControllerArchitecture": ARCHITECTURE,
             "cleanupControllerArmability": LOCAL_ARCHITECTURE_STATE,
             "controllerBindingSha256": controller_binding,
+            "controllerAuthorityEvidenceFile": str(
+                args.output / "controller-authority-evidence.json"
+            ),
+            "controllerAuthorityEvidenceSha256": digest(
+                "m7.8/controller-authority-evidence/v1", controller_authority
+            ),
+            "controllerAuthorizedUntilUtc": verified_controller.controller_authorized_until_utc,
             "cleanupAuthorityExpiresUtc": cleanup_authority_expires,
             "cleanupRegion": cleanup_region,
             "cleanupRegionSelectionSha256": region_selection_sha256,
@@ -434,6 +456,7 @@ def main() -> int:
             ),
         )
         _write_new(fresh_evidence_path, admission.document)
+        _write_new(args.output / "controller-authority-evidence.json", controller_authority)
         _write_new(region_selection_path, region_selection.document())
         _write_new(config_path, config)
         _write_new(runtime_path, runtime)

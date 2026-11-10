@@ -8,6 +8,41 @@ existence.
 
 ## Scope and topology
 
+Controller-authority renewal execution and GET-only reconciliation are under
+local test. They are not yet validated against live Azure and are not ready for
+live renewal. Adoption requires
+private `controller-authority-evidence.json`: the preserved verified config,
+its operation-specific verification authorization and result, and seven baseline
+readbacks. A later deadline additionally requires an exact renewal approval,
+complete before/after readbacks, and a validated completion receipt. Matching
+live tags or boolean preservation claims alone cannot admit a renewal.
+`python -m infra.milestone_7_8.controller_renewal --authority-evidence <file>
+--source-head <commit> --deadline <utc> --output <new-private-file>` creates
+only a private review plan; it creates no authorization, live before-snapshot,
+journal, reconciliation record, completion receipt, or Azure request. Its
+baseline hash is historical and must not substitute for a fresh before-readback.
+The explicitly gated `--operation execute --execute` path records private
+intent, dispatch, and response files but cannot establish renewal completion;
+the separate reconciliation path requires its actual complete dispatch journal
+and performs preservation readback before writing completion evidence.
+
+`controller_admission.py` assembles and validates existing reviewed records
+locally; it issues no approval and performs no Azure operation. It recomputes
+config, verification, approval, preservation, and completion hashes. Preservation
+permits only the deadline tag to differ on the exact group, account, and runbook;
+all other returned fields and all other readbacks must agree. No provider-metadata
+exceptions are silently inferred. These hashes bind private reviewed records;
+they are not Microsoft signatures or independent provider attestations.
+
+Preparation requires `--controller-authority-evidence`, validates it before
+discovery, and copies it into the new bundle. Operator runtime v9 binds that
+file's canonical hash and exact controller deadline. Campaign execution
+authorization v5 also binds the evidence hash; older authorizations cannot be
+used with the new bundle. Capacity discovery and controller baseline readback
+recheck the same evidence and all three live deadline tags. A failed, ambiguous,
+incomplete, or unrecorded renewal remains blocked. This local admission gate
+does not supply the still-unimplemented tag-Merge executor or recovery action.
+
 - `main.bicep` creates one campaign target resource group, five
   campaign-derived workload identities, one private PostgreSQL 17 Flexible
   Server, one private Premium registry, one internal Container Apps

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:operator-runtime:v8",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:operator-runtime:v9",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,6 +13,9 @@
     "cleanupControllerArchitecture",
     "cleanupControllerArmability",
     "controllerBindingSha256",
+    "controllerAuthorityEvidenceFile",
+    "controllerAuthorityEvidenceSha256",
+    "controllerAuthorizedUntilUtc",
     "cleanupAuthorityExpiresUtc",
     "cleanupRegion",
     "cleanupRegionSelectionSha256",
@@ -54,6 +57,9 @@
     "campaignParametersFile"
   ],
   "properties": {
+    "controllerAuthorizedUntilUtc": { "type": "string", "format": "date-time" },
+    "controllerAuthorityEvidenceFile": { "type": "string", "minLength": 1 },
+    "controllerAuthorityEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "subscriptionId": { "type": "string", "minLength": 1 },
     "sourceHead": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
     "canonicalBuildInputSha256": {
