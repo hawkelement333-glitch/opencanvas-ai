@@ -90,6 +90,7 @@
                     "renewalPlanSha256": {"$ref": "#/$defs/hash"},
                     "renewalApprovalSha256": {"$ref": "#/$defs/hash"},
                     "attemptJournalSha256": {"$ref": "#/$defs/hash"},
+                    "reconciliationSourceHead": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
                     "issuedAtUtc": {"type": "string", "format": "date-time"},
                     "expiresAtUtc": {"type": "string", "format": "date-time"},
                     "authorizationSha256": {"$ref": "#/$defs/hash"}

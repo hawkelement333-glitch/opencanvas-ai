@@ -419,6 +419,11 @@ journal. Supplying `--execute` below authorizes only the documented readbacks:
 ```
 
 Reconciliation reads the actual executor records and never repeats a mutation.
+When reconciliation runs from a corrected clean source commit, its separate
+approval must include that exact `reconciliationSourceHead`. The original plan,
+mutation approval, and journal remain bound to the source that dispatched them.
+This source transition applies only to GET-only reconciliation; it cannot
+authorize a snapshot or mutation from a different source.
 An early lost response, missing dispatch record, incomplete journal, nonzero
 final response without a complete journal, or any changed unrelated field stays
 blocked; matching tags do not reconstruct dispatch history. A process crash

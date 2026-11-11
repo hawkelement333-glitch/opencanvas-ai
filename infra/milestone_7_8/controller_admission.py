@@ -132,6 +132,25 @@ def _preservation(
         new_tags = cast(dict[str, object], new["tags"])
         # Restore precisely the one authorized value. No fields are discarded.
         new_tags[DEADLINE_TAG] = old_tags[DEADLINE_TAG]
+    # Azure updates these read-only metadata values when tags are merged.
+    # Normalize only existing string values so missing or malformed fields fail.
+    for index, path in (
+        (1, ("lastModifiedTime",)),
+        (1, ("systemData", "lastModifiedAt")),
+        (3, ("etag",)),
+        (3, ("properties", "lastModifiedTime")),
+    ):
+        old_value: object = original[index]
+        new_value: object = comparable[index]
+        for key in path[:-1]:
+            if not isinstance(old_value, dict) or not isinstance(new_value, dict):
+                break
+            old_value = old_value.get(key)
+            new_value = new_value.get(key)
+        if isinstance(old_value, dict) and isinstance(new_value, dict):
+            key = path[-1]
+            if isinstance(old_value.get(key), str) and isinstance(new_value.get(key), str):
+                new_value[key] = old_value[key]
     if digest("comparison", comparable) != digest("comparison", original):
         raise CampaignError("controller renewal changed other tags or properties")
     return digest(
@@ -313,6 +332,7 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
             issued_at=recon_issued,
             expires_at=recon_expires,
             now=completed,
+            source_head=cast(str | None, recon_auth.get("reconciliationSourceHead")),
         )
         if recon_auth != expected_recon:
             raise CampaignError("controller reconciliation approval binding differs")

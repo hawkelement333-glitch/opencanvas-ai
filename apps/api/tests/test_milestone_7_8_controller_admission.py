@@ -311,6 +311,32 @@ def test_reconciliation_approval_is_separate_get_only_and_attempt_bound():
     assert value["operation"] == "controller-renewal-reconcile-get-only"
     assert value["renewalApprovalSha256"] == original["authorizationSha256"]
     assert value["renewalPlanSha256"] == plan["planSha256"]
+    transitioned = controller_renewal.build_reconciliation_approval(
+        evidence, plan, evidence["baselineReadback"], original, journal,
+        source_head="c" * 40, **kwargs,
+    )
+    assert transitioned["reconciliationSourceHead"] == "c" * 40
+    assert transitioned["renewalPlanSha256"] == plan["planSha256"]
+    assert transitioned["attemptJournalSha256"] == value["attemptJournalSha256"]
+    assert transitioned["authorizationSha256"] != value["authorizationSha256"]
+    renewed = ControllerConfig.from_document(plan["renewedConfig"])
+    controller_renewal._validate_read_source(
+        "reconcile", renewed, transitioned, "c" * 40, renewed.cleanup_script_sha256
+    )
+    for operation, head, script in (
+        ("before-snapshot", "c" * 40, renewed.cleanup_script_sha256),
+        ("reconcile", "d" * 40, renewed.cleanup_script_sha256),
+        ("reconcile", "c" * 40, "0" * 64),
+    ):
+        with unittest.TestCase().assertRaises(CampaignError):
+            controller_renewal._validate_read_source(
+                operation, renewed, transitioned, head, script
+            )
+    with unittest.TestCase().assertRaises(CampaignError):
+        controller_renewal.build_reconciliation_approval(
+            evidence, plan, evidence["baselineReadback"], original, journal,
+            source_head="not-a-commit", **kwargs,
+        )
     with unittest.TestCase().assertRaises(CampaignError):
         controller_renewal.build_reconciliation_approval(
             evidence,
@@ -390,6 +416,34 @@ def test_reconciliation_approval_is_separate_get_only_and_attempt_bound():
         admission.validate_authority_evidence(renewed_fixture()).controller_authorized_until_utc
         == NEW
     )
+
+
+def test_renewal_preservation_allows_only_exact_metadata_values() -> None:
+    evidence = renewed_fixture()
+    before = copy.deepcopy(evidence["renewal"]["beforeReadback"])
+    after = copy.deepcopy(evidence["renewal"]["afterReadback"])
+    for records, value in ((before, "before"), (after, "after")):
+        account = json.loads(records[1]["stdout"])
+        account["lastModifiedTime"] = value
+        account["systemData"] = {"lastModifiedAt": value}
+        records[1] = result(account)
+        runbook = json.loads(records[3]["stdout"])
+        runbook["etag"] = value
+        runbook["properties"]["lastModifiedTime"] = value
+        records[3] = result(runbook)
+    admission._preservation(before, after)
+    for change in ("unrelated", "missing", "malformed"):
+        changed = copy.deepcopy(after)
+        account = json.loads(changed[1]["stdout"])
+        if change == "unrelated":
+            account["tags"]["unrelated"] = "changed"
+        elif change == "missing":
+            del account["systemData"]["lastModifiedAt"]
+        else:
+            account["lastModifiedTime"] = 42
+        changed[1] = result(account)
+        with unittest.TestCase().assertRaisesRegex(CampaignError, "other tags or properties"):
+            admission._preservation(before, changed)
 
 
 def test_renewal_executor_is_bounded_and_journaled() -> None:
@@ -682,6 +736,7 @@ def test_readonly_reconciliation_uses_actual_executor_journal() -> None:
                 issued_at="2030-01-02T03:00:00Z",
                 expires_at="2030-01-02T04:00:00Z",
                 now=reconcile_now,
+                source_head="c" * 40,
             )
             completed = controller_renewal.reconcile_renewal(
                 evidence,

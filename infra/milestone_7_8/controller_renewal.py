@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -208,6 +209,7 @@ def reconcile_renewal(
             issued_at=issued,
             expires_at=expires,
             now=clock().astimezone(UTC),
+            source_head=cast(str | None, reconciliation_authorization.get("reconciliationSourceHead")),
         )
         if expected != reconciliation_authorization:
             raise CampaignError("controller reconciliation approval binding differs")
@@ -534,6 +536,7 @@ def build_reconciliation_approval(
     issued_at: str,
     expires_at: str,
     now: datetime,
+    source_head: str | None = None,
 ) -> dict[str, object]:
     """Bind a separate GET-only reconciliation approval to the original attempt."""
     original_issued = renewal_approval.get("issuedAtUtc")
@@ -566,6 +569,10 @@ def build_reconciliation_approval(
         "issuedAtUtc": issued_at,
         "expiresAtUtc": expires_at,
     }
+    if source_head is not None:
+        if not isinstance(source_head, str) or re.fullmatch(r"[a-f0-9]{40}", source_head) is None:
+            raise CampaignError("controller reconciliation source head is malformed")
+        payload["reconciliationSourceHead"] = source_head
     payload["authorizationSha256"] = admission.digest(
         "m7.8/controller-renewal-reconciliation-approval/v1", payload
     )
@@ -627,6 +634,22 @@ def validate_attempt_journal(
     return admission.digest("m7.8/controller-renewal-attempt-journal/v1", journal)
 
 
+def _validate_read_source(
+    operation: str, renewed: ControllerConfig, authorization: dict[str, object],
+    head: str, script_hash: str,
+) -> None:
+    authorized_head = authorization.get("reconciliationSourceHead")
+    if (
+        renewed.cleanup_script_sha256 != script_hash
+        or (authorized_head is not None and authorized_head != head)
+        or (
+            renewed.source_head != head
+            and not (operation == "reconcile" and authorized_head == head)
+        )
+    ):
+        raise CampaignError("controller renewal source boundary differs")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -672,11 +695,7 @@ def main() -> int:
                 raise CampaignError("controller renewal read inputs are malformed")
             renewed = ControllerConfig.from_document(plan_doc.get("renewedConfig"))
             head, script_hash = local_source_binding()
-            if (
-                renewed.source_head != head
-                or renewed.cleanup_script_sha256 != script_hash
-            ):
-                raise CampaignError("controller renewal source boundary differs")
+            _validate_read_source(args.operation, renewed, read_auth, head, script_hash)
             assert args.output is not None
             runtime_root = (REPOSITORY_ROOT / ".runtime").resolve()
             target = args.output.resolve()
