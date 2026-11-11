@@ -2430,14 +2430,39 @@ def validate_cleanup_bindings(
     if response.get("nextLink") not in {None, ""} or not isinstance(bindings, list):
         raise CampaignError("cleanup binding collection is incomplete")
     binding = bindings[0] if len(bindings) == 1 else None
+    if not isinstance(binding, dict):
+        raise CampaignError("exactly one expected cleanup binding is required")
+    binding_properties = binding.get("properties", binding)
+    expected_name = runtime["bindingName"].casefold()
+    expected_id = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.cleanup_resource_group}"
+        f"/providers/Microsoft.Automation/automationAccounts/{runtime['automationAccountName']}"
+        f"/jobSchedules/{runtime['bindingName']}"
+    )
+    name = binding.get("name")
+    resource_id = binding.get("id")
+    job_schedule_id = (
+        binding_properties.get("jobScheduleId") if isinstance(binding_properties, dict) else None
+    )
     if (
-        not isinstance(binding, dict)
-        or str(binding.get("name", "")).casefold() != runtime["bindingName"].casefold()
+        (name is not None and (not isinstance(name, str) or name.casefold() != expected_name))
+        or (
+            resource_id is not None
+            and (
+                not isinstance(resource_id, str)
+                or resource_id.casefold() != expected_id.casefold()
+            )
+        )
+        or (
+            job_schedule_id is not None
+            and (
+                not isinstance(job_schedule_id, str)
+                or job_schedule_id.casefold() != expected_name
+            )
+        )
+        or (name is None and (resource_id is None or job_schedule_id is None))
     ):
         raise CampaignError("exactly one expected cleanup binding is required")
-    binding_properties = (
-        binding.get("properties", binding) if isinstance(binding, dict) else None
-    )
     bound_runbook = (
         binding_properties.get("runbook")
         if isinstance(binding_properties, dict)

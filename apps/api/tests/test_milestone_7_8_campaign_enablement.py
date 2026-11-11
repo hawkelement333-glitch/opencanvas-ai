@@ -2051,6 +2051,74 @@ def test_cleanup_arming_adopts_published_controller_and_is_restart_deterministic
     assert first_hash == second_hash
 
 
+def test_cleanup_arm_accepts_documented_job_schedule_list_shape() -> None:
+    config = _config()
+    runtime = _runtime()
+    runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
+    results = _cleanup_arm_success_results(config, runtime)
+    response = json.loads(str(results[11]["stdout"]))
+    binding = response["value"][0]
+    binding.pop("name")
+    binding["id"] = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.cleanup_resource_group}"
+        f"/providers/Microsoft.Automation/automationAccounts/{runtime['automationAccountName']}"
+        f"/jobSchedules/{runtime['bindingName']}"
+    )
+    binding["properties"]["jobScheduleId"] = runtime["bindingName"]
+    results[11] = _command_result(response)
+    runner = _OrderedCleanupRunner(results)
+    _, proof = execute_cleanup_arm_commands(
+        runner, command_plan("cleanup-arm", config, runtime), config, runtime  # type: ignore[arg-type]
+    )
+    assert len(proof) == 64
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "zero", "duplicate", "wrong-id", "wrong-uuid", "wrong-name", "wrong-runbook",
+        "wrong-schedule", "missing-parameters", "wrong-parameters", "missing-id",
+        "missing-uuid",
+    ],
+)
+def test_documented_binding_shape_rejects_wrong_or_incomplete_proof(failure: str) -> None:
+    config = _config()
+    runtime = _runtime()
+    response = json.loads(str(_cleanup_arm_success_results(config, runtime)[11]["stdout"]))
+    binding = response["value"][0]
+    binding.pop("name")
+    binding["id"] = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.cleanup_resource_group}"
+        f"/providers/Microsoft.Automation/automationAccounts/{runtime['automationAccountName']}"
+        f"/jobSchedules/{runtime['bindingName']}"
+    )
+    binding["properties"]["jobScheduleId"] = runtime["bindingName"]
+    if failure == "zero":
+        response["value"] = []
+    elif failure == "duplicate":
+        response["value"].append(binding.copy())
+    elif failure == "wrong-id":
+        binding["id"] += "-wrong"
+    elif failure == "wrong-uuid":
+        binding["properties"]["jobScheduleId"] = "wrong"
+    elif failure == "wrong-name":
+        binding["name"] = "wrong"
+    elif failure == "wrong-runbook":
+        binding["properties"]["runbook"]["name"] = "wrong"
+    elif failure == "wrong-schedule":
+        binding["properties"]["schedule"]["name"] = "wrong"
+    elif failure == "missing-parameters":
+        binding["properties"].pop("parameters")
+    elif failure == "wrong-parameters":
+        binding["properties"]["parameters"] = {"wrong": "value"}
+    elif failure == "missing-id":
+        binding.pop("id")
+    else:
+        binding["properties"].pop("jobScheduleId")
+    with pytest.raises(CampaignError, match="cleanup binding"):
+        campaign_operator.validate_cleanup_bindings(response, config=config, runtime=runtime)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
