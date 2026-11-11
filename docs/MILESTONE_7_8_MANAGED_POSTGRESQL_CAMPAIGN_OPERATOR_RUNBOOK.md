@@ -426,6 +426,13 @@ approval must include that exact `reconciliationSourceHead`. The original plan,
 mutation approval, and journal remain bound to the source that dispatched them.
 This source transition applies only to GET-only reconciliation; it cannot
 authorize a snapshot or mutation from a different source.
+One separately authorized subsequent renewal of the existing controller may
+use its validated first-renewal completion evidence as `$anchor`. The planner
+binds that entire prior evidence and its final readback, including the previously
+verified deadline, into the new plan. The new completion retains the unmodified
+bootstrap and first-renewal evidence. A third renewal is not supported by this
+contract. Choose the new deadline at execution and verify it extends at least
+five hours past the actual campaign preparation time.
 An early lost response, missing dispatch record, incomplete journal, nonzero
 final response without a complete journal, or any changed unrelated field stays
 blocked; matching tags do not reconstruct dispatch history. A process crash

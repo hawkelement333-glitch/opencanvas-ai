@@ -228,9 +228,33 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
             {"reconciliation"}
             if isinstance(raw_renewal, dict) and "reconciliation" in raw_renewal
             else set()
+        )
+        | (
+            {"priorAuthorityEvidence"}
+            if isinstance(raw_renewal, dict) and "priorAuthorityEvidence" in raw_renewal
+            else set()
         ),
         "renewal completion",
     )
+    prior_evidence = renewal.get("priorAuthorityEvidence")
+    if "priorAuthorityEvidence" in renewal and prior_evidence is None:
+        raise CampaignError("prior controller authority evidence differs")
+    if prior_evidence is not None:
+        if (
+            not isinstance(prior_evidence, dict)
+            or not isinstance(prior_evidence.get("renewal"), dict)
+            or "priorAuthorityEvidence" in prior_evidence["renewal"]
+            or any(
+                prior_evidence.get(key) != evidence[key]
+                for key in (
+                    "version", "verifiedConfig", "verificationAuthorization",
+                    "verificationResult", "baselineReadback",
+                )
+            )
+            or "reconciliation" not in renewal
+        ):
+            raise CampaignError("prior controller authority evidence differs")
+        original = validate_authority_evidence(prior_evidence)
     renewed = ControllerConfig.from_document(renewal["renewedConfig"])
     old_document = controller_config_document(original)
     new_document = controller_config_document(renewed)
@@ -245,6 +269,9 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
     if parse_utc(new_deadline) <= parse_utc(old_deadline):
         raise CampaignError("controller renewal deadline did not increase")
     before = _readback(renewal["beforeReadback"], original)
+    if isinstance(prior_evidence, dict):
+        previous = _readback(prior_evidence["renewal"]["afterReadback"], original)
+        _preservation(previous, before)
     after = _readback(renewal["afterReadback"], renewed)
     preservation_hash = _preservation(before, after)
     binding = controller_binding_sha256(
@@ -318,7 +345,7 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
             raise CampaignError("controller renewal reconciliation is malformed")
         from infra.milestone_7_8.controller_renewal import build_reconciliation_approval
 
-        base_evidence = {**evidence, "renewal": None}
+        base_evidence = prior_evidence if prior_evidence is not None else {**evidence, "renewal": None}
         recon_issued = recon_auth.get("issuedAtUtc")
         recon_expires = recon_auth.get("expiresAtUtc")
         if not isinstance(recon_issued, str) or not isinstance(recon_expires, str):

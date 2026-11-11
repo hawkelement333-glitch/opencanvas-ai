@@ -59,8 +59,13 @@ def collect_before_snapshot(
             now=clock().astimezone(UTC),
         )
 
-    results = _read_controller(renewed, authorize=authorize, runner=runner)
-    return admission._readback(results, original)
+    results = admission._readback(
+        _read_controller(renewed, authorize=authorize, runner=runner), original
+    )
+    if isinstance(evidence, dict) and isinstance(evidence.get("renewal"), dict):
+        previous = admission._readback(evidence["renewal"]["afterReadback"], original)
+        admission._preservation(previous, results)
+    return results
 
 
 def _read_controller(
@@ -271,6 +276,8 @@ def reconcile_renewal(
             ),
         },
     }
+    if evidence.get("renewal") is not None:
+        renewal["priorAuthorityEvidence"] = evidence
     result = {**evidence, "renewal": renewal}
     admission.validate_authority_evidence(result)
     persist(output_dir / "02-completed-authority-evidence.json", result)
@@ -422,17 +429,22 @@ def build_plan(
     evidence: object, *, source_head: str, deadline: str
 ) -> dict[str, object]:
     original = admission.validate_authority_evidence(evidence)
-    if not isinstance(evidence, dict) or evidence.get("renewal") is not None:
-        raise CampaignError(
-            "renewal plan requires the original verified bootstrap anchor"
-        )
+    if not isinstance(evidence, dict):
+        raise CampaignError("renewal plan requires validated authority evidence")
+    prior = evidence.get("renewal")
+    if prior is not None and (
+        not isinstance(prior, dict) or "priorAuthorityEvidence" in prior
+    ):
+        raise CampaignError("only one subsequent controller renewal is supported")
     if parse_utc(deadline) <= parse_utc(original.controller_authorized_until_utc):
         raise CampaignError("renewal deadline must increase")
     renewed = replace(
         original, source_head=source_head, controller_authorized_until_utc=deadline
     )
     renewed.validate()
-    before = admission._readback(evidence["baselineReadback"], original)
+    before = admission._readback(
+        evidence["baselineReadback"] if prior is None else prior["afterReadback"], original
+    )
     group = f"/subscriptions/{original.subscription_id}/resourceGroups/{original.controller_resource_group_name}"
     account = f"{group}/providers/Microsoft.Automation/automationAccounts/{original.automation_account_name}"
     targets = (group, account, f"{account}/runbooks/{original.runbook_name}")
@@ -466,6 +478,10 @@ def build_plan(
             for scope in targets
         ],
     }
+    if prior is not None:
+        plan["priorAuthorityEvidenceSha256"] = admission.digest(
+            "m7.8/controller-authority-evidence/v1", evidence
+        )
     plan["planSha256"] = admission.digest("m7.8/controller-renewal-plan/v1", plan)
     return plan
 
@@ -497,6 +513,9 @@ def build_approval(
     if plan != expected_plan:
         raise CampaignError("controller renewal plan binding differs")
     before = admission._readback(before_readback, original)
+    if isinstance(evidence, dict) and isinstance(evidence.get("renewal"), dict):
+        previous = admission._readback(evidence["renewal"]["afterReadback"], original)
+        admission._preservation(previous, before)
     issued = parse_utc(issued_at)
     expires = parse_utc(expires_at)
     if (

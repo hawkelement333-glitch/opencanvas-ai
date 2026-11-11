@@ -446,6 +446,95 @@ def test_renewal_preservation_allows_only_exact_metadata_values() -> None:
             admission._preservation(before, changed)
 
 
+def test_second_renewal_preserves_and_binds_first_evidence() -> None:
+    evidence = renewed_fixture()
+    deadline = "2030-01-05T00:00:00Z"
+    now = datetime(2030, 1, 3, 1, 0, tzinfo=UTC)
+    plan = controller_renewal.build_plan(evidence, source_head="c" * 40, deadline=deadline)
+    assert plan["originalDeadlineUtc"] == NEW
+    assert plan["priorAuthorityEvidenceSha256"] == admission.digest(
+        "m7.8/controller-authority-evidence/v1", evidence
+    )
+    auth = copy.deepcopy(evidence["verificationAuthorization"])
+    auth.update({"sourceHead": "c" * 40, "controllerAuthorizedUntilUtc": deadline,
+                 "expiresAtUtc": "2030-01-03T02:00:00Z"})
+    del auth["authorizationSha256"]
+    auth["authorizationSha256"] = admission.digest(
+        "m7.8/controller-execution-authorization/v4", auth
+    )
+
+    class Provider:
+        def __init__(self) -> None:
+            self.values = copy.deepcopy(evidence["renewal"]["afterReadback"])
+            self.reads = 0
+            self.writes = 0
+
+        def run(self, args: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+            if args[:3] == ("rest", "--method", "patch"):
+                index = (0, 1, 3)[self.writes]
+                self.writes += 1
+                value = json.loads(self.values[index]["stdout"])
+                value["tags"][admission.DEADLINE_TAG] = deadline
+                self.values[index] = result(value)
+                return subprocess.CompletedProcess(args, 0, "{}", "")
+            value = self.values[self.reads % 7]
+            self.reads += 1
+            return subprocess.CompletedProcess(args, 0, value["stdout"], value["stderr"])
+
+    drifted_provider = Provider()
+    drifted_account = json.loads(drifted_provider.values[1]["stdout"])
+    drifted_account["tags"]["unexpected"] = "changed"
+    drifted_provider.values[1] = result(drifted_account)
+    with unittest.TestCase().assertRaisesRegex(CampaignError, "other tags or properties"):
+        controller_renewal.collect_before_snapshot(
+            evidence, plan, auth, runner=drifted_provider, clock=lambda: now
+        )
+    assert drifted_provider.writes == 0
+    provider = Provider()
+    before = controller_renewal.collect_before_snapshot(
+        evidence, plan, auth, runner=provider, clock=lambda: now
+    )
+    approval = controller_renewal.build_approval(
+        evidence, plan, before, issued_at="2030-01-03T01:00:00Z",
+        expires_at="2030-01-03T02:00:00Z", now=now,
+    )
+    with tempfile.TemporaryDirectory(prefix="m78-second-renewal-") as directory:
+        root = Path(directory)
+        controller_renewal.execute_renewal(
+            evidence, plan, before, approval, output_dir=root / "attempt",
+            runner=provider, clock=lambda: now,
+        )
+        journal = controller_renewal.load_executor_journal(root / "attempt", plan, approval, before)
+        read_auth = controller_renewal.build_reconciliation_approval(
+            evidence, plan, before, approval, journal,
+            issued_at="2030-01-03T01:00:00Z", expires_at="2030-01-03T02:00:00Z", now=now,
+        )
+        completed = controller_renewal.reconcile_renewal(
+            evidence, plan, before, approval, read_auth, journal_dir=root / "attempt",
+            output_dir=root / "reconciliation", runner=provider, clock=lambda: now,
+        )
+        assert (
+            admission.validate_authority_evidence(completed).controller_authorized_until_utc
+            == deadline
+        )
+        assert completed["renewal"]["priorAuthorityEvidence"] == evidence
+        assert provider.writes == 3
+        for kind in ("prior", "missing_prior", "approval", "journal"):
+            altered = copy.deepcopy(completed)
+            renewal = altered["renewal"]
+            if kind == "prior":
+                renewal["priorAuthorityEvidence"]["renewal"]["completion"]["status"] = "changed"
+            elif kind == "missing_prior":
+                del renewal["priorAuthorityEvidence"]
+            elif kind == "approval":
+                renewal["approval"]["authorizationSha256"] = "0" * 64
+            else:
+                attempt = renewal["reconciliation"]["attemptJournal"]["attempts"][0]
+                attempt["requestSha256"] = "0" * 64
+            with unittest.TestCase().assertRaises(CampaignError):
+                admission.validate_authority_evidence(altered)
+
+
 def test_renewal_executor_is_bounded_and_journaled() -> None:
     evidence = authority_fixture()
     plan = controller_renewal.build_plan(evidence, source_head="b" * 40, deadline=NEW)

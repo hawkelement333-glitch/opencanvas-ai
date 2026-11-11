@@ -27,6 +27,7 @@
           "type": "object", "additionalProperties": false,
           "required": ["renewedConfig", "approval", "beforeReadback", "afterReadback", "completion", "startedAtUtc", "completedAtUtc"],
           "properties": {
+            "priorAuthorityEvidence": {"$ref": "#"},
             "renewedConfig": {"$ref": "controller.schema.json"},
             "beforeReadback": {"$ref": "#/$defs/readback"},
             "afterReadback": {"$ref": "#/$defs/readback"},
@@ -48,6 +49,7 @@
                     "originalDeadlineUtc": {"type": "string", "format": "date-time"},
                     "renewedDeadlineUtc": {"type": "string", "format": "date-time"},
                     "baselineReadbackSha256": {"$ref": "#/$defs/hash"},
+                    "priorAuthorityEvidenceSha256": {"$ref": "#/$defs/hash"},
                     "renewedConfig": {"$ref": "controller.schema.json"},
                     "planSha256": {"$ref": "#/$defs/hash"},
                     "requests": {"type": "array", "minItems": 3, "maxItems": 3,
