@@ -1086,13 +1086,23 @@ def _adoptable_controller_region(
         ),
     }
     resource_id = match.get("id")
+    resource_group = match.get("resourceGroup")
+    if resource_group is None and isinstance(resource_id, str):
+        parsed_id = re.fullmatch(
+            r"/subscriptions/[^/]+/resourceGroups/([^/]+)/providers/"
+            r"Microsoft\.Automation/automationAccounts/[^/]+",
+            resource_id,
+            flags=re.IGNORECASE,
+        )
+        if parsed_id is not None:
+            resource_group = parsed_id.group(1)
     expected_suffix = (
         f"/resourcegroups/{controller_resource_group}/providers/microsoft.automation/"
         f"automationaccounts/{controller_account}"
     ).casefold()
     if (
         match.get("name") != controller_account
-        or match.get("resourceGroup") != controller_resource_group
+        or resource_group != controller_resource_group
         or not isinstance(resource_id, str)
         or not resource_id.casefold().endswith(expected_suffix)
         or not isinstance(tags, dict)

@@ -427,6 +427,26 @@ def test_renewed_controller_without_completion_receipt_is_rejected() -> None:
         )
 
 
+def test_controller_inventory_derives_missing_group_from_resource_id() -> None:
+    authority = authority_fixture(region="southeastasia", evidence_hash="8" * 64)
+    for missing in (True, False):
+        runner = DiscoveryRunner(authority)
+        if missing:
+            del runner.resources[1]["resourceGroup"]
+        else:
+            runner.resources[1]["resourceGroup"] = None
+        assert runner.select(authority).controller_disposition == "exact-controller-adoptable"
+    for field, value in (("resourceGroup", "other-group"), ("id", "/invalid")):
+        runner = DiscoveryRunner(authority)
+        runner.resources[1][field] = value
+        with pytest.raises(CampaignError):
+            runner.select(authority)
+    runner = DiscoveryRunner(authority)
+    runner.resources[1]["tags"]["mobius.owner"] = "other"
+    with pytest.raises(CampaignError, match="identity or tags drifted"):
+        runner.select(authority)
+
+
 def test_exact_reusable_controller_is_adopted_in_its_established_region() -> None:
     authority = authority_fixture(region="southeastasia", evidence_hash="8" * 64)
     runner = DiscoveryRunner(authority)
