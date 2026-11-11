@@ -41,6 +41,7 @@ from infra.milestone_7_8.campaign import (
 from infra.milestone_7_8.operator import (
     command_plan,
     start_direct_cleanup,
+    validate_campaign_provider_quotas,
     validate_operation_results,
 )
 from test_milestone_7_8_controller_admission import (
@@ -1028,14 +1029,42 @@ def test_cleanup_deployment_plan_adopts_one_controller_region_without_hopping() 
     assert all("--method delete" not in " ".join(command) for command in commands)
 
 
+def test_provider_quota_requires_named_sufficient_complete_headroom() -> None:
+    postgres = {"value": [
+        {"name": {"value": name}, "unit": "Count", "currentValue": 0, "limit": 4}
+        for name in ("cores", "standardDDSv4Family")
+    ]}
+    apps = {"value": [{"name": {"value": "ManagedEnvironmentCount"},
+                       "currentValue": 0, "limit": 1}]}
+    validate_campaign_provider_quotas(postgres, apps)
+    with pytest.raises(CampaignError, match="standardDDSv4Family"):
+        validate_campaign_provider_quotas({"value": postgres["value"][:1]}, apps)
+    for item in postgres["value"]:
+        item["currentValue"] = 1
+        with pytest.raises(CampaignError, match="headroom insufficient"):
+            validate_campaign_provider_quotas(postgres, apps)
+        item["currentValue"] = 0
+    with pytest.raises(CampaignError, match="headroom insufficient"):
+        validate_campaign_provider_quotas(postgres, {"value": [{
+            "name": {"value": "ManagedEnvironmentCount"}, "currentValue": 1, "limit": 1
+        }]})
+    with pytest.raises(CampaignError, match="evidence is incomplete"):
+        validate_campaign_provider_quotas({**postgres, "nextLink": "more"}, apps)
+
+
 def test_capacity_check_revalidates_selection_before_scope_mutation() -> None:
     authority = authority_fixture()
     config, runtime = campaign_fixture(authority)
     runner = DiscoveryRunner(authority)
     prefix = [
         *[_result({"registrationState": "Registered"}) for _ in range(6)],
-        _result([{"name": "Standard_D2ds_v5"}]),
-        _result([{"name": "regional-vcpu", "currentValue": 0, "limit": 10}]),
+        _result([{"name": "Standard_D2ds_v4"}]),
+        _result({"value": [
+            {"name": {"value": name}, "unit": "Count", "currentValue": 0, "limit": 10}
+            for name in ("cores", "standardDDSv4Family")
+        ]}),
+        _result({"value": [{"name": {"value": "ManagedEnvironmentCount"},
+                            "currentValue": 0, "limit": 1}]}),
         _result({"nameAvailable": True}),
         _result({"nameAvailable": True}),
     ]

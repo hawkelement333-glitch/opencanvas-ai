@@ -275,7 +275,9 @@ function Invoke-M78Phase([string]$Phase, [string]$Authorization, [string[]]$Extr
 # artifact; the operator rejects execution before Azure otherwise.
 ```
 
-The `capacity-check` dry-run exposes 23 static Azure commands. Six are the
+The `capacity-check` dry-run exposes 24 static Azure commands, including named
+PostgreSQL regional core and SKU-family quotas and the Container Apps managed
+environment count. Six are the
 subscription context, subscription-policy metadata, Automation provider,
 active-account, soft-deleted-account, and policy-assignment reads; enforced
 policy definitions and deny-capable initiative members produce explicit

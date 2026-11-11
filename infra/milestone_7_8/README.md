@@ -130,7 +130,7 @@ no caller-controlled default: preparation selects and hashes the first viable
 reviewed candidate, and `capacity-check` repeats the same proof before scope
 creation. The cleanup deployment runs once in that immutable region; no
 post-mutation retry or region hop is permitted. PostgreSQL is fixed to
-`Standard_D2ds_v5`, PostgreSQL 17, 64 GiB P6 storage, zones 1 and 2,
+`Standard_D2ds_v4`, PostgreSQL 17, 64 GiB P6 storage, zones 1 and 2,
 ZoneRedundant HA, seven-day backup retention, disabled geo backup, and Sunday
 07:00 UTC maintenance.
 

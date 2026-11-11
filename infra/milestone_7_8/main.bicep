@@ -26,7 +26,7 @@ param cleanupResourceGroupName string
 param cleanupAutomationAccountName string
 param tenantId string
 param postgresServerName string
-param postgresSkuName string = 'Standard_D2ds_v5'
+param postgresSkuName string = 'Standard_D2ds_v4'
 param postgresVersion string = '17'
 param postgresStorageGiB int = 64
 param postgresPrimaryZone string

@@ -855,14 +855,18 @@ def command_plan(
                 "--output",
                 "json",
             ),
-            (
-                "az",
-                "vm",
-                "list-usage",
-                "--location",
-                config.target_region,
-                "--output",
-                "json",
+            *(
+                (
+                    "az", "rest", "--method", "get", "--url",
+                    f"https://management.azure.com/subscriptions/{runtime['subscriptionId']}"
+                    f"/providers/{provider}/locations/{region}/{path}"
+                    f"?api-version={version}", "--output", "json",
+                )
+                for provider, region, path, version in (
+                    ("Microsoft.DBforPostgreSQL", config.postgres_region,
+                     "resourceType/flexibleServers/usages", "2025-08-01"),
+                    ("Microsoft.App", config.target_region, "usages", "2026-01-01"),
+                )
             ),
             (
                 "az",
@@ -3030,6 +3034,41 @@ def start_direct_cleanup(
     )
 
 
+def validate_campaign_provider_quotas(postgres: object, container_apps: object) -> None:
+    """Require the named regional quotas for the fixed HA campaign topology."""
+    for response, requirements, unit_required in (
+        (postgres, {"cores": 4, "standardDDSv4Family": 4}, True),
+        (container_apps, {"ManagedEnvironmentCount": 1}, False),
+    ):
+        if (
+            not isinstance(response, dict)
+            or not isinstance(response.get("value"), list)
+            or response.get("nextLink") not in (None, "")
+        ):
+            raise CampaignError("provider quota evidence is incomplete")
+        values = response["value"]
+        for name, required in requirements.items():
+            matches = [
+                item for item in values
+                if isinstance(item, dict)
+                and isinstance(item.get("name"), dict)
+                and item["name"].get("value") == name
+            ]
+            if len(matches) != 1:
+                raise CampaignError(f"required provider quota missing or ambiguous: {name}")
+            item = matches[0]
+            limit, current = item.get("limit"), item.get("currentValue")
+            unit = item.get("unit")
+            if (
+                type(limit) is not int or type(current) is not int
+                or limit < 0 or current < 0
+                or (unit != "Count" if unit_required else unit not in (None, "Count"))
+            ):
+                raise CampaignError(f"provider quota fields malformed: {name}")
+            if limit - current < required:
+                raise CampaignError(f"provider quota headroom insufficient: {name}")
+
+
 def validate_operation_results(
     operation: str,
     results: list[dict[str, object]],
@@ -3078,7 +3117,7 @@ def validate_operation_results(
             raise CampaignError("Azure campaign correlation differs")
     elif operation == "capacity-check":
         validate_bound_controller_authority(controller_authority_evidence, runtime, config)
-        if len(results) != 23:
+        if len(results) != 24:
             raise CampaignError(
                 "provider, quota, region, SKU, or name proof is incomplete"
             )
@@ -3090,13 +3129,13 @@ def validate_operation_results(
         ):
             raise CampaignError("required Azure provider is not registered")
         skus = _json_result(results[6])
-        quota = _json_result(results[7])
-        registry_name = _json_result(results[8])
-        postgres_name = _json_result(results[9])
-        if "Standard_D2ds_v5" not in json.dumps(skus, separators=(",", ":")):
+        postgres_quota = _json_result(results[7])
+        app_quota = _json_result(results[8])
+        registry_name = _json_result(results[9])
+        postgres_name = _json_result(results[10])
+        if "Standard_D2ds_v4" not in json.dumps(skus, separators=(",", ":")):
             raise CampaignError("required PostgreSQL SKU is unavailable")
-        if not isinstance(quota, list) or not quota:
-            raise CampaignError("regional compute quota is unproved")
+        validate_campaign_provider_quotas(postgres_quota, app_quota)
         if (
             not isinstance(registry_name, dict)
             or registry_name.get("nameAvailable") is not True
@@ -3110,7 +3149,7 @@ def validate_operation_results(
             )
         refreshed_selection = select_automation_region_from_results(
             runner,
-            tuple(results[10:16]),
+            tuple(results[11:17]),
             subscription_id=runtime["subscriptionId"],
             controller_resource_group=config.cleanup_resource_group,
             controller_account=runtime["automationAccountName"],
@@ -3144,7 +3183,7 @@ def validate_operation_results(
             raise CampaignError(
                 "prepared Automation cleanup region or offer proof is no longer armable"
             )
-        validate_controller_baseline(results[16:23], config, runtime)
+        validate_controller_baseline(results[17:24], config, runtime)
     elif operation == "scope-create":
         if len(results) != 1:
             raise CampaignError("campaign scope creation is unproved")

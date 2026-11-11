@@ -1168,8 +1168,14 @@ class ControllerAdmissionTests(unittest.TestCase):
         selection = DiscoveryRunner(evidence).select(evidence)
         prefix = [
             *[result({"registrationState": "Registered"}) for _ in range(6)],
-            result(["Standard_D2ds_v5"]),
-            result([{"limit": 10}]),
+            result(["Standard_D2ds_v4"]),
+            result({"value": [
+                {"name": {"value": n}, "unit": "Count", "currentValue": 0, "limit": 10}
+                for n in ("cores", "standardDDSv4Family")
+            ]}),
+            result({"value": [{
+                "name": {"value": "ManagedEnvironmentCount"}, "currentValue": 0, "limit": 1
+            }]}),
             result({"nameAvailable": True}),
             result({"nameAvailable": True}),
         ]
@@ -1200,8 +1206,14 @@ class ControllerAdmissionTests(unittest.TestCase):
         runner = DiscoveryRunner(evidence)
         prefix = [
             *[result({"registrationState": "Registered"}) for _ in range(6)],
-            result(["Standard_D2ds_v5"]),
-            result([{"limit": 10}]),
+            result(["Standard_D2ds_v4"]),
+            result({"value": [
+                {"name": {"value": n}, "unit": "Count", "currentValue": 0, "limit": 10}
+                for n in ("cores", "standardDDSv4Family")
+            ]}),
+            result({"value": [{
+                "name": {"value": "ManagedEnvironmentCount"}, "currentValue": 0, "limit": 1
+            }]}),
             result({"nameAvailable": True}),
             result({"nameAvailable": True}),
         ]
@@ -1217,9 +1229,9 @@ class ControllerAdmissionTests(unittest.TestCase):
                 controller_authority_evidence=evidence,
             )
         changed = copy.deepcopy(results)
-        runbook = json.loads(changed[19]["stdout"])
+        runbook = json.loads(changed[20]["stdout"])
         runbook["tags"][admission.DEADLINE_TAG] = OLD
-        changed[19] = result(runbook)
+        changed[20] = result(runbook)
         with (
             patch("infra.milestone_7_8.automation_region.datetime", Clock),
             self.assertRaisesRegex(CampaignError, "deadlines differ"),
