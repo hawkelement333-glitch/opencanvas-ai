@@ -949,6 +949,10 @@ def command_plan(
                     "mobius.cleanup-offer-eligibility-sha256="
                     + config.cleanup_offer_eligibility_sha256
                 ),
+                (
+                    "mobius.fresh-controller-admission-sha256="
+                    + config.fresh_controller_admission_evidence_sha256
+                ),
                 "mobius.owner=managed-postgresql-evidence",
                 f"mobius.expiry={config.cleanup_deadline_utc}",
                 "--output",
@@ -3496,24 +3500,39 @@ def main() -> int:
             print(json.dumps(output, separators=(",", ":"), sort_keys=True))
             return 0
         except Exception:
-            if (
-                args.operation == "cleanup-wait"
-                and Phase(ledger.phase) is Phase.CLEANING
-            ):
-                start_direct_cleanup(runner, config, runtime)
-            if (
-                target is Phase.SCOPE_CREATED
-                or ORDER.index(Phase(ledger.phase)) >= ORDER.index(Phase.SCOPE_CREATED)
-            ) and Phase(ledger.phase) not in {
-                Phase.CLEANING,
-                Phase.CLEANED,
-                Phase.CLEANUP_DISARMED,
-                Phase.RESIDUE_VERIFIED,
-                Phase.FINALIZED,
-            }:
-                start_failure_cleanup(runner, config, runtime)
-                ledger.transition(Phase.CLEANING, datetime.now(UTC))
-                save_ledger(args.ledger, ledger)
+            try:
+                if (
+                    args.operation == "cleanup-wait"
+                    and Phase(ledger.phase) is Phase.CLEANING
+                ):
+                    start_direct_cleanup(runner, config, runtime)
+                if (
+                    target is Phase.SCOPE_CREATED
+                    or ORDER.index(Phase(ledger.phase)) >= ORDER.index(Phase.SCOPE_CREATED)
+                ) and Phase(ledger.phase) not in {
+                    Phase.CLEANING,
+                    Phase.CLEANED,
+                    Phase.CLEANUP_DISARMED,
+                    Phase.RESIDUE_VERIFIED,
+                    Phase.FINALIZED,
+                }:
+                    try:
+                        start_failure_cleanup(runner, config, runtime)
+                    except Exception as cleanup_error:
+                        print(
+                            json.dumps({"status": "cleanup-start-failed", "error": str(cleanup_error)}),
+                            file=sys.stderr,
+                        )
+                    ledger.transition(
+                        Phase.CLEANING, datetime.now(UTC),
+                        scope_write_attempted=target is Phase.SCOPE_CREATED,
+                    )
+                    save_ledger(args.ledger, ledger)
+            except Exception as cleanup_error:
+                print(
+                    json.dumps({"status": "cleanup-recording-failed", "error": str(cleanup_error)}),
+                    file=sys.stderr,
+                )
             raise
     except Exception as exc:
         print(

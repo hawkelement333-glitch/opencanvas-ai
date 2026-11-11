@@ -1048,10 +1048,63 @@ def test_operator_runbook_maps_every_phase_to_implemented_commands() -> None:
     assert "mobius.milestone=7.8" in scope
     assert f"mobius.cleanup-deadline-utc={config.cleanup_deadline_utc}" in scope
     assert "mobius.cost-ceiling-cents=5000" in scope
+    assert (
+        f"mobius.fresh-controller-admission-sha256={config.fresh_controller_admission_evidence_sha256}"
+        in scope
+    )
     assert f"mobius.cleanup-offer-classification={config.cleanup_offer_classification}" in scope
     assert (
         f"mobius.cleanup-offer-eligibility-sha256={config.cleanup_offer_eligibility_sha256}"
     ) in scope
+
+
+@pytest.mark.parametrize("start_fails", [False, True])
+@pytest.mark.parametrize("recording_fails", [False, True])
+def test_scope_failure_enters_cleanup_and_preserves_original_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    recording_fails: bool, start_fails: bool,
+) -> None:
+    config, runtime = _config(), _runtime()
+    ledger = Ledger(config.campaign_id, config.generation_id)
+    ledger.bind_cleanup_region(config)
+    for phase in (Phase.PREFLIGHT, Phase.CORRELATED, Phase.CAPACITY_CHECKED, Phase.COST_GATED):
+        ledger.transition(phase, NOW)
+    ledger.bind_deadline(config.cleanup_deadline_utc)
+    with pytest.raises(CampaignError, match="invalid lifecycle transition"):
+        ledger.transition(Phase.CLEANING, NOW)
+    monkeypatch.setattr(CampaignConfig, "from_json", classmethod(lambda cls, *a, **k: config))
+    monkeypatch.setattr(campaign_operator, "load_runtime", lambda *_: runtime)
+    monkeypatch.setattr(campaign_operator, "validate_prepared_bundle", lambda *_: None)
+    monkeypatch.setattr(campaign_operator, "load_bound_fresh_controller_admission", lambda *_: None)
+    monkeypatch.setattr(campaign_operator, "load_ledger", lambda *_: ledger)
+    monkeypatch.setattr(campaign_operator, "load_execution_authorization", lambda *a, **k: None)
+    def start_cleanup(*args: object) -> None:
+        if start_fails:
+            raise CampaignError("cleanup dispatch failed")
+
+    monkeypatch.setattr(campaign_operator, "start_failure_cleanup", start_cleanup)
+
+    def fail_scope(*args: object) -> None:
+        raise CampaignError("original scope-create failure")
+
+    def save(*args: object) -> None:
+        if recording_fails:
+            raise OSError("cleanup recording failed")
+
+    monkeypatch.setattr(campaign_operator, "execute_commands", fail_scope)
+    monkeypatch.setattr(campaign_operator, "save_ledger", save)
+    monkeypatch.setattr(sys, "argv", [
+        "operator", "scope-create", "--config", "config", "--runtime", "runtime",
+        "--ledger", "ledger", "--authorization", "auth", "--execute",
+    ])
+    assert campaign_operator.main() == 2
+    errors = capsys.readouterr().err
+    assert "original scope-create failure" in errors
+    assert ("cleanup dispatch failed" in errors) is start_fails
+    assert ("cleanup recording failed" in errors) is recording_fails
+    assert ledger.phase == Phase.CLEANING.value
+    if not recording_fails:
+        ledger.validate_resume(config)
 
 
 def _command_result(value: object) -> dict[str, object]:

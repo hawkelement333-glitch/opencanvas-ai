@@ -461,7 +461,7 @@ class Ledger:
             normal = ORDER.index(target) == ORDER.index(source) + 1
             cleanup_jump = target is Phase.CLEANING and ORDER.index(
                 source
-            ) >= ORDER.index(Phase.SCOPE_CREATED)
+            ) >= ORDER.index(Phase.COST_GATED)
             if not normal and not cleanup_jump:
                 raise CampaignError("resume transition chain is invalid")
             current = target
@@ -506,11 +506,15 @@ class Ledger:
         ):
             raise CampaignError("resume residue disposition is inconsistent")
 
-    def transition(self, target: Phase, now: datetime) -> None:
+    def transition(
+        self, target: Phase, now: datetime, *, scope_write_attempted: bool = False
+    ) -> None:
         current = Phase(self.phase)
         valid = target is Phase.CLEANING and ORDER.index(current) >= ORDER.index(
             Phase.SCOPE_CREATED
         )
+        if target is Phase.CLEANING and current is Phase.COST_GATED:
+            valid = scope_write_attempted
         if not valid:
             valid = ORDER.index(target) == ORDER.index(current) + 1
         if not valid:
