@@ -1217,6 +1217,11 @@ def command_plan(
                 "--output",
                 "json",
             ),
+            (
+                "az", "rest", "--method", "get", "--url",
+                f"{automation_base}/jobSchedules/{runtime['bindingName']}?api-version={api_version}",
+                "--output", "json",
+            ),
         )
     if operation == "cleanup-verify":
         return (
@@ -1306,6 +1311,11 @@ def command_plan(
                 f"{automation_base}/jobSchedules?api-version={api_version}",
                 "--output",
                 "json",
+            ),
+            (
+                "az", "rest", "--method", "get", "--url",
+                f"{automation_base}/jobSchedules/{runtime['bindingName']}?api-version={api_version}",
+                "--output", "json",
             ),
         )
     if operation == "deploy":
@@ -2068,7 +2078,7 @@ def runtime_authority_expiry(config: CampaignConfig) -> str:
 def validate_cleanup_readback(
     results: list[dict[str, object]], config: CampaignConfig, runtime: dict[str, str]
 ) -> str:
-    if len(results) != 8:
+    if len(results) != 9:
         raise CampaignError("cleanup readback is incomplete")
     expected_binding, deployment_outputs, _account = validate_cleanup_foundation(
         results[:4], config, runtime
@@ -2081,7 +2091,9 @@ def validate_cleanup_readback(
         runbook, content, runtime=runtime
     )
     validate_cleanup_schedule(schedule, config=config, runtime=runtime)
-    validate_cleanup_bindings(binding_response, config=config, runtime=runtime)
+    validate_cleanup_bindings(
+        binding_response, config=config, runtime=runtime, exact_binding=_json_result(results[8])
+    )
     proof = {
         "version": "m7.8-cleanup-arm-proof-v1",
         "deploymentName": runtime["cleanupDeploymentName"],
@@ -2422,7 +2434,11 @@ def validate_cleanup_schedule(
 
 
 def validate_cleanup_bindings(
-    response: object, *, config: CampaignConfig, runtime: dict[str, str]
+    response: object,
+    *,
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    exact_binding: object | None = None,
 ) -> None:
     if not isinstance(response, dict) or set(response) - {"value", "nextLink"}:
         raise CampaignError("cleanup binding collection is malformed")
@@ -2481,14 +2497,19 @@ def validate_cleanup_bindings(
         if isinstance(bound_schedule, dict)
         else bound_schedule
     )
+    parameters = (
+        binding_properties.get("parameters") if isinstance(binding_properties, dict) else None
+    )
     if (
         bound_runbook_name != runtime["runbookName"]
         or bound_schedule_name != runtime["scheduleName"]
         or not isinstance(binding_properties, dict)
-        or binding_properties.get("parameters")
-        != cleanup_job_parameters(config, runtime)
+        or (parameters is None and exact_binding is None)
+        or (parameters is not None and parameters != cleanup_job_parameters(config, runtime))
     ):
         raise CampaignError("cleanup binding readback drifted")
+    if exact_binding is not None:
+        validate_cleanup_bindings({"value": [exact_binding]}, config=config, runtime=runtime)
 
 
 def execute_cleanup_arm_commands(
@@ -2497,7 +2518,7 @@ def execute_cleanup_arm_commands(
     config: CampaignConfig,
     runtime: dict[str, str],
 ) -> tuple[list[dict[str, object]], str]:
-    if len(commands) != 12:
+    if len(commands) != 13:
         raise CampaignError("cleanup arming command sequence is incomplete")
     results = [_run_required(runner, command) for command in commands[:8]]
     validate_cleanup_foundation(results[:4], config, runtime)
@@ -2514,9 +2535,6 @@ def execute_cleanup_arm_commands(
     if existing_bindings:
         if existing_schedule is None:
             raise CampaignError("cleanup binding exists without its exact schedule")
-        validate_cleanup_bindings(
-            {"value": existing_bindings}, config=config, runtime=runtime
-        )
         schedule_result = {
             "exitCode": 0,
             "stdout": json.dumps(existing_schedule),
@@ -2544,15 +2562,15 @@ def execute_cleanup_arm_commands(
         results.append(_run_required(runner, commands[10]))
         binding_result = _run_required(runner, commands[11])
         results.append(binding_result)
-        validate_cleanup_bindings(
-            _json_result(binding_result), config=config, runtime=runtime
-        )
+    detail_result = _run_required(runner, commands[12])
+    results.append(detail_result)
     proof_results = [
         *results[:4],
         results[4],
         results[5],
         schedule_result,
         binding_result,
+        detail_result,
     ]
     return results, validate_cleanup_readback(proof_results, config, runtime)
 

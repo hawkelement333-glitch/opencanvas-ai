@@ -1320,6 +1320,7 @@ def test_cleanup_binding_and_readback_reject_substitution() -> None:
             }
         ),
     ]
+    results.append(_command_result(json.loads(str(results[7]["stdout"]))["value"][0]))
     validate_cleanup_readback(results, config, runtime)
     results[6] = _command_result(
         {
@@ -1919,6 +1920,7 @@ def _cleanup_arm_success_results(
         _command_result(schedule_value),
         _command_result({"status": "accepted"}),
         _command_result({"value": binding_values}),
+        _command_result(binding_values[0] if binding_values else {}),
     ]
 
 
@@ -2119,6 +2121,52 @@ def test_documented_binding_shape_rejects_wrong_or_incomplete_proof(failure: str
         campaign_operator.validate_cleanup_bindings(response, config=config, runtime=runtime)
 
 
+@pytest.mark.parametrize("failure", [None, "no-detail", "wrong-detail", "wrong-list"])
+def test_cleanup_arm_checks_exact_get_when_list_parameters_are_null(failure: str | None) -> None:
+    config = _config()
+    runtime = _runtime()
+    runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
+    results = _cleanup_arm_success_results(config, runtime)
+    response = json.loads(str(results[11]["stdout"]))
+    response["value"][0]["properties"]["parameters"] = None
+    if failure == "wrong-list":
+        response["value"][0]["properties"]["runbook"]["name"] = "wrong"
+    results[11] = _command_result(response)
+    if failure == "wrong-detail":
+        detail = json.loads(str(results[12]["stdout"]))
+        detail["properties"]["parameters"] = {"wrong": "value"}
+        results[12] = _command_result(detail)
+    if failure == "no-detail":
+        results[12] = {"exitCode": 1, "stdout": "", "stderr": "unavailable"}
+    runner = _OrderedCleanupRunner(results)
+    if failure:
+        with pytest.raises(CampaignError):
+            execute_cleanup_arm_commands(
+                runner, command_plan("cleanup-arm", config, runtime), config, runtime  # type: ignore[arg-type]
+            )
+    else:
+        _, proof = execute_cleanup_arm_commands(
+            runner, command_plan("cleanup-arm", config, runtime), config, runtime  # type: ignore[arg-type]
+        )
+        assert len(proof) == 64
+
+
+def test_cleanup_verify_requires_exact_binding_parameters() -> None:
+    config = _config()
+    runtime = _runtime()
+    runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
+    results = _cleanup_arm_success_results(config, runtime)
+    response = json.loads(str(results[11]["stdout"]))
+    response["value"][0]["properties"]["parameters"] = None
+    proof_results = [*results[:6], results[9], _command_result(response), results[12]]
+    assert len(validate_cleanup_readback(proof_results, config, runtime)) == 64
+    detail = json.loads(str(results[12]["stdout"]))
+    detail["properties"]["parameters"] = None
+    proof_results[8] = _command_result(detail)
+    with pytest.raises(CampaignError, match="cleanup binding readback drifted"):
+        validate_cleanup_readback(proof_results, config, runtime)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -2226,7 +2274,7 @@ def test_cleanup_arming_adopts_exact_existing_schedule_and_binding_without_put()
     all_results = _cleanup_arm_success_results(
         config, runtime, existing_schedule=True, existing_binding=True
     )
-    runner = _OrderedCleanupRunner(all_results[:8])
+    runner = _OrderedCleanupRunner([*all_results[:8], all_results[12]])
     _, proof = execute_cleanup_arm_commands(
         runner,
         command_plan("cleanup-arm", config, runtime),
@@ -2234,7 +2282,7 @@ def test_cleanup_arming_adopts_exact_existing_schedule_and_binding_without_put()
         runtime,  # type: ignore[arg-type]
     )
     assert len(proof) == 64
-    assert len(runner.commands) == 8
+    assert len(runner.commands) == 9
     assert not any("--method put" in " ".join(item) for item in runner.commands)
 
 
@@ -2243,7 +2291,9 @@ def test_cleanup_arming_retries_partial_schedule_by_creating_only_binding() -> N
     runtime = _runtime()
     runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
     all_results = _cleanup_arm_success_results(config, runtime, existing_schedule=True)
-    runner = _OrderedCleanupRunner([*all_results[:8], all_results[10], all_results[11]])
+    runner = _OrderedCleanupRunner(
+        [*all_results[:8], all_results[10], all_results[11], all_results[12]]
+    )
     _, proof = execute_cleanup_arm_commands(
         runner,
         command_plan("cleanup-arm", config, runtime),
@@ -2252,7 +2302,7 @@ def test_cleanup_arming_retries_partial_schedule_by_creating_only_binding() -> N
     )
     rendered = [" ".join(item).casefold() for item in runner.commands]
     assert len(proof) == 64
-    assert len(rendered) == 10
+    assert len(rendered) == 11
     assert not any("/schedules/" in item and "--method put" in item for item in rendered)
     assert sum("/jobschedules/" in item and "--method put" in item for item in rendered) == 1
 
