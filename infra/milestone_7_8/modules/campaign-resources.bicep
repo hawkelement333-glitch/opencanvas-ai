@@ -317,7 +317,7 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = if (workloadEnabled) 
           resources: { cpu: json('0.5'), memory: '1Gi' }
         }
       ]
-      scale: { minReplicas: 1, maxReplicas: 4 }
+      scale: { minReplicas: 4, maxReplicas: 4 }
     }
   }
   dependsOn: [ applicationDatabase, registryDnsGroup, registryPullAssignments ]
@@ -330,7 +330,7 @@ resource workerJob 'Microsoft.App/jobs@2024-03-01' = if (workloadEnabled) {
   identity: { type: 'UserAssigned', userAssignedIdentities: { '${workerIdentity.id}': {} } }
   properties: {
     environmentId: environment.id
-    configuration: { triggerType: 'Manual', replicaTimeout: 7200, replicaRetryLimit: 0, registries: [ { server: registry.properties.loginServer, identity: workerIdentity.id } ] }
+    configuration: { triggerType: 'Manual', replicaTimeout: 7200, replicaRetryLimit: 0, manualTriggerConfig: { parallelism: 4, replicaCompletionCount: 4 }, registries: [ { server: registry.properties.loginServer, identity: workerIdentity.id } ] }
     template: {
       containers: [
         {

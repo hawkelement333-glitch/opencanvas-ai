@@ -22,7 +22,7 @@ from test_milestone_7_8_controller_admission import authority_fixture
 
 from infra.milestone_7_8 import controller as controller_operator
 from infra.milestone_7_8 import operator as campaign_operator
-from infra.milestone_7_8 import predeployment, prepare, retention, retention_v3
+from infra.milestone_7_8 import predeployment, prepare, retention, retention_v3, scout_admission
 from infra.milestone_7_8.automation_region import (
     CLEANUP_CANDIDATE_REGIONS_BINDING,
     CLEANUP_REGION_CANDIDATES,
@@ -77,7 +77,12 @@ from opencanvas_api.db.principal_manifest import (
     PrincipalSlot,
     load_principal_manifest,
 )
-from scripts import bootstrap_postgres, managed_postgres_evidence, migrate_and_grant
+from scripts import (
+    bootstrap_postgres,
+    managed_postgres_evidence,
+    managed_postgres_measure,
+    migrate_and_grant,
+)
 
 NOW = datetime(2030, 1, 1, tzinfo=UTC)
 
@@ -499,9 +504,113 @@ def test_control_plane_evidence_capacity_and_types_fail_closed() -> None:
     with pytest.raises(managed_postgres_evidence.EvidenceError):
         managed_postgres_evidence.validate_control_plane_evidence(json.dumps(evidence))
     evidence = _control_plane_evidence()
+    evidence["maxConnections"] = 90
+    with pytest.raises(managed_postgres_evidence.EvidenceError, match="shortfall: 1"):
+        managed_postgres_evidence.validate_control_plane_evidence(json.dumps(evidence))
+    evidence = _control_plane_evidence()
+    evidence["safetyReserve"] = 19
+    with pytest.raises(managed_postgres_evidence.EvidenceError, match="minimum of 20"):
+        managed_postgres_evidence.validate_control_plane_evidence(json.dumps(evidence))
+    evidence = _control_plane_evidence()
     evidence["maintenanceDay"] = True
     with pytest.raises(managed_postgres_evidence.EvidenceError):
         managed_postgres_evidence.validate_control_plane_evidence(json.dumps(evidence))
+
+
+def test_operator_rejects_capacity_shortfall_before_evidence_jobs(tmp_path: Path) -> None:
+    document = _operator_control_plane_evidence()
+    path = tmp_path / "control.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert campaign_operator.load_control_plane_evidence(path) == document
+    document["maxConnections"] = 90
+    path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(CampaignError, match="shortfall: 1"):
+        campaign_operator.load_control_plane_evidence(path)
+    document["maxConnections"] = 100
+    document["safetyReserve"] = 19
+    path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(CampaignError, match="minimum of 20"):
+        campaign_operator.load_control_plane_evidence(path)
+
+
+def test_raw_measurement_sample_is_bounded_and_never_claims_verified_concurrency() -> None:
+    async def connections() -> tuple[int, int]:
+        return (4, 3)
+
+    async def request() -> int:
+        return 200
+
+    report = asyncio.run(managed_postgres_measure.sample(connections, request))
+    assert report["status"] == "blocked-unverified"
+    assert report["connectionSamples"] == 5
+    assert report["privateReadinessRequests"] == 40
+    assert report["observedRuntimeConnectionPeak"] == 7
+    assert report["readinessP95Ms"] >= 0
+
+    async def failed_request() -> int:
+        return 503
+
+    with pytest.raises(ValueError, match="readiness request failed"):
+        asyncio.run(managed_postgres_measure.sample(connections, failed_request))
+
+
+def test_raw_measurement_entry_point_rejects_unverified_samples(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def collect(_exercise: object) -> dict[str, object]:
+        return {"status": "blocked-unverified"}
+
+    monkeypatch.setattr(managed_postgres_measure, "collect", collect)
+    monkeypatch.setattr(sys, "argv", ["evidence", "--phase", "measurement-sample"])
+    assert managed_postgres_evidence.main() == 2
+    assert json.loads(capsys.readouterr().out)["status"] == "blocked-unverified"
+
+
+def test_application_latency_hooks_record_real_response_body_completion() -> None:
+    import httpx
+
+    async def run() -> None:
+        timings: list[float] = []
+        times: list[str] = []
+        transport = httpx.MockTransport(lambda _request: httpx.Response(200, content=b"ok"))
+        async with httpx.AsyncClient(
+            transport=transport,
+            event_hooks=managed_postgres_evidence.application_measurement_hooks(timings, times),
+        ) as client:
+            response = await client.get("https://example.test/api/v1/canvases")
+        assert response.content == b"ok"
+        assert len(timings) == 1 and timings[0] >= 0
+        assert len(times) == 1
+
+    asyncio.run(run())
+
+
+def test_application_workload_latency_is_reported_but_not_admitted() -> None:
+    async def run() -> None:
+        timings: list[float] = []
+        times: list[str] = []
+
+        async def connections() -> tuple[int, int]:
+            return 12, 7
+
+        async def readiness() -> int:
+            return 200
+
+        async def exercise() -> object:
+            timings.extend(float(value) for value in range(1, 21))
+            times.extend(datetime.now(UTC).isoformat() for _ in range(20))
+            return None
+
+        task: asyncio.Task[object] = asyncio.create_task(exercise())
+        report = await managed_postgres_measure.sample(
+            connections, readiness, workload=task, application_latencies_ms=timings,
+            application_observed_at_utc=times,
+        )
+        assert report["applicationP95Ms"] == 19.0
+        assert report["observedRuntimeConnectionPeak"] == 19
+        assert report["status"] == "blocked-unverified"
+
+    asyncio.run(run())
 
 
 def test_image_scan_receipt_is_bound_before_workload_deployment(tmp_path: Path) -> None:
@@ -529,6 +638,63 @@ def test_image_scan_receipt_is_bound_before_workload_deployment(tmp_path: Path) 
     path.write_text(json.dumps(receipt), encoding="utf-8")
     with pytest.raises(CampaignError, match="policy"):
         campaign_operator.load_image_scan_evidence(path, digest=digest, runtime=runtime)
+
+
+@pytest.mark.parametrize("failure", [None, "findings", "bad-sarif", "dirty", "wrong-head"])
+def test_scout_scan_emits_only_digest_bound_clean_receipt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str | None
+) -> None:
+    from types import SimpleNamespace
+
+    private = tmp_path / ".runtime" / "milestone_7_8"
+    private.mkdir(parents=True)
+    runtime_path = private / "runtime.json"
+    runtime_path.write_text("{}", encoding="utf-8")
+    runtime = _runtime()
+    runtime["registryName"] = "acrm78test"
+    digest = "sha256:" + "e" * 64
+    commands: list[tuple[str, ...]] = []
+
+    def fake_run(command: tuple[str, ...], **_kwargs: object) -> object:
+        commands.append(command)
+        if command[:2] == ("git", "rev-parse"):
+            return SimpleNamespace(
+                returncode=0,
+                stdout="f" * 40 if failure == "wrong-head" else runtime["sourceHead"],
+            )
+        if command[:2] == ("git", "status"):
+            return SimpleNamespace(returncode=0, stdout=" M file" if failure == "dirty" else "")
+        if command[:3] == ("docker", "scout", "version"):
+            return SimpleNamespace(returncode=0, stdout="version: v1.23.1\n")
+        assert command[:3] == ("docker", "scout", "cves")
+        assert command[3] == f"registry://acrm78test.azurecr.io/mobius-api@{digest}"
+        sarif = {"version": "2.1.0", "runs": [{"results": []}]}
+        if failure == "bad-sarif":
+            sarif["runs"][0]["results"] = [{"ruleId": "CVE"}]
+        Path(command[command.index("--output") + 1]).write_text(json.dumps(sarif))
+        return SimpleNamespace(returncode=2 if failure == "findings" else 0, stdout="")
+
+    monkeypatch.setattr(scout_admission, "ROOT", tmp_path)
+    monkeypatch.setattr(scout_admission, "load_runtime", lambda _path: runtime)
+    monkeypatch.setattr(
+        scout_admission,
+        "canonical_snapshot",
+        lambda _head: {"buildInputSha256": runtime["canonicalBuildInputSha256"]},
+    )
+    monkeypatch.setattr(scout_admission.subprocess, "run", fake_run)
+    report, receipt = private / "report.sarif", private / "receipt.json"
+    if failure:
+        with pytest.raises(CampaignError):
+            scout_admission.create_scout_receipt(runtime_path, digest, report, receipt)
+        assert not receipt.exists()
+    else:
+        scout_admission.create_scout_receipt(runtime_path, digest, report, receipt)
+        document = json.loads(receipt.read_text())
+        assert document["imageDigest"] == digest
+        assert document["sourceHead"] == runtime["sourceHead"]
+        assert document["canonicalBuildInputSha256"] == runtime["canonicalBuildInputSha256"]
+        assert document["scannerVersion"] == "v1.23.1"
+        assert sum(command[:3] == ("docker", "scout", "cves") for command in commands) == 1
 
 
 def test_deployed_principal_manifest_matches_prepared_semantic_plan() -> None:
@@ -1988,6 +2154,26 @@ def test_campaign_path_cannot_create_or_delete_reusable_controller() -> None:
     assert (
         "resource controllerResourceGroup 'Microsoft.Resources/resourceGroups@2024-11-01' ="
         not in cleanup
+    )
+
+
+def test_campaign_template_configures_four_api_and_worker_replicas() -> None:
+    template = (
+        REPOSITORY_ROOT / "infra/milestone_7_8/modules/campaign-resources.bicep"
+    ).read_text(encoding="utf-8")
+    assert "minReplicas: 4, maxReplicas: 4" in template
+    worker = template.split("resource workerJob ", 1)[1].split("resource bootstrapJob ", 1)[0]
+    assert "manualTriggerConfig: { parallelism: 4, replicaCompletionCount: 4 }" in worker
+
+
+def test_immediate_cleanup_passes_exact_key_value_parameters() -> None:
+    config = _config()
+    runtime = _runtime()
+    command = command_plan("cleanup", config, runtime)[0]
+    args = command[command.index("--parameters") + 1 : command.index("--output")]
+    assert all("=" in item for item in args)
+    assert dict(item.split("=", 1) for item in args) == campaign_operator.cleanup_job_parameters(
+        config, runtime
     )
 
 

@@ -1568,8 +1568,9 @@ def command_plan(
                 "--name",
                 runbook,
                 "--parameters",
-                json.dumps(
-                    cleanup_job_parameters(config, runtime), separators=(",", ":")
+                *(
+                    f"{key}={value}"
+                    for key, value in cleanup_job_parameters(config, runtime).items()
                 ),
                 "--output",
                 "json",
@@ -2614,6 +2615,22 @@ def load_control_plane_evidence(path: Path) -> dict[str, object]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict) or set(value) != CONTROL_PLANE_FIELDS:
         raise CampaignError("control-plane evidence is incomplete")
+    capacity_fields = (
+        "azureReservedConnections", "poolCeilings", "rolloutOverlap", "operatorConsumers",
+        "observedPeak", "safetyReserve", "maxConnections",
+    )
+    if any(type(value[field]) is not int for field in capacity_fields):
+        raise CampaignError("connection capacity evidence is malformed")
+    reserved, pools, overlap, operators, peak, safety, maximum = (
+        cast(int, value[field]) for field in capacity_fields
+    )
+    if reserved < 0 or pools <= 0 or overlap < 0 or operators <= 0 or not 0 < peak <= pools:
+        raise CampaignError("connection capacity evidence is invalid")
+    if safety < 20:
+        raise CampaignError("connection safety reserve is below the approved minimum of 20")
+    committed = reserved + pools + overlap + operators + safety
+    if committed >= maximum:
+        raise CampaignError(f"connection budget shortfall: {committed - maximum + 1}")
     return cast(dict[str, object], value)
 
 

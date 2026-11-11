@@ -6,6 +6,8 @@ import hashlib
 import json
 import os
 import sys
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Final
@@ -177,8 +179,8 @@ def validate_control_plane_evidence(raw: str) -> list[Assertion]:
             "capacity.operator-consumers": value["operatorConsumers"] > 0,
             "capacity.observed-peak": 0 < value["observedPeak"] <= value["poolCeilings"],
             "capacity.safety-reserve": (
-                value["safetyReserve"] > 0
-                and committed_capacity <= value["maxConnections"]
+                value["safetyReserve"] >= 20
+                and committed_capacity < value["maxConnections"]
                 and value["observedPeak"]
                 <= value["maxConnections"]
                 - value["azureReservedConnections"]
@@ -187,6 +189,12 @@ def validate_control_plane_evidence(raw: str) -> list[Assertion]:
         }
     )
     assertions = [_assertion(code, passed, {code: value}, 1) for code, passed in proofs.items()]
+    if value["safetyReserve"] < 20:
+        raise EvidenceError("connection safety reserve is below the approved minimum of 20")
+    if committed_capacity >= value["maxConnections"]:
+        raise EvidenceError(
+            f"connection budget shortfall: {committed_capacity - value['maxConnections'] + 1}"
+        )
     if not all(item.passed for item in assertions):
         raise EvidenceError("control-plane evidence failed an assertion")
     return assertions
@@ -535,7 +543,28 @@ async def _authenticate_synthetic(
     return csrf
 
 
-async def application_assertions(*, post_failover: bool = False) -> list[Assertion]:
+def application_measurement_hooks(
+    latencies_ms: list[float], observed_at_utc: list[str] | None = None,
+) -> dict[str, list[Callable[..., Awaitable[None]]]]:
+    async def on_request(request: httpx.Request) -> None:
+        request.extensions["m78_measure_started"] = time.perf_counter()
+
+    async def on_response(response: httpx.Response) -> None:
+        await response.aread()
+        started = response.request.extensions.get("m78_measure_started")
+        if not isinstance(started, float):
+            raise EvidenceError("application request timing is missing")
+        latencies_ms.append((time.perf_counter() - started) * 1000)
+        if observed_at_utc is not None:
+            observed_at_utc.append(datetime.now(UTC).isoformat())
+
+    return {"request": [on_request], "response": [on_response]}
+
+
+async def application_assertions(
+    *, post_failover: bool = False, latencies_ms: list[float] | None = None,
+    observed_at_utc: list[str] | None = None,
+) -> list[Assertion]:
     base_url = os.environ.get("M78_PRIVATE_API_URL", "")
     if not base_url.startswith("https://"):
         raise EvidenceError("private API URL is missing or not TLS")
@@ -545,9 +574,13 @@ async def application_assertions(*, post_failover: bool = False) -> list[Asserti
     password_a = _synthetic_password(campaign, generation, "a")
     password_b = _synthetic_password(campaign, generation, "b")
     assertions: list[Assertion] = []
+    hooks = (
+        application_measurement_hooks(latencies_ms, observed_at_utc)
+        if latencies_ms is not None else None
+    )
     async with (
-        httpx.AsyncClient(base_url=base_url, timeout=30.0) as client,
-        httpx.AsyncClient(base_url=base_url, timeout=30.0) as other,
+        httpx.AsyncClient(base_url=base_url, timeout=30.0, event_hooks=hooks) as client,
+        httpx.AsyncClient(base_url=base_url, timeout=30.0, event_hooks=hooks) as other,
     ):
         csrf = await _authenticate_synthetic(client, suffix=suffix, tenant="a", password=password_a)
         other_csrf = await _authenticate_synthetic(
@@ -718,11 +751,20 @@ def main() -> int:
             "post-failover",
             "credential-denied",
             "operations",
+            "measurement-sample",
         ),
         required=True,
     )
     args = parser.parse_args()
     try:
+        if args.phase == "measurement-sample":
+            from scripts.managed_postgres_measure import collect
+
+            async def exercise(latencies: list[float], times: list[str]) -> object:
+                return await application_assertions(latencies_ms=latencies, observed_at_utc=times)
+
+            print(json.dumps(asyncio.run(collect(exercise)), sort_keys=True))
+            return 2  # Sampling is not verified ceiling/overlap evidence.
         if args.phase == "operations":
             assertions = validate_control_plane_evidence(
                 os.environ.get("M78_CONTROL_PLANE_EVIDENCE", "")
@@ -751,6 +793,14 @@ def main() -> int:
                 )
         emit(assertions)
         return 0
+    except EvidenceError as exc:
+        message = str(exc)
+        detail = message if message.startswith("connection budget shortfall: ") else None
+        print(
+            json.dumps({"status": "blocked", "error": type(exc).__name__, "detail": detail}),
+            file=sys.stderr,
+        )
+        return 2
     except Exception as exc:
         print(json.dumps({"status": "blocked", "error": type(exc).__name__}), file=sys.stderr)
         return 2

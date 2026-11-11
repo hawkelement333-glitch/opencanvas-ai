@@ -338,6 +338,23 @@ prepared source HEAD and canonical build-input hash and must report zero High
 and zero Critical findings. Validate and deploy the workload only after the
 receipt exists:
 
+For a fresh private bundle, the local Scout entry point runs one digest-pinned
+registry scan and writes the raw SARIF and receipt only in the private runtime
+tree. It requires a clean checkout matching the prepared source and canonical
+build inputs, registry access for Docker Scout, and new output paths. It rejects
+an unsuccessful scan or nonempty High/Critical report:
+
+```powershell
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.scout_admission `
+  --runtime "$bundle/runtime.json" --digest $digest `
+  --report "$bundle/image-scan.sarif" --receipt "$bundle/image-scan.json" --execute
+if ($LASTEXITCODE -ne 0) { throw 'image admission scan failed' }
+```
+
+This command requires a separate live authorization and has not been proved
+against the managed registry by local tests. The digest must come from the one
+authorized campaign build and its registry readback.
+
 ```powershell
 $scan = '.runtime/milestone_7_8/image-scan.json'
 Invoke-M78Phase 'image-decision' @(
@@ -470,6 +487,33 @@ numeric/configuration observations under the separately authorized campaign:
 - Azure/provider-reserved connections, declared API+worker pool ceilings,
   rollout overlap allocation, non-runtime operator consumers, observed peak,
   safety reserve, and deployed `max_connections`.
+
+For the next campaign the approved connection safety reserve is at least 20;
+the total budget must be strictly below observed `max_connections`. The current
+template configures four API replicas and a manual worker job with parallelism
+four; configuration alone does not prove that all replicas are running or
+produce verified peak/overlap and p95 measurements. Do not label those
+observations complete or start the campaign until a bounded collection and
+replica/rollout verification path is implemented and reviewed.
+
+The evidence job has a `--phase measurement-sample` diagnostic that performs
+bounded private readiness requests, times the existing application exercise,
+and samples API/worker PostgreSQL connection counts. It reports only aggregate
+values and returns `blocked-unverified` with a nonzero exit: it cannot establish
+replica ceilings or rollout overlap. Its output is not a valid operations
+evidence input until those provider readbacks are bound to the sample window.
+The changed four-replica configuration also requires a fresh cost-gate estimate.
+
+The local `replica_readback.collect_worker_replicas` reads complete raw ARM
+pages and keeps continuations within one exact job execution. Its window checks
+correlate API `properties.runningState` observations with connection and
+application-request timestamps. Worker admission remains blocked because the
+running-state semantics of that execution's replica response are unverified.
+During a separately authorized worker execution, capture the raw response to
+`GET /subscriptions/{subscriptionId}/resourceGroups/{group}/providers/Microsoft.App/jobs/{job}/executions/{execution}/replicas?api-version=2023-11-02-preview`
+and any same-scope continuation pages privately; do not infer running workers
+from replica presence alone. `az containerapp job replica list` is insufficient
+for this proof because the installed extension returns only `value`.
 
 Bind those observations without credentials or resource UUIDs:
 
