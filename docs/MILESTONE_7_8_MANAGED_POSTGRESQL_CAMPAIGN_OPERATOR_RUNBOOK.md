@@ -383,10 +383,18 @@ recomputed; the two success booleans are insufficient without the responses.
 Approval of an exact old/new transition can explicitly cover an already-expired
 old deadline, but historical approval never becomes current execution authority.
 
-The locally tested renewal executor is dispatch-only. The separate read-only
-snapshot and reconciliation paths below have synthetic tests only and are not
-ready for live renewal. Do not perform manual tag changes using this assembler.
-Failed, indeterminate,
+For the existing verified controller, one separately authorized first live
+renewal attempt may use the locally tested executor and the read-only snapshot
+and reconciliation paths below. This permission is limited to the three planned
+deadline-tag Merge requests on that controller's group, Automation account, and
+runbook. Validate the exact plan, current approval, protected private storage,
+and seven-read baseline before dispatch; preserve the complete executor journal
+and all before/after readbacks. The snapshot and reconciliation paths have
+synthetic tests and a separately captured live baseline; successful Azure Merge
+behavior and preservation remain unproved until the separately authorized
+seven-read reconciliation passes and its completion evidence is validated.
+Campaign admission remains blocked until then. Do not perform manual tag changes
+using this assembler. Failed, indeterminate,
 partial, or unrecorded renewals cannot enter campaign adoption. A lost final
 response remains blocked until its actual dispatch journal and complete
 preservation readback validate. Existing original artifacts remain immutable.
@@ -416,7 +424,9 @@ final response without a complete journal, or any changed unrelated field stays
 blocked; matching tags do not reconstruct dispatch history. A process crash
 after dispatch but before the dispatch record likewise needs manual investigation
 and remains inadmissible. File contents are flushed and fsynced; directory-entry
-crash durability and Windows ACL privacy have not been independently tested.
+crash durability has not been independently tested. The designated review
+directory's current-user-only ACL and child inheritance were checked locally;
+recheck the selected private output directory and its inherited ACL at execution.
 
 Preparation copies and hash-binds this evidence in runtime v9. All subsequent
 campaign execution authorizations use v5 and bind
