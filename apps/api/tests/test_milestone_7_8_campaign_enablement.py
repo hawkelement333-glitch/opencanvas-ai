@@ -1576,6 +1576,13 @@ def test_prepare_rejects_invalid_local_boundary(
 def test_prepare_creates_one_private_restart_safe_bundle(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> datetime:
+            assert tz is UTC
+            return datetime(2030, 1, 1, 0, 0, 37, tzinfo=UTC)
+
+    monkeypatch.setattr(prepare, "datetime", FrozenDatetime)
     subscription = _object_id(101)
     tenant = _object_id(102)
     parent = tmp_path / "runtime"
@@ -1688,7 +1695,13 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             for region in CLEANUP_REGION_CANDIDATES
         ),
     )
-    monkeypatch.setattr(prepare, "discover_automation_region", lambda *_args, **_kwargs: selection)
+    discovery_args: dict[str, object] = {}
+
+    def discover(*_args: object, **kwargs: object) -> AutomationRegionSelection:
+        discovery_args.update(kwargs)
+        return selection
+
+    monkeypatch.setattr(prepare, "discover_automation_region", discover)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -1721,6 +1734,7 @@ def test_prepare_creates_one_private_restart_safe_bundle(
     stdout = capsys.readouterr().out
     assert subscription not in stdout and tenant not in stdout
     config = CampaignConfig.from_json(output / "campaign.json")
+    assert config.cleanup_deadline_utc == "2030-01-01T04:00:00Z"
     assert config.campaign_id == "mobius78-managed-proof"
     assert config.cleanup_candidate_regions == CLEANUP_CANDIDATE_REGIONS_BINDING
     assert config.cleanup_offer_classification == selection.offer_classification
@@ -1729,6 +1743,26 @@ def test_prepare_creates_one_private_restart_safe_bundle(
     runtime_path = output / "runtime.json"
     runtime = campaign_operator.load_runtime(runtime_path)
     campaign_operator.validate_prepared_bundle(runtime_path, runtime, config)
+    assert runtime["cleanupAuthorityExpiresUtc"] == "2030-01-01T05:00:00Z"
+    assert discovery_args["controller_required_until_utc"] == "2030-01-01T05:00:37Z"
+    campaign_parameters = json.loads((output / "campaign.parameters.json").read_text())
+    cleanup_parameters = json.loads((output / "cleanup.parameters.json").read_text())
+    assert (
+        campaign_parameters["parameters"]["cleanupDeadlineUtc"]["value"]
+        == config.cleanup_deadline_utc
+    )
+    assert (
+        cleanup_parameters["parameters"]["cleanupDeadlineUtc"]["value"]
+        == config.cleanup_deadline_utc
+    )
+    tags = campaign_parameters["parameters"]["lifecycleTags"]["value"]
+    assert tags["mobius.cleanup-deadline-utc"] == config.cleanup_deadline_utc
+    assert tags["mobius.expiry"] == config.cleanup_deadline_utc
+    scope_command = command_plan("scope-create", config, runtime)[0]
+    assert f"mobius.cleanup-deadline-utc={config.cleanup_deadline_utc}" in scope_command
+    schedule_command = command_plan("cleanup-arm", config, runtime)[8]
+    schedule_body = json.loads(schedule_command[schedule_command.index("--body") + 1])
+    assert schedule_body["properties"]["startTime"] == config.cleanup_deadline_utc
     assert runtime["cleanupControllerArmability"] == (
         "architecture-corrected-live-execution-not-authorized"
     )

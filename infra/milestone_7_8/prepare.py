@@ -16,8 +16,8 @@ from infra.milestone_7_8.automation_region import (
 )
 from infra.milestone_7_8.campaign import (
     CAMPAIGN_PATTERN,
-    CampaignError,
     GENERATION_PATTERN,
+    CampaignError,
     SubprocessRunner,
     sanitize,
     utc,
@@ -36,7 +36,11 @@ from infra.milestone_7_8.controller_admission import (
 )
 from infra.milestone_7_8.predeployment import (
     EVIDENCE_CLASS as FRESH_CONTROLLER_ADMISSION_EVIDENCE_CLASS,
+)
+from infra.milestone_7_8.predeployment import (
     EVIDENCE_VERSION as FRESH_CONTROLLER_ADMISSION_EVIDENCE_VERSION,
+)
+from infra.milestone_7_8.predeployment import (
     PredeploymentVerificationError,
     load_validated_admission,
 )
@@ -149,6 +153,8 @@ def main() -> int:
         except PredeploymentVerificationError as exc:
             raise CampaignError(str(exc)) from exc
         observed_at = datetime.now(UTC).replace(microsecond=0)
+        deadline_time = (observed_at + timedelta(hours=4)).replace(second=0, microsecond=0)
+        deadline = utc(deadline_time)
         controller_authority = load_authority_evidence(args.controller_authority_evidence)
         verified_controller = validate_authority_evidence(controller_authority)
         if (
@@ -157,7 +163,7 @@ def main() -> int:
             or verified_controller.generation_id != args.generation_id
         ):
             raise CampaignError("controller authority scope differs from fresh scope")
-        cleanup_authority_expires = utc(observed_at + timedelta(hours=5))
+        cleanup_authority_expires = utc(deadline_time + timedelta(hours=1))
         region_selection = discover_automation_region(
             SubprocessRunner(),
             subscription_id,
@@ -167,7 +173,7 @@ def main() -> int:
             subscription_correlation=subscription_correlation,
             cleanup_script_sha256=cleanup_script_sha256,
             fresh_controller_admission_evidence_sha256=admission.evidence_sha256,
-            controller_required_until_utc=cleanup_authority_expires,
+            controller_required_until_utc=utc(observed_at + timedelta(hours=5)),
             controller_authority_evidence=controller_authority,
         )
         if region_selection.controller_disposition != "exact-controller-adoptable":
@@ -194,7 +200,6 @@ def main() -> int:
         suffix = hashlib.sha256(
             f"{args.campaign_id}\0{generation_id}".encode()
         ).hexdigest()[:10]
-        deadline = utc(observed_at + timedelta(hours=4))
         target_rg = f"rg-m78-{suffix}-target"
         cleanup_rg = names.resource_group
         account = names.account
