@@ -18,6 +18,8 @@ import pytest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPOSITORY_ROOT))
 
+from test_milestone_7_8_controller_admission import authority_fixture
+
 from infra.milestone_7_8 import controller as controller_operator
 from infra.milestone_7_8 import operator as campaign_operator
 from infra.milestone_7_8 import predeployment, prepare, retention, retention_v3
@@ -66,8 +68,6 @@ from infra.milestone_7_8.operator import (
     validate_operation_results,
     verify_zero_residue,
 )
-from test_milestone_7_8_controller_admission import authority_fixture
-
 from opencanvas_api.db.principal_manifest import (
     CAMPAIGN_ENV,
     CURRENT_PRINCIPAL_ID_ENV,
@@ -2015,6 +2015,106 @@ def test_cleanup_arming_adopts_published_controller_and_is_restart_deterministic
     _, second_hash = execute_cleanup_arm_commands(second, commands, config, runtime)  # type: ignore[arg-type]
     assert first.commands == second.commands == list(commands)
     assert first_hash == second_hash
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("frequency", "private-provider-value"),
+        ("timeZone", "private-provider-value"),
+        ("isEnabled", False),
+        ("interval", True),
+        ("startTime", "private-provider-value"),
+        ("startTime", "2030-01-01T00:00:00Z"),
+    ],
+)
+def test_cleanup_arming_reports_schedule_mismatch_without_provider_values(
+    field: str, value: object
+) -> None:
+    config = _config()
+    runtime = _runtime()
+    runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
+    results = _cleanup_arm_success_results(config, runtime)
+    schedule = json.loads(str(results[9]["stdout"]))
+    schedule["properties"][field] = value
+    results[9] = _command_result(schedule)
+    runner = _OrderedCleanupRunner(results)
+    with pytest.raises(CampaignError) as exc_info:
+        execute_cleanup_arm_commands(
+            runner, command_plan("cleanup-arm", config, runtime), config, runtime  # type: ignore[arg-type]
+        )
+    assert str(exc_info.value) == f"cleanup schedule readback drifted: {field}"
+    assert "private-provider-value" not in str(exc_info.value)
+    assert len(runner.commands) == 10  # The job-schedule binding was not created.
+
+
+def test_cleanup_arming_accepts_explicit_null_interval_for_one_time_schedule() -> None:
+    config = _config()
+    runtime = _runtime()
+    runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
+    results = _cleanup_arm_success_results(config, runtime)
+    schedule = json.loads(str(results[9]["stdout"]))
+    schedule["properties"]["interval"] = None
+    results[9] = _command_result(schedule)
+    runner = _OrderedCleanupRunner(results)
+    _, proof = execute_cleanup_arm_commands(
+        runner, command_plan("cleanup-arm", config, runtime), config, runtime  # type: ignore[arg-type]
+    )
+    assert len(proof) == 64
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("frequency", "Day"),
+        ("timeZone", "UTC"),
+        ("isEnabled", False),
+        ("startTime", "2030-01-01T00:00:00Z"),
+    ],
+)
+def test_null_interval_still_rejects_invalid_schedule(field: str, value: object) -> None:
+    config = _config()
+    runtime = _runtime()
+    schedule = {
+        "name": runtime["scheduleName"],
+        "properties": {
+            "frequency": "OneTime",
+            "interval": None,
+            "isEnabled": True,
+            "startTime": config.cleanup_deadline_utc,
+            "timeZone": "Etc/UTC",
+            field: value,
+        },
+    }
+    with pytest.raises(CampaignError, match=f"readback drifted: {field}"):
+        campaign_operator.validate_cleanup_schedule(schedule, config=config, runtime=runtime)
+
+
+def test_cleanup_schedule_rejects_missing_interval() -> None:
+    config = _config()
+    runtime = _runtime()
+    schedule = {
+        "name": runtime["scheduleName"],
+        "properties": {
+            "frequency": "OneTime",
+            "isEnabled": True,
+            "startTime": config.cleanup_deadline_utc,
+            "timeZone": "Etc/UTC",
+        },
+    }
+    with pytest.raises(CampaignError, match="readback drifted: interval"):
+        campaign_operator.validate_cleanup_schedule(schedule, config=config, runtime=runtime)
+
+
+def test_cleanup_schedule_diagnostic_rejects_malformed_properties() -> None:
+    config = _config()
+    runtime = _runtime()
+    with pytest.raises(CampaignError, match="readback drifted: properties"):
+        campaign_operator.validate_cleanup_schedule(
+            {"name": runtime["scheduleName"], "properties": "private-provider-value"},
+            config=config,
+            runtime=runtime,
+        )
 
 
 def test_cleanup_arming_adopts_exact_existing_schedule_and_binding_without_put() -> None:

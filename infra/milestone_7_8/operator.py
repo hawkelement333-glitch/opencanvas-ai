@@ -49,7 +49,11 @@ from infra.milestone_7_8.controller_admission import (
 )
 from infra.milestone_7_8.predeployment import (
     EVIDENCE_CLASS as FRESH_CONTROLLER_ADMISSION_EVIDENCE_CLASS,
+)
+from infra.milestone_7_8.predeployment import (
     EVIDENCE_VERSION as FRESH_CONTROLLER_ADMISSION_EVIDENCE_VERSION,
+)
+from infra.milestone_7_8.predeployment import (
     PredeploymentVerificationError,
     load_validated_admission,
 )
@@ -2347,7 +2351,9 @@ def validate_cleanup_foundation(
     ):
         raise CampaignError("cleanup schedule or binding identity differs")
     role_definitions = outputs.get("cleanupRoleDefinitionIds")
-    target_scope = f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.target_resource_group}"
+    target_scope = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.target_resource_group}"
+    )
     _validate_assignment_set(
         target_assignments,
         expected_ids=outputs.get("targetRoleAssignmentIds"),
@@ -2388,18 +2394,31 @@ def validate_cleanup_schedule(
     ):
         raise CampaignError("cleanup schedule identity differs")
     properties = schedule.get("properties", schedule)
-    if (
-        not isinstance(properties, dict)
-        or properties.get("frequency") != "OneTime"
-        or properties.get("timeZone") != "Etc/UTC"
-        or properties.get("isEnabled") is not True
-        or type(properties.get("interval")) is not int
-        or properties.get("interval") != 1
-        or not isinstance(properties.get("startTime"), str)
-        or parse_utc(str(properties["startTime"]))
-        != parse_utc(config.cleanup_deadline_utc)
+    if not isinstance(properties, dict):
+        raise CampaignError("cleanup schedule readback drifted: properties")
+    mismatches = []
+    if properties.get("frequency") != "OneTime":
+        mismatches.append("frequency")
+    if properties.get("timeZone") != "Etc/UTC":
+        mismatches.append("timeZone")
+    if properties.get("isEnabled") is not True:
+        mismatches.append("isEnabled")
+    interval = properties.get("interval")
+    if "interval" not in properties or not (
+        interval is None or (type(interval) is int and interval == 1)
     ):
-        raise CampaignError("cleanup schedule readback drifted")
+        mismatches.append("interval")
+    start_time = properties.get("startTime")
+    try:
+        start_matches = isinstance(start_time, str) and parse_utc(start_time) == parse_utc(
+            config.cleanup_deadline_utc
+        )
+    except CampaignError:
+        start_matches = False
+    if not start_matches:
+        mismatches.append("startTime")
+    if mismatches:
+        raise CampaignError("cleanup schedule readback drifted: " + ", ".join(mismatches))
 
 
 def validate_cleanup_bindings(
@@ -3520,7 +3539,9 @@ def main() -> int:
                         start_failure_cleanup(runner, config, runtime)
                     except Exception as cleanup_error:
                         print(
-                            json.dumps({"status": "cleanup-start-failed", "error": str(cleanup_error)}),
+                            json.dumps(
+                                {"status": "cleanup-start-failed", "error": str(cleanup_error)}
+                            ),
                             file=sys.stderr,
                         )
                     ledger.transition(
