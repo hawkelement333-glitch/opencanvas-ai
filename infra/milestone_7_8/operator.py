@@ -3116,6 +3116,11 @@ def start_direct_cleanup(
         or tags.get("mobius.cost-ceiling-cents") != "5000"
     ):
         raise CampaignError("direct cleanup target ownership differs")
+    properties = group.get("properties")
+    if isinstance(properties, dict) and properties.get("provisioningState") == "Deleting":
+        # An owned deletion is already in progress. Preserve it without another
+        # delete request; cleanup-wait and residue must still prove absence.
+        return
     delete_result = runner.run(
         (
             "az",
@@ -3629,6 +3634,16 @@ def main() -> int:
                     private_directory=args.ledger.parent,
                     image_digest=config.image_digest,
                 )
+            elif args.operation == "deploy":
+                # ARM can outlive the ordinary command timeout. Only this base
+                # deployment gets a longer wait, never beyond campaign expiry.
+                remaining = (
+                    parse_utc(config.cleanup_deadline_utc) - datetime.now(UTC)
+                ).total_seconds()
+                if remaining <= 0:
+                    raise CampaignError("base deployment cleanup window is exhausted")
+                deployment_runner = SubprocessRunner(timeout_seconds=min(3600, remaining))
+                results = execute_commands(deployment_runner, commands)
             elif args.operation == "cleanup-deploy":
                 results = execute_cleanup_deploy_commands(
                     runner, commands, config, runtime

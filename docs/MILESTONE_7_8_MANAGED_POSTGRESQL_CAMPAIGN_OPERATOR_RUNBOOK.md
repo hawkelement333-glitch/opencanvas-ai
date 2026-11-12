@@ -317,6 +317,25 @@ job exists yet. Check `Microsoft.Network` registration separately before
 `scope-create` because the base template creates virtual networking and the
 operator's six-provider check does not cover it.
 
+The base `deploy` command alone may wait up to 3,600 seconds, bounded further
+by the actual time remaining before the campaign cleanup deadline. The operator
+rechecks that window inside its failure-cleanup boundary immediately before
+constructing the deployment runner. An exhausted window dispatches no base
+write and enters cleanup. Other commands, including failure cleanup and workload
+deployment, keep the ordinary 900-second command timeout. A timeout is an
+ambiguous provider outcome, not proof that ARM stopped: preserve the attempt,
+follow cleanup, and never retry the deployment or promote a failed ledger from
+a later successful readback. The observed CLI failure near 900 seconds while
+ARM continued is consistent with the previous timeout; its underlying
+`TimeoutExpired` exception was not retained, so that diagnosis is not proven.
+New CLI timeouts retain their exception cause and report only the sanitized
+`Azure CLI process timed out` diagnostic. This does not establish termination
+of an Azure operation or change Windows child-process handling. If fallback
+cleanup finds the exact ownership-checked group already `Deleting`, it sends
+no second delete request. The ledger remains in cleanup until the normal wait
+and residue checks establish absence; matching ownership tags alone cannot
+establish completion.
+
 After the base deployment, read the exact Container Apps environment's
 `ManagedEnvironmentConsumptionCores` usage before building the image or
 deploying the workload. Require at least 14 vCPUs of available quota for the

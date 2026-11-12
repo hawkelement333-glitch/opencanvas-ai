@@ -483,9 +483,11 @@ def test_process_failures_are_redacted_at_cli_and_campaign_boundaries(
     assert "Azure CLI process failed safely" in captured.err
     assert "must-not-leak" not in captured.err
 
-    with pytest.raises(AzureCliError, match="process failed safely") as failure:
+    with pytest.raises(AzureCliError, match=r"^Azure CLI process timed out$") as failure:
         SubprocessRunner(azure_cli=failing).run(("az", "version"))  # type: ignore[arg-type]
     assert "must-not-leak" not in str(failure.value)
+    assert isinstance(failure.value.__cause__, subprocess.TimeoutExpired)
+    assert failure.value.__cause__.cmd == ("az", "--client-secret", "must-not-leak")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows operator launch contract")
@@ -562,3 +564,24 @@ def test_no_milestone_7_8_call_site_directly_executes_literal_az() -> None:
         if line.lstrip().startswith("az ") or " = az " in line
     ]
     assert direct_documented_invocations == []
+
+
+@pytest.mark.parametrize(
+    "error",
+    [OSError("must-not-leak"), subprocess.SubprocessError("must-not-leak"),
+     UnicodeError("must-not-leak")],
+)
+def test_other_campaign_process_failures_keep_existing_redacted_diagnostic(
+    monkeypatch: pytest.MonkeyPatch, error: Exception,
+) -> None:
+    class FailingLauncher:
+        def run(
+            self, _arguments: tuple[str, ...], **_kwargs: object,
+        ) -> subprocess.CompletedProcess[str]:
+            raise error
+
+    monkeypatch.setattr(AzureCliLauncher, "resolve", lambda: FailingLauncher())
+    with pytest.raises(AzureCliError, match=r"^Azure CLI process failed safely$") as failure:
+        SubprocessRunner().run(("az", "version"))
+    assert failure.value.__cause__ is error
+    assert "must-not-leak" not in str(failure.value)

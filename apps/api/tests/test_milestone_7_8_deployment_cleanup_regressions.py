@@ -8,13 +8,22 @@ import shutil
 import subprocess
 import sys
 from dataclasses import replace
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 from test_milestone_7_8_campaign_enablement import NOW, _config, _manifest, _runtime
 
 from infra.milestone_7_8 import operator
-from infra.milestone_7_8.campaign import ORDER, CampaignConfig, Ledger, Phase
+from infra.milestone_7_8.azure_cli import AzureCliError
+from infra.milestone_7_8.campaign import (
+    ORDER,
+    CampaignConfig,
+    CampaignError,
+    Ledger,
+    Phase,
+    SubprocessRunner,
+)
 from infra.milestone_7_8.operator import cleanup_job_parameters, command_plan
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -374,11 +383,16 @@ def test_cleanup_runbook_rejects_invalid_invocation_before_reads(
     assert "CleanupAuthorized" in observed["error"]
 
 
-@pytest.mark.parametrize("failed", [False, True])
+@pytest.mark.parametrize(
+    "outcome, remaining_seconds",
+    [("long-success", 7200), ("short-success", 600), ("failure", 7200),
+     ("timeout", 7200), ("expired", 0)],
+)
 def test_operator_base_deploy_uses_template_and_retains_failure_cleanup(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    failed: bool,
+    outcome: str,
+    remaining_seconds: int,
 ) -> None:
     config, runtime = _config(), _runtime()
     manifest = _manifest()
@@ -432,13 +446,33 @@ def test_operator_base_deploy_uses_template_and_retains_failure_cleanup(
             ledger.record_cleanup_arm_evidence("a" * 64)
         ledger.transition(phase, NOW)
     commands: list[tuple[str, ...]] = []
+    runner_timeouts: list[int | float] = []
+    deadline = datetime.fromisoformat(config.cleanup_deadline_utc)
+
+    class Clock:
+        calls = 0
+
+        @classmethod
+        def now(cls, _timezone: object = None) -> datetime:
+            cls.calls += 1
+            # The early admission check passes; time may expire before dispatch.
+            return NOW if cls.calls == 1 else deadline - timedelta(seconds=remaining_seconds)
 
     class FakeProvider:
+        def __init__(self, *, timeout_seconds: int | float = 900) -> None:
+            self.timeout_seconds = timeout_seconds
+            runner_timeouts.append(timeout_seconds)
+
         def run(self, command: tuple[str, ...]) -> dict[str, object]:
             commands.append(command)
             if "deployment" in command:
+                if outcome == "long-success":
+                    assert self.timeout_seconds >= 1000  # Simulated ARM duration exceeds 900s.
+                if outcome == "timeout":
+                    timeout = subprocess.TimeoutExpired(command, self.timeout_seconds)
+                    raise AzureCliError("Azure CLI process failed safely") from timeout
                 return {
-                    "exitCode": 1 if failed else 0,
+                    "exitCode": 1 if outcome == "failure" else 0,
                     "stderr": "",
                     "stdout": json.dumps(
                         {
@@ -449,8 +483,10 @@ def test_operator_base_deploy_uses_template_and_retains_failure_cleanup(
                     ),
                 }
             assert command[:4] == ("az", "automation", "runbook", "start")
+            assert self.timeout_seconds == 900  # Cleanup keeps the ordinary runner budget.
             return {"exitCode": 0, "stdout": "{}", "stderr": ""}
 
+    monkeypatch.setattr(operator, "datetime", Clock)
     monkeypatch.setattr(CampaignConfig, "from_json", classmethod(lambda cls, *a, **k: config))
     monkeypatch.setattr(operator, "load_runtime", lambda *_: runtime)
     monkeypatch.setattr(operator, "validate_prepared_bundle", lambda *_: None)
@@ -476,8 +512,76 @@ def test_operator_base_deploy_uses_template_and_retains_failure_cleanup(
             "--execute",
         ],
     )
+    failed = outcome in {"failure", "timeout", "expired"}
     assert operator.main() == (2 if failed else 0)
-    assert commands[0] == command_plan("deploy", config, runtime)[0]
-    assert len(commands) == (2 if failed else 1)  # No automatic deployment retry.
+    if outcome == "expired":
+        assert runner_timeouts == [900]
+        assert len(commands) == 1  # Cleanup only; no deployment was dispatched.
+        assert commands[0][:4] == ("az", "automation", "runbook", "start")
+    else:
+        assert runner_timeouts == [900, min(3600, remaining_seconds)]
+        assert commands[0] == command_plan("deploy", config, runtime)[0]
+        assert len(commands) == (2 if failed else 1)  # No automatic deployment retry.
     assert ledger.phase == (Phase.CLEANING if failed else Phase.INFRASTRUCTURE_DEPLOYED).value
-    capsys.readouterr()
+    captured = capsys.readouterr()
+    if outcome == "expired":
+        assert "base deployment cleanup window is exhausted" in captured.err
+
+
+@pytest.mark.parametrize(
+    "deleting, wrong_owner", [(True, False), (True, True), (False, False), (False, True)],
+)
+def test_direct_cleanup_does_not_repeat_an_owned_in_progress_deletion(
+    deleting: bool, wrong_owner: bool,
+) -> None:
+    runtime = _runtime()
+    config = replace(
+        _config(),
+        subscription_correlation=hashlib.sha256(
+            b"m7.8/subscription\0" + runtime["subscriptionId"].encode()
+        ).hexdigest()[:16],
+    )
+
+    def _result(value: object) -> dict[str, object]:
+        return {"exitCode": 0, "stdout": json.dumps(value), "stderr": ""}
+
+    class CleanupProvider(SubprocessRunner):
+        def __init__(self) -> None:
+            self.deleted = False
+            self.delete_calls = 0
+            self.exists_reads = 0
+
+        def run(self, command: tuple[str, ...]) -> dict[str, object]:
+            if command[:3] == ("az", "account", "show"):
+                return _result({"id": runtime["subscriptionId"]})
+            if command[:3] == ("az", "group", "exists"):
+                self.exists_reads += 1
+                return _result(not self.deleted)
+            if command[:3] == ("az", "group", "show"):
+                return _result({
+                    "name": config.target_resource_group,
+                    "properties": {"provisioningState": "Deleting" if deleting else "Succeeded"},
+                    "tags": {
+                        "mobius.milestone": "7.8",
+                        "mobius.campaign": "other-campaign" if wrong_owner else config.campaign_id,
+                        "mobius.generation": config.generation_id,
+                        "mobius.cleanup-deadline-utc": config.cleanup_deadline_utc,
+                        "mobius.cost-ceiling-cents": "5000",
+                    },
+                })
+            assert command[:3] == ("az", "group", "delete")
+            assert command[command.index("--name") + 1] == config.target_resource_group
+            self.delete_calls += 1
+            self.deleted = True
+            return _result(None)
+
+    provider = CleanupProvider()
+    if wrong_owner:
+        with pytest.raises(CampaignError, match="target ownership differs"):
+            operator.start_direct_cleanup(provider, config, runtime)
+        assert provider.delete_calls == 0
+    else:
+        operator.start_direct_cleanup(provider, config, runtime)
+        assert provider.delete_calls == (0 if deleting else 1)
+        assert provider.exists_reads == (1 if deleting else 2)
+        assert provider.deleted is not deleting  # Returning for Deleting never proves absence.

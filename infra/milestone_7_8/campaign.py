@@ -739,6 +739,8 @@ class SubprocessRunner:
                 )
             except AzureCliError:
                 raise
+            except subprocess.TimeoutExpired as exc:
+                raise AzureCliError("Azure CLI process timed out") from exc
             except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
                 raise AzureCliError("Azure CLI process failed safely") from exc
         else:
