@@ -5,9 +5,9 @@
   "additionalProperties": false,
   "required": [
     "primaryZone", "standbyZone", "haMode", "maintenanceDay", "maintenanceHour",
-    "storageGiB", "storageTier", "backupRetentionDays", "geoBackup", "latencyP95Ms",
+    "storageGiB", "storageTier", "backupRetentionDays", "geoBackup",
     "azureReservedConnections", "poolCeilings",
-    "rolloutOverlap", "operatorConsumers", "observedPeak", "safetyReserve", "maxConnections"
+    "rolloutOverlap", "operatorConsumers", "safetyReserve", "maxConnections"
   ],
   "properties": {
     "primaryZone": { "type": "string", "minLength": 1 },
@@ -22,7 +22,7 @@
     "latencyP95Ms": { "type": "number", "minimum": 0 },
     "azureReservedConnections": { "type": "integer", "minimum": 0 },
     "poolCeilings": { "type": "integer", "minimum": 1 },
-    "rolloutOverlap": { "type": "integer", "minimum": 0 },
+    "rolloutOverlap": { "type": "integer", "minimum": 1 },
     "operatorConsumers": { "type": "integer", "minimum": 1 },
     "observedPeak": { "type": "integer", "minimum": 1 },
     "safetyReserve": { "type": "integer", "minimum": 1 },

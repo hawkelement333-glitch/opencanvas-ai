@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Protocol
 from urllib.parse import urlsplit
@@ -94,6 +96,43 @@ def collect_worker_replicas(
         "complete": True,
         "workerRunningState": "unverified",
     }
+
+
+def wait_for_four_running_candidates(
+    runner: Runner,
+    *,
+    subscription: str,
+    group: str,
+    job: str,
+    execution: str,
+    timeout_seconds: float,
+    interval_seconds: float = 2,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, object]:
+    """Poll a single execution; observed labels do not establish admission semantics."""
+    if not 0 < timeout_seconds <= 900 or not 0 < interval_seconds <= 60:
+        raise CampaignError("worker polling bounds are invalid")
+    deadline = clock() + timeout_seconds
+    while clock() < deadline:
+        capture = collect_worker_replicas(
+            runner, subscription=subscription, group=group, job=job, execution=execution
+        )
+        if clock() > deadline:
+            break
+        pages = capture["pages"]
+        assert isinstance(pages, list)
+        replicas = [item for page in pages for item in page["value"]]
+        if len(replicas) == 4 and all(
+            isinstance(item.get("properties"), dict)
+            and item["properties"].get("runningState") == "Running"
+            for item in replicas
+        ):
+            return capture
+        remaining = deadline - clock()
+        if remaining > 0:
+            sleep(min(interval_seconds, remaining))
+    raise CampaignError("four running worker candidates were not observed before timeout")
 
 
 def validate_api_measurement_window(
@@ -193,7 +232,7 @@ def validate_api_measurement_window(
 def validate_worker_measurement_window(
     sample: dict[str, object], captures: list[dict[str, object]], *, expected_scope: str
 ) -> None:
-    """Never infer running workers from page presence while semantics are unverified."""
+    """Validate complete, scoped worker readbacks against the measurement window."""
     try:
         start = parse_utc(str(sample["startedAtUtc"]))
         end = parse_utc(str(sample["endedAtUtc"]))
@@ -220,6 +259,50 @@ def validate_worker_measurement_window(
             raise CampaignError(
                 "worker observation is incomplete or outside the measurement window"
             )
+        pages = capture["pages"]
+        assert isinstance(pages, list)
+        seen: set[str] = set()
+        continuations: set[str] = set()
+        workers: list[dict[str, object]] = []
+        for index, page in enumerate(pages):
+            if not isinstance(page, dict) or not isinstance(page.get("value"), list):
+                raise CampaignError("worker replica page is malformed")
+            for item in page["value"]:
+                if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+                    raise CampaignError("worker replica identity is malformed")
+                name = item["name"]
+                if (
+                    _SEGMENT.fullmatch(name) is None
+                    or name.casefold() in seen
+                    or not isinstance(item.get("id"), str)
+                    or item["id"].casefold() != f"{expected_scope}/{name}".casefold()
+                ):
+                    raise CampaignError("worker replica identity differs or is duplicated")
+                seen.add(name.casefold())
+                workers.append(item)
+            continuation = page.get("nextLink")
+            if index == len(pages) - 1:
+                if continuation not in (None, ""):
+                    raise CampaignError("worker replica pages are incomplete")
+            elif not isinstance(continuation, str) or not continuation:
+                raise CampaignError("worker replica pages are incomplete")
+            else:
+                parts = expected_scope.split("/")
+                if len(parts) < 3 or parts[1].casefold() != "subscriptions":
+                    raise CampaignError("worker replica scope is malformed")
+                url = _safe_inventory_next_link(
+                    continuation, subscription_id=parts[2], expected_path=expected_scope,
+                    api_version=API_VERSION, label="worker replica",
+                )
+                if url.casefold() in continuations:
+                    raise CampaignError("worker replica continuation is duplicated")
+                continuations.add(url.casefold())
+        def is_running(item: dict[str, object]) -> bool:
+            properties = item.get("properties")
+            return isinstance(properties, dict) and properties.get("runningState") == "Running"
+
+        if len(workers) != 4 or not all(is_running(item) for item in workers):
+            raise CampaignError("four running workers are not established")
         observed_times.append(observed_end)
     for key in ("connectionObservationTimesUtc", "applicationRequestTimesUtc"):
         times = sample.get(key)
@@ -231,4 +314,3 @@ def validate_worker_measurement_window(
                 abs((timestamp - observed).total_seconds()) > 5 for observed in observed_times
             ):
                 raise CampaignError("worker observation is not contemporaneous with samples")
-    raise CampaignError("worker replica running-state semantics are unverified")

@@ -297,7 +297,7 @@ command target.
 
 The intended sequence proves local source/hash/Git state, Azure subscription/tenant
 correlation, six provider registrations, PostgreSQL SKU, regional compute
-quota, global names, USD 25.6832 estimate, at least 25 percent contingency,
+quota, global names, a current itemized estimate, at least 25 percent contingency,
 the USD 50 ceiling, exact scope tags, cleanup deployment outputs, published
 runbook content, one immutable schedule, one binding, actual cleanup identity,
 and exact cleanup deadline before the billable clock starts. The campaign
@@ -307,7 +307,15 @@ controller; it creates zero schedules and zero job-schedule bindings.
 state and exact content, reconciles or creates the immutable schedule, and
 reconciles or creates the deterministic binding. A failure at any earlier step cannot advance the ledger to
 `cleanup-armed`. The `deploy` phase is base infrastructure only; no application
-job exists yet.
+job exists yet. Check `Microsoft.Network` registration separately before
+`scope-create` because the base template creates virtual networking and the
+operator's six-provider check does not cover it.
+
+After the base deployment, read the exact Container Apps environment's
+`ManagedEnvironmentConsumptionCores` usage before building the image or
+deploying the workload. Require at least 14 vCPUs of available quota for the
+eight API replicas, four workers, and one sampler during revision overlap.
+An absent, incomplete, or insufficient quota readback requires campaign cleanup.
 
 ## One image decision
 
@@ -443,12 +451,12 @@ approval must include that exact `reconciliationSourceHead`. The original plan,
 mutation approval, and journal remain bound to the source that dispatched them.
 This source transition applies only to GET-only reconciliation; it cannot
 authorize a snapshot or mutation from a different source.
-One separately authorized subsequent renewal of the existing controller may
-use its validated first-renewal completion evidence as `$anchor`. The planner
+Separately authorized subsequent renewals of the existing controller may
+use the immediately preceding validated completion evidence as `$anchor`. The planner
 binds that entire prior evidence and its final readback, including the previously
 verified deadline, into the new plan. The new completion retains the unmodified
-bootstrap and first-renewal evidence. A third renewal is not supported by this
-contract. Choose the new deadline at execution and verify it extends at least
+bootstrap and prior-renewal evidence. The contract permits at most three
+renewals. Choose the new deadline at execution and verify it extends at least
 five hours past the actual campaign preparation time.
 An early lost response, missing dispatch record, incomplete journal, nonzero
 final response without a complete journal, or any changed unrelated field stays
@@ -483,47 +491,26 @@ numeric/configuration observations under the separately authorized campaign:
 
 - actual primary/standby zones, HA mode, maintenance day/hour, storage
   GiB/tier, backup retention, and geo-backup setting from the deployed server;
-- p95 private API latency in milliseconds from the bounded synthetic exercise;
 - Azure/provider-reserved connections, declared API+worker pool ceilings,
-  rollout overlap allocation, non-runtime operator consumers, observed peak,
-  safety reserve, and deployed `max_connections`.
+  rollout overlap allocation, non-runtime operator consumers, safety reserve,
+  and deployed `max_connections`.
 
-For the next campaign the approved connection safety reserve is at least 20;
-the total budget must be strictly below observed `max_connections`. The current
-template configures four API replicas and a manual worker job with parallelism
-four; configuration alone does not prove that all replicas are running or
-produce verified peak/overlap and p95 measurements. Do not label those
-observations complete or start the campaign until a bounded collection and
-replica/rollout verification path is implemented and reviewed.
-
-The evidence job has a `--phase measurement-sample` diagnostic that performs
-bounded private readiness requests, times the existing application exercise,
-and samples API/worker PostgreSQL connection counts. It reports only aggregate
-values and returns `blocked-unverified` with a nonzero exit: it cannot establish
-replica ceilings or rollout overlap. Its output is not a valid operations
-evidence input until those provider readbacks are bound to the sample window.
-The changed four-replica configuration also requires a fresh cost-gate estimate.
-
-The local `replica_readback.collect_worker_replicas` reads complete raw ARM
-pages and keeps continuations within one exact job execution. Its window checks
-correlate API `properties.runningState` observations with connection and
-application-request timestamps. Worker admission remains blocked because the
-running-state semantics of that execution's replica response are unverified.
-During a separately authorized worker execution, capture the raw response to
-`GET /subscriptions/{subscriptionId}/resourceGroups/{group}/providers/Microsoft.App/jobs/{job}/executions/{execution}/replicas?api-version=2023-11-02-preview`
-and any same-scope continuation pages privately; do not infer running workers
-from replica presence alone. `az containerapp job replica list` is insufficient
-for this proof because the installed extension returns only `value`.
+The approved connection safety reserve is at least 20 and the total budget
+must be strictly below deployed `max_connections`. Include four extra API
+replicas in the overlap allocation. The evidence operator supplies measured
+peak connections and application p95 from its worker and API readbacks and
+the two bounded sampler executions. The campaign workspace must support
+execution-scoped Container Apps console log queries. Include the worker,
+temporary API revision, and both sampler executions in the execution
+approval and current cost estimate.
 
 Bind those observations without credentials or resource UUIDs:
 
 ```powershell
-$env:M78_LATENCY_P95_MS = '<observed-nonnegative-number>'
 $env:M78_AZURE_RESERVED_CONNECTIONS = '<observed-nonnegative-integer>'
 $env:M78_POOL_CEILINGS = '<declared-positive-integer>'
 $env:M78_ROLLOUT_OVERLAP = '<bounded-nonnegative-integer>'
 $env:M78_OPERATOR_CONSUMERS = '<observed-positive-integer>'
-$env:M78_OBSERVED_PEAK = '<observed-positive-integer>'
 $env:M78_SAFETY_RESERVE = '<approved-positive-integer>'
 $env:M78_MAX_CONNECTIONS = '<observed-positive-integer>'
 
@@ -543,12 +530,10 @@ $control = [ordered]@{
   storageTier = [string]$server.storage.tier
   backupRetentionDays = [int]$server.backup.backupRetentionDays
   geoBackup = ([string]$server.backup.geoRedundantBackup -eq 'Enabled')
-  latencyP95Ms = [double]$env:M78_LATENCY_P95_MS
   azureReservedConnections = [int]$env:M78_AZURE_RESERVED_CONNECTIONS
   poolCeilings = [int]$env:M78_POOL_CEILINGS
   rolloutOverlap = [int]$env:M78_ROLLOUT_OVERLAP
   operatorConsumers = [int]$env:M78_OPERATOR_CONSUMERS
-  observedPeak = [int]$env:M78_OBSERVED_PEAK
   safetyReserve = [int]$env:M78_SAFETY_RESERVE
   maxConnections = [int]$env:M78_MAX_CONNECTIONS
 }
@@ -571,7 +556,16 @@ Invoke-M78Phase 'evidence' @('--control-plane-evidence', $controlPath)
 Invoke-M78Phase 'dispose'
 ```
 
-The evidence phase executes, in order:
+The evidence phase first starts the campaign worker and verifies four running
+replicas. It samples the bounded private application exercise at steady state,
+then copies the approved API revision and repeats the measurement while four
+replicas of each revision are running. The operator binds each sampler log to
+the exact execution and its dispatch token. It checks the timestamps against
+complete worker and API inventories before deriving peak connections and
+application p95. It restores traffic to the original revision, deactivates the
+temporary revision, and stops the worker before running the remaining probes.
+
+The remaining evidence steps execute in order:
 
 1. exact API and worker catalog probes;
 2. evidence-role catalog/ownership/PUBLIC checks;
@@ -585,10 +579,13 @@ The evidence phase executes, in order:
 9. post-failover replay, forged-scope, and two-tenant isolation; and
 10. exact operational/capacity assertions with measured failover duration.
 
-Every job must terminate `Succeeded`; its harness exits nonzero on one missing
-assertion. The operator persists a sanitized, source/digest/control-bound
-`.runtime/milestone_7_8/managed-evidence-execution.json` containing all 12
-execution identities, terminal states, and domain-separated output hashes.
+The sampler and proof jobs must terminate `Succeeded`. The worker is stopped
+after measurement. Incomplete, stale, or mismatched observations enter the
+existing failure-cleanup path. The operator persists a sanitized,
+source/digest/control-bound `managed-evidence-execution.json` beside the ledger,
+including both measurement-window hashes and the 12 proof execution records.
+An attempt marker without a completed receipt blocks another evidence start.
+If that attempt was interrupted, use the existing cleanup procedure.
 The full shape is closed by
 `infra/milestone_7_8/schemas/evidence-execution.schema.json`. `dispose` records
 the pass/fail campaign disposition before deletion.
@@ -682,8 +679,11 @@ upgrade the preserved legacy finalized ledger described above.
 
 ## Bounded time, cost, artifacts, and stopping rule
 
-The first billable mutation starts a maximum four-hour clock. The conservative
-full-hour estimate is USD 25.6832 with 25 percent contingency and a hard USD 50
+Preparation fixes a cleanup deadline at most four hours away. Before scope
+creation, replace the template's cost inputs with the reviewed regional
+estimate using the sibling `--config` path. Include both API revisions, four
+workers, both sampler executions, the remaining jobs, and cleanup overrun.
+The estimate requires at least 25 percent contingency and a hard USD 50
 ceiling. Stop normal evidence work immediately on any assertion failure, cost
 projection over USD 50, expired deadline, cleanup drift, or unready managed
 service; enter cleanup and preserve the sanitized local files:

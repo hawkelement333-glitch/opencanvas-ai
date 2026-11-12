@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from collections.abc import Awaitable, Callable
@@ -177,7 +178,9 @@ def validate_control_plane_evidence(raw: str) -> list[Assertion]:
             "capacity.pool-ceilings": value["poolCeilings"] > 0,
             "capacity.rollout-overlap": value["rolloutOverlap"] >= 0,
             "capacity.operator-consumers": value["operatorConsumers"] > 0,
-            "capacity.observed-peak": 0 < value["observedPeak"] <= value["poolCeilings"],
+            "capacity.observed-peak": (
+                0 < value["observedPeak"] <= value["poolCeilings"] + value["rolloutOverlap"]
+            ),
             "capacity.safety-reserve": (
                 value["safetyReserve"] >= 20
                 and committed_capacity < value["maxConnections"]
@@ -763,8 +766,15 @@ def main() -> int:
             async def exercise(latencies: list[float], times: list[str]) -> object:
                 return await application_assertions(latencies_ms=latencies, observed_at_utc=times)
 
-            print(json.dumps(asyncio.run(collect(exercise)), sort_keys=True))
-            return 2  # Sampling is not verified ceiling/overlap evidence.
+            token = os.environ.get("M78_MEASUREMENT_TOKEN")
+            if token is None:
+                print(json.dumps(asyncio.run(collect(exercise)), sort_keys=True))
+                return 2
+            if re.fullmatch(r"[a-f0-9]{32}", token) is None:
+                raise EvidenceError("measurement dispatch binding is malformed")
+            sample = asyncio.run(collect(exercise, minimum_seconds=30))
+            print(f"M78_MEASUREMENT {token} {json.dumps(sample, sort_keys=True, allow_nan=False)}")
+            return 0  # Transport succeeded; only the operator can validate the readbacks.
         if args.phase == "operations":
             assertions = validate_control_plane_evidence(
                 os.environ.get("M78_CONTROL_PLANE_EVIDENCE", "")

@@ -10,6 +10,7 @@ from infra.milestone_7_8.replica_readback import (
     collect_worker_replicas,
     validate_api_measurement_window,
     validate_worker_measurement_window,
+    wait_for_four_running_candidates,
     worker_replica_url,
 )
 
@@ -134,7 +135,7 @@ def test_api_window_requires_running_replicas_and_overlap_in_sample_window() -> 
         )
 
 
-def test_worker_window_remains_blocked_even_with_four_records() -> None:
+def test_worker_window_rejects_unbound_replica_records() -> None:
     capture = {
         "scopePath": PATH,
         "complete": True,
@@ -142,8 +143,82 @@ def test_worker_window_remains_blocked_even_with_four_records() -> None:
         "endedAtUtc": "2030-01-01T00:00:05Z",
         "pages": [{"value": [{"name": str(i)} for i in range(4)]}],
     }
-    with pytest.raises(CampaignError, match="running-state semantics are unverified"):
+    with pytest.raises(CampaignError, match="identity differs"):
         validate_worker_measurement_window(SAMPLE, [capture], expected_scope=PATH)
+
+
+def test_worker_window_requires_four_scoped_running_replicas() -> None:
+    replicas = [
+        {"name": f"replica-{i}", "id": f"{PATH}/replica-{i}",
+         "properties": {"runningState": "Running"}}
+        for i in range(4)
+    ]
+    capture = {
+        "scopePath": PATH, "complete": True,
+        "startedAtUtc": "2030-01-01T00:00:04Z", "endedAtUtc": "2030-01-01T00:00:05Z",
+        "pages": [{"value": replicas}],
+    }
+    validate_worker_measurement_window(SAMPLE, [capture], expected_scope=PATH)
+    replicas[0]["properties"]["runningState"] = "NotRunning"
+    with pytest.raises(CampaignError, match="four running workers"):
+        validate_worker_measurement_window(SAMPLE, [capture], expected_scope=PATH)
+    replicas[0]["properties"]["runningState"] = "Running"
+    capture["endedAtUtc"] = "2030-01-01T00:00:11Z"
+    with pytest.raises(CampaignError, match="outside"):
+        validate_worker_measurement_window(SAMPLE, [capture], expected_scope=PATH)
+
+
+def test_worker_window_rejects_incomplete_or_wrong_scope_pagination() -> None:
+    replicas = [
+        {"name": f"replica-{i}", "id": f"{PATH}/replica-{i}",
+         "properties": {"runningState": "Running"}}
+        for i in range(4)
+    ]
+    capture = {
+        "scopePath": PATH, "complete": True,
+        "startedAtUtc": "2030-01-01T00:00:04Z", "endedAtUtc": "2030-01-01T00:00:05Z",
+        "pages": [{"value": replicas[:2], "nextLink": URL + "&skip=2"},
+                  {"value": replicas[2:]}],
+    }
+    validate_worker_measurement_window(SAMPLE, [capture], expected_scope=PATH)
+    capture["pages"][0]["nextLink"] = URL.replace(EXECUTION, "other") + "&skip=2"
+    with pytest.raises(CampaignError):
+        validate_worker_measurement_window(SAMPLE, [capture], expected_scope=PATH)
+
+
+def test_worker_polling_waits_for_four_running_but_does_not_admit() -> None:
+    def page(state: str) -> dict[str, object]:
+        return {"value": [
+            {"name": f"replica-{i}", "properties": {"runningState": state}}
+            for i in range(4)
+        ]}
+
+    runner = FakeRunner([page("NotRunning"), page("Running")])
+    elapsed = [0.0]
+
+    def sleep(seconds: float) -> None:
+        elapsed[0] += seconds
+
+    capture = wait_for_four_running_candidates(
+        runner, subscription=SUBSCRIPTION, group=GROUP, job=JOB, execution=EXECUTION,
+        timeout_seconds=10, clock=lambda: elapsed[0], sleep=sleep,
+    )
+    assert len(runner.commands) == 2
+    assert capture["workerRunningState"] == "unverified"
+
+
+def test_worker_polling_times_out_without_running_candidates() -> None:
+    runner = FakeRunner([{"value": []}, {"value": []}])
+    elapsed = [0.0]
+
+    def sleep(seconds: float) -> None:
+        elapsed[0] += seconds
+
+    with pytest.raises(CampaignError, match="before timeout"):
+        wait_for_four_running_candidates(
+            runner, subscription=SUBSCRIPTION, group=GROUP, job=JOB, execution=EXECUTION,
+            timeout_seconds=4, clock=lambda: elapsed[0], sleep=sleep,
+        )
 
 
 def test_api_window_rejects_missing_timestamps_and_not_running_replicas() -> None:

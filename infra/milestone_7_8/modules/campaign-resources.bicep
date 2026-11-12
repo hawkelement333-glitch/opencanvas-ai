@@ -77,6 +77,8 @@ var commonEnvironment = [
   { name: 'OPENCANVAS_DATABASE_NAME', value: 'opencanvas' }
 ]
 var commonRuntimeEnvironment = concat(commonEnvironment, [
+  { name: 'OPENCANVAS_DATABASE_POOL_SIZE', value: '10' }
+  { name: 'OPENCANVAS_DATABASE_MAX_OVERFLOW', value: '0' }
   { name: 'OPENCANVAS_APP_MODE', value: 'development' }
   { name: 'OPENCANVAS_AUTH_ENABLED', value: 'true' }
   { name: 'OPENCANVAS_AUTH_TEST_BYPASS', value: 'false' }
@@ -337,6 +339,7 @@ resource workerJob 'Microsoft.App/jobs@2024-03-01' = if (workloadEnabled) {
           name: 'worker'
           image: '${registry.properties.loginServer}/mobius-api@${imageDigest}'
           command: [ 'python', '-m', 'scripts.worker' ]
+          resources: { cpu: 2, memory: '4Gi' }
           env: concat(commonRuntimeEnvironment, [
             { name: 'OPENCANVAS_DATABASE_URL', value: 'postgresql+asyncpg://${workerIdentityName}@${postgres.properties.fullyQualifiedDomainName}:5432/opencanvas' }
             { name: 'OPENCANVAS_DATABASE_ROLE', value: 'worker' }
@@ -382,8 +385,8 @@ resource evidenceJob 'Microsoft.App/jobs@2024-03-01' = if (workloadEnabled) {
   identity: { type: 'UserAssigned', userAssignedIdentities: { '${evidenceIdentity.id}': {} } }
   properties: {
     environmentId: environment.id
-    configuration: { triggerType: 'Manual', replicaTimeout: 7200, replicaRetryLimit: 0, registries: [ { server: registry.properties.loginServer, identity: evidenceIdentity.id } ] }
-    template: { containers: [ { name: 'evidence', image: '${registry.properties.loginServer}/mobius-api@${imageDigest}', command: [ 'python', '-m', 'scripts.managed_postgres_evidence' ], args: [ '--phase', 'catalog' ], env: concat(commonEnvironment, [ { name: 'OPENCANVAS_DATABASE_URL', value: 'postgresql+asyncpg://${evidenceIdentityName}@${postgres.properties.fullyQualifiedDomainName}:5432/opencanvas' }, { name: 'OPENCANVAS_DATABASE_ROLE', value: 'observability' }, { name: 'OPENCANVAS_DATABASE_MANAGED_IDENTITY_CLIENT_ID', value: evidenceIdentity.clientId }, { name: 'OPENCANVAS_DATABASE_CURRENT_PRINCIPAL_ID', value: evidenceIdentity.principalId }, { name: 'M78_PRIVATE_API_URL', value: 'https://${apiApp!.properties.configuration.ingress.fqdn}' } ]) } ] }
+    configuration: { triggerType: 'Manual', replicaTimeout: 7200, replicaRetryLimit: 0, manualTriggerConfig: { parallelism: 1, replicaCompletionCount: 1 }, registries: [ { server: registry.properties.loginServer, identity: evidenceIdentity.id } ] }
+    template: { containers: [ { name: 'evidence', resources: { cpu: 2, memory: '4Gi' }, image: '${registry.properties.loginServer}/mobius-api@${imageDigest}', command: [ 'python', '-m', 'scripts.managed_postgres_evidence' ], args: [ '--phase', 'catalog' ], env: concat(commonEnvironment, [ { name: 'OPENCANVAS_DATABASE_URL', value: 'postgresql+asyncpg://${evidenceIdentityName}@${postgres.properties.fullyQualifiedDomainName}:5432/opencanvas' }, { name: 'OPENCANVAS_DATABASE_ROLE', value: 'observability' }, { name: 'OPENCANVAS_DATABASE_MANAGED_IDENTITY_CLIENT_ID', value: evidenceIdentity.clientId }, { name: 'OPENCANVAS_DATABASE_CURRENT_PRINCIPAL_ID', value: evidenceIdentity.principalId }, { name: 'M78_PRIVATE_API_URL', value: 'https://${apiApp!.properties.configuration.ingress.fqdn}' } ]) } ] }
   }
   dependsOn: [ applicationDatabase, registryDnsGroup, registryPullAssignments ]
 }

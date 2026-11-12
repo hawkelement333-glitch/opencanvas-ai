@@ -214,7 +214,9 @@ def reconcile_renewal(
             issued_at=issued,
             expires_at=expires,
             now=clock().astimezone(UTC),
-            source_head=cast(str | None, reconciliation_authorization.get("reconciliationSourceHead")),
+            source_head=cast(
+                str | None, reconciliation_authorization.get("reconciliationSourceHead")
+            ),
         )
         if expected != reconciliation_authorization:
             raise CampaignError("controller reconciliation approval binding differs")
@@ -432,10 +434,14 @@ def build_plan(
     if not isinstance(evidence, dict):
         raise CampaignError("renewal plan requires validated authority evidence")
     prior = evidence.get("renewal")
-    if prior is not None and (
-        not isinstance(prior, dict) or "priorAuthorityEvidence" in prior
-    ):
-        raise CampaignError("only one subsequent controller renewal is supported")
+    if prior is not None and not isinstance(prior, dict):
+        raise CampaignError("prior controller renewal evidence is malformed")
+    if isinstance(prior, dict):
+        second = prior.get("priorAuthorityEvidence")
+        if isinstance(second, dict):
+            earlier = second.get("renewal")
+            if isinstance(earlier, dict) and "priorAuthorityEvidence" in earlier:
+                raise CampaignError("only three controller renewals are supported")
     if parse_utc(deadline) <= parse_utc(original.controller_authorized_until_utc):
         raise CampaignError("renewal deadline must increase")
     renewed = replace(
@@ -445,8 +451,14 @@ def build_plan(
     before = admission._readback(
         evidence["baselineReadback"] if prior is None else prior["afterReadback"], original
     )
-    group = f"/subscriptions/{original.subscription_id}/resourceGroups/{original.controller_resource_group_name}"
-    account = f"{group}/providers/Microsoft.Automation/automationAccounts/{original.automation_account_name}"
+    group = (
+        f"/subscriptions/{original.subscription_id}"
+        f"/resourceGroups/{original.controller_resource_group_name}"
+    )
+    account = (
+        f"{group}/providers/Microsoft.Automation/automationAccounts/"
+        f"{original.automation_account_name}"
+    )
     targets = (group, account, f"{account}/runbooks/{original.runbook_name}")
     binding = controller_binding_sha256(
         original.subscription_id,
@@ -789,7 +801,8 @@ def main() -> int:
                 )
             ):
                 raise CampaignError(
-                    "controller renewal execution requires explicit authorization and private inputs"
+                    "controller renewal execution requires explicit authorization "
+                    "and private inputs"
                 )
             from infra.milestone_7_8.azure_cli import AzureCliLauncher
             from infra.milestone_7_8.controller import (

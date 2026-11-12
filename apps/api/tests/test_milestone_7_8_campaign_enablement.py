@@ -492,6 +492,8 @@ def _operator_control_plane_evidence() -> dict[str, object]:
             "failoverObserved",
             "credentialRecoveryObserved",
             "postFailoverTenantIsolationObserved",
+            "observedPeak",
+            "latencyP95Ms",
         }
     }
 
@@ -1208,8 +1210,8 @@ def test_operator_runbook_maps_every_phase_to_implemented_commands() -> None:
     evidence = command_plan("evidence", config, runtime)
     rendered = "\n".join(" ".join(command) for command in evidence)
     assert "--failover Forced" in rendered
-    assert "--phase application" in rendered
-    assert "--phase operations" in rendered
+    assert "--args=--phase=application" in rendered
+    assert "--args=--phase=operations" in rendered
     scope = " ".join(command_plan("scope-create", config, runtime)[0])
     assert "mobius.milestone=7.8" in scope
     assert f"mobius.cleanup-deadline-utc={config.cleanup_deadline_utc}" in scope
@@ -1573,6 +1575,19 @@ def test_managed_evidence_sequence_derives_recovery_and_persists_receipt(
 ) -> None:
     class FakeEvidenceRunner:
         def run(self, command: tuple[str, ...]) -> dict[str, object]:
+            if command[:4] == ("az", "containerapp", "job", "show"):
+                job = command[command.index("--name") + 1]
+                return _command_result({
+                    "id": (
+                        f"/subscriptions/{runtime['subscriptionId']}/"
+                        f"resourceGroups/{runtime['resourceGroupName']}/"
+                        f"providers/Microsoft.App/jobs/{job}"
+                    ),
+                    "properties": {"template": {"containers": [{
+                        "name": "evidence", "image": f"registry.azurecr.io/mobius-api@{digest}",
+                        "env": [],
+                    }]}},
+                })
             if command[:4] == ("az", "containerapp", "job", "start"):
                 return _command_result(
                     {
@@ -1584,7 +1599,8 @@ def test_managed_evidence_sequence_derives_recovery_and_persists_receipt(
             return _command_result({"status": "Succeeded"})
 
     runtime = _runtime()
-    config = _config(image_digest="sha256:" + "e" * 64)
+    digest = "sha256:" + "e" * 64
+    config = _config(image_digest=digest)
     control = _operator_control_plane_evidence()
     commands = command_plan(
         "evidence",
@@ -1592,10 +1608,14 @@ def test_managed_evidence_sequence_derives_recovery_and_persists_receipt(
         runtime,
         control_plane_evidence="<derived-after-successful-managed-probes>",
     )
+    commands = tuple((*command, "--subscription", runtime["subscriptionId"])
+                     for command in commands)
     results = campaign_operator.execute_evidence_commands(
-        FakeEvidenceRunner(),
+        FakeEvidenceRunner(),  # type: ignore[arg-type]
         commands,
-        control,  # type: ignore[arg-type]
+        {**control, "observedPeak": 40, "latencyP95Ms": 2.0},
+        private_directory=tmp_path,
+        image_digest=digest,
     )
     assert len(results) == 12
     path = tmp_path / "managed-evidence-execution.json"
@@ -1606,6 +1626,19 @@ def test_managed_evidence_sequence_derives_recovery_and_persists_receipt(
         commands=commands,
         results=results,
         control_plane_evidence=control,
+        measurement={
+            "workerExecution": "worker-run",
+            "steady": {
+                "samplerExecution": "sampler-steady", "apiRevisions": ["api-old"],
+                "sampleSha256": "1" * 64, "readbacksSha256": "2" * 64,
+            },
+            "overlap": {
+                "samplerExecution": "sampler-overlap", "apiRevisions": ["api-old", "api-new"],
+                "sampleSha256": "3" * 64, "readbacksSha256": "4" * 64,
+            },
+            "observedPeak": 40,
+            "latencyP95Ms": 2.0,
+        },
     )
     campaign_operator.validate_evidence_execution_receipt(
         path,

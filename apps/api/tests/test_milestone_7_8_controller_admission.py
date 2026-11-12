@@ -519,6 +519,72 @@ def test_second_renewal_preserves_and_binds_first_evidence() -> None:
         )
         assert completed["renewal"]["priorAuthorityEvidence"] == evidence
         assert provider.writes == 3
+        # Reuse the second completion as the immutable baseline for a third renewal.
+        third_deadline = "2030-01-06T00:00:00Z"
+        third = controller_renewal.build_plan(
+            completed, source_head="d" * 40, deadline=third_deadline
+        )
+        third_auth = copy.deepcopy(auth)
+        third_auth.update({"sourceHead": "d" * 40,
+                           "controllerAuthorizedUntilUtc": third_deadline})
+        del third_auth["authorizationSha256"]
+        third_auth["authorizationSha256"] = admission.digest(
+            "m7.8/controller-execution-authorization/v4", third_auth
+        )
+        third_provider = Provider()
+        third_provider.values = copy.deepcopy(provider.values)
+
+        class ThirdProvider:
+            def run(self, args: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+                if args[:3] == ("rest", "--method", "patch"):
+                    index = (0, 1, 3)[third_provider.writes]
+                    third_provider.writes += 1
+                    value = json.loads(third_provider.values[index]["stdout"])
+                    value["tags"][admission.DEADLINE_TAG] = third_deadline
+                    third_provider.values[index] = result(value)
+                    return subprocess.CompletedProcess(args, 0, "{}", "")
+                value = third_provider.values[third_provider.reads % 7]
+                third_provider.reads += 1
+                return subprocess.CompletedProcess(args, 0, value["stdout"], value["stderr"])
+
+        runner = ThirdProvider()
+        third_before = controller_renewal.collect_before_snapshot(
+            completed, third, third_auth, runner=runner, clock=lambda: now
+        )
+        third_approval = controller_renewal.build_approval(
+            completed, third, third_before, issued_at="2030-01-03T01:00:00Z",
+            expires_at="2030-01-03T02:00:00Z", now=now,
+        )
+        controller_renewal.execute_renewal(
+            completed, third, third_before, third_approval, output_dir=root / "third-attempt",
+            runner=runner, clock=lambda: now,
+        )
+        third_journal = controller_renewal.load_executor_journal(
+            root / "third-attempt", third, third_approval, third_before
+        )
+        third_read_auth = controller_renewal.build_reconciliation_approval(
+            completed, third, third_before, third_approval, third_journal,
+            issued_at="2030-01-03T01:00:00Z", expires_at="2030-01-03T02:00:00Z", now=now,
+        )
+        third_completed = controller_renewal.reconcile_renewal(
+            completed, third, third_before, third_approval, third_read_auth,
+            journal_dir=root / "third-attempt", output_dir=root / "third-reconciliation",
+            runner=runner, clock=lambda: now,
+        )
+        assert (
+            admission.validate_authority_evidence(third_completed).controller_authorized_until_utc
+            == third_deadline
+        )
+        corrupted = copy.deepcopy(third_completed)
+        prior = corrupted["renewal"]["priorAuthorityEvidence"]
+        first = prior["renewal"]["priorAuthorityEvidence"]
+        first["renewal"]["completion"]["status"] = "changed"
+        with unittest.TestCase().assertRaises(CampaignError):
+            admission.validate_authority_evidence(corrupted)
+        with unittest.TestCase().assertRaisesRegex(CampaignError, "only three"):
+            controller_renewal.build_plan(
+                third_completed, source_head="e" * 40, deadline="2030-01-07T00:00:00Z"
+            )
         for kind in ("prior", "missing_prior", "approval", "journal"):
             altered = copy.deepcopy(completed)
             renewal = altered["renewal"]

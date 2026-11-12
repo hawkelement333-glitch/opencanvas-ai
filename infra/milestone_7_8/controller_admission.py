@@ -166,6 +166,16 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
     to verify their exact binding. This does not renew them or authorize work.
     The caller separately checks the observed live deadline and required horizon.
     """
+    # Keep the historical chain bounded while allowing one further renewal.
+    cursor = value
+    visited: set[int] = set()
+    depth = 0
+    while isinstance(cursor, dict) and isinstance(cursor.get("renewal"), dict):
+        if id(cursor) in visited or depth >= 3:
+            raise CampaignError("controller renewal evidence chain exceeds its bound")
+        visited.add(id(cursor))
+        depth += 1
+        cursor = cursor["renewal"].get("priorAuthorityEvidence")
     evidence = _closed(
         value,
         {
@@ -243,7 +253,6 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
         if (
             not isinstance(prior_evidence, dict)
             or not isinstance(prior_evidence.get("renewal"), dict)
-            or "priorAuthorityEvidence" in prior_evidence["renewal"]
             or any(
                 prior_evidence.get(key) != evidence[key]
                 for key in (
@@ -345,7 +354,9 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
             raise CampaignError("controller renewal reconciliation is malformed")
         from infra.milestone_7_8.controller_renewal import build_reconciliation_approval
 
-        base_evidence = prior_evidence if prior_evidence is not None else {**evidence, "renewal": None}
+        base_evidence = (
+            prior_evidence if prior_evidence is not None else {**evidence, "renewal": None}
+        )
         recon_issued = recon_auth.get("issuedAtUtc")
         recon_expires = recon_auth.get("expiresAtUtc")
         if not isinstance(recon_issued, str) or not isinstance(recon_expires, str):

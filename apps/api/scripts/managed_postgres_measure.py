@@ -28,11 +28,13 @@ async def sample(
     workload: asyncio.Task[object] | None = None,
     application_latencies_ms: list[float] | None = None,
     application_observed_at_utc: list[str] | None = None,
+    minimum_seconds: float = 0,
 ) -> dict[str, Any]:
     """Collect bounded raw samples; this alone never proves replica or rollout state."""
-    if not 1 <= batches <= 20 or not 1 <= concurrency <= 16:
+    if not 1 <= batches <= 20 or not 1 <= concurrency <= 16 or not 0 <= minimum_seconds <= 60:
         raise ValueError("measurement bounds are invalid")
     started = datetime.now(UTC).isoformat()
+    earliest_end = time.monotonic() + minimum_seconds
     latencies: list[float] = []
     connection_times: list[str] = []
     peak = 0
@@ -46,7 +48,11 @@ async def sample(
         return elapsed
 
     observed_batches = 0
-    while observed_batches < batches or (workload is not None and not workload.done()):
+    while (
+        observed_batches < batches
+        or (workload is not None and not workload.done())
+        or time.monotonic() < earliest_end
+    ):
         if observed_batches >= 1200:
             raise ValueError("measurement window exceeded its bound")
         counts, *timings = await asyncio.gather(
@@ -62,7 +68,7 @@ async def sample(
         connection_times.append(datetime.now(UTC).isoformat())
         latencies.extend(cast(float, value) for value in timings)
         observed_batches += 1
-        if workload is not None and not workload.done():
+        if time.monotonic() < earliest_end or (workload is not None and not workload.done()):
             await asyncio.sleep(0.25)
     if workload is not None:
         await workload
@@ -92,11 +98,14 @@ async def sample(
         "applicationP95Ms": application_p95,
         "applicationRequests": len(application_latencies_ms or []),
         "applicationRequestTimesUtc": application_observed_at_utc or [],
+        "applicationRequestDurationsMs": application_latencies_ms or [],
     }
 
 
 async def collect(
     exercise: Callable[[list[float], list[str]], Coroutine[Any, Any, object]] | None = None,
+    *,
+    minimum_seconds: float = 0,
 ) -> dict[str, Any]:
     settings = get_settings()
     settings.require_database_role(DatabaseRole.OBSERVABILITY)
@@ -109,6 +118,7 @@ async def collect(
     database = Database.from_settings(settings, expected_role=DatabaseRole.OBSERVABILITY)
     try:
         async with database.engine.connect() as connection:
+            await connection.execution_options(isolation_level="AUTOCOMMIT")
             current = str((await connection.execute(text("SELECT current_user"))).scalar_one())
             manifest.require_current(PrincipalSlot.EVIDENCE, current_name=current)
             roles = {
@@ -145,6 +155,7 @@ async def collect(
                         connections, request, workload=task,
                         application_latencies_ms=application_latencies,
                         application_observed_at_utc=application_times,
+                        minimum_seconds=minimum_seconds,
                     )
                 finally:
                     if not task.done():

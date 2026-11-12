@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 import time
@@ -47,6 +48,11 @@ from infra.milestone_7_8.controller_admission import (
     validate_authority_evidence,
     validate_controller_admission,
 )
+from infra.milestone_7_8.measurement_handoff import (
+    CampaignMeasurement,
+    start_evidence_job,
+    validate_measurement_receipt,
+)
 from infra.milestone_7_8.predeployment import (
     EVIDENCE_CLASS as FRESH_CONTROLLER_ADMISSION_EVIDENCE_CLASS,
 )
@@ -68,12 +74,10 @@ CONTROL_PLANE_FIELDS = {
     "storageTier",
     "backupRetentionDays",
     "geoBackup",
-    "latencyP95Ms",
     "azureReservedConnections",
     "poolCeilings",
     "rolloutOverlap",
     "operatorConsumers",
-    "observedPeak",
     "safetyReserve",
     "maxConnections",
 }
@@ -1424,9 +1428,7 @@ def command_plan(
                 rg,
                 "--name",
                 evidence,
-                "--args",
-                "--phase",
-                "catalog",
+                "--args=--phase=catalog",
                 "--output",
                 "json",
             ),
@@ -1439,9 +1441,7 @@ def command_plan(
                 rg,
                 "--name",
                 evidence,
-                "--args",
-                "--phase",
-                "application",
+                "--args=--phase=application",
                 "--output",
                 "json",
             ),
@@ -1478,9 +1478,7 @@ def command_plan(
                 rg,
                 "--name",
                 runtime["apiProbeJobName"],
-                "--args",
-                "--phase",
-                "credential-denied",
+                "--args=--phase=credential-denied",
                 "--output",
                 "json",
             ),
@@ -1531,9 +1529,7 @@ def command_plan(
                 rg,
                 "--name",
                 evidence,
-                "--args",
-                "--phase",
-                "post-failover",
+                "--args=--phase=post-failover",
                 "--output",
                 "json",
             ),
@@ -1546,9 +1542,7 @@ def command_plan(
                 rg,
                 "--name",
                 evidence,
-                "--args",
-                "--phase",
-                "operations",
+                "--args=--phase=operations",
                 *operations_override,
                 "--output",
                 "json",
@@ -1772,6 +1766,10 @@ def _wait_for_job(
     status = _job_status(value)
     resource_group = start_command[start_command.index("--resource-group") + 1]
     job_name = start_command[start_command.index("--name") + 1]
+    subscription: tuple[str, ...] = ()
+    if "--subscription" in start_command:
+        index = start_command.index("--subscription")
+        subscription = start_command[index:index + 2]
     for _ in range(180):
         if status == "Succeeded":
             return {"executionName": execution_name, "terminalStatus": status}
@@ -1792,6 +1790,7 @@ def _wait_for_job(
                 job_name,
                 "--job-execution-name",
                 execution_name,
+                *subscription,
                 "--output",
                 "json",
             ),
@@ -2613,18 +2612,22 @@ def execute_cleanup_disarm_commands(
 
 def load_control_plane_evidence(path: Path) -> dict[str, object]:
     value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict) or set(value) != CONTROL_PLANE_FIELDS:
+    if not isinstance(value, dict) or set(value) - {
+        "observedPeak", "latencyP95Ms",
+    } != CONTROL_PLANE_FIELDS:
         raise CampaignError("control-plane evidence is incomplete")
+    # Older inputs can still be loaded, but only the live sampler supplies these metrics.
+    value = {key: item for key, item in value.items() if key in CONTROL_PLANE_FIELDS}
     capacity_fields = (
         "azureReservedConnections", "poolCeilings", "rolloutOverlap", "operatorConsumers",
-        "observedPeak", "safetyReserve", "maxConnections",
+        "safetyReserve", "maxConnections",
     )
     if any(type(value[field]) is not int for field in capacity_fields):
         raise CampaignError("connection capacity evidence is malformed")
-    reserved, pools, overlap, operators, peak, safety, maximum = (
+    reserved, pools, overlap, operators, safety, maximum = (
         cast(int, value[field]) for field in capacity_fields
     )
-    if reserved < 0 or pools <= 0 or overlap < 0 or operators <= 0 or not 0 < peak <= pools:
+    if reserved < 0 or pools <= 0 or overlap <= 0 or operators <= 0:
         raise CampaignError("connection capacity evidence is invalid")
     if safety < 20:
         raise CampaignError("connection safety reserve is below the approved minimum of 20")
@@ -2651,6 +2654,9 @@ def execute_evidence_commands(
     runner: SubprocessRunner,
     commands: tuple[tuple[str, ...], ...],
     control_plane_evidence: dict[str, object],
+    *,
+    private_directory: Path,
+    image_digest: str,
 ) -> list[dict[str, object]]:
     if len(commands) != 12:
         raise CampaignError("managed evidence command sequence is incomplete")
@@ -2675,9 +2681,15 @@ def execute_evidence_commands(
                 f"M78_CONTROL_PLANE_EVIDENCE={payload}",
                 *command[env_index + 1 :],
             )
-        result = _run_required(runner, command)
         if command[:4] == ("az", "containerapp", "job", "start"):
+            result = start_evidence_job(
+                runner, command, private_directory=private_directory, image_digest=image_digest,
+            )
+            if result.get("exitCode") != 0:
+                raise CampaignError("managed evidence job start failed")
             result = {**result, **_wait_for_job(runner, command, result)}
+        else:
+            result = _run_required(runner, command)
         results.append(result)
         if index == 9:
             if failover_started is None:
@@ -2694,7 +2706,9 @@ def persist_evidence_execution_receipt(
     commands: tuple[tuple[str, ...], ...],
     results: list[dict[str, object]],
     control_plane_evidence: dict[str, object],
+    measurement: dict[str, object],
 ) -> None:
+    measurement = validate_measurement_receipt(measurement, control_plane_evidence)
     if len(commands) != len(results) or len(results) != 12:
         raise CampaignError("managed evidence execution receipt is incomplete")
     observations: list[dict[str, str]] = []
@@ -2710,8 +2724,11 @@ def persist_evidence_execution_receipt(
                     "managed evidence job receipt is not terminal-success"
                 )
             identity = f"job:{command[command.index('--name') + 1]}"
-            if "--phase" in command:
-                identity += f":{command[command.index('--phase') + 1]}"
+            phase_option = next(
+                (part for part in command if part.startswith("--args=--phase=")), None
+            )
+            if phase_option is not None:
+                identity += ":" + phase_option.removeprefix("--args=--phase=")
         else:
             execution_name = "control-plane"
             terminal_status = "Succeeded"
@@ -2727,7 +2744,7 @@ def persist_evidence_execution_receipt(
             }
         )
     receipt = {
-        "version": "m7.8-managed-evidence-execution-v1",
+        "version": "m7.8-managed-evidence-execution-v2",
         "campaignId": config.campaign_id,
         "generationId": config.generation_id,
         "sourceHead": runtime["sourceHead"],
@@ -2737,6 +2754,7 @@ def persist_evidence_execution_receipt(
                 control_plane_evidence, separators=(",", ":"), sort_keys=True
             ).encode()
         ).hexdigest(),
+        "measurement": measurement,
         "observations": observations,
     }
     encoded = json.dumps(receipt, indent=2, sort_keys=True) + "\n"
@@ -2773,9 +2791,10 @@ def validate_evidence_execution_receipt(
             "sourceHead",
             "imageDigest",
             "controlPlaneEvidenceSha256",
+            "measurement",
             "observations",
         }
-        or value["version"] != "m7.8-managed-evidence-execution-v1"
+        or value["version"] != "m7.8-managed-evidence-execution-v2"
         or value["campaignId"] != config.campaign_id
         or value["generationId"] != config.generation_id
         or value["sourceHead"] != runtime["sourceHead"]
@@ -2798,6 +2817,7 @@ def validate_evidence_execution_receipt(
         )
     ):
         raise CampaignError("managed evidence execution receipt is invalid")
+    validate_measurement_receipt(value["measurement"], control_plane_evidence)
 
 
 def load_image_scan_evidence(
@@ -3407,6 +3427,13 @@ def main() -> int:
             else None
         )
         evidence_receipt_path = args.ledger.with_name("managed-evidence-execution.json")
+        if args.execute and args.operation == "evidence":
+            if (
+                ledger.image_digest is None
+                or config.image_digest not in {None, ledger.image_digest}
+            ):
+                raise CampaignError("measurement image differs from the admitted ledger image")
+            config = replace(config, image_digest=ledger.image_digest)
         if (
             args.execute
             and args.operation == "evidence"
@@ -3440,6 +3467,10 @@ def main() -> int:
             runtime,
             control_plane_evidence=rendered_control_evidence,
         )
+        if args.operation == "evidence":
+            commands = tuple(
+                (*command, "--subscription", runtime["subscriptionId"]) for command in commands
+            )
         if not args.execute:
             display_commands = tuple(
                 tuple(
@@ -3456,6 +3487,15 @@ def main() -> int:
                         "generatedCommands": (
                             generated_policy_read_contract()
                             if args.operation == "capacity-check"
+                            else (
+                                "start and stop the campaign worker execution",
+                                "start and observe the steady-state sampler execution",
+                                "copy the campaign API revision and split API traffic",
+                                "start and observe the overlap sampler execution",
+                                "read both sampler results from campaign Log Analytics",
+                                "restore API traffic and deactivate the temporary revision",
+                            )
+                            if args.operation == "evidence"
                             else ()
                         ),
                         "mutationAuthorized": False,
@@ -3464,6 +3504,29 @@ def main() -> int:
                 )
             )
             return 0
+        if args.operation == "evidence" and control_evidence is not None:
+            if Phase(ledger.phase) is not Phase.MIGRATED:
+                raise CampaignError("managed evidence requires the migrated phase")
+            attempt_path = args.ledger.with_name("managed-evidence-attempt.json")
+            try:
+                with attempt_path.open("x", encoding="utf-8") as attempt:
+                    json.dump(
+                        {
+                            "campaignId": config.campaign_id,
+                            "generationId": config.generation_id,
+                            "sourceHead": runtime["sourceHead"],
+                            "imageDigest": config.image_digest,
+                        },
+                        attempt,
+                        sort_keys=True,
+                    )
+                    attempt.flush()
+                    os.fsync(attempt.fileno())
+            except FileExistsError as exc:
+                raise CampaignError(
+                    "managed evidence attempt already exists; use the existing cleanup path "
+                    "if the attempt was interrupted"
+                ) from exc
         runner = SubprocessRunner()
         try:
             cleanup_arm_evidence_sha256: str | None = None
@@ -3478,8 +3541,23 @@ def main() -> int:
                 raise CampaignError(
                     "control-plane evidence is required for managed evidence"
                 )
+            measurement = None
             if args.operation == "evidence" and control_evidence is not None:
-                results = execute_evidence_commands(runner, commands, control_evidence)
+                if config.image_digest is None:
+                    raise CampaignError("measurement image is missing")
+                measurement = CampaignMeasurement(
+                    runner, runtime, config.cleanup_deadline_utc,
+                    private_directory=args.ledger.parent, image_digest=config.image_digest,
+                ).run(control_evidence)
+                results = execute_evidence_commands(
+                    runner, commands, {
+                        **control_evidence,
+                        "observedPeak": measurement["observedPeak"],
+                        "latencyP95Ms": measurement["latencyP95Ms"],
+                    },
+                    private_directory=args.ledger.parent,
+                    image_digest=config.image_digest,
+                )
             elif args.operation == "cleanup-deploy":
                 results = execute_cleanup_deploy_commands(
                     runner, commands, config, runtime
@@ -3504,7 +3582,7 @@ def main() -> int:
                 runner=runner,
                 controller_authority_evidence=controller_authority,
             )
-            if args.operation == "evidence" and control_evidence is not None:
+            if measurement is not None and control_evidence is not None:
                 persist_evidence_execution_receipt(
                     evidence_receipt_path,
                     config=config,
@@ -3512,6 +3590,7 @@ def main() -> int:
                     commands=commands,
                     results=results,
                     control_plane_evidence=control_evidence,
+                    measurement=measurement,
                 )
             if target is Phase.COST_GATED:
                 config.validate()

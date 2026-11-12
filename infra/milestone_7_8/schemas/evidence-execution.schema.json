@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:managed-evidence-execution:v1",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:managed-evidence-execution:v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -10,15 +10,83 @@
     "sourceHead",
     "imageDigest",
     "controlPlaneEvidenceSha256",
+    "measurement",
     "observations"
   ],
+  "$defs": {
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "samplerExecution",
+        "apiRevisions",
+        "sampleSha256",
+        "readbacksSha256"
+      ],
+      "properties": {
+        "samplerExecution": {
+          "type": "string",
+          "minLength": 1
+        },
+        "apiRevisions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "sampleSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "readbacksSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    }
+  },
   "properties": {
-    "version": { "const": "m7.8-managed-evidence-execution-v1" },
+    "version": { "const": "m7.8-managed-evidence-execution-v2" },
     "campaignId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,47}$" },
     "generationId": { "type": "string", "pattern": "^g[1-9][0-9]{0,5}-[a-f0-9]{12}$" },
     "sourceHead": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
     "imageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "controlPlaneEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workerExecution",
+        "steady",
+        "overlap",
+        "observedPeak",
+        "latencyP95Ms"
+      ],
+      "properties": {
+        "workerExecution": {
+          "type": "string",
+          "minLength": 1
+        },
+        "steady": {
+          "$ref": "#/$defs/window"
+        },
+        "overlap": {
+          "$ref": "#/$defs/window"
+        },
+        "observedPeak": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "latencyP95Ms": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
     "observations": {
       "type": "array",
       "minItems": 12,
