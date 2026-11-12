@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import shutil
+import subprocess
 import sys
 import tarfile
 from collections.abc import Callable
@@ -17,8 +18,15 @@ from typing import cast
 import pytest
 from test_milestone_7_8_campaign_enablement import _config, _runtime
 
-from infra.milestone_7_8 import local_image, operator, scout_admission
-from infra.milestone_7_8.campaign import ORDER, CampaignConfig, CampaignError, Ledger, Phase
+from infra.milestone_7_8 import canonical_inputs, local_image, operator, scout_admission
+from infra.milestone_7_8.campaign import (
+    ORDER,
+    CampaignConfig,
+    CampaignError,
+    Ledger,
+    Phase,
+    SubprocessRunner,
+)
 from infra.milestone_7_8.canonical_inputs import BUILD_INPUTS, DOMAIN
 from infra.milestone_7_8.controller_renewal import _durable_record
 
@@ -186,7 +194,7 @@ class Provider:
             raw = self.case.runtime["sourceHead"]
         elif command[:2] == ("git", "status"):
             raw = ""
-        elif command[0] == "git" and command[3] == "archive":
+        elif command[0] == "git" and "archive" in command:
             assert command[command.index("--output") + 2] == self.case.runtime["sourceHead"]
             with tarfile.open(command[command.index("--output") + 1], "w") as archive:
                 directories = {"apps/api/opencanvas_api", "apps/api/scripts", "apps/api/alembic"}
@@ -317,6 +325,80 @@ def test_staging_preflight_rejects_actual_canonical_tree_mismatch(case: Case) ->
     assert case.runtime_path.exists()
     assert not (case.runtime_path.parent / "local-image").exists()
     assert not (case.runtime_path.parent / "local-image-attempt.json").exists()
+
+
+def test_real_git_archive_ignores_workstation_autocrlf_without_changing_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "git-fixture"
+    repository.mkdir()
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ("git", "-C", str(repository), *args),
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    git("init", "--quiet")
+    directories = {"apps/api/opencanvas_api", "apps/api/alembic", "apps/api/scripts"}
+    for name in BUILD_INPUTS:
+        path = repository / name / "fixture.py" if name in directories else repository / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"first line\nsecond line\n")
+    git("-c", "core.autocrlf=false", "add", "--", *BUILD_INPUTS)
+    git("update-index", "--chmod=+x", "apps/api/scripts/fixture.py")
+    git(
+        "-c",
+        "user.name=Synthetic Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "Synthetic canonical source",
+    )
+    source_head = git("rev-parse", "HEAD")
+    config_before = (repository / ".git" / "config").read_bytes()
+    monkeypatch.setattr(local_image, "ROOT", repository)
+    monkeypatch.setattr(canonical_inputs, "REPOSITORY_ROOT", repository)
+    input_hash = str(canonical_inputs.canonical_snapshot(source_head)["buildInputSha256"])
+    tree = git("ls-tree", "-r", "--full-tree", source_head, "--", *BUILD_INPUTS)
+    previous_archive = tmp_path / "previous.tar"
+    git(
+        "-c",
+        "core.autocrlf=true",
+        "archive",
+        "--format=tar",
+        "--output",
+        str(previous_archive),
+        source_head,
+        "--",
+        *BUILD_INPUTS,
+    )
+    with pytest.raises(CampaignError, match="content differs from the exact Git tree"):
+        local_image._extract_source(
+            previous_archive, tmp_path / "previous-source", tree, input_hash
+        )
+
+    class WindowsCheckoutRunner:
+        def run(self, command: tuple[str, ...]) -> dict[str, object]:
+            assert command[0] == "git"
+            return SubprocessRunner().run(("git", "-c", "core.autocrlf=true", *command[1:]))
+
+    output = tmp_path / "new-staging"
+    output.mkdir()
+    archive_path, context = local_image._stage_canonical_source(
+        output,
+        source_head,
+        input_hash,
+        WindowsCheckoutRunner().run,
+    )
+    local_image._extract_source(archive_path, context, tree, input_hash, extract=False)
+    assert (context / "apps/api/scripts/fixture.py").read_bytes() == b"first line\nsecond line\n"
+    assert (repository / ".git" / "config").read_bytes() == config_before
 
 
 def test_scope_create_staging_path_failure_dispatches_zero_azure_and_keeps_ledger(

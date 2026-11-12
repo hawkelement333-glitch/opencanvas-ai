@@ -440,6 +440,13 @@ ledger at `cost-gated`, without dispatching resource creation or failure cleanup
 Use a short, ignored private output directory on Windows; checking only the
 bundle directory length does not establish that every generated path works.
 No Windows long-path or security setting is changed by this check.
+The archive command disables automatic newline conversion for that invocation
+only (`git -c core.autocrlf=false -c core.eol=lf ... archive`). Otherwise a
+Windows checkout with `core.autocrlf=true` can archive CRLF bytes that differ
+from the bound Git blobs. The repository's Git configuration is unchanged;
+every extracted file must still match its exact Git blob hash and executable
+mode. Do not normalize archive contents or substitute a different input hash
+to make this validation pass.
 
 ```powershell
 $imagePlan = "$bundle/local-image-plan.json"

@@ -42,6 +42,9 @@ ROOT = Path(__file__).resolve().parents[2]
 MAX_IMAGE_BYTES = 2 * 1024**3
 API_VERSION = "2025-11-01"
 NETWORK_FIELDS = ("publicNetworkAccess", "networkRuleSet")
+# Git archive otherwise applies the workstation's checkout newline conversion.
+# These command-local settings leave repository configuration untouched.
+ARCHIVE_OPTIONS = ("-c", "core.autocrlf=false", "-c", "core.eol=lf")
 
 
 def _hash(value: object) -> str:
@@ -245,6 +248,7 @@ def _stage_canonical_source(
             "git",
             "-C",
             str(ROOT),
+            *ARCHIVE_OPTIONS,
             "archive",
             "--format=tar",
             "--output",
@@ -758,7 +762,9 @@ def validate_completion(
         return selected
 
     source = str(output / "source")
-    archive_command, _archive_response = required(("git", "-C", str(ROOT), "archive"))[0]
+    archive_command, _archive_response = required(
+        ("git", "-C", str(ROOT), *ARCHIVE_OPTIONS, "archive")
+    )[0]
     tree_command, tree_response = required(("git", "-C", str(ROOT), "ls-tree"))[0]
     if (
         archive_command
@@ -766,6 +772,7 @@ def validate_completion(
             "git",
             "-C",
             str(ROOT),
+            *ARCHIVE_OPTIONS,
             "archive",
             "--format=tar",
             "--output",
