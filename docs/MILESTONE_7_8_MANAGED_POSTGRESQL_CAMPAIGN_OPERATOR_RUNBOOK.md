@@ -431,10 +431,14 @@ role, or trusted-task bypass is added. Before requesting that approval:
    trusted-service bypass, identities, roles, tags, and all other settings.
    The second restores the saved network settings and disabled public access.
 4. Require successful provisioning/readback of the first PATCH before push or
-   scan. Restore and verify the second on success, scan rejection, interruption,
-   or deadline failure. A lost PATCH response needs GET reconciliation, not an
-   automatic mutation retry. A restoration failure blocks workload admission
-   and requires the already approved ownership-checked campaign cleanup.
+   scan. The opened readback may serialize the exact approved single IPv4 `/32`
+   as its bare address; only those two spellings of that one Allow rule are
+   equivalent. All other fields remain exact, raw responses remain unchanged,
+   and completion replays the same check. Restoration still requires the exact
+   saved network settings. Restore and verify the second on success, scan
+   rejection, interruption, or deadline failure. A lost PATCH response needs GET
+   reconciliation, not an automatic mutation retry. A restoration failure blocks
+   workload admission and requires the already approved ownership-checked cleanup.
 
 These are supported
 [Premium IP access controls](https://learn.microsoft.com/en-us/azure/container-registry/container-registry-access-selected-networks)

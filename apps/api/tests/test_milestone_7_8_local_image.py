@@ -230,6 +230,24 @@ class Provider:
         }
 
 
+class RuleReadbackProvider(Provider):
+    def __init__(self, case: Case, rules: object, *, after_patch: int = 1) -> None:
+        super().__init__(case)
+        self.rules = rules
+        self.after_patch = after_patch
+
+    def run(self, command: tuple[str, ...]) -> dict[str, object]:
+        response = super().run(command)
+        if (
+            command[:4] == ("az", "rest", "--method", "get")
+            and self.patch_count == self.after_patch
+        ):
+            observed = json.loads(cast(str, response["stdout"]))
+            observed["properties"]["networkRuleSet"]["ipRules"] = copy.deepcopy(self.rules)
+            response = {**response, "stdout": json.dumps(observed)}
+        return response
+
+
 def execute(case: Case, provider: Provider) -> dict[str, object]:
     return local_image.execute_local_image(
         case.runtime_path,
@@ -512,6 +530,63 @@ def test_one_build_scan_and_exact_restoration_reaches_existing_scan_admission(ca
         execute(case, provider)
 
 
+def test_opened_bare_ipv4_readback_reaches_completion_without_rewriting_evidence(
+    case: Case,
+) -> None:
+    provider = RuleReadbackProvider(case, [{"action": "Allow", "value": "8.8.4.4"}])
+    assert execute(case, provider)["imageDigest"] == DIGEST
+    output = case.runtime_path.parent / "local-image"
+    observed = json.loads(json.loads((output / "03-response.json").read_text())["stdout"])
+    assert observed["properties"]["networkRuleSet"]["ipRules"] == provider.rules
+    assert cast(dict[str, object], case.plan["openBody"])["properties"] != local_image._network(
+        observed
+    )
+    before = {path.name: path.read_bytes() for path in output.iterdir() if path.is_file()}
+    local_image.validate_completion(
+        case.runtime_path,
+        case.runtime,
+        case.config,
+        digest=DIGEST,
+        scan_path=output / "image-scan.json",
+    )
+    assert before == {path.name: path.read_bytes() for path in output.iterdir() if path.is_file()}
+    assert provider.registry == case.plan["before"]
+    assert provider.patch_count == 2
+
+
+@pytest.mark.parametrize(
+    "rules",
+    [
+        [{"action": "Allow", "value": "8.8.4.5"}],
+        [{"action": "Allow", "value": "8.8.4.0/24"}],
+        [{"action": "Allow", "value": "2001:4860:4860::8888/128"}],
+        [{"action": "Allow", "value": "8.8.4.4"}] * 2,
+        [],
+        [{"action": "Allow"}],
+        [{"value": "8.8.4.4"}],
+        [{"action": "Deny", "value": "8.8.4.4"}],
+        [{"action": "Allow", "value": "8.8.4.4", "unexpected": True}],
+        None,
+    ],
+)
+def test_opened_rule_drift_stops_before_build_and_restores(case: Case, rules: object) -> None:
+    provider = RuleReadbackProvider(case, rules)
+    with pytest.raises(CampaignError, match="cleanup required"):
+        execute(case, provider)
+    assert provider.registry == case.plan["before"]
+    assert provider.patch_count == 2
+    assert not any(command[0] == "docker" for command in provider.commands)
+    assert not (case.runtime_path.parent / "local-image/completed.json").exists()
+
+
+def test_bare_ipv4_rule_is_not_accepted_as_restoration(case: Case) -> None:
+    provider = RuleReadbackProvider(case, [{"action": "Allow", "value": "8.8.4.4"}], after_patch=2)
+    with pytest.raises(CampaignError, match="restoration unproved"):
+        execute(case, provider)
+    assert not (case.runtime_path.parent / "local-image/completed.json").exists()
+    assert not (case.runtime_path.parent / "local-image/image-scan.json").exists()
+
+
 @pytest.mark.parametrize(
     "fault",
     [
@@ -573,6 +648,8 @@ def test_completion_rejects_tampered_raw_record_and_wrong_scan(case: Case) -> No
         "history",
         "inspect-scope",
         "manifest-scope",
+        "opened-network",
+        "opening-scope",
     ],
 )
 def test_completion_semantics_reject_even_self_consistent_file_hashes(
@@ -583,11 +660,18 @@ def test_completion_semantics_reject_even_self_consistent_file_hashes(
     receipt = json.loads((output / "completed.json").read_text())
     if field == "bytes":
         receipt["imageBytes"] += 1
-    elif field == "final-get":
-        path = sorted(output.glob("*-response.json"))[-1]
+    elif field in {"final-get", "opened-network"}:
+        path = (
+            sorted(output.glob("*-response.json"))[-1]
+            if field == "final-get"
+            else output / "03-response.json"
+        )
         response = json.loads(path.read_text())
         observed = json.loads(response["stdout"])
-        observed["properties"]["publicNetworkAccess"] = "Enabled"
+        if field == "final-get":
+            observed["properties"]["publicNetworkAccess"] = "Enabled"
+        else:
+            observed["properties"]["networkRuleSet"]["ipRules"][0]["value"] = "8.8.4.5"
         response["stdout"] = json.dumps(observed)
         path.write_text(json.dumps(response), encoding="utf-8")
     else:
@@ -602,6 +686,8 @@ def test_completion_semantics_reject_even_self_consistent_file_hashes(
                 path.with_name(path.name.replace("intent", "response")).unlink()
             elif field == "inspect-scope" and command[:3] == ["docker", "image", "inspect"]:
                 command[-1] = "unrelated-image"
+            elif field == "opening-scope" and path.name == "03-intent.json":
+                command[command.index("--url") + 1] = "https://management.azure.com/unrelated"
             elif field == "manifest-scope" and command[:4] == [
                 "az",
                 "acr",

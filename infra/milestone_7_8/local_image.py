@@ -89,6 +89,29 @@ def _preserved(value: object) -> dict[str, object]:
     return result
 
 
+def _verify_registry(observed: object, plan: dict[str, object], *, opened: bool = False) -> None:
+    expected_network = (
+        _object(plan["openBody"])["properties"] if opened else _network(plan["before"])
+    )
+    actual_network = _network(observed)
+    if opened:
+        rules = _object(actual_network["networkRuleSet"])
+        # ARM can serialize a single IPv4 /32 as its bare address. Accept only
+        # that exact approved host; every other rule and network field stays exact.
+        if rules.get("ipRules") == [{"action": "Allow", "value": plan["egressIpv4"]}]:
+            actual_network = {
+                **actual_network,
+                "networkRuleSet": {
+                    **rules,
+                    "ipRules": [{"action": "Allow", "value": f"{plan['egressIpv4']}/32"}],
+                },
+            }
+    if actual_network != expected_network or _preserved(observed) != _preserved(plan["before"]):
+        raise CampaignError("registry network or preserved properties differ")
+    if _object(_object(observed).get("properties")).get("provisioningState") != "Succeeded":
+        raise CampaignError("registry network readback is not provisioned successfully")
+
+
 def build_plan(
     runtime: dict[str, str], config: CampaignConfig, before: object, *, egress_ipv4: str
 ) -> dict[str, object]:
@@ -492,16 +515,8 @@ def execute_local_image(
             restore=restore,
         )
 
-    def verify_registry(observed: object, expected_network: object) -> None:
-        if _network(observed) != expected_network or _preserved(observed) != _preserved(
-            plan["before"]
-        ):
-            raise CampaignError("registry network or preserved properties differ")
-        if _object(_object(observed).get("properties")).get("provisioningState") != "Succeeded":
-            raise CampaignError("registry network readback is not provisioned successfully")
-
     baseline = get()
-    verify_registry(baseline, _network(plan["before"]))
+    _verify_registry(baseline, plan)
     _durable_record(output / "fresh-before.json", baseline)
     # Record restoration scope before any network mutation. An interruption can
     # be inspected using plan.json, openBody.json and the retained intents.
@@ -512,7 +527,7 @@ def execute_local_image(
     try:
         opened = True  # even a lost PATCH response must take the restoration path
         patch("openBody")
-        verify_registry(get(), _object(plan["openBody"])["properties"])
+        _verify_registry(get(), plan, opened=True)
         info = _object(_result(run(("docker", "info", "--format", "{{json .}}"))))
         if info.get("OSType") != "linux" or info.get("Architecture") not in {"amd64", "x86_64"}:
             raise CampaignError("the campaign requires a Linux amd64 Docker engine")
@@ -636,7 +651,7 @@ def execute_local_image(
                 with suppress(CampaignError):
                     patch("restoreBody", restore=True)
                 restored = get(restore=True)
-                verify_registry(restored, _network(plan["before"]))
+                _verify_registry(restored, plan)
                 _durable_record(output / "restored.json", restored)
             except Exception as exc:
                 _durable_record(
@@ -760,6 +775,44 @@ def validate_completion(
         if len(selected) != count or any(row[1].get("exitCode") != 0 for row in selected):
             raise CampaignError("local image successful command history is incomplete")
         return selected
+
+    registry_get = [
+        "az",
+        "rest",
+        "--method",
+        "get",
+        "--url",
+        plan["registryUrl"],
+        "--subscription",
+        runtime["subscriptionId"],
+        "--output",
+        "json",
+    ]
+    registry_open = [
+        "az",
+        "rest",
+        "--method",
+        "patch",
+        "--url",
+        plan["registryUrl"],
+        "--subscription",
+        runtime["subscriptionId"],
+        "--body",
+        f"@{output / 'openBody.json'}",
+        "--output",
+        "json",
+    ]
+    opening_commands = [registry_get, registry_open, registry_get]
+    if (
+        intents[:3] != opening_commands
+        or [command for command, _response in records[:3]] != opening_commands
+        or any(response.get("exitCode") != 0 for _command, response in records[:3])
+        or json.loads((output / "openBody.json").read_text()) != plan["openBody"]
+        or json.loads((output / "fresh-before.json").read_text()) != _result(records[0][1])
+    ):
+        raise CampaignError("local image exact opening command or raw readback differs")
+    _verify_registry(_result(records[0][1]), plan)
+    _verify_registry(_result(records[2][1]), plan, opened=True)
 
     source = str(output / "source")
     archive_command, _archive_response = required(
