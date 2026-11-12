@@ -1,7 +1,14 @@
-ARG PYTHON_IMAGE=python:3.13.14-slim-trixie@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91
+ARG PYTHON_IMAGE=python:3.13.18-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
 ARG SOURCE_DATE_EPOCH=0
 
-FROM ${PYTHON_IMAGE} AS builder
+FROM ${PYTHON_IMAGE} AS patched-base
+# The pinned upstream base predates Debian DSA-6613-1 (both zlib CVEs).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade \
+        zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM patched-base AS builder
 ARG SOURCE_DATE_EPOCH
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -23,7 +30,7 @@ RUN python -m pip wheel \
     --wheel-dir /wheels \
     .
 
-FROM ${PYTHON_IMAGE} AS runner
+FROM patched-base AS runner
 ARG SOURCE_DATE_EPOCH
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -33,12 +40,17 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 WORKDIR /app
 RUN addgroup --system opencanvas && adduser --system --ingroup opencanvas opencanvas
 COPY --from=builder /wheels /wheels
+# Runtime jobs use preinstalled modules; remove the installer and its bootstrap archive.
 RUN python -m pip install \
         --no-index \
         --no-compile \
         --find-links=/wheels \
         opencanvas-api==0.1.0 \
-    && rm -rf /wheels
+    && python -m pip check \
+    && python -m pip uninstall --yes pip \
+    && rm -rf /wheels /usr/local/lib/python3.13/ensurepip \
+    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.13 \
+    && python -c "import importlib.util; assert all(importlib.util.find_spec(name) is None for name in ('pip', 'ensurepip'))"
 COPY apps/api/alembic.ini ./
 COPY apps/api/alembic ./alembic
 COPY apps/api/scripts ./scripts

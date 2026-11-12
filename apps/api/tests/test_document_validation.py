@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import io
+import subprocess
+import sys
+import textwrap
 import zipfile
 
 import pytest
@@ -79,6 +82,44 @@ def test_valid_pdf_signature_with_malformed_structure_is_rejected(settings: Sett
             settings=settings,
         )
     assert error.value.status_code == 422
+
+
+@pytest.mark.security
+def test_pdf_xref_without_trailer_is_rejected_without_hanging() -> None:
+    # Upstream security regression: https://github.com/py-pdf/pypdf/pull/4289
+    content = b"%PDF-1.4\nstartxref\n28\n%%EOF\nxref\n1 0\naaa"
+    script = textwrap.dedent(
+        """\
+        import sys
+        from opencanvas_api.core.config import Settings
+        from opencanvas_api.services.documents import (
+            DocumentValidationError, validate_document_bytes,
+        )
+
+        try:
+            validate_document_bytes(
+                filename="truncated-xref.pdf",
+                content=sys.stdin.buffer.read(),
+                declared_media_type="application/pdf",
+                settings=Settings(environment="test", document_max_file_size_bytes=100_000),
+            )
+        except DocumentValidationError as error:
+            assert error.code == "invalid_document"
+            assert error.status_code == 422
+            print("invalid_document:422")
+        else:
+            raise AssertionError("malformed PDF accepted")
+        """
+    )
+    # A dependency regression must fail this test, not hang the entire test process.
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", script],
+        input=content,
+        capture_output=True,
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.strip() == b"invalid_document:422"
 
 
 @pytest.mark.security

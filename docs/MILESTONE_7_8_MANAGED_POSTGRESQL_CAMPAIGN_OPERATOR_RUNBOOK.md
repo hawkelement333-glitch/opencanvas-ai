@@ -500,11 +500,31 @@ $scan = "$bundle/local-image/image-scan.json"
 The executor archives only canonical tracked inputs from the exact clean source
 commit, verifies those bytes, builds Linux/amd64 once, and checks source/input
 labels and the 2-GiB size cap before push. Local image identity, pushed digest,
-registry manifest and the one digest-pinned Scout scan must agree. Raw command
-responses, the source archive, SARIF, approvals and network snapshots stay private.
+registry manifest and the completed digest-pinned Scout assessment must agree. Scout explicitly
+uses `--platform linux/amd64`, including on Windows hosts. Raw command responses,
+the source archive, SARIF, approvals and network snapshots stay private.
 Completion is written only after verified network restoration. The normal
 `image-decision` entry point validates that completion whenever the local attempt
 marker exists; a pending scan or failed restoration cannot advance this route.
+Within this same authorized image attempt, the executor permits at most one
+additional Scout command for an observed transport failure: exit code 1, no
+SARIF file, and an explicit connection reset, TLS handshake timeout, I/O timeout,
+or unexpected EOF in retained stderr. The image digest, Linux platform, severity
+filter, network scope and existing approval remain unchanged. It checks expiry
+immediately before dispatch. The first command response stays private and intact;
+the second command uses the separate `scout.retry.sarif.json` output.
+
+Exit code 2 never qualifies. Any existing report, findings, malformed or
+contradictory report/exit status, unknown failure, missing response, or failed
+response persistence stops this path. Deterministic flag, platform and
+authentication errors are not repeated unchanged. A second failure proceeds to
+restoration and cleanup; there is no third command, rebuild, repush, new approval,
+or restart of an earlier image attempt. Completion replay requires both exact
+command/response records, an admissible first transport failure, a clean final
+report and verified restoration. One successful assessment is recorded in the
+campaign scan ledger; both command attempts remain in the private history.
+This bounded recovery does not increase the existing time, transfer or budget
+allowances and cannot admit the historical image with reported vulnerabilities.
 There is no automatic build, push or PATCH retry. Ordinary failures invoke the
 existing campaign cleanup path and require cleanup-wait, disarm, residue and
 finalize. A process crash can prevent local restoration/cleanup dispatch; retain

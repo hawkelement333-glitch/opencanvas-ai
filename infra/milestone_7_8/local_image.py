@@ -471,7 +471,7 @@ def execute_local_image(
             _durable_record(output / f"{stem}-indeterminate.json", {"error": type(exc).__name__})
             raise CampaignError("image command outcome is indeterminate") from exc
         _durable_record(output / f"{stem}-response.json", response)
-        if response.get("exitCode") != 0:
+        if response.get("exitCode") != 0 and command[:3] != ("docker", "scout", "cves"):
             raise CampaignError("image command failed; private response retained")
         return response
 
@@ -629,6 +629,7 @@ def execute_local_image(
             output / "scan-pending.json",
             runner=_RecordingRunner(run),
             clock=clock,
+            recover_transport=True,
         )
         receipt = {
             "version": "m7.8-local-image-result-v1",
@@ -755,6 +756,7 @@ def validate_completion(
             raise CampaignError("local image retained evidence differs")
     records: list[tuple[list[object], dict[str, object]]] = []
     intents: list[list[object]] = []
+    scan_times: list[datetime] = []
     for path in sorted(output.glob("*-intent.json")):
         intent = _object(json.loads(path.read_text()))
         command = intent.get("command")
@@ -765,6 +767,17 @@ def validate_completion(
             raise CampaignError("local image command binding differs")
         intents.append(command)
         response_path = path.with_name(path.name.replace("-intent.json", "-response.json"))
+        if command[:3] == ["docker", "scout", "cves"]:
+            intent_time = intent.get("intentAtUtc")
+            if (
+                not isinstance(intent_time, str)
+                or not parse_utc(str(approval["issuedAtUtc"])) <= parse_utc(intent_time)
+                < parse_utc(str(approval["expiresAtUtc"]))
+                or not response_path.exists()
+                or path.with_name(path.name.replace("-intent.json", "-indeterminate.json")).exists()
+            ):
+                raise CampaignError("local image scanner dispatch history is incomplete or expired")
+            scan_times.append(parse_utc(intent_time))
         if response_path.exists():
             records.append((command, _object(json.loads(response_path.read_text()))))
 
@@ -898,7 +911,41 @@ def validate_completion(
         raise CampaignError("local image source, size or pushed digest evidence differs")
     push_command, push_response = required(("docker", "push"))[0]
     manifest_command, manifest_response = required(("az", "acr", "manifest", "show-metadata"))[0]
-    scan_command, _scan_response = required(("docker", "scout", "cves"))[0]
+    scan_records = [row for row in records if row[0][:3] == ["docker", "scout", "cves"]]
+    scan_intents = [command for command in intents if command[:3] == ["docker", "scout", "cves"]]
+    if (
+        len(scan_records) not in {1, 2}
+        or len(scan_records) != len(scan_intents)
+        or scan_times != sorted(scan_times)
+    ):
+        raise CampaignError("local image scanner attempt history is incomplete")
+    final_report = output / "scout.sarif.json"
+    for index, (scan_command, scan_response) in enumerate(scan_records):
+        report = final_report if index == 0 else scout_admission.retry_report_path(final_report)
+        expected_scan = [
+            "docker", "scout", "cves",
+            f"registry://{runtime['registryName']}.azurecr.io/mobius-api@{digest}",
+            "--platform", "linux/amd64", "--only-severity", "critical,high",
+            "--exit-code", "--format", "sarif", "--output", str(report),
+        ]
+        if (
+            scan_command != expected_scan
+            or type(scan_response.get("exitCode")) is not int
+            or not isinstance(scan_response.get("stdout"), str)
+            or not isinstance(scan_response.get("stderr"), str)
+        ):
+            raise CampaignError("local image scan request or response differs")
+        if index == len(scan_records) - 1:
+            if scan_response["exitCode"] != 0:
+                raise CampaignError("local image final scan is unsuccessful")
+        elif not scout_admission.retryable_transport_failure(scan_response, report):
+            raise CampaignError(
+                "local image scanner recovery is not an unassessed transport failure"
+            )
+    if len(scan_records) == 2:
+        if intents.index(scan_intents[1]) != intents.index(scan_intents[0]) + 1:
+            raise CampaignError("local image scanner recovery is not the same bounded step")
+        final_report = scout_admission.retry_report_path(final_report)
     if (
         push_command != ["docker", "push", plan["imageReference"]]
         or set(re.findall(r"digest:\s*(sha256:[a-f0-9]{64})", str(push_response["stdout"])))
@@ -919,23 +966,9 @@ def validate_completion(
             "json",
         ]
         or _object(_result(manifest_response)).get("digest") != digest
-        or scan_command
-        != [
-            "docker",
-            "scout",
-            "cves",
-            f"registry://{runtime['registryName']}.azurecr.io/mobius-api@{digest}",
-            "--only-severity",
-            "critical,high",
-            "--exit-code",
-            "--format",
-            "sarif",
-            "--output",
-            str(output / "scout.sarif.json"),
-        ]
     ):
         raise CampaignError("local image push, registry or scan digest evidence differs")
-    sarif = _object(json.loads((output / "scout.sarif.json").read_text()))
+    sarif = _object(json.loads(final_report.read_text()))
     runs = sarif.get("runs")
     if (
         sarif.get("version") != "2.1.0"

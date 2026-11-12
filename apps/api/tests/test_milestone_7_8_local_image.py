@@ -213,6 +213,15 @@ class Provider:
             raw = "version: v1.23.1"
         elif command[:3] == ("docker", "scout", "cves"):
             assert command[3].endswith("mobius-api@" + DIGEST)
+            if self.fault == "windows-scout-host" and (
+                "--platform" not in command
+                or command[command.index("--platform") + 1] != "linux/amd64"
+            ):
+                return {
+                    "exitCode": 1,
+                    "stdout": "synthetic registry index has no windows/amd64 child",
+                    "stderr": "Pull failed",
+                }
             if self.fault == "scan-failure":
                 return {"exitCode": 2, "stdout": "", "stderr": "synthetic critical finding"}
             Path(command[command.index("--output") + 1]).write_text(
@@ -530,6 +539,226 @@ def test_one_build_scan_and_exact_restoration_reaches_existing_scan_admission(ca
         execute(case, provider)
 
 
+def test_scout_selects_linux_image_on_windows_host_through_completion(case: Case) -> None:
+    provider = Provider(case, fault="windows-scout-host")
+    assert execute(case, provider)["imageDigest"] == DIGEST
+    commands = [
+        command for command in provider.commands if command[:3] == ("docker", "scout", "cves")
+    ]
+    assert len(commands) == 1
+    assert commands[0].count("--platform") == 1
+    assert commands[0][commands[0].index("--platform") + 1] == "linux/amd64"
+    assert (
+        commands[0][3]
+        == f"registry://{case.runtime['registryName']}.azurecr.io/mobius-api@{DIGEST}"
+    )
+    local_image.validate_completion(
+        case.runtime_path,
+        case.runtime,
+        case.config,
+        digest=DIGEST,
+        scan_path=case.runtime_path.parent / "local-image/image-scan.json",
+    )
+    assert provider.registry == case.plan["before"]
+    assert provider.patch_count == 2
+
+
+class ScanRecoveryProvider(Provider):
+    def __init__(self, case: Case, *, outcome: str = "transport", fault: str = "") -> None:
+        super().__init__(case, fault=fault)
+        self.outcome = outcome
+        self.scan_count = 0
+
+    def run(self, command: tuple[str, ...]) -> dict[str, object]:
+        if command[:3] == ("docker", "scout", "cves"):
+            self.scan_count += 1
+            if self.scan_count == 1 or self.outcome == "transport-twice":
+                self.commands.append(command)
+                report = Path(command[command.index("--output") + 1])
+                if self.outcome == "indeterminate":
+                    raise OSError("synthetic scanner response lost")
+                if self.outcome.startswith("findings-"):
+                    report.write_text(json.dumps({
+                        "version": "2.1.0", "runs": [{"results": [{"ruleId": "CVE-2030-1234"}]}],
+                    }), encoding="utf-8")
+                elif self.outcome == "malformed-report":
+                    report.write_text("{", encoding="utf-8")
+                elif self.outcome == "clean-report-failure":
+                    report.write_text(json.dumps({
+                        "version": "2.1.0", "runs": [{"results": []}],
+                    }), encoding="utf-8")
+                elif self.outcome == "unexpected-retry-report":
+                    scout_admission.retry_report_path(report).write_text("retained unexpected file")
+                return {
+                    "exitCode": (
+                        int(self.outcome[-1]) if self.outcome.startswith("findings-")
+                        else 2 if self.outcome == "exit-two" else 1
+                    ),
+                    "stdout": (
+                        [] if self.outcome == "malformed-envelope"
+                        else "8 Critical 37 High" if self.outcome == "findings-no-report" else ""
+                    ),
+                    "stderr": (
+                        "unknown flag --platform; i/o timeout" if self.outcome == "bad-flags"
+                        else "unauthorized; i/o timeout" if self.outcome == "unauthorized"
+                        else "unclassified scanner failure" if self.outcome == "unknown"
+                        else "registry transport: connection reset by peer"
+                    ),
+                }
+        return super().run(command)
+
+
+def test_scout_transport_failure_recovers_same_digest_once(case: Case) -> None:
+    provider = ScanRecoveryProvider(case)
+    assert execute(case, provider)["imageDigest"] == DIGEST
+    scans = [command for command in provider.commands if command[:3] == ("docker", "scout", "cves")]
+    assert len(scans) == 2
+    assert scans[0][:-1] == scans[1][:-1]
+    assert scans[0][scans[0].index("--platform") + 1] == "linux/amd64"
+    assert scans[0][3].endswith("@" + DIGEST)
+    assert Path(scans[0][-1]).name == "scout.sarif.json"
+    assert Path(scans[1][-1]).name == "scout.retry.sarif.json"
+    assert sum(command[:2] == ("docker", "build") for command in provider.commands) == 1
+    assert sum(command[:2] == ("docker", "push") for command in provider.commands) == 1
+    local_image.validate_completion(
+        case.runtime_path, case.runtime, case.config, digest=DIGEST,
+        scan_path=case.runtime_path.parent / "local-image/image-scan.json",
+    )
+    assert provider.registry == case.plan["before"]
+
+
+@pytest.mark.parametrize("outcome", [
+    "findings-0", "findings-1", "findings-2", "findings-no-report", "exit-two",
+    "clean-report-failure", "malformed-report", "bad-flags", "unauthorized", "unknown",
+    "indeterminate", "unexpected-retry-report", "malformed-envelope",
+])
+def test_scout_assessment_or_uncertain_failure_is_never_repeated(case: Case, outcome: str) -> None:
+    provider = ScanRecoveryProvider(case, outcome=outcome)
+    with pytest.raises(CampaignError, match="cleanup required"):
+        execute(case, provider)
+    assert provider.scan_count == 1
+    assert provider.registry == case.plan["before"]
+    output = case.runtime_path.parent / "local-image"
+    assert not (output / "completed.json").exists()
+    assert not (output / "image-scan.json").exists()
+    if outcome in {"findings-0", "findings-1", "findings-2"}:
+        assert "CVE-2030-1234" in (output / "scout.sarif.json").read_text()
+
+
+def test_scout_transport_recovery_exhaustion_restores_without_third_attempt(case: Case) -> None:
+    provider = ScanRecoveryProvider(case, outcome="transport-twice")
+    with pytest.raises(CampaignError, match="cleanup required"):
+        execute(case, provider)
+    assert provider.scan_count == 2
+    assert provider.registry == case.plan["before"]
+    assert not (case.runtime_path.parent / "local-image/completed.json").exists()
+
+
+def test_scout_transport_recovery_expiry_prevents_second_dispatch(case: Case) -> None:
+    provider = ScanRecoveryProvider(case)
+    with pytest.raises(CampaignError, match="cleanup required"):
+        local_image.execute_local_image(
+            case.runtime_path, case.runtime, case.config, case.ledger, case.plan, case.approval,
+            output=case.runtime_path.parent / "local-image", runner=provider,
+            clock=lambda: NOW + timedelta(hours=2) if provider.scan_count else NOW,
+        )
+    assert provider.scan_count == 1
+    assert provider.registry == case.plan["before"]
+
+
+def test_scout_response_persistence_failure_prevents_recovery(
+    case: Case, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_response(path: Path, value: object) -> None:
+        if isinstance(value, dict) and value.get("stderr") == (
+            "registry transport: connection reset by peer"
+        ):
+            raise OSError("synthetic scan-response persistence failure")
+        _durable_record(path, value)
+
+    monkeypatch.setattr(local_image, "_durable_record", fail_response)
+    provider = ScanRecoveryProvider(case)
+    with pytest.raises(CampaignError, match="cleanup required"):
+        execute(case, provider)
+    assert provider.scan_count == 1
+    assert provider.registry == case.plan["before"]
+
+
+@pytest.mark.parametrize("fault", ["restore-failure", "preservation-drift"])
+def test_recovered_scanner_cannot_bypass_restoration(case: Case, fault: str) -> None:
+    provider = ScanRecoveryProvider(case, fault=fault)
+    with pytest.raises(CampaignError, match="restoration unproved"):
+        execute(case, provider)
+    assert provider.scan_count == 2
+    output = case.runtime_path.parent / "local-image"
+    assert (output / "scan-pending.json").exists()
+    assert not (output / "image-scan.json").exists()
+    assert not (output / "completed.json").exists()
+
+
+@pytest.mark.parametrize("alteration", [
+    "missing-response", "missing-intent", "indeterminate", "findings", "malformed",
+    "expired", "wrong-digest", "third-attempt", "unknown-response", "zero-exit-first",
+    "reversed-times", "final-findings",
+])
+def test_recovered_scan_requires_exact_complete_history(case: Case, alteration: str) -> None:
+    execute(case, ScanRecoveryProvider(case))
+    output = case.runtime_path.parent / "local-image"
+    scans = [
+        path for path in sorted(output.glob("*-intent.json"))
+        if json.loads(path.read_text())["command"][:3] == ["docker", "scout", "cves"]
+    ]
+    first_response = scans[0].with_name(scans[0].name.replace("intent", "response"))
+    if alteration == "missing-response":
+        first_response.unlink()
+    elif alteration == "missing-intent":
+        scans[0].unlink()
+    elif alteration == "indeterminate":
+        scans[0].with_name(scans[0].name.replace("intent", "indeterminate")).write_text("{}")
+    elif alteration in {"findings", "malformed", "final-findings"}:
+        report = output / (
+            "scout.retry.sarif.json" if alteration == "final-findings" else "scout.sarif.json"
+        )
+        report.write_text("{" if alteration == "malformed" else json.dumps({
+            "version": "2.1.0", "runs": [{"results": [{"ruleId": "CVE-2030-1234"}]}],
+        }))
+    elif alteration == "reversed-times":
+        for path, minute in zip(scans, (30, 20), strict=True):
+            intent = json.loads(path.read_text())
+            intent["intentAtUtc"] = f"2030-01-01T00:{minute}:00Z"
+            path.write_text(json.dumps(intent))
+    elif alteration in {"expired", "wrong-digest"}:
+        intent = json.loads(scans[1].read_text())
+        if alteration == "expired":
+            intent["intentAtUtc"] = "2030-01-01T02:00:00Z"
+        else:
+            intent["command"][3] = "registry://unrelated/image@" + DIGEST
+        scans[1].write_text(json.dumps(intent))
+    elif alteration == "third-attempt":
+        (output / "99-intent.json").write_bytes(scans[1].read_bytes())
+        (output / "99-response.json").write_text(json.dumps({
+            "exitCode": 0, "stdout": "", "stderr": "",
+        }))
+    else:
+        response = json.loads(first_response.read_text())
+        if alteration == "unknown-response":
+            response["stderr"] = "unclassified error"
+        else:
+            response["exitCode"] = 0
+        first_response.write_text(json.dumps(response))
+    receipt = json.loads((output / "completed.json").read_text())
+    receipt["filesSha256"] = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in output.iterdir() if path.is_file() and path.name != "completed.json"
+    }
+    (output / "completed.json").write_text(json.dumps(receipt))
+    with pytest.raises(CampaignError):
+        local_image.validate_completion(
+            case.runtime_path, case.runtime, case.config, digest=DIGEST,
+            scan_path=output / "image-scan.json",
+        )
+
+
 def test_opened_bare_ipv4_readback_reaches_completion_without_rewriting_evidence(
     case: Case,
 ) -> None:
@@ -645,6 +874,8 @@ def test_completion_rejects_tampered_raw_record_and_wrong_scan(case: Case) -> No
         "final-get",
         "source-command",
         "scan-command",
+        "scan-platform-missing",
+        "scan-platform-wrong",
         "history",
         "inspect-scope",
         "manifest-scope",
@@ -682,6 +913,16 @@ def test_completion_semantics_reject_even_self_consistent_file_hashes(
                 command[command.index(case.runtime["sourceHead"])] = "f" * 40
             elif field == "scan-command" and command[:3] == ["docker", "scout", "cves"]:
                 command[command.index("critical,high")] = "critical"
+            elif field in {"scan-platform-missing", "scan-platform-wrong"} and command[:3] == [
+                "docker",
+                "scout",
+                "cves",
+            ]:
+                index = command.index("--platform")
+                if field == "scan-platform-missing":
+                    del command[index : index + 2]
+                else:
+                    command[index + 1] = "windows/amd64"
             elif field == "history" and command[:2] == ["docker", "build"]:
                 path.with_name(path.name.replace("intent", "response")).unlink()
             elif field == "inspect-scope" and command[:3] == ["docker", "image", "inspect"]:
@@ -815,7 +1056,9 @@ def test_persistence_failure_cannot_admit_and_attempts_restoration(
     assert not (case.runtime_path.parent / "local-image" / "completed.json").exists()
 
 
-@pytest.mark.parametrize("fault", ["", "scan-failure"])
+@pytest.mark.parametrize(
+    "fault", ["", "scan-failure", "transport", "transport-twice", "findings-1"],
+)
 def test_normal_cli_with_fake_provider_and_existing_failure_cleanup(
     case: Case,
     fault: str,
@@ -824,7 +1067,11 @@ def test_normal_cli_with_fake_provider_and_existing_failure_cleanup(
     folder = case.runtime_path.parent
     for name, value in (("plan", case.plan), ("approval", case.approval)):
         (folder / f"{name}.json").write_text(json.dumps(value), encoding="utf-8")
-    provider = Provider(case, fault=fault)
+    provider = (
+        ScanRecoveryProvider(case, outcome=fault)
+        if fault in {"transport", "transport-twice", "findings-1"}
+        else Provider(case, fault=fault)
+    )
     cleanup: list[str] = []
     monkeypatch.setattr(CampaignConfig, "from_json", lambda _path: case.config)
     monkeypatch.setattr(operator, "validate_prepared_bundle", lambda *_args: None)
@@ -863,6 +1110,7 @@ def test_normal_cli_with_fake_provider_and_existing_failure_cleanup(
             "--execute",
         ],
     )
-    assert local_image.main() == (2 if fault else 0)
-    assert cleanup == (["cleanup"] if fault else [])
+    failed = fault not in {"", "transport"}
+    assert local_image.main() == (2 if failed else 0)
+    assert cleanup == (["cleanup"] if failed else [])
     assert provider.registry == case.plan["before"]

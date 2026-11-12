@@ -7,12 +7,47 @@ import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from infra.milestone_7_8.campaign import CampaignError, CommandRunner, utc
 from infra.milestone_7_8.canonical_inputs import canonical_snapshot
 from infra.milestone_7_8.operator import load_image_scan_evidence, load_runtime
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def retry_report_path(report: Path) -> Path:
+    first, separator, rest = report.name.partition(".")
+    return report.with_name(first + ".retry" + separator + rest)
+
+
+def retryable_transport_failure(response: dict[str, object], report: Path) -> bool:
+    """Only a completed transport failure with no assessment may be repeated."""
+    stdout, stderr = response.get("stdout"), response.get("stderr")
+    if (
+        type(response.get("exitCode")) is not int
+        or response["exitCode"] != 1
+        or not isinstance(stdout, str)
+        or not isinstance(stderr, str)
+        or report.exists()
+    ):
+        return False
+    combined = (stdout + "\n" + stderr).casefold()
+    if re.search(r"critical|\bhigh\b|cve-\d{4}-|vulnerabilit|sarif", combined) or any(
+        marker in combined
+        for marker in (
+            "unknown flag", "unknown shorthand", "no matching manifest", "windows/amd64",
+            "unauthorized", "forbidden", "permission denied", "manifest unknown",
+            "invalid reference", "unsupported",
+        )
+    ):
+        return False
+    return any(
+        marker in stderr.casefold()
+        for marker in (
+            "connection reset by peer", "tls handshake timeout", "i/o timeout", "unexpected eof",
+        )
+    )
 
 
 def create_scout_receipt(
@@ -23,21 +58,26 @@ def create_scout_receipt(
     *,
     runner: CommandRunner | None = None,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    recover_transport: bool = False,
 ) -> None:
     """Run one digest-pinned Scout scan and emit a receipt only for a clean result."""
+    if recover_transport and runner is None:
+        raise CampaignError("bounded scanner recovery requires the recording executor")
     if re.fullmatch(r"sha256:[a-f0-9]{64}", digest) is None:
         raise CampaignError("image digest is malformed")
     private_root = (ROOT / ".runtime" / "milestone_7_8").resolve()
     for path in (runtime_path, report, receipt):
         if not path.resolve().is_relative_to(private_root):
             raise CampaignError("scan artifacts must be in the private runtime directory")
-    if report.exists() or receipt.exists() or report == receipt:
+    retry_report = retry_report_path(report)
+    if (
+        report.exists() or receipt.exists() or report == receipt
+        or (recover_transport and (retry_report.exists() or retry_report == receipt))
+    ):
         raise CampaignError("scan output already exists")
     runtime = load_runtime(runtime_path)
 
-    def run(command: tuple[str, ...]) -> str:
-        exit_code: object
-        stdout: object
+    def command_result(command: tuple[str, ...]) -> dict[str, object]:
         if runner is None:
             completed = subprocess.run(
                 command,
@@ -47,13 +87,26 @@ def create_scout_receipt(
                 text=True,
                 timeout=900,
             )
-            exit_code, stdout = completed.returncode, completed.stdout
+            result: dict[str, object] = {
+                "exitCode": completed.returncode,
+                "stdout": completed.stdout,
+                "stderr": getattr(completed, "stderr", ""),
+            }
         else:
             result = runner.run(command)
-            exit_code, stdout = result.get("exitCode"), result.get("stdout")
-        if exit_code != 0 or not isinstance(stdout, str):
+        if (
+            type(result.get("exitCode")) is not int
+            or not isinstance(result.get("stdout"), str)
+            or not isinstance(result.get("stderr"), str)
+        ):
+            raise CampaignError("Docker Scout command response is incomplete")
+        return result
+
+    def run(command: tuple[str, ...]) -> str:
+        result = command_result(command)
+        if result["exitCode"] != 0:
             raise CampaignError("Docker Scout scan or source check failed")
-        return stdout
+        return cast(str, result["stdout"])
 
     head = run(("git", "rev-parse", "HEAD")).strip()
     status = run(("git", "status", "--porcelain=v1"))
@@ -71,23 +124,37 @@ def create_scout_receipt(
     if version_match is None:
         raise CampaignError("Docker Scout version is unavailable")
     reference = f"registry://{registry}.azurecr.io/mobius-api@{digest}"
-    run(
-        (
+    selected_report = report
+    for attempt in range(2 if recover_transport else 1):
+        if selected_report.exists():
+            raise CampaignError(
+                "Docker Scout output appeared before dispatch; overwrite prohibited"
+            )
+        command = (
             "docker",
             "scout",
             "cves",
             reference,
+            "--platform",
+            "linux/amd64",
             "--only-severity",
             "critical,high",
             "--exit-code",
             "--format",
             "sarif",
             "--output",
-            str(report),
-        ),
-    )
+            str(selected_report),
+        )
+        response = command_result(command)
+        if response["exitCode"] == 0:
+            break
+        if attempt != 0 or not recover_transport or not retryable_transport_failure(
+            response, selected_report
+        ):
+            raise CampaignError("Docker Scout assessment failed; retained result is not admissible")
+        selected_report = retry_report
     try:
-        sarif = json.loads(report.read_text(encoding="utf-8"))
+        sarif = json.loads(selected_report.read_text(encoding="utf-8"))
         runs = sarif["runs"]
         if (
             sarif.get("version") != "2.1.0"
