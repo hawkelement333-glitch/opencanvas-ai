@@ -32,6 +32,10 @@ from infra.milestone_7_8.controller import (
 
 VERSION = "m7.8-controller-authority-evidence-v1"
 DEADLINE_TAG = "mobius.controller-authorized-until-utc"
+ANCHOR_FIELDS = (
+    "version", "verifiedConfig", "verificationAuthorization",
+    "verificationResult", "baselineReadback",
+)
 
 
 def _json_document(text: str) -> object:
@@ -161,6 +165,56 @@ def _preservation(
     )
 
 
+def latest_readback(evidence: dict[str, object]) -> object:
+    """Return the final observation of an already validated authority record."""
+    publication = evidence.get("runbookPublication")
+    if isinstance(publication, dict):
+        return publication["afterReadback"]
+    renewal = evidence.get("renewal")
+    if isinstance(renewal, dict):
+        return renewal["afterReadback"]
+    return evidence["baselineReadback"]
+
+
+def latest_observation(evidence: dict[str, object]) -> datetime | None:
+    publication = evidence.get("runbookPublication")
+    if isinstance(publication, dict):
+        return parse_utc(str(publication["verifiedAtUtc"]))
+    renewal = evidence.get("renewal")
+    if isinstance(renewal, dict):
+        return parse_utc(str(renewal["completedAtUtc"]))
+    return None
+
+
+def has_publication(evidence: dict[str, object]) -> bool:
+    """Inspect validated history, including a publication back to bootstrap bytes."""
+    cursor: object = evidence
+    while isinstance(cursor, dict):
+        if "runbookPublication" in cursor:
+            return True
+        renewal = cursor.get("renewal")
+        cursor = renewal.get("priorAuthorityEvidence") if isinstance(renewal, dict) else None
+    return False
+
+
+def _check_history(value: object) -> None:
+    # No publication/renewal count limit. Reject cycles in programmatic inputs
+    # before recursive validation; serialized JSON cannot contain cycles.
+    cursor = value
+    visited: set[int] = set()
+    while isinstance(cursor, dict):
+        if id(cursor) in visited:
+            raise CampaignError("controller authority history is cyclic")
+        visited.add(id(cursor))
+        publication = cursor.get("runbookPublication")
+        if isinstance(publication, dict) and "priorAuthorityEvidence" in publication:
+            cursor = publication["priorAuthorityEvidence"]
+            continue
+        # The retained v1 publication overlays a complete renewal record.
+        renewal = cursor.get("renewal")
+        cursor = renewal.get("priorAuthorityEvidence") if isinstance(renewal, dict) else None
+
+
 def validate_authority_evidence(value: object) -> ControllerConfig:
     """Validate the preserved bootstrap anchor and, if present, completed renewal.
 
@@ -168,21 +222,23 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
     to verify their exact binding. This does not renew them or authorize work.
     The caller separately checks the observed live deadline and required horizon.
     """
+    _check_history(value)
     if isinstance(value, dict) and "runbookPublication" in value:
         from infra.milestone_7_8.controller_publication import validate_publication
 
+        publication = value["runbookPublication"]
         prior = {key: item for key, item in value.items() if key != "runbookPublication"}
+        if isinstance(publication, dict) and "priorAuthorityEvidence" in publication:
+            raw_prior = publication["priorAuthorityEvidence"]
+            if (
+                set(value) != {*ANCHOR_FIELDS, "renewal", "runbookPublication"}
+                or value["renewal"] is not None
+                or not isinstance(raw_prior, dict)
+                or any(raw_prior.get(key) != value[key] for key in ANCHOR_FIELDS)
+            ):
+                raise CampaignError("prior controller authority evidence differs")
+            prior = raw_prior
         return validate_publication(prior, value["runbookPublication"])
-    # Keep the historical chain bounded while allowing one further renewal.
-    cursor = value
-    visited: set[int] = set()
-    depth = 0
-    while isinstance(cursor, dict) and isinstance(cursor.get("renewal"), dict):
-        if id(cursor) in visited or depth >= 3:
-            raise CampaignError("controller renewal evidence chain exceeds its bound")
-        visited.add(id(cursor))
-        depth += 1
-        cursor = cursor["renewal"].get("priorAuthorityEvidence")
     evidence = _closed(
         value,
         {
@@ -259,7 +315,6 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
     if prior_evidence is not None:
         if (
             not isinstance(prior_evidence, dict)
-            or not isinstance(prior_evidence.get("renewal"), dict)
             or any(
                 prior_evidence.get(key) != evidence[key]
                 for key in (
@@ -284,11 +339,14 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
     new_deadline = renewed.controller_authorized_until_utc
     if parse_utc(new_deadline) <= parse_utc(old_deadline):
         raise CampaignError("controller renewal deadline did not increase")
-    before = _readback(renewal["beforeReadback"], original)
+    bootstrap_hash = bootstrap_script_hash(evidence)
+    before = _readback(renewal["beforeReadback"], original, bootstrap_hash=bootstrap_hash)
     if isinstance(prior_evidence, dict):
-        previous = _readback(prior_evidence["renewal"]["afterReadback"], original)
+        previous = _readback(
+            latest_readback(prior_evidence), original, bootstrap_hash=bootstrap_hash
+        )
         _preservation(previous, before)
-    after = _readback(renewal["afterReadback"], renewed)
+    after = _readback(renewal["afterReadback"], renewed, bootstrap_hash=bootstrap_hash)
     preservation_hash = _preservation(before, after)
     binding = controller_binding_sha256(
         original.subscription_id,
@@ -296,8 +354,9 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
         account=original.automation_account_name,
         runbook=original.runbook_name,
     )
+    raw_approval = renewal["approval"]
     approval = _closed(
-        renewal["approval"],
+        raw_approval,
         {
             "version",
             "operation",
@@ -310,7 +369,11 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
             "issuedAtUtc",
             "expiresAtUtc",
             "authorizationSha256",
-        },
+        } | (
+            {"renewalPlanSha256"}
+            if isinstance(raw_approval, dict) and "renewalPlanSha256" in raw_approval
+            else set()
+        ),
         "renewal approval",
     )
     expected_approval = {
@@ -327,6 +390,12 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
         "issuedAtUtc": approval["issuedAtUtc"],
         "expiresAtUtc": approval["expiresAtUtc"],
     }
+    if "renewalPlanSha256" in approval:
+        reconciliation = renewal.get("reconciliation")
+        plan = reconciliation.get("plan") if isinstance(reconciliation, dict) else None
+        if not isinstance(plan, dict) or approval["renewalPlanSha256"] != plan.get("planSha256"):
+            raise CampaignError("controller renewal approval plan binding differs")
+        expected_approval["renewalPlanSha256"] = approval["renewalPlanSha256"]
     expiry = approval["expiresAtUtc"]
     if not isinstance(expiry, str) or parse_utc(expiry) > parse_utc(new_deadline):
         raise CampaignError("controller renewal approval expiry is malformed")
@@ -339,6 +408,11 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
     if not all(isinstance(item, str) for item in times):
         raise CampaignError("controller renewal completion time is malformed")
     issued, started, completed, expires = [parse_utc(cast(str, item)) for item in times]
+    preceding_observation = (
+        latest_observation(prior_evidence) if isinstance(prior_evidence, dict) else None
+    )
+    if preceding_observation is not None and issued < preceding_observation:
+        raise CampaignError("controller renewal approval predates prior completion")
     if not issued <= started < expires or completed < started:
         raise CampaignError("controller renewal completion is outside approval window")
     approval_hash = digest("m7.8/controller-renewal-approval/v1", expected_approval)

@@ -270,7 +270,19 @@ def test_renewal_approval_binds_fresh_readback_and_exact_plan():
     approval = controller_renewal.build_approval(
         evidence, plan, evidence["baselineReadback"], **kwargs
     )
-    assert approval == renewed_fixture()["renewal"]["approval"]
+    assert approval["renewalPlanSha256"] == plan["planSha256"]
+    legacy_plan = controller_renewal.build_plan(
+        evidence, source_head="b" * 40, deadline=NEW, _legacy=True
+    )
+    assert controller_renewal.build_approval(
+        evidence, legacy_plan, evidence["baselineReadback"], **kwargs
+    ) == renewed_fixture()["renewal"]["approval"]
+    changed_source_plan = controller_renewal.build_plan(
+        evidence, source_head="b" * 40, deadline=NEW, source_script_hash="e" * 64,
+    )
+    assert controller_renewal.build_approval(
+        evidence, changed_source_plan, evidence["baselineReadback"], **kwargs
+    ) != approval
     changed = copy.deepcopy(plan)
     changed["requests"][0]["body"]["properties"]["tags"]["unexpected"] = "value"
     with unittest.TestCase().assertRaises(CampaignError):
@@ -290,7 +302,7 @@ def test_renewal_approval_binds_fresh_readback_and_exact_plan():
 
 def test_reconciliation_approval_is_separate_get_only_and_attempt_bound():
     evidence = authority_fixture()
-    plan = controller_renewal.build_plan(evidence, source_head="b" * 40, deadline=NEW)
+    plan = controller_renewal.build_plan(evidence, source_head="b" * 40, deadline=NEW, _legacy=True)
     original = renewed_fixture()["renewal"]["approval"]
     journal = {
         "version": "m7.8-controller-renewal-attempt-journal-v1",
@@ -587,10 +599,12 @@ def test_second_renewal_preserves_and_binds_first_evidence() -> None:
         first["renewal"]["completion"]["status"] = "changed"
         with unittest.TestCase().assertRaises(CampaignError):
             admission.validate_authority_evidence(corrupted)
-        with unittest.TestCase().assertRaisesRegex(CampaignError, "only three"):
-            controller_renewal.build_plan(
-                third_completed, source_head="e" * 40, deadline="2030-01-07T00:00:00Z"
-            )
+        fourth_plan = controller_renewal.build_plan(
+            third_completed, source_head="e" * 40, deadline="2030-01-07T00:00:00Z"
+        )
+        assert fourth_plan["priorAuthorityEvidenceSha256"] == admission.digest(
+            "m7.8/controller-authority-evidence/v1", third_completed
+        )
         for kind in ("prior", "missing_prior", "approval", "journal"):
             altered = copy.deepcopy(completed)
             renewal = altered["renewal"]
@@ -609,7 +623,7 @@ def test_second_renewal_preserves_and_binds_first_evidence() -> None:
 
 def test_renewal_executor_is_bounded_and_journaled() -> None:
     evidence = authority_fixture()
-    plan = controller_renewal.build_plan(evidence, source_head="b" * 40, deadline=NEW)
+    plan = controller_renewal.build_plan(evidence, source_head="b" * 40, deadline=NEW, _legacy=True)
     approval = renewed_fixture()["renewal"]["approval"]
     now = datetime(2030, 1, 2, 1, 1, tzinfo=UTC)
 
@@ -795,7 +809,7 @@ def test_renewal_cli_requires_explicit_execute_gate() -> None:
 
 def test_readonly_reconciliation_uses_actual_executor_journal() -> None:
     evidence = authority_fixture()
-    plan = controller_renewal.build_plan(evidence, source_head="b" * 40, deadline=NEW)
+    plan = controller_renewal.build_plan(evidence, source_head="b" * 40, deadline=NEW, _legacy=True)
     approval = renewed_fixture()["renewal"]["approval"]
     mutation_now = datetime(2030, 1, 2, 1, 1, tzinfo=UTC)
     reconcile_now = datetime(2030, 1, 2, 3, 1, tzinfo=UTC)
@@ -1023,11 +1037,10 @@ class DiscoveryRunner:
             result([]),
         )
 
-    def select(self, authority: object, required_until="2030-01-01T05:00:00Z"):
+    def select(self, authority: object, required_until="2030-01-01T05:00:00Z", observed=None):
         config = ControllerConfig.from_document(self.evidence["verifiedConfig"])
-        if self.evidence.get("runbookPublication"):
-            config = admission.validate_authority_evidence(self.evidence)
-        observed = datetime(2030, 1, 2, 1, 3, tzinfo=UTC) if self.evidence["renewal"] else NOW
+        config = admission.validate_authority_evidence(self.evidence)
+        observed = observed or admission.latest_observation(self.evidence) or NOW
         return select_automation_region_from_results(
             self,
             self.discovery_results(),
@@ -1085,14 +1098,14 @@ def campaign_fixture(evidence: dict[str, object]):
         "runbookName": controller.runbook_name,
         "cleanupAuthorityExpiresUtc": "2030-01-01T05:00:00Z",
     }
-    if evidence.get("runbookPublication"):
+    if admission.bootstrap_script_hash(evidence) != controller.cleanup_script_sha256:
         runtime["controllerBootstrapScriptSha256"] = admission.bootstrap_script_hash(evidence)
     return config, runtime
 
 
 class PublicationProvider:
     def __init__(self, prior, *, failure=None):
-        self.readback = copy.deepcopy(prior["renewal"]["afterReadback"])
+        self.readback = copy.deepcopy(admission.latest_readback(prior))
         self.failure = failure
         self.reads = 0
         self.writes = []
@@ -1145,7 +1158,13 @@ def test_publication_proves_new_content_without_rewriting_renewal_or_tags(tmp_pa
     assert [command[2] for command in provider.writes] == ["replace-content", "publish"]
     assert [list(command) for command in provider.writes] == plan["requests"]
     assert prior == saved
-    assert {key: value for key, value in evidence.items() if key != "runbookPublication"} == saved
+    assert evidence["runbookPublication"]["priorAuthorityEvidence"] == saved
+    # The already retained overlay format remains admissible without rewriting it.
+    legacy = {**saved, "runbookPublication": {
+        key: value for key, value in evidence["runbookPublication"].items()
+        if key != "priorAuthorityEvidence"
+    }}
+    assert admission.validate_authority_evidence(legacy).cleanup_script_sha256 == source[1]
     accepted = admission.load_authority_evidence(
         tmp_path / "attempt/controller-authority-evidence.json"
     )
@@ -1157,7 +1176,7 @@ def test_publication_proves_new_content_without_rewriting_renewal_or_tags(tmp_pa
     selector.content = {"exitCode": 0, "stdout": "cleanup-content", "stderr": ""}
     with unittest.TestCase().assertRaisesRegex(CampaignError, "content drifted"):
         selector.select(accepted)
-    with unittest.TestCase().assertRaisesRegex(CampaignError, "tags drifted"):
+    with unittest.TestCase().assertRaisesRegex(CampaignError, "binding differs"):
         DiscoveryRunner(accepted).select(prior)
     config, runtime = campaign_fixture(accepted)
     assert operator.validate_bound_controller_authority(accepted, runtime, config) == accepted
@@ -1201,6 +1220,241 @@ def test_publication_blocks_expiry_drift_and_ambiguous_writes(tmp_path):
             )
         assert len(provider.writes) == writes
         assert not (directory / "controller-authority-evidence.json").exists()
+
+
+class TransitionProvider(PublicationProvider):
+    """The same exact seven readbacks survive every real transition API."""
+
+    def __init__(self, prior):
+        super().__init__(prior)
+        self.next_content = "publication one"
+        self.patch_count = 0
+        self.lose_patch = None
+
+    def run(self, command):
+        if command[:3] == ("rest", "--method", "patch"):
+            request = json.loads(command[command.index("--body") + 1])
+            assert request["operation"] == "Merge"
+            assert set(request["properties"]["tags"]) == {admission.DEADLINE_TAG}
+            url = command[command.index("--url") + 1]
+            resource_id = url.split("https://management.azure.com", 1)[1].split(
+                "/providers/Microsoft.Resources/tags/default?", 1
+            )[0]
+            indexes = [
+                i for i in (0, 1, 3)
+                if json.loads(self.readback[i]["stdout"])["id"] == resource_id
+            ]
+            assert len(indexes) == 1
+            resource = json.loads(self.readback[indexes[0]]["stdout"])
+            resource["tags"].update(request["properties"]["tags"])
+            self.readback[indexes[0]] = result(resource)
+            self.patch_count += 1
+            if self.lose_patch == self.patch_count:
+                raise TimeoutError("successful response lost")
+            return subprocess.CompletedProcess(command, 0, "{}", "")
+        response = super().run(command)
+        if command[:3] == ("automation", "runbook", "publish"):
+            self.readback[4]["stdout"] = self.next_content
+        return response
+
+
+def publish_transition(prior, provider, root, *, minute=10, head="d" * 40):
+    source = (head, hashlib.sha256(provider.next_content.encode()).hexdigest())
+    plan = controller_publication.build_plan(
+        prior, source_head=head, script_hash=source[1], artifact_root=".runtime/chain-publication",
+    )
+    authorization = controller_publication.build_approval(
+        plan, issued_at=f"2030-01-02T01:{minute:02}:00Z", expires_at="2030-01-02T02:00:00Z",
+    )
+    return controller_publication.execute_publication(
+        prior, plan, authorization, output_dir=root, runner=provider,
+        clock=lambda: datetime(2030, 1, 2, 1, minute, tzinfo=UTC), source=lambda: source,
+    )
+
+
+def renewal_transition(prior, provider, root, *, minute=20, deadline="2030-01-04T00:00:00Z",
+                       head="d" * 40, source_hash=None):
+    root.mkdir()
+    now = datetime(2030, 1, 2, 1, minute, tzinfo=UTC)
+    issued = now.isoformat().replace("+00:00", "Z")
+    expiry = "2030-01-02T02:00:00Z"
+    plan = controller_renewal.build_plan(
+        prior, source_head=head, deadline=deadline, source_script_hash=source_hash,
+    )
+    authorization = copy.deepcopy(prior["verificationAuthorization"])
+    authorization.update({"sourceHead": head, "controllerAuthorizedUntilUtc": deadline,
+                          "expiresAtUtc": expiry})
+    del authorization["authorizationSha256"]
+    authorization["authorizationSha256"] = admission.digest(
+        "m7.8/controller-execution-authorization/v4", authorization
+    )
+    renewed = ControllerConfig.from_document(plan["renewedConfig"])
+    controller_renewal._validate_read_source(
+        "before-snapshot", renewed, authorization, head,
+        source_hash or renewed.cleanup_script_sha256, source_script_hash=source_hash,
+    )
+    before = controller_renewal.collect_before_snapshot(
+        prior, plan, authorization, runner=provider, clock=lambda: now,
+    )
+    approval = controller_renewal.build_approval(
+        prior, plan, before, issued_at=issued, expires_at=expiry, now=now,
+    )
+    journal = controller_renewal.execute_renewal(
+        prior, plan, before, approval, output_dir=root / "attempt",
+        runner=provider, clock=lambda: now,
+    )
+    read_approval = controller_renewal.build_reconciliation_approval(
+        prior, plan, before, approval, journal, issued_at=issued, expires_at=expiry, now=now,
+    )
+    accepted = controller_renewal.reconcile_renewal(
+        prior, plan, before, approval, read_approval, journal_dir=root / "attempt",
+        output_dir=root / "reconciliation", runner=provider, clock=lambda: now,
+    )
+    assert accepted["renewal"]["priorAuthorityEvidence"] == prior
+    accepted_plan = accepted["renewal"]["reconciliation"]["plan"]
+    assert accepted_plan["priorAuthorityEvidenceSha256"] == admission.digest(
+        "m7.8/controller-authority-evidence/v1", prior,
+    )
+    return accepted
+
+
+def alternating_transition_fixture(root):
+    prior = renewed_fixture()
+    saved = copy.deepcopy(prior)
+    provider = TransitionProvider(prior)
+    first = publish_transition(prior, provider, root / "publication-one")
+    second = renewal_transition(
+        first, provider, root / "renewal-one", head="e" * 40,
+        source_hash=hashlib.sha256(b"publication two").hexdigest(),
+    )
+    provider.next_content = "publication two"
+    # Renewal already bound this source: publishing new content from the same
+    # clean commit is supported; no synthetic extra source commit is required.
+    third = publish_transition(
+        second, provider, root / "publication-two", minute=30, head="e" * 40,
+    )
+    fourth = renewal_transition(
+        third, provider, root / "renewal-two", minute=40, deadline="2030-01-05T00:00:00Z",
+        head="e" * 40,
+    )
+    assert prior == saved
+    assert provider.reads == 56
+    assert provider.patch_count == 6
+    assert len(provider.writes) == 4
+    for accepted in (first, second, third, fourth):
+        selection = DiscoveryRunner(accepted).select(accepted)
+        assert selection.controller_disposition == "exact-controller-adoptable"
+        config, runtime = campaign_fixture(accepted)
+        assert operator.validate_bound_controller_authority(accepted, runtime, config) == accepted
+        # Both preparation discovery and subsequent campaign validation preserve
+        # the bootstrap tag while requiring the latest published content hash.
+        assert runtime["controllerBootstrapScriptSha256"] == admission.bootstrap_script_hash(saved)
+    return fourth
+
+
+def test_alternating_publications_and_renewals_admit_through_campaign(tmp_path):
+    accepted = alternating_transition_fixture(tmp_path)
+    assert admission.validate_authority_evidence(accepted).cleanup_script_sha256 == hashlib.sha256(
+        b"publication two"
+    ).hexdigest()
+    third = accepted["renewal"]["priorAuthorityEvidence"]
+    second = third["runbookPublication"]["priorAuthorityEvidence"]
+    first = second["renewal"]["priorAuthorityEvidence"]
+    assert first["runbookPublication"]["priorAuthorityEvidence"] == renewed_fixture()
+    for kind in ("history", "script", "deadline", "approval", "journal", "prior", "baseline"):
+        bad = copy.deepcopy(accepted)
+        renewal = bad["renewal"]
+        if kind == "history":
+            attempt = renewal["priorAuthorityEvidence"]["runbookPublication"]["attempts"][0]
+            attempt["requestSha256"] = "0" * 64
+        elif kind in {"script", "deadline"}:
+            field = "cleanupScriptSha256" if kind == "script" else "controllerAuthorizedUntilUtc"
+            renewal["renewedConfig"][field] = (
+                "0" * 64 if kind == "script" else "2030-01-07T00:00:00Z"
+            )
+        elif kind == "approval":
+            renewal["approval"]["authorizationSha256"] = "0" * 64
+        elif kind == "journal":
+            renewal["reconciliation"]["attemptJournal"]["attempts"].pop()
+        elif kind == "prior":
+            renewal["priorAuthorityEvidence"] = renewed_fixture()
+        else:
+            renewal["beforeReadback"] = renewed_fixture()["renewal"]["afterReadback"]
+        with unittest.TestCase().assertRaises(CampaignError):
+            admission.validate_authority_evidence(bad)
+
+
+def test_renew_then_publish_preserves_deployed_hash_and_binds_executing_source(tmp_path):
+    prior = renewed_fixture()
+    provider = TransitionProvider(prior)
+    candidate = hashlib.sha256(provider.next_content.encode()).hexdigest()
+    renewed = renewal_transition(prior, provider, tmp_path / "renew", source_hash=candidate)
+    renewed_config = admission.validate_authority_evidence(renewed)
+    assert renewed_config.cleanup_script_sha256 != candidate
+    with unittest.TestCase().assertRaisesRegex(CampaignError, "source boundary"):
+        controller_renewal._validate_read_source(
+            "before-snapshot", renewed_config, {}, "d" * 40, "f" * 64, source_script_hash=candidate,
+        )
+    published = publish_transition(renewed, provider, tmp_path / "publish", minute=30)
+    assert admission.validate_authority_evidence(published).cleanup_script_sha256 == candidate
+    selection = DiscoveryRunner(published).select(published)
+    assert selection.controller_disposition == "exact-controller-adoptable"
+    provider.next_content = "cleanup-content"
+    restored = publish_transition(
+        published, provider, tmp_path / "restore-content", minute=40, head="e" * 40,
+    )
+    assert (
+        admission.validate_authority_evidence(restored).cleanup_script_sha256
+        == admission.bootstrap_script_hash(restored)
+    )
+    selector = DiscoveryRunner(restored)
+    assert selector.select(restored).controller_disposition == "exact-controller-adoptable"
+    assert any("/content?" in arg for command in selector.commands for arg in command)
+    selector.content = {"exitCode": 0, "stdout": "drifted", "stderr": ""}
+    with unittest.TestCase().assertRaisesRegex(CampaignError, "content drifted"):
+        selector.select(restored)
+
+
+def test_interrupted_transition_cannot_replace_latest_accepted_evidence(tmp_path):
+    prior = renewed_fixture()
+    provider = TransitionProvider(prior)
+    published = publish_transition(prior, provider, tmp_path / "published")
+    provider.lose_patch = 2
+    with unittest.TestCase().assertRaisesRegex(CampaignError, "indeterminate"):
+        renewal_transition(published, provider, tmp_path / "interrupted")
+    assert provider.patch_count == 2
+    assert not (
+        tmp_path / "interrupted/reconciliation/02-completed-authority-evidence.json"
+    ).exists()
+    # A new plan cannot treat two updated tags as the accepted old deadline.
+    plan = controller_renewal.build_plan(
+        published, source_head="d" * 40, deadline="2030-01-04T00:00:00Z"
+    )
+    with unittest.TestCase().assertRaises(CampaignError):
+        controller_renewal.build_approval(
+            published, plan, provider.readback, issued_at="2030-01-02T01:21:00Z",
+            expires_at="2030-01-02T02:00:00Z", now=datetime(2030, 1, 2, 1, 21, tzinfo=UTC),
+        )
+    cyclic = copy.deepcopy(published)
+    cyclic["runbookPublication"]["priorAuthorityEvidence"] = cyclic
+    with unittest.TestCase().assertRaisesRegex(CampaignError, "cyclic"):
+        admission.validate_authority_evidence(cyclic)
+
+
+def test_new_first_renewal_binds_exact_bootstrap_anchor_after_expiry(tmp_path):
+    prior = authority_fixture()
+    provider = TransitionProvider(prior)
+    accepted = renewal_transition(prior, provider, tmp_path / "first-renewal")
+    assert accepted["renewal"]["priorAuthorityEvidence"] == prior
+    renewal = accepted["renewal"]
+    assert (
+        renewal["approval"]["renewalPlanSha256"]
+        == renewal["reconciliation"]["plan"]["planSha256"]
+    )
+    assert (
+        admission.validate_authority_evidence(accepted).controller_authorized_until_utc
+        == "2030-01-04T00:00:00Z"
+    )
 
 
 class ControllerAdmissionTests(unittest.TestCase):
@@ -1357,7 +1611,9 @@ class ControllerAdmissionTests(unittest.TestCase):
         evidence = renewed_fixture()
         evidence["renewal"]["completedAtUtc"] = "2030-01-02T01:10:00Z"
         with self.assertRaisesRegex(CampaignError, "later than live observation"):
-            DiscoveryRunner(evidence).select(evidence)
+            DiscoveryRunner(evidence).select(
+                evidence, observed=datetime(2030, 1, 2, 1, 3, tzinfo=UTC)
+            )
 
     def test_failed_or_wrong_scope_bootstrap_readback_cannot_anchor(self):
         for wrong_scope in (False, True):

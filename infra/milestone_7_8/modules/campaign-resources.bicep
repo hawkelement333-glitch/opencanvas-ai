@@ -199,6 +199,9 @@ resource vectorExtension 'Microsoft.DBforPostgreSQL/flexibleServers/configuratio
   parent: postgres
   name: 'azure.extensions'
   properties: { source: 'user-override', value: 'vector' }
+  // Both children mutate server state. These writes overlapped in the attempt
+  // that failed with AadAuthOperationCannotBePerformedWhenServerIsNotAccessible.
+  dependsOn: [ postgresAdministrator ]
 }
 
 resource applicationDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = {

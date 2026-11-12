@@ -4,17 +4,26 @@ import argparse
 import json
 import re
 import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from infra.milestone_7_8.campaign import CampaignError, utc
+from infra.milestone_7_8.campaign import CampaignError, CommandRunner, utc
 from infra.milestone_7_8.canonical_inputs import canonical_snapshot
 from infra.milestone_7_8.operator import load_image_scan_evidence, load_runtime
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def create_scout_receipt(runtime_path: Path, digest: str, report: Path, receipt: Path) -> None:
+def create_scout_receipt(
+    runtime_path: Path,
+    digest: str,
+    report: Path,
+    receipt: Path,
+    *,
+    runner: CommandRunner | None = None,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> None:
     """Run one digest-pinned Scout scan and emit a receipt only for a clean result."""
     if re.fullmatch(r"sha256:[a-f0-9]{64}", digest) is None:
         raise CampaignError("image digest is malformed")
@@ -25,12 +34,29 @@ def create_scout_receipt(runtime_path: Path, digest: str, report: Path, receipt:
     if report.exists() or receipt.exists() or report == receipt:
         raise CampaignError("scan output already exists")
     runtime = load_runtime(runtime_path)
-    head = subprocess.run(
-        ("git", "rev-parse", "HEAD"), cwd=ROOT, check=True, capture_output=True, text=True
-    ).stdout.strip()
-    status = subprocess.run(
-        ("git", "status", "--porcelain=v1"), cwd=ROOT, check=True, capture_output=True, text=True
-    ).stdout
+
+    def run(command: tuple[str, ...]) -> str:
+        exit_code: object
+        stdout: object
+        if runner is None:
+            completed = subprocess.run(
+                command,
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=900,
+            )
+            exit_code, stdout = completed.returncode, completed.stdout
+        else:
+            result = runner.run(command)
+            exit_code, stdout = result.get("exitCode"), result.get("stdout")
+        if exit_code != 0 or not isinstance(stdout, str):
+            raise CampaignError("Docker Scout scan or source check failed")
+        return stdout
+
+    head = run(("git", "rev-parse", "HEAD")).strip()
+    status = run(("git", "status", "--porcelain=v1"))
     if (
         head != runtime["sourceHead"]
         or status.strip()
@@ -40,25 +66,26 @@ def create_scout_receipt(runtime_path: Path, digest: str, report: Path, receipt:
     registry = runtime["registryName"]
     if re.fullmatch(r"[a-z0-9]{5,50}", registry) is None:
         raise CampaignError("campaign registry name is malformed")
-    version = subprocess.run(
-        ("docker", "scout", "version"), cwd=ROOT, check=True, capture_output=True, text=True
-    ).stdout
+    version = run(("docker", "scout", "version"))
     version_match = re.search(r"(?m)^version:\s*(v?[0-9][^\s]*)", version)
     if version_match is None:
         raise CampaignError("Docker Scout version is unavailable")
     reference = f"registry://{registry}.azurecr.io/mobius-api@{digest}"
-    result = subprocess.run(
+    run(
         (
-            "docker", "scout", "cves", reference, "--only-severity", "critical,high",
-            "--exit-code", "--format", "sarif", "--output", str(report),
+            "docker",
+            "scout",
+            "cves",
+            reference,
+            "--only-severity",
+            "critical,high",
+            "--exit-code",
+            "--format",
+            "sarif",
+            "--output",
+            str(report),
         ),
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
     )
-    if result.returncode != 0:
-        raise CampaignError("Docker Scout scan failed or reported high/critical findings")
     try:
         sarif = json.loads(report.read_text(encoding="utf-8"))
         runs = sarif["runs"]
@@ -78,7 +105,7 @@ def create_scout_receipt(runtime_path: Path, digest: str, report: Path, receipt:
         "imageDigest": digest,
         "scanner": "Docker Scout",
         "scannerVersion": version_match.group(1),
-        "scannedAtUtc": utc(datetime.now(UTC)),
+        "scannedAtUtc": utc(clock()),
         "result": "passed",
         "criticalFindings": 0,
         "highFindings": 0,

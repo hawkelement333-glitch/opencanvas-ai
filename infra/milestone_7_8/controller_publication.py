@@ -41,11 +41,9 @@ def _publication_requests(config: ControllerConfig) -> list[list[str]]:
 def build_plan(
     prior: dict[str, object], *, source_head: str, script_hash: str, artifact_root: str
 ) -> dict[str, object]:
-    if "runbookPublication" in prior:
-        raise CampaignError("only one controller runbook publication is supported")
     original = admission.validate_authority_evidence(prior)
-    if script_hash == original.cleanup_script_sha256 or source_head == original.source_head:
-        raise CampaignError("controller publication must bind new source and content")
+    if script_hash == original.cleanup_script_sha256:
+        raise CampaignError("controller publication must bind corrected content")
     path = PurePosixPath(artifact_root)
     if (
         path.parts[:1] != (".runtime",) or len(path.parts) < 2 or ".." in path.parts
@@ -114,9 +112,9 @@ def _approval_window(
     ):
         raise CampaignError("controller publication approval binding differs")
     issued_at = parse_utc(issued)
-    renewal = prior.get("renewal")
-    if isinstance(renewal, dict) and issued_at < parse_utc(str(renewal["completedAtUtc"])):
-        raise CampaignError("controller publication approval predates renewal completion")
+    previous_time = admission.latest_observation(prior)
+    if previous_time is not None and issued_at < previous_time:
+        raise CampaignError("controller publication approval predates prior completion")
     return issued_at, parse_utc(expires)
 
 
@@ -124,10 +122,12 @@ def _validate_before(
     prior: dict[str, object], value: object
 ) -> list[dict[str, object]]:
     original = admission.validate_authority_evidence(prior)
-    renewal = prior.get("renewal")
-    previous = renewal["afterReadback"] if isinstance(renewal, dict) else prior["baselineReadback"]
-    before = admission._readback(value, original)
-    admission._preservation(admission._readback(previous, original), before)
+    previous = admission.latest_readback(prior)
+    bootstrap_hash = admission.bootstrap_script_hash(prior)
+    before = admission._readback(value, original, bootstrap_hash=bootstrap_hash)
+    admission._preservation(
+        admission._readback(previous, original, bootstrap_hash=bootstrap_hash), before
+    )
     return before
 
 
@@ -155,10 +155,15 @@ def _verify_preservation(
 
 
 def validate_publication(prior: dict[str, object], value: object) -> ControllerConfig:
-    publication = admission._closed(value, {
+    fields = {
         "plan", "approval", "beforeReadback", "attempts", "afterReadback",
         "verifiedAtUtc", "proofSha256",
-    }, "runbook publication")
+    }
+    if isinstance(value, dict) and "priorAuthorityEvidence" in value:
+        fields.add("priorAuthorityEvidence")
+        if value["priorAuthorityEvidence"] != prior:
+            raise CampaignError("controller publication prior evidence differs")
+    publication = admission._closed(value, fields, "runbook publication")
     published = _validate_plan(prior, publication["plan"])
     plan = cast(dict[str, object], publication["plan"])
     issued, expires = _approval_window(prior, plan, publication["approval"])
@@ -256,7 +261,11 @@ def execute_publication(
         "afterReadback": after, "verifiedAtUtc": verified_at.isoformat(),
         "proofSha256": validate_controller_results(after, published, bootstrap_hash=bootstrap_hash),
     }
-    evidence = {**prior, "runbookPublication": publication}
+    publication["priorAuthorityEvidence"] = prior
+    evidence = {
+        **{key: prior[key] for key in admission.ANCHOR_FIELDS},
+        "renewal": None, "runbookPublication": publication,
+    }
     admission.validate_authority_evidence(evidence)
     _durable_record(output_dir / "controller-authority-evidence.json", evidence)
     return evidence

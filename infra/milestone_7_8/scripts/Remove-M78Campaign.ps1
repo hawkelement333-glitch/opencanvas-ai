@@ -46,26 +46,65 @@ function Get-ArmJson([string]$Path) {
 
 function Assert-CleanupBindingParameters([string]$Content, [hashtable]$Expected) {
   # ConvertFrom-Json can coerce ISO strings to DateTime in the Automation runtime.
-  $document = [System.Text.Json.JsonDocument]::Parse($Content)
+  try { $document = [System.Text.Json.JsonDocument]::Parse($Content) }
+  catch { throw 'cleanup-binding-parameter-set-mismatch:invalid-json' }
   try {
-    $parameters = $document.RootElement.GetProperty('properties').GetProperty('parameters')
+    try { $parameters = $document.RootElement.GetProperty('properties').GetProperty('parameters') }
+    catch { throw 'cleanup-binding-parameter-set-mismatch:parameters-shape' }
+    if ($parameters.ValueKind -ne [System.Text.Json.JsonValueKind]::Object) {
+      throw 'cleanup-binding-parameter-set-mismatch:parameters-shape'
+    }
     $seen = @{}
     foreach ($parameter in $parameters.EnumerateObject()) {
       $key = $parameter.Name
-      if ($seen.ContainsKey($key) -or -not $Expected.ContainsKey($key)) {
-        throw 'cleanup-binding-parameter-set-mismatch'
+      if (-not $Expected.ContainsKey($key)) {
+        throw 'cleanup-binding-parameter-set-mismatch:unknown-field'
       }
-      if (
-        $parameter.Value.ValueKind -ne [System.Text.Json.JsonValueKind]::String -or
-        $parameter.Value.GetString() -cne $Expected[$key]
-      ) {
-        throw 'cleanup-binding-parameter-mismatch'
+      # Emit only the trusted parameter name and a fixed reason/type. Never
+      # emit provider-supplied keys, values, identifiers, hashes, or raw content.
+      $field = @($Expected.Keys | Where-Object { $_ -ieq $key })[0]
+      if ($seen.ContainsKey($key)) {
+        throw "cleanup-binding-parameter-set-mismatch:${field}:duplicate"
+      }
+      if ($parameter.Value.ValueKind -ne [System.Text.Json.JsonValueKind]::String) {
+        throw "cleanup-binding-parameter-mismatch:${field}:type-$($parameter.Value.ValueKind)"
+      }
+      if ($Expected[$key] -isnot [string]) {
+        throw "cleanup-binding-parameter-mismatch:${field}:expected-type"
+      }
+      if ($parameter.Value.GetString() -cne $Expected[$key]) {
+        throw "cleanup-binding-parameter-mismatch:${field}:value"
       }
       $seen[$key] = $true
     }
-    if ($seen.Count -ne $Expected.Count) { throw 'cleanup-binding-parameter-set-mismatch' }
+    foreach ($field in ($Expected.Keys | Sort-Object)) {
+      if (-not $seen.ContainsKey($field)) {
+        throw "cleanup-binding-parameter-set-mismatch:${field}:missing"
+      }
+    }
   }
   finally { $document.Dispose() }
+}
+
+function Assert-CleanupBindingIdentity([hashtable]$Binding, [string]$ExpectedId, [string]$ExpectedName) {
+  # ARM jobSchedules GET omits name. Match the full resource ID and UUID;
+  # preserve the legacy named shape, and reject every supplied conflict.
+  $properties = $Binding['properties']
+  if ($properties -isnot [hashtable]) { throw 'cleanup-binding-identity-mismatch:properties' }
+  $name = $Binding['name']
+  $id = $Binding['id']
+  $uuid = $properties['jobScheduleId']
+  $values = @{ name = $name; id = $id; jobScheduleId = $uuid }
+  foreach ($field in @('name', 'id', 'jobScheduleId')) {
+    $value = $values[$field]
+    $expectedValue = if ($field -eq 'id') { $ExpectedId } else { $ExpectedName }
+    if ($null -ne $value -and ($value -isnot [string] -or $value -ine $expectedValue)) {
+      throw "cleanup-binding-identity-mismatch:${field}"
+    }
+  }
+  if ($null -eq $name -and ($null -eq $id -or $null -eq $uuid)) {
+    throw 'cleanup-binding-identity-mismatch:missing'
+  }
 }
 
 function Get-ExecutingPrincipalId {
@@ -168,7 +207,6 @@ $account = Get-ArmJson "$automationBase`?api-version=2024-10-23"
 $runbook = Get-ArmJson "$automationBase/runbooks/$CleanupRunbookName`?api-version=2024-10-23"
 $schedule = Get-ArmJson "$automationBase/schedules/$CleanupScheduleName`?api-version=2024-10-23"
 $bindingContent = Get-ArmContent "$automationBase/jobSchedules/$CleanupBindingName`?api-version=2024-10-23"
-$binding = $bindingContent | ConvertFrom-Json -Depth 32
 
 $controllerRunbookId = "$automationBase/runbooks/$CleanupRunbookName".ToLowerInvariant()
 $observedControllerBinding = Get-Sha256 "m7.8/reusable-cleanup-controller/v1`0$controllerRunbookId"
@@ -197,6 +235,8 @@ $expectedBindingParameters = @{
   CleanupAuthorized = $CleanupAuthorized
 }
 Assert-CleanupBindingParameters $bindingContent $expectedBindingParameters
+$binding = $bindingContent | ConvertFrom-Json -Depth 32 -AsHashtable
+Assert-CleanupBindingIdentity $binding "$automationBase/jobSchedules/$CleanupBindingName" $CleanupBindingName
 if (
   $observedControllerBinding -ne $ControllerBindingSha256 -or
   $account.name -ne $AutomationAccountName -or
@@ -205,8 +245,7 @@ if (
   $schedule.name -ne $CleanupScheduleName -or
   $schedule.properties.frequency -ne 'OneTime' -or
   $schedule.properties.isEnabled -ne $true -or
-  [DateTimeOffset]::Parse($schedule.properties.startTime) -ne $parsedDeadline -or
-  $binding.name -ne $CleanupBindingName -or
+  [DateTimeOffset]$schedule.properties.startTime -ne $parsedDeadline -or
   $binding.properties.runbook.name -ne $CleanupRunbookName -or
   $binding.properties.schedule.name -ne $CleanupScheduleName
 ) { throw 'cleanup-controller-readback-mismatch' }

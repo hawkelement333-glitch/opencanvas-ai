@@ -24,6 +24,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["plan", "approval", "beforeReadback", "attempts", "afterReadback", "verifiedAtUtc", "proofSha256"],
       "properties": {
+        "priorAuthorityEvidence": {"$ref": "#"},
         "plan": {
           "type": "object", "additionalProperties": false,
           "required": ["version", "priorAuthorityEvidenceSha256", "priorConfigSha256", "priorScriptSha256", "publishedConfig", "publishedConfigSha256", "artifactRoot", "requests", "planSha256"],
@@ -101,6 +102,8 @@
                     "renewedDeadlineUtc": {"type": "string", "format": "date-time"},
                     "baselineReadbackSha256": {"$ref": "#/$defs/hash"},
                     "priorAuthorityEvidenceSha256": {"$ref": "#/$defs/hash"},
+                    "sourceCleanupScriptSha256": {"$ref": "#/$defs/hash"},
+                    "approvalBinding": {"const": "exact-plan-v1"},
                     "renewedConfig": {"$ref": "controller.schema.json"},
                     "planSha256": {"$ref": "#/$defs/hash"},
                     "requests": {"type": "array", "minItems": 3, "maxItems": 3,
@@ -156,6 +159,7 @@
               "type": "object", "additionalProperties": false,
               "required": ["version", "operation", "controllerBindingSha256", "originalConfigSha256", "renewedConfigSha256", "originalDeadlineUtc", "renewedDeadlineUtc", "baselineReadbackSha256", "issuedAtUtc", "expiresAtUtc", "authorizationSha256"],
               "properties": {
+                "renewalPlanSha256": {"$ref": "#/$defs/hash"},
                 "version": {"const": "m7.8-controller-renewal-approval-v1"},
                 "operation": {"const": "controller-renew-deadline-tags"},
                 "controllerBindingSha256": {"$ref": "#/$defs/hash"},

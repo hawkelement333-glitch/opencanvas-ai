@@ -451,7 +451,7 @@ def main() -> int:
             "cleanupParametersFile": str(cleanup_path),
             "campaignParametersFile": str(campaign_path),
         }
-        if "runbookPublication" in controller_authority:
+        if bootstrap_script_hash(controller_authority) != cleanup_script_sha256:
             runtime["controllerBootstrapScriptSha256"] = bootstrap_script_hash(controller_authority)
         _write_new(
             fresh_runtime_path,

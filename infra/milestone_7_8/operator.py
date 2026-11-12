@@ -3428,6 +3428,15 @@ def main() -> int:
                     digest=args.image_digest,
                     runtime=runtime,
                 )
+                if (args.runtime.parent / "local-image-attempt.json").exists():
+                    from infra.milestone_7_8.local_image import validate_completion
+
+                    # Validate against the prepared configuration before attaching
+                    # its selected digest; local-image never deploys the workload.
+                    validate_completion(
+                        args.runtime, runtime, replace(config, image_digest=None),
+                        digest=args.image_digest, scan_path=args.image_scan_evidence,
+                    )
         control_evidence = None
         if args.control_plane_evidence is not None:
             control_evidence = load_control_plane_evidence(args.control_plane_evidence)

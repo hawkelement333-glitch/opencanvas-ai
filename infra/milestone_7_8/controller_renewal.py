@@ -48,6 +48,8 @@ def collect_before_snapshot(
         evidence,
         source_head=renewed.source_head,
         deadline=renewed.controller_authorized_until_utc,
+        source_script_hash=cast(str | None, plan.get("sourceCleanupScriptSha256")),
+        _legacy="approvalBinding" not in plan,
     ):
         raise CampaignError("controller renewal plan binding differs")
 
@@ -60,10 +62,14 @@ def collect_before_snapshot(
         )
 
     results = admission._readback(
-        _read_controller(renewed, authorize=authorize, runner=runner), original
+        _read_controller(renewed, authorize=authorize, runner=runner), original,
+        bootstrap_hash=admission.bootstrap_script_hash(cast(dict[str, object], evidence)),
     )
-    if isinstance(evidence, dict) and isinstance(evidence.get("renewal"), dict):
-        previous = admission._readback(evidence["renewal"]["afterReadback"], original)
+    if isinstance(evidence, dict):
+        previous = admission._readback(
+            admission.latest_readback(evidence), original,
+            bootstrap_hash=admission.bootstrap_script_hash(evidence),
+        )
         admission._preservation(previous, results)
     return results
 
@@ -235,8 +241,9 @@ def reconcile_renewal(
     observed = clock().astimezone(UTC)
     authorize()
     persist(output_dir / "01-after-readback.json", after)
-    admission._readback(after, renewed)
-    before_validated = admission._readback(before, original)
+    bootstrap_hash = admission.bootstrap_script_hash(evidence)
+    admission._readback(after, renewed, bootstrap_hash=bootstrap_hash)
+    before_validated = admission._readback(before, original, bootstrap_hash=bootstrap_hash)
     preservation = admission._preservation(before_validated, after)
     binding = cast(str, plan["controllerBindingSha256"])
     completion: dict[str, object] = {
@@ -278,9 +285,12 @@ def reconcile_renewal(
             ),
         },
     }
-    if evidence.get("renewal") is not None:
+    if (
+        plan.get("approvalBinding") == "exact-plan-v1"
+        or evidence.get("renewal") is not None or "runbookPublication" in evidence
+    ):
         renewal["priorAuthorityEvidence"] = evidence
-    result = {**evidence, "renewal": renewal}
+    result = {**{key: evidence[key] for key in admission.ANCHOR_FIELDS}, "renewal": renewal}
     admission.validate_authority_evidence(result)
     persist(output_dir / "02-completed-authority-evidence.json", result)
     return result
@@ -428,22 +438,16 @@ def execute_renewal(
 
 
 def build_plan(
-    evidence: object, *, source_head: str, deadline: str
+    evidence: object, *, source_head: str, deadline: str,
+    source_script_hash: str | None = None,
+    _legacy: bool = False,
 ) -> dict[str, object]:
-    if isinstance(evidence, dict) and "runbookPublication" in evidence:
-        raise CampaignError("deadline renewal after runbook publication is unsupported")
     original = admission.validate_authority_evidence(evidence)
     if not isinstance(evidence, dict):
         raise CampaignError("renewal plan requires validated authority evidence")
     prior = evidence.get("renewal")
     if prior is not None and not isinstance(prior, dict):
         raise CampaignError("prior controller renewal evidence is malformed")
-    if isinstance(prior, dict):
-        second = prior.get("priorAuthorityEvidence")
-        if isinstance(second, dict):
-            earlier = second.get("renewal")
-            if isinstance(earlier, dict) and "priorAuthorityEvidence" in earlier:
-                raise CampaignError("only three controller renewals are supported")
     if parse_utc(deadline) <= parse_utc(original.controller_authorized_until_utc):
         raise CampaignError("renewal deadline must increase")
     renewed = replace(
@@ -451,7 +455,8 @@ def build_plan(
     )
     renewed.validate()
     before = admission._readback(
-        evidence["baselineReadback"] if prior is None else prior["afterReadback"], original
+        admission.latest_readback(evidence), original,
+        bootstrap_hash=admission.bootstrap_script_hash(evidence),
     )
     group = (
         f"/subscriptions/{original.subscription_id}"
@@ -492,10 +497,18 @@ def build_plan(
             for scope in targets
         ],
     }
-    if prior is not None:
+    if not _legacy or prior is not None or "runbookPublication" in evidence:
         plan["priorAuthorityEvidenceSha256"] = admission.digest(
             "m7.8/controller-authority-evidence/v1", evidence
         )
+    if source_script_hash is not None:
+        if re.fullmatch(r"[a-f0-9]{64}", source_script_hash) is None:
+            raise CampaignError("controller renewal source script hash is malformed")
+        plan["sourceCleanupScriptSha256"] = source_script_hash
+    if not _legacy:
+        plan["approvalBinding"] = "exact-plan-v1"
+    elif source_script_hash is not None:
+        raise CampaignError("controller renewal source transition requires exact plan approval")
     plan["planSha256"] = admission.digest("m7.8/controller-renewal-plan/v1", plan)
     return plan
 
@@ -523,15 +536,26 @@ def build_approval(
         evidence,
         source_head=renewed.source_head,
         deadline=renewed.controller_authorized_until_utc,
+        source_script_hash=cast(str | None, plan.get("sourceCleanupScriptSha256")),
+        _legacy="approvalBinding" not in plan,
     )
     if plan != expected_plan:
         raise CampaignError("controller renewal plan binding differs")
-    before = admission._readback(before_readback, original)
-    if isinstance(evidence, dict) and isinstance(evidence.get("renewal"), dict):
-        previous = admission._readback(evidence["renewal"]["afterReadback"], original)
+    before = admission._readback(
+        before_readback, original,
+        bootstrap_hash=admission.bootstrap_script_hash(cast(dict[str, object], evidence)),
+    )
+    if isinstance(evidence, dict):
+        previous = admission._readback(
+            admission.latest_readback(evidence), original,
+            bootstrap_hash=admission.bootstrap_script_hash(evidence),
+        )
         admission._preservation(previous, before)
     issued = parse_utc(issued_at)
     expires = parse_utc(expires_at)
+    previous_time = admission.latest_observation(cast(dict[str, object], evidence))
+    if previous_time is not None and issued < previous_time:
+        raise CampaignError("controller renewal approval predates prior completion")
     if (
         not issued
         <= now
@@ -553,6 +577,8 @@ def build_approval(
         "issuedAtUtc": issued_at,
         "expiresAtUtc": expires_at,
     }
+    if plan.get("approvalBinding") == "exact-plan-v1":
+        payload["renewalPlanSha256"] = plan["planSha256"]
     payload["authorizationSha256"] = admission.digest(
         "m7.8/controller-renewal-approval/v1", payload
     )
@@ -669,11 +695,11 @@ def validate_attempt_journal(
 
 def _validate_read_source(
     operation: str, renewed: ControllerConfig, authorization: dict[str, object],
-    head: str, script_hash: str,
+    head: str, script_hash: str, *, source_script_hash: str | None = None,
 ) -> None:
     authorized_head = authorization.get("reconciliationSourceHead")
     if (
-        renewed.cleanup_script_sha256 != script_hash
+        (source_script_hash or renewed.cleanup_script_sha256) != script_hash
         or (authorized_head is not None and authorized_head != head)
         or (
             renewed.source_head != head
@@ -692,6 +718,7 @@ def main() -> int:
     )
     parser.add_argument("--authority-evidence", required=True, type=Path)
     parser.add_argument("--source-head")
+    parser.add_argument("--source-cleanup-script-sha256")
     parser.add_argument("--deadline")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--plan", type=Path)
@@ -728,7 +755,10 @@ def main() -> int:
                 raise CampaignError("controller renewal read inputs are malformed")
             renewed = ControllerConfig.from_document(plan_doc.get("renewedConfig"))
             head, script_hash = local_source_binding()
-            _validate_read_source(args.operation, renewed, read_auth, head, script_hash)
+            _validate_read_source(
+                args.operation, renewed, read_auth, head, script_hash,
+                source_script_hash=cast(str | None, plan_doc.get("sourceCleanupScriptSha256")),
+            )
             assert args.output is not None
             runtime_root = (REPOSITORY_ROOT / ".runtime").resolve()
             target = args.output.resolve()
@@ -825,7 +855,8 @@ def main() -> int:
             renewed = ControllerConfig.from_document(plan_value.get("renewedConfig"))
             if (
                 renewed.source_head != head
-                or renewed.cleanup_script_sha256 != script_hash
+                or plan_value.get("sourceCleanupScriptSha256", renewed.cleanup_script_sha256)
+                != script_hash
             ):
                 raise CampaignError("controller renewal source boundary differs")
             runtime_root = (REPOSITORY_ROOT / ".runtime").resolve()
@@ -864,7 +895,8 @@ def main() -> int:
         ):
             raise CampaignError("controller renewal plan inputs are incomplete")
         plan = build_plan(
-            evidence, source_head=args.source_head, deadline=args.deadline
+            evidence, source_head=args.source_head, deadline=args.deadline,
+            source_script_hash=args.source_cleanup_script_sha256,
         )
         descriptor = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:

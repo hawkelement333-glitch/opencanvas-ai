@@ -317,36 +317,167 @@ deploying the workload. Require at least 14 vCPUs of available quota for the
 eight API replicas, four workers, and one sampler during revision overlap.
 An absent, incomplete, or insufficient quota readback requires campaign cleanup.
 
+### Deployment and cleanup failure review
+
+The finalized Canada Central attempt at source `4610daa` is unsuccessful, not
+resumable. Its retained operations show the server creation completing before
+the Entra administrator and `azure.extensions` writes started together. The
+administrator failed with `AadAuthOperationCannotBePerformedWhenServerIsNotAccessible`;
+the configuration write succeeded. The template now orders server creation,
+administrator, extension configuration, and application database serially.
+This removes a demonstrated parallel-write hazard without adding sleeps,
+retries, public PostgreSQL access, identities, or network resources. A similar
+concurrency failure is recorded in the
+[Azure PostgreSQL issue](https://github.com/Azure/azure-postgresql/issues/127).
+That report supports the ordering correction, not a claim that it proves the
+sole cause of this attempt's provider failure.
+
+The retained later server read reported `Ready`. The subnet had no NSG or route
+table, used a Storage service endpoint, and had no explicit NAT gateway. There
+is no retained server-state observation at the failed administrator dispatch,
+or server-side Entra DNS/egress trace. Do not treat the later `Ready` read as
+proof of earlier readiness or add a NAT gateway based only on this error.
+[Microsoft's Entra requirements](https://learn.microsoft.com/en-us/azure/postgresql/security/security-entra-configure)
+still apply. If a separately approved future deployment fails after serialized
+writes, preserve its operation records and follow cleanup; do not silently
+retry the administrator or relax networking.
+
+The failed cleanup job's 17 saved parameters and exact binding parameters match
+offline. These are CLI-captured records, not the exact bytes or bound variable
+types seen by `Invoke-AzRestMethod` inside Automation. The failing field is
+therefore unproved. The runbook now emits only a trusted parameter name and
+fixed reason (`value`, `type-*`, `expected-type`, `missing`, or `duplicate`);
+unknown provider keys and all parameter values remain private. Exact strings,
+parameter-set checks, authority hashes, identity, ownership, and roles remain
+mandatory.
+
+Full-runbook synthetic replay also covers the actual ARM jobSchedule shape:
+when top-level `name` is absent, require both the exact full resource `id` and
+`properties.jobScheduleId`; reject any supplied conflicting identity. Cast a
+JSON-coerced schedule DateTime directly to DateTimeOffset to preserve UTC,
+rather than round-tripping through a local-culture string. These local tests
+do not establish Azure Automation's live behavior. The old terminal receipt,
+publication evidence, and failed-job records remain immutable. Publishing this
+new runbook needs a new reviewed source/content transition using the accepted
+predecessor evidence, as documented below. Offline replay is not live admission.
+
 ## One image decision
 
 The canonical source changes in this implementation require one new validation
-image. No retained image may be substituted. Under the later image/scanner
-authorization, build once from the repository root and retrieve the immutable
-digest:
+image. No retained image may be substituted. The template creates a Premium
+registry with public access disabled and a private endpoint. A hosted
+`az acr build` is not an established access path for that configuration; neither
+the retained records nor the template establish a private build agent or a
+workstation route. Docker Scout's `registry://` path also needs authenticated
+registry data-plane access. Do not run a build merely because ARM reads work.
+
+The executable local path uses the installed Linux Docker builder and Scout on
+the workstation. It requires separate approval for temporary registry network
+access, one build/push, one digest read, and one scan. No VM, agent pool, VPN,
+role, or trusted-task bypass is added. Before requesting that approval:
+
+1. Bind a fresh private registry GET to the new bundle's subscription, group,
+   registry ID, Premium SKU, disabled public access, and disabled admin/anonymous
+   access. Save its exact network settings. Verify existing operator push/pull
+   permission; otherwise stop and request that exact missing permission.
+2. Verify the workstation and Docker Desktop proxy's public IPv4 egress again.
+   The old matching observation is historical. Require the same single `/32`,
+   and preserve it only privately. Check current policy permits this change.
+3. Review two exact registry PATCH bodies at
+   `https://management.azure.com/subscriptions/{runtimeSubscription}/resourceGroups/{targetGroup}/providers/Microsoft.ContainerRegistry/registries/{registryName}?api-version=2025-11-01`.
+   The first atomically sets `publicNetworkAccess: Enabled` and
+   `networkRuleSet: {defaultAction: Deny, ipRules: [{action: Allow, value: <verified-/32>}]}`.
+   Never enable public access while the default is Allow. Preserve Private Link,
+   trusted-service bypass, identities, roles, tags, and all other settings.
+   The second restores the saved network settings and disabled public access.
+4. Require successful provisioning/readback of the first PATCH before push or
+   scan. Restore and verify the second on success, scan rejection, interruption,
+   or deadline failure. A lost PATCH response needs GET reconciliation, not an
+   automatic mutation retry. A restoration failure blocks workload admission
+   and requires the already approved ownership-checked campaign cleanup.
+
+These are supported
+[Premium IP access controls](https://learn.microsoft.com/en-us/azure/container-registry/container-registry-access-selected-networks)
+and [registry update operations](https://learn.microsoft.com/en-us/rest/api/container-registry/registries/update?view=rest-container-registry-2025-11-01).
+They are a proposed temporary public-IP exception, not unchanged private-only
+networking. This correction does not apply or authorize either PATCH.
+
+After the 14-vCPU gate, save the reviewed exact registry response as a private
+JSON object (`$registryBefore`) and the verified single IPv4 in process memory
+(`$verifiedEgress`). The local planner starts no approval window. All paths below
+must be inside the protected ignored runtime directory; the output directory
+`$bundle/local-image` and marker `$bundle/local-image-attempt.json` must not exist.
+Use the same cost config and ledger as every campaign phase:
 
 ```powershell
-$rt = Get-Content -LiteralPath $runtime -Raw | ConvertFrom-Json
-$imageName = "mobius-api:m78-$($campaign)"
-& .\.venv\Scripts\python.exe -m infra.milestone_7_8.azure_cli invoke -- `
-  acr build --registry $rt.registryName --image $imageName `
-  --file apps/api/Dockerfile . --output json
-if ($LASTEXITCODE -ne 0) { throw 'single campaign image build failed' }
-$digest = (& .\.venv\Scripts\python.exe -m infra.milestone_7_8.azure_cli `
-  invoke -- acr manifest show-metadata --registry $rt.registryName `
-  --name $imageName --query digest --output tsv).Trim()
-if ($LASTEXITCODE -ne 0 -or $digest -notmatch '^sha256:[a-f0-9]{64}$') {
-  throw 'immutable image digest readback failed'
-}
+$imagePlan = "$bundle/local-image-plan.json"
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.local_image plan `
+  --runtime $runtime --config $config --ledger $ledger --plan $imagePlan `
+  --registry-before $registryBefore --egress-ipv4 $verifiedEgress
+if ($LASTEXITCODE -ne 0) { throw 'local image plan validation failed' }
+# Stop here for approval of the exact plan. At execution readiness only:
+$imageApproval = "$bundle/local-image-approval.json"
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.local_image approve `
+  --runtime $runtime --config $config --ledger $ledger --plan $imagePlan `
+  --approval $imageApproval --expires-at $reviewedImageExpiry `
+  --restore-until $reviewedRestorationExpiry
+# Image expiry is at most one hour, within the campaign deadline. Restoration
+# may continue only through its separately approved cleanup-authority deadline.
+if ($LASTEXITCODE -ne 0) { throw 'local image approval validation failed' }
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.local_image execute `
+  --runtime $runtime --config $config --ledger $ledger --plan $imagePlan `
+  --approval $imageApproval --cleanup-authorization $failureCleanupAuth --execute
+if ($LASTEXITCODE -ne 0) { throw 'image attempt failed; inspect cleanup ledger and private results' }
+$imageResult = Get-Content -LiteralPath "$bundle/local-image/completed.json" -Raw | ConvertFrom-Json
+$digest = $imageResult.imageDigest
+$scan = "$bundle/local-image/image-scan.json"
+# Separately authorized image-decision consumes $digest/$scan and deploys the
+# workload using the existing operator. local_image itself never deploys it.
 ```
 
+The executor archives only canonical tracked inputs from the exact clean source
+commit, verifies those bytes, builds Linux/amd64 once, and checks source/input
+labels and the 2-GiB size cap before push. Local image identity, pushed digest,
+registry manifest and the one digest-pinned Scout scan must agree. Raw command
+responses, the source archive, SARIF, approvals and network snapshots stay private.
+Completion is written only after verified network restoration. The normal
+`image-decision` entry point validates that completion whenever the local attempt
+marker exists; a pending scan or failed restoration cannot advance this route.
+There is no automatic build, push or PATCH retry. Ordinary failures invoke the
+existing campaign cleanup path and require cleanup-wait, disarm, residue and
+finalize. A process crash can prevent local restoration/cleanup dispatch; retain
+the intents, inspect the exact registry under separate read authority, and use
+the already armed deadline cleanup. Matching state cannot invent missing history.
+Windows ACL and directory crash-durability limitations remain those documented
+below; Unix file modes alone do not establish Windows privacy.
+
+The local builder has zero incremental Azure build compute/resource cost. Keep
+the existing build allowance as contingency rather than claiming a saving
+before execution. Public Azure pricing refreshed November 12, 2026 lists incoming
+transfer as free and North American internet egress at USD 0.087/GB before
+volume discounts, ignoring the free tier. A 2-GiB image cap and 4-GiB external
+retrieval allowance contribute USD 0.3737 to the shared USD 2 network allowance.
+Together with one endpoint for five hours (USD 0.05), 100 GB private processing
+(USD 1), 20 GB cross-region traffic (USD 0.40), and 100,000 DNS queries (USD 0.04),
+the network estimate is USD 1.8637. Actual image size and all campaign transfers
+must fit that allowance before push. Otherwise revise the itemized estimate
+and rerun the cost gate. The refreshed offline replacement estimate is USD
+49.4083 including 25% contingency; apply its cost fields to the new prepared
+bundle and run the actual gate. It covers this campaign and one hour of cleanup
+overrun, not prior attempts or retained-controller standing costs. It is an
+estimate, not a billing guarantee. No Docker subscription purchase is authorized; use existing Scout
+entitlement or stop if unavailable.
+[Bandwidth pricing](https://azure.microsoft.com/en-us/pricing/details/bandwidth/).
+
 The separately authorized admission scanner must scan that exact digest and
-write `.runtime/milestone_7_8/image-scan.json` conforming to
+write a private receipt in the fresh bundle, conforming to
 `infra/milestone_7_8/schemas/image-scan.schema.json`. The receipt must bind the
 prepared source HEAD and canonical build-input hash and must report zero High
 and zero Critical findings. Validate and deploy the workload only after the
 receipt exists:
 
-For a fresh private bundle, the local Scout entry point runs one digest-pinned
+The local-image route already performs that scan; do not scan again. For a
+different separately approved access route, the existing Scout entry point runs one digest-pinned
 registry scan and writes the raw SARIF and receipt only in the private runtime
 tree. It requires a clean checkout matching the prepared source and canonical
 build inputs, registry access for Docker Scout, and new output paths. It rejects
@@ -364,7 +495,8 @@ against the managed registry by local tests. The digest must come from the one
 authorized campaign build and its registry readback.
 
 ```powershell
-$scan = '.runtime/milestone_7_8/image-scan.json'
+# Restore disabled registry access and verify its readback before admission.
+$scan = "$bundle/image-scan.json"
 Invoke-M78Phase 'image-decision' @(
   '--image-digest', $digest,
   '--image-built',
@@ -405,20 +537,24 @@ renewed config, exact approval, actual seven-command before/after readbacks,
 start/completion times within the approval window, and completion receipt.
 Only `sourceHead` and `controllerAuthorizedUntilUtc` may differ between configs.
 The approval binds both configs, the original deadline, proposed deadline, and
-before-readback digest. All preservation and completion hashes are independently
+before-readback digest. Newly planned renewals also bind the exact plan hash
+(`approvalBinding: exact-plan-v1`, `renewalPlanSha256` in the approval), including
+the immediate predecessor evidence and executing source identity. Retained
+approvals without these fields remain valid under their original contracts.
+All preservation and completion hashes are independently
 recomputed; the two success booleans are insufficient without the responses.
 Approval of an exact old/new transition can explicitly cover an already-expired
 old deadline, but historical approval never becomes current execution authority.
 
-For the existing verified controller, one separately authorized first live
+For the existing verified controller, each separately authorized
 renewal attempt may use the locally tested executor and the read-only snapshot
 and reconciliation paths below. This permission is limited to the three planned
 deadline-tag Merge requests on that controller's group, Automation account, and
 runbook. Validate the exact plan, current approval, protected private storage,
 and seven-read baseline before dispatch; preserve the complete executor journal
 and all before/after readbacks. The snapshot and reconciliation paths have
-synthetic tests and a separately captured live baseline; successful Azure Merge
-behavior and preservation remain unproved until the separately authorized
+synthetic tests and retained live evidence; a new attempt's Azure Merge
+behavior and preservation remain unproved until its separately authorized
 seven-read reconciliation passes and its completion evidence is validated.
 Campaign admission remains blocked until then. Do not perform manual tag changes
 using this assembler. Failed, indeterminate,
@@ -455,9 +591,35 @@ Separately authorized subsequent renewals of the existing controller may
 use the immediately preceding validated completion evidence as `$anchor`. The planner
 binds that entire prior evidence and its final readback, including the previously
 verified deadline, into the new plan. The new completion retains the unmodified
-bootstrap and prior-renewal evidence. The contract permits at most three
-renewals. Choose the new deadline at execution and verify it extends at least
+bootstrap and complete preceding transition evidence. Publications and renewals
+may repeat in either order; neither resets the history. Choose the new deadline
+at execution and verify it extends at least
 five hours past the actual campaign preparation time.
+
+When the current checkout contains a corrected, not-yet-published script, the
+renewal plan may separately bind its `sourceCleanupScriptSha256`. This is the
+executing source file, not a claim that those bytes are deployed. The renewed
+config retains the previously accepted deployed script hash, and both baseline
+and reconciliation must still read exactly that content. The plan and approval
+bind both identities. This permits renewal before publication from the same
+clean commit without weakening the source check or changing deployed tags.
+
+```powershell
+$head = (git rev-parse HEAD).Trim()
+$sourceScriptHash = (Get-FileHash infra/milestone_7_8/scripts/Remove-M78Campaign.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.controller_renewal `
+  --operation plan --authority-evidence $anchor --source-head $head `
+  --source-cleanup-script-sha256 $sourceScriptHash --deadline $reviewedNewDeadline `
+  --output $plan
+# After explicit baseline-read approval, use before-snapshot above. Build the
+# mutation artifact with build_approval(anchor, plan, before, issued_at=...,
+# expires_at=..., now=...) only after approval; do not start a window in planning.
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.controller_renewal `
+  --operation execute --authority-evidence $anchor --plan $plan `
+  --approval $mutationAuth --before-readback $before --journal-dir $journal --execute
+# Separate GET-only approval and reconciliation above must pass before adoption
+# or using its 02-completed-authority-evidence.json as the next $anchor.
+```
 An early lost response, missing dispatch record, incomplete journal, nonzero
 final response without a complete journal, or any changed unrelated field stays
 blocked; matching tags do not reconstruct dispatch history. A process crash
@@ -467,7 +629,7 @@ crash durability has not been independently tested. The designated review
 directory's current-user-only ACL and child inheritance were checked locally;
 recheck the selected private output directory and its inherited ACL at execution.
 
-### One in-place cleanup runbook publication
+### In-place cleanup runbook publications
 
 Use the last validated authority evidence as `$anchor` and keep it intact. The
 publication plan binds the entire prior record, the old script hash, the corrected
@@ -513,14 +675,24 @@ and runbook configuration must be preserved, allowing only runbook publication
 metadata to change. The original script-hash tags remain the bootstrap binding.
 
 Use the resulting `$attempt/controller-authority-evidence.json` for campaign
-preparation. It preserves the original bootstrap and renewals and adds the
-publication approval, dispatch results, both readbacks, and recomputable proof.
-Discovery checks the exact current published content again. A failed or ambiguous
+preparation or the next renewal/publication. Every new publication retains the
+entire immediately preceding accepted record in `priorAuthorityEvidence`;
+the root bootstrap fields remain identical and its root `renewal` is null.
+New renewal records retain the prior publication or renewal in the same way.
+The retained legacy publication overlay and original bootstrap/direct-renewal
+records are validated unchanged. Each transition binds its plan, source,
+approval, attempts, before/after readbacks and proof. Publication can use the
+same source commit as the preceding renewal but must change published content.
+Discovery checks the exact current published content again even if a later
+publication returns to the bootstrap bytes. A failed or ambiguous
 dispatch, an incomplete readback, or a preservation mismatch produces no admitting
 record. Keep the attempt and investigate using scoped reads before considering
-any further write. The executor has synthetic tests. Azure publication has yet to
-be verified, and directory-entry crash durability remains unproved. A second
-publication or deadline renewal from this record is outside the supported path.
+any further write. Fake-provider integration exercises publication → renewal →
+publication → renewal through the production planners, executors, reconciler,
+discovery and campaign admission. Retained live publication evidence does not
+prove a future publication. Directory-entry crash durability remains unproved.
+There is no automatic retry or publication lost-response reconciliation writer;
+an incomplete publication remains blocked pending a separately reviewed recovery.
 
 Preparation copies and hash-binds this evidence in runtime v9. All subsequent
 campaign execution authorizations use v5 and bind

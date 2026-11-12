@@ -16,6 +16,7 @@ from infra.milestone_7_8.cleanup_controller import (
 )
 from infra.milestone_7_8.controller_admission import (
     bootstrap_script_hash,
+    has_publication,
     validate_authority_evidence,
     validate_controller_admission,
 )
@@ -783,15 +784,15 @@ def select_automation_region_from_results(
     offer = _subscription_offer_eligibility(subscription)
     active_accounts = _complete_account_inventory(active, label="active")
     deleted_accounts = _complete_account_inventory(deleted, label="soft-deleted")
-    published = (
-        isinstance(controller_authority_evidence, dict)
-        and "runbookPublication" in controller_authority_evidence
-    )
     tag_hash = cleanup_script_sha256
-    if published:
+    if isinstance(controller_authority_evidence, dict):
         authority = cast(dict[str, object], controller_authority_evidence)
         validate_authority_evidence(authority)
         tag_hash = bootstrap_script_hash(authority)
+    published = (
+        isinstance(controller_authority_evidence, dict)
+        and has_publication(controller_authority_evidence)
+    )
     controller_region = _adoptable_controller_region(
         active_accounts,
         controller_resource_group=controller_resource_group,
