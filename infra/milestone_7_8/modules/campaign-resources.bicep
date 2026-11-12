@@ -93,8 +93,10 @@ var commonRuntimeEnvironment = concat(commonEnvironment, [
   { name: 'OPENCANVAS_TELEMETRY_EXPORTER', value: 'disabled' }
 ])
 var postgresSubnetId = resourceId('Microsoft.Network/virtualNetworks/subnets', virtualNetworkName, 'postgres')
-var containerAppsSubnetId = resourceId('Microsoft.Network/virtualNetworks/subnets', virtualNetworkName, 'container-apps')
+var containerAppsSubnetId = '${network.id}/subnets/container-apps'
 var privateEndpointSubnetId = resourceId('Microsoft.Network/virtualNetworks/subnets', virtualNetworkName, 'private-endpoints')
+// Private DNS accepts at most 15 tags. Keep the authoritative cleanup deadline.
+var privateDnsTags = toObject(filter(items(lifecycleTags), tag => tag.key != 'mobius.expiry'), tag => tag.key, tag => tag.value)
 var workloadEnabled = deploymentStage == 'workload'
 var acrPullRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
 
@@ -115,7 +117,10 @@ resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
       }
       {
         name: 'container-apps'
-        properties: { addressPrefix: '10.78.4.0/23' }
+        properties: {
+          addressPrefix: '10.78.4.0/23'
+          delegations: [ { name: 'container-apps', properties: { serviceName: 'Microsoft.App/environments' } } ]
+        }
       }
       {
         name: 'private-endpoints'
@@ -128,20 +133,20 @@ resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
 resource privateDns 'Microsoft.Network/privateDnsZones@2024-06-01' = {
   name: privateDnsZoneName
   location: 'global'
-  tags: lifecycleTags
+  tags: privateDnsTags
 }
 
 resource registryPrivateDns 'Microsoft.Network/privateDnsZones@2024-06-01' = {
   name: 'privatelink.azurecr.io'
   location: 'global'
-  tags: lifecycleTags
+  tags: privateDnsTags
 }
 
 resource registryPrivateDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
   parent: registryPrivateDns
   name: 'm78-${uniqueString(campaignId, generationId)}'
   location: 'global'
-  tags: lifecycleTags
+  tags: privateDnsTags
   properties: { registrationEnabled: false, virtualNetwork: { id: network.id } }
 }
 
@@ -149,7 +154,7 @@ resource privateDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2
   parent: privateDns
   name: 'm78-${uniqueString(campaignId, generationId)}'
   location: 'global'
-  tags: lifecycleTags
+  tags: privateDnsTags
   properties: { registrationEnabled: false, virtualNetwork: { id: network.id } }
 }
 

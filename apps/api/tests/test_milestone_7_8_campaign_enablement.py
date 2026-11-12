@@ -7,6 +7,8 @@ import hashlib
 # also imports the repository-level campaign package after adding that explicit root.
 # ruff: noqa: E402
 import json
+import shutil
+import subprocess
 import sys
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -2197,6 +2199,86 @@ def test_campaign_template_configures_four_api_and_worker_replicas() -> None:
     assert "minReplicas: 4, maxReplicas: 4" in template
     worker = template.split("resource workerJob ", 1)[1].split("resource bootstrapJob ", 1)[0]
     assert "manualTriggerConfig: { parallelism: 4, replicaCompletionCount: 4 }" in worker
+
+
+def test_campaign_template_delegates_environment_subnet_and_limits_private_dns_tags() -> None:
+    template = (
+        REPOSITORY_ROOT / "infra/milestone_7_8/modules/campaign-resources.bicep"
+    ).read_text(encoding="utf-8")
+    subnet = template.split("name: 'container-apps'", 1)[1].split(
+        "name: 'private-endpoints'", 1
+    )[0]
+    assert "serviceName: 'Microsoft.App/environments'" in subnet
+    assert "var containerAppsSubnetId = '${network.id}/subnets/container-apps'" in template
+    assert "infrastructureSubnetId: containerAppsSubnetId" in template
+    assert "filter(items(lifecycleTags), tag => tag.key != 'mobius.expiry')" in template
+    for symbol in ("privateDns", "registryPrivateDns", "privateDnsLink", "registryPrivateDnsLink"):
+        dns = template.split(f"resource {symbol} ", 1)[1].split("\n}", 1)[0]
+        assert "tags: privateDnsTags" in dns
+
+
+@pytest.mark.parametrize("defect", [None, "deadline", "authority-expiry", "number", "missing"])
+def test_cleanup_runbook_compares_uncoerced_binding_strings(
+    tmp_path: Path, defect: str | None
+) -> None:
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is required for the cleanup runbook regression")
+    expected = {
+        "CleanupDeadlineUtc": "2026-11-12T05:32:00Z",
+        "CleanupAuthorityExpiresUtc": "2026-11-12T06:32:00Z",
+        "CostCeilingCents": "5000",
+    }
+    parameters: dict[str, object] = dict(expected)
+    if defect == "deadline":
+        parameters["CleanupDeadlineUtc"] = "2026-11-12T05:33:00Z"
+    elif defect == "authority-expiry":
+        parameters["CleanupAuthorityExpiresUtc"] = "2026-11-12T06:32:00+00:00"
+    elif defect == "number":
+        parameters["CostCeilingCents"] = 5000
+    elif defect == "missing":
+        del parameters["CostCeilingCents"]
+    fixture = tmp_path / "binding.json"
+    fixture.write_text(json.dumps({"properties": {"parameters": parameters}}), encoding="utf-8")
+    harness = tmp_path / "check-binding.ps1"
+    harness.write_text(
+        r"""param([string]$Runbook, [string]$Fixture)
+$ErrorActionPreference = 'Stop'
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+  $Runbook, [ref]$null, [ref]$null
+)
+$function = $ast.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Assert-CleanupBindingParameters'
+}, $false)
+. ([scriptblock]::Create($function.Extent.Text))
+Assert-CleanupBindingParameters (Get-Content -LiteralPath $Fixture -Raw) @{
+  CleanupDeadlineUtc = '2026-11-12T05:32:00Z'
+  CleanupAuthorityExpiresUtc = '2026-11-12T06:32:00Z'
+  CostCeilingCents = '5000'
+}
+""",
+        encoding="utf-8",
+    )
+    runbook = REPOSITORY_ROOT / "infra/milestone_7_8/scripts/Remove-M78Campaign.ps1"
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-NonInteractive", "-File", str(harness), str(runbook), str(fixture)],
+        capture_output=True,
+        check=False,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    if defect is None:
+        assert result.returncode == 0, result.stderr
+    else:
+        assert result.returncode != 0
+        assert (
+            "cleanup-binding-parameter-set-mismatch"
+            if defect == "missing"
+            else "cleanup-binding-parameter-mismatch"
+        ) in result.stderr
 
 
 def test_immediate_cleanup_passes_exact_key_value_parameters() -> None:

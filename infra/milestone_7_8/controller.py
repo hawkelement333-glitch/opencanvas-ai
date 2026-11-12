@@ -14,8 +14,8 @@ from typing import cast
 
 from infra.milestone_7_8.campaign import (
     CAMPAIGN_PATTERN,
-    CampaignError,
     GENERATION_PATTERN,
+    CampaignError,
     SubprocessRunner,
     parse_utc,
     sanitize,
@@ -29,6 +29,8 @@ from infra.milestone_7_8.cleanup_controller import (
 )
 from infra.milestone_7_8.predeployment import (
     EVIDENCE_VERSION as FRESH_CONTROLLER_ADMISSION_EVIDENCE_VERSION,
+)
+from infra.milestone_7_8.predeployment import (
     PredeploymentVerificationError,
     load_validated_admission,
 )
@@ -501,33 +503,23 @@ def controller_command_plan(
             "--output",
             "json",
         ),
-        (
-            "az",
-            "automation",
-            "runbook",
-            "replace-content",
-            "--resource-group",
-            config.controller_resource_group_name,
-            "--automation-account-name",
-            config.automation_account_name,
-            "--name",
-            config.runbook_name,
-            "--content",
-            "@infra/milestone_7_8/scripts/Remove-M78Campaign.ps1",
-        ),
-        (
-            "az",
-            "automation",
-            "runbook",
-            "publish",
-            "--resource-group",
-            config.controller_resource_group_name,
-            "--automation-account-name",
-            config.automation_account_name,
-            "--name",
-            config.runbook_name,
-        ),
+        *runbook_publication_commands(config),
         *reads,
+    )
+
+
+def runbook_publication_commands(config: ControllerConfig) -> tuple[tuple[str, ...], ...]:
+    target = (
+        "--resource-group", config.controller_resource_group_name,
+        "--automation-account-name", config.automation_account_name,
+        "--name", config.runbook_name,
+    )
+    return (
+        (
+            "az", "automation", "runbook", "replace-content", *target,
+            "--content", "@infra/milestone_7_8/scripts/Remove-M78Campaign.ps1",
+        ),
+        ("az", "automation", "runbook", "publish", *target),
     )
 
 
@@ -551,7 +543,7 @@ def _json_result(result: dict[str, object]) -> object:
 
 
 def validate_controller_results(
-    results: list[dict[str, object]], config: ControllerConfig
+    results: list[dict[str, object]], config: ControllerConfig, *, bootstrap_hash: str | None = None
 ) -> str:
     if len(results) != 7:
         raise CampaignError("controller readback sequence is incomplete")
@@ -577,7 +569,7 @@ def validate_controller_results(
         "mobius.controller-authorized-until-utc": (
             config.controller_authorized_until_utc
         ),
-        "mobius.cleanup-script-sha256": config.cleanup_script_sha256,
+        "mobius.cleanup-script-sha256": bootstrap_hash or config.cleanup_script_sha256,
         "mobius.fresh-controller-admission-sha256": (
             config.fresh_controller_admission_evidence_sha256
         ),

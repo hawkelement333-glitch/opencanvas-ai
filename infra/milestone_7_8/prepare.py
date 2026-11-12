@@ -30,6 +30,7 @@ from infra.milestone_7_8.cleanup_controller import (
     controller_names,
 )
 from infra.milestone_7_8.controller_admission import (
+    bootstrap_script_hash,
     digest,
     load_authority_evidence,
     validate_authority_evidence,
@@ -450,6 +451,8 @@ def main() -> int:
             "cleanupParametersFile": str(cleanup_path),
             "campaignParametersFile": str(campaign_path),
         }
+        if "runbookPublication" in controller_authority:
+            runtime["controllerBootstrapScriptSha256"] = bootstrap_script_hash(controller_authority)
         _write_new(
             fresh_runtime_path,
             json.loads(args.fresh_subscription_runtime.read_text(encoding="utf-8")),

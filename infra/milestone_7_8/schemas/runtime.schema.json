@@ -68,6 +68,7 @@
     },
     "dockerfileSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "cleanupScriptSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "controllerBootstrapScriptSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "automationApiVersion": { "const": "2024-10-23" },
     "cleanupControllerArchitecture": {
       "const": "reusable-automation-controller-v1"

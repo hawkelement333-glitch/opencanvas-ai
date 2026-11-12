@@ -44,6 +44,7 @@ from infra.milestone_7_8.cleanup_controller import (
     validate_controller_deadline_consistency,
 )
 from infra.milestone_7_8.controller_admission import (
+    bootstrap_script_hash,
     load_authority_evidence,
     validate_authority_evidence,
     validate_controller_admission,
@@ -256,10 +257,11 @@ def load_runtime(path: Path) -> dict[str, str]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if (
         not isinstance(value, dict)
-        or set(value) != RUNTIME_FIELDS
+        or not RUNTIME_FIELDS <= set(value) <= RUNTIME_FIELDS | {"controllerBootstrapScriptSha256"}
         or not all(isinstance(item, str) and item for item in value.values())
     ):
         raise CampaignError("operator runtime fields are incomplete")
+    value = cast(dict[str, str], value)
     try:
         uuid.UUID(value["subscriptionId"])
     except ValueError as exc:
@@ -269,6 +271,10 @@ def load_runtime(path: Path) -> dict[str, str]:
         or re.fullmatch(r"[a-f0-9]{64}", value["canonicalBuildInputSha256"]) is None
         or re.fullmatch(r"[a-f0-9]{64}", value["dockerfileSha256"]) is None
         or re.fullmatch(r"[a-f0-9]{64}", value["cleanupScriptSha256"]) is None
+        or re.fullmatch(
+            r"[a-f0-9]{64}",
+            value.get("controllerBootstrapScriptSha256", value["cleanupScriptSha256"]),
+        ) is None
         or value["automationApiVersion"] != "2024-10-23"
         or value["cleanupControllerArchitecture"] != ARCHITECTURE
         or value["cleanupControllerArmability"] != LOCAL_ARCHITECTURE_STATE
@@ -399,6 +405,8 @@ def validate_bound_controller_authority(
     )
     if (
         authority_hash != runtime["controllerAuthorityEvidenceSha256"]
+        or runtime.get("controllerBootstrapScriptSha256", runtime["cleanupScriptSha256"])
+        != bootstrap_script_hash(cast(dict[str, object], value))
         or anchor.controller_authorized_until_utc != runtime["controllerAuthorizedUntilUtc"]
         or anchor.runbook_name != runtime["runbookName"]
         or anchor.campaign_id != config.campaign_id
@@ -2195,7 +2203,9 @@ def _validate_controller_tags(
         "mobius.owner": "managed-postgresql-evidence",
         "mobius.cleanup-controller": ARCHITECTURE,
         "mobius.subscription-correlation": config.subscription_correlation,
-        "mobius.cleanup-script-sha256": runtime["cleanupScriptSha256"],
+        "mobius.cleanup-script-sha256": runtime.get(
+            "controllerBootstrapScriptSha256", runtime["cleanupScriptSha256"]
+        ),
         "mobius.fresh-controller-admission-sha256": (
             config.fresh_controller_admission_evidence_sha256
         ),

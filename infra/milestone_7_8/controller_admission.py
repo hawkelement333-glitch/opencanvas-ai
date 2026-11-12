@@ -68,7 +68,9 @@ def _closed(value: object, fields: set[str], label: str) -> dict[str, object]:
     return cast(dict[str, object], value)
 
 
-def _readback(value: object, config: ControllerConfig) -> list[dict[str, object]]:
+def _readback(
+    value: object, config: ControllerConfig, *, bootstrap_hash: str | None = None
+) -> list[dict[str, object]]:
     if (
         not isinstance(value, list)
         or len(value) != 7
@@ -88,7 +90,7 @@ def _readback(value: object, config: ControllerConfig) -> list[dict[str, object]
         _snapshot_values(results)
     except (TypeError, ValueError) as exc:
         raise CampaignError("controller preservation readback is malformed") from exc
-    validate_controller_results(results, config)
+    validate_controller_results(results, config, bootstrap_hash=bootstrap_hash)
     group_id = (
         f"/subscriptions/{config.subscription_id}/resourceGroups/"
         f"{config.controller_resource_group_name}"
@@ -166,6 +168,11 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
     to verify their exact binding. This does not renew them or authorize work.
     The caller separately checks the observed live deadline and required horizon.
     """
+    if isinstance(value, dict) and "runbookPublication" in value:
+        from infra.milestone_7_8.controller_publication import validate_publication
+
+        prior = {key: item for key, item in value.items() if key != "runbookPublication"}
+        return validate_publication(prior, value["runbookPublication"])
     # Keep the historical chain bounded while allowing one further renewal.
     cursor = value
     visited: set[int] = set()
@@ -406,6 +413,11 @@ def validate_authority_evidence(value: object) -> ControllerConfig:
     return renewed
 
 
+def bootstrap_script_hash(evidence: dict[str, object]) -> str:
+    """Get the original infrastructure tag value from a validated authority record."""
+    return ControllerConfig.from_document(evidence["verifiedConfig"]).cleanup_script_sha256
+
+
 def validate_controller_admission(
     value: object,
     *,
@@ -443,6 +455,13 @@ def validate_controller_admission(
         raise CampaignError(
             "controller renewal completion is later than live observation"
         )
+    publication = evidence.get("runbookPublication")
+    if (
+        observed_at is not None
+        and isinstance(publication, dict)
+        and parse_utc(str(publication["verifiedAtUtc"])) > observed_at.astimezone(UTC)
+    ):
+        raise CampaignError("controller publication is later than live observation")
     return digest("m7.8/controller-authority-evidence/v1", value)
 
 

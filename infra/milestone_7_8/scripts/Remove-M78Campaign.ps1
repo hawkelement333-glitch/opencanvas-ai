@@ -34,10 +34,38 @@ function Get-Correlation([string]$Domain, [string]$Value) {
   return (Get-Sha256 "m7.8/$Domain`0$Value").Substring(0, 16)
 }
 
-function Get-ArmJson([string]$Path) {
+function Get-ArmContent([string]$Path) {
   $response = Invoke-AzRestMethod -Path $Path -Method GET
   if ([string]::IsNullOrWhiteSpace($response.Content)) { throw 'cleanup-readback-empty' }
-  return $response.Content | ConvertFrom-Json -Depth 32
+  return $response.Content
+}
+
+function Get-ArmJson([string]$Path) {
+  return (Get-ArmContent $Path) | ConvertFrom-Json -Depth 32
+}
+
+function Assert-CleanupBindingParameters([string]$Content, [hashtable]$Expected) {
+  # ConvertFrom-Json can coerce ISO strings to DateTime in the Automation runtime.
+  $document = [System.Text.Json.JsonDocument]::Parse($Content)
+  try {
+    $parameters = $document.RootElement.GetProperty('properties').GetProperty('parameters')
+    $seen = @{}
+    foreach ($parameter in $parameters.EnumerateObject()) {
+      $key = $parameter.Name
+      if ($seen.ContainsKey($key) -or -not $Expected.ContainsKey($key)) {
+        throw 'cleanup-binding-parameter-set-mismatch'
+      }
+      if (
+        $parameter.Value.ValueKind -ne [System.Text.Json.JsonValueKind]::String -or
+        $parameter.Value.GetString() -cne $Expected[$key]
+      ) {
+        throw 'cleanup-binding-parameter-mismatch'
+      }
+      $seen[$key] = $true
+    }
+    if ($seen.Count -ne $Expected.Count) { throw 'cleanup-binding-parameter-set-mismatch' }
+  }
+  finally { $document.Dispose() }
 }
 
 function Get-ExecutingPrincipalId {
@@ -139,7 +167,8 @@ $automationBase = "/subscriptions/$($context.Subscription.Id)/resourceGroups/$Co
 $account = Get-ArmJson "$automationBase`?api-version=2024-10-23"
 $runbook = Get-ArmJson "$automationBase/runbooks/$CleanupRunbookName`?api-version=2024-10-23"
 $schedule = Get-ArmJson "$automationBase/schedules/$CleanupScheduleName`?api-version=2024-10-23"
-$binding = Get-ArmJson "$automationBase/jobSchedules/$CleanupBindingName`?api-version=2024-10-23"
+$bindingContent = Get-ArmContent "$automationBase/jobSchedules/$CleanupBindingName`?api-version=2024-10-23"
+$binding = $bindingContent | ConvertFrom-Json -Depth 32
 
 $controllerRunbookId = "$automationBase/runbooks/$CleanupRunbookName".ToLowerInvariant()
 $observedControllerBinding = Get-Sha256 "m7.8/reusable-cleanup-controller/v1`0$controllerRunbookId"
@@ -167,14 +196,7 @@ $expectedBindingParameters = @{
   CleanupAuthoritySha256 = $CleanupAuthoritySha256
   CleanupAuthorized = $CleanupAuthorized
 }
-foreach ($key in $expectedBindingParameters.Keys) {
-  if ([string]$binding.properties.parameters.$key -ne $expectedBindingParameters[$key]) {
-    throw 'cleanup-binding-parameter-mismatch'
-  }
-}
-if (@($binding.properties.parameters.PSObject.Properties.Name).Count -ne $expectedBindingParameters.Count) {
-  throw 'cleanup-binding-parameter-set-mismatch'
-}
+Assert-CleanupBindingParameters $bindingContent $expectedBindingParameters
 if (
   $observedControllerBinding -ne $ControllerBindingSha256 -or
   $account.name -ne $AutomationAccountName -or

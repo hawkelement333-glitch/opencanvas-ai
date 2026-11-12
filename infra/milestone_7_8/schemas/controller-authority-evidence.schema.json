@@ -20,6 +20,57 @@
       }
     },
     "baselineReadback": {"$ref": "#/$defs/readback"},
+    "runbookPublication": {
+      "type": "object", "additionalProperties": false,
+      "required": ["plan", "approval", "beforeReadback", "attempts", "afterReadback", "verifiedAtUtc", "proofSha256"],
+      "properties": {
+        "plan": {
+          "type": "object", "additionalProperties": false,
+          "required": ["version", "priorAuthorityEvidenceSha256", "priorConfigSha256", "priorScriptSha256", "publishedConfig", "publishedConfigSha256", "artifactRoot", "requests", "planSha256"],
+          "properties": {
+            "version": {"const": "m7.8-controller-runbook-publication-plan-v1"},
+            "priorAuthorityEvidenceSha256": {"$ref": "#/$defs/hash"},
+            "priorConfigSha256": {"$ref": "#/$defs/hash"},
+            "priorScriptSha256": {"$ref": "#/$defs/hash"},
+            "publishedConfig": {"$ref": "controller.schema.json"},
+            "publishedConfigSha256": {"$ref": "#/$defs/hash"},
+            "artifactRoot": {"type": "string", "pattern": "^\\.runtime/[^\\\\]+$"},
+            "planSha256": {"$ref": "#/$defs/hash"},
+            "requests": {"type": "array", "minItems": 2, "maxItems": 2, "items": {
+              "type": "array", "minItems": 3, "items": {"type": "string"}
+            }}
+          }
+        },
+        "approval": {
+          "type": "object", "additionalProperties": false,
+          "required": ["version", "operation", "planSha256", "issuedAtUtc", "expiresAtUtc", "authorizationSha256"],
+          "properties": {
+            "version": {"const": "m7.8-controller-runbook-publication-approval-v1"},
+            "operation": {"const": "replace-and-publish-controller-runbook"},
+            "planSha256": {"$ref": "#/$defs/hash"},
+            "issuedAtUtc": {"type": "string", "format": "date-time"},
+            "expiresAtUtc": {"type": "string", "format": "date-time"},
+            "authorizationSha256": {"$ref": "#/$defs/hash"}
+          }
+        },
+        "beforeReadback": {"$ref": "#/$defs/readback"},
+        "afterReadback": {"$ref": "#/$defs/readback"},
+        "verifiedAtUtc": {"type": "string", "format": "date-time"},
+        "proofSha256": {"$ref": "#/$defs/hash"},
+        "attempts": {"type": "array", "minItems": 2, "maxItems": 2, "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["requestSha256", "dispatchedAtUtc", "result"],
+          "properties": {
+            "requestSha256": {"$ref": "#/$defs/hash"},
+            "dispatchedAtUtc": {"type": "string", "format": "date-time"},
+            "result": {"type": "object", "additionalProperties": false,
+              "required": ["exitCode", "stdout", "stderr"],
+              "properties": {"exitCode": {"const": 0}, "stdout": {"type": "string"}, "stderr": {"type": "string"}}
+            }
+          }
+        }}
+      }
+    },
     "renewal": {
       "oneOf": [
         {"type": "null"},

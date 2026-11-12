@@ -430,6 +430,8 @@ def execute_renewal(
 def build_plan(
     evidence: object, *, source_head: str, deadline: str
 ) -> dict[str, object]:
+    if isinstance(evidence, dict) and "runbookPublication" in evidence:
+        raise CampaignError("deadline renewal after runbook publication is unsupported")
     original = admission.validate_authority_evidence(evidence)
     if not isinstance(evidence, dict):
         raise CampaignError("renewal plan requires validated authority evidence")

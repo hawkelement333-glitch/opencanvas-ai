@@ -19,7 +19,13 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from infra.milestone_7_8 import controller_admission as admission
-from infra.milestone_7_8 import controller_renewal, operator, predeployment, prepare
+from infra.milestone_7_8 import (
+    controller_publication,
+    controller_renewal,
+    operator,
+    predeployment,
+    prepare,
+)
 from infra.milestone_7_8.automation_region import (
     CLEANUP_REGION_CANDIDATES,
     automation_region_discovery_commands,
@@ -959,6 +965,9 @@ class DiscoveryRunner:
         records = copy.deepcopy(evidence["baselineReadback"])
         if evidence["renewal"]:
             records = copy.deepcopy(evidence["renewal"]["afterReadback"])
+        if evidence.get("runbookPublication"):
+            records = copy.deepcopy(evidence["runbookPublication"]["afterReadback"])
+        self.content = records[4]
         self.resources = [json.loads(records[index]["stdout"]) for index in (0, 1, 3)]
         self.resources[1]["resourceGroup"] = self.resources[0]["name"]
         for resource in self.resources[:changed_resources]:
@@ -972,6 +981,8 @@ class DiscoveryRunner:
             return self.discovery_results()[discovery.index(command)]
         assert command[:4] == ("az", "rest", "--method", "get")
         url = command[command.index("--url") + 1]
+        if "/content?" in url:
+            return self.content
         return result(self.resources[2] if "/runbooks/" in url else self.resources[0])
 
     def discovery_results(self):
@@ -1014,6 +1025,8 @@ class DiscoveryRunner:
 
     def select(self, authority: object, required_until="2030-01-01T05:00:00Z"):
         config = ControllerConfig.from_document(self.evidence["verifiedConfig"])
+        if self.evidence.get("runbookPublication"):
+            config = admission.validate_authority_evidence(self.evidence)
         observed = datetime(2030, 1, 2, 1, 3, tzinfo=UTC) if self.evidence["renewal"] else NOW
         return select_automation_region_from_results(
             self,
@@ -1072,7 +1085,122 @@ def campaign_fixture(evidence: dict[str, object]):
         "runbookName": controller.runbook_name,
         "cleanupAuthorityExpiresUtc": "2030-01-01T05:00:00Z",
     }
+    if evidence.get("runbookPublication"):
+        runtime["controllerBootstrapScriptSha256"] = admission.bootstrap_script_hash(evidence)
     return config, runtime
+
+
+class PublicationProvider:
+    def __init__(self, prior, *, failure=None):
+        self.readback = copy.deepcopy(prior["renewal"]["afterReadback"])
+        self.failure = failure
+        self.reads = 0
+        self.writes = []
+
+    def run(self, command):
+        assert command[-3:] == ("--subscription", SUBSCRIPTION, "--only-show-errors")
+        if command[:2] == ("automation", "runbook"):
+            self.writes.append(command)
+            action = command[2]
+            if self.failure == action:
+                raise TimeoutError("response lost")
+            if action == "publish" and self.failure != "stale-content":
+                self.readback[4]["stdout"] = "corrected cleanup content"
+                runbook = json.loads(self.readback[3]["stdout"])
+                runbook["properties"]["lastModifiedTime"] = "2030-01-02T01:03:00Z"
+                self.readback[3] = result(runbook)
+                if self.failure == "drift":
+                    account = json.loads(self.readback[1]["stdout"])
+                    account["tags"]["unexpected"] = "changed"
+                    self.readback[1] = result(account)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        item = self.readback[self.reads % 7]
+        self.reads += 1
+        return subprocess.CompletedProcess(command, 0, item["stdout"], item["stderr"])
+
+
+def publication_inputs(prior):
+    script_hash = hashlib.sha256(b"corrected cleanup content").hexdigest()
+    source = ("d" * 40, script_hash)
+    plan = controller_publication.build_plan(
+        prior, source_head=source[0], script_hash=source[1],
+        artifact_root=".runtime/test-publication",
+    )
+    approval = controller_publication.build_approval(
+        plan, issued_at="2030-01-02T01:02:30Z", expires_at="2030-01-02T01:10:00Z",
+    )
+    return plan, approval, source
+
+
+def test_publication_proves_new_content_without_rewriting_renewal_or_tags(tmp_path):
+    prior = renewed_fixture()
+    saved = copy.deepcopy(prior)
+    plan, approval, source = publication_inputs(prior)
+    provider = PublicationProvider(prior)
+    evidence = controller_publication.execute_publication(
+        prior, plan, approval, output_dir=tmp_path / "attempt", runner=provider,
+        clock=lambda: datetime(2030, 1, 2, 1, 3, tzinfo=UTC), source=lambda: source,
+    )
+    assert provider.reads == 14
+    assert [command[2] for command in provider.writes] == ["replace-content", "publish"]
+    assert [list(command) for command in provider.writes] == plan["requests"]
+    assert prior == saved
+    assert {key: value for key, value in evidence.items() if key != "runbookPublication"} == saved
+    accepted = admission.load_authority_evidence(
+        tmp_path / "attempt/controller-authority-evidence.json"
+    )
+    assert admission.validate_authority_evidence(accepted).cleanup_script_sha256 == source[1]
+    assert admission.validate_authority_evidence(accepted).controller_authorized_until_utc == NEW
+    selector = DiscoveryRunner(accepted)
+    assert selector.select(accepted).controller_disposition == "exact-controller-adoptable"
+    assert any("/content?" in argument for cmd in selector.commands for argument in cmd)
+    selector.content = {"exitCode": 0, "stdout": "cleanup-content", "stderr": ""}
+    with unittest.TestCase().assertRaisesRegex(CampaignError, "content drifted"):
+        selector.select(accepted)
+    with unittest.TestCase().assertRaisesRegex(CampaignError, "tags drifted"):
+        DiscoveryRunner(accepted).select(prior)
+    config, runtime = campaign_fixture(accepted)
+    assert operator.validate_bound_controller_authority(accepted, runtime, config) == accepted
+    operator._validate_controller_tags(
+        selector.resources[1]["tags"], config=config, runtime=runtime
+    )
+    del runtime["controllerBootstrapScriptSha256"]
+    with unittest.TestCase().assertRaisesRegex(CampaignError, "binding differs"):
+        operator.validate_bound_controller_authority(accepted, runtime, config)
+    bad = copy.deepcopy(accepted)
+    bad["runbookPublication"]["attempts"].pop()
+    with unittest.TestCase().assertRaisesRegex(CampaignError, "dispatch history is incomplete"):
+        admission.validate_authority_evidence(bad)
+
+
+def test_publication_blocks_expiry_drift_and_ambiguous_writes(tmp_path):
+    prior = renewed_fixture()
+    plan, approval, source = publication_inputs(prior)
+    for failure, writes, message in (
+        ("replace-content", 1, "outcome is indeterminate"),
+        ("publish", 2, "outcome is indeterminate"),
+        ("stale-content", 2, "publication readback differs"),
+        ("drift", 2, "changed other tags or properties"),
+        ("expired", 0, "approval is not current"),
+        ("wrong-source", 0, "source boundary differs"),
+        ("wrong-approval", 0, "approval binding differs"),
+    ):
+        provider = PublicationProvider(prior, failure=failure)
+        directory = tmp_path / failure
+        authorization = (
+            {**approval, "planSha256": "f" * 64} if failure == "wrong-approval" else approval
+        )
+        current = datetime(2030, 1, 2, 1, 11 if failure == "expired" else 3, tzinfo=UTC)
+        observed_source = ("e" * 40, source[1]) if failure == "wrong-source" else source
+        with unittest.TestCase().assertRaisesRegex(CampaignError, message):
+            controller_publication.execute_publication(
+                prior, plan, authorization,
+                output_dir=directory, runner=provider,
+                clock=lambda current=current: current,
+                source=lambda observed_source=observed_source: observed_source,
+            )
+        assert len(provider.writes) == writes
+        assert not (directory / "controller-authority-evidence.json").exists()
 
 
 class ControllerAdmissionTests(unittest.TestCase):

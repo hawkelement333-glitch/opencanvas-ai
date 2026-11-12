@@ -467,6 +467,61 @@ crash durability has not been independently tested. The designated review
 directory's current-user-only ACL and child inheritance were checked locally;
 recheck the selected private output directory and its inherited ACL at execution.
 
+### One in-place cleanup runbook publication
+
+Use the last validated authority evidence as `$anchor` and keep it intact. The
+publication plan binds the entire prior record, the old script hash, the corrected
+source and script hash, and exactly two subscription-scoped commands on
+`Remove-M78Campaign`. Create the plan from the clean approved branch into a new
+file under an ACL-checked, ignored private directory. Its location is part of the
+plan hash and fixes the attempt directory. Plan generation makes no Azure
+requests and starts no approval window.
+
+```powershell
+$publicationRoot = '<new-directory-under-the-protected-private-runtime-root>'
+$plan = "$publicationRoot/plan.json"
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.controller_publication plan `
+  --evidence $anchor --output $plan
+```
+
+After explicit approval of that plan and its expiry, run the following from the
+repository root. Set `$planSha256` to the reviewed plan hash, `$expiresAtUtc` to
+the approved expiry at or before the retained controller deadline, and leave the
+attempt directory absent until dispatch. Recheck the five-hour horizon at actual
+campaign preparation. Publication cannot extend the controller deadline.
+
+```powershell
+$approval = "$publicationRoot/approval.json"
+$attempt = "$publicationRoot/$($planSha256.Substring(0, 24))"
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.controller_publication authorize `
+  --evidence $anchor --plan $plan --plan-sha256 $planSha256 `
+  --expires-at-utc $expiresAtUtc --output $approval
+if ($LASTEXITCODE -ne 0) { throw 'runbook publication authorization failed' }
+.\.venv\Scripts\python.exe -m infra.milestone_7_8.controller_publication execute `
+  --evidence $anchor --plan $plan --plan-sha256 $planSha256 `
+  --approval $approval --output $attempt --execute
+if ($LASTEXITCODE -ne 0) { throw 'runbook publication or verification failed' }
+```
+
+Execution takes the existing seven scoped reads before either write. It requires
+the old published bytes and complete empty schedule and binding inventories.
+It then runs `az automation runbook replace-content` once using the bound source
+file, followed by `az automation runbook publish` once for the same runbook.
+The same seven reads must succeed afterward. The published content GET must hash
+to the corrected script. The group, account, identity, roles, tags, deadline,
+and runbook configuration must be preserved, allowing only runbook publication
+metadata to change. The original script-hash tags remain the bootstrap binding.
+
+Use the resulting `$attempt/controller-authority-evidence.json` for campaign
+preparation. It preserves the original bootstrap and renewals and adds the
+publication approval, dispatch results, both readbacks, and recomputable proof.
+Discovery checks the exact current published content again. A failed or ambiguous
+dispatch, an incomplete readback, or a preservation mismatch produces no admitting
+record. Keep the attempt and investigate using scoped reads before considering
+any further write. The executor has synthetic tests. Azure publication has yet to
+be verified, and directory-entry crash durability remains unproved. A second
+publication or deadline renewal from this record is outside the supported path.
+
 Preparation copies and hash-binds this evidence in runtime v9. All subsequent
 campaign execution authorizations use v5 and bind
 `controllerAuthorityEvidenceSha256`; an authorization for another receipt is

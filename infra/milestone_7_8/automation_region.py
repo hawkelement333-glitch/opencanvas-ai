@@ -15,6 +15,7 @@ from infra.milestone_7_8.cleanup_controller import (
     validate_controller_deadline_consistency,
 )
 from infra.milestone_7_8.controller_admission import (
+    bootstrap_script_hash,
     validate_authority_evidence,
     validate_controller_admission,
 )
@@ -782,12 +783,21 @@ def select_automation_region_from_results(
     offer = _subscription_offer_eligibility(subscription)
     active_accounts = _complete_account_inventory(active, label="active")
     deleted_accounts = _complete_account_inventory(deleted, label="soft-deleted")
+    published = (
+        isinstance(controller_authority_evidence, dict)
+        and "runbookPublication" in controller_authority_evidence
+    )
+    tag_hash = cleanup_script_sha256
+    if published:
+        authority = cast(dict[str, object], controller_authority_evidence)
+        validate_authority_evidence(authority)
+        tag_hash = bootstrap_script_hash(authority)
     controller_region = _adoptable_controller_region(
         active_accounts,
         controller_resource_group=controller_resource_group,
         controller_account=controller_account,
         subscription_correlation=subscription_correlation,
-        cleanup_script_sha256=cleanup_script_sha256,
+        cleanup_script_sha256=tag_hash,
         fresh_controller_admission_evidence_sha256=(
             fresh_controller_admission_evidence_sha256
         ),
@@ -853,6 +863,27 @@ def select_automation_region_from_results(
             names=names,
             expected_deadline=deadline,
         )
+        if published:
+            for resource in observations:
+                if (
+                    not isinstance(resource, dict)
+                    or not isinstance(resource.get("tags"), dict)
+                    or resource["tags"].get("mobius.cleanup-script-sha256") != tag_hash
+                ):
+                    raise CampaignError("controller publication bootstrap tags differ")
+            content = _run_required(
+                runner,
+                (
+                    "az", "rest", "--method", "get", "--url",
+                    runbook_url.replace("?", "/content?", 1),
+                    "--output", "tsv", "--subscription", subscription_id,
+                ),
+            ).get("stdout")
+            if (
+                not isinstance(content, str)
+                or hashlib.sha256(content.encode()).hexdigest() != cleanup_script_sha256
+            ):
+                raise CampaignError("controller publication content drifted")
     active_counts = _location_counts(
         active_accounts, supported=supported, label="active"
     )
@@ -1210,7 +1241,8 @@ def _policy_allowance(
                 )
                 if result is None:
                     raise CampaignError(
-                        "automation-region-discovery-failed: location policy cannot be evaluated safely"
+                        "automation-region-discovery-failed: location policy cannot be "
+                        "evaluated safely"
                     )
                 if result:
                     allowed[region] = False
