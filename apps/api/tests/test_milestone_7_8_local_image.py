@@ -9,15 +9,13 @@ import subprocess
 import sys
 import tarfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
 from typing import cast
 
 import pytest
-from test_milestone_7_8_campaign_enablement import _config, _runtime
-
 from infra.milestone_7_8 import canonical_inputs, local_image, operator, scout_admission
 from infra.milestone_7_8.campaign import (
     ORDER,
@@ -26,9 +24,17 @@ from infra.milestone_7_8.campaign import (
     Ledger,
     Phase,
     SubprocessRunner,
+    load_ledger,
+    save_ledger,
 )
 from infra.milestone_7_8.canonical_inputs import BUILD_INPUTS, DOMAIN
 from infra.milestone_7_8.controller_renewal import _durable_record
+from test_milestone_7_8_campaign_enablement import (
+    _config,
+    _manifest,
+    _runtime,
+    _write_execution_authorization,
+)
 
 NOW = datetime(2030, 1, 1, tzinfo=UTC)
 DIGEST = "sha256:" + "d" * 64
@@ -1114,3 +1120,147 @@ def test_normal_cli_with_fake_provider_and_existing_failure_cleanup(
     assert local_image.main() == (2 if failed else 0)
     assert cleanup == (["cleanup"] if failed else [])
     assert provider.registry == case.plan["before"]
+
+
+def test_recovered_scan_continues_normal_admission_and_bootstrap_with_cleanup_armed(
+    case: Case, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    folder = case.runtime_path.parent
+    manifest = _manifest()
+    principals = cast(dict[str, dict[str, str]], manifest["principals"])
+    semantic_plan = {
+        "campaignId": case.config.campaign_id,
+        "generationId": case.config.generation_id,
+        "principals": {slot: principals[slot]["name"] for slot in (
+            "bootstrap", "migration", "api", "worker", "evidence",
+        )},
+        "cleanup": principals["cleanup"]["name"],
+    }
+    case.config = replace(case.config, principal_manifest_sha256=hashlib.sha256(
+        json.dumps(semantic_plan, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest())
+    case.plan = local_image.build_plan(
+        case.runtime, case.config, case.plan["before"], egress_ipv4="8.8.4.4",
+    )
+    case.approval = local_image.build_approval(
+        case.plan, issued_at="2030-01-01T00:00:00Z", expires_at="2030-01-01T01:00:00Z",
+        restore_until="2030-01-01T05:00:00Z",
+    )
+    case.ledger.bind_deadline(case.config.cleanup_deadline_utc)
+    case.ledger.first_billable_mutation_utc = "2030-01-01T00:00:00Z"
+    save_ledger(folder / "ledger.json", case.ledger)
+    arm_hash = case.ledger.cleanup_arm_evidence_sha256
+    for name, value in (("plan", case.plan), ("approval", case.approval)):
+        (folder / f"{name}.json").write_text(json.dumps(value), encoding="utf-8")
+    _write_execution_authorization(
+        folder / "execution.json", case.config, case.runtime,
+        expires_at="2030-01-01T01:00:00Z", operations=["cleanup", "image-decision", "bootstrap"],
+    )
+    binding: dict[str, object] = {
+        "campaignId": case.config.campaign_id, "generationId": case.config.generation_id,
+        "subscriptionCorrelation": case.config.subscription_correlation,
+        "cleanupDeadlineUtc": case.config.cleanup_deadline_utc,
+        "maximumHours": 4, "costCeilingCents": 5000, "principalManifest": json.dumps(manifest),
+    }
+    for key, attribute in (
+        ("cleanupResourceGroupName", "cleanup_resource_group"),
+        ("cleanupLocation", "cleanup_region"),
+        ("cleanupRegionSelectionSha256", "cleanup_region_selection_sha256"),
+        ("cleanupCandidateRegions", "cleanup_candidate_regions"),
+        ("cleanupOfferClassification", "cleanup_offer_classification"),
+        ("cleanupOfferEligibilityDisposition", "cleanup_offer_eligibility_disposition"),
+        ("cleanupOfferEligibleRegions", "cleanup_offer_eligible_regions"),
+        ("cleanupOfferEligibilitySource", "cleanup_offer_eligibility_source"),
+        ("cleanupOfferEligibilitySha256", "cleanup_offer_eligibility_sha256"),
+        ("freshControllerAdmissionEvidenceSha256", "fresh_controller_admission_evidence_sha256"),
+    ):
+        binding[key] = getattr(case.config, attribute)
+
+    class ContinuingProvider(ScanRecoveryProvider):
+        def run(self, command: tuple[str, ...]) -> dict[str, object]:
+            if command[:4] == ("az", "deployment", "sub", "create"):
+                assert self.registry == case.plan["before"]
+                assert "deploymentStage=workload" in command and f"imageDigest={DIGEST}" in command
+                self.commands.append(command)
+                outputs = {
+                    "campaignId": case.config.campaign_id,
+                    "generationId": case.config.generation_id,
+                    "deploymentStage": "workload",
+                    "imageDigest": DIGEST,
+                    "campaignBinding": binding,
+                }
+                return {"exitCode": 0, "stderr": "", "stdout": json.dumps({
+                    "properties": {
+                        "outputs": {key: {"value": value} for key, value in outputs.items()},
+                    },
+                })}
+            if command[:4] == ("az", "containerapp", "job", "start"):
+                assert command[command.index("--name") + 1] == case.runtime["bootstrapJobName"]
+                self.commands.append(command)
+                return {"exitCode": 0, "stderr": "", "stdout": json.dumps({
+                    "name": "synthetic-bootstrap-execution", "properties": {"status": "Succeeded"},
+                })}
+            return super().run(command)
+
+    provider = ContinuingProvider(case)
+    cleanup: list[str] = []
+    # This fixture starts at the already validated prepared/deployed boundary.
+    # Scan, completion, execution authorization, deployment-manifest and ledger
+    # validators below are production code; only the upstream bundle is supplied.
+    monkeypatch.setattr(CampaignConfig, "from_json", lambda _path, **_kwargs: case.config)
+    monkeypatch.setattr(operator, "validate_prepared_bundle", lambda *_args: None)
+    monkeypatch.setattr(operator, "load_bound_fresh_controller_admission", lambda *_args: None)
+    monkeypatch.setattr(operator, "start_failure_cleanup", lambda *_args: cleanup.append("cleanup"))
+    for module in (local_image, operator):
+        monkeypatch.setattr(module, "SubprocessRunner", lambda **_kwargs: provider)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> FrozenDateTime:
+            return cls(2030, 1, 1, tzinfo=UTC)
+
+    monkeypatch.setattr(local_image, "datetime", FrozenDateTime)
+    monkeypatch.setattr(operator, "datetime", FrozenDateTime)
+    common = ["--runtime", str(case.runtime_path), "--config", str(folder / "config.json"),
+              "--ledger", str(folder / "ledger.json")]
+    monkeypatch.setattr(sys, "argv", [
+        "local_image", "execute", *common, "--plan", str(folder / "plan.json"),
+        "--approval", str(folder / "approval.json"), "--cleanup-authorization",
+        str(folder / "execution.json"), "--execute",
+    ])
+    assert local_image.main() == 0
+    retained_files = {
+        path: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (folder / "local-image").iterdir() if path.is_file()
+    }
+    monkeypatch.setattr(sys, "argv", [
+        "operator", "image-decision", *common, "--authorization", str(folder / "execution.json"),
+        "--image-digest", DIGEST, "--image-built", "--image-scan-evidence",
+        str(folder / "local-image/image-scan.json"), "--execute",
+    ])
+    assert operator.main() == 0
+    admitted = load_ledger(folder / "ledger.json", case.config)
+    assert admitted.phase == Phase.IMAGE_DECIDED.value and admitted.image_digest == DIGEST
+    assert admitted.image_scan_count == 1 and admitted.image_generation_count == 1
+    monkeypatch.setattr(sys, "argv", [
+        "operator", "bootstrap", *common, "--authorization", str(folder / "execution.json"),
+        "--execute",
+    ])
+    assert operator.main() == 0
+    final = load_ledger(folder / "ledger.json", case.config)
+    assert final.phase == Phase.DATABASE_BOOTSTRAPPED.value
+    assert final.cleanup_arm_evidence_sha256 == arm_hash
+    assert final.cleanup_disarm_evidence_sha256 is None and final.resource_generation_count == 1
+    assert cleanup == [] and provider.scan_count == 2 and provider.registry == case.plan["before"]
+    assert all(hashlib.sha256(path.read_bytes()).hexdigest() == value
+               for path, value in retained_files.items())
+    assert not any(command[:3] == ("az", "group", "delete") or "delete" in command
+                   for command in provider.commands)
+    scans = [i for i, cmd in enumerate(provider.commands) if cmd[:3] == ("docker", "scout", "cves")]
+    restores = [i for i, cmd in enumerate(provider.commands) if cmd[:2] == ("az", "rest")
+                and "--body" in cmd and cmd[cmd.index("--body") + 1].endswith("restoreBody.json")]
+    workload = next(i for i, cmd in enumerate(provider.commands)
+                    if cmd[:4] == ("az", "deployment", "sub", "create"))
+    bootstrap = next(i for i, cmd in enumerate(provider.commands)
+                     if cmd[:4] == ("az", "containerapp", "job", "start"))
+    assert scans[0] < scans[1] < restores[0] < workload < bootstrap
