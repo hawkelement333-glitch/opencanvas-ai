@@ -281,9 +281,15 @@ environment count. Six are the
 subscription context, subscription-policy metadata, Automation provider,
 active-account, soft-deleted-account, and policy-assignment reads; enforced
 policy definitions and deny-capable initiative members produce explicit
-generated GETs. Execution repeats preparation's complete offer-aware selector
-and requires the immutable region, ordered candidate-set binding, decision
-hash, offer binding, and every evidence hash to match. Any change stops before
+generated GETs. Execution repeats preparation's complete offer-aware selector.
+The original selection receipt must still match its immutable prepared hash.
+The refresh must preserve the entire admitted decision: selected region,
+ordered candidate set, provider support and status for every candidate, offer,
+policy, occupancy, and controller bindings. A global provider-location hash
+change alone may pass only when those complete validated decisions are equal;
+it cannot hide a capability change within the admitted candidate set. Both
+full inventory hashes and captured responses remain audit evidence. No receipt
+or hash is substituted or rewritten. Any other change stops before
 `scope-create`. Seven final reads also prove the exact controller group,
 account, permanent Reader grant, published runbook content, and complete empty
 schedule and binding inventories before any target mutation.

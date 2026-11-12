@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import cast
 
 from infra.milestone_7_8.automation_region import (
+    AutomationRegionSelection,
     automation_region_discovery_commands,
     generated_policy_read_contract,
     select_automation_region_from_results,
@@ -3182,6 +3183,38 @@ def validate_campaign_provider_quotas(postgres: object, container_apps: object) 
                 raise CampaignError(f"provider quota headroom insufficient: {name}")
 
 
+def validate_region_selection_refresh(
+    refreshed: AutomationRegionSelection,
+    config: CampaignConfig,
+    runtime: dict[str, str],
+) -> None:
+    """Keep the prepared receipt exact while comparing the admitted region scope."""
+    if refreshed.sha256() == config.cleanup_region_selection_sha256:
+        return
+    failure = "prepared Automation cleanup region or offer proof is no longer armable"
+    try:
+        prepared = selection_from_document(
+            json.loads(Path(runtime["cleanupRegionSelectionFile"]).read_text(encoding="utf-8"))
+        )
+    except (KeyError, OSError, ValueError) as exc:
+        raise CampaignError(f"{failure}: prepared receipt is unreadable") from exc
+    if prepared.sha256() != config.cleanup_region_selection_sha256:
+        raise CampaignError(f"{failure}: prepared receipt binding differs")
+    # The complete provider location inventory can change outside the fixed
+    # candidate set. Both validated documents bind support/status for every
+    # admitted candidate and all policy, offer, occupancy and controller facts.
+    # Preserve both full inventory hashes; do not substitute either one.
+    audit_fields = {"observedAtUtc", "providerLocationsSha256"}
+    prepared_decision = {
+        key: value for key, value in prepared.document().items() if key not in audit_fields
+    }
+    refreshed_decision = {
+        key: value for key, value in refreshed.document().items() if key not in audit_fields
+    }
+    if prepared_decision != refreshed_decision:
+        raise CampaignError(failure)
+
+
 def validate_operation_results(
     operation: str,
     results: list[dict[str, object]],
@@ -3274,10 +3307,10 @@ def validate_operation_results(
             controller_required_until_utc=runtime["cleanupAuthorityExpiresUtc"],
             controller_authority_evidence=controller_authority_evidence,
         )
+        validate_region_selection_refresh(refreshed_selection, config, runtime)
         if (
             refreshed_selection.controller_disposition != "exact-controller-adoptable"
             or refreshed_selection.selected_region != config.cleanup_region
-            or refreshed_selection.sha256() != config.cleanup_region_selection_sha256
             or ",".join(refreshed_selection.candidate_order)
             != config.cleanup_candidate_regions
             or refreshed_selection.offer_classification

@@ -284,8 +284,8 @@ class AutomationRegionSelection:
     def sha256(self) -> str:
         document = self.document()
         # Observation time is retained in the receipt but excluded from the
-        # replay binding so an immediate capacity-check can prove the exact
-        # decision and every evidence hash at a later timestamp.
+        # receipt binding. Capacity refresh separately compares the admitted
+        # candidate decision when only the global provider inventory changes.
         document.pop("observedAtUtc")
         encoded = json.dumps(document, separators=(",", ":"), sort_keys=True).encode()
         return hashlib.sha256(
