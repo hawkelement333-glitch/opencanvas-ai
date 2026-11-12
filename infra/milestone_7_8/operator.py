@@ -3451,6 +3451,25 @@ def main() -> int:
                 ledger.transition(Phase.CLEANING, datetime.now(UTC))
                 save_ledger(args.ledger, ledger)
             raise CampaignError("cleanup deadline is expired; cleanup is required")
+        if args.execute and args.operation == "scope-create":
+            from infra.milestone_7_8.local_image import preflight_image_staging
+
+            # A local filesystem failure must happen before the first target
+            # write, outside the attempted-write failure-cleanup block below.
+            preflight_image_staging(
+                args.runtime.parent,
+                source_head=runtime["sourceHead"],
+                canonical_input_sha256=runtime["canonicalBuildInputSha256"],
+            )
+            # Full extraction can take time; the first write still needs current
+            # authority and a live cleanup window after this local work.
+            if parse_utc(config.cleanup_deadline_utc) <= datetime.now(UTC):
+                raise CampaignError("cleanup deadline expired during local image path preflight")
+            for authorized_operation in sorted(required_authorizations):
+                load_execution_authorization(
+                    args.authorization, config=config, runtime=runtime,
+                    operation=authorized_operation,
+                )
         image_scan_sha256 = None
         if target is Phase.IMAGE_DECIDED and args.image_digest is not None:
             config = replace(config, image_digest=args.image_digest)

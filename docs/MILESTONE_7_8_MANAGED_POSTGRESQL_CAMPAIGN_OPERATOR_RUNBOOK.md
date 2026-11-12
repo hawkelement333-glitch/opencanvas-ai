@@ -367,6 +367,21 @@ publication evidence, and failed-job records remain immutable. Publishing this
 new runbook needs a new reviewed source/content transition using the accepted
 predecessor evidence, as documented below. Offline replay is not live admission.
 
+The later pre-billable attempt identified `CleanupAuthorized:value`. Its saved
+invocation, job, and binding all contain the string `true`; the runbook's
+in-memory argument and its own binding response were not captured. Do not infer
+a live type conversion from those records. Full-runbook local replay does prove
+that PowerShell's existing affirmative parameter validation accepts `True` (and
+an affirmative Boolean converted to a string), while the subsequent exact
+comparison rejected it. After that validation, the expected binding value is
+now the canonical string `true`. The binding must still contain that exact
+string; false, malformed or non-string binding values remain rejected. Other
+parameters, authority hashes and ownership checks are unchanged. The field-only
+diagnostic distinguishes an unexpected binding value without exposing it.
+The ownership-checked fallback, disarm, residue and finalization records for the
+failed attempt remain historical evidence; they do not prove this correction
+has executed successfully in Automation.
+
 ## One image decision
 
 The canonical source changes in this implementation require one new validation
@@ -414,6 +429,17 @@ JSON object (`$registryBefore`) and the verified single IPv4 in process memory
 must be inside the protected ignored runtime directory; the output directory
 `$bundle/local-image` and marker `$bundle/local-image-attempt.json` must not exist.
 Use the same cost config and ledger as every campaign phase:
+
+Before `scope-create --execute` can issue an Azure command, the operator probes
+the complete committed canonical source at the actual
+`$bundle/local-image/source` staging paths. It checks source bytes and file modes
+using the same archive/extraction path as the builder, then removes only the
+probe's own staging files. An existing staging directory or attempt marker is
+preserved and blocks this probe. Extraction or probe-removal failure leaves the
+ledger at `cost-gated`, without dispatching resource creation or failure cleanup.
+Use a short, ignored private output directory on Windows; checking only the
+bundle directory length does not establish that every generated path works.
+No Windows long-path or security setting is changed by this check.
 
 ```powershell
 $imagePlan = "$bundle/local-image-plan.json"

@@ -72,7 +72,11 @@ function Assert-CleanupBindingParameters([string]$Content, [hashtable]$Expected)
       if ($Expected[$key] -isnot [string]) {
         throw "cleanup-binding-parameter-mismatch:${field}:expected-type"
       }
-      if ($parameter.Value.GetString() -cne $Expected[$key]) {
+      $observedValue = $parameter.Value.GetString()
+      if ($observedValue -cne $Expected[$key]) {
+        if ([string]::Equals($observedValue, $Expected[$key], [System.StringComparison]::OrdinalIgnoreCase)) {
+          throw "cleanup-binding-parameter-mismatch:${field}:value-case-only"
+        }
         throw "cleanup-binding-parameter-mismatch:${field}:value"
       }
       $seen[$key] = $true
@@ -232,7 +236,9 @@ $expectedBindingParameters = @{
   FreshControllerAdmissionEvidenceSha256 = $FreshControllerAdmissionEvidenceSha256
   FreshControllerAdmissionEvidenceVersion = $FreshControllerAdmissionEvidenceVersion
   CleanupAuthoritySha256 = $CleanupAuthoritySha256
-  CleanupAuthorized = $CleanupAuthorized
+  # The parameter admission above already requires affirmative true. PowerShell
+  # may bind it as 'True'; the persisted binding still must be the exact string.
+  CleanupAuthorized = 'true'
 }
 Assert-CleanupBindingParameters $bindingContent $expectedBindingParameters
 $binding = $bindingContent | ConvertFrom-Json -Depth 32 -AsHashtable

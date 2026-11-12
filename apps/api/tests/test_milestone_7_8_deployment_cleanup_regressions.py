@@ -64,6 +64,9 @@ $p = @{}
 foreach ($key in $f.parameters.Keys) {
   $p[$key] = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f.parameters[$key]))
 }
+if ($f.ContainsKey('cleanupAuthorizedBoolean')) {
+  $p.CleanupAuthorized = $f.cleanupAuthorizedBoolean
+}
 # Get-AzResourceGroup returns string-valued tags, not JSON-coerced DateTimes.
 foreach ($section in @('controllerTags', 'targetTags')) {
   foreach ($key in @($f[$section].Keys)) {
@@ -145,6 +148,8 @@ def _runbook_fixture(defect: str | None) -> dict[str, object]:
     )
     principal = "22222222-2222-4222-8222-222222222222"
     binding_parameters: dict[str, object] = dict(parameters)
+    if defect == "invocation-true-case":
+        parameters["CleanupAuthorized"] = "True"
     binding: dict[str, object] = {
         "id": f"{account}/jobSchedules/{runtime['bindingName']}",
         "type": "Microsoft.Automation/automationAccounts/jobSchedules",
@@ -158,6 +163,18 @@ def _runbook_fixture(defect: str | None) -> dict[str, object]:
     }
     if defect == "value":
         binding_parameters["CleanupAuthorized"] = "PRIVATE-VALUE-MUST-NOT-LEAK"
+    elif defect == "binding-true-case":
+        binding_parameters["CleanupAuthorized"] = "True"
+    elif defect == "binding-false":
+        binding_parameters["CleanupAuthorized"] = "false"
+    elif defect == "binding-boolean":
+        binding_parameters["CleanupAuthorized"] = True
+    elif defect == "binding-null":
+        binding_parameters["CleanupAuthorized"] = None
+    elif defect == "binding-array":
+        binding_parameters["CleanupAuthorized"] = ["true"]
+    elif defect == "other-field-case":
+        binding_parameters["GenerationId"] = parameters["GenerationId"].upper()
     elif defect == "type":
         binding_parameters["CostCeilingCents"] = 5000
     elif defect == "missing":
@@ -226,7 +243,7 @@ def _runbook_fixture(defect: str | None) -> dict[str, object]:
             '"CleanupAuthorized": "true"',
             '"CleanupAuthorized": "true", "cleanupauthorized": "true"',
         )
-    return {
+    fixture: dict[str, object] = {
         "parameters": {k: base64.b64encode(v.encode()).decode() for k, v in parameters.items()},
         "subscription": subscription,
         "controllerTags": {
@@ -256,14 +273,28 @@ def _runbook_fixture(defect: str | None) -> dict[str, object]:
             ],
         },
     }
+    if defect == "invocation-boolean-true":
+        fixture["cleanupAuthorizedBoolean"] = True
+    return fixture
 
 
 @pytest.mark.parametrize(
     "defect, expected",
     [
         (None, None),
+        ("invocation-true-case", None),
+        ("invocation-boolean-true", None),
         ("legacy-name", None),
         ("value", "cleanup-binding-parameter-mismatch:CleanupAuthorized:value"),
+        (
+            "binding-true-case",
+            "cleanup-binding-parameter-mismatch:CleanupAuthorized:value-case-only",
+        ),
+        ("binding-false", "cleanup-binding-parameter-mismatch:CleanupAuthorized:value"),
+        ("binding-boolean", "cleanup-binding-parameter-mismatch:CleanupAuthorized:type-True"),
+        ("binding-null", "cleanup-binding-parameter-mismatch:CleanupAuthorized:type-Null"),
+        ("binding-array", "cleanup-binding-parameter-mismatch:CleanupAuthorized:type-Array"),
+        ("other-field-case", "cleanup-binding-parameter-mismatch:GenerationId:value-case-only"),
         ("type", "cleanup-binding-parameter-mismatch:CostCeilingCents:type-Number"),
         ("missing", "cleanup-binding-parameter-set-mismatch:CleanupDeadlineUtc:missing"),
         ("extra", "cleanup-binding-parameter-set-mismatch:unknown-field"),
@@ -311,6 +342,36 @@ def test_full_cleanup_runbook_handles_raw_automation_response(
         assert result.returncode == 2, observed
         assert observed["error"] == expected
         assert observed["removed"] is False
+
+
+@pytest.mark.parametrize("authorization", [False, "false", "not-approved", ""])
+def test_cleanup_runbook_rejects_invalid_invocation_before_reads(
+    tmp_path: Path, authorization: bool | str,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is required for the cleanup response replay")
+    value = _runbook_fixture(None)
+    if isinstance(authorization, bool):
+        value["cleanupAuthorizedBoolean"] = authorization
+    else:
+        parameters = value["parameters"]
+        assert isinstance(parameters, dict)
+        parameters["CleanupAuthorized"] = base64.b64encode(authorization.encode()).decode()
+    fixture = tmp_path / "invalid-invocation.json"
+    fixture.write_text(json.dumps(value), encoding="utf-8")
+    harness = tmp_path / "run.ps1"
+    harness.write_text(HARNESS, encoding="utf-8")
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-NonInteractive", "-File", str(harness), str(RUNBOOK), str(fixture)],
+        capture_output=True, text=True, check=False, timeout=30,
+        env={**os.environ, "POWERSHELL_TELEMETRY_OPTOUT": "1"},
+    )
+    observed = json.loads(result.stdout)
+    assert result.returncode == 2
+    assert observed["reads"] == 0
+    assert observed["removed"] is False
+    assert "CleanupAuthorized" in observed["error"]
 
 
 @pytest.mark.parametrize("failed", [False, True])

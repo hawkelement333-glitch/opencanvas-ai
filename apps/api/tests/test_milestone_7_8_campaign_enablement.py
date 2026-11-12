@@ -1234,6 +1234,8 @@ def test_scope_failure_enters_cleanup_and_preserves_original_error(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     recording_fails: bool, start_fails: bool,
 ) -> None:
+    from infra.milestone_7_8 import local_image
+
     config, runtime = _config(), _runtime()
     ledger = Ledger(config.campaign_id, config.generation_id)
     ledger.bind_cleanup_region(config)
@@ -1248,6 +1250,9 @@ def test_scope_failure_enters_cleanup_and_preserves_original_error(
     monkeypatch.setattr(campaign_operator, "load_bound_fresh_controller_admission", lambda *_: None)
     monkeypatch.setattr(campaign_operator, "load_ledger", lambda *_: ledger)
     monkeypatch.setattr(campaign_operator, "load_execution_authorization", lambda *a, **k: None)
+    # This test starts at the Azure write boundary; filesystem failure is covered
+    # through the normal operator entry point in the local-image tests.
+    monkeypatch.setattr(local_image, "preflight_image_staging", lambda *a, **k: None)
     def start_cleanup(*args: object) -> None:
         if start_fails:
             raise CampaignError("cleanup dispatch failed")

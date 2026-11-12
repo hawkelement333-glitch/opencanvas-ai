@@ -12,6 +12,7 @@ import hashlib
 import ipaddress
 import json
 import re
+import shutil
 import tarfile
 from collections.abc import Callable
 from contextlib import suppress
@@ -231,6 +232,104 @@ def _extract_source(
             archive.extractall(context, filter="data")
 
 
+def _stage_canonical_source(
+    output: Path,
+    source_head: str,
+    canonical_input_sha256: str,
+    run: Callable[[tuple[str, ...]], dict[str, object]],
+) -> tuple[Path, Path]:
+    """Use the same full source paths during preflight and the actual build."""
+    archive_path = output / "source.tar"
+    archive_result = run(
+        (
+            "git",
+            "-C",
+            str(ROOT),
+            "archive",
+            "--format=tar",
+            "--output",
+            str(archive_path),
+            source_head,
+            "--",
+            *BUILD_INPUTS,
+        )
+    )
+    tree = run(
+        (
+            "git",
+            "-C",
+            str(ROOT),
+            "ls-tree",
+            "-r",
+            "--full-tree",
+            source_head,
+            "--",
+            *BUILD_INPUTS,
+        )
+    )
+    if (
+        archive_result.get("exitCode") != 0
+        or tree.get("exitCode") != 0
+        or not isinstance(tree.get("stdout"), str)
+    ):
+        raise CampaignError("canonical source staging commands failed")
+    context = output / "source"
+    _extract_source(archive_path, context, cast(str, tree["stdout"]), canonical_input_sha256)
+    return archive_path, context
+
+
+def preflight_image_staging(
+    bundle_directory: Path,
+    *,
+    source_head: str,
+    canonical_input_sha256: str,
+    runner: CommandRunner | None = None,
+) -> None:
+    """Exercise every actual generated source path before a target group is created.
+
+    No image, attempt marker, authorization or persistent receipt is produced.
+    Only the newly created staging tree is removed, including after a failed probe.
+    """
+    bundle_directory = bundle_directory.resolve()
+    private_root = (ROOT / ".runtime" / "milestone_7_8").resolve()
+    if not bundle_directory.is_relative_to(private_root) or not bundle_directory.is_dir():
+        raise CampaignError("image staging preflight requires the exact private bundle directory")
+    output = bundle_directory / "local-image"
+    if output.exists() or (bundle_directory / "local-image-attempt.json").exists():
+        raise CampaignError("image staging or an image attempt already exists")
+    head, _script = local_source_binding()
+    if (
+        head != source_head
+        or canonical_snapshot(head)["buildInputSha256"] != canonical_input_sha256
+    ):
+        raise CampaignError("image staging source or canonical build inputs differ")
+    # mkdir must succeed exclusively before the cleanup block owns this path.
+    output.mkdir(mode=0o700)
+    identity = output.stat(follow_symlinks=False)
+    try:
+        _stage_canonical_source(
+            output,
+            source_head,
+            canonical_input_sha256,
+            (runner if runner is not None else SubprocessRunner()).run,
+        )
+    except (OSError, tarfile.TarError) as exc:
+        raise CampaignError("full generated image staging path preflight failed") from exc
+    finally:
+        try:
+            current = output.stat(follow_symlinks=False)
+            if (
+                output.is_symlink()
+                or output.is_junction()
+                or output.resolve().parent != bundle_directory
+                or (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino)
+            ):
+                raise CampaignError("image staging ownership changed; private probe retained")
+            shutil.rmtree(output)
+        except OSError as exc:
+            raise CampaignError("image staging preflight cleanup failed; probe retained") from exc
+
+
 def build_approval(
     plan: dict[str, object], *, issued_at: str, expires_at: str, restore_until: str
 ) -> dict[str, object]:
@@ -414,29 +513,11 @@ def execute_local_image(
         if info.get("OSType") != "linux" or info.get("Architecture") not in {"amd64", "x86_64"}:
             raise CampaignError("the campaign requires a Linux amd64 Docker engine")
         reference = str(plan["imageReference"])
-        archive_path = output / "source.tar"
-        run(
-            (
-                "git",
-                "-C",
-                str(ROOT),
-                "archive",
-                "--format=tar",
-                "--output",
-                str(archive_path),
-                head,
-                "--",
-                *BUILD_INPUTS,
-            )
-        )
-        context = output / "source"
-        tree = run(
-            ("git", "-C", str(ROOT), "ls-tree", "-r", "--full-tree", head, "--", *BUILD_INPUTS)
-        )
-        if not isinstance(tree.get("stdout"), str):
-            raise CampaignError("canonical source tree is unavailable")
-        _extract_source(
-            archive_path, context, cast(str, tree["stdout"]), runtime["canonicalBuildInputSha256"]
+        archive_path, context = _stage_canonical_source(
+            output,
+            head,
+            runtime["canonicalBuildInputSha256"],
+            run,
         )
         run(
             (

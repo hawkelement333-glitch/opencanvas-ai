@@ -4,8 +4,10 @@ import copy
 import hashlib
 import io
 import json
+import shutil
 import sys
 import tarfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
@@ -236,6 +238,172 @@ def execute(case: Case, provider: Provider) -> dict[str, object]:
 
 def test_local_image_has_executable_entry_point() -> None:
     assert callable(local_image.main)
+
+
+def test_staging_preflight_uses_full_private_output_and_leaves_no_attempt(case: Case) -> None:
+    provider = Provider(case)
+    local_image.preflight_image_staging(
+        case.runtime_path.parent,
+        source_head=case.runtime["sourceHead"],
+        canonical_input_sha256=case.runtime["canonicalBuildInputSha256"],
+        runner=provider,
+    )
+    assert not (case.runtime_path.parent / "local-image").exists()
+    assert not (case.runtime_path.parent / "local-image-attempt.json").exists()
+    assert case.runtime_path.exists()
+    assert all(command[0] == "git" for command in provider.commands)
+
+
+@pytest.mark.parametrize("existing", ["local-image", "local-image-attempt.json"])
+def test_staging_preflight_preserves_existing_private_work(case: Case, existing: str) -> None:
+    target = case.runtime_path.parent / existing
+    if existing == "local-image":
+        target.mkdir()
+        protected = target / "retained.json"
+    else:
+        protected = target
+    protected.write_text("retained evidence", encoding="utf-8")
+    provider = Provider(case)
+    with pytest.raises(CampaignError, match="already exists"):
+        local_image.preflight_image_staging(
+            case.runtime_path.parent,
+            source_head=case.runtime["sourceHead"],
+            canonical_input_sha256=case.runtime["canonicalBuildInputSha256"],
+            runner=provider,
+        )
+    assert protected.read_text() == "retained evidence"
+    assert provider.commands == []
+
+
+def test_staging_preflight_cleanup_failure_is_blocking(
+    case: Case,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def failed_remove(path: Path) -> None:
+        assert path == case.runtime_path.parent / "local-image"
+        raise OSError("synthetic removal failure")
+
+    monkeypatch.setattr(shutil, "rmtree", failed_remove)
+    with pytest.raises(CampaignError, match="cleanup failed"):
+        local_image.preflight_image_staging(
+            case.runtime_path.parent,
+            source_head=case.runtime["sourceHead"],
+            canonical_input_sha256=case.runtime["canonicalBuildInputSha256"],
+            runner=Provider(case),
+        )
+    assert (case.runtime_path.parent / "local-image" / "source.tar").exists()
+    assert case.runtime_path.exists()
+    assert not (case.runtime_path.parent / "local-image-attempt.json").exists()
+
+
+def test_staging_preflight_rejects_actual_canonical_tree_mismatch(case: Case) -> None:
+    class AlteredTreeProvider(Provider):
+        def run(self, command: tuple[str, ...]) -> dict[str, object]:
+            result = super().run(command)
+            if command[:1] == ("git",) and command[3] == "ls-tree":
+                actual_blob = hashlib.sha1(b"blob 4\0test", usedforsecurity=False).hexdigest()
+                result["stdout"] = str(result["stdout"]).replace(actual_blob, "f" * 40)
+            return result
+
+    provider = AlteredTreeProvider(case)
+    with pytest.raises(CampaignError, match="bound canonical build inputs"):
+        local_image.preflight_image_staging(
+            case.runtime_path.parent,
+            source_head=case.runtime["sourceHead"],
+            canonical_input_sha256=case.runtime["canonicalBuildInputSha256"],
+            runner=provider,
+        )
+    assert all(command[0] == "git" for command in provider.commands)
+    assert case.runtime_path.exists()
+    assert not (case.runtime_path.parent / "local-image").exists()
+    assert not (case.runtime_path.parent / "local-image-attempt.json").exists()
+
+
+def test_scope_create_staging_path_failure_dispatches_zero_azure_and_keeps_ledger(
+    case: Case,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = case.ledger
+    ledger.phase = Phase.COST_GATED.value
+    ledger.transitions = ledger.transitions[: ORDER.index(Phase.COST_GATED)]
+    ledger.resource_generation_count = 0
+    ledger.cleanup_arm_evidence_sha256 = None
+    ledger.validate_resume(case.config)
+    previous = copy.deepcopy(ledger)
+    provider = Provider(case)
+    authorization_checks: list[str] = []
+    ledger_writes: list[str] = []
+    monkeypatch.setattr(CampaignConfig, "from_json", lambda _path, **_kwargs: case.config)
+    monkeypatch.setattr(operator, "validate_prepared_bundle", lambda *_args: None)
+    monkeypatch.setattr(operator, "load_bound_fresh_controller_admission", lambda *_args: None)
+    monkeypatch.setattr(operator, "load_ledger", lambda *_args: ledger)
+    monkeypatch.setattr(operator, "save_ledger", lambda *_args: ledger_writes.append("write"))
+    monkeypatch.setattr(local_image, "SubprocessRunner", lambda: provider)
+
+    def authorize(*_args: object, **kwargs: object) -> str:
+        authorization_checks.append(str(kwargs["operation"]))
+        return "approved"
+
+    def no_azure_runner() -> None:
+        raise AssertionError("Azure runner must not be constructed after local preflight failure")
+
+    monkeypatch.setattr(operator, "load_execution_authorization", authorize)
+    monkeypatch.setattr(operator, "SubprocessRunner", no_azure_runner)
+    extract = tarfile.TarFile._extract_member
+    observed_paths: list[Path] = []
+
+    def fail_full_generated_path(
+        archive: tarfile.TarFile,
+        member: tarfile.TarInfo,
+        targetpath: str,
+        set_attrs: bool = True,
+        numeric_owner: bool = False,
+        *,
+        filter_function: Callable[[tarfile.TarInfo, str], tarfile.TarInfo | None] | None = None,
+        extraction_root: str | None = None,
+    ) -> None:
+        observed_paths.append(Path(targetpath))
+        if member.name == "apps/api/scripts/test.txt":
+            assert Path(targetpath) == (
+                case.runtime_path.parent / "local-image" / "source" / member.name
+            )
+            raise OSError(206, "synthetic full generated filename too long", targetpath)
+        extract(
+            archive,
+            member,
+            targetpath,
+            set_attrs=set_attrs,
+            numeric_owner=numeric_owner,
+            filter_function=filter_function,
+            extraction_root=extraction_root,
+        )
+
+    monkeypatch.setattr(tarfile.TarFile, "_extract_member", fail_full_generated_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "operator",
+            "scope-create",
+            "--config",
+            str(case.runtime_path.parent / "config.json"),
+            "--runtime",
+            str(case.runtime_path),
+            "--ledger",
+            str(case.runtime_path.parent / "ledger.json"),
+            "--authorization",
+            str(case.runtime_path.parent / "authorization.json"),
+            "--execute",
+        ],
+    )
+    assert operator.main() == 2
+    assert authorization_checks == ["cleanup", "scope-create"]
+    assert observed_paths
+    assert all(command[0] == "git" for command in provider.commands)
+    assert ledger_writes == []
+    assert ledger == previous
+    assert not (case.runtime_path.parent / "local-image").exists()
+    assert not (case.runtime_path.parent / "local-image-attempt.json").exists()
 
 
 def test_one_build_scan_and_exact_restoration_reaches_existing_scan_admission(case: Case) -> None:
