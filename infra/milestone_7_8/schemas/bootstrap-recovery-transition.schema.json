@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:bootstrap-recovery-transition:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "originalSourceHead",
+    "operatorSourceHead",
+    "campaignId",
+    "generationId",
+    "cleanupDeadlineUtc",
+    "issuedAtUtc",
+    "expiresAtUtc",
+    "maximumRetryDispatches",
+    "originalFiles",
+    "failedExecution",
+    "imageDigest",
+    "patchSha256",
+    "validationReceiptSha256",
+    "explicitApprovalSha256",
+    "originalAttemptSha256",
+    "originalPauseSha256",
+    "originalAuthorizationSha256",
+    "canonicalBuildInputSha256",
+    "cleanupScriptSha256",
+    "protectedStashesSha256",
+    "cleanupArmSha256",
+    "transitionSha256"
+  ],
+  "properties": {
+    "version": {
+      "const": "m7.8-bootstrap-recovery-transition-v1"
+    },
+    "originalSourceHead": {
+      "$ref": "#/$defs/commit"
+    },
+    "operatorSourceHead": {
+      "$ref": "#/$defs/commit"
+    },
+    "campaignId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cleanupDeadlineUtc": {
+      "$ref": "#/$defs/utc"
+    },
+    "issuedAtUtc": {
+      "$ref": "#/$defs/utc"
+    },
+    "expiresAtUtc": {
+      "$ref": "#/$defs/utc"
+    },
+    "maximumRetryDispatches": {
+      "const": 1
+    },
+    "originalFiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime",
+        "config",
+        "attempt",
+        "pause",
+        "originalAuthorization",
+        "imageAdmission",
+        "scan",
+        "validationReceipt",
+        "explicitApproval",
+        "patch"
+      ],
+      "properties": {
+        "runtime": {
+          "$ref": "#/$defs/file"
+        },
+        "config": {
+          "$ref": "#/$defs/file"
+        },
+        "attempt": {
+          "$ref": "#/$defs/file"
+        },
+        "pause": {
+          "$ref": "#/$defs/file"
+        },
+        "originalAuthorization": {
+          "$ref": "#/$defs/file"
+        },
+        "imageAdmission": {
+          "$ref": "#/$defs/file"
+        },
+        "scan": {
+          "$ref": "#/$defs/file"
+        },
+        "validationReceipt": {
+          "$ref": "#/$defs/file"
+        },
+        "explicitApproval": {
+          "$ref": "#/$defs/file"
+        },
+        "patch": {
+          "$ref": "#/$defs/file"
+        }
+      }
+    },
+    "failedExecution": {
+      "type": "string",
+      "minLength": 1
+    },
+    "imageDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "patchSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "validationReceiptSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "explicitApprovalSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "originalAttemptSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "originalPauseSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "originalAuthorizationSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "canonicalBuildInputSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "cleanupScriptSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "protectedStashesSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "cleanupArmSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "transitionSha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

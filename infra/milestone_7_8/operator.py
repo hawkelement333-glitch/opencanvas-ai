@@ -2244,6 +2244,7 @@ def _active_protected_pause(
     config: CampaignConfig,
     runtime: dict[str, str],
     ledger: Ledger,
+    source_transition: dict[str, object] | None = None,
 ) -> dict[str, object] | None:
     active: list[dict[str, object]] = []
     for operation in sorted(PROTECTED_STAGE_OPERATIONS):
@@ -2284,6 +2285,8 @@ def _active_protected_pause(
                 directory / f"{operation}-stage-retry-start.json", "stage-retry-start"
             )
             completed = _read_stage_record(completed_path, "stage-recovery-completed")
+            _require_retry_source(retry, source_transition)
+            _require_retry_source(completed, source_transition)
             if (
                 completed.get("retryIntentSha256") != retry["recordSha256"]
                 or retry.get("pauseSha256") != pause["recordSha256"]
@@ -2323,6 +2326,50 @@ def _active_protected_pause(
     if len(active) > 1:
         raise _ProtectedStagePaused("multiple protected stages are paused")
     return active[0] if active else None
+
+
+def _source_transition_metadata(
+    transition: dict[str, object] | None,
+) -> dict[str, object]:
+    if transition is None:
+        return {}
+    return {
+        "operatorSourceHead": transition["operatorSourceHead"],
+        "bootstrapSourceTransitionSha256": transition["transitionSha256"],
+    }
+
+
+def _require_retry_source(
+    record: dict[str, object], transition: dict[str, object] | None,
+) -> None:
+    names = {"operatorSourceHead", "bootstrapSourceTransitionSha256"}
+    actual = {name: record[name] for name in names if name in record}
+    if actual != _source_transition_metadata(transition):
+        raise _ProtectedStagePaused("database retry executing-source transition differs")
+
+
+def _validate_transition_dispatch(transition: dict[str, object]) -> None:
+    from infra.milestone_7_8.bootstrap_transition import validate_dispatch_window
+
+    try:
+        validate_dispatch_window(transition, datetime.now(UTC))
+    except CampaignError as exc:
+        # An expired retry permission does not itself revoke cleanup protection.
+        raise _ProtectedStagePaused(str(exc)) from exc
+
+
+def _retry_template_semantics(value: object) -> dict[str, object]:
+    """Compare only the provider's optional-empty collection forms; retain raw evidence."""
+    if not isinstance(value, dict):
+        raise _ProtectedStagePaused("database retry template is malformed")
+    normalized = dict(value)
+    for field in ("initContainers", "volumes"):
+        observed = value.get(field)
+        if observed is None:
+            normalized[field] = []
+        elif not isinstance(observed, list):
+            raise _ProtectedStagePaused("database retry optional template collection is malformed")
+    return normalized
 
 
 def _validate_retry_job_limits(
@@ -2367,13 +2414,13 @@ def _validate_retry_job_limits(
     ) not in (None, []):
         raise _ProtectedStagePaused("database retry contains unpriced initialization containers")
     normalized = {
-        **template,
+        **_retry_template_semantics(template),
         "containers": [
             {key: value for key, value in container.items() if key != "args"},
         ],
     }
     normalized_prior = {
-        **failed_template,
+        **_retry_template_semantics(failed_template),
         "containers": [
             {key: value for key, value in previous.items() if key != "args"},
         ],
@@ -2473,7 +2520,15 @@ def _execute_database_retry(
     pause: dict[str, object],
     directory: Path,
     authorization_path: Path,
+    source_transition: dict[str, object] | None = None,
 ) -> tuple[dict[str, object], dict[str, object]]:
+    transition_window = source_transition if operation == "bootstrap" else None
+    window_start = parse_utc(str(
+        transition_window["issuedAtUtc"] if transition_window else pause["failedAtUtc"]
+    ))
+    window_end = parse_utc(str(
+        transition_window["expiresAtUtc"] if transition_window else pause["recoveryUntilUtc"]
+    ))
     failed = pause.get("failedExecution")
     if (
         not isinstance(failed, str)
@@ -2494,6 +2549,7 @@ def _execute_database_retry(
     )
     if retry_path.exists():
         attempt = _read_stage_record(retry_path, "stage-retry-intent")
+        _require_retry_source(attempt, source_transition)
         saved = _read_stage_record(
             directory / f"{operation}-stage-retry-start.json", "stage-retry-start"
         )
@@ -2508,9 +2564,9 @@ def _execute_database_retry(
             or not isinstance(attempt.get("validatedJob"), dict)
             or attempt.get("templateSha256")
             != _stage_hash("stage-template", attempt["validatedJob"])
-            or not parse_utc(str(pause["failedAtUtc"]))
+            or not window_start
             <= parse_utc(str(attempt["startedAtUtc"]))
-            < parse_utc(str(pause["recoveryUntilUtc"]))
+            < window_end
         ):
             raise _ProtectedStagePaused(
                 "database retry dispatch history is incomplete or mismatched"
@@ -2540,6 +2596,7 @@ def _execute_database_retry(
             directory=directory,
             failed=failed,
             expected_manifest_hash=manifest_hash,
+            source_transition=source_transition,
         )
     allowance = [
         item for item in config.resource_items if item.name == "database-recovery-job-allowance"
@@ -2604,10 +2661,12 @@ def _execute_database_retry(
             or manifest.get("generationId") != config.generation_id
         ):
             raise _ProtectedStagePaused("database retry manifest campaign differs")
-        if not _stage_is_protected(config, runtime, ledger) or (
-            parse_utc(str(pause["recoveryUntilUtc"])) <= datetime.now(UTC)
-        ):
-            raise _ProtectedStageExpired("database recovery window or protection expired")
+        if not _stage_is_protected(config, runtime, ledger):
+            raise _ProtectedStageExpired("database recovery protection expired")
+        if transition_window is not None:
+            _validate_transition_dispatch(transition_window)
+        elif window_end <= datetime.now(UTC):
+            raise _ProtectedStageExpired("database recovery window expired")
         for required in (operation, "cleanup"):
             load_execution_authorization(
                 authorization_path,
@@ -2630,11 +2689,14 @@ def _execute_database_retry(
                 "startedAtUtc": datetime.now(UTC).isoformat(),
                 "oldExecution": shown,
                 "cleanupReadbacks": cleanup_results,
+                **_source_transition_metadata(source_transition),
             },
         )
-        if parse_utc(str(pause["recoveryUntilUtc"])) <= datetime.now(
-            UTC
-        ) or not _stage_is_protected(config, runtime, ledger):
+        if not _stage_is_protected(config, runtime, ledger):
+            raise _ProtectedStageExpired("database recovery protection expired before dispatch")
+        if transition_window is not None:
+            _validate_transition_dispatch(transition_window)
+        elif window_end <= datetime.now(UTC):
             raise _ProtectedStageExpired("database recovery window expired before dispatch")
         for required in (operation, "cleanup"):
             load_execution_authorization(
@@ -2677,6 +2739,7 @@ def _execute_database_retry(
         directory=directory,
         failed=failed,
         expected_manifest_hash=expected_manifest_hash,
+        source_transition=source_transition,
     )
 
 
@@ -2693,6 +2756,7 @@ def _finish_database_retry(
     directory: Path,
     failed: str,
     expected_manifest_hash: str,
+    source_transition: dict[str, object] | None = None,
 ) -> tuple[dict[str, object], dict[str, object]]:
     job = runtime["bootstrapJobName" if operation == "bootstrap" else "migrationJobName"]
     expected_id = (
@@ -2735,7 +2799,8 @@ def _finish_database_retry(
         last.get("name") != execution
         or execution == failed
         or not isinstance(last_properties, dict)
-        or last_properties.get("template") != validated_properties["template"]
+        or _retry_template_semantics(last_properties.get("template"))
+        != _retry_template_semantics(validated_properties["template"])
         or str(last.get("id", "")).casefold() != expected_retry_id.casefold()
     ):
         raise _ProtectedStagePaused("database retry terminal execution identity differs")
@@ -2848,6 +2913,7 @@ def _finish_database_retry(
                 if path.is_file()
             },
             "completedAtUtc": datetime.now(UTC).isoformat(),
+            **_source_transition_metadata(source_transition),
         },
     )
     return {**started, **waited}, attempt
@@ -4539,6 +4605,7 @@ def main() -> int:
     parser.add_argument("--image-scan-evidence", type=Path)
     parser.add_argument("--control-plane-evidence", type=Path)
     parser.add_argument("--resume-database-job", action="store_true")
+    parser.add_argument("--bootstrap-source-transition", type=Path)
     args = parser.parse_args()
     try:
         if args.resume_database_job and args.operation not in {"bootstrap", "migrate"}:
@@ -4565,6 +4632,32 @@ def main() -> int:
                 config,
             )
         ledger = load_ledger(args.ledger, config)
+        source_transition = None
+        if args.bootstrap_source_transition is not None:
+            from infra.milestone_7_8.bootstrap_transition import (
+                load_bootstrap_transition,
+                require_operation,
+            )
+
+            source_transition = load_bootstrap_transition(
+                args.bootstrap_source_transition, args.runtime, args.config,
+                runtime, config, ledger, args.operation, args.resume_database_job,
+            )
+            # Existing history/readback validators establish completion before
+            # the separate executing-source authority can admit later phases.
+            if not cleanup_only:
+                _active_protected_pause(
+                    args.ledger.parent, config, runtime, ledger, source_transition,
+                )
+            completed_transition = None
+            completed_path = args.ledger.with_name("bootstrap-stage-recovery-completed.json")
+            if completed_path.exists() and not cleanup_only:
+                completed = _read_stage_record(completed_path, "stage-recovery-completed")
+                completed_transition = str(completed.get("bootstrapSourceTransitionSha256", ""))
+            require_operation(
+                source_transition, args.operation, args.resume_database_job,
+                completed_transition_sha256=completed_transition,
+            )
 
         def require_cleanup_authority() -> None:
             try:
@@ -4687,7 +4780,9 @@ def main() -> int:
             _reconcile_evidence_stage_completion(
                 args.ledger.parent, config, runtime, ledger, control_evidence,
             )
-            if _active_protected_pause(args.ledger.parent, config, runtime, ledger) is not None:
+            if _active_protected_pause(
+                args.ledger.parent, config, runtime, ledger, source_transition,
+            ) is not None:
                 raise _ProtectedStagePaused("another protected stage remains paused")
             ledger.transition(Phase.EVIDENCE_EXECUTED, datetime.now(UTC))
             save_ledger(args.ledger, ledger)
@@ -4780,7 +4875,7 @@ def main() -> int:
                         and Phase(ledger.phase) is not expected_previous[args.operation]):
                     raise _ProtectedStagePaused("protected stage predecessor is not complete")
                 recovery_pause = _active_protected_pause(
-                    args.ledger.parent, config, runtime, ledger,
+                    args.ledger.parent, config, runtime, ledger, source_transition,
                 )
                 if recovery_pause is not None:
                     already_dispatched = (
@@ -4788,7 +4883,14 @@ def main() -> int:
                         and (args.ledger.parent
                              / f"{args.operation}-stage-retry-intent.json").exists()
                     )
-                    if ((not already_dispatched
+                    amended_bootstrap = (
+                        source_transition is not None and args.operation == "bootstrap"
+                        and recovery_pause["operation"] == "bootstrap"
+                    )
+                    if amended_bootstrap and not already_dispatched:
+                        assert source_transition is not None
+                        _validate_transition_dispatch(source_transition)
+                    if ((not already_dispatched and not amended_bootstrap
                          and parse_utc(str(recovery_pause["recoveryUntilUtc"]))
                          <= datetime.now(UTC))
                             or not _stage_is_protected(config, runtime, ledger)):
@@ -4880,6 +4982,7 @@ def main() -> int:
                     runner, commands[0], operation=args.operation, config=config, runtime=runtime,
                     ledger=ledger, pause=recovery_pause, directory=args.ledger.parent,
                     authorization_path=args.authorization,
+                    source_transition=source_transition,
                 )
                 results = [result]
             else:
@@ -4986,14 +5089,20 @@ def main() -> int:
                         raise ProtectedStagePersistenceError(
                             "protected stage attempt is unavailable"
                         )
-                    preserved = preserve_protected_stage_failure(
-                        args.operation, config, runtime, ledger, args.ledger.parent,
-                        attempt_sha, authorization_sha,
-                        failed_execution=(
-                            phase_error.execution
-                            if isinstance(phase_error, _JobExecutionFailure) else None
-                        ),
-                    ) is not None
+                    if (source_transition is not None and args.operation == "bootstrap"
+                            and recovery_pause is not None):
+                        # Retain the original expired pause unchanged. This amendment
+                        # permits one new dispatch, not teardown on an uncertain result.
+                        preserved = True
+                    else:
+                        preserved = preserve_protected_stage_failure(
+                            args.operation, config, runtime, ledger, args.ledger.parent,
+                            attempt_sha, authorization_sha,
+                            failed_execution=(
+                                phase_error.execution
+                                if isinstance(phase_error, _JobExecutionFailure) else None
+                            ),
+                        ) is not None
                 except (ProtectedStagePersistenceError, _ProtectedStagePaused):
                     # The pre-dispatch attempt still prevents replay. A diagnostic
                     # or persistence failure alone never authorizes deleting healthy scope.

@@ -273,6 +273,8 @@ def run_operator(
     allowance: bool = True,
     authorization_check: Callable[..., None] | None = None,
     execute: bool = True,
+    extra_arguments: tuple[str, ...] = (),
+    runtime_override: dict[str, str] | None = None,
 ) -> tuple[int, FakeProvider, Mock, str]:
     config = replace(
         cast(Callable[[], CampaignConfig], _config)(), cleanup_deadline_utc="2030-01-01T01:00:00Z"
@@ -286,7 +288,7 @@ def run_operator(
                 CostItem("database-recovery-job-allowance", "0", 1, "0.0567"),
             ),
         )
-    runtime = _runtime()
+    runtime = runtime_override or _runtime()
     runtime["cleanupScriptSha256"] = hashlib.sha256(b"cleanup-content").hexdigest()
     runtime["cleanupAuthorityExpiresUtc"] = operator.runtime_authority_expiry(config)
     arm = _cleanup_arm_success_results(config, runtime)
@@ -365,6 +367,7 @@ def run_operator(
                     "--authorization",
                     str(directory / "authorization"),
                     *(["--resume-database-job"] if resume else []),
+                    *extra_arguments,
                 ],
             )
         )
@@ -883,3 +886,100 @@ def test_deadline_expiring_during_diagnostics_requires_current_authorized_cleanu
     assert ledger.phase == Phase.CLEANING.value
     assert (tmp_path / "bootstrap-stage-pause.json").is_file()
     assert len(list(tmp_path.glob("job-failure-*/console.json"))) == 1
+
+
+class EmptyOptionalTemplateProvider(FakeProvider):
+    """Replay the retained job-null versus execution-empty ARM response forms."""
+
+    def __init__(self, *, empty_before: bool, drift_at: str = "", drift: str = "") -> None:
+        super().__init__(_runtime())
+        self.empty_before = empty_before
+        self.drift_at = drift_at
+        self.drift = drift
+
+    def shape(self, response: dict[str, object], *, boundary: str) -> dict[str, object]:
+        document = json.loads(str(response["stdout"]))
+        template = document["properties"]["template"]
+        template["initContainers"] = None
+        template["volumes"] = None
+        if boundary == "terminal" or (boundary == "original" and self.empty_before):
+            template["initContainers"] = []
+            template.pop("volumes")
+        if boundary == self.drift_at:
+            container = template["containers"][0]
+            if self.drift == "volumes":
+                template["volumes"] = [{"name": "unexpected", "storageType": "EmptyDir"}]
+            elif self.drift == "initContainers":
+                template["initContainers"] = [{"name": "unexpected", "image": "invalid"}]
+            elif self.drift == "malformed":
+                template["volumes"] = ""
+            elif self.drift == "environment":
+                container["env"].append({"name": "UNREVIEWED", "value": "changed"})
+            elif self.drift == "image":
+                container["image"] = "registry.invalid/app@sha256:" + "e" * 64
+            elif self.drift == "command":
+                container["command"] = ["python", "-m", "scripts.unreviewed"]
+            elif self.drift == "resources":
+                container["resources"]["cpu"] = 0.25
+            else:
+                raise AssertionError("unexpected synthetic drift")
+        return {**response, "stdout": json.dumps(document)}
+
+    def run(self, command: tuple[str, ...]) -> dict[str, object]:
+        response = super().run(command)
+        if command[:4] == ("az", "containerapp", "job", "show"):
+            return self.shape(response, boundary="before")
+        return response
+
+    def execution_result(self, name: str, status: str) -> dict[str, object]:
+        response = super().execution_result(name, status)
+        return self.shape(
+            response, boundary="terminal" if name == self.retry_execution else "original",
+        )
+
+
+@pytest.mark.parametrize("empty_before", [False, True])
+def test_normal_retry_accepts_only_empty_optional_template_shape_changes(
+    tmp_path: Path, empty_before: bool,
+) -> None:
+    provider = EmptyOptionalTemplateProvider(empty_before=empty_before)
+    status, _, ledger, errors = run_operator(tmp_path, provider=provider)
+    assert status == 2 and "stage-paused" in errors
+    status, _, ledger, errors = run_operator(
+        tmp_path, provider=provider, ledger=ledger, resume=True,
+    )
+    assert status == 0, errors
+    assert ledger.phase == Phase.DATABASE_BOOTSTRAPPED.value
+    assert provider.events.count("retry-start") == 1
+    assert "cleanup" not in provider.events
+    intent = json.loads((tmp_path / "bootstrap-stage-retry-intent.json").read_text())
+    raw_job = intent["validatedJob"]["properties"]["template"]
+    assert raw_job["initContainers"] is None and raw_job["volumes"] is None
+    completed = json.loads((tmp_path / "bootstrap-stage-recovery-completed.json").read_text())
+    capture = tmp_path / completed["capture"]
+    execution = json.loads((capture / "execution.json").read_text())
+    raw_terminal = json.loads(execution["lastResult"]["stdout"])["properties"]["template"]
+    assert raw_terminal["initContainers"] == [] and "volumes" not in raw_terminal
+    assert completed["captureFilesSha256"]["execution.json"] == hashlib.sha256(
+        (capture / "execution.json").read_bytes()
+    ).hexdigest()
+
+
+@pytest.mark.parametrize("boundary", ["before", "terminal"])
+@pytest.mark.parametrize(
+    "drift",
+    ["volumes", "initContainers", "malformed", "environment", "image", "command", "resources"],
+)
+def test_normal_retry_still_rejects_substantive_template_drift(
+    tmp_path: Path, boundary: str, drift: str,
+) -> None:
+    provider = EmptyOptionalTemplateProvider(empty_before=True, drift_at=boundary, drift=drift)
+    _, _, ledger, _ = run_operator(tmp_path, provider=provider)
+    status, _, ledger, errors = run_operator(
+        tmp_path, provider=provider, ledger=ledger, resume=True,
+    )
+    assert status == 2, errors
+    assert ledger.phase == Phase.IMAGE_DECIDED.value
+    assert provider.events.count("retry-start") == int(boundary == "terminal")
+    assert "cleanup" not in provider.events
+    assert not (tmp_path / "bootstrap-stage-recovery-completed.json").exists()

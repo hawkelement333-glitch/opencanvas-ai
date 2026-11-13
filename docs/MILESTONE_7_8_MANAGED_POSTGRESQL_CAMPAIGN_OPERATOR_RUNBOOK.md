@@ -1054,9 +1054,87 @@ completion observation of that recorded retry. It never starts another job and
 may observe it after the dispatch window under current authorization, while the
 campaign deadline, budget and protection still hold. Missing dispatch/start
 history cannot be reconstructed from matching state. A source/config/image change
-cannot retrospectively rebind a live attempt. Other paused stages have no new
+cannot retrospectively rebind a live attempt. The explicitly approved bootstrap
+source transition below adds new evidence; it never edits or replaces those
+historical bindings. Other paused stages have no new
 redispatch mechanism; retain evidence and investigate within their bounded window
 or explicitly abandon/clean up. Once cleanup has started, it cannot be reversed.
+
+### Explicit bootstrap operator-source transition
+
+For the specifically reviewed failed bootstrap, an explicit transition approval
+may admit the tested operator correction without rewriting the prepared bundle.
+Keep the original runtime, cost config, admitted image digest, source identity,
+phase authorization, failed execution, stage intent, pause and private diagnostics
+unchanged. The new closed transition authorization binds that exact history and
+controller/campaign scope, the original and corrected source commits, the reviewed
+patch and validation evidence, and the actual user approval. The corrected clean
+commit is the executing **operator** source; it does not become the historical
+runtime or image source. Missing or mismatched transition evidence fails closed.
+
+Prepare this artifact through the validated transition builder and existing
+serializer only after the correction passes its focused checks and is committed.
+Do not issue it during development or alter an expired authorization. The existing
+v5 phase authorization remains separately required and retains its original
+runtime bindings; the transition artifact supplements it rather than replacing
+it. Both approvals must be current at dispatch.
+
+The approved exception can open one new dispatch window for the **unused**
+bootstrap retry: at most 15 minutes from issuance, capped by the existing campaign
+cleanup deadline and authority. It neither extends that deadline nor replenishes
+the retry allowance. Any retained retry intent or dispatch must be reconciled;
+it cannot be discarded to obtain another start. The exact previous execution must
+remain terminal, cleanup protection must still verify, and the original
+`database-recovery-job-allowance` must still cover the bounded retry. The existing
+single-container, one-replica, 0.5-vCPU/1-GiB maximum, zero automatic retries and
+900-second bootstrap timeout checks remain mandatory. No new resource, identity,
+image, role, permission, resource allocation or spending reset is authorized.
+
+```powershell
+# New closed transition approval; original runtime/config/image and v5 approval.
+Invoke-M78Phase 'bootstrap' $bootstrapAuthorization @(
+  '--resume-database-job',
+  '--bootstrap-source-transition', $bootstrapSourceTransition
+)
+```
+
+Dispatch requires all existing operator retry checks; the job's safe database
+inspection must pass before any SQL mutation. Preserve the transition and
+resulting attempt records privately. After a recorded retry, the same supported
+resume path may perform later execution-completion GETs under current required
+authorization without starting another job; it cannot reconstruct missing
+dispatch history. Any scoped
+Log Analytics query needed for the safe-state marker is semantically read-only
+and may use HTTP POST, as described above. Normal migration and remaining campaign
+phases stay blocked until the existing bootstrap completion validator accepts
+the exact successful execution and its matching safe-state evidence. Later
+phases still require their own existing approvals and valid cleanup protection.
+Every subsequent operator invocation must carry the same transition path because
+the original runtime source remains unchanged. After accepted bootstrap
+completion, use the normal next phase and its operation-specific authorization:
+
+```powershell
+Invoke-M78Phase 'migrate' $migrationAuthorization @(
+  '--bootstrap-source-transition', $bootstrapSourceTransition
+)
+Invoke-M78Phase 'evidence' $evidenceAuthorization @(
+  '--bootstrap-source-transition', $bootstrapSourceTransition,
+  '--control-plane-evidence', $controlPath
+)
+Invoke-M78Phase 'dispose' $disposeAuthorization @(
+  '--bootstrap-source-transition', $bootstrapSourceTransition
+)
+Invoke-M78Phase 'cleanup' $cleanupAuthorization @(
+  '--bootstrap-source-transition', $bootstrapSourceTransition
+)
+```
+
+Cleanup may run before accepted bootstrap completion under its existing exact
+authorization when cleanup is required; the transition does not block cleanup
+or extend cleanup authority. Carry the same flag through `cleanup-wait`,
+`cleanup-disarm`, `residue` and `finalize`, each with its existing required
+authorization. Passing this flag to later phases never permits a second
+bootstrap retry or a dispatch outside the approved retry window.
 
 For an unpaused conforming ledger, invoke only its next operation:
 
