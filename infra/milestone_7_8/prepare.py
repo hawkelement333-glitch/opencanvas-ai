@@ -440,7 +440,7 @@ def main() -> int:
             "evidenceJobName": f"job-m78-{suffix}-evidence",
             "apiProbeJobName": f"job-m78-{suffix}-probe-api",
             "workerProbeJobName": f"job-m78-{suffix}-probe-worker",
-            "migrationProbeJobName": f"job-m78-{suffix}-probe-migration",
+            "migrationProbeJobName": f"job-m78-{suffix}-probe-migrate",
             "recoveryJobName": f"job-m78-{suffix}-revoke",
             "recoveryRestoreJobName": f"job-m78-{suffix}-restore",
             "postgresServerName": f"pgm78{suffix}",

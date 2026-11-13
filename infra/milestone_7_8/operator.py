@@ -263,6 +263,24 @@ def load_runtime(path: Path) -> dict[str, str]:
     ):
         raise CampaignError("operator runtime fields are incomplete")
     value = cast(dict[str, str], value)
+    for field in (
+        "bootstrapJobName",
+        "migrationJobName",
+        "workerJobName",
+        "evidenceJobName",
+        "apiProbeJobName",
+        "workerProbeJobName",
+        "migrationProbeJobName",
+        "recoveryJobName",
+        "recoveryRestoreJobName",
+    ):
+        name = value[field]
+        if (
+            not 2 <= len(name) <= 32
+            or re.fullmatch(r"[a-z][a-z0-9-]*[a-z0-9]", name) is None
+            or "--" in name
+        ):
+            raise CampaignError(f"operator Container Apps job name is invalid: {field}")
     try:
         uuid.UUID(value["subscriptionId"])
     except ValueError as exc:
@@ -548,7 +566,7 @@ def validate_prepared_bundle(
         "evidenceJobName": f"job-m78-{suffix}-evidence",
         "apiProbeJobName": f"job-m78-{suffix}-probe-api",
         "workerProbeJobName": f"job-m78-{suffix}-probe-worker",
-        "migrationProbeJobName": f"job-m78-{suffix}-probe-migration",
+        "migrationProbeJobName": f"job-m78-{suffix}-probe-migrate",
         "recoveryJobName": f"job-m78-{suffix}-revoke",
         "recoveryRestoreJobName": f"job-m78-{suffix}-restore",
         "postgresServerName": f"pgm78{suffix}",

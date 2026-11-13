@@ -249,6 +249,13 @@ runtime, both Bicep parameter files, lifecycle tags, and later ledger/readback
 evidence. Preparation creates exactly one generation and a cleanup deadline
 four hours in the future. It never prints either raw Azure UUID.
 
+All nine Container Apps job names must be 2 to 32 characters, start with a
+lowercase letter, end with a lowercase letter or digit, and contain only
+lowercase letters, digits, and single hyphens. Preparation and the template
+use `job-m78-<10-hex-generation-suffix>-probe-migrate` for the migration probe
+(32 characters). Runtime admission rejects invalid names before any operator
+Azure request. Historical bundles and receipts are never renamed in place.
+
 ## Dry-run and execute phases
 
 **Not currently authorized:** do not execute the phase sequence without one

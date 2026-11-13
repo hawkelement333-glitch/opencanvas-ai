@@ -418,7 +418,7 @@ resource workerProbeJob 'Microsoft.App/jobs@2024-03-01' = if (workloadEnabled) {
 }
 
 resource migrationProbeJob 'Microsoft.App/jobs@2024-03-01' = if (workloadEnabled) {
-  name: 'job-m78-${resourceNameSuffix}-probe-migration'
+  name: 'job-m78-${resourceNameSuffix}-probe-migrate'
   location: targetLocation
   tags: lifecycleTags
   identity: { type: 'UserAssigned', userAssignedIdentities: { '${migrationIdentity.id}': {} } }

@@ -7,6 +7,7 @@ import hashlib
 # also imports the repository-level campaign package after adding that explicit root.
 # ruff: noqa: E402
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -1953,6 +1954,24 @@ def test_prepare_creates_one_private_restart_safe_bundle(
     assert runtime["cleanupAuthorityExpiresUtc"] == "2030-01-01T05:00:00Z"
     assert discovery_args["controller_required_until_utc"] == "2030-01-01T05:00:37Z"
     campaign_parameters = json.loads((output / "campaign.parameters.json").read_text())
+    suffix = campaign_parameters["parameters"]["resourceNameSuffix"]["value"]
+    template_path = REPOSITORY_ROOT / "infra/milestone_7_8/modules/campaign-resources.bicep"
+    template = template_path.read_text()
+    jobs = re.findall(
+        r"resource (\w+) 'Microsoft.App/jobs@[^']+'[^\n]*\{\s*name: '([^']+)'",
+        template,
+    )
+    assert {name + "Name" for name, _expression in jobs} == {
+        "bootstrapJobName", "migrationJobName", "workerJobName", "evidenceJobName",
+        "apiProbeJobName", "workerProbeJobName", "migrationProbeJobName",
+        "recoveryJobName", "recoveryRestoreJobName",
+    }
+    for name, expression in jobs:
+        generated = expression.replace("${resourceNameSuffix}", suffix)
+        assert runtime[name + "Name"] == generated
+        assert 2 <= len(generated) <= 32, name
+        assert re.fullmatch(r"[a-z][a-z0-9-]*[a-z0-9]", generated), name
+        assert "--" not in generated, name
     cleanup_parameters = json.loads((output / "cleanup.parameters.json").read_text())
     assert (
         campaign_parameters["parameters"]["cleanupDeadlineUtc"]["value"]
@@ -2036,6 +2055,48 @@ def test_prepare_creates_one_private_restart_safe_bundle(
         campaign_operator.validate_prepared_bundle(runtime_path, runtime, config)
     with pytest.raises(FileExistsError):
         output.mkdir()
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "bootstrapJobName", "migrationJobName", "workerJobName", "evidenceJobName",
+        "apiProbeJobName", "workerProbeJobName", "migrationProbeJobName",
+        "recoveryJobName", "recoveryRestoreJobName",
+    ],
+)
+@pytest.mark.parametrize(
+    "name",
+    ["a" * 33, "Bad-name", "1bad", "bad-", "bad--name", "bad_name", "a", "ab\n", "ab\r\n"],
+)
+def test_operator_rejects_invalid_job_name_before_azure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    field: str, name: str,
+) -> None:
+    runtime = _runtime()
+    runtime[field] = name
+    runtime_path = tmp_path / "runtime.json"
+    runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+    monkeypatch.setattr(CampaignConfig, "from_json", classmethod(lambda cls, *a, **k: _config()))
+    monkeypatch.setattr(
+        campaign_operator, "SubprocessRunner",
+        lambda *_a, **_k: pytest.fail("invalid job name reached Azure runner"),
+    )
+    monkeypatch.setattr(
+        campaign_operator, "validate_prepared_bundle",
+        lambda *_a, **_k: pytest.fail("invalid job name passed runtime admission"),
+    )
+    monkeypatch.setattr(sys, "argv", [
+        "operator", "preflight", "--execute", "--config", str(tmp_path / "config.json"),
+        "--runtime", str(runtime_path), "--ledger", str(tmp_path / "ledger.json"),
+        "--authorization", str(tmp_path / "authorization.json"),
+    ])
+    assert campaign_operator.main() == 2
+    result = json.loads(capsys.readouterr().err)
+    assert result == {
+        "status": "blocked", "error": f"operator Container Apps job name is invalid: {field}",
+    }
+    assert not (tmp_path / "ledger.json").exists()
 
 
 def _cleanup_arm_success_results(

@@ -3,6 +3,14 @@
   "$id": "urn:solarplexus:mobius:milestone-7.8:operator-runtime:v9",
   "type": "object",
   "additionalProperties": false,
+  "$defs": {
+    "containerAppJobName": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 32,
+      "pattern": "^[a-z](?!.*--)[a-z0-9-]*[a-z0-9](?![\\s\\S])"
+    }
+  },
   "required": [
     "subscriptionId",
     "sourceHead",
@@ -138,15 +146,15 @@
       "pattern": "^m78-deadline-[a-f0-9]{10}$"
     },
     "bindingName": { "type": "string", "format": "uuid" },
-    "bootstrapJobName": { "type": "string", "minLength": 1 },
-    "migrationJobName": { "type": "string", "minLength": 1 },
-    "workerJobName": { "type": "string", "minLength": 1 },
-    "evidenceJobName": { "type": "string", "minLength": 1 },
-    "apiProbeJobName": { "type": "string", "minLength": 1 },
-    "workerProbeJobName": { "type": "string", "minLength": 1 },
-    "migrationProbeJobName": { "type": "string", "minLength": 1 },
-    "recoveryJobName": { "type": "string", "minLength": 1 },
-    "recoveryRestoreJobName": { "type": "string", "minLength": 1 },
+    "bootstrapJobName": { "$ref": "#/$defs/containerAppJobName" },
+    "migrationJobName": { "$ref": "#/$defs/containerAppJobName" },
+    "workerJobName": { "$ref": "#/$defs/containerAppJobName" },
+    "evidenceJobName": { "$ref": "#/$defs/containerAppJobName" },
+    "apiProbeJobName": { "$ref": "#/$defs/containerAppJobName" },
+    "workerProbeJobName": { "$ref": "#/$defs/containerAppJobName" },
+    "migrationProbeJobName": { "$ref": "#/$defs/containerAppJobName" },
+    "recoveryJobName": { "$ref": "#/$defs/containerAppJobName" },
+    "recoveryRestoreJobName": { "$ref": "#/$defs/containerAppJobName" },
     "postgresServerName": { "type": "string", "minLength": 1 },
     "registryName": { "type": "string", "minLength": 5 },
     "logAnalyticsWorkspaceName": { "type": "string", "minLength": 1 },
