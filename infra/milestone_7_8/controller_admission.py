@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import sys
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -35,6 +36,11 @@ DEADLINE_TAG = "mobius.controller-authorized-until-utc"
 ANCHOR_FIELDS = (
     "version", "verifiedConfig", "verificationAuthorization",
     "verificationResult", "baselineReadback",
+)
+
+
+_VALIDATED_HISTORY: ContextVar[dict[str, ControllerConfig] | None] = ContextVar(
+    "m78_validated_authority_history", default=None,
 )
 
 
@@ -216,13 +222,34 @@ def _check_history(value: object) -> None:
 
 
 def validate_authority_evidence(value: object) -> ControllerConfig:
+    """Validate every distinct historical record once in this traversal only."""
+    cached = _VALIDATED_HISTORY.get()
+    token = None
+    if cached is None:
+        cached = {}
+        token = _VALIDATED_HISTORY.set(cached)
+    try:
+        _check_history(value)
+        key = digest("m7.8/controller-authority-validation-cache/v1", value)
+        if key in cached:
+            return cached[key]
+        validated = _validate_authority_evidence_uncached(value)
+        if digest("m7.8/controller-authority-validation-cache/v1", value) != key:
+            raise CampaignError("controller authority evidence changed during validation")
+        cached[key] = validated
+        return validated
+    finally:
+        if token is not None:
+            _VALIDATED_HISTORY.reset(token)
+
+
+def _validate_authority_evidence_uncached(value: object) -> ControllerConfig:
     """Validate the preserved bootstrap anchor and, if present, completed renewal.
 
     Expired historical authorizations are checked at a historical instant only
     to verify their exact binding. This does not renew them or authorize work.
     The caller separately checks the observed live deadline and required horizon.
     """
-    _check_history(value)
     if isinstance(value, dict) and "runbookPublication" in value:
         from infra.milestone_7_8.controller_publication import validate_publication
 

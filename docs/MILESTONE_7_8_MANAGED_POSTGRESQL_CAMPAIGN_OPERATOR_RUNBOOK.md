@@ -789,6 +789,14 @@ campaign execution authorizations use v5 and bind
 rejected. Capacity checks reload the bound record and recheck live deadline
 consistency on all three resources. The retained controller is not deleted.
 
+Within one top-level historical authority validation, an identical complete
+canonical evidence record may reuse its successfully validated immutable
+configuration. Every distinct predecessor and its preservation checks still
+validate; changed content cannot reuse the prior result. The cache is discarded
+when that call ends, including on failure. It never caches current time, source
+checks, campaign admission, or live readbacks across calls, and it never replaces
+the required scoped Azure observations.
+
 ## Bootstrap, migrate, and prepare observed inputs
 
 ```powershell
