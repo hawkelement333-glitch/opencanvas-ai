@@ -13,6 +13,7 @@ from opencanvas_api.core.config import (
 from opencanvas_api.db.principal_manifest import PrincipalSlot, load_principal_manifest
 from opencanvas_api.db.role_privileges import runtime_privilege_statements
 from opencanvas_api.db.session import Database
+from scripts.m78_database_recovery import require_safe_retry, retry_argument
 from scripts.migrate import run as run_migration
 
 _SAFE_FAILURE_CODE = "observability-bootstrap-migration-or-runtime-privilege-reconciliation-failed"
@@ -27,23 +28,36 @@ def _principals() -> tuple[str, str, str]:
     )
 
 
-async def _current_revision() -> str:
+async def _current_revision(*, retry_after_execution: str | None = None) -> str:
     settings = get_settings()
     if settings.database_role is not DatabaseRole.MIGRATION:
         raise RuntimeError("database migration role contract is invalid")
     database = Database.from_settings(settings, expected_role=DatabaseRole.MIGRATION)
     try:
         async with database.engine.connect() as connection:
+            retry_observation = None
+            if retry_after_execution is not None:
+                retry_observation = await require_safe_retry(
+                    connection, operation="migrate", previous_execution=retry_after_execution,
+                    manifest=load_principal_manifest(),
+                )
             exists = (
                 await connection.execute(text("SELECT to_regclass('public.alembic_version')"))
             ).scalar_one_or_none()
             if exists is None:
+                if (
+                    retry_observation is not None
+                    and retry_observation["observedRevision"] != "base"
+                ):
+                    raise RuntimeError("database retry revision changed after inspection")
                 return "base"
             revision = (
                 await connection.execute(text("SELECT version_num FROM alembic_version"))
             ).scalar_one_or_none()
             if not isinstance(revision, str):
                 raise RuntimeError("database migration state is inconsistent")
+            if retry_observation is not None and retry_observation["observedRevision"] != revision:
+                raise RuntimeError("database retry revision changed after inspection")
             return revision
     finally:
         await database.dispose()
@@ -128,9 +142,13 @@ async def apply_runtime_privileges() -> None:
         await database.dispose()
 
 
-def main() -> int:
+def main(arguments: list[str] | None = None) -> int:
     try:
-        revision = asyncio.run(_current_revision())
+        retry = retry_argument(arguments)
+        revision = asyncio.run(
+            _current_revision() if retry is None
+            else _current_revision(retry_after_execution=retry)
+        )
         if revision == "base":
             result = run_migration(expected_current="base", target=EXPECTED_DATABASE_REVISION)
             if result != 0:
@@ -147,4 +165,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

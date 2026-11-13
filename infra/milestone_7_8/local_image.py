@@ -47,6 +47,10 @@ NETWORK_FIELDS = ("publicNetworkAccess", "networkRuleSet")
 ARCHIVE_OPTIONS = ("-c", "core.autocrlf=false", "-c", "core.eol=lf")
 
 
+class RegistryRestorationUnproved(CampaignError):
+    """The required private-registry boundary could not be re-established."""
+
+
 def _hash(value: object) -> str:
     return hashlib.sha256(
         b"m7.8/local-image/v1\0"
@@ -655,20 +659,23 @@ def execute_local_image(
                 _verify_registry(restored, plan)
                 _durable_record(output / "restored.json", restored)
             except Exception as exc:
-                _durable_record(
-                    output / "restoration-failed.json",
-                    {
-                        "error": type(exc).__name__,
-                        "originalError": type(failure).__name__ if failure else None,
-                        "cleanupRequired": True,
-                    },
-                )
-                raise CampaignError(
+                # Failed diagnostic persistence cannot erase the established
+                # loss of the registry restoration boundary.
+                with suppress(Exception):
+                    _durable_record(
+                        output / "restoration-failed.json",
+                        {
+                            "error": type(exc).__name__,
+                            "originalError": type(failure).__name__ if failure else None,
+                            "cleanupRequired": True,
+                        },
+                    )
+                raise RegistryRestorationUnproved(
                     "registry restoration unproved; campaign cleanup required"
                 ) from exc
     if failure is not None:
         raise CampaignError(
-            "image attempt failed after verified restoration; cleanup required"
+            "image attempt failed after verified restoration; stage recovery review required"
         ) from failure
     if receipt is None:
         raise CampaignError("image receipt is unavailable")
@@ -1106,10 +1113,52 @@ def main() -> int:
                         runner=runner,
                         clock=lambda: datetime.now(UTC),
                     )
-                except Exception:
-                    # The original failure is re-raised even when cleanup recording fails.
+                except Exception as image_error:
+                    # A restored, protected image failure pauses admission. Only
+                    # established loss of the private registry boundary or the
+                    # existing protection limits require immediate cleanup.
+                    cleanup_required = isinstance(image_error, RegistryRestorationUnproved)
+                    if not cleanup_required:
+                        # Check protection even if the diagnostic/attempt files
+                        # are missing. Unknown history blocks replay; it cannot
+                        # conceal an exhausted budget or an expired deadline.
+                        attempt_sha256 = ""
+                        approval_sha256 = ""
+                        with suppress(OSError, ValueError, TypeError):
+                            attempt_path = args.runtime.parent / "local-image-attempt.json"
+                            attempt_sha256 = hashlib.sha256(attempt_path.read_bytes()).hexdigest()
+                        with suppress(OSError, ValueError, TypeError):
+                            image_approval = _object(json.loads(args.approval.read_text()))
+                            approval_sha256 = str(image_approval.get("approvalSha256", ""))
+                        try:
+                            pause = operator.preserve_protected_stage_failure(
+                                "local-image", config, runtime, ledger, args.ledger.parent,
+                                attempt_sha256, approval_sha256,
+                            )
+                            cleanup_required = pause is None
+                            if pause is not None:
+                                print(json.dumps({
+                                    "status": "stage-paused", "operation": "local-image",
+                                }))
+                        except Exception:
+                            # Missing local diagnostics/history is not proof that
+                            # healthy infrastructure needs deletion. The existing
+                            # attempt barrier and absent scan receipt block replay
+                            # and admission; scheduled cleanup remains armed.
+                            print(json.dumps({"status": "stage-pause-recording-incomplete"}))
+                    if not cleanup_required:
+                        raise
+                    # The original failure is re-raised if cleanup recording fails.
                     try:
-                        operator.start_failure_cleanup(runner, config, runtime)
+                        def require_cleanup_authority() -> None:
+                            load_execution_authorization(
+                                args.cleanup_authorization, config=config, runtime=runtime,
+                                operation="cleanup",
+                            )
+
+                        operator.start_failure_cleanup(
+                            runner, config, runtime, before_dispatch=require_cleanup_authority,
+                        )
                         ledger.transition(Phase.CLEANING, datetime.now(UTC))
                         save_ledger(args.ledger, ledger)
                     except Exception as cleanup_error:

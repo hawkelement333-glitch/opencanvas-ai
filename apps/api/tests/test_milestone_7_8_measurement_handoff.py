@@ -4,16 +4,18 @@ import io
 import json
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 from unittest.mock import Mock, patch
 from urllib.parse import urlsplit
 
-from infra.milestone_7_8 import measurement_handoff, operator, replica_readback
-from infra.milestone_7_8.campaign import Phase
+from test_milestone_7_8_campaign_enablement import _config, _runtime, _write_execution_authorization
+
+from infra.milestone_7_8 import cleanup_controller, measurement_handoff, operator, replica_readback
+from infra.milestone_7_8.campaign import ORDER, CampaignConfig, Ledger, Phase
 
 SUBSCRIPTION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 GROUP = "rg-m78-aabbccddee-target"
@@ -33,11 +35,10 @@ CONTROL = {
     "safetyReserve": 20, "maxConnections": 200,
 }
 RUNTIME = {
+    **_runtime(),
     "subscriptionId": SUBSCRIPTION,
     "sourceHead": "a" * 40,
     "resourceGroupName": GROUP,
-    "cleanupResourceGroupName": "rg-proof-cleanup",
-    "automationAccountName": "aa-proof",
     "runbookName": "Remove-M78Campaign",
     "workerJobName": WORKER,
     "evidenceJobName": SAMPLER,
@@ -218,50 +219,60 @@ class FakeProvider:
 class TestMeasurementHandoff(unittest.TestCase):
     def run_operator(
         self, directory: Path, failure: str | None = None,
-    ) -> tuple[int, FakeProvider, Mock, Mock, str]:
+        *, operation: str = "evidence", ledger: Ledger | None = None, save_fails: bool = False,
+    ) -> tuple[int, FakeProvider, Ledger, Mock, str]:
         provider = FakeProvider(failure)
-        @dataclass(frozen=True)
-        class Config:
-            cleanup_deadline_utc: str = "2030-01-01T01:00:00Z"
-            campaign_id: str = "campaign-test"
-            generation_id: str = "g1-abcdefabcdef"
-            image_digest: str | None = None
-
-        config = Config()
-        ledger = Mock(phase=Phase.MIGRATED.value, image_digest=DIGEST)
+        config = _config(cleanup_deadline_utc="2030-01-01T01:00:00Z")
+        if ledger is None:
+            ledger = Ledger(config.campaign_id, config.generation_id)
+            ledger.bind_cleanup_region(config)
+            ledger.bind_deadline(config.cleanup_deadline_utc)
+            for phase in ORDER[1 : ORDER.index(Phase.MIGRATED) + 1]:
+                if phase is Phase.CLEANUP_ARMED:
+                    ledger.record_cleanup_arm_evidence("a" * 64)
+                if phase is Phase.IMAGE_DECIDED:
+                    ledger.record_image(DIGEST, built=True)
+                    ledger.record_image_scan(DIGEST, "b" * 64)
+                ledger.transition(phase, provider.base)
+        _write_execution_authorization(
+            directory / "auth", config, RUNTIME,
+            expires_at="2030-01-01T01:30:00Z", operations=[operation, "cleanup"],
+        )
         control = directory / "control.json"
         control.write_text(json.dumps({**CONTROL, "observedPeak": 1, "latencyP95Ms": 0}))
         argv = [
-            "operator", "evidence", "--execute", "--config", str(directory / "config"),
+            "operator", operation, "--execute", "--config", str(directory / "config"),
             "--runtime", str(directory / "runtime"), "--ledger", str(directory / "ledger"),
             "--authorization", str(directory / "auth"), "--control-plane-evidence", str(control),
         ]
 
         class Clock(datetime):
             @classmethod
-            def now(cls, tz: tzinfo | None = None) -> datetime:
+            def now(cls, tz: tzinfo | None = None) -> Clock:
                 now = provider.base + timedelta(seconds=provider.elapsed)
-                return now.astimezone(tz) if tz is not None else now.replace(tzinfo=None)
+                return cls.fromtimestamp(now.timestamp(), tz)
 
         errors = io.StringIO()
         with ExitStack() as stack:
             stack.enter_context(patch.object(sys, "argv", argv))
             stack.enter_context(patch.object(
-                operator.CampaignConfig, "from_json", return_value=config,
+                CampaignConfig, "from_json", return_value=config,
             ))
             stack.enter_context(patch.object(operator, "load_runtime", return_value=RUNTIME))
             stack.enter_context(patch.object(operator, "validate_prepared_bundle"))
             stack.enter_context(patch.object(operator, "load_bound_fresh_controller_admission"))
-            stack.enter_context(patch.object(operator, "load_execution_authorization"))
             stack.enter_context(patch.object(operator, "load_ledger", return_value=ledger))
             stack.enter_context(patch.object(operator, "SubprocessRunner", return_value=provider))
-            stack.enter_context(patch.object(operator, "save_ledger"))
-            cleanup = stack.enter_context(patch.object(operator, "start_failure_cleanup"))
-            for module in (operator, measurement_handoff, replica_readback):
-                stack.enter_context(patch.object(module, "datetime", Clock))
-            stack.enter_context(patch.object(measurement_handoff.time, "sleep", provider.sleep))
             stack.enter_context(patch.object(
-                measurement_handoff.time, "monotonic", lambda: provider.elapsed,
+                operator, "save_ledger",
+                side_effect=OSError("synthetic ledger persistence failure") if save_fails else None,
+            ))
+            cleanup = stack.enter_context(patch.object(operator, "start_failure_cleanup"))
+            for module in (operator, cleanup_controller, measurement_handoff, replica_readback):
+                stack.enter_context(patch.object(module, "datetime", Clock))
+            stack.enter_context(patch.object(time, "sleep", provider.sleep))
+            stack.enter_context(patch.object(
+                time, "monotonic", lambda: provider.elapsed,
             ))
             stack.enter_context(redirect_stderr(errors))
             stack.enter_context(redirect_stdout(io.StringIO()))
@@ -284,7 +295,7 @@ class TestMeasurementHandoff(unittest.TestCase):
                                 for command in provider.commands))
             self.assertIsNone(provider.new_revision)
             cleanup.assert_not_called()
-            self.assertEqual(ledger.transition.call_args.args[0], Phase.EVIDENCE_EXECUTED)
+            self.assertEqual(ledger.phase, Phase.EVIDENCE_EXECUTED.value)
             receipt = json.loads((directory / "managed-evidence-execution.json").read_text())
             self.assertEqual(receipt["measurement"]["workerExecution"], "worker-execution")
             self.assertEqual(receipt["measurement"]["steady"]["apiRevisions"], [OLD])
@@ -292,7 +303,7 @@ class TestMeasurementHandoff(unittest.TestCase):
             self.assertEqual(receipt["measurement"]["observedPeak"], 91)
             self.assertEqual(len(receipt["observations"]), 12)
 
-    def test_missing_or_mismatched_measurement_enters_cleanup(self) -> None:
+    def test_missing_or_mismatched_measurement_preserves_armed_cleanup_and_pauses(self) -> None:
         for failure, error in (
             ("wrong-execution", "exact execution"),
             ("stale", "timestamps are stale"),
@@ -306,8 +317,20 @@ class TestMeasurementHandoff(unittest.TestCase):
                 self.assertIn(error, errors)
                 self.assertIsNone(provider.operations_input)
                 self.assertFalse((directory / "managed-evidence-execution.json").exists())
-                cleanup.assert_called_once()
-                self.assertEqual(ledger.transition.call_args.args[0], Phase.CLEANING)
+                cleanup.assert_not_called()
+                self.assertEqual(ledger.phase, Phase.MIGRATED.value)
+                self.assertEqual(ledger.cleanup_arm_evidence_sha256, "a" * 64)
+                pause = operator._read_stage_record(
+                    directory / "evidence-stage-pause.json", "stage-pause",
+                )
+                self.assertEqual(pause["operation"], "evidence")
+                bindings = pause["bindings"]
+                self.assertIsInstance(bindings, dict)
+                assert isinstance(bindings, dict)
+                self.assertEqual(bindings["sourceHead"], RUNTIME["sourceHead"])
+                self.assertEqual(bindings["imageDigest"], DIGEST)
+                self.assertEqual(bindings["cleanupArmSha256"], "a" * 64)
+                self.assertTrue((directory / "managed-evidence-attempt.json").exists())
 
     def test_interrupted_attempt_does_not_start_another_worker(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -319,6 +342,73 @@ class TestMeasurementHandoff(unittest.TestCase):
             self.assertFalse(provider.commands)
             cleanup.assert_not_called()
 
+    def test_receipt_resume_reconciles_failed_ledger_save_and_allows_dispose(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            status, _, _, cleanup, errors = self.run_operator(directory, save_fails=True)
+            self.assertEqual(status, 2, errors)
+            self.assertIn("synthetic ledger persistence failure", errors)
+            cleanup.assert_not_called()
+            receipt_path = directory / "managed-evidence-execution.json"
+            pause_path = directory / "evidence-stage-pause.json"
+            receipt_before, pause_before = receipt_path.read_bytes(), pause_path.read_bytes()
+            status, provider, ledger, cleanup, errors = self.run_operator(directory)
+            self.assertEqual(status, 0, errors)
+            self.assertFalse(provider.commands)
+            self.assertEqual(ledger.phase, Phase.EVIDENCE_EXECUTED.value)
+            cleanup.assert_not_called()
+            status, provider, ledger, cleanup, errors = self.run_operator(
+                directory, operation="dispose", ledger=ledger,
+            )
+            self.assertEqual(status, 0, errors)
+            self.assertEqual(ledger.phase, Phase.DISPOSED.value)
+            self.assertFalse(provider.commands)
+            cleanup.assert_not_called()
+            self.assertEqual(receipt_path.read_bytes(), receipt_before)
+            self.assertEqual(pause_path.read_bytes(), pause_before)
+
+    def test_receipt_resume_rejects_missing_or_altered_stage_history_and_other_pauses(self) -> None:
+        for defect in ("missing-attempt", "altered-attempt", "another-pause", "wrong-source"):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as temp:
+                directory = Path(temp)
+                status, _, _, _, errors = self.run_operator(directory, save_fails=True)
+                self.assertEqual(status, 2, errors)
+                attempt_path = directory / "evidence-stage-attempt.json"
+                if defect == "missing-attempt":
+                    attempt_path.unlink()
+                elif defect == "altered-attempt":
+                    attempt = json.loads(attempt_path.read_text())
+                    attempt["bindings"]["sourceHead"] = "b" * 40
+                    unsigned = {key: value for key, value in attempt.items()
+                                if key != "recordSha256"}
+                    attempt["recordSha256"] = operator._stage_hash("stage-attempt", unsigned)
+                    attempt_path.write_text(json.dumps(attempt), encoding="utf-8")
+                elif defect == "another-pause":
+                    (directory / "bootstrap-stage-pause.json").write_text("{}", encoding="utf-8")
+                else:
+                    receipt_path = directory / "managed-evidence-execution.json"
+                    receipt = json.loads(receipt_path.read_text())
+                    receipt["sourceHead"] = "b" * 40
+                    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+                status, provider, ledger, cleanup, errors = self.run_operator(directory)
+                self.assertEqual(status, 2, errors)
+                self.assertFalse(provider.commands)
+                self.assertEqual(ledger.phase, Phase.MIGRATED.value)
+                cleanup.assert_not_called()
+
+    def test_historical_receipt_only_resume_remains_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            status, _, _, _, errors = self.run_operator(directory)
+            self.assertEqual(status, 0, errors)
+            (directory / "evidence-stage-attempt.json").unlink()
+            status, provider, ledger, cleanup, errors = self.run_operator(directory)
+            self.assertEqual(status, 0, errors)
+            self.assertFalse(provider.commands)
+            self.assertEqual(ledger.phase, Phase.EVIDENCE_EXECUTED.value)
+            cleanup.assert_not_called()
+            self.assertFalse((directory / "evidence-stage-recovery-completed.json").exists())
+
     def test_completed_receipt_resumes_without_a_second_provider_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
@@ -328,7 +418,7 @@ class TestMeasurementHandoff(unittest.TestCase):
             self.assertEqual(status, 0, errors)
             self.assertFalse(provider.commands)
             cleanup.assert_not_called()
-            self.assertEqual(ledger.transition.call_args.args[0], Phase.EVIDENCE_EXECUTED)
+            self.assertEqual(ledger.phase, Phase.EVIDENCE_EXECUTED.value)
 
 
 if __name__ == "__main__":

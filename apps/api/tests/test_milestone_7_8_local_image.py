@@ -16,6 +16,13 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from test_milestone_7_8_campaign_enablement import (
+    _config,
+    _manifest,
+    _runtime,
+    _write_execution_authorization,
+)
+
 from infra.milestone_7_8 import canonical_inputs, local_image, operator, scout_admission
 from infra.milestone_7_8.campaign import (
     ORDER,
@@ -29,12 +36,6 @@ from infra.milestone_7_8.campaign import (
 )
 from infra.milestone_7_8.canonical_inputs import BUILD_INPUTS, DOMAIN
 from infra.milestone_7_8.controller_renewal import _durable_record
-from test_milestone_7_8_campaign_enablement import (
-    _config,
-    _manifest,
-    _runtime,
-    _write_execution_authorization,
-)
 
 NOW = datetime(2030, 1, 1, tzinfo=UTC)
 DIGEST = "sha256:" + "d" * 64
@@ -640,7 +641,7 @@ def test_scout_transport_failure_recovers_same_digest_once(case: Case) -> None:
 ])
 def test_scout_assessment_or_uncertain_failure_is_never_repeated(case: Case, outcome: str) -> None:
     provider = ScanRecoveryProvider(case, outcome=outcome)
-    with pytest.raises(CampaignError, match="cleanup required"):
+    with pytest.raises(CampaignError, match=r"recovery review required|cleanup required"):
         execute(case, provider)
     assert provider.scan_count == 1
     assert provider.registry == case.plan["before"]
@@ -653,7 +654,7 @@ def test_scout_assessment_or_uncertain_failure_is_never_repeated(case: Case, out
 
 def test_scout_transport_recovery_exhaustion_restores_without_third_attempt(case: Case) -> None:
     provider = ScanRecoveryProvider(case, outcome="transport-twice")
-    with pytest.raises(CampaignError, match="cleanup required"):
+    with pytest.raises(CampaignError, match=r"recovery review required|cleanup required"):
         execute(case, provider)
     assert provider.scan_count == 2
     assert provider.registry == case.plan["before"]
@@ -662,7 +663,7 @@ def test_scout_transport_recovery_exhaustion_restores_without_third_attempt(case
 
 def test_scout_transport_recovery_expiry_prevents_second_dispatch(case: Case) -> None:
     provider = ScanRecoveryProvider(case)
-    with pytest.raises(CampaignError, match="cleanup required"):
+    with pytest.raises(CampaignError, match=r"recovery review required|cleanup required"):
         local_image.execute_local_image(
             case.runtime_path, case.runtime, case.config, case.ledger, case.plan, case.approval,
             output=case.runtime_path.parent / "local-image", runner=provider,
@@ -684,7 +685,7 @@ def test_scout_response_persistence_failure_prevents_recovery(
 
     monkeypatch.setattr(local_image, "_durable_record", fail_response)
     provider = ScanRecoveryProvider(case)
-    with pytest.raises(CampaignError, match="cleanup required"):
+    with pytest.raises(CampaignError, match=r"recovery review required|cleanup required"):
         execute(case, provider)
     assert provider.scan_count == 1
     assert provider.registry == case.plan["before"]
@@ -806,7 +807,7 @@ def test_opened_bare_ipv4_readback_reaches_completion_without_rewriting_evidence
 )
 def test_opened_rule_drift_stops_before_build_and_restores(case: Case, rules: object) -> None:
     provider = RuleReadbackProvider(case, rules)
-    with pytest.raises(CampaignError, match="cleanup required"):
+    with pytest.raises(CampaignError, match=r"recovery review required|cleanup required"):
         execute(case, provider)
     assert provider.registry == case.plan["before"]
     assert provider.patch_count == 2
@@ -836,7 +837,7 @@ def test_bare_ipv4_rule_is_not_accepted_as_restoration(case: Case) -> None:
 )
 def test_failure_restores_exact_network_without_admitting(case: Case, fault: str) -> None:
     provider = Provider(case, fault=fault)
-    with pytest.raises(CampaignError, match="cleanup required"):
+    with pytest.raises(CampaignError, match=r"recovery review required|cleanup required"):
         execute(case, provider)
     assert provider.registry == case.plan["before"]
     assert provider.patch_count == 2
@@ -1025,7 +1026,7 @@ def test_expiry_after_build_stops_push_but_still_restores(case: Case) -> None:
             return NOW + timedelta(hours=2)
         return NOW
 
-    with pytest.raises(CampaignError, match="cleanup required"):
+    with pytest.raises(CampaignError, match=r"recovery review required|cleanup required"):
         local_image.execute_local_image(
             case.runtime_path,
             case.runtime,
@@ -1056,16 +1057,19 @@ def test_persistence_failure_cannot_admit_and_attempts_restoration(
 
     monkeypatch.setattr(local_image, "_durable_record", failing_persist)
     provider = Provider(case)
-    with pytest.raises(CampaignError, match="cleanup required"):
+    with pytest.raises(CampaignError, match=r"recovery review required|cleanup required"):
         execute(case, provider)
     assert provider.registry == case.plan["before"]
     assert not (case.runtime_path.parent / "local-image" / "completed.json").exists()
 
 
 @pytest.mark.parametrize(
-    "fault", ["", "scan-failure", "transport", "transport-twice", "findings-1"],
+    "fault", ["", "scan-failure", "transport", "transport-twice", "findings-1",
+              "restore-failure", "restore-persistence", "expired-protection",
+              "exhausted-budget", "expired-missing-attempt", "budget-missing-attempt",
+              "pause-persistence", "cleanup-auth-expired"],
 )
-def test_normal_cli_with_fake_provider_and_existing_failure_cleanup(
+def test_normal_cli_preserves_protected_infrastructure_after_restored_image_failure(
     case: Case,
     fault: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -1076,7 +1080,12 @@ def test_normal_cli_with_fake_provider_and_existing_failure_cleanup(
     provider = (
         ScanRecoveryProvider(case, outcome=fault)
         if fault in {"transport", "transport-twice", "findings-1"}
-        else Provider(case, fault=fault)
+        else Provider(case, fault="scan-failure" if fault in {
+            "expired-protection", "exhausted-budget", "pause-persistence",
+            "expired-missing-attempt", "budget-missing-attempt",
+        } else "restore-failure" if fault in {
+            "restore-persistence", "cleanup-auth-expired",
+        } else fault)
     )
     cleanup: list[str] = []
     monkeypatch.setattr(CampaignConfig, "from_json", lambda _path: case.config)
@@ -1085,8 +1094,25 @@ def test_normal_cli_with_fake_provider_and_existing_failure_cleanup(
     monkeypatch.setattr(
         local_image, "load_execution_authorization", lambda *_args, **_kwargs: "approved"
     )
+    if fault == "cleanup-auth-expired":
+        authorization_reads: list[str] = []
+
+        def authorize(*_args: object, **_kwargs: object) -> str:
+            authorization_reads.append("checked")
+            if len(authorization_reads) > 1:
+                raise CampaignError("cleanup authorization expired")
+            return "approved"
+
+        monkeypatch.setattr(local_image, "load_execution_authorization", authorize)
     monkeypatch.setattr(local_image, "SubprocessRunner", lambda **_kwargs: provider)
-    monkeypatch.setattr(operator, "start_failure_cleanup", lambda *_args: cleanup.append("cleanup"))
+    def dispatch_cleanup(
+        *_args: object, before_dispatch: Callable[[], None] | None = None,
+    ) -> None:
+        assert before_dispatch is not None
+        before_dispatch()
+        cleanup.append("cleanup")
+
+    monkeypatch.setattr(operator, "start_failure_cleanup", dispatch_cleanup)
     monkeypatch.setattr(local_image, "save_ledger", lambda *_args: None)
 
     class FrozenDateTime(datetime):
@@ -1095,6 +1121,43 @@ def test_normal_cli_with_fake_provider_and_existing_failure_cleanup(
             return cls(2030, 1, 1, tzinfo=UTC)
 
     monkeypatch.setattr(local_image, "datetime", FrozenDateTime)
+    monkeypatch.setattr(operator, "datetime", FrozenDateTime)
+    if fault in {"expired-protection", "expired-missing-attempt"}:
+        class ExpiredDateTime(FrozenDateTime):
+            @classmethod
+            def now(cls, tz: object = None) -> ExpiredDateTime:
+                return cls(2030, 1, 1, 4, 1, tzinfo=UTC)
+
+        monkeypatch.setattr(operator, "datetime", ExpiredDateTime)
+    if fault in {"exhausted-budget", "budget-missing-attempt"}:
+        case.ledger.actual_cost_usd = "50"
+    if fault in {"expired-missing-attempt", "budget-missing-attempt"}:
+        read_bytes = Path.read_bytes
+
+        def missing_attempt(path: Path) -> bytes:
+            if path.name == "local-image-attempt.json":
+                raise FileNotFoundError("synthetic missing attempt")
+            return read_bytes(path)
+
+        monkeypatch.setattr(Path, "read_bytes", missing_attempt)
+    if fault == "pause-persistence":
+        persist = _durable_record
+
+        def fail_pause(path: Path, value: object) -> None:
+            if path.name == "local-image-stage-pause.json":
+                raise OSError("synthetic pause persistence failure")
+            persist(path, value)
+
+        monkeypatch.setattr(
+            "infra.milestone_7_8.controller_renewal._durable_record", fail_pause,
+        )
+    if fault == "restore-persistence":
+        def fail_restoration_record(path: Path, value: object) -> None:
+            if path.name == "restoration-failed.json":
+                raise OSError("synthetic restoration record failure")
+            _durable_record(path, value)
+
+        monkeypatch.setattr(local_image, "_durable_record", fail_restoration_record)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -1118,8 +1181,30 @@ def test_normal_cli_with_fake_provider_and_existing_failure_cleanup(
     )
     failed = fault not in {"", "transport"}
     assert local_image.main() == (2 if failed else 0)
-    assert cleanup == (["cleanup"] if failed else [])
-    assert provider.registry == case.plan["before"]
+    terminal = fault in {
+        "restore-failure", "restore-persistence", "expired-protection", "exhausted-budget",
+        "expired-missing-attempt", "budget-missing-attempt", "cleanup-auth-expired",
+    }
+    cleanup_dispatched = terminal and fault != "cleanup-auth-expired"
+    assert cleanup == (["cleanup"] if cleanup_dispatched else [])
+    if fault not in {"restore-failure", "restore-persistence", "cleanup-auth-expired"}:
+        assert provider.registry == case.plan["before"]
+    assert case.ledger.phase == (
+        Phase.CLEANING.value if cleanup_dispatched else Phase.INFRASTRUCTURE_DEPLOYED.value
+    )
+    if fault == "cleanup-auth-expired":
+        assert len(authorization_reads) == 2
+    assert case.ledger.cleanup_arm_evidence_sha256 is not None
+    assert case.ledger.cleanup_disarm_evidence_sha256 is None
+    if failed and not terminal and fault != "pause-persistence":
+        pause = json.loads((folder / "local-image-stage-pause.json").read_text())
+        assert pause["operation"] == "local-image"
+        assert pause["authorizationSha256"] == case.approval["approvalSha256"]
+        assert not (folder / "local-image" / "completed.json").exists()
+    if fault == "pause-persistence":
+        assert (folder / "local-image-attempt.json").exists()
+        assert not (folder / "local-image-stage-pause.json").exists()
+        assert not (folder / "local-image" / "completed.json").exists()
 
 
 def test_recovered_scan_continues_normal_admission_and_bootstrap_with_cleanup_armed(

@@ -331,8 +331,9 @@ constructing the deployment runner. An exhausted window dispatches no base
 write and enters cleanup. Other commands, including failure cleanup and workload
 deployment, keep the ordinary 900-second command timeout. A timeout is an
 ambiguous provider outcome, not proof that ARM stopped: preserve the attempt,
-follow cleanup, and never retry the deployment or promote a failed ledger from
-a later successful readback. The observed CLI failure near 900 seconds while
+pause dependent work while cleanup protection, budget, and authority remain valid.
+Never retry the deployment or promote a failed ledger from a later successful
+readback; this path has no deployment redispatch recovery mode. The observed CLI failure near 900 seconds while
 ARM continued is consistent with the previous timeout; its underlying
 `TimeoutExpired` exception was not retained, so that diagnosis is not proven.
 New CLI timeouts retain their exception cause and report only the sanitized
@@ -525,16 +526,19 @@ Exit code 2 never qualifies. Any existing report, findings, malformed or
 contradictory report/exit status, unknown failure, missing response, or failed
 response persistence stops this path. Deterministic flag, platform and
 authentication errors are not repeated unchanged. A second failure proceeds to
-restoration and cleanup; there is no third command, rebuild, repush, new approval,
+restoration and a protected stage pause; there is no third command, rebuild, repush, new approval,
 or restart of an earlier image attempt. Completion replay requires both exact
 command/response records, an admissible first transport failure, a clean final
 report and verified restoration. One successful assessment is recorded in the
 campaign scan ledger; both command attempts remain in the private history.
 This bounded recovery does not increase the existing time, transfer or budget
 allowances and cannot admit the historical image with reported vulnerabilities.
-There is no automatic build, push or PATCH retry. Ordinary failures invoke the
-existing campaign cleanup path and require cleanup-wait, disarm, residue and
-finalize. A process crash can prevent local restoration/cleanup dispatch; retain
+There is no automatic build, push or PATCH retry. With verified registry
+restoration and valid cleanup protection, budget and authority, scan/build
+failures pause the stage and block image admission. High/Critical findings
+remain failed and never cause an unchanged automatic scan retry. Unproved
+restoration, expiry, established budget exhaustion or other established
+terminal failure uses the existing cleanup path through verified residue. A process crash can prevent local restoration/cleanup dispatch; retain
 the intents, inspect the exact registry under separate read authority, and use
 the already armed deadline cleanup. Matching state cannot invent missing history.
 Windows ACL and directory crash-durability limitations remain those documented
@@ -904,12 +908,17 @@ The remaining evidence steps execute in order:
 10. exact operational/capacity assertions with measured failover duration.
 
 The sampler and proof jobs must terminate `Succeeded`. The worker is stopped
-after measurement. Incomplete, stale, or mismatched observations enter the
-existing failure-cleanup path. The operator persists a sanitized,
+after measurement. Incomplete, stale, or mismatched observations block admission
+and pause dependent work while cleanup protection, budget and authority remain
+valid. Expiry or an established terminal condition uses failure cleanup.
+The operator persists a sanitized,
 source/digest/control-bound `managed-evidence-execution.json` beside the ledger,
 including both measurement-window hashes and the 12 proof execution records.
 An attempt marker without a completed receipt blocks another evidence start.
-If that attempt was interrupted, use the existing cleanup procedure.
+An interrupted attempt without a completed receipt requires investigation;
+there is no automatic evidence-job redispatch. Preserve the armed cleanup
+schedule and use the existing cleanup procedure when the attempt is abandoned
+or its protection limits require it.
 The full shape is closed by
 `infra/milestone_7_8/schemas/evidence-execution.schema.json`. `dispose` records
 the pass/fail campaign disposition before deletion.
@@ -921,7 +930,36 @@ unrelated Automation account; it enters the existing cleanup path.
 
 ## Cleanup and zero residue
 
-Cleanup is mandatory on success, failure, interruption, or deadline expiry:
+A failed or timed-out bootstrap, migration, or managed probe execution preserves
+its exact start/last execution responses before any subsequent cleanup. The operator makes
+best-effort, exact-execution replica and console reads into a new private
+`job-failure-*` directory beside the ledger: at most six read operations,
+a 60-second admission budget with a 15-second command timeout and 10 seconds
+reserved for local timeout termination, never dispatching beyond the campaign
+deadline. ARM execution/replica reads are GETs; the scoped Log Analytics query is
+semantically read-only and may use HTTP POST. The opt-in Windows-only diagnostic launcher writes stdout/stderr to private
+files and, on timeout, asks the trusted system taskkill utility to terminate only
+its exact owned process tree before killing the parent. A real local synthetic
+batch/child/grandchild timeout test covers this path; OS termination failure,
+filesystem stalls, hard crashes, and Windows ACL/directory-durability guarantees
+remain unproved. Ordinary Azure mutation and wait commands do not opt in. Replica
+continuation links retain the exact execution scope. Console reads require a
+complete, validated set of exact replica names (not an execution-prefix match)
+and are skipped if that scope is unavailable. Console capture is bounded to
+1,001 rows over the preceding 30 minutes and is diagnostic,
+not complete-inventory or admission evidence. Missing, denied, expired, malformed,
+or unpersistable diagnostics never replace the original job error, retry a job,
+or require deletion while the stage remains protected. They also cannot
+prevent mandatory cleanup after protection, authority, budget or deadline is lost. Bootstrap emits only static stage,
+allowlisted error class, and a syntactically valid SQLSTATE; it never prints SQL,
+exception text, principal identifiers, or credentials. These records do not
+establish the cause of a historical attempt whose logs were not retained. The
+existing private-directory ACL and directory-durability limitations still apply.
+
+Cleanup is mandatory after campaign completion, explicit abandonment, established
+terminal failure, lost cleanup protection or authority, budget exhaustion, or
+cleanup-deadline expiry. A recoverable or undiagnosed protected stage failure
+first pauses dependent work; a missing diagnostic alone is not a deletion trigger:
 
 ```powershell
 Invoke-M78Phase 'cleanup'
@@ -964,9 +1002,63 @@ the private files, and cannot become a fresh controller-admission gate.
 
 ## Failure and interruption recovery
 
-After scope creation, every operator exception starts cleanup and advances the
-ledger to `cleaning`. Resume by reading `ledger.json` and invoking only the
-operation that maps to the next state:
+Before cleanup is verified, setup failure uses the existing failure-cleanup
+path. After cleanup verification, a recoverable or undiagnosed failure preserves
+healthy infrastructure and the existing cleanup schedule while budget, authority
+and deadline remain valid. Immutable stage intents precede writes, and per-stage
+pause records bind the exact source, runtime, cost config, image, original
+approval, attempt, ledger phase and cleanup-arm hash. The ledger stays at its
+prior phase. Missing/corrupt pause records or lost responses block retries and
+dependent work; they do not justify deleting an otherwise protected scope.
+Established expiry/cost/protection loss takes precedence over missing diagnostics.
+Failure cleanup still requires current cleanup authorization immediately before
+runbook start and, after ownership reads, immediately before fallback deletion.
+An expired approval blocks dispatch and preserves the original stage error;
+dry-run inspection never dispatches cleanup.
+
+Only bootstrap and migration have a supported guarded mutation retry in this
+correction. There is at most one additional existing-job start for each, within
+15 minutes of the initial failure; diagnostic collection consumes that dispatch
+window. The reviewed sibling cost config must include
+`database-recovery-job-allowance` of at least USD 0.0567 before contingency for
+both starts. Exact job and failed-execution template readbacks must establish one
+container, one parallel replica/completion, zero automatic retries, at most
+0.5 vCPU/1 GiB, and server timeout at most 900 seconds for bootstrap or 1,800 for
+migration. Init containers and any template change except the approved argument
+are rejected. These server bounds and the existing campaign deadline remain in
+force; the 15-minute dispatch window is not a claim that a job finishes within
+15 minutes.
+
+```powershell
+# Same existing source/runtime/image/cost config; current phase+cleanup approval.
+Invoke-M78Phase 'bootstrap' $bootstrapAuthorization @('--resume-database-job')
+# Or, only when the paused operation is migration:
+Invoke-M78Phase 'migrate' $migrationAuthorization @('--resume-database-job')
+```
+
+The normal operator rechecks the exact terminal previous execution and all nine
+cleanup-protection observations, then starts the same existing job using its
+reviewed execution-template YAML with only `--retry-after-execution=<previous>`
+changed. The actual script performs SELECT-only identity/OID, privilege,
+ownership, revision, active-writer and migration-lock checks before any SQL
+mutation. Bootstrap permits only a safe base-state catalog; migration permits
+base/empty or the exact current head with owned schema and privilege
+reconciliation. Unknown, mixed, conflicting or incomplete state cannot mutate.
+Admission requires the distinct retry execution to succeed and the matching
+safe-state marker from its exact validated replica logs. No new job, identity,
+resource, image, migration or permission is created by this recovery wiring.
+
+If successful-job logs arrive late, repeating the same resume command validates
+the original immutable dispatch/start records and performs only read-only
+completion observation of that recorded retry. It never starts another job and
+may observe it after the dispatch window under current authorization, while the
+campaign deadline, budget and protection still hold. Missing dispatch/start
+history cannot be reconstructed from matching state. A source/config/image change
+cannot retrospectively rebind a live attempt. Other paused stages have no new
+redispatch mechanism; retain evidence and investigate within their bounded window
+or explicitly abandon/clean up. Once cleanup has started, it cannot be reversed.
+
+For an unpaused conforming ledger, invoke only its next operation:
 
 | Ledger state              | Resume operation                                   |
 | ------------------------- | -------------------------------------------------- |
@@ -997,6 +1089,9 @@ execution receipt without rerunning the managed probes. A changed campaign,
 generation, source, digest, control input, transition chain, deadline, or
 receipt is rejected. Once cleanup starts, resume only cleanup, wait, disarm,
 residue, and finalization; cleanup remains allowed after the deadline.
+When protected-stage records exist, receipt recovery also reconciles the original
+attempt and pause into a separate immutable completion record. Missing or altered
+history and an unrelated paused stage remain blocked; original records are retained.
 
 This resume table describes only a conforming v6 ledger. It does not reopen or
 upgrade the preserved legacy finalized ledger described above.
@@ -1010,7 +1105,9 @@ workers, both sampler executions, the remaining jobs, and cleanup overrun.
 The estimate requires at least 25 percent contingency and a hard USD 50
 ceiling. Stop normal evidence work immediately on any assertion failure, cost
 projection over USD 50, expired deadline, cleanup drift, or unready managed
-service; enter cleanup and preserve the sanitized local files:
+service. Preserve the sanitized local files and pause recoverable/undiagnosed
+protected failures; enter cleanup for established terminal failure or loss of
+budget, deadline, cleanup protection or authority:
 
 - `campaign.json`, `runtime.json`, parameter files, and `ledger.json`;
 - the copied fresh-controller-admission artifact and its domain-separated hash;

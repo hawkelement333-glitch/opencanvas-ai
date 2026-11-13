@@ -12,7 +12,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-from test_milestone_7_8_campaign_enablement import NOW, _config, _manifest, _runtime
+from test_milestone_7_8_campaign_enablement import (
+    NOW,
+    _config,
+    _manifest,
+    _runtime,
+    _write_execution_authorization,
+)
 
 from infra.milestone_7_8 import operator
 from infra.milestone_7_8.azure_cli import AzureCliError
@@ -388,11 +394,12 @@ def test_cleanup_runbook_rejects_invalid_invocation_before_reads(
     [("long-success", 7200), ("short-success", 600), ("failure", 7200),
      ("timeout", 7200), ("expired", 0)],
 )
-def test_operator_base_deploy_uses_template_and_retains_failure_cleanup(
+def test_operator_base_deploy_uses_template_and_preserves_protected_failures(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     outcome: str,
     remaining_seconds: int,
+    tmp_path: Path,
 ) -> None:
     config, runtime = _config(), _runtime()
     manifest = _manifest()
@@ -491,10 +498,14 @@ def test_operator_base_deploy_uses_template_and_retains_failure_cleanup(
     monkeypatch.setattr(operator, "load_runtime", lambda *_: runtime)
     monkeypatch.setattr(operator, "validate_prepared_bundle", lambda *_: None)
     monkeypatch.setattr(operator, "load_bound_fresh_controller_admission", lambda *_: None)
-    monkeypatch.setattr(operator, "load_execution_authorization", lambda *a, **k: None)
     monkeypatch.setattr(operator, "load_ledger", lambda *_: ledger)
     monkeypatch.setattr(operator, "save_ledger", lambda *_: None)
     monkeypatch.setattr(operator, "SubprocessRunner", FakeProvider)
+    authorization = tmp_path / "authorization.json"
+    _write_execution_authorization(
+        authorization, config, runtime,
+        expires_at=runtime["cleanupAuthorityExpiresUtc"], operations=["deploy", "cleanup"],
+    )
     monkeypatch.setattr(
         sys,
         "argv",
@@ -502,13 +513,13 @@ def test_operator_base_deploy_uses_template_and_retains_failure_cleanup(
             "operator",
             "deploy",
             "--config",
-            "config",
+            str(tmp_path / "config"),
             "--runtime",
-            "runtime",
+            str(tmp_path / "runtime"),
             "--ledger",
-            "ledger",
+            str(tmp_path / "ledger"),
             "--authorization",
-            "auth",
+            str(authorization),
             "--execute",
         ],
     )
@@ -521,8 +532,17 @@ def test_operator_base_deploy_uses_template_and_retains_failure_cleanup(
     else:
         assert runner_timeouts == [900, min(3600, remaining_seconds)]
         assert commands[0] == command_plan("deploy", config, runtime)[0]
-        assert len(commands) == (2 if failed else 1)  # No automatic deployment retry.
-    assert ledger.phase == (Phase.CLEANING if failed else Phase.INFRASTRUCTURE_DEPLOYED).value
+        assert len(commands) == 1  # No retry or deletion for an undiagnosed protected failure.
+    expected_phase = (
+        Phase.CLEANING if outcome == "expired"
+        else Phase.BILLABLE_STARTED if failed else Phase.INFRASTRUCTURE_DEPLOYED
+    )
+    assert ledger.phase == expected_phase.value
+    if failed and outcome != "expired":
+        pause = operator._read_stage_record(tmp_path / "deploy-stage-pause.json", "stage-pause")
+        assert pause["operation"] == "deploy"
+        assert ledger.cleanup_arm_evidence_sha256 == "a" * 64
+        assert (tmp_path / "deploy-stage-attempt.json").is_file()
     captured = capsys.readouterr()
     if outcome == "expired":
         assert "base deployment cleanup window is exhausted" in captured.err

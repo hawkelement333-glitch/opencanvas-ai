@@ -722,7 +722,9 @@ class SubprocessRunner:
         azure_cli: AzureCliLauncher | None = None,
         timeout_seconds: int | float = 900,
         encoding: str = "utf-8",
+        diagnostic_capture_directory: Path | None = None,
     ) -> None:
+        self._diagnostic_capture_directory = diagnostic_capture_directory
         self._azure_cli = azure_cli
         self._timeout_seconds = timeout_seconds
         self._encoding = encoding
@@ -732,11 +734,15 @@ class SubprocessRunner:
             try:
                 if self._azure_cli is None:
                     self._azure_cli = AzureCliLauncher.resolve()
-                completed = self._azure_cli.run(
-                    command[1:],
-                    timeout=self._timeout_seconds,
-                    encoding=self._encoding,
-                )
+                if self._diagnostic_capture_directory is None:
+                    completed = self._azure_cli.run(
+                        command[1:], timeout=self._timeout_seconds, encoding=self._encoding,
+                    )
+                else:
+                    completed = self._azure_cli.run(
+                        command[1:], timeout=self._timeout_seconds, encoding=self._encoding,
+                        diagnostic_capture_directory=self._diagnostic_capture_directory,
+                    )
             except AzureCliError:
                 raise
             except subprocess.TimeoutExpired as exc:

@@ -6,6 +6,7 @@ import math
 import re
 import time
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -101,9 +102,13 @@ def start_evidence_job(
     *,
     private_directory: Path,
     image_digest: str,
+    expected_command: tuple[str, ...] | None = None,
+    before_dispatch: Callable[[dict[str, object]], None] | None = None,
 ) -> dict[str, object]:
     """Submit a full execution template when a job's arguments or environment change."""
-    args = next((arg for arg in command if arg.startswith("--args=--phase=")), None)
+    args = next((arg for arg in command if arg.startswith((
+        "--args=--phase=", "--args=--retry-after-execution=",
+    ))), None)
     if args is None:
         return runner.run(command)
     offset = command.index(args)
@@ -138,6 +143,11 @@ def start_evidence_job(
     image = container.get("image")
     if not isinstance(image, str) or not image.endswith(f"@{image_digest}"):
         raise CampaignError("evidence job image differs from the admitted digest")
+    if args.startswith("--args=--retry-after-execution=") and (
+        expected_command is None or container.get("command") != list(expected_command)
+        or before_dispatch is None
+    ):
+        raise CampaignError("database retry command or dispatch guard is missing")
     container["args"] = [args.removeprefix("--args=")]
     if env_override is not None:
         key, _, value = env_override.partition("=")
@@ -152,7 +162,9 @@ def start_evidence_job(
     with TemporaryDirectory(prefix="m78-job-", dir=private_directory) as directory:
         override = Path(directory) / "execution.yaml"
         override.write_text(json.dumps(template, allow_nan=False), encoding="utf-8")
-        return runner.run((*read, "--yaml", str(override)))
+        if before_dispatch is not None:
+            before_dispatch(resource)
+        return {**runner.run((*read, "--yaml", str(override))), "executionTemplate": template}
 
 
 class CampaignMeasurement:

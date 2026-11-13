@@ -8,8 +8,10 @@ import re
 import sys
 import time
 import uuid
-from dataclasses import dataclass, replace
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import cast
 
@@ -26,6 +28,8 @@ from infra.milestone_7_8.campaign import (
     CampaignConfig,
     CampaignError,
     CleanupBinding,
+    CommandRunner,
+    Ledger,
     Phase,
     SubprocessRunner,
     load_ledger,
@@ -65,6 +69,7 @@ from infra.milestone_7_8.predeployment import (
     PredeploymentVerificationError,
     load_validated_admission,
 )
+from infra.milestone_7_8.replica_readback import collect_worker_replicas, worker_replica_url
 
 CONTROL_PLANE_FIELDS = {
     "primaryZone",
@@ -1764,7 +1769,7 @@ def _json_result(result: dict[str, object]) -> object:
 
 
 def _run_required(
-    runner: SubprocessRunner, command: tuple[str, ...]
+    runner: CommandRunner, command: tuple[str, ...]
 ) -> dict[str, object]:
     result = runner.run(command)
     if result.get("exitCode") != 0:
@@ -1781,28 +1786,429 @@ def _job_status(value: object) -> str | None:
     return str(value["status"]) if isinstance(value.get("status"), str) else None
 
 
+PROTECTED_STAGE_OPERATIONS = frozenset(
+    {
+        "local-image",
+        "deploy",
+        "image-decision",
+        "bootstrap",
+        "migrate",
+        "evidence",
+        "dispose",
+    }
+)
+
+
+class ProtectedStagePersistenceError(CampaignError):
+    """Protection remains armed, but an uncertain local record forbids retry."""
+
+
+class _ProtectedStagePaused(CampaignError):
+    pass
+
+
+class _ProtectedStageExpired(CampaignError):
+    pass
+
+
+class _CleanupAuthorizationBlocked(CampaignError):
+    pass
+
+
+def _stage_hash(domain: str, value: object) -> str:
+    return hashlib.sha256(
+        f"m7.8/{domain}/v1\0".encode()
+        + json.dumps(value, separators=(",", ":"), sort_keys=True, allow_nan=False).encode()
+    ).hexdigest()
+
+
+def _stage_bindings(
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    ledger: Ledger,
+) -> dict[str, object]:
+    return {
+        "campaignId": config.campaign_id,
+        "generationId": config.generation_id,
+        "sourceHead": runtime["sourceHead"],
+        "runtimeSha256": _stage_hash("stage-runtime", runtime),
+        "configSha256": _stage_hash("stage-config", asdict(config)),
+        "imageDigest": config.image_digest or ledger.image_digest,
+        "ledgerPhase": ledger.phase,
+        "cleanupArmSha256": ledger.cleanup_arm_evidence_sha256,
+        "cleanupDeadlineUtc": config.cleanup_deadline_utc,
+    }
+
+
+def _stage_is_protected(
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    ledger: Ledger,
+) -> bool:
+    now = datetime.now(UTC)
+    try:
+        config.validate(allow_expired=True)
+    except CampaignError:
+        return False
+    return (
+        ORDER.index(Phase.CLEANUP_VERIFIED)
+        <= ORDER.index(Phase(ledger.phase))
+        < ORDER.index(Phase.DISPOSED)
+        and isinstance(ledger.cleanup_arm_evidence_sha256, str)
+        and re.fullmatch(r"[a-f0-9]{64}", ledger.cleanup_arm_evidence_sha256) is not None
+        and parse_utc(config.cleanup_deadline_utc) > now
+        and parse_utc(runtime["cleanupAuthorityExpiresUtc"]) > now
+        and (
+            ledger.actual_cost_usd is None
+            or Decimal(ledger.actual_cost_usd) < Decimal(ledger.authorized_ceiling_usd)
+        )
+    )
+
+
+def _stage_record(path: Path, domain: str, value: dict[str, object]) -> dict[str, object]:
+    from infra.milestone_7_8.controller_renewal import _durable_record
+
+    record = {**value, "recordSha256": _stage_hash(domain, value)}
+    try:
+        _durable_record(path, record)
+    except Exception as exc:
+        raise ProtectedStagePersistenceError(
+            "protected stage record is uncertain; preserve resources and do not retry"
+        ) from exc
+    return record
+
+
+def _read_stage_record(path: Path, domain: str) -> dict[str, object]:
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(record, dict):
+            raise ValueError
+        body = {key: value for key, value in record.items() if key != "recordSha256"}
+        if record.get("recordSha256") != _stage_hash(domain, body):
+            raise ValueError
+        return cast(dict[str, object], record)
+    except (OSError, ValueError) as exc:
+        raise _ProtectedStagePaused(
+            "protected stage record is missing or invalid; do not retry"
+        ) from exc
+
+
+def preserve_protected_stage_failure(
+    operation: str,
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    ledger: Ledger,
+    private_directory: Path,
+    attempt_sha256: str,
+    authorization_sha256: str,
+    *,
+    failed_execution: str | None = None,
+    terminal_failure: bool = False,
+) -> Path | None:
+    """Keep one protected campaign stage paused; this never admits or retries work."""
+    if terminal_failure or not _stage_is_protected(config, runtime, ledger):
+        return None
+    if operation not in PROTECTED_STAGE_OPERATIONS or any(
+        re.fullmatch(r"[a-f0-9]{64}", value) is None
+        for value in (attempt_sha256, authorization_sha256)
+    ):
+        raise ProtectedStagePersistenceError("protected stage attempt binding is unavailable")
+    path = private_directory / f"{operation}-stage-pause.json"
+    if path.exists():
+        record = _read_stage_record(path, "stage-pause")
+        if record.get("bindings") != _stage_bindings(config, runtime, ledger):
+            raise _ProtectedStagePaused("protected stage pause binding differs")
+        if parse_utc(str(record.get("recoveryUntilUtc", ""))) <= datetime.now(UTC):
+            return None
+        return path
+    now = datetime.now(UTC)
+    _stage_record(
+        path,
+        "stage-pause",
+        {
+            "version": "m7.8-protected-stage-pause-v1",
+            "operation": operation,
+            "bindings": _stage_bindings(config, runtime, ledger),
+            "attemptSha256": attempt_sha256,
+            "authorizationSha256": authorization_sha256,
+            "failedExecution": failed_execution,
+            "failedAtUtc": now.isoformat(),
+            "recoveryUntilUtc": min(
+                now + timedelta(minutes=15), parse_utc(config.cleanup_deadline_utc)
+            ).isoformat(),
+            "maximumRetryDispatches": 1,
+        },
+    )
+    return path
+
+
+class _JobExecutionFailure(CampaignError):
+    def __init__(
+        self,
+        message: str,
+        command: tuple[str, ...],
+        start: dict[str, object],
+        last: dict[str, object],
+        execution: str,
+    ) -> None:
+        super().__init__(message)
+        self.command = command
+        self.start = start
+        self.last = last
+        self.execution = execution
+
+
+def _capture_failed_job_diagnostics(
+    failure: _JobExecutionFailure,
+    *,
+    runtime: dict[str, str],
+    deadline: datetime,
+    private_directory: Path,
+    purpose: str = "failure",
+) -> Path:
+    """Best-effort, bounded exact-execution reads before destructive cleanup.
+
+    Raw responses are private diagnostics, never admitting campaign evidence.
+    """
+    from infra.milestone_7_8.controller_renewal import _durable_record
+
+    directory = private_directory / f"job-{purpose}-{uuid.uuid4().hex}"
+    directory.mkdir(mode=0o700)
+    persistence_failed = False
+
+    def record(name: str, value: object) -> None:
+        nonlocal persistence_failed
+        try:
+            _durable_record(directory / name, value)
+        except Exception:
+            persistence_failed = True
+            raise
+
+    record(
+        "execution.json",
+        {
+            "sourceHead": runtime["sourceHead"],
+            "executionName": failure.execution,
+            "command": failure.command,
+            "startResult": failure.start,
+            "lastResult": failure.last,
+            "observedAtUtc": datetime.now(UTC).isoformat(),
+        },
+    )
+    command = failure.command
+    group = command[command.index("--resource-group") + 1]
+    job = command[command.index("--name") + 1]
+    subscription = runtime["subscriptionId"]
+    if (
+        group != runtime["resourceGroupName"]
+        or job not in {value for key, value in runtime.items() if key.endswith("JobName")}
+        or (
+            "--subscription" in command
+            and command[command.index("--subscription") + 1] != subscription
+        )
+    ):
+        raise CampaignError("failed job diagnostic scope differs")
+    # Validate all endpoint segments before any request or KQL interpolation.
+    worker_replica_url(subscription, group, job, failure.execution)
+    expected_execution_id = (
+        f"/subscriptions/{subscription}/resourceGroups/{group}"
+        f"/providers/Microsoft.App/jobs/{job}/executions/{failure.execution}"
+    )
+    for raw in (failure.start, failure.last):
+        value = _json_result(raw)
+        if not isinstance(value, dict) or (
+            value.get("name", failure.execution) != failure.execution
+            or ("id" in value and str(value["id"]).casefold() != expected_execution_id.casefold())
+        ):
+            raise CampaignError("failed job diagnostic execution identity differs")
+    expires = time.monotonic() + 60
+    count = 0
+
+    class Capture:
+        def run(self, request: tuple[str, ...]) -> dict[str, object]:
+            nonlocal count
+            remaining = min(
+                expires - time.monotonic(),
+                (deadline - datetime.now(UTC)).total_seconds(),
+            )
+            if count >= 6 or remaining <= 10 or persistence_failed:
+                raise CampaignError("failed job diagnostic read budget exhausted")
+            count += 1
+            scoped = (*request, "--subscription", subscription)
+            record(
+                f"{count:02d}-intent.json",
+                {
+                    "command": scoped,
+                    "requestedAtUtc": datetime.now(UTC).isoformat(),
+                },
+            )
+            remaining = min(
+                expires - time.monotonic(),
+                (deadline - datetime.now(UTC)).total_seconds(),
+            )
+            if remaining <= 10:
+                raise CampaignError("failed job diagnostic read budget exhausted")
+            try:
+                response = SubprocessRunner(
+                    timeout_seconds=min(15, remaining - 10),
+                    diagnostic_capture_directory=directory,
+                ).run(scoped)
+            except Exception as exc:
+                record(f"{count:02d}-exception.json", {"errorClass": type(exc).__name__})
+                raise
+            record(f"{count:02d}-result.json", response)
+            return response
+
+    capture = Capture()
+    status = {"replicas": "unavailable", "console": "unavailable"}
+    names: list[str] = []
+    try:
+        replicas = collect_worker_replicas(
+            capture,
+            subscription=subscription,
+            group=group,
+            job=job,
+            execution=failure.execution,
+        )
+        pages = cast(list[dict[str, object]], replicas["pages"])
+        names = [
+            str(item["name"])
+            for page in pages
+            for item in cast(list[dict[str, object]], page["value"])
+        ]
+        if (
+            not names
+            or len(names) > 32
+            or any(not name.startswith(f"{failure.execution}-") for name in names)
+        ):
+            raise CampaignError("failed job replica identity differs")
+        record("replicas.json", replicas)
+        status["replicas"] = "captured"
+    except Exception:
+        if persistence_failed:
+            raise
+    try:
+        if status["replicas"] != "captured":
+            raise CampaignError("exact failed job console scope is unavailable")
+        workspace = runtime["logAnalyticsWorkspaceName"]
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,127}", workspace) is None:
+            raise CampaignError("failed job workspace identity is invalid")
+        shown = capture.run(
+            (
+                "az",
+                "monitor",
+                "log-analytics",
+                "workspace",
+                "show",
+                "--resource-group",
+                group,
+                "--workspace-name",
+                workspace,
+                "--output",
+                "json",
+            )
+        )
+        value = _json_result(shown)
+        expected_workspace_id = (
+            f"/subscriptions/{subscription}/resourceGroups/{group}"
+            f"/providers/Microsoft.OperationalInsights/workspaces/{workspace}"
+        )
+        if (
+            shown.get("exitCode") != 0
+            or not isinstance(value, dict)
+            or (str(value.get("id", "")).casefold() != expected_workspace_id.casefold())
+        ):
+            raise CampaignError("failed job workspace readback differs")
+        customer = uuid.UUID(str(value.get("customerId", "")))
+        if customer.int == 0:
+            raise CampaignError("failed job workspace identity is invalid")
+        exact_names = ",".join(f"'{name}'" for name in names)
+        query = (
+            "ContainerAppConsoleLogs_CL"
+            f" | where ContainerGroupName_s in ({exact_names})"
+            " | project TimeGenerated, ContainerGroupName_s, ContainerName_s, Log_s | take 1001"
+        )
+        logs = capture.run(
+            (
+                "az",
+                "monitor",
+                "log-analytics",
+                "query",
+                "--workspace",
+                str(customer),
+                "--analytics-query",
+                query,
+                "--timespan",
+                "PT30M",
+                "--output",
+                "json",
+            )
+        )
+        rows = _json_result(logs)
+        if (
+            logs.get("exitCode") != 0
+            or not isinstance(rows, list)
+            or len(rows) > 1001
+            or any(
+                not isinstance(row, dict) or row.get("ContainerGroupName_s") not in names
+                for row in rows
+            )
+        ):
+            raise CampaignError("failed job console read failed or returned another replica")
+        # A bounded console capture is diagnostic only; never claim completeness.
+        record("console.json", rows)
+        status["console"] = "captured-bounded"
+    except Exception:
+        if persistence_failed:
+            raise
+    record("capture-status.json", {**status, "readAttempts": count, "admissionEvidence": False})
+    return directory
+
+
 def _wait_for_job(
-    runner: SubprocessRunner,
+    runner: CommandRunner,
     start_command: tuple[str, ...],
     start_result: dict[str, object],
-) -> dict[str, str]:
+    *,
+    deadline: datetime | None = None,
+    maximum_wait_seconds: int = 900,
+) -> dict[str, object]:
     value = _json_result(start_result)
     if not isinstance(value, dict) or not isinstance(value.get("name"), str):
         raise CampaignError("container job execution identity is missing")
     execution_name = str(value["name"])
     status = _job_status(value)
+    last_result = start_result
     resource_group = start_command[start_command.index("--resource-group") + 1]
     job_name = start_command[start_command.index("--name") + 1]
     subscription: tuple[str, ...] = ()
     if "--subscription" in start_command:
         index = start_command.index("--subscription")
         subscription = start_command[index:index + 2]
-    for _ in range(180):
+    for _ in range((maximum_wait_seconds + 4) // 5):
+        if deadline is not None and datetime.now(UTC) >= deadline:
+            raise _ProtectedStageExpired("database retry cleanup deadline expired")
         if status == "Succeeded":
-            return {"executionName": execution_name, "terminalStatus": status}
+            return {
+                "executionName": execution_name,
+                "terminalStatus": status,
+                "executionReadback": last_result,
+            }
         if status in {"Failed", "Stopped", "Degraded"}:
-            raise CampaignError("container job evidence failed")
-        time.sleep(5)
+            raise _JobExecutionFailure(
+                "container job evidence failed",
+                start_command,
+                start_result,
+                last_result,
+                execution_name,
+            )
+        time.sleep(
+            min(5, max(0, (deadline - datetime.now(UTC)).total_seconds()))
+            if deadline is not None
+            else 5
+        )
+        if deadline is not None and datetime.now(UTC) >= deadline:
+            raise _ProtectedStageExpired("database retry cleanup deadline expired")
         shown = _run_required(
             runner,
             (
@@ -1822,8 +2228,629 @@ def _wait_for_job(
                 "json",
             ),
         )
+        last_result = shown
         status = _job_status(_json_result(shown))
-    raise CampaignError("container job evidence timed out")
+    raise _JobExecutionFailure(
+        "container job evidence timed out",
+        start_command,
+        start_result,
+        last_result,
+        execution_name,
+    )
+
+
+def _active_protected_pause(
+    directory: Path,
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    ledger: Ledger,
+) -> dict[str, object] | None:
+    active: list[dict[str, object]] = []
+    for operation in sorted(PROTECTED_STAGE_OPERATIONS):
+        path = directory / f"{operation}-stage-pause.json"
+        if not path.exists():
+            continue
+        pause = _read_stage_record(path, "stage-pause")
+        if (
+            set(pause)
+            != {
+                "version",
+                "operation",
+                "bindings",
+                "attemptSha256",
+                "authorizationSha256",
+                "failedExecution",
+                "failedAtUtc",
+                "recoveryUntilUtc",
+                "maximumRetryDispatches",
+                "recordSha256",
+            }
+            or pause["version"] != "m7.8-protected-stage-pause-v1"
+            or pause["operation"] != operation
+        ):
+            raise _ProtectedStagePaused("protected stage pause contract differs")
+        completed_path = directory / f"{operation}-stage-recovery-completed.json"
+        if completed_path.exists():
+            if operation == "evidence":
+                _reconcile_evidence_stage_completion(directory, config, runtime, ledger)
+                continue
+            if operation not in {"bootstrap", "migrate"}:
+                raise _ProtectedStagePaused("this stage has no supported completion reconciliation")
+            _database_attempt_history(directory, operation, pause)
+            retry = _read_stage_record(
+                directory / f"{operation}-stage-retry-intent.json", "stage-retry-intent"
+            )
+            started = _read_stage_record(
+                directory / f"{operation}-stage-retry-start.json", "stage-retry-start"
+            )
+            completed = _read_stage_record(completed_path, "stage-recovery-completed")
+            if (
+                completed.get("retryIntentSha256") != retry["recordSha256"]
+                or retry.get("pauseSha256") != pause["recordSha256"]
+                or started.get("retryIntentSha256") != retry["recordSha256"]
+            ):
+                raise _ProtectedStagePaused("database completion history binding differs")
+            capture_name = completed.get("capture")
+            if (
+                not isinstance(capture_name, str)
+                or re.fullmatch(r"job-recovery-[a-f0-9]{32}", capture_name) is None
+            ):
+                raise _ProtectedStagePaused("database completion capture binding differs")
+            capture = directory / capture_name
+            try:
+                hashes = {
+                    path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                    for path in capture.iterdir()
+                    if path.is_file()
+                }
+            except OSError as exc:
+                raise _ProtectedStagePaused("database completion capture is unavailable") from exc
+            if not hashes or hashes != completed.get("captureFilesSha256"):
+                raise _ProtectedStagePaused("database completion capture was altered")
+            bindings = pause.get("bindings")
+            if (
+                completed.get("pauseSha256") != pause["recordSha256"]
+                or completed.get("sourceHead") != runtime["sourceHead"]
+                or not isinstance(bindings, dict)
+                or ORDER.index(Phase(ledger.phase))
+                <= ORDER.index(Phase(str(bindings["ledgerPhase"])))
+            ):
+                raise _ProtectedStagePaused("protected stage completion or ledger is inconsistent")
+            continue
+        if pause["bindings"] != _stage_bindings(config, runtime, ledger):
+            raise _ProtectedStagePaused("protected stage pause binding differs")
+        active.append(pause)
+    if len(active) > 1:
+        raise _ProtectedStagePaused("multiple protected stages are paused")
+    return active[0] if active else None
+
+
+def _validate_retry_job_limits(
+    operation: str,
+    resource: dict[str, object],
+    failed_template: object,
+) -> tuple[dict[str, object], str]:
+    properties = resource.get("properties")
+    configuration = properties.get("configuration") if isinstance(properties, dict) else None
+    template = properties.get("template") if isinstance(properties, dict) else None
+    manual = configuration.get("manualTriggerConfig") if isinstance(configuration, dict) else None
+    containers = template.get("containers") if isinstance(template, dict) else None
+    prior_containers = (
+        failed_template.get("containers") if isinstance(failed_template, dict) else None
+    )
+    timeout = 900 if operation == "bootstrap" else 1800
+    if (
+        not isinstance(configuration, dict)
+        or configuration.get("triggerType") != "Manual"
+        or type(configuration.get("replicaTimeout")) is not int
+        or not 0 < configuration["replicaTimeout"] <= timeout
+        or type(configuration.get("replicaRetryLimit")) is not int
+        or configuration["replicaRetryLimit"] != 0
+        or not isinstance(manual, dict)
+        or type(manual.get("parallelism")) is not int
+        or manual["parallelism"] != 1
+        or type(manual.get("replicaCompletionCount")) is not int
+        or manual["replicaCompletionCount"] != 1
+        or not isinstance(containers, list)
+        or len(containers) != 1
+        or not isinstance(prior_containers, list)
+        or len(prior_containers) != 1
+        or not isinstance(containers[0], dict)
+        or not isinstance(prior_containers[0], dict)
+    ):
+        raise _ProtectedStagePaused("database retry workload limits or history are unproved")
+    container = containers[0]
+    previous = prior_containers[0]
+    assert isinstance(template, dict) and isinstance(failed_template, dict)
+    if template.get("initContainers") not in (None, []) or failed_template.get(
+        "initContainers"
+    ) not in (None, []):
+        raise _ProtectedStagePaused("database retry contains unpriced initialization containers")
+    normalized = {
+        **template,
+        "containers": [
+            {key: value for key, value in container.items() if key != "args"},
+        ],
+    }
+    normalized_prior = {
+        **failed_template,
+        "containers": [
+            {key: value for key, value in previous.items() if key != "args"},
+        ],
+    }
+    if normalized != normalized_prior:
+        raise _ProtectedStagePaused(
+            "database retry image, command, environment, or template drifted"
+        )
+    resources = container.get("resources")
+    if not isinstance(resources, dict):
+        raise _ProtectedStagePaused("database retry allocation is missing")
+    cpu, memory = resources.get("cpu"), resources.get("memory")
+    memory_match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)(Gi|Mi)", str(memory))
+    if type(cpu) not in (int, float) or not 0 < float(cast(float, cpu)) <= 0.5 or not memory_match:
+        raise _ProtectedStagePaused("database retry allocation exceeds the reviewed allowance")
+    gib = Decimal(memory_match[1]) / (1024 if memory_match[2] == "Mi" else 1)
+    if not 0 < gib <= 1:
+        raise _ProtectedStagePaused("database retry allocation exceeds the reviewed allowance")
+    env = container.get("env")
+    manifests = (
+        [
+            item.get("value")
+            for item in env
+            if isinstance(item, dict)
+            and item.get("name") == "OPENCANVAS_DATABASE_PRINCIPAL_MANIFEST"
+        ]
+        if isinstance(env, list)
+        else []
+    )
+    if len(manifests) != 1 or not isinstance(manifests[0], str):
+        raise _ProtectedStagePaused("database retry manifest is missing or ambiguous")
+    manifest = json.loads(manifests[0])
+    if not isinstance(manifest, dict):
+        raise _ProtectedStagePaused("database retry manifest is malformed")
+    return cast(dict[str, object], manifest), _stage_hash("database-recovery-manifest", manifest)
+
+
+def _database_attempt_history(
+    directory: Path,
+    operation: str,
+    pause: dict[str, object],
+) -> dict[str, object]:
+    original = _read_stage_record(directory / f"{operation}-stage-attempt.json", "stage-attempt")
+    if (
+        set(original)
+        != {
+            "version",
+            "operation",
+            "bindings",
+            "commandSha256",
+            "authorizationSha256",
+            "startedAtUtc",
+            "recordSha256",
+        }
+        or original.get("version") != "m7.8-protected-stage-attempt-v1"
+        or original.get("operation") != operation
+        or original.get("bindings") != pause["bindings"]
+        or original.get("recordSha256") != pause["attemptSha256"]
+        or original.get("authorizationSha256") != pause["authorizationSha256"]
+    ):
+        raise _ProtectedStagePaused("database original attempt history is missing or mismatched")
+    return original
+
+
+def _verify_retry_protection(
+    runner: SubprocessRunner,
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    ledger: Ledger,
+) -> list[dict[str, object]]:
+    results = execute_commands(
+        runner,
+        tuple(
+            (*read, "--subscription", runtime["subscriptionId"])
+            for read in command_plan("cleanup-verify", config, runtime)
+        ),
+    )
+    try:
+        arm_hash = validate_cleanup_readback(results, config, runtime)
+    except CampaignError as exc:
+        raise _ProtectedStageExpired("database retry cleanup protection is invalid") from exc
+    if arm_hash != ledger.cleanup_arm_evidence_sha256:
+        raise _ProtectedStageExpired("database retry cleanup protection changed")
+    if not _stage_is_protected(config, runtime, ledger):
+        raise _ProtectedStageExpired("database retry protection expired")
+    return results
+
+
+def _execute_database_retry(
+    runner: SubprocessRunner,
+    command: tuple[str, ...],
+    *,
+    operation: str,
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    ledger: Ledger,
+    pause: dict[str, object],
+    directory: Path,
+    authorization_path: Path,
+) -> tuple[dict[str, object], dict[str, object]]:
+    failed = pause.get("failedExecution")
+    if (
+        not isinstance(failed, str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", failed) is None
+    ):
+        raise _ProtectedStagePaused("database retry lacks an exact failed execution")
+    if pause.get("maximumRetryDispatches") != 1:
+        raise _ProtectedStagePaused("database retry attempt bound differs")
+    _database_attempt_history(directory, operation, pause)
+    retry_path = directory / f"{operation}-stage-retry-intent.json"
+    if (directory / f"{operation}-stage-retry-start.json").exists() and not retry_path.exists():
+        raise _ProtectedStagePaused("database retry intent history is missing")
+    retry_command = (
+        *command,
+        "--subscription",
+        runtime["subscriptionId"],
+        f"--args=--retry-after-execution={failed}",
+    )
+    if retry_path.exists():
+        attempt = _read_stage_record(retry_path, "stage-retry-intent")
+        saved = _read_stage_record(
+            directory / f"{operation}-stage-retry-start.json", "stage-retry-start"
+        )
+        if (
+            attempt.get("version") != "m7.8-stage-retry-intent-v1"
+            or attempt.get("operation") != operation
+            or attempt.get("pauseSha256") != pause["recordSha256"]
+            or attempt.get("bindings") != _stage_bindings(config, runtime, ledger)
+            or attempt.get("commandSha256") != _stage_hash("stage-command", retry_command)
+            or saved.get("retryIntentSha256") != attempt["recordSha256"]
+            or not isinstance(saved.get("startResult"), dict)
+            or not isinstance(attempt.get("validatedJob"), dict)
+            or attempt.get("templateSha256")
+            != _stage_hash("stage-template", attempt["validatedJob"])
+            or not parse_utc(str(pause["failedAtUtc"]))
+            <= parse_utc(str(attempt["startedAtUtc"]))
+            < parse_utc(str(pause["recoveryUntilUtc"]))
+        ):
+            raise _ProtectedStagePaused(
+                "database retry dispatch history is incomplete or mismatched"
+            )
+        previous = _json_result(cast(dict[str, object], attempt["oldExecution"]))
+        props = previous.get("properties") if isinstance(previous, dict) else None
+        template = props.get("template") if isinstance(props, dict) else None
+        _, manifest_hash = _validate_retry_job_limits(
+            operation,
+            cast(dict[str, object], attempt["validatedJob"]),
+            template,
+        )
+        _verify_retry_protection(runner, config, runtime, ledger)
+        for required in (operation, "cleanup"):
+            load_execution_authorization(
+                authorization_path, config=config, runtime=runtime, operation=required
+            )
+        return _finish_database_retry(
+            retry_command,
+            cast(dict[str, object], saved["startResult"]),
+            attempt,
+            operation=operation,
+            config=config,
+            runtime=runtime,
+            ledger=ledger,
+            pause=pause,
+            directory=directory,
+            failed=failed,
+            expected_manifest_hash=manifest_hash,
+        )
+    allowance = [
+        item for item in config.resource_items if item.name == "database-recovery-job-allowance"
+    ]
+    if len(allowance) != 1 or allowance[0].maximum() < Decimal("0.0567"):
+        raise _ProtectedStagePaused(
+            "database retry cost allowance is missing from the gated config"
+        )
+    group, subscription = runtime["resourceGroupName"], runtime["subscriptionId"]
+    job = runtime["bootstrapJobName" if operation == "bootstrap" else "migrationJobName"]
+    shown = _run_required(
+        runner,
+        (
+            "az",
+            "containerapp",
+            "job",
+            "execution",
+            "show",
+            "--resource-group",
+            group,
+            "--name",
+            job,
+            "--job-execution-name",
+            failed,
+            "--subscription",
+            subscription,
+            "--output",
+            "json",
+        ),
+    )
+    old = _json_result(shown)
+    expected_id = (
+        f"/subscriptions/{subscription}/resourceGroups/{group}"
+        f"/providers/Microsoft.App/jobs/{job}/executions/{failed}"
+    )
+    if (
+        not isinstance(old, dict)
+        or old.get("name") != failed
+        or str(old.get("id", "")).casefold() != expected_id.casefold()
+        or _job_status(old) not in {"Failed", "Stopped", "Degraded"}
+    ):
+        raise _ProtectedStagePaused("previous database execution is not exactly terminal")
+    properties = old.get("properties")
+    failed_template = properties.get("template") if isinstance(properties, dict) else None
+    cleanup_results = _verify_retry_protection(runner, config, runtime, ledger)
+    retry_command = (
+        *command,
+        "--subscription",
+        subscription,
+        f"--args=--retry-after-execution={failed}",
+    )
+    attempt = {}
+    expected_manifest_hash = ""
+
+    def before_dispatch(resource: dict[str, object]) -> None:
+        nonlocal attempt, expected_manifest_hash
+        manifest, expected_manifest_hash = _validate_retry_job_limits(
+            operation, resource, failed_template
+        )
+        if (
+            manifest.get("campaignId") != config.campaign_id
+            or manifest.get("generationId") != config.generation_id
+        ):
+            raise _ProtectedStagePaused("database retry manifest campaign differs")
+        if not _stage_is_protected(config, runtime, ledger) or (
+            parse_utc(str(pause["recoveryUntilUtc"])) <= datetime.now(UTC)
+        ):
+            raise _ProtectedStageExpired("database recovery window or protection expired")
+        for required in (operation, "cleanup"):
+            load_execution_authorization(
+                authorization_path,
+                config=config,
+                runtime=runtime,
+                operation=required,
+            )
+        attempt = _stage_record(
+            retry_path,
+            "stage-retry-intent",
+            {
+                "version": "m7.8-stage-retry-intent-v1",
+                "operation": operation,
+                "pauseSha256": pause["recordSha256"],
+                "bindings": _stage_bindings(config, runtime, ledger),
+                "commandSha256": _stage_hash("stage-command", retry_command),
+                "templateSha256": _stage_hash("stage-template", resource),
+                "validatedJob": resource,
+                "authorizationSha256": hashlib.sha256(authorization_path.read_bytes()).hexdigest(),
+                "startedAtUtc": datetime.now(UTC).isoformat(),
+                "oldExecution": shown,
+                "cleanupReadbacks": cleanup_results,
+            },
+        )
+        if parse_utc(str(pause["recoveryUntilUtc"])) <= datetime.now(
+            UTC
+        ) or not _stage_is_protected(config, runtime, ledger):
+            raise _ProtectedStageExpired("database recovery window expired before dispatch")
+        for required in (operation, "cleanup"):
+            load_execution_authorization(
+                authorization_path,
+                config=config,
+                runtime=runtime,
+                operation=required,
+            )
+
+    module = (
+        "scripts.bootstrap_postgres" if operation == "bootstrap" else "scripts.migrate_and_grant"
+    )
+    started = start_evidence_job(
+        runner,
+        retry_command,
+        private_directory=directory,
+        image_digest=str(ledger.image_digest),
+        expected_command=("python", "-m", module),
+        before_dispatch=before_dispatch,
+    )
+    if started.get("exitCode") != 0:
+        raise _ProtectedStagePaused("database retry dispatch outcome is uncertain")
+    _stage_record(
+        directory / f"{operation}-stage-retry-start.json",
+        "stage-retry-start",
+        {
+            "retryIntentSha256": attempt["recordSha256"],
+            "startResult": started,
+        },
+    )
+    return _finish_database_retry(
+        retry_command,
+        started,
+        attempt,
+        operation=operation,
+        config=config,
+        runtime=runtime,
+        ledger=ledger,
+        pause=pause,
+        directory=directory,
+        failed=failed,
+        expected_manifest_hash=expected_manifest_hash,
+    )
+
+
+def _finish_database_retry(
+    retry_command: tuple[str, ...],
+    started: dict[str, object],
+    attempt: dict[str, object],
+    *,
+    operation: str,
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    ledger: Ledger,
+    pause: dict[str, object],
+    directory: Path,
+    failed: str,
+    expected_manifest_hash: str,
+) -> tuple[dict[str, object], dict[str, object]]:
+    job = runtime["bootstrapJobName" if operation == "bootstrap" else "migrationJobName"]
+    expected_id = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{runtime['resourceGroupName']}"
+        f"/providers/Microsoft.App/jobs/{job}/executions/{failed}"
+    )
+    started_value = _json_result(started)
+    if (
+        started.get("exitCode") != 0
+        or not isinstance(started_value, dict)
+        or started_value.get("name") == failed
+    ):
+        raise _ProtectedStagePaused("database retry did not start a distinct execution")
+    deadline = parse_utc(config.cleanup_deadline_utc)
+
+    class RetryReadRunner:
+        def run(self, request: tuple[str, ...]) -> dict[str, object]:
+            remaining = (deadline - datetime.now(UTC)).total_seconds()
+            if remaining <= 10:
+                raise _ProtectedStageExpired("database retry cleanup deadline is exhausted")
+            return SubprocessRunner(
+                timeout_seconds=min(15, remaining - 10),
+                diagnostic_capture_directory=directory,
+            ).run(request)
+
+    waited = _wait_for_job(
+        RetryReadRunner(),
+        retry_command,
+        started,
+        deadline=deadline,
+        maximum_wait_seconds=900 if operation == "bootstrap" else 1800,
+    )
+    execution = str(waited["executionName"])
+    last = _json_result(cast(dict[str, object], waited["executionReadback"]))
+    expected_retry_id = expected_id.rsplit("/", 1)[0] + "/" + execution
+    validated = cast(dict[str, object], attempt["validatedJob"])
+    validated_properties = cast(dict[str, object], validated["properties"])
+    last_properties = last.get("properties") if isinstance(last, dict) else None
+    if not isinstance(last, dict) or (
+        last.get("name") != execution
+        or execution == failed
+        or not isinstance(last_properties, dict)
+        or last_properties.get("template") != validated_properties["template"]
+        or str(last.get("id", "")).casefold() != expected_retry_id.casefold()
+    ):
+        raise _ProtectedStagePaused("database retry terminal execution identity differs")
+    if not _stage_is_protected(config, runtime, ledger):
+        raise _ProtectedStageExpired("database retry protection expired before admission")
+    capture = _capture_failed_job_diagnostics(
+        _JobExecutionFailure(
+            "database retry readback",
+            retry_command,
+            started,
+            cast(dict[str, object], waited["executionReadback"]),
+            execution,
+        ),
+        runtime=runtime,
+        deadline=parse_utc(config.cleanup_deadline_utc),
+        private_directory=directory,
+        purpose="recovery",
+    )
+    try:
+        rows = json.loads((capture / "console.json").read_text(encoding="utf-8"))
+        messages = [
+            str(row["Log_s"])[len("M78_DATABASE_RECOVERY ") :]
+            for row in rows
+            if isinstance(row, dict)
+            and isinstance(row.get("Log_s"), str)
+            and str(row["Log_s"]).startswith("M78_DATABASE_RECOVERY ")
+        ]
+        marker = json.loads(messages[0]) if len(messages) == 1 else None
+    except (OSError, ValueError) as exc:
+        raise _ProtectedStagePaused("database retry partial-state proof is unavailable") from exc
+    states = (
+        {"bootstrap-empty", "bootstrap-partial", "bootstrap-existing"}
+        if operation == "bootstrap"
+        else {"migration-empty", "migration-grants-reconcile"}
+    )
+    if (
+        not isinstance(marker, dict)
+        or set(marker)
+        != {
+            "version",
+            "operation",
+            "previousExecution",
+            "campaignId",
+            "generationId",
+            "manifestSha256",
+            "observedRevision",
+            "state",
+            "principalCount",
+            "applicationRelationCount",
+            "snapshotSha256",
+            "status",
+        }
+        or marker.get("version") != "m7.8-database-recovery-observation-v1"
+        or marker.get("operation") != operation
+        or marker.get("previousExecution") != failed
+        or marker.get("campaignId") != config.campaign_id
+        or marker.get("generationId") != config.generation_id
+        or marker.get("manifestSha256") != expected_manifest_hash
+        or marker.get("observedRevision") not in {"base", "20260726_0029"}
+        or (operation == "bootstrap" and marker.get("observedRevision") != "base")
+        or marker.get("state") not in states
+        or type(marker.get("principalCount")) is not int
+        or not 0 <= marker["principalCount"] <= 4
+        or type(marker.get("applicationRelationCount")) is not int
+        or marker["applicationRelationCount"] < 0
+        or re.fullmatch(r"[a-f0-9]{64}", str(marker.get("snapshotSha256", ""))) is None
+        or marker.get("status") != "retry-preflight-passed"
+    ):
+        raise _ProtectedStagePaused(
+            "database retry partial-state proof is mismatched or incomplete"
+        )
+    state, revision = marker["state"], marker["observedRevision"]
+    principals, relations = marker["principalCount"], marker["applicationRelationCount"]
+    if (
+        operation == "bootstrap"
+        and (
+            revision != "base"
+            or relations != 0
+            or (state == "bootstrap-empty" and principals != 0)
+            or (state == "bootstrap-partial" and not 0 < principals < 4)
+            or (state == "bootstrap-existing" and principals != 4)
+        )
+    ) or (
+        operation == "migrate"
+        and (
+            principals != 4
+            or (state == "migration-empty" and (revision != "base" or relations != 0))
+            or (
+                state == "migration-grants-reconcile"
+                and (revision != "20260726_0029" or relations <= 0)
+            )
+        )
+    ):
+        raise _ProtectedStagePaused("database retry state observation is contradictory")
+    if not _stage_is_protected(config, runtime, ledger):
+        raise _ProtectedStageExpired("database retry protection expired before admission")
+    _stage_record(
+        directory / f"{operation}-stage-recovery-completed.json",
+        "stage-recovery-completed",
+        {
+            "pauseSha256": pause["recordSha256"],
+            "retryIntentSha256": attempt["recordSha256"],
+            "sourceHead": runtime["sourceHead"],
+            "resultSha256": _stage_hash("stage-result", waited),
+            "marker": marker,
+            "capture": str(capture.name),
+            "captureFilesSha256": {
+                path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in capture.iterdir()
+                if path.is_file()
+            },
+            "completedAtUtc": datetime.now(UTC).isoformat(),
+        },
+    )
+    return {**started, **waited}, attempt
 
 
 def execute_commands(
@@ -2849,6 +3876,93 @@ def validate_evidence_execution_receipt(
     validate_measurement_receipt(value["measurement"], control_plane_evidence)
 
 
+def _reconcile_evidence_stage_completion(
+    directory: Path,
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    ledger: Ledger,
+    control_plane_evidence: dict[str, object] | None = None,
+) -> None:
+    """Reconcile only an already validated evidence receipt, never dispatch work."""
+    completion_path = directory / "evidence-stage-recovery-completed.json"
+    existing = (
+        _read_stage_record(completion_path, "stage-recovery-completed")
+        if completion_path.exists() else None
+    )
+    if control_plane_evidence is None:
+        if existing is None or not isinstance(existing.get("controlPlaneEvidence"), dict):
+            raise _ProtectedStagePaused("managed evidence completion control input is missing")
+        control_plane_evidence = cast(dict[str, object], existing["controlPlaneEvidence"])
+    config = replace(config, image_digest=ledger.image_digest)
+    receipt = directory / "managed-evidence-execution.json"
+    validate_evidence_execution_receipt(
+        receipt, config=config, runtime=runtime, control_plane_evidence=control_plane_evidence,
+    )
+    attempt_path = directory / "evidence-stage-attempt.json"
+    pause_path = directory / "evidence-stage-pause.json"
+    if not attempt_path.exists() and not pause_path.exists() and existing is None:
+        # Historical receipt-only recovery predates durable protected-stage records.
+        return
+    expected_bindings = _stage_bindings(
+        config, runtime, replace(ledger, phase=Phase.MIGRATED.value),
+    )
+    attempt = _read_stage_record(attempt_path, "stage-attempt")
+    commands = tuple(
+        (*command, "--subscription", runtime["subscriptionId"])
+        for command in command_plan(
+            "evidence", config, runtime,
+            control_plane_evidence="<derived-after-successful-managed-probes>",
+        )
+    )
+    if (
+        set(attempt) != {
+            "version", "operation", "bindings", "commandSha256", "authorizationSha256",
+            "startedAtUtc", "recordSha256",
+        }
+        or attempt["version"] != "m7.8-protected-stage-attempt-v1"
+        or attempt["operation"] != "evidence"
+        or attempt["bindings"] != expected_bindings
+        or attempt["commandSha256"] != _stage_hash("stage-command", commands)
+        or re.fullmatch(r"[a-f0-9]{64}", str(attempt["authorizationSha256"])) is None
+        or ORDER.index(Phase(ledger.phase)) < ORDER.index(Phase.MIGRATED)
+    ):
+        raise _ProtectedStagePaused("managed evidence original attempt binding differs")
+    parse_utc(str(attempt["startedAtUtc"]))
+    pause = _read_stage_record(pause_path, "stage-pause") if pause_path.exists() else None
+    if pause is not None and (
+        set(pause) != {
+            "version", "operation", "bindings", "attemptSha256", "authorizationSha256",
+            "failedExecution", "failedAtUtc", "recoveryUntilUtc", "maximumRetryDispatches",
+            "recordSha256",
+        }
+        or pause["version"] != "m7.8-protected-stage-pause-v1"
+        or pause["operation"] != "evidence"
+        or pause["bindings"] not in (
+            expected_bindings, {**expected_bindings, "ledgerPhase": Phase.EVIDENCE_EXECUTED.value},
+        )
+        or pause["attemptSha256"] != attempt["recordSha256"]
+        or pause["authorizationSha256"] != attempt["authorizationSha256"]
+        or pause["failedExecution"] is not None
+        or pause["maximumRetryDispatches"] != 1
+    ):
+        raise _ProtectedStagePaused("managed evidence completion pause binding differs")
+    completed: dict[str, object] = {
+        "version": "m7.8-managed-evidence-completion-reconciliation-v1",
+        "bindings": expected_bindings,
+        "attemptSha256": attempt["recordSha256"],
+        "pauseSha256": pause["recordSha256"] if pause is not None else None,
+        "receiptSha256": hashlib.sha256(receipt.read_bytes()).hexdigest(),
+        "controlPlaneEvidence": control_plane_evidence,
+    }
+    if existing is not None:
+        if existing != {**completed, "recordSha256": _stage_hash(
+            "stage-recovery-completed", completed,
+        )}:
+            raise _ProtectedStagePaused("managed evidence completion history differs")
+    else:
+        _stage_record(completion_path, "stage-recovery-completed", completed)
+
+
 def load_image_scan_evidence(
     path: Path, *, digest: str, runtime: dict[str, str]
 ) -> str:
@@ -3078,19 +4192,24 @@ def verify_zero_residue(
 
 
 def start_failure_cleanup(
-    runner: SubprocessRunner, config: CampaignConfig, runtime: dict[str, str]
+    runner: SubprocessRunner, config: CampaignConfig, runtime: dict[str, str],
+    before_dispatch: Callable[[], None] | None = None,
 ) -> None:
-    try:
-        for command in command_plan("cleanup", config, runtime):
+    for command in command_plan("cleanup", config, runtime):
+        if before_dispatch is not None:
+            before_dispatch()
+        try:
             _run_required(runner, command)
+        except CampaignError:
+            break
+    else:
         return
-    except CampaignError:
-        pass
-    start_direct_cleanup(runner, config, runtime)
+    start_direct_cleanup(runner, config, runtime, before_dispatch)
 
 
 def start_direct_cleanup(
-    runner: SubprocessRunner, config: CampaignConfig, runtime: dict[str, str]
+    runner: SubprocessRunner, config: CampaignConfig, runtime: dict[str, str],
+    before_dispatch: Callable[[], None] | None = None,
 ) -> None:
     account = _json_result(
         _run_required(runner, ("az", "account", "show", "--output", "json"))
@@ -3139,6 +4258,8 @@ def start_direct_cleanup(
         # An owned deletion is already in progress. Preserve it without another
         # delete request; cleanup-wait and residue must still prove absence.
         return
+    if before_dispatch is not None:
+        before_dispatch()
     delete_result = runner.run(
         (
             "az",
@@ -3417,8 +4538,11 @@ def main() -> int:
     parser.add_argument("--image-built", action="store_true")
     parser.add_argument("--image-scan-evidence", type=Path)
     parser.add_argument("--control-plane-evidence", type=Path)
+    parser.add_argument("--resume-database-job", action="store_true")
     args = parser.parse_args()
     try:
+        if args.resume_database_job and args.operation not in {"bootstrap", "migrate"}:
+            raise CampaignError("only bootstrap or migrate supports a guarded database retry")
         cleanup_only = args.operation in {
             "cleanup",
             "cleanup-wait",
@@ -3441,6 +4565,20 @@ def main() -> int:
                 config,
             )
         ledger = load_ledger(args.ledger, config)
+
+        def require_cleanup_authority() -> None:
+            try:
+                if args.authorization is None:
+                    raise CampaignError("separate cleanup authorization is required")
+                load_execution_authorization(
+                    args.authorization, config=config, runtime=runtime, operation="cleanup",
+                )
+            except CampaignError as exc:
+                print(json.dumps({
+                    "status": "cleanup-dispatch-blocked", "error": str(exc),
+                }), file=sys.stderr)
+                raise _CleanupAuthorizationBlocked(str(exc)) from exc
+
         target = OPERATION_PHASE[args.operation]
         required_authorizations = required_execution_authorizations(
             args.operation, Phase(ledger.phase)
@@ -3452,15 +4590,13 @@ def main() -> int:
                 )
             for authorized_operation in sorted(required_authorizations):
                 load_execution_authorization(
-                    args.authorization,
-                    config=config,
-                    runtime=runtime,
+                    args.authorization, config=config, runtime=runtime,
                     operation=authorized_operation,
                 )
         if not cleanup_only and parse_utc(config.cleanup_deadline_utc) <= datetime.now(
             UTC
         ):
-            if ORDER.index(Phase(ledger.phase)) >= ORDER.index(
+            if args.execute and ORDER.index(Phase(ledger.phase)) >= ORDER.index(
                 Phase.SCOPE_CREATED
             ) and Phase(ledger.phase) not in {
                 Phase.CLEANING,
@@ -3470,7 +4606,8 @@ def main() -> int:
                 Phase.FINALIZED,
             }:
                 expiry_runner = SubprocessRunner()
-                start_failure_cleanup(expiry_runner, config, runtime)
+                require_cleanup_authority()
+                start_failure_cleanup(expiry_runner, config, runtime, require_cleanup_authority)
                 ledger.transition(Phase.CLEANING, datetime.now(UTC))
                 save_ledger(args.ledger, ledger)
             raise CampaignError("cleanup deadline is expired; cleanup is required")
@@ -3490,7 +4627,9 @@ def main() -> int:
                 raise CampaignError("cleanup deadline expired during local image path preflight")
             for authorized_operation in sorted(required_authorizations):
                 load_execution_authorization(
-                    args.authorization, config=config, runtime=runtime,
+                    args.authorization,
+                    config=config,
+                    runtime=runtime,
                     operation=authorized_operation,
                 )
         image_scan_sha256 = None
@@ -3545,6 +4684,11 @@ def main() -> int:
             )
             if Phase(ledger.phase) is not Phase.MIGRATED:
                 raise CampaignError("managed evidence receipt phase is inconsistent")
+            _reconcile_evidence_stage_completion(
+                args.ledger.parent, config, runtime, ledger, control_evidence,
+            )
+            if _active_protected_pause(args.ledger.parent, config, runtime, ledger) is not None:
+                raise _ProtectedStagePaused("another protected stage remains paused")
             ledger.transition(Phase.EVIDENCE_EXECUTED, datetime.now(UTC))
             save_ledger(args.ledger, ledger)
             print(
@@ -3618,11 +4762,64 @@ def main() -> int:
                     os.fsync(attempt.fileno())
             except FileExistsError as exc:
                 raise CampaignError(
-                    "managed evidence attempt already exists; use the existing cleanup path "
-                    "if the attempt was interrupted"
+                    "managed evidence attempt already exists; preserve the protected scope "
+                    "and reconcile retained evidence before any retry"
                 ) from exc
         runner = SubprocessRunner()
+        stage_attempt: dict[str, object] | None = None
+        recovery_pause: dict[str, object] | None = None
         try:
+            if not cleanup_only:
+                expected_previous = {
+                    "deploy": Phase.BILLABLE_STARTED,
+                    "image-decision": Phase.INFRASTRUCTURE_DEPLOYED,
+                    "bootstrap": Phase.IMAGE_DECIDED, "migrate": Phase.DATABASE_BOOTSTRAPPED,
+                    "evidence": Phase.MIGRATED, "dispose": Phase.EVIDENCE_EXECUTED,
+                }
+                if (args.operation in expected_previous
+                        and Phase(ledger.phase) is not expected_previous[args.operation]):
+                    raise _ProtectedStagePaused("protected stage predecessor is not complete")
+                recovery_pause = _active_protected_pause(
+                    args.ledger.parent, config, runtime, ledger,
+                )
+                if recovery_pause is not None:
+                    already_dispatched = (
+                        args.resume_database_job
+                        and (args.ledger.parent
+                             / f"{args.operation}-stage-retry-intent.json").exists()
+                    )
+                    if ((not already_dispatched
+                         and parse_utc(str(recovery_pause["recoveryUntilUtc"]))
+                         <= datetime.now(UTC))
+                            or not _stage_is_protected(config, runtime, ledger)):
+                        raise _ProtectedStageExpired("protected stage recovery window expired")
+                    if (not args.resume_database_job
+                            or recovery_pause["operation"] != args.operation):
+                        raise _ProtectedStagePaused(
+                            "campaign stage is paused; dependent work and plain retries are blocked"
+                        )
+                elif args.resume_database_job:
+                    raise _ProtectedStagePaused(
+                        "database retry requires a bound failed-stage pause"
+                    )
+                if args.operation in PROTECTED_STAGE_OPERATIONS and recovery_pause is None:
+                    attempt_path = args.ledger.parent / f"{args.operation}-stage-attempt.json"
+                    if attempt_path.exists():
+                        raise _ProtectedStagePaused(
+                            "protected stage already has an attempt; "
+                            "do not replay an uncertain dispatch"
+                        )
+                    if args.authorization is None:
+                        raise CampaignError("protected stage authorization is missing")
+                    stage_attempt = _stage_record(attempt_path, "stage-attempt", {
+                        "version": "m7.8-protected-stage-attempt-v1", "operation": args.operation,
+                        "bindings": _stage_bindings(config, runtime, ledger),
+                        "commandSha256": _stage_hash("stage-command", commands),
+                        "authorizationSha256": hashlib.sha256(
+                            args.authorization.read_bytes()
+                        ).hexdigest(),
+                        "startedAtUtc": datetime.now(UTC).isoformat(),
+                    })
             cleanup_arm_evidence_sha256: str | None = None
             cleanup_disarm_evidence_sha256: str | None = None
             if target is Phase.IMAGE_DECIDED and (
@@ -3676,6 +4873,15 @@ def main() -> int:
                 )
             elif args.operation == "residue":
                 results = execute_residue_commands(runner, commands)
+            elif recovery_pause is not None and args.resume_database_job:
+                if len(commands) != 1 or args.authorization is None:
+                    raise _ProtectedStagePaused("database retry command binding differs")
+                result, stage_attempt = _execute_database_retry(
+                    runner, commands[0], operation=args.operation, config=config, runtime=runtime,
+                    ledger=ledger, pause=recovery_pause, directory=args.ledger.parent,
+                    authorization_path=args.authorization,
+                )
+                results = [result]
             else:
                 results = execute_commands(runner, commands)
             validate_operation_results(
@@ -3761,13 +4967,61 @@ def main() -> int:
             )
             print(json.dumps(output, separators=(",", ":"), sort_keys=True))
             return 0
-        except Exception:
+        except Exception as phase_error:
+            protected = _stage_is_protected(config, runtime, ledger)
+            if (isinstance(phase_error, (_ProtectedStagePaused, ProtectedStagePersistenceError))
+                    and protected):
+                raise
+            preserved = False
+            if (args.operation in PROTECTED_STAGE_OPERATIONS and protected
+                    and not isinstance(phase_error, _ProtectedStageExpired)):
+                try:
+                    if stage_attempt is None and recovery_pause is not None:
+                        attempt_sha = str(recovery_pause["attemptSha256"])
+                        authorization_sha = str(recovery_pause["authorizationSha256"])
+                    elif stage_attempt is not None:
+                        attempt_sha = str(stage_attempt["recordSha256"])
+                        authorization_sha = str(stage_attempt["authorizationSha256"])
+                    else:
+                        raise ProtectedStagePersistenceError(
+                            "protected stage attempt is unavailable"
+                        )
+                    preserved = preserve_protected_stage_failure(
+                        args.operation, config, runtime, ledger, args.ledger.parent,
+                        attempt_sha, authorization_sha,
+                        failed_execution=(
+                            phase_error.execution
+                            if isinstance(phase_error, _JobExecutionFailure) else None
+                        ),
+                    ) is not None
+                except (ProtectedStagePersistenceError, _ProtectedStagePaused):
+                    # The pre-dispatch attempt still prevents replay. A diagnostic
+                    # or persistence failure alone never authorizes deleting healthy scope.
+                    print(
+                        json.dumps({"status": "stage-pause-recording-incomplete"}), file=sys.stderr,
+                    )
+                    raise phase_error from None
+            if isinstance(phase_error, _JobExecutionFailure):
+                try:
+                    _capture_failed_job_diagnostics(
+                        phase_error, runtime=runtime,
+                        deadline=parse_utc(config.cleanup_deadline_utc),
+                        private_directory=args.ledger.parent,
+                    )
+                except Exception:
+                    print(json.dumps({"status": "job-diagnostics-incomplete"}), file=sys.stderr)
+            if preserved and _stage_is_protected(config, runtime, ledger):
+                print(
+                    json.dumps({"status": "stage-paused", "phase": ledger.phase}), file=sys.stderr,
+                )
+                raise
             try:
                 if (
                     args.operation == "cleanup-wait"
                     and Phase(ledger.phase) is Phase.CLEANING
                 ):
-                    start_direct_cleanup(runner, config, runtime)
+                    require_cleanup_authority()
+                    start_direct_cleanup(runner, config, runtime, require_cleanup_authority)
                 if (
                     target is Phase.SCOPE_CREATED
                     or ORDER.index(Phase(ledger.phase)) >= ORDER.index(Phase.SCOPE_CREATED)
@@ -3778,8 +5032,11 @@ def main() -> int:
                     Phase.RESIDUE_VERIFIED,
                     Phase.FINALIZED,
                 }:
+                    require_cleanup_authority()
                     try:
-                        start_failure_cleanup(runner, config, runtime)
+                        start_failure_cleanup(runner, config, runtime, require_cleanup_authority)
+                    except _CleanupAuthorizationBlocked:
+                        raise
                     except Exception as cleanup_error:
                         print(
                             json.dumps(

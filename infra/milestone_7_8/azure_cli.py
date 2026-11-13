@@ -221,6 +221,7 @@ class AzureCliLauncher:
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
         encoding: str = "utf-8",
+        diagnostic_capture_directory: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
         normalized_arguments = tuple(str(argument) for argument in arguments)
         for argument in normalized_arguments:
@@ -242,6 +243,13 @@ class AzureCliLauncher:
                 normalized_arguments,
                 process_environment,
             )
+        if diagnostic_capture_directory is not None:
+            if os.name != "nt":
+                raise AzureCliError("bounded diagnostic process capture requires Windows")
+            return _run_windows_diagnostic(
+                command, timeout=timeout, cwd=cwd, env=process_environment,
+                encoding=encoding, directory=diagnostic_capture_directory,
+            )
         return subprocess.run(
             command,
             check=False,
@@ -254,6 +262,52 @@ class AzureCliLauncher:
             env=process_environment,
             shell=False,
         )
+
+
+def _run_windows_diagnostic(
+    command: str | tuple[str, ...], *, timeout: int | float, cwd: Path | None,
+    env: dict[str, str] | None, encoding: str, directory: Path,
+) -> subprocess.CompletedProcess[str]:
+    """Opt-in read diagnostics only; ordinary launcher behavior is unchanged.
+
+    File-backed output avoids waiting on pipes inherited by Azure CLI children.
+    Timeout termination addresses only the exact process tree launched here.
+    """
+    taskkill = _canonical_file(_windows_system_directory() / "taskkill.exe")
+    token = secrets.token_hex(16)
+    stdout_path = directory / f"cli-{token}.stdout"
+    stderr_path = directory / f"cli-{token}.stderr"
+    stdout_fd = os.open(stdout_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(stdout_fd, "wb") as stdout:
+        stderr_fd = os.open(stderr_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(stderr_fd, "wb") as stderr:
+            process = subprocess.Popen(
+                command, stdout=stdout, stderr=stderr, cwd=cwd, env=env,
+                shell=False, creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            try:
+                returncode = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired as exc:
+                # Do this before killing the parent, while its child-tree
+                # relationship remains available to the trusted OS utility.
+                try:
+                    killed = subprocess.run(
+                        (str(taskkill), "/PID", str(process.pid), "/T", "/F"),
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        timeout=5, check=False, shell=False,
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                    )
+                    if killed.returncode != 0:
+                        raise AzureCliError("diagnostic process-tree termination unverified")
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=5)
+                raise subprocess.TimeoutExpired("Azure CLI diagnostic", timeout) from exc
+    return subprocess.CompletedProcess(
+        "Azure CLI diagnostic", returncode,
+        stdout_path.read_text(encoding=encoding), stderr_path.read_text(encoding=encoding),
+    )
 
 
 def local_version_smoke() -> dict[str, str]:

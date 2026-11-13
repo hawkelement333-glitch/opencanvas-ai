@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import ast
+import ctypes
 import inspect
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -22,6 +24,7 @@ from infra.milestone_7_8.azure_cli import (
     AzureCliLauncher,
     AzureCliResolutionError,
     _canonical_file,
+    _windows_system_directory,
     local_version_smoke,
     main,
 )
@@ -585,3 +588,74 @@ def test_other_campaign_process_failures_keep_existing_redacted_diagnostic(
         SubprocessRunner().run(("az", "version"))
     assert failure.value.__cause__ is error
     assert "must-not-leak" not in str(failure.value)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows diagnostic process-tree contract")
+def test_diagnostic_timeout_stops_owned_batch_child_and_grandchild(tmp_path: Path) -> None:
+    recorder = tmp_path / "diagnostic_child.py"
+    grandchild = tmp_path / "diagnostic_grandchild.py"
+    pids = tmp_path / "owned-pids.json"
+    marker = tmp_path / "must-not-run-after-timeout"
+    grandchild.write_text(
+        "import pathlib,sys,time\n"
+        "print('grandchild-stdout',flush=True)\n"
+        "print('grandchild-stderr',file=sys.stderr,flush=True)\n"
+        "time.sleep(4)\npathlib.Path(sys.argv[1]).write_text('unexpected')\n",
+        encoding="utf-8",
+    )
+    recorder.write_text(
+        "import json,os,pathlib,subprocess,sys,time\n"
+        f"child=subprocess.Popen([sys.executable,{str(grandchild)!r},{str(marker)!r}])\n"
+        f"pathlib.Path({str(pids)!r}).write_text(json.dumps([os.getpid(),child.pid]))\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    launchers = tmp_path / "launcher"
+    launchers.mkdir()
+    _write_batch_launcher(launchers, "cmd")
+    launcher = _resolve_windows(launchers)
+    captures = tmp_path / "private"
+    captures.mkdir()
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+    kernel.OpenProcess.restype = ctypes.c_void_p
+    kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    kernel.WaitForSingleObject.restype = ctypes.c_ulong
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel.CloseHandle.restype = ctypes.c_int
+
+    def running(pid: int) -> bool:
+        handle = kernel.OpenProcess(0x00100000, False, pid)
+        if not handle:
+            return False
+        try:
+            return int(kernel.WaitForSingleObject(handle, 0)) == 258
+        finally:
+            kernel.CloseHandle(handle)
+
+    started = time.monotonic()
+    try:
+        with pytest.raises(subprocess.TimeoutExpired) as raised:
+            launcher.run(
+                ("synthetic-no-network",), timeout=1.5, env=_test_environment(recorder),
+                diagnostic_capture_directory=captures,
+            )
+        elapsed = time.monotonic() - started
+        assert elapsed < 8
+        assert raised.value.cmd == "Azure CLI diagnostic"
+        assert pids.exists(), "both synthetic descendants must exist before timeout"
+        owned = json.loads(pids.read_text())
+        assert len(owned) == 2 and not any(running(pid) for pid in owned)
+        assert not marker.exists()
+        assert "grandchild-stdout" in next(captures.glob("*.stdout")).read_text()
+        assert "grandchild-stderr" in next(captures.glob("*.stderr")).read_text()
+    finally:
+        if pids.exists():
+            for pid in json.loads(pids.read_text()):
+                if running(pid):
+                    subprocess.run(
+                        (str(_windows_system_directory() / "taskkill.exe"),
+                         "/PID", str(pid), "/T", "/F"),
+                        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        timeout=5, creationflags=subprocess.CREATE_NO_WINDOW,
+                    )
