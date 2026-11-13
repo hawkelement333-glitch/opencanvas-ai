@@ -352,9 +352,11 @@ def runtime_privilege_statements(
                 f"REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM {quoted}",
                 f"REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM {quoted}",
                 f"REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM {quoted}",
-                f"REVOKE {quoted_migration} FROM {quoted}",
             )
         )
+        # Role membership is revoked by the privileged bootstrap, not by this
+        # unprivileged schema owner. The caller rejects inherited migration
+        # membership before committing these object grants.
         for object_kind in ("TABLES", "SEQUENCES", "FUNCTIONS"):
             statements.append(
                 f"ALTER DEFAULT PRIVILEGES FOR ROLE {quoted_migration} IN SCHEMA public "

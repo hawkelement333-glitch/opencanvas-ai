@@ -59,8 +59,10 @@ def test_emitted_grants_are_explicit_and_revoke_implicit_privileges() -> None:
     assert "REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC" in rendered
     assert "REVOKE CREATE ON SCHEMA public FROM PUBLIC" in rendered
     assert "REVOKE ALL PRIVILEGES ON FUNCTIONS FROM PUBLIC" in rendered
-    assert 'REVOKE "id-mobius77-db-migration" FROM "id-mobius77-api"' in rendered
-    assert 'REVOKE "id-mobius77-db-migration" FROM "id-mobius77-worker"' in rendered
+    # An unprivileged migration owner has no ADMIN option on its own role.
+    # Membership revocation belongs to bootstrap; reconciliation rejects drift.
+    assert 'REVOKE "id-mobius77-db-migration" FROM "id-mobius77-api"' not in rendered
+    assert 'REVOKE "id-mobius77-db-migration" FROM "id-mobius77-worker"' not in rendered
     assert "legacy_creation_request_identities" in rendered
 
 

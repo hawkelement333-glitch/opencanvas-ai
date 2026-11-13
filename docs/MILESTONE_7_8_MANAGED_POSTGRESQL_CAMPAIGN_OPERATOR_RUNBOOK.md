@@ -814,6 +814,26 @@ uses the migration identity, direct `NullPool`, advisory locking, expected
 revision `20260726_0029`, sole-head ordering, and exact runtime-grant
 reconciliation.
 
+Role-membership revocation remains in the privileged bootstrap. The migration
+identity must not receive `CREATEROLE` or an `ADMIN` option to reconcile object
+grants. Its reconciliation rejects inherited migration membership and rolls back
+the grant transaction if that check fails; it does not attempt a role-membership
+REVOKE that PostgreSQL denies to the unprivileged migration identity.
+
+Recovery catalog reads cast PostgreSQL's internal `relkind` to text before
+validating the exact table inventory and serializing the observation. The
+asyncpg internal-character representation is bytes; it is not evidence that
+tables are absent. Unknown revisions, missing tables, unexpected ownership,
+identity mappings, or inherited privileges still block a retry.
+
+Local PostgreSQL rehearsal can verify migrations and privilege/recovery logic
+with explicitly synthetic Entra-function fixtures. It cannot establish the
+availability or permissions of Azure's `pgaadauth` functions. If that managed
+observation is missing, capture the separately approved bounded read-only
+function/identity diagnostic in both `opencanvas` and `postgres` before principal
+provisioning. Do not treat missing function evidence as permission to substitute
+an identity, route writes to another database, or skip the retry inspection.
+
 Before the combined managed-evidence phase, collect the following sanitized
 numeric/configuration observations under the separately authorized campaign:
 

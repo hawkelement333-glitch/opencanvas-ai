@@ -94,7 +94,8 @@ async def _observe(
     relations = await _rows(
         connection,
         (
-            "SELECT c.relname AS name, c.relkind AS kind, pg_get_userbyid(c.relowner) AS owner "
+            "SELECT c.relname AS name, c.relkind::text AS kind, "
+            "pg_get_userbyid(c.relowner) AS owner "
             "FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace "
             "WHERE n.nspname='public' AND c.relkind IN ('r','p','S','v','m') "
             "AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid="

@@ -382,6 +382,55 @@ def test_normal_migration_retry_inspects_then_uses_existing_upgrade_or_grant_rec
     assert marker["state"] == ("migration-grants-reconcile" if head else "migration-empty")
 
 
+def test_normal_head_retry_reads_internal_relation_kind_as_text(
+    monkeypatch: pytest.MonkeyPatch,
+    manifest: PrincipalManifest,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    observed = state(manifest, head=True)
+    observed["currentUser"] = manifest.principals[PrincipalSlot.MIGRATION].name
+    monkeypatch.setenv(
+        CURRENT_PRINCIPAL_ID_ENV, manifest.principals[PrincipalSlot.MIGRATION].object_id
+    )
+
+    class AsyncpgConnection(Connection):
+        async def execute(self, statement: object, parameters: object = None) -> Result:
+            result = await super().execute(statement, parameters)
+            if "FROM pg_catalog.pg_class c" in str(statement):
+                # PostgreSQL internal "char" is bytes in asyncpg; text is str.
+                return Result(
+                    [
+                        {
+                            **row,
+                            "kind": row["kind"]
+                            if "c.relkind::text AS kind" in str(statement)
+                            else row["kind"].encode(),
+                        }
+                        for row in result.values
+                    ]
+                )
+            return result
+
+    connection = AsyncpgConnection(observed)
+    use_database(monkeypatch, connection, role=DatabaseRole.MIGRATION)
+    reconciled: list[bool] = []
+
+    async def grants() -> None:
+        reconciled.append(True)
+
+    def no_upgrade(**_kwargs: object) -> int:
+        raise AssertionError("head reconciliation must not repeat migrations")
+
+    monkeypatch.setattr(migrate_and_grant, "run_migration", no_upgrade)
+    monkeypatch.setattr(migrate_and_grant, "apply_runtime_privileges", grants)
+    assert migrate_and_grant.main(["--retry-after-execution=previous"]) == 0
+    assert reconciled == [True]
+    marker = json.loads(capsys.readouterr().out.removeprefix(recovery.PREFIX))
+    assert marker["state"] == "migration-grants-reconcile"
+    assert marker["applicationRelationCount"] == len(Base.metadata.tables) + 1
+    assert not connection.mutations
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("drift", ["owner", "missing-table", "missing-principal"])
 async def test_migration_retry_head_partial_state_rejects_unsafe_reconciliation(
