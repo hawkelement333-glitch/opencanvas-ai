@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opencanvas.local/schemas/milestone-7-8/late-cleanup.schema.json",
+  "title": "Private late cleanup-only plan or independently approved authorization",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {},
+    "files": {},
+    "ledgerPath": {},
+    "ledgerFileSha256": {},
+    "originalLedger": {},
+    "outputDirectory": {},
+    "reviewSourceHead": {},
+    "operatorContentSha256": {},
+    "protectedStashesSha256": {},
+    "jobResourceId": {},
+    "scheduledJobId": {},
+    "deletes": {},
+    "planSha256": {},
+    "operatorSourceHead": {},
+    "approvalPath": {},
+    "approvalSha256": {},
+    "issuedAtUtc": {},
+    "expiresAtUtc": {},
+    "allowedOperations": {},
+    "authorizationSha256": {},
+    "validationReceiptPath": {},
+    "validationReceiptSha256": {}
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/plan"
+    },
+    {
+      "$ref": "#/$defs/authorization"
+    }
+  ],
+  "$defs": {
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "files",
+        "ledgerPath",
+        "ledgerFileSha256",
+        "originalLedger",
+        "outputDirectory",
+        "reviewSourceHead",
+        "operatorContentSha256",
+        "protectedStashesSha256",
+        "jobResourceId",
+        "deletes",
+        "planSha256",
+        "scheduledJobId"
+      ],
+      "properties": {
+        "version": {
+          "const": "m7.8-late-cleanup-plan-v1"
+        },
+        "files": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "runtime",
+            "config",
+            "jobResult",
+            "outputResult",
+            "originalAuthorization"
+          ],
+          "properties": {
+            "runtime": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "sha256"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "config": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "sha256"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "jobResult": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "sha256"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "outputResult": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "sha256"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "originalAuthorization": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "sha256"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            }
+          }
+        },
+        "ledgerPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ledgerFileSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "originalLedger": {
+          "$ref": "ledger.schema.json"
+        },
+        "outputDirectory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reviewSourceHead": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "operatorContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "protectedStashesSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "jobResourceId": {
+          "type": "string",
+          "pattern": "^/subscriptions/.+/providers/Microsoft.Automation/automationAccounts/.+/jobs/[A-Za-z0-9_-]+$"
+        },
+        "deletes": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "array",
+            "minItems": 8,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "planSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "scheduledJobId": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9-]{36}$"
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "planSha256",
+        "operatorSourceHead",
+        "operatorContentSha256",
+        "approvalPath",
+        "approvalSha256",
+        "issuedAtUtc",
+        "expiresAtUtc",
+        "allowedOperations",
+        "authorizationSha256",
+        "validationReceiptPath",
+        "validationReceiptSha256"
+      ],
+      "properties": {
+        "version": {
+          "const": "m7.8-late-cleanup-authorization-v1"
+        },
+        "planSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "operatorSourceHead": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "operatorContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "approvalPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approvalSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "issuedAtUtc": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "(?:Z|\\+00:00)$"
+        },
+        "expiresAtUtc": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "(?:Z|\\+00:00)$"
+        },
+        "allowedOperations": {
+          "const": [
+            "adopt-scheduled-cleanup",
+            "delete-exact-binding",
+            "delete-exact-schedule",
+            "verify-residue",
+            "finalize-failed-campaign"
+          ]
+        },
+        "authorizationSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "validationReceiptPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "validationReceiptSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    }
+  }
+}

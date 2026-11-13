@@ -1202,3 +1202,93 @@ other than the private ignored `runtime.json`, which must not be committed or
 printed. A successful campaign may close only the five managed gaps actually
 proved by the artifacts. It does not complete Milestone 7.8 and does not start
 the object-storage audit.
+
+## Late closure of the already removed failed campaign
+
+`infra.milestone_7_8.late_cleanup` is the separate, narrowly scoped path for
+adopting the retained scheduled cleanup after the original execution authority
+has expired. It applies only to the retained paused `image-decided` campaign.
+The original runtime, v5 authorization, controller deadline, stage history and
+provider captures remain unchanged. The expired v5 authorization is checked at
+the scheduled job's actual historical start time; it never becomes current
+permission to mutate Azure.
+
+The local plan requires the exact completed scheduled job, its matching cleanup
+receipt, original authorization and ledger snapshot. It binds their file hashes,
+the exact subscription/controller scope, the two disarm targets, current reviewed
+infrastructure code content and the five protected stashes. Execution additionally
+requires a clean reviewed checkpoint with the same code content, canonical image
+inputs and cleanup-script hash, plus a passing validation receipt and a new
+explicit plan-bound approval. That approval lasts at most 30 minutes and is
+independent of the expired campaign/controller window. It authorizes only the
+exact job-schedule binding DELETE, exact schedule DELETE, scoped verification and
+local failed-campaign closure. It cannot start a runbook, delete a resource group,
+create a resource, renew the controller, resume a campaign or claim a managed
+observation passed.
+
+Prepare only the local plan first. This example uses the retained private
+`p-rec/ca` captures; choose a new nonexistent closure directory and keep all
+outputs under the existing protected, ignored parent:
+
+```powershell
+$bundle = '.runtime/milestone_7_8/p-rec/ca'
+$capture = "$bundle/post-deadline-status-20261113T1530Z"
+$closure = "$bundle/late-cleanup-closure-01"
+New-Item -ItemType Directory -Path $closure -ErrorAction Stop | Out-Null
+& .\.venv\Scripts\python.exe -B -m infra.milestone_7_8.late_cleanup plan `
+  --runtime "$bundle/runtime.json" --config "$bundle/campaign-cost.json" `
+  --ledger "$bundle/ledger.json" `
+  --job-result "$capture/05-job-result.json" `
+  --output-result "$capture/06-output-result.json" `
+  --original-authorization "$bundle/failure-cleanup-authorization.json" `
+  --output-directory "$closure/attempt" --output "$closure/plan.json"
+if ($LASTEXITCODE -ne 0) { throw 'late cleanup plan blocked' }
+```
+
+Stop for review of the exact plan. Record the actual approval privately; do not
+manufacture approval by setting `approved` to true. Its allowed operations must
+be exactly `adopt-scheduled-cleanup`, `delete-exact-binding`,
+`delete-exact-schedule`, `verify-residue` and `finalize-failed-campaign`, with the
+reviewed plan hash and `maximumMinutes: 30`. After the required local checks and
+clean checkpoint, retain the validation receipt binding that same plan, code and
+checkpoint. It must record passing tests, Ruff, strict mypy, schema and hygiene
+checks completed no later than issuance. Only when execution is ready and the
+explicit approval exists, issue the separate local authorization:
+
+```powershell
+$issuedAt = [DateTimeOffset]::UtcNow
+$expiresAt = $issuedAt.AddMinutes(30)
+& .\.venv\Scripts\python.exe -B -m infra.milestone_7_8.late_cleanup authorize `
+  --plan "$closure/plan.json" --approval "$closure/explicit-approval.json" `
+  --validation-receipt "$closure/validation-receipt.json" `
+  --issued-at ($issuedAt.ToString('o')) --expires-at ($expiresAt.ToString('o')) `
+  --output "$closure/authorization.json"
+if ($LASTEXITCODE -ne 0) { throw 'late cleanup authorization blocked' }
+
+& .\.venv\Scripts\python.exe -B -m infra.milestone_7_8.late_cleanup execute `
+  --plan "$closure/plan.json" --authorization "$closure/authorization.json" --execute
+if ($LASTEXITCODE -ne 0) { throw 'late cleanup stopped; preserve the attempt' }
+```
+
+The executor reads back the exact completed job and its output, proves the target
+group is already absent, validates the exact binding and schedule, and persists
+intent before either DELETE. It checks the new authorization immediately before
+dispatch. A failed or ambiguous response stops the invocation; no automatic
+retry occurs. With the same still-current approval, re-entry must use GET
+readbacks to prove an already-attempted target absent and must never repeat its
+DELETE. If that target remains present, closure stays blocked even when the prior
+response reported failure. Re-entry may delete only the remaining target that
+has no prior dispatch intent, under the same exact approval. Thus an invocation
+that continues an unattempted DELETE is not GET-only. Expired approval blocks
+execution; any further closure requires a separately reviewed approval without
+discarding the retained attempt history.
+
+Only complete disarm readbacks and all 14 zero residue counters permit local
+adoption and finalization. Preserve `attempt/original-ledger.json` before writes;
+the actual campaign ledger is updated only after the verified final ledger is
+persisted. Completion evidence records the scheduled job's historical start/end
+times separately from the present adoption timestamps, with raw readbacks and
+hashes kept private. The terminal receipt establishes zero residue for a
+**failed** campaign; it does not assert that PG-E01, PG-E02, PG-E03, TI-E01 or
+PG-E04 passed. Existing Windows ACL and parent-directory crash-durability
+limitations remain unchanged and must not be described as newly proven.

@@ -3707,8 +3707,17 @@ def execute_cleanup_disarm_commands(
         raise CampaignError("cleanup disarming command sequence is incomplete")
     results = [runner.run(commands[0]), runner.run(commands[1])]
     results.extend(_run_required(runner, command) for command in commands[2:])
-    schedules = _collection(_json_result(results[2]), label="cleanup schedule")
-    bindings = _collection(_json_result(results[3]), label="cleanup binding")
+    return results, validate_disarm_readback(results[2:], config, runtime)
+
+
+def validate_disarm_readback(
+    results: list[dict[str, object]], config: CampaignConfig, runtime: dict[str, str]
+) -> str:
+    """Validate the same complete disarm proof without dispatching any mutation."""
+    if len(results) != 2 or any(result.get("exitCode") != 0 for result in results):
+        raise CampaignError("cleanup disarming readback is incomplete")
+    schedules = _collection(_json_result(results[0]), label="cleanup schedule")
+    bindings = _collection(_json_result(results[1]), label="cleanup binding")
     if schedules or bindings:
         raise CampaignError("cleanup schedule or binding revocation failed")
     evidence = {
@@ -3729,7 +3738,7 @@ def execute_cleanup_disarm_commands(
         b"m7.8/cleanup-disarm-proof/v1\0"
         + json.dumps(evidence, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
-    return results, evidence_sha256
+    return evidence_sha256
 
 
 def load_control_plane_evidence(path: Path) -> dict[str, object]:
