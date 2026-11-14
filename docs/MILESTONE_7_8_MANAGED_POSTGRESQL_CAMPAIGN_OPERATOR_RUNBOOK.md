@@ -1086,6 +1086,30 @@ or retrospectively extend dispatch authority. Evidence and disposal use the same
 accepted image continuation after validated migration recovery. Normal cleanup
 remains available if the correction is incomplete.
 
+If the accepted corrected-image prerequisite passes but the retry stops before
+its durable intent because the provider omitted an empty `ephemeralStorage`
+field, the reviewed operator-only comparison correction may use
+`build_operator_source_amendment(plan_path, approval=standing_approval_record)`.
+Persist its result once as `operator-source-amendment.json`. The separate record
+binds the exact 31-command stopped capture, successful prerequisite, original
+image/admission and source, unchanged canonical inputs/cleanup script, and the
+corrected clean direct-child operator commit. The approval record names the
+exact `planSha256`, scope `unused-migration-retry-operator-correction`, and actual
+standing approval in `userText`. Original runtime and image source remain
+unchanged; retry journals record the corrected executing operator separately.
+
+The original retry window remains authoritative. Only after it expires, and
+only while both retry intent and retry start are absent, a separately retained
+replacement approval can be passed to `build_migration_retry_supersession` with
+the plan path, `explicit_approval`, actual `issued_at`, and `expires_at` at most
+15 minutes later and no later than cleanup. Persist its result once as
+`migration-retry-supersession.json`; do not overwrite the first approval. The
+replacement explicit approval uses the existing closed retry-approval fields
+and the original plan's source, with the corrected executing source bound by
+the separate amendment. A recorded or indeterminate retry cannot receive a
+replacement window. No image rebuild, push, scan, workload PATCH, or completed
+prerequisite is repeated by this operator-only resumption.
+
 An authenticated listing ACL denial can admit ordinary migration with
 `listingRead=false`. Guarded migration retry requires a positive,
 invocation-bound listing observation and repeats the mapping check before

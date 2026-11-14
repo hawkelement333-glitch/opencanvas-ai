@@ -2411,7 +2411,7 @@ def _validate_transition_dispatch(transition: dict[str, object]) -> None:
 
 
 def _retry_template_semantics(value: object) -> dict[str, object]:
-    """Compare only the provider's optional-empty collection forms; retain raw evidence."""
+    """Normalize provider-only empty fields in copies; retain every raw observation."""
     if not isinstance(value, dict):
         raise _ProtectedStagePaused("database retry template is malformed")
     normalized = dict(value)
@@ -2421,6 +2421,26 @@ def _retry_template_semantics(value: object) -> dict[str, object]:
             normalized[field] = []
         elif not isinstance(observed, list):
             raise _ProtectedStagePaused("database retry optional template collection is malformed")
+    containers = value.get("containers")
+    if not isinstance(containers, list):
+        raise _ProtectedStagePaused("database retry template containers are malformed")
+    normalized_containers: list[dict[str, object]] = []
+    for container in containers:
+        resources = container.get("resources") if isinstance(container, dict) else None
+        if not isinstance(container, dict) or not isinstance(resources, dict):
+            raise _ProtectedStagePaused("database retry container allocation is malformed")
+        # ARM declares ephemeralStorage read-only. The same bounded job/execution
+        # returns its unspecified value as absent, null, or empty string. Never
+        # accept a nonempty allocation or coerce another value into this default.
+        ephemeral = resources.get("ephemeralStorage")
+        if ephemeral is not None and ephemeral != "":
+            raise _ProtectedStagePaused("database retry ephemeral storage is not empty")
+        normalized_containers.append({
+            **container,
+            "resources": {key: observed for key, observed in resources.items()
+                          if key != "ephemeralStorage"},
+        })
+    normalized["containers"] = normalized_containers
     return normalized
 
 
@@ -2466,18 +2486,13 @@ def _validate_retry_job_limits(
         "initContainers"
     ) not in (None, []):
         raise _ProtectedStagePaused("database retry contains unpriced initialization containers")
-    normalized = {
-        **_retry_template_semantics(template),
-        "containers": [
-            {key: value for key, value in container.items() if key != "args"},
-        ],
-    }
-    normalized_prior = {
-        **_retry_template_semantics(failed_template),
-        "containers": [
-            {key: value for key, value in previous.items() if key != "args"},
-        ],
-    }
+    normalized = _retry_template_semantics(template)
+    normalized_prior = _retry_template_semantics(failed_template)
+    for representation in (normalized, normalized_prior):
+        normalized_container = cast(list[dict[str, object]], representation["containers"])[0]
+        representation["containers"] = [
+            {key: value for key, value in normalized_container.items() if key != "args"},
+        ]
     if _migration_image_transition(source_transition):
         assert source_transition is not None
         if (operation != "migrate"

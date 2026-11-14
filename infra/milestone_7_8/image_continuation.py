@@ -310,8 +310,156 @@ def _load_migration_plan(path: Path, plan: dict[str, object]) -> dict[str, objec
 
 
 def _plan_source(plan: dict[str, object]) -> str:
-    return (_migration_source(plan)["sourceHead"]
-            if plan.get("version") == MIGRATION_VERSION else _source())
+    if plan.get("version") != MIGRATION_VERSION:
+        return _source()
+    amendment = _source_amendment(plan)
+    return (str(amendment["operatorSourceHead"]) if amendment is not None
+            else _migration_source(plan)["sourceHead"])
+
+
+def _inspect_amended_source(plan: dict[str, object]) -> str:
+    head, cleanup = local_source_binding()
+    def git(*args: str) -> str:
+        return subprocess.run(("git", *args), cwd=ROOT, capture_output=True, text=True,
+                              check=True, timeout=30).stdout.strip()
+    allowed = {
+        "infra/milestone_7_8/operator.py", "infra/milestone_7_8/image_continuation.py",
+        "apps/api/tests/test_milestone_7_8_migration_operator_continuation.py",
+        "apps/api/tests/test_milestone_7_8_migration_image_continuation.py",
+        "docs/MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_OPERATOR_RUNBOOK.md",
+    }
+    original = str(plan["sourceHead"])
+    runtime = _read(Path(str(plan["runtimeFile"])))
+    changes = set(git("diff", "--name-only", original, head).splitlines())
+    if (git("rev-list", "--parents", "-n", "1", head).split() != [head, original]
+            or not changes <= allowed or "infra/milestone_7_8/operator.py" not in changes
+            or cleanup != runtime["cleanupScriptSha256"]
+            or canonical_snapshot(head)["buildInputSha256"] != plan["canonicalBuildInputSha256"]
+            or _hash(git("stash", "list", "--format=%H").splitlines())
+            != plan["protectedStashesSha256"]):
+        raise CampaignError("migration operator-only correction changed its permitted source")
+    return head
+
+
+def _predispatch_capture_files(path: Path, plan: dict[str, object]) -> dict[str, str]:
+    from infra.milestone_7_8 import operator
+
+    folder = path.parent
+    capture = folder / "captures/migrate"
+    intents = sorted(capture.glob("[0-9][0-9][0-9]-intent.json"))
+    if len(intents) != 31:
+        raise CampaignError("migration predispatch history is incomplete")
+    starts = []
+    for index, intent in enumerate(intents, 1):
+        if intent.name != f"{index:03d}-intent.json":
+            raise CampaignError("migration predispatch history is not ordered")
+        command = _read(intent).get("command")
+        response = _read(capture / f"{index:03d}-result.json")
+        if not isinstance(command, list) or response.get("exitCode") != 0:
+            raise CampaignError("migration predispatch command result is incomplete")
+        if command[:4] == ["az", "containerapp", "job", "start"]:
+            starts.append(response)
+        elif not (
+            command[:4] in (["az", "deployment", "sub", "show"],
+                            ["az", "containerapp", "job", "show"],
+                            ["az", "automation", "account", "show"],
+                            ["az", "role", "assignment", "list"],
+                            ["az", "monitor", "log-analytics", "query"])
+            or command[:5] == ["az", "monitor", "log-analytics", "workspace", "show"]
+            or command[:5] == ["az", "containerapp", "job", "execution", "show"]
+            or command[:6] == ["az", "containerapp", "job", "replica", "list", "--name"]
+            or command[:4] == ["az", "rest", "--method", "get"]
+        ):
+            raise CampaignError("migration predispatch history contains another mutation")
+    result = _read(capture / "command-result.json")
+    failure = "database retry image, command, environment, or template drifted"
+    if (result.get("exitCode") != 2
+            or failure not in str(result.get("stdout")) + str(result.get("stderr"))):
+        raise CampaignError("migration stop is not the reviewed predispatch comparison")
+    prefix = folder / "prerequisites"
+    start = operator._read_stage_record(prefix / "migrate-prerequisite-start.json",
+                                       "database-prerequisite-start")
+    proof = operator._read_stage_record(prefix / "migrate-prerequisites.json",
+                                       "database-prerequisites")
+    prerequisite_intent = operator._read_stage_record(
+        prefix / "migrate-prerequisite-intent.json", "database-prerequisite-intent",
+    )
+    runtime, config = _effective(plan)
+    baseline = Ledger(**_object(plan["baselineLedger"]))  # type: ignore[arg-type]
+    receipt = _read(folder / "completed.json")
+    baseline.image_digest = str(receipt["imageDigest"])
+    expected = operator._stage_bindings(config, runtime, baseline)
+    if (len(starts) != 1 or starts[0].get("stdout") != start.get("stdout")
+            or proof.get("bindings") != expected or prerequisite_intent.get("bindings") != expected
+            or proof.get("intentSha256") != prerequisite_intent.get("recordSha256")
+            or _object(proof.get("marker")).get("listingRead") is not True):
+        raise CampaignError("corrected migration prerequisite or sole dispatch differs")
+    files = {item for directory in (capture, prefix) for item in directory.iterdir()
+             if item.is_file()}
+    files.update(folder / name for name in ("completed.json", "migration-retry-approval.json"))
+    return {str(item): _file_hash(item) for item in sorted(files)}
+
+
+def _retry_not_dispatched(plan: dict[str, object]) -> None:
+    folder = Path(str(plan["runtimeFile"])).parent
+    if any((folder / name).exists() for name in (
+        "migrate-stage-retry-intent.json", "migrate-stage-retry-start.json",
+    )):
+        raise CampaignError("migration retry is already dispatched or indeterminate")
+
+
+def build_operator_source_amendment(path: Path, *, approval: Path) -> dict[str, object]:
+    plan = load_plan(path)
+    if plan.get("version") != MIGRATION_VERSION:
+        raise CampaignError("operator-only amendment requires the migration correction")
+    _retry_not_dispatched(plan)
+    if (path.parent / "operator-source-amendment.json").exists():
+        raise CampaignError("operator source amendment already exists")
+    head = _inspect_amended_source(plan)
+    runtime, config = _effective(plan)
+    validate_admission(path, runtime, config, load_ledger(Path(str(plan["ledgerFile"])), config))
+    approval = _private(approval)
+    explicit = _read(approval)
+    if (explicit.get("planSha256") != plan["planSha256"]
+            or explicit.get("scope") != "unused-migration-retry-operator-correction"
+            or not isinstance(explicit.get("userText"), str) or not explicit["userText"]):
+        raise CampaignError("operator source correction lacks its exact standing approval")
+    body = {"version": "m7.8-migration-operator-source-amendment-v1",
+            "planSha256": plan["planSha256"], "originalSourceHead": plan["sourceHead"],
+            "standingApprovalSha256": plan["amendmentSha256"],
+            "operatorSourceHead": head,
+            "canonicalBuildInputSha256": plan["canonicalBuildInputSha256"],
+            "approvalFile": str(approval), "approvalFileSha256": _file_hash(approval),
+            "filesSha256": _predispatch_capture_files(path, plan)}
+    return {**body, "amendmentSha256": _hash(body)}
+
+
+def _source_amendment(plan: dict[str, object]) -> dict[str, object] | None:
+    folder = Path(str(plan["runtimeFile"])).parent / "migration-image-continuation"
+    path = folder / "operator-source-amendment.json"
+    if not path.exists():
+        return None
+    record = _read(path)
+    body = {key: value for key, value in record.items() if key != "amendmentSha256"}
+    if (set(record) != {"version", "planSha256", "originalSourceHead", "operatorSourceHead",
+                        "canonicalBuildInputSha256", "approvalFile", "approvalFileSha256",
+                        "filesSha256", "amendmentSha256", "standingApprovalSha256"}
+            or record["version"] != "m7.8-migration-operator-source-amendment-v1"
+            or record["amendmentSha256"] != _hash(body)
+            or record["planSha256"] != plan["planSha256"]
+            or record["originalSourceHead"] != plan["sourceHead"]
+            or record["standingApprovalSha256"] != plan["amendmentSha256"]
+            or record["canonicalBuildInputSha256"] != plan["canonicalBuildInputSha256"]
+            or record["operatorSourceHead"] != _inspect_amended_source(plan)
+            or record["filesSha256"] != _predispatch_capture_files(folder / "plan.json", plan)
+            or record["approvalFileSha256"]
+            != _file_hash(_private(Path(str(record["approvalFile"]))))):
+        raise CampaignError("migration operator source amendment or retained history differs")
+    explicit = _read(Path(str(record["approvalFile"])))
+    if (explicit.get("planSha256") != plan["planSha256"]
+            or explicit.get("scope") != "unused-migration-retry-operator-correction"):
+        raise CampaignError("migration operator source approval scope differs")
+    return record
 
 
 def _previous_image(plan: dict[str, object]) -> str:
@@ -397,6 +545,61 @@ def build_migration_retry_approval(
     return {**body, "authorizationSha256": _hash(body)}
 
 
+def build_migration_retry_supersession(
+    path: Path, *, explicit_approval: Path, issued_at: datetime, expires_at: datetime,
+) -> dict[str, object]:
+    """Replace one expired, unused dispatch window without replacing any historical record."""
+    plan = load_plan(path)
+    amendment = _source_amendment(plan)
+    if amendment is None:
+        raise CampaignError("retry supersession requires the reviewed operator source correction")
+    _retry_not_dispatched(plan)
+    if (path.parent / "migration-retry-supersession.json").exists():
+        raise CampaignError("migration retry supersession already exists")
+    previous = _read(path.parent / "migration-retry-approval.json")
+    if issued_at < parse_utc(str(previous["expiresAtUtc"])):
+        raise CampaignError("the original migration retry window is still open")
+    if explicit_approval.resolve() == Path(str(previous["explicitApprovalFile"])).resolve():
+        raise CampaignError("retry supersession requires a separately retained approval record")
+    runtime, config = _effective(plan)
+    validate_admission(path, runtime, config, load_ledger(Path(str(plan["ledgerFile"])), config))
+    approval_body = _migration_retry_body(
+        path, explicit_approval=explicit_approval, issued_at=issued_at, expires_at=expires_at,
+    )
+    body = {
+        "version": "m7.8-migration-unused-retry-supersession-v1",
+        "planSha256": plan["planSha256"], "operatorSourceHead": amendment["operatorSourceHead"],
+        "sourceAmendmentSha256": amendment["amendmentSha256"],
+        "previousApprovalFileSha256": _file_hash(path.parent / "migration-retry-approval.json"),
+        "approval": {**approval_body, "authorizationSha256": _hash(approval_body)},
+    }
+    return {**body, "supersessionSha256": _hash(body)}
+
+
+def _load_retry_supersession(
+    path: Path, plan: dict[str, object], amendment: dict[str, object] | None,
+) -> dict[str, object]:
+    record = _read(path.parent / "migration-retry-supersession.json")
+    body = {key: value for key, value in record.items() if key != "supersessionSha256"}
+    previous = _read(path.parent / "migration-retry-approval.json")
+    approval = _object(record.get("approval"))
+    if (amendment is None
+            or set(record) != {"version", "planSha256", "operatorSourceHead",
+                               "sourceAmendmentSha256", "previousApprovalFileSha256", "approval",
+                               "supersessionSha256"}
+            or record["version"] != "m7.8-migration-unused-retry-supersession-v1"
+            or record["planSha256"] != plan["planSha256"]
+            or record["operatorSourceHead"] != amendment["operatorSourceHead"]
+            or record["sourceAmendmentSha256"] != amendment["amendmentSha256"]
+            or record["supersessionSha256"] != _hash(body)
+            or record["previousApprovalFileSha256"]
+            != _file_hash(path.parent / "migration-retry-approval.json")
+            or parse_utc(str(approval.get("issuedAtUtc")))
+            < parse_utc(str(previous["expiresAtUtc"]))):
+        raise CampaignError("migration unused-retry supersession history differs")
+    return record
+
+
 def migration_retry_transition(
     path: Path, runtime: dict[str, str], config: CampaignConfig, ledger: Ledger,
 ) -> dict[str, object] | None:
@@ -406,9 +609,15 @@ def migration_retry_transition(
     plan = load_plan(path)
     if plan.get("version") != MIGRATION_VERSION:
         return None
-    _plan_source(plan)
+    executing_head = _plan_source(plan)
     validate_admission(path, runtime, config, ledger)
     approval = _read(path.parent / "migration-retry-approval.json")
+    amendment = _source_amendment(plan)
+    supersession_path = path.parent / "migration-retry-supersession.json"
+    supersession: dict[str, object] | None = None
+    if supersession_path.exists():
+        supersession = _load_retry_supersession(path, plan, amendment)
+        approval = _object(supersession["approval"])
     if set(approval) != MIGRATION_RETRY_FIELDS:
         raise CampaignError("migration retry approval fields differ")
     body = _migration_retry_body(
@@ -423,8 +632,12 @@ def migration_retry_transition(
     workload = _read(Path(str(plan["workloadRecoveryPlanFile"])))
     image_prefix = f"{runtime['registryName']}.azurecr.io/mobius-api@"
     return {
-        "kind": "migration-image-continuation", "operatorSourceHead": plan["sourceHead"],
-        "transitionSha256": approval["authorizationSha256"],
+        "kind": "migration-image-continuation", "operatorSourceHead": executing_head,
+        "transitionSha256": (approval["authorizationSha256"] if amendment is None else _hash({
+            "retryAuthorizationSha256": approval["authorizationSha256"],
+            "operatorSourceAmendmentSha256": amendment["amendmentSha256"],
+            "supersessionSha256": (supersession["supersessionSha256"] if supersession else None),
+        })),
         "issuedAtUtc": approval["issuedAtUtc"], "expiresAtUtc": approval["expiresAtUtc"],
         "originalBindings": pause["bindings"], "migrationPauseSha256": plan["migrationPauseSha256"],
         "originalAttemptSha256": approval["originalAttemptSha256"],
@@ -502,7 +715,7 @@ def _cost(original: Path, replacement: Path, budget: Path) -> tuple[CampaignConf
         "proposed-corrected-bootstrap-prerequisite",
     }
     if (len(additions) != 3 or {_object(item).get("name") for item in additions} != names
-            or any(Decimal(str(_object(item).get("fixedUsd"))) < Decimal("0.0378")
+            or any(Decimal(str(_object(item).get("fixedUsd"))) < Decimal("0.0189")
                    for item in additions)):
         raise CampaignError("continuation does not cover the three additional executions")
     history = _read(budget)
@@ -803,13 +1016,13 @@ def load_context(
     path: Path, runtime_path: Path, config_path: Path, ledger_path: Path, *, operation: str,
 ) -> tuple[dict[str, str], CampaignConfig, Ledger]:
     plan = load_plan(path)
+    _plan_source(plan)
     allowed_operations = (MIGRATION_OPERATIONS - {"bootstrap", "startup"}
                           if plan.get("version") == MIGRATION_VERSION else ALLOWED_OPERATIONS)
     if (operation not in allowed_operations
             or str(runtime_path.resolve()) != plan["runtimeFile"]
             or str(config_path.resolve()) != plan["configFile"]
-            or str(ledger_path.resolve()) != plan["ledgerFile"]
-            or _plan_source(plan) != plan["sourceHead"]):
+            or str(ledger_path.resolve()) != plan["ledgerFile"]):
         raise CampaignError("continuation operation, files, or executing source differs")
     runtime, config = _effective(plan)
     if operation == "image" and "completedImagePlan" in plan:

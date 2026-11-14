@@ -17,6 +17,8 @@ from infra.milestone_7_8 import image_continuation as continuation
 from infra.milestone_7_8 import operator
 from infra.milestone_7_8.campaign import CampaignConfig, CampaignError, Ledger, Phase, save_ledger
 
+SOURCE_RESOLVER = continuation._plan_source
+
 
 @pytest.fixture
 def approved_image(
@@ -48,6 +50,8 @@ def approved_image(
         "runtimeFile": str(folder / "runtime.json"),
         "configFile": str(folder / "campaign-cost.json"),
         "ledgerFile": str(folder / "ledger.json"), "sourceHead": "d" * 40,
+        "canonicalBuildInputSha256": "9" * 64,
+        "amendmentSha256": "8" * 64,
         "failedMigrationExecution": "old-failed", "retainedImageId": "sha256:" + "1" * 64,
         "originalImageDigest": ledger.image_digest,
         "migrationPauseSha256": continuation._file_hash(folder / "migrate-stage-pause.json"),
@@ -169,3 +173,113 @@ def test_cost_preserves_prior_allowances_and_adds_exact_prerequisite(tmp_path: P
     with pytest.raises(CampaignError, match="preserve all prior allowances"):
         continuation._migration_cost(original, replacement)
     assert hashlib.sha256(original.read_bytes()).hexdigest() == original_hash
+
+
+def amend_source(
+    approved_image: tuple[Path, Path, dict[str, str], CampaignConfig, Ledger],
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, object]:
+    path, approval, *_ = approved_image
+    original = continuation.build_migration_retry_approval(
+        path, explicit_approval=approval, issued_at=NOW, expires_at=NOW + timedelta(minutes=15),
+    )
+    write(path.parent / "migration-retry-approval.json", original)
+    standing = write(path.parent / "source-approval.json", {
+        "planSha256": continuation.load_plan(path)["planSha256"],
+        "scope": "unused-migration-retry-operator-correction", "userText": "Synthetic approval",
+    })
+    monkeypatch.setattr(continuation, "_inspect_amended_source", lambda _: "e" * 40)
+    monkeypatch.setattr(continuation, "_predispatch_capture_files", lambda *_: {
+        str(approval): continuation._file_hash(approval),
+    })
+    record = continuation.build_operator_source_amendment(path, approval=standing)
+    write(path.parent / "operator-source-amendment.json", record)
+    monkeypatch.setattr(continuation, "_plan_source", SOURCE_RESOLVER)
+    return record
+
+
+def test_operator_source_amendment_retains_image_source_and_old_dispatch_window(
+    approved_image: tuple[Path, Path, dict[str, str], CampaignConfig, Ledger],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, _, runtime, config, ledger = approved_image
+    record = amend_source(approved_image, monkeypatch)
+    plan = continuation.load_plan(path)
+    assert continuation._plan_source(plan) == "e" * 40
+    assert plan["sourceHead"] == "d" * 40
+    transition = continuation.migration_retry_transition(path, runtime, config, ledger)
+    assert transition is not None
+    assert transition["operatorSourceHead"] == record["operatorSourceHead"]
+    assert transition["expiresAtUtc"] == (NOW + timedelta(minutes=15)).isoformat()
+    _, _, cleanup_ledger = continuation.load_context(
+        path, Path(str(plan["runtimeFile"])), Path(str(plan["configFile"])),
+        Path(str(plan["ledgerFile"])), operation="cleanup",
+    )
+    assert cleanup_ledger.phase == Phase.DATABASE_BOOTSTRAPPED
+
+
+@pytest.mark.parametrize("defect", ["source", "capture", "approval", "unknown-field"])
+def test_source_amendment_tampering_does_not_admit_new_operator(
+    approved_image: tuple[Path, Path, dict[str, str], CampaignConfig, Ledger],
+    monkeypatch: pytest.MonkeyPatch, defect: str,
+) -> None:
+    path, *_ = approved_image
+    record = amend_source(approved_image, monkeypatch)
+    if defect == "source":
+        monkeypatch.setattr(continuation, "_inspect_amended_source", lambda _: "f" * 40)
+    elif defect == "capture":
+        monkeypatch.setattr(continuation, "_predispatch_capture_files", lambda *_: {})
+    elif defect == "approval":
+        write(Path(str(record["approvalFile"])), {"scope": "wrong"})
+    else:
+        record["unexpected"] = True
+        record["amendmentSha256"] = continuation._hash({
+            key: value for key, value in record.items() if key != "amendmentSha256"
+        })
+        write(path.parent / "operator-source-amendment.json", record)
+    with pytest.raises(CampaignError, match="source amendment"):
+        continuation._plan_source(continuation.load_plan(path))
+
+
+def test_expired_unused_window_can_be_superseded_once_without_rewriting_original(
+    approved_image: tuple[Path, Path, dict[str, str], CampaignConfig, Ledger],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, explicit, runtime, config, ledger = approved_image
+    amend_source(approved_image, monkeypatch)
+    old_path = path.parent / "migration-retry-approval.json"
+    old_bytes = old_path.read_bytes()
+    replacement = write(path.parent / "replacement-explicit.json", continuation._read(explicit))
+    with pytest.raises(CampaignError, match="still open"):
+        continuation.build_migration_retry_supersession(
+            path, explicit_approval=replacement, issued_at=NOW,
+            expires_at=NOW + timedelta(minutes=15),
+        )
+    supersession = continuation.build_migration_retry_supersession(
+        path, explicit_approval=replacement, issued_at=NOW + timedelta(minutes=16),
+        expires_at=NOW + timedelta(minutes=31),
+    )
+    write(path.parent / "migration-retry-supersession.json", supersession)
+    transition = continuation.migration_retry_transition(path, runtime, config, ledger)
+    assert transition is not None
+    continuation.validate_migration_retry_window(transition, now=NOW + timedelta(minutes=17))
+    assert old_path.read_bytes() == old_bytes
+    with pytest.raises(CampaignError, match="already exists"):
+        continuation.build_migration_retry_supersession(
+            path, explicit_approval=replacement, issued_at=NOW + timedelta(minutes=32),
+            expires_at=NOW + timedelta(minutes=47),
+        )
+
+
+def test_supersession_rejects_any_recorded_retry_intent(
+    approved_image: tuple[Path, Path, dict[str, str], CampaignConfig, Ledger],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, explicit, *_ = approved_image
+    amend_source(approved_image, monkeypatch)
+    write(path.parent.parent / "migrate-stage-retry-intent.json", {"uncertain": True})
+    with pytest.raises(CampaignError, match="already dispatched or indeterminate"):
+        continuation.build_migration_retry_supersession(
+            path, explicit_approval=explicit, issued_at=NOW + timedelta(minutes=16),
+            expires_at=NOW + timedelta(minutes=31),
+        )

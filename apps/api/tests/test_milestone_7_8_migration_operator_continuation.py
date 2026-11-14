@@ -325,3 +325,60 @@ def test_normal_migration_continuation_rejects_unproved_history_or_observations(
     if defect == "retry-failure":
         assert "logs" in value.provider.events
         assert "stage-pause-recording-incomplete" not in errors
+
+
+@pytest.mark.parametrize("before,after,terminal", [
+    ("", "absent", None), (None, "", "absent"), ("absent", None, ""),
+])
+def test_normal_retry_accepts_empty_readonly_ephemeral_storage_shapes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    before: str | None, after: str | None, terminal: str | None,
+) -> None:
+    value = case(tmp_path, monkeypatch)
+
+    def shape(template: dict[str, object], observed: object) -> None:
+        container = cast(list[dict[str, object]], template["containers"])[0]
+        resources = cast(dict[str, object], container["resources"])
+        if observed == "absent":
+            resources.pop("ephemeralStorage", None)
+        else:
+            resources["ephemeralStorage"] = observed
+
+    shape(value.provider.original_template, before)
+    shape(value.provider.template, after)
+    original = deepcopy(value.provider.original_template)
+    current = deepcopy(value.provider.resource)
+    execution_result = value.provider.execution_result
+
+    def final_readback(name: str, status: str) -> dict[str, object]:
+        response = execution_result(name, status)
+        if name == value.provider.retry_execution:
+            payload = json.loads(str(response["stdout"]))
+            shape(payload["properties"]["template"], terminal)
+            response["stdout"] = json.dumps(payload)
+        return response
+
+    monkeypatch.setattr(value.provider, "execution_result", final_readback)
+    status, errors = value.run(monkeypatch)
+    assert status == 0, errors
+    assert value.ledger.phase == Phase.MIGRATED.value
+    assert value.provider.original_template == original
+    assert value.provider.resource == current
+
+
+@pytest.mark.parametrize("field,observed", [
+    ("ephemeralStorage", "1Gi"), ("ephemeralStorage", 0),
+    ("ephemeralStorage", False), ("ephemeralStorage", []),
+    ("ephemeralStorage", {}), ("cpu", 1), ("memory", "2Gi"),
+])
+def test_retry_rejects_nonempty_or_malformed_storage_and_other_resource_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, observed: object,
+) -> None:
+    value = case(tmp_path, monkeypatch)
+    container = cast(list[dict[str, object]], value.provider.template["containers"])[0]
+    cast(dict[str, object], container["resources"])[field] = observed
+    status, errors = value.run(monkeypatch)
+    assert status == 2, errors
+    assert "retry-start" not in value.provider.events
+    assert "cleanup" not in value.provider.events
+    assert value.ledger.phase == Phase.DATABASE_BOOTSTRAPPED.value
