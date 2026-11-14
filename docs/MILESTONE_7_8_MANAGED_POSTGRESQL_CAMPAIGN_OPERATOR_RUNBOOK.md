@@ -1010,6 +1010,20 @@ must match the declared object identities. Identity changes commit in
 `postgres` before schema and grant work in `opencanvas`. Recovery rechecks
 the durable state after a partial bootstrap.
 
+The listing reader projects provider rows as JSON before selecting the bound
+role names. It accepts the documented `rolename` and the reported `rolname`
+field, with case-insensitive field spelling. It rejects duplicate or conflicting
+aliases, malformed identity/flag fields and duplicate roles before filtering;
+an unsupported response must never look like an empty, safe-to-create state.
+The selected mappings retain the exact object-ID, tenant-consistency, service
+principal, administrator and MFA checks. See the
+[Microsoft return contract](https://learn.microsoft.com/en-us/azure/postgresql/security/security-manage-entra-users#list-microsoft-entra-roles-using-sql)
+and the [reported provider output](https://github.com/Azure/azure-postgresql/issues/117).
+These sources support local compatibility tests; they do not establish the
+installed function's output on a particular managed server. Any further catalog
+diagnosis remains a scoped read-only operation under its execution approval.
+The normal managed prerequisite must pass before principal writes.
+
 Bootstrap installs and verifies `public.vector`. Migration retains the
 historical revisions and verifies the installed extension before DDL. Bootstrap
 manages the extension member ACL separately from migration-owned application

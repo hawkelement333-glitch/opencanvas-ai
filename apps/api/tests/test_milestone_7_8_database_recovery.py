@@ -227,13 +227,10 @@ class Connection:
             return Result(self.observed["roles"])
         if "pgaadauth_list_principals" in sql:
             assert self.database == "postgres"
-            assert isinstance(parameters, dict)
+            assert parameters is None and "p.rolename" not in sql and "p.rolname" not in sql
             if error := self.observed.get("listingError"):
                 raise error
-            return Result([
-                item for item in self.observed["mappings"]
-                if item["mapping"]["rolename"] in parameters["names"]
-            ])
+            return Result(self.observed["mappings"])
         for fragment, key in (
             ("FROM pg_catalog.pg_auth_members", "memberships"),
             ("FROM pg_catalog.pg_class c", "relations"),
@@ -277,6 +274,65 @@ def separate_identity(connection: Connection) -> Connection:
     identity = Connection(connection.observed)
     identity.database = "postgres"
     return identity
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name_field", ["rolname", "rolename", "roleName"])
+async def test_list_mappings_accepts_named_provider_columns(
+    manifest: PrincipalManifest, name_field: str,
+) -> None:
+    observed = state(manifest)
+    mappings = observed["mappings"]
+    for entry in mappings:
+        mapping = entry["mapping"]
+        mapping[name_field] = mapping.pop("rolename")
+    mappings.extend([
+        {"mapping": {**mappings[0]["mapping"], name_field: "unrelated-group",
+                     "principalType": "group"}},
+        {"mapping": {**mappings[0]["mapping"], name_field: "unrelated-user",
+                     "principalType": "user"}},
+    ])
+    mappings.reverse()
+    identity = cast(AsyncConnection, separate_identity(Connection(observed)))
+    principals = [manifest.principals[slot] for slot in recovery.SLOTS]
+    requested = {principal.name: principal.object_id for principal in principals}
+    rows = await identity_sql.list_mappings(identity, list(requested))
+    assert [row["mapping"] for row in rows] == [
+        entry["mapping"] for name in sorted(requested) for entry in mappings
+        if entry["mapping"][name_field] == name
+    ]
+    identity_sql.require_mappings(rows, requested)
+    assert await identity_sql.list_mappings(identity, ["no-such-valid-principal"]) == []
+    with pytest.raises(RuntimeError, match="database Entra mapping differs"):
+        identity_sql.require_mappings(rows, dict.fromkeys(requested, "unverified"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "defect", ["name", "alias", "case", "object", "tenant", "flags", "duplicate"],
+)
+async def test_malformed_listing_cannot_look_like_an_empty_recovery_scope(
+    manifest: PrincipalManifest, defect: str,
+) -> None:
+    observed = state(manifest, absent=4)
+    row = observed["mappings"][0]["mapping"]
+    if defect == "name":
+        row["unrecognizedName"] = row.pop("rolename")
+    elif defect == "alias":
+        row["rolname"] = row["rolename"]
+    elif defect == "case":
+        row["roleName"] = row["rolename"]
+    elif defect == "object":
+        row.pop("objectId")
+    elif defect == "tenant":
+        row["tenantId"] = "unverified"
+    elif defect == "flags":
+        row["isAdmin"] = True
+    else:
+        observed["mappings"].append(observed["mappings"][0])
+    identity = cast(AsyncConnection, separate_identity(Connection(observed)))
+    with pytest.raises(RuntimeError, match="database Entra mapping"):
+        await identity_sql.list_mappings(identity, [])
 
 
 @pytest.mark.asyncio

@@ -83,15 +83,49 @@ async def function_executable(connection: AsyncConnection, signature: str) -> bo
 async def list_mappings(
     connection: AsyncConnection, names: list[str]
 ) -> list[dict[str, object]]:
-    # Always invoke the provider's read API, including an empty result on a fresh server.
+    # Microsoft Entra role management documents rolename; this report uses rolname.
+    # https://github.com/Azure/azure-postgresql/issues/117
     rows = await connection.execute(
-        text(
-            "SELECT to_jsonb(p) AS mapping FROM pg_catalog.pgaadauth_list_principals(false) AS p "
-            "WHERE p.rolename::text = ANY(CAST(:names AS text[])) ORDER BY p.rolename"
-        ),
-        {"names": names},
+        text("SELECT to_jsonb(p) AS mapping FROM pg_catalog.pgaadauth_list_principals(false) AS p")
     )
-    return [dict(row) for row in rows.mappings()]
+    requested = set(names)
+    seen: set[str] = set()
+    selected: dict[str, dict[str, object]] = {}
+    for row in rows.mappings():
+        item = dict(row)
+        name, _ = _mapping_fields(item)
+        if name in seen:
+            raise RuntimeError("database Entra mapping is duplicated")
+        seen.add(name)
+        if name in requested:
+            selected[name] = item
+    return [selected[name] for name in sorted(selected)]
+
+
+def _mapping_fields(item: Mapping[str, object]) -> tuple[str, dict[str, object]]:
+    raw = item.get("mapping")
+    if not isinstance(raw, dict) or any(not isinstance(key, str) for key in raw):
+        raise RuntimeError("database Entra mapping is unverified")
+    mapping: dict[str, object] = {key.casefold(): value for key, value in raw.items()}
+    names = [mapping[key] for key in ("rolename", "rolname") if key in mapping]
+    if (
+        len(mapping) != len(raw)
+        or len(names) != 1
+        or not isinstance(name := names[0], str)
+        or not name
+        or mapping.get("principaltype") not in ("user", "group", "service")
+        or not isinstance(mapping.get("objectid"), str)
+        or not isinstance(mapping.get("tenantid"), str)
+        or any(type(mapping.get(key)) is not int or mapping[key] not in (0, 1)
+               for key in ("isadmin", "ismfa"))
+    ):
+        raise RuntimeError("database Entra mapping is unverified")
+    try:
+        if any(uuid.UUID(str(mapping[key])).int == 0 for key in ("objectid", "tenantid")):
+            raise ValueError
+    except ValueError:
+        raise RuntimeError("database Entra mapping is unverified") from None
+    return name, mapping
 
 
 def require_mappings(
@@ -103,31 +137,20 @@ def require_mappings(
     observed: set[str] = set()
     tenants: set[uuid.UUID] = set()
     for item in rows:
-        raw = item.get("mapping")
-        if not isinstance(raw, dict) or any(not isinstance(key, str) for key in raw):
-            raise RuntimeError("database Entra mapping is unverified")
-        mapping = {key.casefold(): value for key, value in raw.items()}
-        name = mapping.get("rolename")
+        name, mapping = _mapping_fields(item)
         try:
-            tenant = uuid.UUID(str(mapping.get("tenantid")))
-            valid = (
-                len(mapping) == len(raw)
-                and isinstance(name, str)
-                and name in expected
-                and name not in observed
-                and mapping.get("principaltype") == "service"
-                and uuid.UUID(str(mapping.get("objectid"))) == uuid.UUID(expected[name])
-                and type(mapping.get("isadmin")) is int
-                and mapping["isadmin"] == int(name in admins)
-                and type(mapping.get("ismfa")) is int
-                and mapping["ismfa"] == 0
-                and tenant.int != 0
-            )
-        except (ValueError, KeyError):
-            valid = False
-        if not valid or not isinstance(name, str):
+            expected_object = uuid.UUID(expected[name])
+        except (KeyError, ValueError):
+            raise RuntimeError("database Entra mapping differs") from None
+        if (
+            name in observed
+            or mapping["principaltype"] != "service"
+            or uuid.UUID(str(mapping["objectid"])) != expected_object
+            or mapping["isadmin"] != int(name in admins)
+            or mapping["ismfa"] != 0
+        ):
             raise RuntimeError("database Entra mapping differs")
-        tenants.add(tenant)
+        tenants.add(uuid.UUID(str(mapping["tenantid"])))
         observed.add(name)
     if observed != set(expected) or len(tenants) > 1:
         raise RuntimeError("database Entra mapping is missing or tenant bindings differ")
