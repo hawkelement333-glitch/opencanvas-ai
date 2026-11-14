@@ -420,8 +420,8 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = if (workloadEnabled) 
           name: 'documents'
           storageType: 'AzureFile'
           storageName: documentEnvironmentStorage.name
-          // The reviewed Linux image runs as uid=100, gid=101; require encrypted SMB.
-          mountOptions: 'uid=100,gid=101,dir_mode=0770,file_mode=0770,vers=3.1.1,seal'
+          // ACA rejects seal; the storage account requires encrypted SMB3.1.1.
+          mountOptions: 'uid=100,gid=101,dir_mode=0770,file_mode=0770,vers=3.1.1'
         }
       ]
       scale: { minReplicas: 4, maxReplicas: 4 }
@@ -458,7 +458,7 @@ resource workerJob 'Microsoft.App/jobs@2024-03-01' = if (workloadEnabled) {
           name: 'documents'
           storageType: 'AzureFile'
           storageName: documentEnvironmentStorage.name
-          mountOptions: 'uid=100,gid=101,dir_mode=0770,file_mode=0770,vers=3.1.1,seal'
+          mountOptions: 'uid=100,gid=101,dir_mode=0770,file_mode=0770,vers=3.1.1'
         }
       ]
     }

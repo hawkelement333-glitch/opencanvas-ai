@@ -1350,9 +1350,63 @@ campaign deadline, budget and protection still hold. Missing dispatch/start
 history cannot be reconstructed from matching state. A source/config/image change
 cannot retrospectively rebind a live attempt. The explicitly approved bootstrap
 source transition below adds new evidence; it never edits or replaces those
-historical bindings. Other paused stages have no new
-redispatch mechanism; retain evidence and investigate within their bounded window
+historical bindings. Apart from the specific absent-workload repair below, other
+paused stages have no new redispatch mechanism; retain evidence and investigate within their bounded window
 or explicitly abandon/clean up. Once cleanup has started, it cannot be reversed.
+
+### Verified absent-workload mount repair
+
+The captured workload deployment rejected `seal` as an unsupported Azure Files
+mount option. Exact resource GETs prove the API, worker, evidence job and migration
+probe absent; six other job definitions succeeded. Preserve the failed deployment,
+original stage pause and its timestamps, runtime, image provenance, successful
+zero-build push/scan/restoration, and all successful resources. Do not repeat the
+full workload template. Remove only `seal`; retain UID/GID, directory/file modes,
+SMB 3.1.1, secure-transfer enforcement, AES-GCM restrictions and private networking.
+
+`workload_recovery` supports only this recorded attempt and its clean child source
+checkpoint. It independently verifies unchanged canonical image inputs and cleanup
+script, the five protected stashes, exact failure/absence history and the retained
+image admission. The historical runtime/image source stays unchanged; the plan
+records the corrected executing operator source separately. The derived template
+contains only the four proved-absent declarations, their internal dependencies and
+read-only references to existing identities, using new deployment record names.
+Neither the base resources nor the six successful jobs are resubmitted.
+
+After local validation and checkpointing, use the existing serializer to persist
+`workload_recovery.build_plan(plan_path, runtime, config, ledger,
+deploy_until=<reviewed UTC cutoff>)` in the original bundle's private
+`workload-recovery/plan.json`. The standing correction approval must cover these
+exact missing resources. Record the plan hash and separate executing-source
+binding before dispatch. Issue the existing v5 image-decision/cleanup authorization
+with its original runtime bindings. The new, bounded repair dispatch cutoff must
+be no later than 45 minutes before the unchanged campaign deadline. This is new
+authority for verified absent-resource creation, not an extension or replay of the
+failed deployment's original pause window. Bootstrap/migration retry limits and
+their 15-minute dispatch windows are unchanged.
+
+```powershell
+& $python -B -m infra.milestone_7_8.operator image-decision `
+  --config $config --runtime $runtime --ledger $ledger `
+  --workload-recovery $repairPlan --workload-recovery-sha256 $repairPlanHash
+& $python -B -m infra.milestone_7_8.operator image-decision `
+  --config $config --runtime $runtime --ledger $ledger `
+  --workload-recovery $repairPlan --workload-recovery-sha256 $repairPlanHash `
+  --authorization $repairAuthorization --execute
+```
+
+Dispatch requires fresh cleanup protection and exact readbacks establishing all
+four targets still absent and the six successful jobs unchanged. Durable intent
+precedes the single bounded repair deployment. Missing/uncertain results never
+permit a repeat. Completion requires genuine successful deployment/identity
+outputs, all ten workload readbacks, exact corrected mounts and preservation of
+the six jobs. Only validated completion advances image admission with zero builds
+and the original scan. Subsequent bootstrap, migration, evidence and disposal use
+the same repair plan/hash so the original pause is resolved only by that receipt.
+No database job starts as part of this repair. Cleanup remains independently
+available under its existing authority; a repair receipt is not a cleanup
+prerequisite. The original campaign and cleanup deadlines and cumulative cost
+ceilings remain controlling.
 
 ### Explicit bootstrap operator-source transition
 

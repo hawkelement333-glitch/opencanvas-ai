@@ -98,7 +98,7 @@ def test_api_and_worker_share_only_the_private_document_mount(
         ]
         assert template["volumes"] == [{
             "name": "documents", "storageType": "AzureFile", "storageName": "m78-documents",
-            "mountOptions": "uid=100,gid=101,dir_mode=0770,file_mode=0770,vers=3.1.1,seal",
+            "mountOptions": "uid=100,gid=101,dir_mode=0770,file_mode=0770,vers=3.1.1",
         }]
         assert any("managedEnvironments/storages" in item for item in resource["dependsOn"])
         assert "listKeys(" not in json.dumps(template)
@@ -109,6 +109,28 @@ def test_api_and_worker_share_only_the_private_document_mount(
     for job in compiled_storage["resources"]:
         if job["type"] == "Microsoft.App/jobs" and job is not worker:
             assert "volumes" not in job["properties"]["template"]
+
+
+@pytest.mark.parametrize("kind,name", [
+    ("Microsoft.App/containerApps", ""),
+    ("Microsoft.App/jobs", "job-m78-{0}-worker"),
+])
+def test_azure_files_mount_uses_service_encryption_without_unsupported_seal(
+    compiled_storage: dict[str, Any], kind: str, name: str,
+) -> None:
+    resource = _resource(compiled_storage, kind, name)
+    options = resource["properties"]["template"]["volumes"][0]["mountOptions"].split(",")
+    assert "seal" not in options
+    assert "vers=3.1.1" in options
+    account = _resource(compiled_storage, "Microsoft.Storage/storageAccounts")
+    assert account["properties"]["supportsHttpsTrafficOnly"] is True
+    assert account["properties"]["publicNetworkAccess"] == "Disabled"
+    service = _resource(compiled_storage, "Microsoft.Storage/storageAccounts/fileServices")
+    assert service["properties"]["protocolSettings"]["smb"] == {
+        "versions": "SMB3.1.1",
+        "authenticationMethods": "NTLMv2",
+        "channelEncryption": "AES-128-GCM;AES-256-GCM",
+    }
 
 
 def test_migration_identity_probe_receives_exact_private_api_target(

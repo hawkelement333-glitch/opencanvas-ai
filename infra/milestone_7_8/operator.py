@@ -2260,6 +2260,7 @@ def _active_protected_pause(
     ledger: Ledger,
     source_transition: dict[str, object] | None = None,
     *, resolved_image_pause_sha256: str | None = None,
+    resolved_workload_pause_sha256: str | None = None,
 ) -> dict[str, object] | None:
     active: list[dict[str, object]] = []
     for operation in sorted(PROTECTED_STAGE_OPERATIONS):
@@ -2289,6 +2290,9 @@ def _active_protected_pause(
                 and hashlib.sha256(path.read_bytes()).hexdigest() == resolved_image_pause_sha256):
             # Supplied only after the complete predecessor-bound image admission
             # has replayed. The failed attempt and its original window stay intact.
+            continue
+        if (operation == "image-decision" and resolved_workload_pause_sha256 is not None
+                and hashlib.sha256(path.read_bytes()).hexdigest() == resolved_workload_pause_sha256):
             continue
         completed_path = directory / f"{operation}-stage-recovery-completed.json"
         if completed_path.exists():
@@ -2675,7 +2679,7 @@ def _database_attempt_history(
 
 
 def _verify_retry_protection(
-    runner: SubprocessRunner,
+    runner: CommandRunner,
     config: CampaignConfig,
     runtime: dict[str, str],
     ledger: Ledger,
@@ -3107,7 +3111,7 @@ def _finish_database_retry(
 
 
 def execute_commands(
-    runner: SubprocessRunner, commands: tuple[tuple[str, ...], ...]
+    runner: CommandRunner, commands: tuple[tuple[str, ...], ...]
 ) -> list[dict[str, object]]:
     results: list[dict[str, object]] = []
     for command in commands:
@@ -5002,10 +5006,18 @@ def main() -> int:
     parser.add_argument("--resume-database-job", action="store_true")
     parser.add_argument("--bootstrap-source-transition", type=Path)
     parser.add_argument("--image-continuation", type=Path)
+    parser.add_argument("--workload-recovery", type=Path)
+    parser.add_argument("--workload-recovery-sha256")
     args = parser.parse_args()
     try:
         if args.resume_database_job and args.operation not in {"bootstrap", "migrate"}:
             raise CampaignError("only bootstrap or migrate supports a guarded database retry")
+        if args.workload_recovery is not None and (
+            args.image_continuation is not None or args.bootstrap_source_transition is not None
+        ):
+            raise CampaignError("independent source transitions cannot be combined")
+        if args.workload_recovery is None and args.workload_recovery_sha256 is not None:
+            raise CampaignError("workload recovery hash requires its exact private plan")
         cleanup_only = args.operation in {
             "cleanup",
             "cleanup-wait",
@@ -5038,6 +5050,29 @@ def main() -> int:
                 runtime,
                 config,
             )
+        repaired_workload_pause = None
+        if args.workload_recovery is not None:
+            from infra.milestone_7_8 import workload_recovery
+
+            if any(actual.resolve() != workload_recovery.PRIVATE / name for actual, name in (
+                (args.runtime, "runtime.json"), (args.config, "campaign-cost.json"),
+                (args.ledger, "ledger.json"),
+            )):
+                raise CampaignError("workload recovery requires the original prepared bundle files")
+            if not cleanup_only:
+                if args.operation not in workload_recovery.OPERATIONS:
+                    raise CampaignError("workload recovery does not admit this phase")
+                workload_plan = workload_recovery.load_plan(args.workload_recovery, runtime, config)
+                if args.workload_recovery_sha256 != workload_plan["planSha256"]:
+                    raise CampaignError("workload recovery plan does not match the approved hash")
+                if args.operation != "image-decision":
+                    repaired_workload_pause = workload_recovery.resume_pause(
+                        args.workload_recovery, workload_plan, runtime, config, ledger,
+                    )
+            else:
+                # Cleanup must remain possible after an incomplete repair. It
+                # keeps the frozen runtime and never consumes a repair receipt.
+                workload_recovery._source(runtime)
         source_transition = None
         if args.bootstrap_source_transition is not None:
             from infra.milestone_7_8.bootstrap_transition import (
@@ -5131,6 +5166,48 @@ def main() -> int:
                     runtime=runtime,
                     operation=authorized_operation,
                 )
+        if args.workload_recovery is not None and args.operation == "image-decision":
+            if args.image_built or args.image_digest is not None or args.image_scan_evidence is not None:
+                raise CampaignError("workload recovery uses only the retained admitted image evidence")
+            if not args.execute:
+                print(json.dumps({"operation": "workload-recovery", "mutationAuthorized": False,
+                                  "planSha256": workload_plan["planSha256"],
+                                  "resourceCount": len(workload_recovery.MISSING)}))
+                return 0
+            if args.authorization is None:
+                raise CampaignError("workload recovery authorization is missing")
+
+            def authorize_workload_recovery() -> None:
+                for permitted in ("image-decision", "cleanup"):
+                    load_execution_authorization(
+                        args.authorization, config=config, runtime=runtime, operation=permitted,
+                    )
+
+            recovery_runner = SubprocessRunner(timeout_seconds=min(900, max(
+                1, (parse_utc(str(workload_plan["deployUntilUtc"])) - datetime.now(UTC)).total_seconds(),
+            )))
+            try:
+                workload_recovery.execute(
+                    args.workload_recovery, workload_plan, runtime, config, ledger,
+                    authorization=args.authorization, runner=recovery_runner,
+                    authorize=authorize_workload_recovery,
+                )
+            except Exception as repair_error:
+                if isinstance(repair_error, _ProtectedStageExpired) or not _stage_is_protected(
+                    config, runtime, ledger,
+                ):
+                    try:
+                        require_cleanup_authority()
+                        start_failure_cleanup(SubprocessRunner(), config, runtime,
+                                              require_cleanup_authority)
+                        ledger.transition(Phase.CLEANING, datetime.now(UTC))
+                        save_ledger(args.ledger, ledger)
+                    except Exception as cleanup_error:
+                        print(json.dumps({"status": "cleanup-recording-failed",
+                                          "error": str(cleanup_error)}), file=sys.stderr)
+                raise
+            print(json.dumps({"status": "passed", "phase": ledger.phase}, sort_keys=True))
+            return 0
         if args.image_continuation is not None and args.operation == "image-decision":
             if (args.image_digest is None or args.image_scan_evidence is None
                     or (args.execute and args.authorization is None) or args.image_built):
@@ -5203,6 +5280,7 @@ def main() -> int:
             )
             if _active_protected_pause(
                 args.ledger.parent, config, runtime, ledger, source_transition,
+                resolved_workload_pause_sha256=repaired_workload_pause,
             ) is not None:
                 raise _ProtectedStagePaused("another protected stage remains paused")
             ledger.transition(Phase.EVIDENCE_EXECUTED, datetime.now(UTC))
@@ -5302,6 +5380,7 @@ def main() -> int:
                             args.image_continuation, runtime, config, ledger,
                         ) if args.image_continuation is not None else None
                     ),
+                    resolved_workload_pause_sha256=repaired_workload_pause,
                 )
                 if recovery_pause is not None:
                     already_dispatched = (
