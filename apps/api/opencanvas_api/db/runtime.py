@@ -59,7 +59,7 @@ async def validate_database_runtime(
                 )
             ).scalar_one_or_none()
             revision = (
-                await connection.execute(text("SELECT version_num FROM alembic_version"))
+                await connection.execute(text("SELECT version_num FROM public.alembic_version"))
             ).scalar_one_or_none()
             validate_postgresql_capabilities(
                 server_version=server_version,

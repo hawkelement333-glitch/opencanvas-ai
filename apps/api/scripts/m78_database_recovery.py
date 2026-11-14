@@ -5,7 +5,6 @@ import asyncio
 import hashlib
 import json
 import re
-import uuid
 from os import environ
 from typing import Literal
 
@@ -19,6 +18,13 @@ from opencanvas_api.db.principal_manifest import (
     PrincipalSlot,
 )
 from opencanvas_api.db.runtime import MIGRATION_ADVISORY_LOCK_ID
+from scripts.m78_database_identity import (
+    APPLICATION_DATABASE,
+    IDENTITY_DATABASE,
+    list_mappings,
+    require_bound_connection,
+    require_mappings,
+)
 
 Operation = Literal["bootstrap", "migrate"]
 PREFIX = "M78_DATABASE_RECOVERY "
@@ -58,6 +64,7 @@ async def _rows(
 async def _observe(
     connection: AsyncConnection,
     manifest: PrincipalManifest,
+    identity: AsyncConnection,
 ) -> dict[str, object]:
     parameters: dict[str, object] = {slot.value: manifest.principals[slot].name for slot in SLOTS}
     names = ":migration, :api, :worker, :evidence"
@@ -70,16 +77,7 @@ async def _observe(
         ),
         parameters,
     )
-    # Microsoft documents this read API and its objectId/principalType/admin/MFA columns.
-    # No SECURITY LABEL, role reset, identity substitution, or Graph request is performed.
-    mappings = await _rows(
-        connection,
-        (
-            "SELECT to_jsonb(p) AS mapping FROM pg_catalog.pgaadauth_list_principals(false) AS p "
-            f"WHERE p.rolename IN ({names}) ORDER BY p.rolename"
-        ),
-        parameters,
-    )
+    mappings = await list_mappings(identity, [manifest.principals[slot].name for slot in SLOTS])
     memberships = await _rows(
         connection,
         (
@@ -189,7 +187,7 @@ def _validate(
 ) -> tuple[str, str, int, int]:
     slot = PrincipalSlot.BOOTSTRAP if operation == "bootstrap" else PrincipalSlot.MIGRATION
     current = observation["currentUser"]
-    if not isinstance(current, str) or observation["database"] != "opencanvas":
+    if not isinstance(current, str) or observation["database"] != APPLICATION_DATABASE:
         raise RuntimeError("database retry target binding differs")
     manifest.require_current(slot, current_name=current)
     if any(
@@ -224,34 +222,9 @@ def _validate(
         ):
             raise RuntimeError("database retry principal is unexpected or overprivileged")
         seen.add(name)
-    mapped: set[str] = set()
-    for item in mappings:
-        raw = item.get("mapping") if isinstance(item, dict) else None
-        if not isinstance(raw, dict) or any(not isinstance(key, str) for key in raw):
-            raise RuntimeError("database retry Entra mapping is unverified")
-        mapping = {key.casefold(): value for key, value in raw.items()}
-        name = mapping.get("rolename")
-        try:
-            valid = (
-                len(mapping) == len(raw)
-                and isinstance(name, str)
-                and name in seen
-                and name not in mapped
-                and mapping.get("principaltype") == "service"
-                and uuid.UUID(str(mapping.get("objectid"))) == uuid.UUID(expected[name].object_id)
-                and type(mapping.get("isadmin")) is int
-                and mapping["isadmin"] == 0
-                and type(mapping.get("ismfa")) is int
-                and mapping["ismfa"] == 0
-                and uuid.UUID(str(mapping.get("tenantid"))).int != 0
-            )
-        except (ValueError, KeyError):
-            valid = False
-        if not valid or not isinstance(name, str):
-            raise RuntimeError("database retry Entra mapping differs")
-        mapped.add(name)
-    if mapped != seen:
-        raise RuntimeError("database retry Entra mapping is missing")
+    if any(not isinstance(item, dict) for item in mappings):
+        raise RuntimeError("database retry Entra mapping is malformed")
+    require_mappings(mappings, {name: expected[name].object_id for name in seen})
     memberships = observation["memberships"]
     if not isinstance(memberships, list):
         raise RuntimeError("database retry role memberships are unverified")
@@ -319,6 +292,7 @@ def _validate(
 async def require_safe_retry(
     connection: AsyncConnection,
     *,
+    identity: AsyncConnection,
     operation: Operation,
     previous_execution: str,
     manifest: PrincipalManifest,
@@ -330,8 +304,10 @@ async def require_safe_retry(
     """
     if retry_argument([f"--retry-after-execution={previous_execution}"]) != previous_execution:
         raise RuntimeError("database retry execution binding differs")
+    slot = PrincipalSlot.BOOTSTRAP if operation == "bootstrap" else PrincipalSlot.MIGRATION
     async with asyncio.timeout(30):
-        observation = await _observe(connection, manifest)
+        await require_bound_connection(identity, manifest, slot, IDENTITY_DATABASE)
+        observation = await _observe(connection, manifest, identity)
     state, revision, count, relation_count = _validate(observation, manifest, operation)
     raw_manifest = json.loads(environ[MANIFEST_ENV])
     marker: dict[str, object] = {

@@ -22,6 +22,7 @@ from infra.milestone_7_8.automation_region import (
     select_automation_region_from_results,
     selection_from_document,
 )
+from infra.milestone_7_8.azure_cli import AzureCliError
 from infra.milestone_7_8.campaign import (
     ORDER,
     RESIDUE_KEYS,
@@ -2458,6 +2459,175 @@ def _validate_retry_job_limits(
     return cast(dict[str, object], manifest), _stage_hash("database-recovery-manifest", manifest)
 
 
+def _database_prerequisites(
+    runner: SubprocessRunner,
+    command: tuple[str, ...],
+    *,
+    operation: str,
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    ledger: Ledger,
+    directory: Path,
+    authorization_path: Path,
+    retry: bool,
+) -> None:
+    from infra.milestone_7_8.database_prerequisites import (
+        PREREQUISITE_MARKER,
+        PREREQUISITE_TOKEN,
+        validate_database_template,
+        validate_prerequisite_marker,
+    )
+    from infra.milestone_7_8.evidence_console import read_job_marker
+
+    deadline = parse_utc(config.cleanup_deadline_utc)
+    receipt = directory / f"{operation}-prerequisites.json"
+    intent = directory / f"{operation}-prerequisite-intent.json"
+    bindings = _stage_bindings(config, runtime, ledger)
+    if receipt.exists():
+        record = _read_stage_record(receipt, "database-prerequisites")
+        request = _read_stage_record(intent, "database-prerequisite-intent")
+        if (
+            record.get("bindings") != bindings
+            or record.get("operation") != operation
+            or record.get("intentSha256") != request["recordSha256"]
+        ):
+            raise _ProtectedStagePaused("database prerequisite receipt binding differs")
+        marker = validate_prerequisite_marker(
+            record.get("marker"), operation=operation,
+            campaign_id=config.campaign_id, generation_id=config.generation_id,
+        )
+        if retry and marker["listingRead"] is not True:
+            raise _ProtectedStagePaused("migration identity listing is unproved for guarded retry")
+        return
+    if intent.exists() or retry:
+        raise _ProtectedStagePaused("database prerequisite evidence is incomplete")
+    allocated = [
+        item for item in config.resource_items if item.name == "database-prerequisites"
+    ]
+    if len(allocated) != 1 or allocated[0].maximum() < Decimal("0.0567"):
+        raise _ProtectedStagePaused("two database prerequisite jobs are not covered by cost gate")
+    if not ledger.image_digest:
+        raise _ProtectedStagePaused("database prerequisite image is missing")
+    _verify_retry_protection(runner, config, runtime, ledger)
+    token = uuid.uuid4().hex
+    started_by = time.monotonic() + 600
+    job = runtime["bootstrapJobName" if operation == "bootstrap" else "migrationJobName"]
+    container = ""
+    intent_sha256 = ""
+    diagnostic_command = (
+        *command,
+        "--args=--diagnose-prerequisites",
+        "--env-vars",
+        f"{PREREQUISITE_TOKEN}={token}",
+    )
+    if "--subscription" not in diagnostic_command:
+        diagnostic_command += ("--subscription", runtime["subscriptionId"])
+
+    def check_authority() -> None:
+        if not _stage_is_protected(config, runtime, ledger):
+            raise _ProtectedStageExpired("database prerequisite protection expired")
+        for required in (operation, "cleanup"):
+            load_execution_authorization(
+                authorization_path, config=config, runtime=runtime, operation=required,
+            )
+
+    class DiagnosticRunner:
+        def run(self, request: tuple[str, ...]) -> dict[str, object]:
+            remaining = min(
+                started_by - time.monotonic(), (deadline - datetime.now(UTC)).total_seconds(),
+            )
+            if remaining <= 0:
+                raise CampaignError("database prerequisite time budget is exhausted")
+            return SubprocessRunner(
+                timeout_seconds=min(30, remaining),
+                diagnostic_capture_directory=directory,
+            ).run(request)
+
+    diagnostic_runner = DiagnosticRunner()
+    def before_dispatch(resource: dict[str, object]) -> None:
+        nonlocal container, intent_sha256
+        properties = resource.get("properties")
+        template = properties.get("template") if isinstance(properties, dict) else None
+        manifest, _ = _validate_retry_job_limits(operation, resource, template)
+        if (
+            manifest.get("campaignId") != config.campaign_id
+            or manifest.get("generationId") != config.generation_id
+            or manifest.get("subscriptionCorrelation") != config.subscription_correlation
+        ):
+            raise _ProtectedStagePaused("database prerequisite manifest binding differs")
+        container = validate_database_template(
+            resource, manifest, operation=operation, subscription=runtime["subscriptionId"],
+            group=runtime["resourceGroupName"], server=runtime["postgresServerName"],
+            registry=runtime["registryName"], image_digest=str(ledger.image_digest),
+        )
+        check_authority()
+        request = _stage_record(intent, "database-prerequisite-intent", {
+            "operation": operation, "bindings": bindings, "token": token,
+            "authorizationSha256": hashlib.sha256(authorization_path.read_bytes()).hexdigest(),
+            "templateSha256": _stage_hash("stage-template", resource),
+            "startedAtUtc": datetime.now(UTC).isoformat(),
+        })
+        intent_sha256 = str(request["recordSha256"])
+        check_authority()
+
+    module = (
+        "scripts.bootstrap_postgres" if operation == "bootstrap" else "scripts.migrate_and_grant"
+    )
+    try:
+        started = start_evidence_job(
+            diagnostic_runner, diagnostic_command, private_directory=directory,
+            image_digest=ledger.image_digest, expected_command=("python", "-m", module),
+            before_dispatch=before_dispatch,
+        )
+        if started.get("exitCode") != 0:
+            raise CampaignError("database prerequisite dispatch is unproved")
+        _stage_record(directory / f"{operation}-prerequisite-start.json",
+                      "database-prerequisite-start", started)
+        waited = _wait_for_job(
+            diagnostic_runner, diagnostic_command, started, deadline=deadline,
+            maximum_wait_seconds=240,
+        )
+        execution = str(waited["executionName"])
+        response = _json_result(cast(dict[str, object], waited["executionReadback"]))
+        expected_id = (
+            f"/subscriptions/{runtime['subscriptionId']}"
+            f"/resourceGroups/{runtime['resourceGroupName']}"
+            f"/providers/Microsoft.App/jobs/{job}/executions/{execution}"
+        )
+        if (
+            not isinstance(response, dict)
+            or response.get("name") != execution
+            or str(response.get("id", "")).casefold() != expected_id.casefold()
+        ):
+            raise CampaignError("database prerequisite execution readback differs")
+        marker = validate_prerequisite_marker(
+            read_job_marker(
+                diagnostic_runner,
+                subscription=runtime["subscriptionId"], group=runtime["resourceGroupName"],
+                workspace=runtime["logAnalyticsWorkspaceName"], job=job, execution=execution,
+                container=container, marker=PREREQUISITE_MARKER, token=token, deadline=deadline,
+                maximum_wait_seconds=240,
+            ),
+            operation=operation, campaign_id=config.campaign_id, generation_id=config.generation_id,
+        )
+        check_authority()
+    except _ProtectedStageExpired:
+        raise
+    except _JobExecutionFailure as exc:
+        _capture_failed_job_diagnostics(
+            exc, runtime=runtime, deadline=deadline, private_directory=directory,
+            purpose="database-prerequisite",
+        )
+        raise _ProtectedStagePaused("database prerequisite failed before the mutation job") from exc
+    except (AzureCliError, CampaignError, ValueError) as exc:
+        raise _ProtectedStagePaused(str(exc)) from exc
+    _stage_record(receipt, "database-prerequisites", {
+        "operation": operation, "bindings": bindings, "execution": execution,
+        "intentSha256": intent_sha256,
+        "marker": marker, "completedAtUtc": datetime.now(UTC).isoformat(),
+    })
+
+
 def _database_attempt_history(
     directory: Path,
     operation: str,
@@ -2543,8 +2713,7 @@ def _execute_database_retry(
         raise _ProtectedStagePaused("database retry intent history is missing")
     retry_command = (
         *command,
-        "--subscription",
-        runtime["subscriptionId"],
+        *(("--subscription", runtime["subscriptionId"]) if "--subscription" not in command else ()),
         f"--args=--retry-after-execution={failed}",
     )
     if retry_path.exists():
@@ -2644,8 +2813,7 @@ def _execute_database_retry(
     cleanup_results = _verify_retry_protection(runner, config, runtime, ledger)
     retry_command = (
         *command,
-        "--subscription",
-        subscription,
+        *(("--subscription", subscription) if "--subscription" not in command else ()),
         f"--args=--retry-after-execution={failed}",
     )
     attempt = {}
@@ -4809,7 +4977,7 @@ def main() -> int:
             runtime,
             control_plane_evidence=rendered_control_evidence,
         )
-        if args.operation == "evidence":
+        if args.operation in {"bootstrap", "migrate", "evidence"}:
             commands = tuple(
                 (*command, "--subscription", runtime["subscriptionId"]) for command in commands
             )
@@ -4912,6 +5080,14 @@ def main() -> int:
                 elif args.resume_database_job:
                     raise _ProtectedStagePaused(
                         "database retry requires a bound failed-stage pause"
+                    )
+                if args.operation in {"bootstrap", "migrate"}:
+                    if len(commands) != 1 or args.authorization is None:
+                        raise _ProtectedStagePaused("database stage authorization is missing")
+                    _database_prerequisites(
+                        runner, commands[0], operation=args.operation, config=config,
+                        runtime=runtime, ledger=ledger, directory=args.ledger.parent,
+                        authorization_path=args.authorization, retry=args.resume_database_job,
                     )
                 if args.operation in PROTECTED_STAGE_OPERATIONS and recovery_pause is None:
                     attempt_path = args.ledger.parent / f"{args.operation}-stage-attempt.json"

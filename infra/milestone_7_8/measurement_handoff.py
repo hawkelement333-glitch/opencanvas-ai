@@ -107,7 +107,7 @@ def start_evidence_job(
 ) -> dict[str, object]:
     """Submit a full execution template when a job's arguments or environment change."""
     args = next((arg for arg in command if arg.startswith((
-        "--args=--phase=", "--args=--retry-after-execution=",
+        "--args=--phase=", "--args=--retry-after-execution=", "--args=--diagnose-prerequisites",
     ))), None)
     if args is None:
         return runner.run(command)
@@ -143,11 +143,13 @@ def start_evidence_job(
     image = container.get("image")
     if not isinstance(image, str) or not image.endswith(f"@{image_digest}"):
         raise CampaignError("evidence job image differs from the admitted digest")
-    if args.startswith("--args=--retry-after-execution=") and (
+    if args.startswith(("--args=--retry-after-execution=", "--args=--diagnose-prerequisites")) and (
         expected_command is None or container.get("command") != list(expected_command)
         or before_dispatch is None
     ):
-        raise CampaignError("database retry command or dispatch guard is missing")
+        raise CampaignError("database command or dispatch guard is missing")
+    if args == "--args=--diagnose-prerequisites" and container.get("args") not in (None, []):
+        raise CampaignError("database prerequisite requires the standard job arguments")
     container["args"] = [args.removeprefix("--args=")]
     if env_override is not None:
         key, _, value = env_override.partition("=")

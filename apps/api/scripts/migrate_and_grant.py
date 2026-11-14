@@ -11,8 +11,19 @@ from opencanvas_api.core.config import (
     get_settings,
 )
 from opencanvas_api.db.principal_manifest import PrincipalSlot, load_principal_manifest
-from opencanvas_api.db.role_privileges import runtime_privilege_statements
+from opencanvas_api.db.role_privileges import (
+    application_routines,
+    require_runtime_function_privileges,
+    runtime_privilege_statements,
+)
 from opencanvas_api.db.session import Database
+from scripts.m78_database_identity import (
+    APPLICATION_DATABASE,
+    failure_diagnostic,
+    identity_connection,
+    require_bound_connection,
+)
+from scripts.m78_database_prerequisites import diagnose, require_installed_vector
 from scripts.m78_database_recovery import require_safe_retry, retry_argument
 from scripts.migrate import run as run_migration
 
@@ -35,12 +46,22 @@ async def _current_revision(*, retry_after_execution: str | None = None) -> str:
     database = Database.from_settings(settings, expected_role=DatabaseRole.MIGRATION)
     try:
         async with database.engine.connect() as connection:
+            manifest = load_principal_manifest()
+            await require_bound_connection(
+                connection, manifest, PrincipalSlot.MIGRATION, APPLICATION_DATABASE,
+            )
             retry_observation = None
             if retry_after_execution is not None:
-                retry_observation = await require_safe_retry(
-                    connection, operation="migrate", previous_execution=retry_after_execution,
-                    manifest=load_principal_manifest(),
-                )
+                async with asyncio.timeout(40):
+                    async with identity_connection(
+                        settings, role=DatabaseRole.MIGRATION, manifest=manifest,
+                        slot=PrincipalSlot.MIGRATION,
+                    ) as identity:
+                        retry_observation = await require_safe_retry(
+                            connection, identity=identity, operation="migrate",
+                            previous_execution=retry_after_execution, manifest=manifest,
+                        )
+            await require_installed_vector(connection)
             exists = (
                 await connection.execute(text("SELECT to_regclass('public.alembic_version')"))
             ).scalar_one_or_none()
@@ -73,8 +94,9 @@ async def apply_runtime_privileges() -> None:
     database = Database.from_settings(settings, expected_role=DatabaseRole.MIGRATION)
     try:
         async with database.engine.begin() as connection:
-            current_user = str((await connection.execute(text("SELECT current_user"))).scalar_one())
-            manifest.require_current(PrincipalSlot.MIGRATION, current_name=current_user)
+            await require_bound_connection(
+                connection, manifest, PrincipalSlot.MIGRATION, APPLICATION_DATABASE,
+            )
             migration_flags = (
                 await connection.execute(
                     text(
@@ -102,25 +124,12 @@ async def apply_runtime_privileges() -> None:
             )
             if unowned_relations:
                 raise RuntimeError("migration principal does not own the application schema")
-            unowned_functions = int(
-                (
-                    await connection.execute(
-                        text(
-                            "SELECT count(*) FROM pg_catalog.pg_proc AS p "
-                            "JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace "
-                            "JOIN pg_catalog.pg_roles AS r ON r.oid = p.proowner "
-                            "WHERE n.nspname = 'public' AND r.rolname <> :migration"
-                        ),
-                        {"migration": migration},
-                    )
-                ).scalar_one()
-            )
-            if unowned_functions:
-                raise RuntimeError("migration principal does not own application functions")
+            routines = await application_routines(connection, owner=migration)
             for statement in runtime_privilege_statements(
                 api_principal=api,
                 worker_principal=worker,
                 migration_principal=migration,
+                application_routines=routines,
             ):
                 await connection.execute(text(statement))
             role_rows = (
@@ -138,28 +147,40 @@ async def apply_runtime_privileges() -> None:
                 any(bool(value) for value in row[1:]) for row in role_rows
             ):
                 raise RuntimeError("database runtime principal is overprivileged")
+            await require_runtime_function_privileges(connection, DatabaseRole.API, principal=api)
+            await require_runtime_function_privileges(
+                connection, DatabaseRole.WORKER, principal=worker,
+            )
     finally:
         await database.dispose()
 
 
 def main(arguments: list[str] | None = None) -> int:
+    if arguments == ["--diagnose-prerequisites"]:
+        return diagnose("migrate")
+    stage = "configuration"
     try:
         retry = retry_argument(arguments)
+        stage = "retry-inspection" if retry is not None else "database-revision"
         revision = asyncio.run(
             _current_revision() if retry is None
             else _current_revision(retry_after_execution=retry)
         )
         if revision == "base":
+            stage = "migration-upgrade"
             result = run_migration(expected_current="base", target=EXPECTED_DATABASE_REVISION)
             if result != 0:
                 raise RuntimeError("database migration failed")
         elif revision != EXPECTED_DATABASE_REVISION:
             raise RuntimeError("database migration state is inconsistent")
+        stage = "runtime-grant-reconciliation"
         asyncio.run(apply_runtime_privileges())
+        stage = "database-verification"
         if asyncio.run(_current_revision()) != EXPECTED_DATABASE_REVISION:
             raise RuntimeError("database migration verification failed")
         return 0
-    except Exception:
+    except Exception as exc:
+        failure_diagnostic("M78_MIGRATION_DIAGNOSTIC ", stage, exc)
         print(_SAFE_FAILURE_CODE, file=sys.stderr)
         return 1
 

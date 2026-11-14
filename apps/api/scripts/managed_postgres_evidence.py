@@ -15,13 +15,20 @@ from typing import Final
 
 import httpx
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
-from opencanvas_api.core.config import DatabaseRole, get_settings
-from opencanvas_api.db.principal_manifest import PrincipalSlot, load_principal_manifest
+from opencanvas_api.core.config import EXPECTED_DATABASE_REVISION, DatabaseRole, get_settings
+from opencanvas_api.db.principal_manifest import (
+    PrincipalManifest,
+    PrincipalSlot,
+    load_principal_manifest,
+)
 from opencanvas_api.db.role_privileges import (
     RUNTIME_FUNCTION_PRIVILEGES,
     RUNTIME_SEQUENCE_PRIVILEGES,
     RUNTIME_TABLE_PRIVILEGES,
+    application_routines,
+    require_runtime_function_privileges,
 )
 from opencanvas_api.db.session import Database
 
@@ -203,6 +210,70 @@ def validate_control_plane_evidence(raw: str) -> list[Assertion]:
     return assertions
 
 
+async def _role_contract_matches(
+    connection: AsyncConnection, manifest: PrincipalManifest, slot: PrincipalSlot,
+) -> bool:
+    name = manifest.principals[slot].name
+    admin = slot is PrincipalSlot.BOOTSTRAP
+    flags = (
+        await connection.execute(
+            text(
+                "SELECT rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolreplication, "
+                "rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = :role"
+            ),
+            {"role": name},
+        )
+    ).one_or_none()
+    if flags is None or tuple(flags) != (True, False, admin, admin, False, False):
+        return False
+    if admin:
+        # Azure's Entra administrator deliberately has CREATEDB, CREATEROLE and
+        # azure_pg_admin membership. It must never be admitted as a runtime role.
+        return bool(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT pg_catalog.pg_has_role(CAST(:role AS name), r.oid, 'MEMBER') "
+                        "FROM pg_catalog.pg_roles AS r WHERE rolname = 'azure_pg_admin'"
+                    ),
+                    {"role": name},
+                )
+            ).scalar_one_or_none()
+        )
+    memberships = set(
+        (
+            await connection.execute(
+                text(
+                    "SELECT parent.rolname FROM pg_catalog.pg_auth_members AS m "
+                    "JOIN pg_catalog.pg_roles AS member ON member.oid = m.member "
+                    "JOIN pg_catalog.pg_roles AS parent ON parent.oid = m.roleid "
+                    "WHERE member.rolname = :role"
+                ),
+                {"role": name},
+            )
+        ).scalars()
+    )
+    expected_memberships = {"pg_monitor"} if slot is PrincipalSlot.EVIDENCE else set()
+    if memberships != expected_memberships:
+        return False
+    # Migration owns the application schema. The runtime and evidence roles
+    # need a database connection, with DDL kept in the migration job.
+    can_connect, can_create_schema, can_create_public = (
+        await connection.execute(
+            text(
+                "SELECT pg_catalog.has_database_privilege(CAST(:role AS name), "
+                "current_database(), 'CONNECT'), "
+                "pg_catalog.has_database_privilege(CAST(:role AS name), "
+                "current_database(), 'CREATE'), "
+                "pg_catalog.has_schema_privilege(CAST(:role AS name), 'public', 'CREATE')"
+            ),
+            {"role": name},
+        )
+    ).one()
+    migration = slot is PrincipalSlot.MIGRATION
+    return bool(can_connect and can_create_schema == migration and can_create_public == migration)
+
+
 async def catalog_assertions(role: DatabaseRole) -> list[Assertion]:
     settings = get_settings()
     settings.require_database_role(role)
@@ -210,55 +281,62 @@ async def catalog_assertions(role: DatabaseRole) -> list[Assertion]:
     database = Database.from_settings(settings, expected_role=role)
     try:
         async with database.engine.connect() as connection:
-            current = str((await connection.execute(text("SELECT current_user"))).scalar_one())
+            current, database_name = (
+                await connection.execute(text("SELECT current_user, current_database()"))
+            ).one()
+            if database_name != "opencanvas":
+                raise EvidenceError("catalog evidence requires the bound application database")
             expected_slot = {
                 DatabaseRole.API: PrincipalSlot.API,
                 DatabaseRole.WORKER: PrincipalSlot.WORKER,
                 DatabaseRole.MIGRATION: PrincipalSlot.MIGRATION,
                 DatabaseRole.OBSERVABILITY: PrincipalSlot.EVIDENCE,
             }[role]
-            manifest.require_current(expected_slot, current_name=current)
+            manifest.require_current(expected_slot, current_name=str(current))
             max_connections = int(
                 (await connection.execute(text("SHOW max_connections"))).scalar_one()
             )
+            slots = (
+                tuple(slot for slot in PrincipalSlot if slot is not PrincipalSlot.CLEANUP)
+                if role is DatabaseRole.OBSERVABILITY else (expected_slot,)
+            )
+            role_contracts = {
+                slot.value: await _role_contract_matches(connection, manifest, slot)
+                for slot in slots
+            }
             results = [
-                _assertion("catalog.roles", True, {"role": role.value}),
+                _assertion(
+                    "catalog.roles", all(role_contracts.values()), role_contracts, len(slots),
+                ),
                 _assertion("capacity.max-connections", max_connections > 0, max_connections),
             ]
             if role in {DatabaseRole.API, DatabaseRole.WORKER}:
                 matrix = RUNTIME_TABLE_PRIVILEGES[role]
-                table_names = tuple(
-                    str(item)
-                    for item in (
+                observed: dict[str, int] = {}
+                operations: dict[str, frozenset[str]] = dict(matrix.items())
+                for forbidden in ("TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"):
+                    operations[forbidden] = frozenset()
+                for operation, expected_tables in operations.items():
+                    rows = (
                         await connection.execute(
                             text(
-                                "SELECT tablename FROM pg_catalog.pg_tables "
-                                "WHERE schemaname = 'public' ORDER BY tablename"
-                            )
+                                "SELECT c.relname, pg_catalog.has_table_privilege("
+                                "current_user, c.oid, :operation), pg_catalog.has_table_privilege("
+                                "current_user, c.oid, :grant_option) "
+                                "FROM pg_catalog.pg_class AS c JOIN pg_catalog.pg_namespace AS n "
+                                "ON n.oid = c.relnamespace WHERE n.nspname = 'public' "
+                                "AND c.relkind IN ('r','p','f','v','m')"
+                            ),
+                            {
+                                "operation": operation,
+                                "grant_option": f"{operation} WITH GRANT OPTION",
+                            },
                         )
-                    ).scalars()
-                )
-                observed: dict[str, int] = {}
-                for operation, expected_tables in matrix.items():
-                    observed[operation] = 0
-                    for table_name in table_names:
-                        allowed = bool(
-                            (
-                                await connection.execute(
-                                    text(
-                                        "SELECT has_table_privilege("
-                                        "current_user, :table, :operation)"
-                                    ),
-                                    {
-                                        "table": f"public.{table_name}",
-                                        "operation": operation,
-                                    },
-                                )
-                            ).scalar_one()
-                        )
-                        if allowed != (table_name in expected_tables):
-                            raise EvidenceError("runtime table grants differ from the exact matrix")
-                        observed[operation] += int(allowed)
+                    ).all()
+                    allowed_tables = {name for name, privilege, _ in rows if privilege}
+                    if allowed_tables != expected_tables or any(grant for _, _, grant in rows):
+                        raise EvidenceError("runtime table grants differ from the exact matrix")
+                    observed[operation] = len(allowed_tables)
                 sequence_names = tuple(
                     str(item)
                     for item in (
@@ -290,83 +368,26 @@ async def catalog_assertions(role: DatabaseRole) -> list[Assertion]:
                             raise EvidenceError(
                                 "runtime sequence privilege is broader than allowed"
                             )
-                function_oids = tuple(
-                    int(item)
-                    for item in (
-                        await connection.execute(
-                            text(
-                                "SELECT p.oid FROM pg_catalog.pg_proc AS p "
-                                "JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace "
-                                "WHERE n.nspname = 'public' ORDER BY p.oid"
-                            )
-                        )
-                    ).scalars()
+                function_objects = await require_runtime_function_privileges(
+                    connection, role, principal=str(current),
                 )
-                for function_oid in function_oids:
-                    allowed = bool(
-                        (
-                            await connection.execute(
-                                text(
-                                    "SELECT has_function_privilege("
-                                    "current_user, :function_oid, 'EXECUTE')"
-                                ),
-                                {"function_oid": function_oid},
-                            )
-                        ).scalar_one()
-                    )
-                    if allowed:
-                        raise EvidenceError("runtime function execution is broader than allowed")
                 results.append(
                     _assertion(
                         "catalog.runtime-grants",
-                        not RUNTIME_SEQUENCE_PRIVILEGES[role]
-                        and not RUNTIME_FUNCTION_PRIVILEGES[role],
+                        not RUNTIME_SEQUENCE_PRIVILEGES[role],
                         {
                             "role": role.value,
                             "tableGrants": observed,
                             "sequenceObjectsChecked": len(sequence_names),
-                            "functionObjectsChecked": len(function_oids),
+                            "functionObjectsChecked": function_objects,
                             "declaredSequenceGrantsEmpty": True,
-                            "declaredFunctionGrantsEmpty": True,
+                            "declaredFunctionGrants": sorted(RUNTIME_FUNCTION_PRIVILEGES[role]),
                         },
                     )
                 )
             elif role is DatabaseRole.OBSERVABILITY:
-                database_slots = (
-                    PrincipalSlot.BOOTSTRAP,
-                    PrincipalSlot.MIGRATION,
-                    PrincipalSlot.API,
-                    PrincipalSlot.WORKER,
-                    PrincipalSlot.EVIDENCE,
-                )
-                safe_roles = True
-                for slot in database_slots:
-                    binding = manifest.principals[slot]
-                    row = (
-                        await connection.execute(
-                            text(
-                                "SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, "
-                                "rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = :role"
-                            ),
-                            {"role": binding.name},
-                        )
-                    ).one_or_none()
-                    if row is None or any(bool(item) for item in row):
-                        safe_roles = False
                 migration = manifest.principals[PrincipalSlot.MIGRATION].name
-                for slot in (PrincipalSlot.API, PrincipalSlot.WORKER, PrincipalSlot.EVIDENCE):
-                    can_assume = bool(
-                        (
-                            await connection.execute(
-                                text("SELECT pg_has_role(:member, :target, 'MEMBER')"),
-                                {
-                                    "member": manifest.principals[slot].name,
-                                    "target": migration,
-                                },
-                            )
-                        ).scalar_one()
-                    )
-                    safe_roles = safe_roles and not can_assume
+                await application_routines(connection, owner=migration)
                 schema_owner = str(
                     (
                         await connection.execute(
@@ -419,7 +440,6 @@ async def catalog_assertions(role: DatabaseRole) -> list[Assertion]:
                 )
                 results.extend(
                     [
-                        _assertion("catalog.roles", safe_roles, {"roles": len(database_slots)}),
                         _assertion(
                             "catalog.ownership",
                             schema_owner == migration and unowned_relations == 0,
@@ -441,11 +461,17 @@ async def catalog_assertions(role: DatabaseRole) -> list[Assertion]:
             else:
                 revision = str(
                     (
-                        await connection.execute(text("SELECT version_num FROM alembic_version"))
+                        await connection.execute(
+                            text("SELECT version_num FROM public.alembic_version")
+                        )
                     ).scalar_one()
                 )
                 results.append(
-                    _assertion("migration.exact-revision", revision == "20260726_0029", revision)
+                    _assertion(
+                        "migration.exact-revision",
+                        revision == EXPECTED_DATABASE_REVISION,
+                        revision,
+                    )
                 )
                 suffix = _digest(
                     {"campaign": manifest.campaign_id, "generation": manifest.generation_id}

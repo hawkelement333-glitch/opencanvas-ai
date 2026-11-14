@@ -30,16 +30,27 @@ def test_api_inventory_covers_every_runtime_table_without_migration_only_tables(
     assert WORKER_SELECT_TABLES < API_SELECT_TABLES
 
 
-def test_runtime_roles_have_independent_table_matrices_and_no_sequence_or_function_grants() -> None:
+def test_runtime_roles_read_schema_revision_without_metadata_writes() -> None:
     api = RUNTIME_TABLE_PRIVILEGES[DatabaseRole.API]
     worker = RUNTIME_TABLE_PRIVILEGES[DatabaseRole.WORKER]
     assert api != worker
     assert api["UPDATE"] != worker["UPDATE"]
     assert api["DELETE"] != worker["DELETE"]
+    for matrix in (api, worker):
+        assert "alembic_version" in matrix["SELECT"]
+        assert "alembic_version" not in matrix["INSERT"] | matrix["UPDATE"] | matrix["DELETE"]
     assert set(RUNTIME_SEQUENCE_PRIVILEGES) == {DatabaseRole.API, DatabaseRole.WORKER}
     assert not any(RUNTIME_SEQUENCE_PRIVILEGES.values())
-    assert set(RUNTIME_FUNCTION_PRIVILEGES) == {DatabaseRole.API, DatabaseRole.WORKER}
-    assert not any(RUNTIME_FUNCTION_PRIVILEGES.values())
+
+
+def test_runtime_vector_grants_cover_only_coercion_and_api_distance() -> None:
+    coercion = "public.vector(public.vector, pg_catalog.int4, pg_catalog.bool)"
+    cosine = "public.cosine_distance(public.vector, public.vector)"
+    expected = {
+        DatabaseRole.API: frozenset({coercion, cosine}),
+        DatabaseRole.WORKER: frozenset({coercion}),
+    }
+    assert expected == RUNTIME_FUNCTION_PRIVILEGES
 
 
 def test_emitted_grants_are_explicit_and_revoke_implicit_privileges() -> None:
@@ -47,6 +58,7 @@ def test_emitted_grants_are_explicit_and_revoke_implicit_privileges() -> None:
         api_principal="id-mobius77-api",
         worker_principal="id-mobius77-worker",
         migration_principal="id-mobius77-db-migration",
+        application_routines=("public.reject_example_mutation()",),
     )
     rendered = "\n".join(statements)
     assert "GRANT ALL" not in rendered
@@ -56,7 +68,9 @@ def test_emitted_grants_are_explicit_and_revoke_implicit_privileges() -> None:
     assert "GRANT SELECT ON SEQUENCE" not in rendered
     assert "GRANT SELECT ON ALL TABLES" not in rendered
     assert "GRANT INSERT, UPDATE, DELETE" not in rendered
-    assert "REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC" in rendered
+    assert "REVOKE EXECUTE ON ALL FUNCTIONS" not in rendered
+    assert 'REVOKE EXECUTE ON ROUTINE public.reject_example_mutation() FROM PUBLIC' in rendered
+    assert 'REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC' in rendered
     assert "REVOKE CREATE ON SCHEMA public FROM PUBLIC" in rendered
     assert "REVOKE ALL PRIVILEGES ON FUNCTIONS FROM PUBLIC" in rendered
     # An unprivileged migration owner has no ADMIN option on its own role.
@@ -110,12 +124,26 @@ async def test_principal_creation_is_repeatable_without_widening(
     async def role_flags(_connection: object, _principal: str):  # type: ignore[no-untyped-def]
         return next(flags)
 
+    async def mappings(_connection: object, names: list[str]) -> list[dict[str, object]]:
+        assert names == ["id-mobius77-db-migration"]
+        return [{
+            "mapping": {
+                "rolename": names[0],
+                "principalType": "service",
+                "objectId": "00000000-0000-0000-0000-000000000001",
+                "tenantId": "00000000-0000-0000-0000-000000000002",
+                "isMfa": 0,
+                "isAdmin": 0,
+            }
+        }]
+
     class FakeConnection:
         async def execute(self, statement: object, _parameters: object) -> SimpleNamespace:
             statements.append(str(statement))
             return SimpleNamespace()
 
     monkeypatch.setattr(bootstrap_postgres, "_role_flags", role_flags)
+    monkeypatch.setattr(bootstrap_postgres, "list_mappings", mappings)
     await bootstrap_postgres._ensure_principal(
         FakeConnection(),  # type: ignore[arg-type]
         bootstrap_postgres.PrincipalContract(

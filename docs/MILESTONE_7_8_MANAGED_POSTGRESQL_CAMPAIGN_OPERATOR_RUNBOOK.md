@@ -820,19 +820,43 @@ grants. Its reconciliation rejects inherited migration membership and rolls back
 the grant transaction if that check fails; it does not attempt a role-membership
 REVOKE that PostgreSQL denies to the unprivileged migration identity.
 
-Recovery catalog reads cast PostgreSQL's internal `relkind` to text before
-validating the exact table inventory and serializing the observation. The
-asyncpg internal-character representation is bytes; it is not evidence that
-tables are absent. Unknown revisions, missing tables, unexpected ownership,
-identity mappings, or inherited privileges still block a retry.
+Before dispatching each database mutation job, the operator runs its
+`--diagnose-prerequisites` branch once under the same job identity and admitted
+image. A one-time token binds the diagnostic to the exact execution and console
+marker. The closed marker drives admission. The gated cost config must include
+`database-prerequisites` with at least USD 0.0567 for the two provider-timeout
+allocations. An uncertain diagnostic dispatch is preserved for review. It
+does not consume the guarded mutation retry.
 
-Local PostgreSQL rehearsal can verify migrations and privilege/recovery logic
-with explicitly synthetic Entra-function fixtures. It cannot establish the
-availability or permissions of Azure's `pgaadauth` functions. If that managed
-observation is missing, capture the separately approved bounded read-only
-function/identity diagnostic in both `opencanvas` and `postgres` before principal
-provisioning. Do not treat missing function evidence as permission to substitute
-an identity, route writes to another database, or skip the retry inspection.
+Bootstrap verifies its Entra administrator mapping, runs the read-only listing
+in `postgres`, and checks EXECUTE on the exact creation signature. The
+diagnostic uses read-only transactions and inspects vector packaging, allowlist,
+and installer privileges in `opencanvas`. Actual principal creation and ACL
+application still require the authorized bootstrap. Existing role mappings
+must match the declared object identities. Identity changes commit in
+`postgres` before schema and grant work in `opencanvas`. Recovery rechecks
+the durable state after a partial bootstrap.
+
+Bootstrap installs and verifies `public.vector`. Migration retains the
+historical revisions and verifies the installed extension before DDL. Bootstrap
+manages the extension member ACL separately from migration-owned application
+routines. API and worker have SELECT-only access to `public.alembic_version`.
+The API can invoke cosine distance and the vector typmod cast. The worker
+can invoke the typmod cast for typed vector inserts.
+
+Migration's diagnostic authenticates its actual identity in both databases.
+An authenticated listing ACL denial can admit ordinary migration with
+`listingRead=false`. Guarded migration retry requires a positive,
+invocation-bound listing observation and repeats the mapping check before
+writes. Connection, token, and transport failures block diagnostic admission.
+Recovery retains the exact table inventory, ownership, and inherited privilege
+checks. PostgreSQL's internal relation kind is projected as text for asyncpg.
+
+Local rehearsal with separate synthetic identity functions verifies application
+behavior. Managed caller permissions, extension packaging, install/ACL
+authority, managed networking, and failover require live evidence. A successful
+bootstrap, migration, and runtime startup checkpoint leaves PG-E01, PG-E02,
+PG-E03, TI-E01, and PG-E04 open until their complete managed criteria pass.
 
 Before the combined managed-evidence phase, collect the following sanitized
 numeric/configuration observations under the separately authorized campaign:

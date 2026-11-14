@@ -383,6 +383,8 @@ def run_operator(
             patch.object(operator, "load_execution_authorization", side_effect=authorization_check)
         )
         stack.enter_context(patch.object(operator, "load_ledger", return_value=ledger))
+        # These cases exercise failure capture and guarded retries after prerequisite admission.
+        stack.enter_context(patch.object(operator, "_database_prerequisites"))
         stack.enter_context(patch.object(operator, "SubprocessRunner", return_value=provider))
         stack.enter_context(patch.object(operator, "datetime", Clock))
         stack.enter_context(patch.object(time, "sleep"))

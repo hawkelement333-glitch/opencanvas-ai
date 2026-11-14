@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import re
 import sys
 from dataclasses import dataclass
 
@@ -11,8 +9,21 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from opencanvas_api.core.config import DatabaseRole, get_settings
 from opencanvas_api.db.principal_manifest import PrincipalSlot, load_principal_manifest
-from opencanvas_api.db.role_privileges import quote_identifier
+from opencanvas_api.db.role_privileges import configure_vector_runtime_functions, quote_identifier
 from opencanvas_api.db.session import Database
+from scripts.m78_database_identity import (
+    APPLICATION_DATABASE,
+    failure_diagnostic,
+    identity_connection,
+    list_mappings,
+    require_bound_connection,
+    require_mappings,
+)
+from scripts.m78_database_prerequisites import (
+    diagnose,
+    require_installed_vector,
+    vector_observation,
+)
 from scripts.m78_database_recovery import require_safe_retry, retry_argument
 
 
@@ -66,6 +77,10 @@ async def _ensure_principal(connection: AsyncConnection, contract: PrincipalCont
         flags = await _role_flags(connection, contract.name)
     if flags is None or any(flags):
         raise RuntimeError("database principal is overprivileged")
+    require_mappings(
+        await list_mappings(connection, [contract.name]),
+        {contract.name: contract.object_id},
+    )
 
 
 async def _transfer_existing_ownership(
@@ -108,7 +123,12 @@ async def _transfer_existing_ownership(
                 "SELECT p.oid::regprocedure::text "
                 "FROM pg_catalog.pg_proc AS p "
                 "JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace "
-                "WHERE n.nspname = 'public' ORDER BY p.oid::regprocedure::text"
+                "WHERE n.nspname = 'public' AND NOT EXISTS ("
+                "SELECT 1 FROM pg_catalog.pg_depend d JOIN pg_catalog.pg_extension e "
+                "ON d.refobjid=e.oid WHERE d.classid='pg_catalog.pg_proc'::regclass "
+                "AND d.refclassid='pg_catalog.pg_extension'::regclass "
+                "AND d.deptype='e' AND d.objid=p.oid AND e.extname='vector') "
+                "ORDER BY p.oid::regprocedure::text"
             )
         )
     ).scalars()
@@ -119,36 +139,7 @@ async def _transfer_existing_ownership(
 
 
 def _failure_diagnostic(stage: str, error: Exception) -> None:
-    # Never render the exception, driver arguments, SQL, or principal values.
-    allowed_classes = {
-        "TimeoutError", "ConnectionError", "OSError", "OperationalError", "InterfaceError",
-        "ProgrammingError", "DataError", "IntegrityError", "DBAPIError", "InvalidRequestError",
-        "ClientAuthenticationError", "CredentialUnavailableError", "ValidationError",
-        "RuntimeError", "ValueError", "TypeError",
-    }
-    category = next(
-        (kind.__name__ for kind in type(error).__mro__ if kind.__name__ in allowed_classes),
-        "Exception",
-    )
-    sqlstate = None
-    pending: list[object] = [error]
-    seen: set[int] = set()
-    while pending and len(seen) < 8:
-        current = pending.pop(0)
-        if id(current) in seen:
-            continue
-        seen.add(id(current))
-        value = getattr(current, "sqlstate", None)
-        if isinstance(value, str) and re.fullmatch(r"[0-9A-Z]{5}", value):
-            sqlstate = value
-            break
-        for attribute in ("orig", "__cause__"):
-            child = getattr(current, attribute, None)
-            if isinstance(child, BaseException):
-                pending.append(child)
-    print("M78_BOOTSTRAP_DIAGNOSTIC " + json.dumps({
-        "stage": stage, "errorClass": category, "sqlstate": sqlstate,
-    }, separators=(",", ":"), sort_keys=True), file=sys.stderr)
+    failure_diagnostic("M78_BOOTSTRAP_DIAGNOSTIC ", stage, error)
 
 
 async def provision_database_principals(*, retry_after_execution: str | None = None) -> None:
@@ -168,17 +159,52 @@ async def provision_database_principals(*, retry_after_execution: str | None = N
         stage = "connection"
         async with database.engine.begin() as connection:
             stage = "bootstrap-identity"
-            current_user = str((await connection.execute(text("SELECT current_user"))).scalar_one())
-            manifest.require_current(PrincipalSlot.BOOTSTRAP, current_name=current_user)
-            if retry_after_execution is not None:
-                stage = "retry-inspection"
-                await require_safe_retry(
-                    connection, operation="bootstrap", previous_execution=retry_after_execution,
-                    manifest=manifest,
+            await require_bound_connection(
+                connection, manifest, PrincipalSlot.BOOTSTRAP, APPLICATION_DATABASE,
+            )
+            stage = "vector-prerequisite"
+            vector = await vector_observation(
+                connection, managed=settings.database_auth_mode == "entra", provisioning=True,
+            )
+            stage = "identity-connection"
+            async with identity_connection(
+                settings, role=DatabaseRole.PROVISIONING, manifest=manifest,
+                slot=PrincipalSlot.BOOTSTRAP, read_only=False,
+            ) as identity:
+                administrator = manifest.principals[PrincipalSlot.BOOTSTRAP]
+                require_mappings(
+                    await list_mappings(identity, [administrator.name]),
+                    {administrator.name: administrator.object_id},
+                    admins=frozenset({administrator.name}),
                 )
-            stage = "principal-provisioning"
-            for contract in contracts:
-                await _ensure_principal(connection, contract)
+                if retry_after_execution is not None:
+                    stage = "retry-inspection"
+                    await require_safe_retry(
+                        connection, identity=identity, operation="bootstrap",
+                        previous_execution=retry_after_execution, manifest=manifest,
+                    )
+                stage = "principal-provisioning"
+                for contract in contracts:
+                    await _ensure_principal(identity, contract)
+                expected = {item.name: item.object_id for item in contracts}
+                expected[administrator.name] = administrator.object_id
+                require_mappings(
+                    await list_mappings(identity, list(expected)),
+                    expected,
+                    admins=frozenset({administrator.name}),
+                )
+
+            # Principal mappings commit in postgres before app grants require their
+            # roles. The guarded retry inspects that partial state if app DDL fails.
+            stage = "vector-installation"
+            if vector["installed"] is False:
+                await connection.execute(
+                    text("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public")
+                )
+            await require_installed_vector(connection)
+            await configure_vector_runtime_functions(
+                connection, api_principal=api.name, worker_principal=worker.name,
+            )
 
             stage = "schema-privileges"
             quoted_migration = quote_identifier(migration.name)
@@ -234,6 +260,8 @@ async def provision_database_principals(*, retry_after_execution: str | None = N
                     raise
 
 def main(arguments: list[str] | None = None) -> int:
+    if arguments == ["--diagnose-prerequisites"]:
+        return diagnose("bootstrap")
     try:
         retry = retry_argument(arguments)
         asyncio.run(provision_database_principals(retry_after_execution=retry))

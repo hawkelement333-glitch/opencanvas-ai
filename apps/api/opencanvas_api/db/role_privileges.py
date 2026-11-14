@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Final, Literal
 
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
 from opencanvas_api.core.config import DatabaseRole
 
 TableOperation = Literal["SELECT", "INSERT", "UPDATE", "DELETE"]
@@ -295,15 +298,19 @@ WORKER_UPDATE_TABLES: Final = frozenset(
 )
 WORKER_DELETE_TABLES: Final = frozenset({"document_chunks"})
 
+# Startup needs to check the deployed Alembic revision. Keep this inventory
+# separate from the application SELECT set used to derive INSERT permissions.
+SCHEMA_REVISION_READ_TABLES: Final = frozenset({"alembic_version"})
+
 RUNTIME_TABLE_PRIVILEGES: Final[Mapping[DatabaseRole, Mapping[TableOperation, frozenset[str]]]] = {
     DatabaseRole.API: {
-        "SELECT": API_SELECT_TABLES,
+        "SELECT": API_SELECT_TABLES | SCHEMA_REVISION_READ_TABLES,
         "INSERT": API_INSERT_TABLES,
         "UPDATE": API_UPDATE_TABLES,
         "DELETE": API_DELETE_TABLES,
     },
     DatabaseRole.WORKER: {
-        "SELECT": WORKER_SELECT_TABLES,
+        "SELECT": WORKER_SELECT_TABLES | SCHEMA_REVISION_READ_TABLES,
         "INSERT": WORKER_INSERT_TABLES,
         "UPDATE": WORKER_UPDATE_TABLES,
         "DELETE": WORKER_DELETE_TABLES,
@@ -314,10 +321,100 @@ RUNTIME_SEQUENCE_PRIVILEGES: Final[Mapping[DatabaseRole, frozenset[str]]] = {
     DatabaseRole.API: frozenset(),
     DatabaseRole.WORKER: frozenset(),
 }
+_VECTOR_TYPEMOD: Final = "public.vector(public.vector, pg_catalog.int4, pg_catalog.bool)"
+_VECTOR_COSINE: Final = "public.cosine_distance(public.vector, public.vector)"
 RUNTIME_FUNCTION_PRIVILEGES: Final[Mapping[DatabaseRole, frozenset[str]]] = {
-    DatabaseRole.API: frozenset(),
-    DatabaseRole.WORKER: frozenset(),
+    DatabaseRole.API: frozenset({_VECTOR_TYPEMOD, _VECTOR_COSINE}),
+    DatabaseRole.WORKER: frozenset({_VECTOR_TYPEMOD}),
 }
+
+_PUBLIC_ROUTINES: Final = """
+    SELECT p.oid,
+           pg_catalog.format('%I.%I(%s)', n.nspname, p.proname,
+                             pg_catalog.pg_get_function_identity_arguments(p.oid)) AS routine,
+           pg_catalog.pg_get_userbyid(p.proowner) AS owner,
+           EXISTS (
+               SELECT 1 FROM pg_catalog.pg_depend AS d
+               JOIN pg_catalog.pg_extension AS e ON e.oid = d.refobjid
+               WHERE d.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass
+                 AND d.objid = p.oid AND d.objsubid = 0
+                 AND d.refclassid = 'pg_catalog.pg_extension'::pg_catalog.regclass
+                 AND d.deptype = 'e' AND e.extname = 'vector' AND e.extnamespace = n.oid
+           ) AS is_vector
+    FROM pg_catalog.pg_proc AS p
+    JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+"""
+
+
+async def application_routines(connection: AsyncConnection, *, owner: str) -> tuple[str, ...]:
+    routines = (await connection.execute(text(_PUBLIC_ROUTINES + " ORDER BY routine"))).all()
+    application = [row for row in routines if not row.is_vector]
+    if any(row.owner != owner for row in application):
+        raise RuntimeError("migration principal does not own the application routines")
+    return tuple(str(row.routine) for row in application)
+
+
+async def _runtime_function_oids(connection: AsyncConnection, role: DatabaseRole) -> set[int]:
+    expected: set[int] = set()
+    for routine in sorted(RUNTIME_FUNCTION_PRIVILEGES[role]):
+        oid = (
+            await connection.execute(
+                text(
+                    "SELECT oid FROM (" + _PUBLIC_ROUTINES + ") AS routines "
+                    "WHERE is_vector AND oid = pg_catalog.to_regprocedure(:routine)"
+                ),
+                {"routine": routine},
+            )
+        ).scalar_one_or_none()
+        if oid is None:
+            raise RuntimeError("required vector routine is missing or is not an extension member")
+        expected.add(int(oid))
+    return expected
+
+
+async def require_runtime_function_privileges(
+    connection: AsyncConnection, role: DatabaseRole, *, principal: str,
+) -> int:
+    expected = await _runtime_function_oids(connection, role)
+    rows = (
+        await connection.execute(
+            text(
+                "SELECT oid, pg_catalog.has_function_privilege(CAST(:principal AS name), "
+                "oid, 'EXECUTE'), pg_catalog.has_function_privilege(CAST(:principal AS name), "
+                "oid, 'EXECUTE WITH GRANT OPTION') FROM (" + _PUBLIC_ROUTINES + ") AS routines"
+            ),
+            {"principal": principal},
+        )
+    ).all()
+    if {int(oid) for oid, execute, _ in rows if execute} != expected or any(
+        grant for _, _, grant in rows
+    ):
+        raise RuntimeError("runtime routine grants differ from the exact matrix")
+    return len(rows)
+
+
+async def configure_vector_runtime_functions(
+    connection: AsyncConnection, *, api_principal: str, worker_principal: str,
+) -> None:
+    # The bootstrap identity installs vector and controls its ACL. There is no
+    # ownership transfer, role grant, or extension installation authority for
+    # the runtime identities.
+    for role in RUNTIME_FUNCTION_PRIVILEGES:
+        await _runtime_function_oids(connection, role)
+    routines = (
+        await connection.execute(text(_PUBLIC_ROUTINES + " ORDER BY routine"))
+    ).all()
+    api = quote_identifier(api_principal)
+    worker = quote_identifier(worker_principal)
+    for row in routines:
+        if row.is_vector:
+            await connection.execute(
+                text(f"REVOKE EXECUTE ON ROUTINE {row.routine} FROM PUBLIC, {api}, {worker}")
+            )
+    for role, principal in ((DatabaseRole.API, api), (DatabaseRole.WORKER, worker)):
+        for routine in sorted(RUNTIME_FUNCTION_PRIVILEGES[role]):
+            await connection.execute(text(f"GRANT EXECUTE ON ROUTINE {routine} TO {principal}"))
 
 
 def quote_identifier(value: str) -> str:
@@ -330,7 +427,8 @@ def _table_grant(operation: TableOperation, tables: Sequence[str], principal: st
 
 
 def runtime_privilege_statements(
-    *, api_principal: str, worker_principal: str, migration_principal: str
+    *, api_principal: str, worker_principal: str, migration_principal: str,
+    application_routines: Sequence[str],
 ) -> tuple[str, ...]:
     principals = {
         DatabaseRole.API: api_principal,
@@ -339,8 +437,13 @@ def runtime_privilege_statements(
     quoted_migration = quote_identifier(migration_principal)
     statements: list[str] = [
         "REVOKE CREATE ON SCHEMA public FROM PUBLIC",
-        "REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC",
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE {quoted_migration} "
+        "REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC",
     ]
+    api = quote_identifier(api_principal)
+    worker = quote_identifier(worker_principal)
+    for routine in application_routines:
+        statements.append(f"REVOKE EXECUTE ON ROUTINE {routine} FROM PUBLIC, {api}, {worker}")
     for role, principal in principals.items():
         quoted = quote_identifier(principal)
         statements.extend(
@@ -351,7 +454,6 @@ def runtime_privilege_statements(
                 f"GRANT USAGE ON SCHEMA public TO {quoted}",
                 f"REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM {quoted}",
                 f"REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM {quoted}",
-                f"REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM {quoted}",
             )
         )
         # Role membership is revoked by the privileged bootstrap, not by this

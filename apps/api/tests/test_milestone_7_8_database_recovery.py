@@ -3,14 +3,18 @@ from __future__ import annotations
 import io
 import json
 import uuid
+from collections.abc import Iterator
 from contextlib import redirect_stdout
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from pydantic import SecretStr
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from opencanvas_api.core.config import EXPECTED_DATABASE_REVISION, DatabaseRole
+from opencanvas_api.core.config import EXPECTED_DATABASE_REVISION, DatabaseRole, Settings
 from opencanvas_api.db.models import Base
 from opencanvas_api.db.principal_manifest import (
     CAMPAIGN_ENV,
@@ -23,6 +27,7 @@ from opencanvas_api.db.principal_manifest import (
 )
 from opencanvas_api.db.session import Database
 from scripts import bootstrap_postgres, migrate_and_grant
+from scripts import m78_database_prerequisites as prerequisites
 from scripts import m78_database_recovery as recovery
 
 
@@ -80,6 +85,17 @@ def state(manifest: PrincipalManifest, *, head: bool = False, absent: int = 0) -
         }
         for slot in selected
     ]
+    bootstrap = manifest.principals[PrincipalSlot.BOOTSTRAP]
+    mappings.append({
+        "mapping": {
+            "rolename": bootstrap.name,
+            "principalType": "service",
+            "objectId": bootstrap.object_id,
+            "tenantId": str(uuid.UUID(int=99)),
+            "isMfa": 0,
+            "isAdmin": 1,
+        }
+    })
     migration = manifest.principals[PrincipalSlot.MIGRATION].name
     return {
         "currentUser": manifest.principals[PrincipalSlot.BOOTSTRAP].name,
@@ -105,8 +121,11 @@ class Result:
     def __init__(self, values: list[Any]) -> None:
         self.values = values
 
-    def mappings(self) -> list[dict[str, object]]:
-        return cast(list[dict[str, object]], self.values)
+    def mappings(self) -> Result:
+        return self
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self.values)
 
     def scalars(self) -> list[Any]:
         return self.values
@@ -131,10 +150,13 @@ class Connection:
         self.queries: list[str] = []
         self.mutations: list[str] = []
         self.output: io.StringIO | None = None
+        self.database = observed["database"]
 
     async def execute(self, statement: object, parameters: object = None) -> Result:
         sql = str(statement)
         self.queries.append(sql)
+        if sql == "SET TRANSACTION READ ONLY":
+            return Result([])
         if not sql.startswith("SELECT"):
             if self.output is not None:
                 assert recovery.PREFIX in self.output.getvalue()
@@ -143,7 +165,21 @@ class Connection:
         if sql == "SELECT current_user":
             return Result([self.observed["currentUser"]])
         if sql == "SELECT current_user, current_database()":
-            return Result([(self.observed["currentUser"], self.observed["database"])])
+            return Result([(self.observed["currentUser"], self.database)])
+        if "pg_catalog.has_function_privilege" in sql:
+            assert self.database == "postgres"
+            return Result([self.observed.get("functionExecute", True)])
+        if "pg_available_extension_versions" in sql:
+            assert self.database == "opencanvas"
+            return Result([{
+                "version": "0.8.2", "trusted": False, "superuser": True, "schema": None,
+                "requires": None, "installed_schema": "public", "allowlist": None,
+                "database_create": True, "schema_create": True, "rolsuper": True,
+                "azure_admin": False,
+            }])
+        if "e.extname='vector'" in sql and "SELECT EXISTS" in sql:
+            assert self.database == "opencanvas"
+            return Result([True])
         if "WHERE rolname = :principal" in sql:
             assert isinstance(parameters, dict)
             rows = [r for r in self.observed["roles"] if r["rolname"] == parameters["principal"]]
@@ -164,8 +200,16 @@ class Connection:
             )
         if "FROM pg_catalog.pg_roles WHERE" in sql:
             return Result(self.observed["roles"])
+        if "pgaadauth_list_principals" in sql:
+            assert self.database == "postgres"
+            assert isinstance(parameters, dict)
+            if error := self.observed.get("listingError"):
+                raise error
+            return Result([
+                item for item in self.observed["mappings"]
+                if item["mapping"]["rolename"] in parameters["names"]
+            ])
         for fragment, key in (
-            ("pgaadauth_list_principals", "mappings"),
             ("FROM pg_catalog.pg_auth_members", "memberships"),
             ("FROM pg_catalog.pg_class c", "relations"),
             ("FROM pg_catalog.pg_proc p", "functions"),
@@ -194,11 +238,20 @@ class Connection:
             return Result([])
         raise AssertionError(f"unexpected SQL shape: {sql[:40]}")
 
+    def begin_nested(self) -> Connection:
+        return self
+
     async def __aenter__(self) -> Connection:
         return self
 
     async def __aexit__(self, *_args: object) -> None:
         return None
+
+
+def separate_identity(connection: Connection) -> Connection:
+    identity = Connection(connection.observed)
+    identity.database = "postgres"
+    return identity
 
 
 def use_database(
@@ -212,17 +265,32 @@ def use_database(
     async def dispose() -> None:
         events.append("disposed")
 
-    database = SimpleNamespace(
-        engine=SimpleNamespace(
-            begin=lambda: connection,
-            connect=lambda: connection,
-        ),
-        dispose=dispose,
+    identity = separate_identity(connection)
+    username = connection.observed["currentUser"]
+
+    def from_settings(settings: Settings, *, expected_role: DatabaseRole) -> SimpleNamespace:
+        assert expected_role is role
+        url = make_url(settings.database_url_value)
+        assert url.username == username and url.host == "fixture.invalid"
+        assert url.database in {"postgres", "opencanvas"}
+        selected = connection if url.database == "opencanvas" else identity
+        return SimpleNamespace(
+            engine=SimpleNamespace(begin=lambda: selected, connect=lambda: selected),
+            dispose=dispose,
+        )
+
+    async def configure_vector(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(bootstrap_postgres, "configure_vector_runtime_functions", configure_vector)
+    monkeypatch.setattr(Database, "from_settings", from_settings)
+    settings = Settings(
+        database_role=role,
+        database_url=SecretStr(f"postgresql+asyncpg://{username}@fixture.invalid/opencanvas"),
     )
-    monkeypatch.setattr(Database, "from_settings", lambda *_a, **_k: database)
-    settings = SimpleNamespace(database_role=role, require_database_role=lambda _role: None)
     monkeypatch.setattr(bootstrap_postgres, "get_settings", lambda: settings)
     monkeypatch.setattr(migrate_and_grant, "get_settings", lambda: settings)
+    monkeypatch.setattr(prerequisites, "get_settings", lambda: settings)
     return events
 
 
@@ -239,6 +307,7 @@ async def test_real_query_handoff_accepts_only_bound_bootstrap_states(
     connection = Connection(state(manifest, absent=absent))
     marker = await recovery.require_safe_retry(
         cast(AsyncConnection, connection),
+        identity=cast(AsyncConnection, separate_identity(connection)),
         operation="bootstrap",
         previous_execution="previous-execution",
         manifest=manifest,
@@ -283,7 +352,7 @@ async def test_unsafe_observed_partial_state_cannot_emit_retry_marker_or_mutate(
     if bad == "mapping":
         observed["mappings"][0]["mapping"]["objectId"] = str(uuid.UUID(int=555))
     elif bad == "missing-mapping":
-        observed["mappings"].pop()
+        observed["mappings"].pop(0)
     elif bad == "duplicate-mapping":
         observed["mappings"].append(observed["mappings"][0])
     elif bad == "admin":
@@ -310,6 +379,7 @@ async def test_unsafe_observed_partial_state_cannot_emit_retry_marker_or_mutate(
     with pytest.raises(RuntimeError):
         await recovery.require_safe_retry(
             cast(AsyncConnection, connection),
+            identity=cast(AsyncConnection, separate_identity(connection)),
             operation="bootstrap",
             previous_execution="previous",
             manifest=manifest,
@@ -330,7 +400,7 @@ def test_normal_bootstrap_retry_inspects_before_actual_privilege_statements(
     assert connection.mutations and all(
         q.startswith(("GRANT", "REVOKE", "ALTER")) for q in connection.mutations
     )
-    assert events == ["disposed"]
+    assert events == ["disposed", "disposed"]
     assert recovery.PREFIX in output.getvalue()
 
 
@@ -344,9 +414,109 @@ def test_normal_bootstrap_retry_unsafe_state_never_reaches_existing_writes(
     connection = Connection(observed)
     events = use_database(monkeypatch, connection, role=DatabaseRole.PROVISIONING)
     assert bootstrap_postgres.main(["--retry-after-execution=previous"]) == 1
-    assert not connection.mutations and events == ["disposed"]
+    assert not connection.mutations and events == ["disposed", "disposed"]
     captured = capsys.readouterr()
     assert recovery.PREFIX not in captured.out and "777" not in captured.err
+
+
+def test_idempotent_bootstrap_rejects_mapped_name_with_different_object(
+    monkeypatch: pytest.MonkeyPatch,
+    manifest: PrincipalManifest,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    observed = state(manifest)
+    observed["mappings"][0]["mapping"]["objectId"] = str(uuid.UUID(int=777))
+    connection = Connection(observed)
+    use_database(monkeypatch, connection, role=DatabaseRole.PROVISIONING)
+    assert bootstrap_postgres.main() == 1
+    assert not connection.mutations
+    captured = capsys.readouterr()
+    assert '"stage":"principal-provisioning"' in captured.err
+    assert "777" not in captured.err
+
+
+@pytest.mark.parametrize("operation", ["bootstrap", "migrate"])
+def test_read_only_prerequisites_require_actual_identity_listing(
+    monkeypatch: pytest.MonkeyPatch,
+    manifest: PrincipalManifest,
+    operation: prerequisites.Operation,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    observed = state(manifest)
+    role = DatabaseRole.PROVISIONING
+    main = bootstrap_postgres.main
+    if operation == "migrate":
+        principal = manifest.principals[PrincipalSlot.MIGRATION]
+        observed["currentUser"] = principal.name
+        monkeypatch.setenv(CURRENT_PRINCIPAL_ID_ENV, principal.object_id)
+        role = DatabaseRole.MIGRATION
+        main = migrate_and_grant.main
+    connection = Connection(observed)
+    use_database(monkeypatch, connection, role=role)
+    token = "a" * 32
+    monkeypatch.setenv(prerequisites.TOKEN_ENV, token)
+    assert main(["--diagnose-prerequisites"]) == 0
+    assert not connection.mutations
+    assert "SET TRANSACTION READ ONLY" in connection.queries
+    assert not any("pgaadauth" in sql for sql in connection.queries)
+    payload = json.loads(capsys.readouterr().out.removeprefix(prerequisites.PREFIX + token + " "))
+    assert payload["identityDatabase"] == "postgres"
+    assert payload["applicationDatabase"] == "opencanvas"
+    assert payload["listingRead"] is True and payload["operation"] == operation
+    assert payload["createExecute"] is (True if operation == "bootstrap" else None)
+
+
+@pytest.mark.parametrize("status", ["42501", "42883", "08006", "timeout", "acl-denied"])
+def test_only_bound_listing_permission_failure_allows_migration_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    manifest: PrincipalManifest,
+    status: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    principal = manifest.principals[PrincipalSlot.MIGRATION]
+    observed = state(manifest)
+    observed["currentUser"] = principal.name
+    monkeypatch.setenv(CURRENT_PRINCIPAL_ID_ENV, principal.object_id)
+    token = "a" * 32
+    monkeypatch.setenv(prerequisites.TOKEN_ENV, token)
+    if status == "acl-denied":
+        observed["functionExecute"] = False
+    elif status == "timeout":
+        observed["listingError"] = TimeoutError("sensitive")
+    else:
+        class DriverError(Exception):
+            sqlstate = status
+
+        observed["listingError"] = DBAPIError(None, None, DriverError("sensitive"))
+    connection = Connection(observed)
+    use_database(monkeypatch, connection, role=DatabaseRole.MIGRATION)
+    denied = status in {"42501", "42883", "acl-denied"}
+    assert migrate_and_grant.main(["--diagnose-prerequisites"]) == (0 if denied else 1)
+    captured = capsys.readouterr()
+    assert "sensitive" not in captured.err and not connection.mutations
+    if denied:
+        payload = json.loads(captured.out.removeprefix(prerequisites.PREFIX + token + " "))
+        assert payload["listingRead"] is False
+    else:
+        assert prerequisites.PREFIX not in captured.out
+
+
+def test_migration_diagnostic_binds_stage_and_sqlstate_without_error_content(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class DriverError(Exception):
+        sqlstate = "42501"
+
+    async def current_revision() -> str:
+        raise DBAPIError(None, None, DriverError("sensitive"))
+
+    monkeypatch.setattr(migrate_and_grant, "_current_revision", current_revision)
+    assert migrate_and_grant.main() == 1
+    diagnostic = capsys.readouterr().err
+    assert "sensitive" not in diagnostic
+    assert '"stage":"database-revision"' in diagnostic
+    assert '"sqlstate":"42501"' in diagnostic
 
 
 @pytest.mark.parametrize("head", [False, True])
@@ -449,10 +619,12 @@ async def test_migration_retry_head_partial_state_rejects_unsafe_reconciliation(
         observed["relations"].pop()
     else:
         observed["roles"].pop()
-        observed["mappings"].pop()
+        observed["mappings"].pop(-2)
+    connection = Connection(observed)
     with pytest.raises(RuntimeError):
         await recovery.require_safe_retry(
-            cast(AsyncConnection, Connection(observed)),
+            cast(AsyncConnection, connection),
+            identity=cast(AsyncConnection, separate_identity(connection)),
             operation="migrate",
             previous_execution="previous",
             manifest=manifest,
@@ -494,6 +666,7 @@ async def test_inspection_timeout_emits_no_passing_marker_or_mutation(
     with pytest.raises(TimeoutError):
         await recovery.require_safe_retry(
             cast(AsyncConnection, connection),
+            identity=cast(AsyncConnection, separate_identity(connection)),
             operation="bootstrap",
             previous_execution="previous",
             manifest=manifest,
@@ -573,9 +746,11 @@ async def test_role_flags_cannot_hide_unapproved_inherited_privileges(
             "parent": parent,
         }
     ]
+    connection = Connection(observed)
     with pytest.raises(RuntimeError, match="inherited privilege"):
         await recovery.require_safe_retry(
-            cast(AsyncConnection, Connection(observed)),
+            cast(AsyncConnection, connection),
+            identity=cast(AsyncConnection, separate_identity(connection)),
             operation="bootstrap",
             previous_execution="previous",
             manifest=manifest,
@@ -596,6 +771,7 @@ async def test_declared_evidence_monitor_membership_is_supported(
     connection = Connection(observed)
     marker = await recovery.require_safe_retry(
         cast(AsyncConnection, connection),
+        identity=cast(AsyncConnection, separate_identity(connection)),
         operation="bootstrap",
         previous_execution="previous",
         manifest=manifest,
