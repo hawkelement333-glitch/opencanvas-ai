@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -397,6 +397,32 @@ def test_full_lifecycle_reaches_sanitized_zero_residue() -> None:
     assert set(result.residue.values()) == {0}
     assert receipt["status"] == "zero-residue"
     assert config.campaign_id not in json.dumps(receipt)
+
+
+@pytest.mark.parametrize("elapsed_hours", [4.01, 6, 7.99])
+def test_campaign_uses_bound_deadline_after_four_hours(elapsed_hours: float) -> None:
+    ledger = Ledger("mobius78-pg-proof", "g1-aabbccddeeff")
+    ledger.bind_deadline("2030-01-01T08:00:00Z")
+    for phase in ORDER[1 : ORDER.index(Phase.BILLABLE_STARTED) + 1]:
+        if phase is Phase.CLEANUP_ARMED:
+            ledger.record_cleanup_arm_evidence("e" * 64)
+        ledger.transition(phase, NOW)
+    ledger.transition(Phase.INFRASTRUCTURE_DEPLOYED, NOW + timedelta(hours=elapsed_hours))
+    assert ledger.phase == Phase.INFRASTRUCTURE_DEPLOYED
+
+
+@pytest.mark.parametrize("elapsed_hours", [8, 9])
+def test_campaign_still_enforces_bound_cleanup_deadline(elapsed_hours: int) -> None:
+    ledger = Ledger("mobius78-pg-proof", "g1-aabbccddeeff")
+    ledger.bind_deadline("2030-01-01T08:00:00Z")
+    for phase in ORDER[1 : ORDER.index(Phase.BILLABLE_STARTED) + 1]:
+        if phase is Phase.CLEANUP_ARMED:
+            ledger.record_cleanup_arm_evidence("e" * 64)
+        ledger.transition(phase, NOW)
+    with pytest.raises(CampaignError, match="cleanup deadline has expired"):
+        ledger.transition(Phase.INFRASTRUCTURE_DEPLOYED, NOW + timedelta(hours=elapsed_hours))
+    ledger.transition(Phase.CLEANING, NOW + timedelta(hours=elapsed_hours))
+    assert ledger.phase == Phase.CLEANING
 
 
 @pytest.mark.parametrize("failed_at", ORDER[1:-1])
@@ -1757,8 +1783,10 @@ def test_prepare_rejects_invalid_local_boundary(
         assert not output.exists()
 
 
+@pytest.mark.parametrize("deadline_hour", [None, 0, 8])
 def test_prepare_creates_one_private_restart_safe_bundle(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    deadline_hour: int | None,
 ) -> None:
     class FrozenDatetime(datetime):
         @classmethod
@@ -1911,14 +1939,24 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             str(fresh_evidence_path),
             "--controller-authority-evidence",
             str(authority_path),
+            *(
+                ["--cleanup-deadline", f"2030-01-01T{deadline_hour:02}:00:00Z"]
+                if deadline_hour is not None else []
+            ),
         ],
     )
+    if deadline_hour == 0:
+        assert prepare.main() != 0
+        assert not output.exists()
+        assert not discovery_args
+        return
     assert prepare.main() == 0
     assert existing_evidence.read_text(encoding="utf-8") == '{"preserved":true}'
     stdout = capsys.readouterr().out
     assert subscription not in stdout and tenant not in stdout
     config = CampaignConfig.from_json(output / "campaign.json")
-    assert config.cleanup_deadline_utc == "2030-01-01T04:00:00Z"
+    expected_hour = deadline_hour if deadline_hour is not None else 4
+    assert config.cleanup_deadline_utc == f"2030-01-01T{expected_hour:02}:00:00Z"
     assert config.campaign_id == "mobius78-managed-proof"
     assert config.cleanup_candidate_regions == CLEANUP_CANDIDATE_REGIONS_BINDING
     assert config.cleanup_offer_classification == selection.offer_classification
@@ -1927,8 +1965,8 @@ def test_prepare_creates_one_private_restart_safe_bundle(
     runtime_path = output / "runtime.json"
     runtime = campaign_operator.load_runtime(runtime_path)
     campaign_operator.validate_prepared_bundle(runtime_path, runtime, config)
-    assert runtime["cleanupAuthorityExpiresUtc"] == "2030-01-01T05:00:00Z"
-    assert discovery_args["controller_required_until_utc"] == "2030-01-01T05:00:37Z"
+    assert runtime["cleanupAuthorityExpiresUtc"] == f"2030-01-01T{expected_hour + 1:02}:00:00Z"
+    assert discovery_args["controller_required_until_utc"] == runtime["cleanupAuthorityExpiresUtc"]
     campaign_parameters = json.loads((output / "campaign.parameters.json").read_text())
     suffix = campaign_parameters["parameters"]["resourceNameSuffix"]["value"]
     template_path = REPOSITORY_ROOT / "infra/milestone_7_8/modules/campaign-resources.bicep"

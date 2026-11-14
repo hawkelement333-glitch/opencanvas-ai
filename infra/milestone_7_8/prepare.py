@@ -19,6 +19,7 @@ from infra.milestone_7_8.campaign import (
     GENERATION_PATTERN,
     CampaignError,
     SubprocessRunner,
+    parse_utc,
     sanitize,
     utc,
 )
@@ -95,6 +96,10 @@ def main() -> int:
     parser.add_argument("--fresh-subscription-authorization", type=Path, required=True)
     parser.add_argument("--fresh-subscription-evidence", type=Path, required=True)
     parser.add_argument("--controller-authority-evidence", type=Path, required=True)
+    parser.add_argument(
+        "--cleanup-deadline",
+        help="Explicit UTC cleanup deadline covered by the reviewed cost and controller authority",
+    )
     args = parser.parse_args()
     try:
         if CAMPAIGN_PATTERN.fullmatch(args.campaign_id) is None:
@@ -154,7 +159,15 @@ def main() -> int:
         except PredeploymentVerificationError as exc:
             raise CampaignError(str(exc)) from exc
         observed_at = datetime.now(UTC).replace(microsecond=0)
-        deadline_time = (observed_at + timedelta(hours=4)).replace(second=0, microsecond=0)
+        # Keep the legacy default for existing callers. New executions can bind
+        # a reviewed window without inheriting the historical four-hour cutoff.
+        deadline_time = (
+            parse_utc(args.cleanup_deadline)
+            if args.cleanup_deadline
+            else (observed_at + timedelta(hours=4)).replace(second=0, microsecond=0)
+        )
+        if deadline_time <= observed_at:
+            raise CampaignError("cleanup deadline is expired")
         deadline = utc(deadline_time)
         controller_authority = load_authority_evidence(args.controller_authority_evidence)
         verified_controller = validate_authority_evidence(controller_authority)
@@ -174,7 +187,7 @@ def main() -> int:
             subscription_correlation=subscription_correlation,
             cleanup_script_sha256=cleanup_script_sha256,
             fresh_controller_admission_evidence_sha256=admission.evidence_sha256,
-            controller_required_until_utc=utc(observed_at + timedelta(hours=5)),
+            controller_required_until_utc=cleanup_authority_expires,
             controller_authority_evidence=controller_authority,
         )
         if region_selection.controller_disposition != "exact-controller-adoptable":

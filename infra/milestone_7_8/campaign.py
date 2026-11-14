@@ -22,7 +22,6 @@ from infra.milestone_7_8.azure_cli import (
 
 HARD_CEILING: Final = Decimal("50.00")
 DEFAULT_ESTIMATE: Final = Decimal("25.6832")
-MAX_HOURS: Final = 4
 CAMPAIGN_PATTERN: Final = re.compile(r"^[a-z][a-z0-9-]{7,47}$")
 GENERATION_PATTERN: Final = re.compile(r"^g[1-9][0-9]{0,5}-[a-f0-9]{12}$")
 DIGEST_PATTERN: Final = re.compile(r"^sha256:[a-f0-9]{64}$")
@@ -817,10 +816,6 @@ class Ledger:
             and now >= parse_utc(self.cleanup_deadline_utc)
         ):
             raise CampaignError("cleanup deadline has expired")
-        if not cleanup_transition and self.first_billable_mutation_utc is not None:
-            started = parse_utc(self.first_billable_mutation_utc)
-            if now > started + timedelta(hours=MAX_HOURS):
-                raise CampaignError("four-hour lifecycle limit exceeded")
 
 
 @dataclass(frozen=True, slots=True)
