@@ -63,7 +63,7 @@ class Case:
                 "--authorization", str(self.authorization)]
         if operation == "image-decision":
             args += ["--image-digest", continuation.IMAGE, "--image-scan-evidence",
-                     str(self.folder / "image-continuation/local-image/image-scan.json")]
+                     str(self.plan.parent / "local-image/image-scan.json")]
         monkeypatch.setattr(sys, "argv", args)
         return operator.main()
 
@@ -363,3 +363,50 @@ def test_admission_replay_checks_authorization_at_each_retained_dispatch(
     ledger.image_replacement["continuationSha256"] = receipt["continuationSha256"]
     with pytest.raises(CampaignError, match="authorization is expired"):
         continuation.validate_admission(case.plan, case.runtime, case.config, ledger)
+
+
+def test_new_slot_resolves_only_bound_pause_after_complete_admission(
+    case: Case, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from infra.milestone_7_8 import image_continuation_recovery
+
+    original_plan, original_bytes = case.plan, case.plan.read_bytes()
+    body = json.loads(original_bytes)
+    body["priorImageAttempt"] = {"syntheticPrior": True}
+    body["planSha256"] = continuation._hash({
+        key: value for key, value in body.items() if key != "planSha256"
+    })
+    # The complete retained nine-command replay has separate synthetic tests.
+    monkeypatch.setattr(image_continuation_recovery, "validate_prior", lambda _: None)
+    case.plan = write(case.folder / "image-continuation-r1/plan.json", body)
+    write(case.plan.parent / "local-image/image-scan.json", json.loads(
+        (original_plan.parent / "local-image/image-scan.json").read_text(),
+    ))
+    pause_path = case.folder / "local-image-stage-pause.json"
+    pause = operator._stage_record(pause_path, "stage-pause", {
+        "version": "m7.8-protected-stage-pause-v1", "operation": "local-image",
+        "bindings": {"oldSource": True}, "attemptSha256": "a" * 64,
+        "authorizationSha256": "b" * 64, "failedExecution": None,
+        "failedAtUtc": NOW.isoformat(), "recoveryUntilUtc": NOW.isoformat(),
+        "maximumRetryDispatches": 1,
+    })
+    monkeypatch.setattr(image_continuation_recovery, "bound_pause_matches", lambda _, p: p == pause)
+    old_ledger = campaign.load_ledger(
+        case.folder / "ledger.json", CampaignConfig.from_json(case.folder / "cost.json"),
+    )
+    with pytest.raises(FileNotFoundError):
+        continuation.resolved_image_pause(case.plan, case.runtime, case.config, old_ledger)
+    assert case.invoke(monkeypatch) == 0
+    ledger = campaign.load_ledger(case.folder / "ledger.json", case.config)
+    resolved = continuation.resolved_image_pause(case.plan, case.runtime, case.config, ledger)
+    assert resolved == continuation._file_hash(pause_path)
+    assert operator._active_protected_pause(
+        case.folder, case.config, case.runtime, ledger, resolved_image_pause_sha256=resolved,
+    ) is None
+    with pytest.raises(CampaignError, match="pause binding differs"):
+        operator._active_protected_pause(case.folder, case.config, case.runtime, ledger)
+    assert original_plan.read_bytes() == original_bytes
+    assert operator._read_stage_record(pause_path, "stage-pause") == pause
+    (case.plan.parent / "completed.json").unlink()
+    with pytest.raises(FileNotFoundError):
+        continuation.resolved_image_pause(case.plan, case.runtime, case.config, ledger)

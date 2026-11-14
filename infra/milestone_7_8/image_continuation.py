@@ -128,7 +128,7 @@ def _cost(original: Path, replacement: Path, budget: Path) -> tuple[CampaignConf
 
 def build_plan(
     runtime_path: Path, config_path: Path, ledger_path: Path, *,
-    cost_path: Path, retained_image: Path,
+    cost_path: Path, retained_image: Path, previous_plan: Path | None = None,
 ) -> dict[str, object]:
     from infra.milestone_7_8 import operator
 
@@ -198,13 +198,18 @@ def build_plan(
         "scannerReserveCoversReplacement": True,
         "amendmentSha256": AMENDMENT,
     }
+    if previous_plan is not None:
+        from infra.milestone_7_8.image_continuation_recovery import build_prior
+
+        plan["priorImageAttempt"] = build_prior(previous_plan)
     return {**plan, "planSha256": _hash(plan)}
 
 
 def load_plan(path: Path) -> dict[str, object]:
     plan = _read(_private(path))
     body = {key: value for key, value in plan.items() if key != "planSha256"}
-    if (set(plan) != FIELDS or plan["planSha256"] != _hash(body)
+    if (set(plan) not in (FIELDS, FIELDS | {"priorImageAttempt"})
+            or plan["planSha256"] != _hash(body)
             or plan["version"] != "m7.8-image-continuation-plan-v1"
             or plan["imageBuildSourceHead"] != IMAGE_BUILD_HEAD
             or plan["canonicalBuildInputSha256"] != CANONICAL or plan["retainedImageId"] != IMAGE
@@ -219,6 +224,13 @@ def load_plan(path: Path) -> dict[str, object]:
         "runtimeFile", "configFile", "costFile", "retainedImageFile",
     )}
     folder = Path(str(plan["runtimeFile"])).parent
+    slot = "image-continuation-r1" if "priorImageAttempt" in plan else "image-continuation"
+    if path.resolve() != folder / slot / "plan.json":
+        raise CampaignError("continuation plan is outside its exact private attempt slot")
+    if "priorImageAttempt" in plan:
+        from infra.milestone_7_8.image_continuation_recovery import validate_prior
+
+        validate_prior(_object(plan["priorImageAttempt"]))
     required_files |= {str(folder / name) for name in (
         "budget-continuity.json", "bootstrap-prerequisite-intent.json",
         "local-image/completed.json", "local-image/image-scan.json",
@@ -332,7 +344,7 @@ def validate_admission(
     from infra.milestone_7_8 import local_image, workload_image_update
 
     plan = load_plan(path)
-    folder = Path(str(plan["runtimeFile"])).parent / "image-continuation"
+    folder = path.resolve().parent
     receipt = _read(folder / "completed.json")
     body = {key: value for key, value in receipt.items() if key != "continuationSha256"}
     if (set(receipt) != {"planSha256", "imageDigest", "scanEvidenceSha256",
@@ -399,9 +411,24 @@ def validate_admission(
 def prerequisite_directory(path: Path, runtime: dict[str, str], config: CampaignConfig,
                            ledger: Ledger) -> Path:
     validate_admission(path, runtime, config, ledger)
-    folder = Path(str(load_plan(path)["runtimeFile"])).parent / "image-continuation/prerequisites"
+    folder = path.resolve().parent / "prerequisites"
     folder.mkdir(mode=0o700, exist_ok=True)
     return folder
+
+
+def resolved_image_pause(
+    path: Path, runtime: dict[str, str], config: CampaignConfig, ledger: Ledger,
+) -> str | None:
+    plan = load_plan(path)
+    if "priorImageAttempt" not in plan:
+        return None
+    validate_admission(path, runtime, config, ledger)
+    pause_path = Path(str(plan["runtimeFile"])).parent / "local-image-stage-pause.json"
+    from infra.milestone_7_8.image_continuation_recovery import bound_pause_matches
+
+    if not bound_pause_matches(_object(plan["priorImageAttempt"]), _read(pause_path)):
+        raise CampaignError("replacement completion differs from the retained image pause")
+    return _file_hash(pause_path)
 
 
 def execute_admission(
@@ -415,7 +442,7 @@ def execute_admission(
 
     plan = load_plan(path)
     runtime_path = Path(str(plan["runtimeFile"]))
-    folder = runtime_path.parent / "image-continuation"
+    folder = path.resolve().parent
     if local_image.validate_completion(
         runtime_path, runtime, replace(config, image_digest=None), digest=digest,
         scan_path=scan_path, continuation=path,
@@ -505,14 +532,18 @@ def main() -> int:
     parser.add_argument("operation", choices=("plan", "validate"))
     for name in ("runtime", "config", "ledger", "cost", "retained-image", "plan"):
         parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument("--previous-plan", type=Path)
     args = parser.parse_args()
     try:
         if args.operation == "plan":
             plan = build_plan(
                 args.runtime, args.config, args.ledger, cost_path=args.cost,
-                retained_image=args.retained_image,
+                retained_image=args.retained_image, previous_plan=args.previous_plan,
             )
-            folder = args.runtime.resolve().parent / "image-continuation"
+            slot = (
+                "image-continuation-r1" if args.previous_plan is not None else "image-continuation"
+            )
+            folder = args.runtime.resolve().parent / slot
             if args.plan.resolve().parent != folder:
                 raise CampaignError("continuation plan must use its exact private directory")
             folder.mkdir(mode=0o700, exist_ok=True)

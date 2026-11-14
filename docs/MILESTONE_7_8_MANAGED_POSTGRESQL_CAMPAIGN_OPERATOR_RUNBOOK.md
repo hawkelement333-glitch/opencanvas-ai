@@ -825,6 +825,21 @@ the required scoped Azure observations.
 
 ### One corrected image in the existing startup attempt
 
+The retained-image route verifies the complete canonical Git archive without
+extracting an unused build context. New image builds still require extraction.
+For the specifically retained pre-push Windows path failure at operator
+`ba7308dd0bbae01564b20fdb974fea876b370eea`, one separately approved continuation
+may use `--previous-plan "$bundle/image-continuation/plan.json"` and
+`--plan "$bundle/image-continuation-r1/plan.json"` with the plan command below.
+The predecessor validator requires its exact nine command outcomes, complete
+canonical archive, original approval, verified registry restoration, and pause.
+It rejects missing, altered, or additional dispatch history. All predecessor
+artifacts remain in place; the new attempt uses its own plan, approval, and
+journal. No old intent is replayed. Only accepted replacement admission resolves
+that exact historical image pause for normal bootstrap. Missing completion,
+another pause, partial workload updates, and uncertain registry restoration
+remain blocked. This exception extends neither the campaign deadline nor costs.
+
 The seven-argument Entra catalog correction has one explicit same-bundle
 continuation. This does not authorize another campaign, base deployment, image
 build, controller renewal, or a later Milestone 7.8 evidence phase. Its image

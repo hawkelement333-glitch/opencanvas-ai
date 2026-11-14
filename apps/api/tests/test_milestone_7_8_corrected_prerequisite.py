@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import time
@@ -28,11 +29,13 @@ from infra.milestone_7_8.database_prerequisites import PREREQUISITE_MARKER, PRER
 
 
 @pytest.mark.parametrize("defect", ["", "failed-execution", "wrong-marker", "wrong-execution"])
+@pytest.mark.parametrize("resolved_image_pause", [False, True])
 def test_corrected_prerequisite_gates_real_operator_bootstrap_and_migration(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     defect: str,
+    resolved_image_pause: bool,
 ) -> None:
     config = replace(
         _config(), resource_items=(CostItem("database-prerequisites", "0", 1, "0.0567"),),
@@ -56,6 +59,19 @@ def test_corrected_prerequisite_gates_real_operator_bootstrap_and_migration(
     original_body: dict[str, object] = {"operation": "bootstrap", "previousEvidence": True}
     operator._stage_record(original_intent, "database-prerequisite-intent", original_body)
     original_bytes = original_intent.read_bytes()
+    if resolved_image_pause:
+        pause_path = tmp_path / "local-image-stage-pause.json"
+        operator._stage_record(pause_path, "stage-pause", {
+            "version": "m7.8-protected-stage-pause-v1", "operation": "local-image",
+            "bindings": {"historical": True}, "attemptSha256": "a" * 64,
+            "authorizationSha256": "b" * 64, "failedExecution": None,
+            "failedAtUtc": NOW.isoformat(), "recoveryUntilUtc": NOW.isoformat(),
+            "maximumRetryDispatches": 1,
+        })
+        # The production continuation replay is exercised separately. Here the
+        # normal operator must consume its accepted resolution, not the old window.
+        accepted_pause = hashlib.sha256(pause_path.read_bytes()).hexdigest()
+        monkeypatch.setattr(image_continuation, "resolved_image_pause", lambda *_: accepted_pause)
 
     # Image, source, and controller admission have independent tests. Replay
     # this contract from an already-replaced ledger with the real auth loader.

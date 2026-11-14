@@ -328,8 +328,10 @@ def _stage_canonical_source(
     source_head: str,
     canonical_input_sha256: str,
     run: Callable[[tuple[str, ...]], dict[str, object]],
+    *,
+    extract: bool = True,
 ) -> tuple[Path, Path]:
-    """Use the same full source paths during preflight and the actual build."""
+    """Verify exact source bytes; extract only when a Docker build needs them."""
     archive_path = output / "source.tar"
     archive_result = run(
         (
@@ -366,7 +368,9 @@ def _stage_canonical_source(
     ):
         raise CampaignError("canonical source staging commands failed")
     context = output / "source"
-    _extract_source(archive_path, context, cast(str, tree["stdout"]), canonical_input_sha256)
+    _extract_source(
+        archive_path, context, cast(str, tree["stdout"]), canonical_input_sha256, extract=extract,
+    )
     return archive_path, context
 
 
@@ -503,7 +507,7 @@ def execute_local_image(
     replacement = "continuationFile" in plan
     expected_parent = runtime_path.resolve().parent
     if replacement:
-        expected_parent /= "image-continuation"
+        expected_parent = Path(str(plan["continuationFile"])).resolve().parent
     if output.resolve().parent != expected_parent or output.name != "local-image":
         raise CampaignError("image output must be the single private local-image directory")
     if output.exists():
@@ -623,6 +627,7 @@ def execute_local_image(
             head,
             runtime["canonicalBuildInputSha256"],
             run,
+            extract=retained is None,
         )
         if retained is not None:
             run(("docker", "tag", str(retained["imageId"]), reference))
@@ -814,7 +819,7 @@ def validate_completion(
     """An attempted local route cannot admit its pending scan before restoration."""
     output = runtime_path.parent / "local-image"
     if continuation is not None:
-        output = runtime_path.parent / "image-continuation" / "local-image"
+        output = continuation.resolve().parent / "local-image"
     marker = _object(json.loads((output.parent / "local-image-attempt.json").read_text()))
     receipt = _object(json.loads((output / "completed.json").read_text()))
     plan = _object(json.loads((output / "plan.json").read_text()))
@@ -1288,7 +1293,7 @@ def main() -> int:
             ledger = load_ledger(args.ledger, config)
         output = args.runtime.parent / "local-image"
         if args.image_continuation is not None:
-            output = args.runtime.parent / "image-continuation" / "local-image"
+            output = args.image_continuation.resolve().parent / "local-image"
         if args.operation == "plan":
             if args.registry_before is None or args.egress_ipv4 is None:
                 raise CampaignError("registry baseline and verified egress address are required")

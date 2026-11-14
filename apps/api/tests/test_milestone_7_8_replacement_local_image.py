@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
 import json
 import sys
+import tarfile
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -51,8 +53,12 @@ def retained_path(case: original.Case, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def continuation(case: original.Case, monkeypatch: pytest.MonkeyPatch) -> Path:
-    path = case.runtime_path.with_name("continuation.json")
+def continuation(
+    case: original.Case, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest,
+) -> Path:
+    slot = str(getattr(request, "param", "image-continuation"))
+    path = case.runtime_path.parent / slot / "plan.json"
+    path.parent.mkdir()
     document = {"planSha256": "7" * 64}
     path.write_text(json.dumps(document), encoding="utf-8")
 
@@ -99,9 +105,12 @@ def prepare(case: original.Case, retained_path: Path, continuation: Path) -> Non
 
 
 def execute(case: original.Case, provider: retained.RetainedProvider) -> dict[str, object]:
+    output = case.runtime_path.parent / "image-continuation/local-image"
+    if "continuationFile" in case.plan:
+        output = Path(str(case.plan["continuationFile"])).parent / "local-image"
     return local_image.execute_local_image(
         case.runtime_path, case.runtime, case.config, case.ledger, case.plan, case.approval,
-        output=case.runtime_path.parent / "image-continuation/local-image",
+        output=output,
         runner=provider, clock=lambda: original.NOW,
     )
 
@@ -281,3 +290,70 @@ def test_replacement_completion_replays_context_beyond_file_inventory(
             case.runtime_path, case.runtime, case.config, digest=original.DIGEST,
             scan_path=output / "image-scan.json", continuation=selected,
         )
+
+
+@pytest.mark.parametrize("continuation", ["image-continuation-r1"], indirect=True)
+def test_retry_slot_preserves_failed_attempt_and_validates_without_extraction(
+    case: original.Case, retained_path: Path, continuation: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepare(case, retained_path, continuation)
+    original_files = originals(case)
+    failed = case.runtime_path.parent / "image-continuation"
+    (failed / "local-image/source").mkdir(parents=True)
+    historical = {
+        "local-image/source/partial.txt": b"retained failed extraction",
+        "local-image-attempt.json": b'{"failedAttempt":"preserved"}',
+        "local-image/restored.json": b'{"restoration":"preserved"}',
+    }
+    for name, content in historical.items():
+        (failed / name).write_bytes(content)
+
+    def extraction_forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("retained image must not extract source files")
+
+    monkeypatch.setattr(tarfile.TarFile, "extractall", extraction_forbidden)
+    provider = retained.RetainedProvider(case)
+    receipt = execute(case, provider)
+    output = continuation.parent / "local-image"
+    assert receipt["imageBuildCount"] == 0
+    assert (output / "source.tar").is_file() and not (output / "source").exists()
+    assert provider.pushed and provider.patch_count == 2
+    assert provider.registry == case.plan["before"]
+    assert len([cmd for cmd in provider.commands if cmd[:3] == ("docker", "scout", "cves")]) == 1
+    assert local_image.validate_completion(
+        case.runtime_path, case.runtime, case.config, digest=original.DIGEST,
+        scan_path=output / "image-scan.json", continuation=continuation,
+    ) == 0
+    assert originals(case) == original_files
+    assert all((failed / name).read_bytes() == content for name, content in historical.items())
+
+
+@pytest.mark.parametrize("fault", ["altered-blob", "missing-file"])
+def test_no_extract_route_still_rejects_incomplete_or_changed_canonical_archive(
+    case: original.Case, retained_path: Path, continuation: Path, fault: str,
+) -> None:
+    prepare(case, retained_path, continuation)
+
+    class ChangedArchiveProvider(retained.RetainedProvider):
+        def run(self, command: tuple[str, ...]) -> dict[str, object]:
+            response = super().run(command)
+            if command[0] == "git" and "archive" in command:
+                path = Path(command[command.index("--output") + 1])
+                with tarfile.open(path) as archive:
+                    members = archive.getmembers()
+                if fault == "missing-file":
+                    members = members[:-1]
+                with tarfile.open(path, "w") as archive:
+                    for index, member in enumerate(members):
+                        content = b"evil" if index == 0 and fault == "altered-blob" else b"test"
+                        archive.addfile(member, io.BytesIO(content))
+            return response
+
+    provider = ChangedArchiveProvider(case)
+    with pytest.raises(CampaignError, match="after verified restoration"):
+        execute(case, provider)
+    assert provider.registry == case.plan["before"] and provider.patch_count == 2
+    assert not provider.tagged and not provider.pushed
+    assert not (continuation.parent / "local-image/source").exists()
+    assert not (continuation.parent / "local-image/completed.json").exists()

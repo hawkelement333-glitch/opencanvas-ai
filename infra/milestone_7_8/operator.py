@@ -2246,6 +2246,7 @@ def _active_protected_pause(
     runtime: dict[str, str],
     ledger: Ledger,
     source_transition: dict[str, object] | None = None,
+    *, resolved_image_pause_sha256: str | None = None,
 ) -> dict[str, object] | None:
     active: list[dict[str, object]] = []
     for operation in sorted(PROTECTED_STAGE_OPERATIONS):
@@ -2271,6 +2272,11 @@ def _active_protected_pause(
             or pause["operation"] != operation
         ):
             raise _ProtectedStagePaused("protected stage pause contract differs")
+        if (operation == "local-image" and resolved_image_pause_sha256 is not None
+                and hashlib.sha256(path.read_bytes()).hexdigest() == resolved_image_pause_sha256):
+            # Supplied only after the complete predecessor-bound image admission
+            # has replayed. The failed attempt and its original window stay intact.
+            continue
         completed_path = directory / f"{operation}-stage-recovery-completed.json"
         if completed_path.exists():
             if operation == "evidence":
@@ -5079,6 +5085,11 @@ def main() -> int:
                     raise _ProtectedStagePaused("protected stage predecessor is not complete")
                 recovery_pause = _active_protected_pause(
                     args.ledger.parent, config, runtime, ledger, source_transition,
+                    resolved_image_pause_sha256=(
+                        image_continuation.resolved_image_pause(
+                            args.image_continuation, runtime, config, ledger,
+                        ) if args.image_continuation is not None else None
+                    ),
                 )
                 if recovery_pause is not None:
                     already_dispatched = (
