@@ -764,23 +764,19 @@ def test_deployed_principal_manifest_matches_prepared_semantic_plan() -> None:
         campaign_operator.validate_deployed_principal_manifest(outputs, config)
 
 
-def test_fake_postgres_adapter_proves_campaign_login_denial(
+def test_fake_postgres_transport_failure_does_not_prove_campaign_login_denial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeSettings:
+        database_url_value = "postgresql+asyncpg://synthetic-api@synthetic.invalid/opencanvas"
+        database_auth_mode = "entra"
+
         def require_database_role(self, _role: object) -> None:
             return None
 
-    class DeniedContext:
-        async def __aenter__(self) -> None:
-            raise ConnectionError("synthetic login denied")
-
-        async def __aexit__(self, *_args: object) -> None:
-            return None
-
     class FakeEngine:
-        def connect(self) -> DeniedContext:
-            return DeniedContext()
+        async def connect(self) -> None:
+            raise ConnectionError("synthetic login denied")
 
     class FakeDatabase:
         engine = FakeEngine()
@@ -793,9 +789,12 @@ def test_fake_postgres_adapter_proves_campaign_login_denial(
             return None
 
     monkeypatch.setattr(managed_postgres_evidence, "get_settings", FakeSettings)
+    manifest = _manifest(names={slot.value: f"synthetic-{slot.value}" for slot in PrincipalSlot})
+    _set_manifest(monkeypatch, manifest)
+    monkeypatch.setenv(CURRENT_PRINCIPAL_ID_ENV, _object_id(3))
     monkeypatch.setattr(managed_postgres_evidence, "Database", FakeDatabase)
-    assertions = asyncio.run(managed_postgres_evidence.credential_denial_assertion())
-    assert [item.code for item in assertions] == ["recovery.credential-revocation"]
+    with pytest.raises(ConnectionError):
+        asyncio.run(managed_postgres_evidence.credential_denial_assertion())
 
 
 def test_new_bicep_has_no_executable_milestone_7_7_coupling() -> None:
@@ -1578,7 +1577,7 @@ def test_fake_azure_job_adapter_waits_for_success(monkeypatch: pytest.MonkeyPatc
     assert len(runner.commands) == 2
 
 
-def test_managed_evidence_sequence_derives_recovery_and_persists_receipt(
+def test_managed_evidence_terminal_success_without_probe_assertions_is_rejected(
     tmp_path: Path,
 ) -> None:
     class FakeEvidenceRunner:
@@ -1618,43 +1617,20 @@ def test_managed_evidence_sequence_derives_recovery_and_persists_receipt(
     )
     commands = tuple((*command, "--subscription", runtime["subscriptionId"])
                      for command in commands)
-    results = campaign_operator.execute_evidence_commands(
-        FakeEvidenceRunner(),  # type: ignore[arg-type]
-        commands,
-        {**control, "observedPeak": 40, "latencyP95Ms": 2.0},
-        private_directory=tmp_path,
-        image_digest=digest,
-    )
-    assert len(results) == 12
-    path = tmp_path / "managed-evidence-execution.json"
-    campaign_operator.persist_evidence_execution_receipt(
-        path,
-        config=config,
-        runtime=runtime,
-        commands=commands,
-        results=results,
-        control_plane_evidence=control,
-        measurement={
-            "workerExecution": "worker-run",
-            "steady": {
-                "samplerExecution": "sampler-steady", "apiRevisions": ["api-old"],
-                "sampleSha256": "1" * 64, "readbacksSha256": "2" * 64,
-            },
-            "overlap": {
-                "samplerExecution": "sampler-overlap", "apiRevisions": ["api-old", "api-new"],
-                "sampleSha256": "3" * 64, "readbacksSha256": "4" * 64,
-            },
-            "observedPeak": 40,
-            "latencyP95Ms": 2.0,
-        },
-    )
-    campaign_operator.validate_evidence_execution_receipt(
-        path,
-        config=config,
-        runtime=runtime,
-        control_plane_evidence=control,
-    )
-    assert "<derived-after" not in path.read_text(encoding="utf-8")
+    with pytest.raises(CampaignError, match="image, command, or token differs"):
+        campaign_operator.execute_evidence_commands(
+            FakeEvidenceRunner(),  # type: ignore[arg-type]
+            commands,
+            {**control, "observedPeak": 40, "latencyP95Ms": 2.0},
+            private_directory=tmp_path,
+            image_digest=digest,
+            runtime=runtime,
+            worker_execution="worker-run",
+            deadline=datetime.fromisoformat(config.cleanup_deadline_utc),
+            authorize=lambda: None,
+        )
+    assert not (tmp_path / "managed-evidence-execution.json").exists()
+    assert not (tmp_path / "managed-assertion-evidence.json").exists()
 
 
 def test_zero_residue_requires_all_control_plane_reads_to_be_empty() -> None:

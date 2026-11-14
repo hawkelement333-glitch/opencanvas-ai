@@ -83,7 +83,8 @@ var commonRuntimeEnvironment = concat(commonEnvironment, [
   { name: 'OPENCANVAS_AUTH_ENABLED', value: 'true' }
   { name: 'OPENCANVAS_AUTH_TEST_BYPASS', value: 'false' }
   { name: 'OPENCANVAS_DATABASE_EXPECTED_REVISION', value: '20260726_0029' }
-  { name: 'OPENCANVAS_STORAGE_PROVIDER', value: 'memory' }
+  { name: 'OPENCANVAS_STORAGE_PROVIDER', value: 'local' }
+  { name: 'OPENCANVAS_DOCUMENT_STORAGE_ROOT', value: '/app/data/documents' }
   { name: 'OPENCANVAS_OBJECT_INGESTION_MODE', value: 'disabled' }
   { name: 'OPENCANVAS_JOB_PROVIDER', value: 'database' }
   { name: 'OPENCANVAS_SHARED_RATE_LIMIT_PROVIDER', value: 'memory' }
@@ -252,6 +253,78 @@ resource registryDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGrou
   dependsOn: [ registryPrivateDnsLink ]
 }
 
+// The API and worker must read the same synthetic document bytes. This private
+// SMB mount uses the existing local adapter; it is not object-ingestion evidence.
+resource documentStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: 'stm78${resourceNameSuffix}'
+  location: targetLocation
+  tags: lifecycleTags
+  kind: 'StorageV2'
+  sku: { name: 'Standard_LRS' }
+  properties: {
+    publicNetworkAccess: 'Disabled'
+    allowBlobPublicAccess: false
+    allowSharedKeyAccess: true
+    supportsHttpsTrafficOnly: true
+    minimumTlsVersion: 'TLS1_2'
+    networkAcls: { defaultAction: 'Deny', bypass: 'None', ipRules: [], virtualNetworkRules: [] }
+    encryption: { keySource: 'Microsoft.Storage', services: { file: { enabled: true, keyType: 'Account' } } }
+  }
+}
+
+resource documentFileService 'Microsoft.Storage/storageAccounts/fileServices@2023-05-01' = {
+  parent: documentStorage
+  name: 'default'
+  properties: {
+    protocolSettings: {
+      smb: { versions: 'SMB3.1.1', authenticationMethods: 'NTLMv2', channelEncryption: 'AES-128-GCM;AES-256-GCM' }
+    }
+    shareDeleteRetentionPolicy: { enabled: false }
+  }
+}
+
+resource documentShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-05-01' = {
+  parent: documentFileService
+  name: 'm78-documents'
+  properties: { accessTier: 'TransactionOptimized', enabledProtocols: 'SMB', shareQuota: 1 }
+}
+
+resource documentPrivateDns 'Microsoft.Network/privateDnsZones@2024-06-01' = {
+  name: 'privatelink.file.${az.environment().suffixes.storage}'
+  location: 'global'
+  tags: privateDnsTags
+}
+
+resource documentPrivateDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
+  parent: documentPrivateDns
+  name: 'm78-${uniqueString(campaignId, generationId)}'
+  location: 'global'
+  tags: privateDnsTags
+  properties: { registrationEnabled: false, virtualNetwork: { id: network.id } }
+}
+
+resource documentEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = {
+  name: 'pe-m78-${resourceNameSuffix}-documents'
+  location: targetLocation
+  tags: lifecycleTags
+  properties: {
+    subnet: { id: privateEndpointSubnetId }
+    privateLinkServiceConnections: [
+      { name: 'documents', properties: { privateLinkServiceId: documentStorage.id, groupIds: [ 'file' ] } }
+    ]
+  }
+  dependsOn: [ network ]
+}
+
+resource documentDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
+  parent: documentEndpoint
+  name: 'documents'
+  properties: {
+    privateDnsZoneConfigs: [ { name: 'documents', properties: { privateDnsZoneId: documentPrivateDns.id } } ]
+  }
+  dependsOn: [ documentPrivateDnsLink ]
+}
+
 resource registryPullAssignments 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (principalId, index) in [
   bootstrapIdentity.principalId
   migrationIdentity.principalId
@@ -302,6 +375,20 @@ resource environment 'Microsoft.App/managedEnvironments@2024-10-02-preview' = {
   }
 }
 
+resource documentEnvironmentStorage 'Microsoft.App/managedEnvironments/storages@2024-03-01' = {
+  parent: environment
+  name: 'm78-documents'
+  properties: {
+    azureFile: {
+      accountName: documentStorage.name
+      accountKey: documentStorage.listKeys().keys[0].value
+      shareName: documentShare.name
+      accessMode: 'ReadWrite'
+    }
+  }
+  dependsOn: [ documentDnsGroup ]
+}
+
 resource apiApp 'Microsoft.App/containerApps@2024-03-01' = if (workloadEnabled) {
   name: 'app-m78-${resourceNameSuffix}'
   location: targetLocation
@@ -325,6 +412,16 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = if (workloadEnabled) 
             { name: 'OPENCANVAS_DATABASE_MANAGED_IDENTITY_CLIENT_ID', value: apiIdentity.clientId }
           ])
           resources: { cpu: json('0.5'), memory: '1Gi' }
+          volumeMounts: [ { volumeName: 'documents', mountPath: '/app/data/documents' } ]
+        }
+      ]
+      volumes: [
+        {
+          name: 'documents'
+          storageType: 'AzureFile'
+          storageName: documentEnvironmentStorage.name
+          // The reviewed Linux image runs as uid=100, gid=101; require encrypted SMB.
+          mountOptions: 'uid=100,gid=101,dir_mode=0770,file_mode=0770,vers=3.1.1,seal'
         }
       ]
       scale: { minReplicas: 4, maxReplicas: 4 }
@@ -348,11 +445,20 @@ resource workerJob 'Microsoft.App/jobs@2024-03-01' = if (workloadEnabled) {
           image: '${registry.properties.loginServer}/mobius-api@${imageDigest}'
           command: [ 'python', '-m', 'scripts.worker' ]
           resources: { cpu: 2, memory: '4Gi' }
+          volumeMounts: [ { volumeName: 'documents', mountPath: '/app/data/documents' } ]
           env: concat(commonRuntimeEnvironment, [
             { name: 'OPENCANVAS_DATABASE_URL', value: 'postgresql+asyncpg://${workerIdentityName}@${postgres.properties.fullyQualifiedDomainName}:5432/opencanvas' }
             { name: 'OPENCANVAS_DATABASE_ROLE', value: 'worker' }
             { name: 'OPENCANVAS_DATABASE_MANAGED_IDENTITY_CLIENT_ID', value: workerIdentity.clientId }
           ])
+        }
+      ]
+      volumes: [
+        {
+          name: 'documents'
+          storageType: 'AzureFile'
+          storageName: documentEnvironmentStorage.name
+          mountOptions: 'uid=100,gid=101,dir_mode=0770,file_mode=0770,vers=3.1.1,seal'
         }
       ]
     }
@@ -422,7 +528,7 @@ resource migrationProbeJob 'Microsoft.App/jobs@2024-03-01' = if (workloadEnabled
   location: targetLocation
   tags: lifecycleTags
   identity: { type: 'UserAssigned', userAssignedIdentities: { '${migrationIdentity.id}': {} } }
-  properties: { environmentId: environment.id, configuration: { triggerType: 'Manual', replicaTimeout: 900, replicaRetryLimit: 0, manualTriggerConfig: { parallelism: 1, replicaCompletionCount: 1 }, registries: [ { server: registry.properties.loginServer, identity: migrationIdentity.id } ] }, template: { containers: [ { name: 'probe-migration', image: '${registry.properties.loginServer}/mobius-api@${imageDigest}', resources: { cpu: json('0.5'), memory: '1Gi' }, command: [ 'python', '-m', 'scripts.managed_postgres_evidence' ], args: [ '--phase', 'migration' ], env: concat(commonEnvironment, [ { name: 'OPENCANVAS_DATABASE_URL', value: 'postgresql+asyncpg://${migrationIdentityName}@${postgres.properties.fullyQualifiedDomainName}:5432/opencanvas' }, { name: 'OPENCANVAS_DATABASE_ROLE', value: 'migration' }, { name: 'OPENCANVAS_DATABASE_MANAGED_IDENTITY_CLIENT_ID', value: migrationIdentity.clientId }, { name: 'OPENCANVAS_DATABASE_CURRENT_PRINCIPAL_ID', value: migrationIdentity.principalId } ]) } ] } }
+  properties: { environmentId: environment.id, configuration: { triggerType: 'Manual', replicaTimeout: 900, replicaRetryLimit: 0, manualTriggerConfig: { parallelism: 1, replicaCompletionCount: 1 }, registries: [ { server: registry.properties.loginServer, identity: migrationIdentity.id } ] }, template: { containers: [ { name: 'probe-migration', image: '${registry.properties.loginServer}/mobius-api@${imageDigest}', resources: { cpu: json('0.5'), memory: '1Gi' }, command: [ 'python', '-m', 'scripts.managed_postgres_evidence' ], args: [ '--phase', 'migration' ], env: concat(commonEnvironment, [ { name: 'OPENCANVAS_DATABASE_URL', value: 'postgresql+asyncpg://${migrationIdentityName}@${postgres.properties.fullyQualifiedDomainName}:5432/opencanvas' }, { name: 'OPENCANVAS_DATABASE_ROLE', value: 'migration' }, { name: 'OPENCANVAS_DATABASE_MANAGED_IDENTITY_CLIENT_ID', value: migrationIdentity.clientId }, { name: 'OPENCANVAS_DATABASE_CURRENT_PRINCIPAL_ID', value: migrationIdentity.principalId }, { name: 'M78_PRIVATE_API_URL', value: 'https://${apiApp!.properties.configuration.ingress.fqdn}' } ]) } ] } }
   dependsOn: [ applicationDatabase, registryDnsGroup, registryPullAssignments ]
 }
 

@@ -282,7 +282,7 @@ function Invoke-M78Phase([string]$Phase, [string]$Authorization, [string[]]$Extr
 # artifact; the operator rejects execution before Azure otherwise.
 ```
 
-The `capacity-check` dry-run exposes 24 static Azure commands, including named
+The `capacity-check` dry-run exposes 26 static Azure commands, including named
 PostgreSQL regional core and SKU-family quotas and the Container Apps managed
 environment count. Six are the
 subscription context, subscription-policy metadata, Automation provider,
@@ -309,7 +309,7 @@ path uses the centralized launcher; no unrelated Automation account name is a
 command target.
 
 The intended sequence proves local source/hash/Git state, Azure subscription/tenant
-correlation, six provider registrations, PostgreSQL SKU, regional compute
+correlation, eight provider registrations, PostgreSQL SKU, regional compute
 quota, global names, a current itemized estimate, at least 25 percent contingency,
 the USD 50 ceiling, exact scope tags, cleanup deployment outputs, published
 runbook content, one immutable schedule, one binding, actual cleanup identity,
@@ -320,9 +320,11 @@ controller; it creates zero schedules and zero job-schedule bindings.
 state and exact content, reconciles or creates the immutable schedule, and
 reconciles or creates the deterministic binding. A failure at any earlier step cannot advance the ledger to
 `cleanup-armed`. The `deploy` phase is base infrastructure only; no application
-job exists yet. Check `Microsoft.Network` registration separately before
-`scope-create` because the base template creates virtual networking and the
-operator's six-provider check does not cover it.
+job exists yet. The provider gate includes `Microsoft.Network` and
+`Microsoft.Storage` for the campaign's private endpoints and shared file store,
+in addition to PostgreSQL, Container Apps, ACR, managed identities, Automation,
+and Log Analytics. A registration read is not permission to register a provider;
+an unregistered required namespace needs its own explicit approval.
 
 The base `deploy` command alone may wait up to 3,600 seconds, bounded further
 by the actual time remaining before the campaign cleanup deadline. The operator
@@ -348,7 +350,11 @@ After the base deployment, read the exact Container Apps environment's
 `ManagedEnvironmentConsumptionCores` usage before building the image or
 deploying the workload. Require at least 14 vCPUs of available quota for the
 eight API replicas, four workers, and one sampler during revision overlap.
-An absent, incomplete, or insufficient quota readback requires campaign cleanup.
+An absent, incomplete, denied or insufficient readback blocks dependent work.
+Preserve healthy infrastructure and armed cleanup during bounded diagnosis while
+budget, authority and deadline remain valid. A confirmed terminal capacity/scope
+failure, explicit abandonment, or loss of those protections requires cleanup;
+missing evidence alone does not authorize teardown or workload admission.
 
 ### Deployment and cleanup failure review
 
@@ -1110,10 +1116,61 @@ managed commands reach terminal success.
 
 ## Managed evidence and disposition
 
+### Full five-observation replacement
+
+Finish source validation, image provenance/scan preparation, complete retained
+controller-history validation, and the itemized cost review before issuing live
+approvals or calling `prepare`. A prior local history replay took approximately
+320 seconds; do not hide that preparation cost inside an expiring live window.
+A new campaign uses a new nonexistent private output directory and its own clean
+source, runtime, image admission, ledger and receipt. Preserve historical bundles
+and the controller predecessor chain; do not import a failed campaign's image
+continuation or stage-pause records as new work. An unchanged retained image may
+be reused only through the existing canonical-input/provenance checks. Changed
+application inputs require a new local build and actual scan.
+
+The PostgreSQL campaign's API and worker use the existing `local` document
+adapter with `/app/data/documents` mounted from the same private Azure Files SMB
+share. The exact target-group storage account is `stm78<generation-suffix>`,
+StorageV2/Standard_LRS, with one 1-GiB TransactionOptimized `m78-documents`
+share. Base deployment also creates its file private endpoint, private DNS zone
+and VNet link, and the Container Apps environment storage binding. Public storage
+access is disabled. ARM resolves the account key directly into that environment
+binding; no application environment variable or deployment output contains it.
+SMB 3.1.1 encryption and mount UID/GID 100/101 match the reviewed Linux image.
+Verify the final image retains those IDs before live deployment. The mount's
+actual Azure behavior still requires the campaign's positive API-to-worker
+document exercise; this is not evidence for the separate object/scanner gate.
+
+Budget the normal 16 job starts, two prerequisite starts and at most two
+separately approved guarded database retries. Keep the four-worker execution
+alive through the failover window within its existing 7,200-second timeout;
+never add a second worker execution to recover missing evidence. There is no
+extra standalone startup probe in this full-observation sequence. The
+migration-identity probe receives the exact private API target for the bounded
+failover window; its SQL observations remain read-only and no database role is
+broadened. The 14-vCPU overlap, 20-connection safety reserve, cleanup overrun,
+private-storage quantities, installed scan allowance and cumulative prior
+attempts must all remain in the reviewed estimate. The unchanged per-bundle
+USD 50 gate is not a reset of a separately approved cumulative spending limit.
+
 ```powershell
-Invoke-M78Phase 'evidence' @('--control-plane-evidence', $controlPath)
-Invoke-M78Phase 'dispose'
+Invoke-M78Phase 'bootstrap' $bootstrapAuthorization
+Invoke-M78Phase 'migrate' $migrationAuthorization
+# Collect and validate the actual deployed control-plane fields described above.
+Invoke-M78Phase 'evidence' $evidenceAuthorization @('--control-plane-evidence', $controlPath)
+Invoke-M78Phase 'dispose' $disposeAuthorization
 ```
+
+Every mutation-capable artifact also carries its required cleanup operation.
+Bootstrap and migration invoke their existing exact-image prerequisite jobs
+before database writes. Current, operation-specific artifacts remain required
+even when an explicit user approval covers the whole bounded sequence. An
+approved routine local correction does not authorize replaying a successful or
+uncertain write, changing immutable source/image history, extending a deadline,
+or inventing completion evidence. Resume only when the existing entry point can
+conclusively validate the recorded outcome. Otherwise retain the protected pause
+and require the exact supported transition or cleanup.
 
 The evidence phase first starts the campaign worker and verifies four running
 replicas. It samples the bounded private application exercise at steady state,
@@ -1121,8 +1178,9 @@ then copies the approved API revision and repeats the measurement while four
 replicas of each revision are running. The operator binds each sampler log to
 the exact execution and its dispatch token. It checks the timestamps against
 complete worker and API inventories before deriving peak connections and
-application p95. It restores traffic to the original revision, deactivates the
-temporary revision, and stops the worker before running the remaining probes.
+application p95. It restores traffic to the original revision and deactivates the
+temporary revision. The same exact worker execution remains running through the
+subsequent failover observations.
 
 The remaining evidence steps execute in order:
 
@@ -1134,12 +1192,17 @@ The remaining evidence steps execute in order:
 5. API `NOLOGIN`, active-session termination, and catalog readback;
 6. an API-role connection-denial probe;
 7. API login restoration and positive API probe;
-8. forced managed PostgreSQL failover;
-9. post-failover replay, forged-scope, and two-tenant isolation; and
+8. start the existing migration probe's bounded failover window and require its
+   execution/token-bound readiness marker plus four running exact workers;
+9. one forced managed PostgreSQL failover while the probe is running, followed
+   by its positive request/worker recovery, replay and two-tenant observations; and
 10. exact operational/capacity assertions with measured failover duration.
 
-The sampler and proof jobs must terminate `Succeeded`. The worker is stopped
-after measurement. Incomplete, stale, or mismatched observations block admission
+The sampler and proof jobs must terminate `Succeeded`. Each assertion receipt
+must also contain the exact execution/token-bound passing markers, with the
+complete required proof set; a successful exit alone is not a passing assertion.
+The worker is stopped after the operational evidence completes. Incomplete,
+stale, or mismatched observations block admission
 and pause dependent work while cleanup protection, budget and authority remain
 valid. Expiry or an established terminal condition uses failure cleanup.
 The operator persists a sanitized,

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from opencanvas_api.core.config import Settings
@@ -47,6 +49,15 @@ ACTIVE_JOB_STATUSES = (
     "embedding",
     "indexing",
 )
+_WORKER_DATABASE_RECOVERY_SECONDS = 300.0
+_WORKER_DATABASE_TRANSIENT_STATES = frozenset({"08003", "08006", "57P01", "57P02", "57P03"})
+
+
+def _worker_database_disconnect(error: DBAPIError) -> bool:
+    state = getattr(error.orig, "sqlstate", None)
+    if state is not None:
+        return isinstance(state, str) and state in _WORKER_DATABASE_TRANSIENT_STATES
+    return error.connection_invalidated
 
 
 class JobQueueError(RuntimeError):
@@ -443,15 +454,36 @@ class DocumentWorker:
         return True
 
     async def run_forever(self) -> None:
+        disconnected_until: float | None = None
         try:
             while True:
-                processed = await self.run_once()
+                try:
+                    processed = await self.run_once()
+                except DBAPIError as exc:
+                    if not _worker_database_disconnect(exc):
+                        raise
+                    if disconnected_until is None:
+                        disconnected_until = time.monotonic() + _WORKER_DATABASE_RECOVERY_SECONDS
+                    remaining = disconnected_until - time.monotonic()
+                    if remaining <= 0:
+                        raise
+                    # A new iteration uses fresh sessions and the existing durable
+                    # lease recovery. Never replay the failed claim or commit.
+                    await asyncio.sleep(min(self.settings.worker_poll_interval_seconds, remaining))
+                    if time.monotonic() >= disconnected_until:
+                        raise
+                    continue
+                disconnected_until = None
                 if not processed:
                     await asyncio.sleep(self.settings.worker_poll_interval_seconds)
-        except asyncio.CancelledError:
-            async with self.sessions() as session:
-                await self._heartbeat(session, "stopping")
-                await session.commit()
+        except asyncio.CancelledError as cancellation:
+            try:
+                async with self.sessions() as session:
+                    await self._heartbeat(session, "stopping")
+                    await session.commit()
+            except (DBAPIError, OSError, TimeoutError):
+                # Shutdown reporting is best-effort during a provider outage.
+                raise cancellation from None
             raise
 
     async def _renew_lease(

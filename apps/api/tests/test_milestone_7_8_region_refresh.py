@@ -7,14 +7,15 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from infra.milestone_7_8.automation_region import CLEANUP_REGION_CANDIDATES
-from infra.milestone_7_8.campaign import CampaignConfig, CampaignError, SubprocessRunner
-from infra.milestone_7_8.operator import validate_operation_results
 from test_milestone_7_8_controller_admission import (
     DiscoveryRunner,
     authority_fixture,
     campaign_fixture,
 )
+
+from infra.milestone_7_8.automation_region import CLEANUP_REGION_CANDIDATES
+from infra.milestone_7_8.campaign import CampaignConfig, CampaignError, SubprocessRunner
+from infra.milestone_7_8.operator import validate_operation_results
 
 
 def _result(value: object) -> dict[str, object]:
@@ -65,7 +66,7 @@ def _capacity(
     discovery: tuple[dict[str, object], ...] | None = None,
 ) -> None:
     prefix = [
-        *[_result({"registrationState": "Registered"}) for _ in range(6)],
+        *[_result({"registrationState": "Registered"}) for _ in range(8)],
         _result([{"name": "Standard_D2ds_v4"}]),
         _result({"value": [
             {"name": {"value": name}, "unit": "Count", "currentValue": 0, "limit": 10}

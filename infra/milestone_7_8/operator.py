@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -54,6 +55,16 @@ from infra.milestone_7_8.controller_admission import (
     load_authority_evidence,
     validate_authority_evidence,
     validate_controller_admission,
+)
+from infra.milestone_7_8.controller_renewal import _durable_record
+from infra.milestone_7_8.evidence_console import (
+    EvidenceConsole,
+    evidence_hash,
+    validate_failover,
+    validate_probe_container,
+    validate_proofs,
+    validate_ready_readback,
+    validate_worker_capture,
 )
 from infra.milestone_7_8.measurement_handoff import (
     CampaignMeasurement,
@@ -806,6 +817,8 @@ def command_plan(
                 "Microsoft.ManagedIdentity",
                 "Microsoft.Automation",
                 "Microsoft.OperationalInsights",
+                "Microsoft.Storage",
+                "Microsoft.Network",
             )
         )
         automation_region_commands = automation_region_discovery_commands(
@@ -1561,8 +1574,8 @@ def command_plan(
                 "--resource-group",
                 rg,
                 "--name",
-                evidence,
-                "--args=--phase=post-failover",
+                runtime["migrationProbeJobName"],
+                "--args=--phase=failover-window",
                 "--output",
                 "json",
             ),
@@ -3962,45 +3975,199 @@ def execute_evidence_commands(
     *,
     private_directory: Path,
     image_digest: str,
+    runtime: dict[str, str],
+    worker_execution: str,
+    deadline: datetime,
+    authorize: Callable[[], None],
 ) -> list[dict[str, object]]:
     if len(commands) != 12:
         raise CampaignError("managed evidence command sequence is incomplete")
+    output = private_directory / "managed-assertion-captures"
+    console = EvidenceConsole(
+        runner, runtime, image_digest=image_digest, directory=output,
+        deadline=deadline, authorize=authorize,
+    )
     results: list[dict[str, object]] = []
-    recovery_seconds: float | None = None
-    failover_started: float | None = None
-    for index, original in enumerate(commands):
-        command = original
-        if index == 9:
-            failover_started = time.monotonic()
-        if index == 11:
-            if recovery_seconds is None:
-                raise CampaignError("managed failover duration is unavailable")
-            payload = _completed_control_plane_evidence(
-                control_plane_evidence, recovery_seconds=recovery_seconds
-            )
-            if "--env-vars" not in command:
-                raise CampaignError("managed operations evidence injection is absent")
+    captures: list[dict[str, object]] = []
+    phases = {0: "api", 1: "worker", 2: "catalog", 3: "application", 4: "migration",
+              5: "revoke", 6: "credential-denied", 7: "restore", 8: "api",
+              10: "failover-window", 11: "operations"}
+    revoke_requested, restore_requested = False, False
+    dispatch_times: dict[int, datetime] = {}
+
+    def guard() -> None:
+        if datetime.now(UTC) >= deadline:
+            raise _ProtectedStageExpired("managed evidence cleanup deadline expired")
+        authorize()
+
+    def prepare_job(index: int, *, payload: str | None = None) -> tuple[tuple[str, ...], str]:
+        nonlocal revoke_requested, restore_requested
+        command = list(commands[index])
+        if payload is not None:
             env_index = command.index("--env-vars") + 1
-            command = (
-                *command[:env_index],
-                f"M78_CONTROL_PLANE_EVIDENCE={payload}",
-                *command[env_index + 1 :],
-            )
-        if command[:4] == ("az", "containerapp", "job", "start"):
-            result = start_evidence_job(
-                runner, command, private_directory=private_directory, image_digest=image_digest,
-            )
-            if result.get("exitCode") != 0:
-                raise CampaignError("managed evidence job start failed")
-            result = {**result, **_wait_for_job(runner, command, result)}
+            command[env_index] = "M78_CONTROL_PLANE_EVIDENCE=" + payload
+        token = uuid.uuid4().hex
+        extra = ["M78_EVIDENCE_TOKEN=" + token]
+        if index == 10:
+            extra.append("M78_FAILOVER_WORKER_EXECUTION=" + worker_execution)
+        if "--env-vars" in command:
+            env_index = command.index("--env-vars") + 1
+            command[env_index:env_index] = extra
         else:
-            result = _run_required(runner, command)
+            command.extend(("--env-vars", *extra))
+        _durable_record(output / f"job-{index:02d}-intent.json", {
+            "command": command, "phase": phases[index], "token": token,
+            "sourceHead": runtime["sourceHead"], "imageDigest": image_digest,
+            "requestedAtUtc": datetime.now(UTC).isoformat(),
+        })
+        if index == 5:
+            revoke_requested = True
+        if index == 7:
+            restore_requested = True
+        return tuple(command), token
+
+    def start(index: int, *, payload: str | None = None) -> tuple[
+        tuple[str, ...], str, dict[str, object],
+    ]:
+        command, token = prepare_job(index, payload=payload)
+        guard()
+        def before_dispatch(resource: dict[str, object]) -> None:
+            properties = resource.get("properties")
+            template = properties.get("template") if isinstance(properties, dict) else None
+            containers = template.get("containers") if isinstance(template, dict) else None
+            if (not isinstance(containers, list) or len(containers) != 1
+                    or not isinstance(containers[0], dict)):
+                raise CampaignError("managed evidence job container scope differs")
+            validate_probe_container(
+                containers[0], phase=phases[index], image_digest=image_digest, token=token,
+            )
+            guard()
+            dispatched = datetime.now(UTC)
+            _durable_record(output / f"job-{index:02d}-dispatch.json", {
+                "command": command, "phase": phases[index], "token": token,
+                "dispatchedAtUtc": dispatched.isoformat(),
+            })
+            guard()
+            dispatch_times[index] = dispatched
+
+        started = start_evidence_job(
+            runner, command, private_directory=private_directory, image_digest=image_digest,
+            before_dispatch=before_dispatch,
+        )
+        _durable_record(output / f"job-{index:02d}-start.json", started)
+        if started.get("exitCode") != 0:
+            raise CampaignError("managed evidence job start failed")
+        return command, token, started
+
+    def finish(index: int, command: tuple[str, ...], token: str,
+               started: dict[str, object]) -> tuple[dict[str, object], dict[str, object]]:
+        waited = _wait_for_job(runner, command, started, deadline=deadline)
+        guard()
+        result = {**started, **waited}
+        _durable_record(output / f"job-{index:02d}-terminal.json", result)
+        capture = console.capture(
+            command[command.index("--name") + 1], str(waited["executionName"]),
+            token, phases[index],
+            dispatched_at=dispatch_times[index],
+        )
+        return result, capture
+
+    try:
+        for index in range(9):
+            command, token, started = start(index)
+            result, capture = finish(index, command, token, started)
+            results.append(result)
+            captures.append(capture)
+        # The probe must observe live API/worker state before the one restart.
+        command, token, started = start(10)
+        initial = _json_result(started)
+        if not isinstance(initial, dict) or not isinstance(initial.get("name"), str):
+            raise CampaignError("managed failover probe execution identity is missing")
+        ready = console.capture(
+            runtime["migrationProbeJobName"], str(initial["name"]), token, "failover-window",
+            dispatched_at=dispatch_times[10], ready=True,
+        )
+        ready_payload = cast(dict[str, object], ready["payload"])
+        if ready_payload.get("workerExecution") != worker_execution:
+            raise CampaignError("failover ready marker names another worker execution")
+        worker_before = collect_worker_replicas(
+            console, subscription=runtime["subscriptionId"], group=runtime["resourceGroupName"],
+            job=runtime["workerJobName"], execution=worker_execution,
+        )
+        validate_worker_capture(worker_before, runtime, worker_execution)
+        probe_path = (
+            f"/subscriptions/{runtime['subscriptionId']}"
+            f"/resourceGroups/{runtime['resourceGroupName']}"
+            f"/providers/Microsoft.App/jobs/{runtime['migrationProbeJobName']}"
+            f"/executions/{initial['name']}"
+        )
+        probe_readback = console.run((
+            "az", "rest", "--method", "get", "--url",
+            "https://management.azure.com" + probe_path + "?api-version=2024-03-01",
+            "--subscription", runtime["subscriptionId"], "--output", "json",
+        ))
+        probe_observed = datetime.now(UTC).isoformat()
+        validate_ready_readback(ready, probe_readback, probe_observed, runtime, image_digest)
+        guard()
+        restart: dict[str, object] = {
+            "command": commands[9], "dispatchedAtUtc": datetime.now(UTC).isoformat(),
+            "probeReadback": probe_readback, "probeObservedAtUtc": probe_observed,
+        }
+        _durable_record(output / "forced-failover-intent.json", restart)
+        guard()
+        restart["dispatchedAtUtc"] = datetime.now(UTC).isoformat()
+        _durable_record(output / "forced-failover-dispatch.json", restart)
+        guard()
+        restarted = runner.run(commands[9])
+        restart.update(result=restarted, completedAtUtc=datetime.now(UTC).isoformat())
+        _durable_record(output / "forced-failover-result.json", restart)
+        if restarted.get("exitCode") != 0:
+            raise CampaignError("forced managed failover failed")
+        result, capture = finish(10, command, token, started)
+        worker_after = collect_worker_replicas(
+            console, subscription=runtime["subscriptionId"], group=runtime["resourceGroupName"],
+            job=runtime["workerJobName"], execution=worker_execution,
+        )
+        validate_worker_capture(worker_after, runtime, worker_execution)
+        recovery_seconds = validate_failover(
+            cast(dict[str, object], ready["payload"]), cast(dict[str, object], capture["payload"]),
+            restart, worker_execution=worker_execution,
+        )
+        results.extend((restarted, result))
+        captures.append(capture)
+        payload = _completed_control_plane_evidence(
+            control_plane_evidence, recovery_seconds=recovery_seconds,
+        )
+        command, token, started = start(11, payload=payload)
+        result, capture = finish(11, command, token, started)
         results.append(result)
-        if index == 9:
-            if failover_started is None:
-                raise CampaignError("managed failover start time is unavailable")
-            recovery_seconds = max(time.monotonic() - failover_started, 0.000001)
-    return results
+        captures.append(capture)
+        proof: dict[str, object] = {
+            "version": "m7.8-managed-assertion-evidence-v1", "sourceHead": runtime["sourceHead"],
+            "imageDigest": image_digest, "workerExecution": worker_execution,
+            "control": control_plane_evidence, "captures": captures, "ready": ready,
+            "restart": restart, "workerBefore": worker_before, "workerAfter": worker_after,
+        }
+        proof["evidenceSha256"] = evidence_hash(proof)
+        validate_proofs(proof, runtime, image_digest=image_digest,
+                        control=control_plane_evidence, worker_execution=worker_execution)
+        _durable_record(private_directory / "managed-assertion-evidence.json", proof)
+        return results
+    except Exception:
+        # Revocation and restoration are distinct approved operations. A failed
+        # denial observation must not strand the API in NOLOGIN while protected.
+        if revoke_requested and not restore_requested:
+            try:
+                command, token, started = start(7)
+                finish(7, command, token, started)
+            except Exception as restoration_error:
+                # Preserve the original phase failure even if diagnostics cannot persist.
+                with contextlib.suppress(Exception):
+                    _durable_record(output / "credential-restoration-failed.json", {
+                        "errorClass": type(restoration_error).__name__,
+                        "observedAtUtc": datetime.now(UTC).isoformat(),
+                    })
+        raise
 
 
 def persist_evidence_execution_receipt(
@@ -4048,8 +4215,25 @@ def persist_evidence_execution_receipt(
                 ).hexdigest(),
             }
         )
+    proof_path = path.with_name("managed-assertion-evidence.json")
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    if not isinstance(proof, dict) or config.image_digest is None:
+        raise CampaignError("managed assertion evidence is absent")
+    validate_proofs(
+        proof, runtime, image_digest=config.image_digest,
+        control={**control_plane_evidence, "observedPeak": measurement["observedPeak"],
+                 "latencyP95Ms": measurement["latencyP95Ms"]},
+        worker_execution=str(measurement["workerExecution"]),
+    )
+    for capture, observation in zip(
+        proof["captures"], [item for i, item in enumerate(observations) if i != 9], strict=True,
+    ):
+        if (capture["execution"] != observation["executionName"]
+                or observation["identity"].split(":")[1] != capture["job"]):
+            raise CampaignError("assertion evidence belongs to another probe execution")
     receipt = {
-        "version": "m7.8-managed-evidence-execution-v2",
+        "version": "m7.8-managed-evidence-execution-v3",
+        "assertionEvidenceSha256": proof["evidenceSha256"],
         "campaignId": config.campaign_id,
         "generationId": config.generation_id,
         "sourceHead": runtime["sourceHead"],
@@ -4078,9 +4262,13 @@ def validate_evidence_execution_receipt(
     config: CampaignConfig,
     runtime: dict[str, str],
     control_plane_evidence: dict[str, object],
+    allow_historical: bool = False,
 ) -> None:
     value = json.loads(path.read_text(encoding="utf-8"))
     observations = value.get("observations") if isinstance(value, dict) else None
+    historical = (
+        isinstance(value, dict) and value.get("version") == "m7.8-managed-evidence-execution-v2"
+    )
     control_sha256 = hashlib.sha256(
         json.dumps(
             control_plane_evidence, separators=(",", ":"), sort_keys=True
@@ -4098,8 +4286,11 @@ def validate_evidence_execution_receipt(
             "controlPlaneEvidenceSha256",
             "measurement",
             "observations",
+        } | (set() if historical else {"assertionEvidenceSha256"})
+        or (historical and not allow_historical)
+        or value["version"] not in {
+            "m7.8-managed-evidence-execution-v2", "m7.8-managed-evidence-execution-v3",
         }
-        or value["version"] != "m7.8-managed-evidence-execution-v2"
         or value["campaignId"] != config.campaign_id
         or value["generationId"] != config.generation_id
         or value["sourceHead"] != runtime["sourceHead"]
@@ -4122,7 +4313,28 @@ def validate_evidence_execution_receipt(
         )
     ):
         raise CampaignError("managed evidence execution receipt is invalid")
-    validate_measurement_receipt(value["measurement"], control_plane_evidence)
+    measurement = validate_measurement_receipt(value["measurement"], control_plane_evidence)
+    if historical:
+        return  # Explicit audit only; normal live admission never sets this flag.
+    if config.image_digest is None:
+        raise CampaignError("managed evidence admitted image is absent")
+    proof_path = path.with_name("managed-assertion-evidence.json")
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    if (not isinstance(proof, dict)
+            or proof.get("evidenceSha256") != value["assertionEvidenceSha256"]):
+        raise CampaignError("managed assertion evidence differs from the phase receipt")
+    validate_proofs(
+        proof, runtime, image_digest=config.image_digest,
+        control={**control_plane_evidence, "observedPeak": measurement["observedPeak"],
+                 "latencyP95Ms": measurement["latencyP95Ms"]},
+        worker_execution=str(measurement["workerExecution"]),
+    )
+    for capture, observation in zip(
+        proof["captures"], [item for i, item in enumerate(observations) if i != 9], strict=True,
+    ):
+        if (capture["execution"] != observation["executionName"]
+                or observation["identity"].split(":")[1] != capture["job"]):
+            raise CampaignError("managed assertion receipt execution differs")
 
 
 def _reconcile_evidence_stage_completion(
@@ -4656,22 +4868,22 @@ def validate_operation_results(
             raise CampaignError("Azure campaign correlation differs")
     elif operation == "capacity-check":
         validate_bound_controller_authority(controller_authority_evidence, runtime, config)
-        if len(results) != 24:
+        if len(results) != 26:
             raise CampaignError(
                 "provider, quota, region, SKU, or name proof is incomplete"
             )
-        providers = [_json_result(result) for result in results[:6]]
+        providers = [_json_result(result) for result in results[:8]]
         if any(
             not isinstance(provider, dict)
             or provider.get("registrationState") != "Registered"
             for provider in providers
         ):
             raise CampaignError("required Azure provider is not registered")
-        skus = _json_result(results[6])
-        postgres_quota = _json_result(results[7])
-        app_quota = _json_result(results[8])
-        registry_name = _json_result(results[9])
-        postgres_name = _json_result(results[10])
+        skus = _json_result(results[8])
+        postgres_quota = _json_result(results[9])
+        app_quota = _json_result(results[10])
+        registry_name = _json_result(results[11])
+        postgres_name = _json_result(results[12])
         if "Standard_D2ds_v4" not in json.dumps(skus, separators=(",", ":")):
             raise CampaignError("required PostgreSQL SKU is unavailable")
         validate_campaign_provider_quotas(postgres_quota, app_quota)
@@ -4688,7 +4900,7 @@ def validate_operation_results(
             )
         refreshed_selection = select_automation_region_from_results(
             runner,
-            tuple(results[11:17]),
+            tuple(results[13:19]),
             subscription_id=runtime["subscriptionId"],
             controller_resource_group=config.cleanup_resource_group,
             controller_account=runtime["automationAccountName"],
@@ -4722,7 +4934,7 @@ def validate_operation_results(
             raise CampaignError(
                 "prepared Automation cleanup region or offer proof is no longer armable"
             )
-        validate_controller_baseline(results[17:24], config, runtime)
+        validate_controller_baseline(results[19:26], config, runtime)
     elif operation == "scope-create":
         if len(results) != 1:
             raise CampaignError("campaign scope creation is unproved")
@@ -5165,19 +5377,53 @@ def main() -> int:
             if args.operation == "evidence" and control_evidence is not None:
                 if config.image_digest is None:
                     raise CampaignError("measurement image is missing")
-                measurement = CampaignMeasurement(
+                def authorize_evidence() -> None:
+                    if args.authorization is None:
+                        raise CampaignError("managed evidence authorization is missing")
+                    if not _stage_is_protected(config, runtime, ledger):
+                        raise _ProtectedStageExpired("managed evidence protection expired")
+                    for permitted in ("evidence", "cleanup"):
+                        load_execution_authorization(
+                            args.authorization, config=config, runtime=runtime,
+                            operation=permitted, now=datetime.now(UTC),
+                        )
+
+                sampler = CampaignMeasurement(
                     runner, runtime, config.cleanup_deadline_utc,
                     private_directory=args.ledger.parent, image_digest=config.image_digest,
-                ).run(control_evidence)
-                results = execute_evidence_commands(
-                    runner, commands, {
-                        **control_evidence,
-                        "observedPeak": measurement["observedPeak"],
-                        "latencyP95Ms": measurement["latencyP95Ms"],
-                    },
-                    private_directory=args.ledger.parent,
-                    image_digest=config.image_digest,
+                    authorize=authorize_evidence,
                 )
+                try:
+                    measurement = sampler.run(control_evidence, keep_worker=True)
+                    results = execute_evidence_commands(
+                        runner, commands, {
+                            **control_evidence,
+                            "observedPeak": measurement["observedPeak"],
+                            "latencyP95Ms": measurement["latencyP95Ms"],
+                        },
+                        private_directory=args.ledger.parent,
+                        image_digest=config.image_digest, runtime=runtime,
+                        worker_execution=str(measurement["workerExecution"]),
+                        deadline=parse_utc(config.cleanup_deadline_utc),
+                        authorize=authorize_evidence,
+                    )
+                except Exception:
+                    if sampler.worker_execution is not None:
+                        try:
+                            sampler.stop_worker(sampler.worker_execution)
+                        except Exception as stop_error:
+                            with contextlib.suppress(Exception):
+                                _stage_record(
+                                    args.ledger.parent / "measurement-worker-stop-failed.json",
+                                    "worker-stop-failed", {
+                                        "errorClass": type(stop_error).__name__,
+                                        "observedAtUtc": datetime.now(UTC).isoformat(),
+                                    },
+                                )
+                    raise
+                else:
+                    if sampler.worker_execution is not None:
+                        sampler.stop_worker(sampler.worker_execution)
             elif args.operation == "deploy":
                 # ARM can outlive the ordinary command timeout. Only this base
                 # deployment gets a longer wait, never beyond campaign expiry.

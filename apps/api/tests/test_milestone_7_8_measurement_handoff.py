@@ -14,7 +14,13 @@ from urllib.parse import urlsplit
 
 from test_milestone_7_8_campaign_enablement import _config, _runtime, _write_execution_authorization
 
-from infra.milestone_7_8 import cleanup_controller, measurement_handoff, operator, replica_readback
+from infra.milestone_7_8 import (
+    cleanup_controller,
+    evidence_console,
+    measurement_handoff,
+    operator,
+    replica_readback,
+)
 from infra.milestone_7_8.campaign import ORDER, CampaignConfig, Ledger, Phase
 
 SUBSCRIPTION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -49,6 +55,8 @@ RUNTIME = {
     "recoveryJobName": "job-proof-revoke",
     "recoveryRestoreJobName": "job-proof-restore",
     "postgresServerName": "pg-proof",
+    "campaignId": _config().campaign_id,
+    "generationId": _config().generation_id,
 }
 
 
@@ -221,7 +229,10 @@ class TestMeasurementHandoff(unittest.TestCase):
         self, directory: Path, failure: str | None = None,
         *, operation: str = "evidence", ledger: Ledger | None = None, save_fails: bool = False,
     ) -> tuple[int, FakeProvider, Ledger, Mock, str]:
-        provider = FakeProvider(failure)
+        from test_milestone_7_8_disruption_operator import FakeCampaignEvidence
+
+        provider = FakeCampaignEvidence()
+        provider.failure = failure
         config = _config(cleanup_deadline_utc="2030-01-01T01:00:00Z")
         if ledger is None:
             ledger = Ledger(config.campaign_id, config.generation_id)
@@ -268,7 +279,8 @@ class TestMeasurementHandoff(unittest.TestCase):
                 side_effect=OSError("synthetic ledger persistence failure") if save_fails else None,
             ))
             cleanup = stack.enter_context(patch.object(operator, "start_failure_cleanup"))
-            for module in (operator, cleanup_controller, measurement_handoff, replica_readback):
+            for module in (operator, cleanup_controller, measurement_handoff,
+                           replica_readback, evidence_console):
                 stack.enter_context(patch.object(module, "datetime", Clock))
             stack.enter_context(patch.object(time, "sleep", provider.sleep))
             stack.enter_context(patch.object(

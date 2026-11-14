@@ -109,17 +109,22 @@ def start_evidence_job(
     args = next((arg for arg in command if arg.startswith((
         "--args=--phase=", "--args=--retry-after-execution=", "--args=--diagnose-prerequisites",
     ))), None)
-    if args is None:
+    if args is None and "--env-vars" not in command:
         return runner.run(command)
-    offset = command.index(args)
     read = list(command)
     read[3] = "show"
-    del read[offset]
-    env_override = None
+    if args is not None:
+        read.remove(args)
+    env_overrides: list[str] = []
     if "--env-vars" in read:
         index = read.index("--env-vars")
-        env_override = read[index + 1]
-        del read[index:index + 2]
+        end = index + 1
+        while end < len(read) and not read[end].startswith("--"):
+            env_overrides.append(read[end])
+            end += 1
+        if not env_overrides:
+            raise CampaignError("evidence execution environment override is empty")
+        del read[index:end]
     group = command[command.index("--resource-group") + 1]
     subscription = command[command.index("--subscription") + 1]
     job = command[command.index("--name") + 1]
@@ -143,18 +148,21 @@ def start_evidence_job(
     image = container.get("image")
     if not isinstance(image, str) or not image.endswith(f"@{image_digest}"):
         raise CampaignError("evidence job image differs from the admitted digest")
-    if args.startswith(("--args=--retry-after-execution=", "--args=--diagnose-prerequisites")) and (
+    if args is not None and args.startswith((
+        "--args=--retry-after-execution=", "--args=--diagnose-prerequisites",
+    )) and (
         expected_command is None or container.get("command") != list(expected_command)
         or before_dispatch is None
     ):
         raise CampaignError("database command or dispatch guard is missing")
     if args == "--args=--diagnose-prerequisites" and container.get("args") not in (None, []):
         raise CampaignError("database prerequisite requires the standard job arguments")
-    container["args"] = [args.removeprefix("--args=")]
-    if env_override is not None:
-        key, _, value = env_override.partition("=")
+    if args is not None:
+        container["args"] = [args.removeprefix("--args=")]
+    for env_override in env_overrides:
+        key, separator, value = env_override.partition("=")
         env = container.get("env")
-        if not key or not isinstance(env, list):
+        if not key or not separator or not isinstance(env, list):
             raise CampaignError("evidence job environment is malformed")
         variables = [_object(item, "evidence job environment variable") for item in env]
         if any(item.get("name") == key for item in variables):
@@ -175,16 +183,19 @@ class CampaignMeasurement:
     def __init__(
         self, runner: CommandRunner, runtime: dict[str, str], deadline_utc: str,
         *, private_directory: Path, image_digest: str,
+        authorize: Callable[[], None] | None = None,
     ) -> None:
         self.runner = runner
         self.private_directory = private_directory
         self.image_digest = image_digest
         self.deadline = parse_utc(deadline_utc)
+        self.authorize = authorize or (lambda: None)
         self.subscription = runtime["subscriptionId"]
         self.group = _name(runtime["resourceGroupName"])
         self.worker = _name(runtime["workerJobName"])
         self.sampler = _name(runtime["evidenceJobName"])
         self.workspace = _name(runtime["logAnalyticsWorkspaceName"])
+        self.worker_execution: str | None = None
         group = re.fullmatch(r"rg-m78-([a-f0-9]{10})-target", self.group)
         if group is None:
             raise CampaignError("measurement campaign scope is malformed")
@@ -202,11 +213,17 @@ class CampaignMeasurement:
 
     def command(self, *args: str, output: bool = True) -> object:
         self.remaining()
+        self.authorize()
         command = ("az", *args, "--subscription", self.subscription, "--output", "json")
         if args[:3] == ("containerapp", "job", "start"):
+            def before_dispatch(_resource: dict[str, object]) -> None:
+                self.remaining()
+                self.authorize()
+
             result = start_evidence_job(
                 self.runner, command, private_directory=self.private_directory,
                 image_digest=self.image_digest,
+                before_dispatch=before_dispatch,
             )
         else:
             result = self.runner.run(command)
@@ -448,7 +465,7 @@ class CampaignMeasurement:
             "readbacksSha256": _digest({"api": api_observations, "worker": worker_observations}),
         }
 
-    def run(self, control: dict[str, object]) -> dict[str, object]:
+    def run(self, control: dict[str, object], *, keep_worker: bool = False) -> dict[str, object]:
         pools = cast(int, control["poolCeilings"])
         allowance = cast(int, control["rolloutOverlap"])
         # The campaign pins ten connections per API and worker replica.
@@ -461,6 +478,7 @@ class CampaignMeasurement:
         self.wait_for_api(initial)
         workspace = self.workspace_id()
         worker_execution = self.start_job(self.worker)
+        self.worker_execution = worker_execution
         wait_for_four_running_candidates(
             self.runner, subscription=self.subscription, group=self.group, job=self.worker,
             execution=worker_execution, timeout_seconds=min(180, self.remaining()),
@@ -496,10 +514,8 @@ class CampaignMeasurement:
             "containerapp", "revision", "deactivate", *app_args, "--revision", new, output=False,
         )
         self.wait_for_api((old,))
-        self.command(
-            "containerapp", "job", "stop", "--resource-group", self.group,
-            "--name", self.worker, "--job-execution-name", worker_execution, output=False,
-        )
+        if not keep_worker:
+            self.stop_worker(worker_execution)
         return {
             "workerExecution": worker_execution,
             "steady": steady_evidence,
@@ -507,6 +523,12 @@ class CampaignMeasurement:
             "observedPeak": max(steady_peak, overlap_peak),
             "latencyP95Ms": _p95(_application_latencies(steady) + _application_latencies(overlap)),
         }
+
+    def stop_worker(self, execution: str) -> None:
+        self.command(
+            "containerapp", "job", "stop", "--resource-group", self.group,
+            "--name", self.worker, "--job-execution-name", _name(execution), output=False,
+        )
 
 
 def _four_running(records: list[dict[str, object]]) -> bool:

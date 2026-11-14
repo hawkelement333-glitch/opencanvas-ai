@@ -14,10 +14,15 @@ from datetime import UTC, datetime
 from typing import Final
 
 import httpx
+from asyncpg.exceptions import InvalidAuthorizationSpecificationError
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.pool import NullPool
 
 from opencanvas_api.core.config import EXPECTED_DATABASE_REVISION, DatabaseRole, get_settings
+from opencanvas_api.db.migrations import run_guarded_postgresql_migration
 from opencanvas_api.db.principal_manifest import (
     PrincipalManifest,
     PrincipalSlot,
@@ -30,6 +35,7 @@ from opencanvas_api.db.role_privileges import (
     application_routines,
     require_runtime_function_privileges,
 )
+from opencanvas_api.db.runtime import MIGRATION_ADVISORY_LOCK_ID
 from opencanvas_api.db.session import Database
 
 REQUIRED_PROOFS: Final = frozenset(
@@ -274,6 +280,127 @@ async def _role_contract_matches(
     return bool(can_connect and can_create_schema == migration and can_create_public == migration)
 
 
+async def _runtime_table_grants(
+    connection: AsyncConnection, principal: str, role: DatabaseRole,
+) -> dict[str, int]:
+    operations: dict[str, frozenset[str]] = dict(RUNTIME_TABLE_PRIVILEGES[role].items())
+    for forbidden in ("TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"):
+        operations[forbidden] = frozenset()
+    observed: dict[str, int] = {}
+    for operation, expected_tables in operations.items():
+        rows = (
+            await connection.execute(
+                text(
+                    "SELECT c.relname, pg_catalog.has_table_privilege("
+                    "CAST(:principal AS name), c.oid, :operation), "
+                    "pg_catalog.has_table_privilege("
+                    "CAST(:principal AS name), c.oid, :grant_option) "
+                    "FROM pg_catalog.pg_class AS c JOIN pg_catalog.pg_namespace AS n "
+                    "ON n.oid = c.relnamespace WHERE n.nspname = 'public' "
+                    "AND c.relkind IN ('r','p','f','v','m')"
+                ),
+                {"principal": principal, "operation": operation,
+                 "grant_option": f"{operation} WITH GRANT OPTION"},
+            )
+        ).all()
+        allowed_tables = {name for name, privilege, _ in rows if privilege}
+        if allowed_tables != expected_tables or any(grant for _, _, grant in rows):
+            raise EvidenceError("runtime table grants differ from the exact matrix")
+        observed[operation] = len(allowed_tables)
+    return observed
+
+
+async def _migration_lock_observation(
+    connection: AsyncConnection, database: Database,
+) -> dict[str, bool]:
+    lock = {"lock_id": MIGRATION_ADVISORY_LOCK_ID}
+    acquire = text("SELECT pg_try_advisory_lock(:lock_id)")
+    release = text("SELECT pg_advisory_unlock(:lock_id)")
+    if (await connection.execute(acquire, lock)).scalar_one() is not True:
+        raise EvidenceError("migration probe could not acquire its advisory lock")
+
+    def must_not_migrate() -> None:
+        raise EvidenceError("contender entered migration despite an observed existing lock")
+
+    try:
+        async with database.engine.connect() as contender:
+            try:
+                await contender.run_sync(
+                    lambda sync: run_guarded_postgresql_migration(
+                        sync, expected_current=EXPECTED_DATABASE_REVISION,
+                        expected_target=EXPECTED_DATABASE_REVISION, migrate=must_not_migrate,
+                    )
+                )
+            except RuntimeError as exc:
+                if str(exc) != "another database migration is already active":
+                    raise
+                contender_blocked = True
+            else:
+                raise EvidenceError("migration contender was not blocked by the advisory lock")
+            if contender.in_transaction():
+                raise EvidenceError("migration contender left its transaction open")
+    finally:
+        if (await connection.execute(release, lock)).scalar_one() is not True:
+            raise EvidenceError("migration probe lost its advisory lock")
+    await connection.commit()
+
+    entered = False
+
+    def observe_callback() -> None:
+        nonlocal entered
+        entered = True
+
+    await connection.run_sync(
+        lambda sync: run_guarded_postgresql_migration(
+            sync, expected_current=EXPECTED_DATABASE_REVISION,
+            expected_target=EXPECTED_DATABASE_REVISION, migrate=observe_callback,
+        )
+    )
+    if not entered or connection.in_transaction():
+        raise EvidenceError("migration guard did not complete its no-op revision check")
+    return {"contenderBlocked": contender_blocked, "reacquiredGuardEntered": entered}
+
+
+async def _migration_runtime_assertions(
+    connection: AsyncConnection, database: Database, manifest: PrincipalManifest,
+) -> list[Assertion]:
+    if not isinstance(database.engine.pool, NullPool):
+        raise EvidenceError("migration probe requires a non-pooled database engine")
+    migration = manifest.principals[PrincipalSlot.MIGRATION].name
+    await application_routines(connection, owner=migration)
+    schema_owner, unowned = (
+        await connection.execute(
+            text(
+                "SELECT pg_catalog.pg_get_userbyid(n.nspowner), count(c.oid) FILTER "
+                "(WHERE c.relowner <> n.nspowner) "
+                "FROM pg_catalog.pg_namespace AS n LEFT JOIN pg_catalog.pg_class AS c "
+                "ON c.relnamespace=n.oid AND c.relkind IN ('r','p','S') "
+                "WHERE n.nspname='public' GROUP BY n.nspowner"
+            )
+        )
+    ).one()
+    if schema_owner != migration or unowned != 0:
+        raise EvidenceError("migration probe observed non-owned application schema objects")
+    grants: dict[str, object] = {}
+    for role, slot in ((DatabaseRole.API, PrincipalSlot.API),
+                       (DatabaseRole.WORKER, PrincipalSlot.WORKER)):
+        if not await _role_contract_matches(connection, manifest, slot):
+            raise EvidenceError("migration probe observed runtime role or membership drift")
+        name = manifest.principals[slot].name
+        grants[role.value] = {
+            "tableGrants": await _runtime_table_grants(connection, name, role),
+            "functionObjectsChecked": await require_runtime_function_privileges(
+                connection, role, principal=name,
+            ),
+        }
+    guard_observation = await _migration_lock_observation(connection, database)
+    return [
+        _assertion("migration.nullpool", True, {"pool": type(database.engine.pool).__name__}),
+        _assertion("migration.advisory-lock", all(guard_observation.values()), guard_observation),
+        _assertion("migration.reconciliation", True, {"runtimeGrants": grants}),
+    ]
+
+
 async def catalog_assertions(role: DatabaseRole) -> list[Assertion]:
     settings = get_settings()
     settings.require_database_role(role)
@@ -311,32 +438,7 @@ async def catalog_assertions(role: DatabaseRole) -> list[Assertion]:
                 _assertion("capacity.max-connections", max_connections > 0, max_connections),
             ]
             if role in {DatabaseRole.API, DatabaseRole.WORKER}:
-                matrix = RUNTIME_TABLE_PRIVILEGES[role]
-                observed: dict[str, int] = {}
-                operations: dict[str, frozenset[str]] = dict(matrix.items())
-                for forbidden in ("TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"):
-                    operations[forbidden] = frozenset()
-                for operation, expected_tables in operations.items():
-                    rows = (
-                        await connection.execute(
-                            text(
-                                "SELECT c.relname, pg_catalog.has_table_privilege("
-                                "current_user, c.oid, :operation), pg_catalog.has_table_privilege("
-                                "current_user, c.oid, :grant_option) "
-                                "FROM pg_catalog.pg_class AS c JOIN pg_catalog.pg_namespace AS n "
-                                "ON n.oid = c.relnamespace WHERE n.nspname = 'public' "
-                                "AND c.relkind IN ('r','p','f','v','m')"
-                            ),
-                            {
-                                "operation": operation,
-                                "grant_option": f"{operation} WITH GRANT OPTION",
-                            },
-                        )
-                    ).all()
-                    allowed_tables = {name for name, privilege, _ in rows if privilege}
-                    if allowed_tables != expected_tables or any(grant for _, _, grant in rows):
-                        raise EvidenceError("runtime table grants differ from the exact matrix")
-                    observed[operation] = len(allowed_tables)
+                observed = await _runtime_table_grants(connection, str(current), role)
                 sequence_names = tuple(
                     str(item)
                     for item in (
@@ -473,6 +575,7 @@ async def catalog_assertions(role: DatabaseRole) -> list[Assertion]:
                         revision,
                     )
                 )
+                results.extend(await _migration_runtime_assertions(connection, database, manifest))
                 suffix = _digest(
                     {"campaign": manifest.campaign_id, "generation": manifest.generation_id}
                 )[:12]
@@ -591,7 +694,7 @@ def application_measurement_hooks(
 
 
 async def application_assertions(
-    *, post_failover: bool = False, latencies_ms: list[float] | None = None,
+    *, latencies_ms: list[float] | None = None,
     observed_at_utc: list[str] | None = None,
 ) -> list[Assertion]:
     base_url = os.environ.get("M78_PRIVATE_API_URL", "")
@@ -733,38 +836,68 @@ async def application_assertions(
                 "tenant.forged-workflow",
             )
         )
-        if post_failover:
-            assertions.append(_assertion("tenant.post-failover", True, {"status": "proved"}))
     return assertions
 
 
 async def credential_denial_assertion() -> list[Assertion]:
     settings = get_settings()
     settings.require_database_role(DatabaseRole.API)
+    manifest = load_principal_manifest()
+    url = make_url(settings.database_url_value)
+    if (
+        url.get_backend_name() != "postgresql" or url.database != "opencanvas"
+        or url.username is None or url.password is not None
+        or settings.database_auth_mode != "entra"
+    ):
+        raise EvidenceError("credential denial probe is outside the managed application database")
+    binding = manifest.require_current(PrincipalSlot.API, current_name=url.username)
     database = Database.from_settings(settings, expected_role=DatabaseRole.API)
-    denied = False
+    message = f'role "{binding.name}" is not permitted to log in'
     try:
-        async with database.engine.connect() as connection:
-            await connection.execute(text("SELECT 1"))
-    except Exception:
-        denied = True
+        try:
+            connection = await database.engine.connect()
+        except (DBAPIError, InvalidAuthorizationSpecificationError) as exc:
+            driver = exc.orig if isinstance(exc, DBAPIError) else exc
+            if isinstance(driver, BaseException) and not isinstance(
+                driver, InvalidAuthorizationSpecificationError,
+            ):
+                driver = driver.__cause__
+            if (
+                not isinstance(driver, InvalidAuthorizationSpecificationError)
+                or driver.sqlstate != "28000"
+                or getattr(driver, "severity_en", None) != "FATAL"
+                or driver.message != message
+            ):
+                raise EvidenceError("exact PostgreSQL role login denial is unproved") from None
+        else:
+            await connection.close()
+            raise EvidenceError("revoked campaign identity retained database login")
     finally:
         await database.dispose()
-    if not denied:
-        raise EvidenceError("revoked campaign identity retained database login")
-    return [_assertion("recovery.credential-revocation", True, {"loginDenied": True})]
+    return [_assertion("recovery.credential-revocation", True, {
+        "loginDenied": True, "sqlstate": "28000", "role": PrincipalSlot.API.value,
+    })]
+
+
+def _emit_evidence(value: dict[str, object]) -> None:
+    token = os.environ.get("M78_EVIDENCE_TOKEN")
+    if token is not None and re.fullmatch(r"[a-f0-9]{32}", token) is None:
+        raise EvidenceError("evidence dispatch binding is malformed")
+    prefix = f"M78_EVIDENCE {token} " if token is not None else ""
+    print(prefix + json.dumps(value, separators=(",", ":"), sort_keys=True, allow_nan=False),
+          flush=True)
 
 
 def emit(assertions: list[Assertion]) -> None:
     if not assertions or not all(item.passed for item in assertions):
         raise EvidenceError("evidence set is empty or failed")
-    value = {
+    value: dict[str, object] = {
         "version": "m7.8-managed-postgres-evidence-v1",
         "observedAtUtc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "assertions": [asdict(item) for item in sorted(assertions, key=lambda item: item.code)],
         "status": "passed",
     }
-    print(json.dumps(value, separators=(",", ":"), sort_keys=True))
+    _emit_evidence(value)
 
 
 def main() -> int:
@@ -778,6 +911,7 @@ def main() -> int:
             "migration",
             "application",
             "post-failover",
+            "failover-window",
             "credential-denied",
             "operations",
             "measurement-sample",
@@ -805,10 +939,15 @@ def main() -> int:
             assertions = validate_control_plane_evidence(
                 os.environ.get("M78_CONTROL_PLANE_EVIDENCE", "")
             )
-        elif args.phase in {"application", "post-failover"}:
-            assertions = asyncio.run(
-                application_assertions(post_failover=args.phase == "post-failover")
-            )
+        elif args.phase == "application":
+            assertions = asyncio.run(application_assertions())
+        elif args.phase == "post-failover":
+            raise EvidenceError("post-failover evidence requires a bound managed disruption window")
+        elif args.phase == "failover-window":
+            from scripts.m78_failover_probe import run
+
+            _emit_evidence(asyncio.run(run()))
+            return 0
         elif args.phase == "credential-denied":
             assertions = asyncio.run(credential_denial_assertion())
         else:
@@ -819,14 +958,6 @@ def main() -> int:
                 "migration": DatabaseRole.MIGRATION,
             }[args.phase]
             assertions = asyncio.run(catalog_assertions(role))
-            if args.phase == "migration":
-                assertions.extend(
-                    [
-                        _assertion("migration.nullpool", True, {"pool": "NullPool"}),
-                        _assertion("migration.advisory-lock", True, {"lock": "guarded"}),
-                        _assertion("migration.reconciliation", True, {"status": "exact"}),
-                    ]
-                )
         emit(assertions)
         return 0
     except EvidenceError as exc:
