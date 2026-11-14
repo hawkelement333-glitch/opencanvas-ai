@@ -59,7 +59,8 @@
         "replacementScanEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "replacementConservativeEstimateUsd": { "type": "string" },
         "continuationSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "recordedAtUtc": { "type": "string", "format": "date-time" }
+        "recordedAtUtc": { "type": "string", "format": "date-time" },
+        "replacementPhase": { "const": "database-bootstrapped" }
       }
     },
     "cleanupCompletedUtc": { "type": "string", "format": "date-time" },

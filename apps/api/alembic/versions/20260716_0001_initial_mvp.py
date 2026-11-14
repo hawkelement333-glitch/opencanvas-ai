@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from datetime import datetime
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "20260716_0001"
@@ -30,7 +31,21 @@ def _timestamps() -> list[sa.Column[datetime]]:
 
 def upgrade() -> None:
     if op.get_bind().dialect.name == "postgresql":
-        op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        # Managed PostgreSQL checks installer privileges even for IF NOT EXISTS.
+        # Bootstrap owns installation; fresh local databases still need it here.
+        op.execute(
+            """
+            DO $vector_setup$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_extension WHERE extname = 'vector'
+                ) THEN
+                    CREATE EXTENSION IF NOT EXISTS vector;
+                END IF;
+            END;
+            $vector_setup$;
+            """
+        )
     op.create_table(
         "canvases",
         sa.Column("id", sa.Uuid(), nullable=False),

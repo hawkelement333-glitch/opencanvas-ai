@@ -2292,8 +2292,23 @@ def _active_protected_pause(
             # has replayed. The failed attempt and its original window stay intact.
             continue
         if (operation == "image-decision" and resolved_workload_pause_sha256 is not None
-                and hashlib.sha256(path.read_bytes()).hexdigest() == resolved_workload_pause_sha256):
+                and hashlib.sha256(path.read_bytes()).hexdigest()
+                == resolved_workload_pause_sha256):
             continue
+        migration_history = (
+            operation == "migrate" and _migration_image_transition(source_transition)
+        )
+        if migration_history:
+            assert source_transition is not None
+            if (
+                hashlib.sha256(path.read_bytes()).hexdigest()
+                != source_transition["migrationPauseSha256"]
+                or pause["bindings"] != source_transition["originalBindings"]
+            ):
+                raise _ProtectedStagePaused("migration continuation original pause differs")
+            original = _database_attempt_history(directory, operation, pause)
+            if original["recordSha256"] != source_transition["originalAttemptSha256"]:
+                raise _ProtectedStagePaused("migration continuation original attempt differs")
         completed_path = directory / f"{operation}-stage-recovery-completed.json"
         if completed_path.exists():
             if operation == "evidence":
@@ -2344,7 +2359,7 @@ def _active_protected_pause(
             ):
                 raise _ProtectedStagePaused("protected stage completion or ledger is inconsistent")
             continue
-        if pause["bindings"] != _stage_bindings(config, runtime, ledger):
+        if not migration_history and pause["bindings"] != _stage_bindings(config, runtime, ledger):
             raise _ProtectedStagePaused("protected stage pause binding differs")
         active.append(pause)
     if len(active) > 1:
@@ -2352,21 +2367,29 @@ def _active_protected_pause(
     return active[0] if active else None
 
 
+def _migration_image_transition(transition: dict[str, object] | None) -> bool:
+    return transition is not None and transition.get("kind") == "migration-image-continuation"
+
+
 def _source_transition_metadata(
     transition: dict[str, object] | None,
 ) -> dict[str, object]:
     if transition is None:
         return {}
+    key = ("migrationImageTransitionSha256" if _migration_image_transition(transition)
+           else "bootstrapSourceTransitionSha256")
     return {
         "operatorSourceHead": transition["operatorSourceHead"],
-        "bootstrapSourceTransitionSha256": transition["transitionSha256"],
+        key: transition["transitionSha256"],
     }
 
 
 def _require_retry_source(
     record: dict[str, object], transition: dict[str, object] | None,
 ) -> None:
-    names = {"operatorSourceHead", "bootstrapSourceTransitionSha256"}
+    names = {
+        "operatorSourceHead", "bootstrapSourceTransitionSha256", "migrationImageTransitionSha256",
+    }
     actual = {name: record[name] for name in names if name in record}
     if actual != _source_transition_metadata(transition):
         raise _ProtectedStagePaused("database retry executing-source transition differs")
@@ -2376,7 +2399,12 @@ def _validate_transition_dispatch(transition: dict[str, object]) -> None:
     from infra.milestone_7_8.bootstrap_transition import validate_dispatch_window
 
     try:
-        validate_dispatch_window(transition, datetime.now(UTC))
+        if _migration_image_transition(transition):
+            from infra.milestone_7_8.image_continuation import validate_migration_retry_window
+
+            validate_migration_retry_window(transition, now=datetime.now(UTC))
+        else:
+            validate_dispatch_window(transition, datetime.now(UTC))
     except CampaignError as exc:
         # An expired retry permission does not itself revoke cleanup protection.
         raise _ProtectedStagePaused(str(exc)) from exc
@@ -2400,6 +2428,7 @@ def _validate_retry_job_limits(
     operation: str,
     resource: dict[str, object],
     failed_template: object,
+    *, source_transition: dict[str, object] | None = None,
 ) -> tuple[dict[str, object], str]:
     properties = resource.get("properties")
     configuration = properties.get("configuration") if isinstance(properties, dict) else None
@@ -2449,6 +2478,17 @@ def _validate_retry_job_limits(
             {key: value for key, value in previous.items() if key != "args"},
         ],
     }
+    if _migration_image_transition(source_transition):
+        assert source_transition is not None
+        if (operation != "migrate"
+                or previous.get("image") != source_transition["previousImageReference"]
+                or container.get("image") != source_transition["replacementImageReference"]
+                or previous.get("image") == container.get("image")):
+            raise _ProtectedStagePaused("migration retry accepted image transition differs")
+        normalized_prior["containers"] = [{
+            **cast(dict[str, object], cast(list[object], normalized_prior["containers"])[0]),
+            "image": source_transition["replacementImageReference"],
+        }]
     if normalized != normalized_prior:
         raise _ProtectedStagePaused(
             "database retry image, command, environment, or template drifted"
@@ -2493,6 +2533,8 @@ def _database_prerequisites(
     directory: Path,
     authorization_path: Path,
     retry: bool,
+    allow_fresh_retry: bool = False,
+    source_transition: dict[str, object] | None = None,
 ) -> None:
     from infra.milestone_7_8.database_prerequisites import (
         PREREQUISITE_MARKER,
@@ -2522,8 +2564,15 @@ def _database_prerequisites(
         if retry and marker["listingRead"] is not True:
             raise _ProtectedStagePaused("migration identity listing is unproved for guarded retry")
         return
-    if intent.exists() or retry:
+    if allow_fresh_retry and (operation != "migrate" or not retry):
+        raise _ProtectedStagePaused("corrected prerequisite is limited to the migration retry")
+    if intent.exists() or (retry and not allow_fresh_retry):
         raise _ProtectedStagePaused("database prerequisite evidence is incomplete")
+    if allow_fresh_retry:
+        corrected = [item for item in config.resource_items
+                     if item.name == "corrected-migration-prerequisite"]
+        if len(corrected) != 1 or corrected[0].maximum() < Decimal("0.0378"):
+            raise _ProtectedStagePaused("corrected migration prerequisite allowance is missing")
     allocated = [
         item for item in config.resource_items if item.name == "database-prerequisites"
     ]
@@ -2549,6 +2598,11 @@ def _database_prerequisites(
     def check_authority() -> None:
         if not _stage_is_protected(config, runtime, ledger):
             raise _ProtectedStageExpired("database prerequisite protection expired")
+        if allow_fresh_retry:
+            if not _migration_image_transition(source_transition):
+                raise _ProtectedStagePaused("corrected prerequisite transition is missing")
+            assert source_transition is not None
+            _validate_transition_dispatch(source_transition)
         for required in (operation, "cleanup"):
             load_execution_authorization(
                 authorization_path, config=config, runtime=runtime, operation=required,
@@ -2633,6 +2687,8 @@ def _database_prerequisites(
             ),
             operation=operation, campaign_id=config.campaign_id, generation_id=config.generation_id,
         )
+        if retry and marker["listingRead"] is not True:
+            raise _ProtectedStagePaused("migration identity listing is unproved for guarded retry")
         check_authority()
     except _ProtectedStageExpired:
         raise
@@ -2715,7 +2771,10 @@ def _execute_database_retry(
     authorization_path: Path,
     source_transition: dict[str, object] | None = None,
 ) -> tuple[dict[str, object], dict[str, object]]:
-    transition_window = source_transition if operation == "bootstrap" else None
+    transition_window = source_transition if (
+        operation == "bootstrap" or (operation == "migrate"
+                                    and _migration_image_transition(source_transition))
+    ) else None
     window_start = parse_utc(str(
         transition_window["issuedAtUtc"] if transition_window else pause["failedAtUtc"]
     ))
@@ -2770,6 +2829,7 @@ def _execute_database_retry(
             operation,
             cast(dict[str, object], attempt["validatedJob"]),
             template,
+            source_transition=source_transition,
         )
         _verify_retry_protection(runner, config, runtime, ledger)
         for required in (operation, "cleanup"):
@@ -2845,7 +2905,7 @@ def _execute_database_retry(
     def before_dispatch(resource: dict[str, object]) -> None:
         nonlocal attempt, expected_manifest_hash
         manifest, expected_manifest_hash = _validate_retry_job_limits(
-            operation, resource, failed_template
+            operation, resource, failed_template, source_transition=source_transition,
         )
         if (
             manifest.get("campaignId") != config.campaign_id
@@ -5074,6 +5134,14 @@ def main() -> int:
                 # keeps the frozen runtime and never consumes a repair receipt.
                 workload_recovery._source(runtime)
         source_transition = None
+        if (args.image_continuation is not None
+                and args.operation in {"migrate", "evidence", "dispose"}):
+            source_transition = image_continuation.migration_retry_transition(
+                args.image_continuation, runtime, config, ledger,
+            )
+            if _migration_image_transition(source_transition):
+                assert source_transition is not None
+                repaired_workload_pause = str(source_transition["resolvedWorkloadPauseSha256"])
         if args.bootstrap_source_transition is not None:
             from infra.milestone_7_8.bootstrap_transition import (
                 load_bootstrap_transition,
@@ -5167,8 +5235,11 @@ def main() -> int:
                     operation=authorized_operation,
                 )
         if args.workload_recovery is not None and args.operation == "image-decision":
-            if args.image_built or args.image_digest is not None or args.image_scan_evidence is not None:
-                raise CampaignError("workload recovery uses only the retained admitted image evidence")
+            if (args.image_built or args.image_digest is not None
+                    or args.image_scan_evidence is not None):
+                raise CampaignError(
+                    "workload recovery uses only the retained admitted image evidence"
+                )
             if not args.execute:
                 print(json.dumps({"operation": "workload-recovery", "mutationAuthorized": False,
                                   "planSha256": workload_plan["planSha256"],
@@ -5183,9 +5254,10 @@ def main() -> int:
                         args.authorization, config=config, runtime=runtime, operation=permitted,
                     )
 
-            recovery_runner = SubprocessRunner(timeout_seconds=min(900, max(
-                1, (parse_utc(str(workload_plan["deployUntilUtc"])) - datetime.now(UTC)).total_seconds(),
-            )))
+            recovery_seconds = (
+                parse_utc(str(workload_plan["deployUntilUtc"])) - datetime.now(UTC)
+            ).total_seconds()
+            recovery_runner = SubprocessRunner(timeout_seconds=min(900, max(1, recovery_seconds)))
             try:
                 workload_recovery.execute(
                     args.workload_recovery, workload_plan, runtime, config, ledger,
@@ -5388,14 +5460,20 @@ def main() -> int:
                         and (args.ledger.parent
                              / f"{args.operation}-stage-retry-intent.json").exists()
                     )
-                    amended_bootstrap = (
-                        source_transition is not None and args.operation == "bootstrap"
-                        and recovery_pause["operation"] == "bootstrap"
+                    amended_database = (
+                        source_transition is not None
+                        and (
+                            (args.operation == "bootstrap"
+                             and recovery_pause["operation"] == "bootstrap")
+                            or (args.operation == "migrate"
+                                and recovery_pause["operation"] == "migrate"
+                                and _migration_image_transition(source_transition))
+                        )
                     )
-                    if amended_bootstrap and not already_dispatched:
+                    if amended_database and not already_dispatched:
                         assert source_transition is not None
                         _validate_transition_dispatch(source_transition)
-                    if ((not already_dispatched and not amended_bootstrap
+                    if ((not already_dispatched and not amended_database
                          and parse_utc(str(recovery_pause["recoveryUntilUtc"]))
                          <= datetime.now(UTC))
                             or not _stage_is_protected(config, runtime, ledger)):
@@ -5421,6 +5499,11 @@ def main() -> int:
                         runner, commands[0], operation=args.operation, config=config,
                         runtime=runtime, ledger=ledger, directory=prerequisite_folder,
                         authorization_path=args.authorization, retry=args.resume_database_job,
+                        allow_fresh_retry=(
+                            args.operation == "migrate" and args.resume_database_job
+                            and _migration_image_transition(source_transition)
+                        ),
+                        source_transition=source_transition,
                     )
                 if args.operation in PROTECTED_STAGE_OPERATIONS and recovery_pause is None:
                     attempt_path = args.ledger.parent / f"{args.operation}-stage-attempt.json"
@@ -5646,7 +5729,10 @@ def main() -> int:
                         raise ProtectedStagePersistenceError(
                             "protected stage attempt is unavailable"
                         )
-                    if (source_transition is not None and args.operation == "bootstrap"
+                    if (source_transition is not None
+                            and (args.operation == "bootstrap"
+                                 or (args.operation == "migrate"
+                                     and _migration_image_transition(source_transition)))
                             and recovery_pause is not None):
                         # Retain the original expired pause unchanged. This amendment
                         # permits one new dispatch, not teardown on an uncertain result.

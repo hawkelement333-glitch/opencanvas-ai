@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from test_milestone_7_8_campaign_enablement import _config
-
 from infra.milestone_7_8.campaign import (
     ORDER,
     RESIDUE_KEYS,
@@ -20,6 +18,7 @@ from infra.milestone_7_8.campaign import (
     save_ledger,
     terminal_receipt,
 )
+from test_milestone_7_8_campaign_enablement import _config
 
 NOW = datetime(2030, 1, 1, tzinfo=UTC)
 OLD_DIGEST = "sha256:" + "a" * 64
@@ -140,6 +139,52 @@ def test_replacement_is_rejected_outside_original_image_phase(phase: Phase) -> N
     ledger.phase = phase.value
     with pytest.raises(CampaignError, match="original admitted image phase"):
         replace_image(ledger)
+
+
+def test_migration_replacement_retains_bootstrap_and_predecessor_history(tmp_path: Path) -> None:
+    config = _config()
+    ledger = image_decided(config)
+    bootstrap_at = NOW + timedelta(minutes=1)
+    ledger.transition(Phase.DATABASE_BOOTSTRAPPED, bootstrap_at)
+    transitions = list(ledger.transitions)
+    replacement_at = bootstrap_at + timedelta(seconds=30)
+    ledger.record_image_replacement(
+        NEW_DIGEST, NEW_SCAN, CONTINUATION, conservative_estimate_usd=NEW_ESTIMATE,
+        now=replacement_at, at_phase=Phase.DATABASE_BOOTSTRAPPED,
+    )
+    assert ledger.transitions == transitions
+    assert ledger.phase == Phase.DATABASE_BOOTSTRAPPED
+    assert ledger.image_replacement is not None
+    assert ledger.image_replacement["replacementPhase"] == Phase.DATABASE_BOOTSTRAPPED
+    assert ledger.image_replacement["previousImageDigest"] == OLD_DIGEST
+    assert ledger.image_replacement["previousScanEvidenceSha256"] == OLD_SCAN
+    assert ledger.image_scan_count == ledger.required_scan_count == 2
+    assert ledger.image_generation_count == 0 and ledger.resource_generation_count == 1
+    ledger.transition(Phase.MIGRATED, replacement_at + timedelta(seconds=30))
+    path = tmp_path / "ledger.json"
+    save_ledger(path, ledger)
+    updated = replace(config, conservative_estimate_usd=NEW_ESTIMATE)
+    assert load_ledger(path, updated) == ledger
+
+    ledger.image_replacement.pop("replacementPhase")
+    save_ledger(path, ledger)
+    with pytest.raises(CampaignError, match="timestamp differs from its phase"):
+        load_ledger(path, updated)
+
+
+@pytest.mark.parametrize("case", ["pre-bootstrap", "post-migration", "built-image"])
+def test_migration_replacement_enforces_zero_build_and_exact_phase(case: str) -> None:
+    ledger = image_decided(_config(), built=case == "built-image")
+    if case != "pre-bootstrap":
+        ledger.transition(Phase.DATABASE_BOOTSTRAPPED, NOW + timedelta(minutes=1))
+    if case == "post-migration":
+        ledger.transition(Phase.MIGRATED, NOW + timedelta(minutes=2))
+    with pytest.raises(CampaignError, match="image replacement"):
+        ledger.record_image_replacement(
+            NEW_DIGEST, NEW_SCAN, CONTINUATION, conservative_estimate_usd=NEW_ESTIMATE,
+            now=NOW + timedelta(minutes=3), at_phase=Phase.DATABASE_BOOTSTRAPPED,
+        )
+    assert ledger.image_digest == OLD_DIGEST and ledger.image_replacement is None
 
 
 def test_startup_failure_finalizes_only_as_cleanup_with_replacement_history(tmp_path: Path) -> None:

@@ -1038,6 +1038,54 @@ The API can invoke cosine distance and the vector typmod cast. The worker
 can invoke the typmod cast for typed vector inserts.
 
 Migration's diagnostic authenticates its actual identity in both databases.
+Bootstrap installs `vector` with its installer authority. The initial Alembic
+revision checks `pg_catalog.pg_extension` before issuing extension DDL. Azure
+returned SQLSTATE `42501` for the redundant `CREATE EXTENSION IF NOT EXISTS`
+even though `vector` was installed. This correction preserves the revision
+chain and the existing migration identity. On a fresh PostgreSQL database the
+install branch still requires installer privileges.
+
+The `p-five/ca` correction retains its successful bootstrap, original migration
+failure, accepted four-resource mount repair, prepared files and cleanup binding.
+After the reviewed source checkpoint and corrected local build/scan, call
+`image_continuation.build_migration_plan(runtime_path, config_path, ledger_path,
+cost_path=corrected_cost_path, retained_image=provenance_path)` and persist the
+returned closed plan as `migration-image-continuation/plan.json` using the existing
+private serializer. This does not create a retry window. The separate cost config
+preserves every prior item and adds `corrected-migration-prerequisite`, at least
+`$0.0378` before contingency for the existing 1,800-second migration job limit.
+The campaign remains below $50 and the approved aggregate ceiling is $108.
+
+Use the existing `local_image` plan/authorize/execute route with
+`--image-continuation` pointing to that plan, then the normal operator
+`image-decision --image-continuation <plan> --image-digest <pushed-manifest-digest>
+--image-scan-evidence <plan-directory>/local-image/image-scan.json` with its exact
+phase authorization. Admission updates only the ten existing workload images;
+every old-image baseline, journaled PATCH, new-image readback and preservation
+check must pass. It retains the `database-bootstrapped` ledger phase and does not
+redeploy the base or rerun bootstrap. The local Docker image ID and pushed Linux
+manifest digest remain distinct evidence fields.
+
+Only after image admission is complete and the user separately approves one
+fresh corrected prerequisite plus guarded migration retry, create a private
+explicit approval record with version `m7.8-explicit-migration-retry-approval-v1`,
+the exact `planSha256`, `operatorSourceHead`, `failedExecution`, scope
+`one-guarded-migration-retry`, integer `maximumRetryDispatches: 1`, and the actual
+approval text in `userText`. Call
+`build_migration_retry_approval(plan_path, explicit_approval=approval_path,
+issued_at=actual_utc, expires_at=actual_utc + timedelta(minutes=15))` and persist
+its result once as `migration-retry-approval.json` beside the plan. Its expiry
+must also be no later than the original cleanup deadline. The normal command is
+`operator migrate --image-continuation <plan> --resume-database-job --execute`
+with the unchanged original runtime/config/ledger paths and a current v5 phase
+authorization including cleanup. This runs the one new corrected-image
+prerequisite before the still-unused guarded retry; both dispatches check the
+separate window. The original expired pause is preserved. A later read-only
+completion recheck may consume the recorded retry, but cannot start another job
+or retrospectively extend dispatch authority. Evidence and disposal use the same
+accepted image continuation after validated migration recovery. Normal cleanup
+remains available if the correction is incomplete.
+
 An authenticated listing ACL denial can admit ordinary migration with
 `listingRead=false`. Guarded migration retry requires a positive,
 invocation-bound listing observation and repeats the mapping check before

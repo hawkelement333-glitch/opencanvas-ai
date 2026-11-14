@@ -639,10 +639,13 @@ class Ledger:
     def _validate_replacement(self, replacement: dict[str, str]) -> None:
         if (
             not isinstance(replacement, dict)
-            or set(replacement) != IMAGE_REPLACEMENT_KEYS
+            or set(replacement) not in (
+                IMAGE_REPLACEMENT_KEYS, IMAGE_REPLACEMENT_KEYS | {"replacementPhase"},
+            )
             or any(not isinstance(value, str) for value in replacement.values())
         ):
             raise CampaignError("image replacement history is malformed")
+        phase = self._replacement_phase(replacement)
         previous_digest = replacement["previousImageDigest"]
         next_digest = replacement["replacementImageDigest"]
         previous_scan = replacement["previousScanEvidenceSha256"]
@@ -668,12 +671,8 @@ class Ledger:
             if not estimate.is_finite() or not 0 <= estimate <= HARD_CEILING:
                 raise CampaignError("image replacement cost estimate is invalid")
         recorded = parse_utc(replacement["recordedAtUtc"])
-        decision = next(
-            (item for item in self.transitions if item["to"] == Phase.IMAGE_DECIDED), None
-        )
-        later = next(
-            (item for item in self.transitions if item["from"] == Phase.IMAGE_DECIDED), None
-        )
+        decision = next((item for item in self.transitions if item["to"] == phase), None)
+        later = next((item for item in self.transitions if item["from"] == phase), None)
         if (
             decision is None
             or recorded < parse_utc(decision["atUtc"])
@@ -685,6 +684,14 @@ class Ledger:
             raise CampaignError("image replacement timestamp differs from its phase")
         self._assert_time(recorded)
 
+    def _replacement_phase(self, replacement: dict[str, str]) -> Phase:
+        if "replacementPhase" not in replacement:
+            return Phase.IMAGE_DECIDED
+        if (replacement["replacementPhase"] != Phase.DATABASE_BOOTSTRAPPED.value
+                or self.image_generation_count != 0):
+            raise CampaignError("image replacement migration phase or zero-build binding differs")
+        return Phase.DATABASE_BOOTSTRAPPED
+
     def record_image_replacement(
         self,
         digest: str,
@@ -693,11 +700,13 @@ class Ledger:
         *,
         conservative_estimate_usd: str,
         now: datetime,
+        at_phase: Phase = Phase.IMAGE_DECIDED,
     ) -> None:
         if self.image_replacement is not None:
             raise CampaignError("second image replacement rejected")
         if (
-            self.phase != Phase.IMAGE_DECIDED.value
+            at_phase not in {Phase.IMAGE_DECIDED, Phase.DATABASE_BOOTSTRAPPED}
+            or self.phase != at_phase.value
             or self.image_digest is None
             or self.image_scan_evidence_sha256 is None
             or self.resource_generation_count != 1
@@ -715,6 +724,8 @@ class Ledger:
             "continuationSha256": continuation_sha256,
             "recordedAtUtc": utc(now),
         }
+        if at_phase is Phase.DATABASE_BOOTSTRAPPED:
+            replacement["replacementPhase"] = at_phase.value
         self._validate_replacement(replacement)
         self.image_replacement = replacement
         self.image_digest = digest

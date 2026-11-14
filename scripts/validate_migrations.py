@@ -41,7 +41,8 @@ POSTGRESQL_UNSAFE_IDENTIFIERS = frozenset(RESERVED_WORDS).intersection(
     POSTGRESQL_SENSITIVE_IDENTIFIER_CANDIDATES
 )
 EXPECTED_MIGRATION_BLOB_HASHES = {
-    "20260716_0001_initial_mvp.py": "17f5dcba649b2fa8ec0f2dc4263b26957e29d378",
+    # Milestone 7.8 compatibility correction: skip redundant vector extension DDL.
+    "20260716_0001_initial_mvp.py": "b47b2c67752a4454de2af6e377fb6bd1c2012a83",
     "20260717_0002_document_ingestion.py": "8d8cbb2b313df3c33120ee3a7faf18e270dbdef9",
     "20260717_0003_trace_foundation.py": "3cd0be30f4ba6d22da3b611b4bc65e125eee536b",
     "20260717_0004_canonical_persistence.py": "6c2f314573833567db48174c61410406b51d788b",
