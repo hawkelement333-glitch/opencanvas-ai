@@ -27,8 +27,25 @@ from opencanvas_api.db.principal_manifest import (
 )
 from opencanvas_api.db.session import Database
 from scripts import bootstrap_postgres, migrate_and_grant
+from scripts import m78_database_identity as identity_sql
 from scripts import m78_database_prerequisites as prerequisites
 from scripts import m78_database_recovery as recovery
+
+CREATE_ROUTINE = "pg_catalog.pgaadauth_create_principal_with_oid"
+CREATE_ARGUMENTS = (
+    "rolename text",
+    "objectid text",
+    "objecttype text",
+    "isadmin boolean",
+    "ismfa boolean",
+    "tenantid text DEFAULT NULL::text",
+    "skipvalidation boolean DEFAULT false",
+)
+
+
+def create_signature(arguments: tuple[str, ...]) -> str:
+    types = ",".join(argument.split()[1] for argument in arguments)
+    return f"{CREATE_ROUTINE}({types})"
 
 
 @pytest.fixture
@@ -168,7 +185,15 @@ class Connection:
             return Result([(self.observed["currentUser"], self.database)])
         if "pg_catalog.has_function_privilege" in sql:
             assert self.database == "postgres"
-            return Result([self.observed.get("functionExecute", True)])
+            assert isinstance(parameters, dict)
+            # pg_proc records all argument types, including both defaulted
+            # arguments. Only the exact signature resolves for ACL inspection.
+            available = {
+                "pg_catalog.pgaadauth_list_principals(boolean)",
+                create_signature(CREATE_ARGUMENTS),
+            }
+            signature_exists = parameters.get("signature") in available
+            return Result([signature_exists and self.observed.get("functionExecute", True)])
         if "pg_available_extension_versions" in sql:
             assert self.database == "opencanvas"
             return Result([{
@@ -252,6 +277,47 @@ def separate_identity(connection: Connection) -> Connection:
     identity = Connection(connection.observed)
     identity.database = "postgres"
     return identity
+
+
+@pytest.mark.asyncio
+async def test_exact_create_identity_preserves_five_argument_bootstrap_call(
+    manifest: PrincipalManifest,
+) -> None:
+    observed = state(manifest)
+    missing_role = observed["roles"].pop(0)
+    missing_mapping = observed["mappings"].pop(0)
+    principal = manifest.principals[PrincipalSlot.MIGRATION]
+    contract = bootstrap_postgres.PrincipalContract(principal.name, principal.object_id)
+    calls = []
+
+    class FreshIdentity(Connection):
+        async def execute(self, statement: object, parameters: object = None) -> Result:
+            sql = str(statement)
+            if sql.startswith(f"SELECT * FROM {CREATE_ROUTINE}("):
+                assert self.database == "postgres"
+                assert sql == (
+                    f"SELECT * FROM {CREATE_ROUTINE}(CAST(:principal AS text), "
+                    "CAST(:object_id AS text), 'service'::text, false, false)"
+                )
+                assert parameters == {"principal": principal.name, "object_id": principal.object_id}
+                defaults = tuple(
+                    argument.split(" DEFAULT ")[1] for argument in CREATE_ARGUMENTS[5:]
+                )
+                calls.append(defaults)
+                self.observed["roles"].append(missing_role)
+                self.observed["mappings"].append(missing_mapping)
+                return Result([True])
+            return await super().execute(statement, parameters)
+
+    fixture = FreshIdentity(observed)
+    fixture.database = "postgres"
+    connection = cast(AsyncConnection, fixture)
+    assert not await identity_sql.function_executable(
+        connection, create_signature(CREATE_ARGUMENTS[:5])
+    )
+    assert await identity_sql.function_executable(connection, identity_sql.CREATE_SIGNATURE)
+    await bootstrap_postgres._ensure_principal(connection, contract)
+    assert calls == [("NULL::text", "false")]
 
 
 def use_database(

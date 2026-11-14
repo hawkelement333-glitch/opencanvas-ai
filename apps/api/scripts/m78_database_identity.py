@@ -19,7 +19,9 @@ from opencanvas_api.db.session import Database
 APPLICATION_DATABASE = "opencanvas"
 IDENTITY_DATABASE = "postgres"
 LIST_SIGNATURE = "pg_catalog.pgaadauth_list_principals(boolean)"
-CREATE_SIGNATURE = "pg_catalog.pgaadauth_create_principal_with_oid(text,text,text,boolean,boolean)"
+CREATE_SIGNATURE = (
+    "pg_catalog.pgaadauth_create_principal_with_oid(text,text,text,boolean,boolean,text,boolean)"
+)
 
 
 @asynccontextmanager
