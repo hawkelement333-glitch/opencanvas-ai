@@ -123,6 +123,7 @@ def build_plan(
     *,
     egress_ipv4: str,
     retained_image: Path | None = None,
+    continuation: Path | None = None,
 ) -> dict[str, object]:
     """Create a reviewable exact plan from a separately captured registry GET."""
     try:
@@ -188,6 +189,14 @@ def build_plan(
         "openBody": {"properties": opened},
         "restoreBody": {"properties": original},
     }
+    if continuation is not None:
+        from infra.milestone_7_8 import image_continuation
+
+        if retained_image is None:
+            raise CampaignError("replacement image requires exact retained-image provenance")
+        bound_continuation = image_continuation.load_plan(continuation)
+        plan["continuationFile"] = str(continuation.resolve())
+        plan["continuationPlanSha256"] = bound_continuation["planSha256"]
     if retained_image is not None:
         from infra.milestone_7_8.retained_image import load_retained_image
 
@@ -210,6 +219,7 @@ def _rebuild_plan(
         plan.get("before"),
         egress_ipv4=str(plan["egressIpv4"]),
         retained_image=Path(str(retained["provenanceFile"])) if retained else None,
+        continuation=Path(str(plan["continuationFile"])) if "continuationFile" in plan else None,
     )
 
 
@@ -458,6 +468,11 @@ def validate_inputs(
         parse_utc(str(approval["issuedAtUtc"])) <= now < parse_utc(str(approval["expiresAtUtc"]))
     ):
         raise CampaignError("local image approval is expired or differs")
+    if "continuationFile" in plan:
+        from infra.milestone_7_8 import image_continuation
+
+        image_continuation.validate_image_request(runtime, config, ledger, plan, approval, now)
+        return
     ledger.validate_resume(config)
     if (
         ledger.phase != Phase.INFRASTRUCTURE_DEPLOYED.value
@@ -485,7 +500,11 @@ def execute_local_image(
     validate_inputs(runtime, config, ledger, plan, approval, clock())
     if not runtime_path.resolve().is_relative_to((ROOT / ".runtime" / "milestone_7_8").resolve()):
         raise CampaignError("image artifacts must remain in the ignored private root")
-    if output.resolve().parent != runtime_path.resolve().parent or output.name != "local-image":
+    replacement = "continuationFile" in plan
+    expected_parent = runtime_path.resolve().parent
+    if replacement:
+        expected_parent /= "image-continuation"
+    if output.resolve().parent != expected_parent or output.name != "local-image":
         raise CampaignError("image output must be the single private local-image directory")
     if output.exists():
         raise CampaignError("image attempt already exists; automatic retry is prohibited")
@@ -495,8 +514,10 @@ def execute_local_image(
         or canonical_snapshot(head)["buildInputSha256"] != runtime["canonicalBuildInputSha256"]
     ):
         raise CampaignError("image source or canonical build inputs differ")
+    if replacement:
+        output.parent.mkdir(mode=0o700, exist_ok=True)
     _durable_record(
-        runtime_path.parent / "local-image-attempt.json",
+        output.parent / "local-image-attempt.json",
         {
             "planSha256": plan["planSha256"],
             "approvalSha256": approval["approvalSha256"],
@@ -699,8 +720,12 @@ def execute_local_image(
         )
         if manifest.get("digest") != digest:
             raise CampaignError("registry manifest differs from the pushed digest")
+        scout_runtime = runtime_path
+        if replacement:
+            scout_runtime = output / "scout-runtime.json"
+            _durable_record(scout_runtime, runtime)
         scout_admission.create_scout_receipt(
-            runtime_path,
+            scout_runtime,
             digest,
             output / "scout.sarif.json",
             output / "scan-pending.json",
@@ -784,13 +809,26 @@ def validate_completion(
     *,
     digest: str,
     scan_path: Path,
+    continuation: Path | None = None,
 ) -> int:
     """An attempted local route cannot admit its pending scan before restoration."""
     output = runtime_path.parent / "local-image"
-    marker = _object(json.loads((runtime_path.parent / "local-image-attempt.json").read_text()))
+    if continuation is not None:
+        output = runtime_path.parent / "image-continuation" / "local-image"
+    marker = _object(json.loads((output.parent / "local-image-attempt.json").read_text()))
     receipt = _object(json.loads((output / "completed.json").read_text()))
     plan = _object(json.loads((output / "plan.json").read_text()))
     approval = _object(json.loads((output / "approval.json").read_text()))
+    if continuation is not None:
+        from infra.milestone_7_8 import image_continuation
+
+        if plan.get("continuationFile") != str(continuation.resolve()):
+            raise CampaignError("replacement image continuation path differs")
+        image_continuation.validate_image_completion_context(runtime, config, plan, continuation)
+        if json.loads((output / "scout-runtime.json").read_text()) != runtime:
+            raise CampaignError("replacement scanner runtime binding differs")
+    elif "continuationFile" in plan:
+        raise CampaignError("replacement image requires its bound continuation")
     retained = _object(plan["retainedImage"]) if "retainedImage" in plan else None
     retained_fields = {"imageBuildSourceHead", "retainedImageId"} if retained else set()
     if (
@@ -1213,6 +1251,7 @@ def main() -> int:
     parser.add_argument("--approval", type=Path)
     parser.add_argument("--registry-before", type=Path)
     parser.add_argument("--retained-image", type=Path)
+    parser.add_argument("--image-continuation", type=Path)
     parser.add_argument("--egress-ipv4")
     parser.add_argument("--expires-at")
     parser.add_argument("--restore-until")
@@ -1230,15 +1269,26 @@ def main() -> int:
             args.registry_before,
             args.cleanup_authorization,
             args.retained_image,
+            args.image_continuation,
         ):
             if path is not None and not path.resolve().is_relative_to(root):
                 raise CampaignError("image artifacts must remain in the ignored private root")
-        runtime = operator.load_runtime(args.runtime)
         if args.retained_image is not None and args.operation != "plan":
             raise CampaignError("retained image selection must be bound by the reviewed plan")
-        config = CampaignConfig.from_json(args.config)
-        operator.validate_prepared_bundle(args.runtime, runtime, config)
-        ledger = load_ledger(args.ledger, config)
+        if args.image_continuation is not None:
+            from infra.milestone_7_8 import image_continuation
+
+            runtime, config, ledger = image_continuation.load_context(
+                args.image_continuation, args.runtime, args.config, args.ledger, operation="image"
+            )
+        else:
+            runtime = operator.load_runtime(args.runtime)
+            config = CampaignConfig.from_json(args.config)
+            operator.validate_prepared_bundle(args.runtime, runtime, config)
+            ledger = load_ledger(args.ledger, config)
+        output = args.runtime.parent / "local-image"
+        if args.image_continuation is not None:
+            output = args.runtime.parent / "image-continuation" / "local-image"
         if args.operation == "plan":
             if args.registry_before is None or args.egress_ipv4 is None:
                 raise CampaignError("registry baseline and verified egress address are required")
@@ -1248,10 +1298,16 @@ def main() -> int:
                 json.loads(args.registry_before.read_text()),
                 egress_ipv4=args.egress_ipv4,
                 retained_image=args.retained_image,
+                continuation=args.image_continuation,
             )
             _durable_record(args.plan, plan)
         else:
             plan = _object(json.loads(args.plan.read_text()))
+            if plan.get("continuationFile") != (
+                str(args.image_continuation.resolve()) if args.image_continuation is not None
+                else None
+            ):
+                raise CampaignError("local image continuation selection differs from its plan")
             if args.approval is None:
                 raise CampaignError("exact separate image approval is required")
             if args.operation == "approve":
@@ -1278,7 +1334,7 @@ def main() -> int:
                         ledger,
                         plan,
                         _object(json.loads(args.approval.read_text())),
-                        output=args.runtime.parent / "local-image",
+                        output=output,
                         runner=runner,
                         clock=lambda: datetime.now(UTC),
                     )
@@ -1294,7 +1350,7 @@ def main() -> int:
                         attempt_sha256 = ""
                         approval_sha256 = ""
                         with suppress(OSError, ValueError, TypeError):
-                            attempt_path = args.runtime.parent / "local-image-attempt.json"
+                            attempt_path = output.parent / "local-image-attempt.json"
                             attempt_sha256 = hashlib.sha256(attempt_path.read_bytes()).hexdigest()
                         with suppress(OSError, ValueError, TypeError):
                             image_approval = _object(json.loads(args.approval.read_text()))

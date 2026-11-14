@@ -3,6 +3,22 @@
   "$id": "urn:solarplexus:mobius:milestone-7.8:campaign-ledger:v7",
   "type": "object",
   "additionalProperties": false,
+  "if": { "required": ["image_replacement"] },
+  "then": {
+    "properties": {
+      "required_scan_count": { "const": 2 },
+      "image_scan_count": { "const": 2 },
+      "resource_generation_count": { "const": 1 },
+      "image_digest": { "type": "string" },
+      "image_scan_evidence_sha256": { "type": "string" }
+    }
+  },
+  "else": {
+    "properties": {
+      "required_scan_count": { "maximum": 1 },
+      "image_scan_count": { "maximum": 1 }
+    }
+  },
   "required": [
     "campaign_id",
     "generation_id",
@@ -70,11 +86,30 @@
       "type": ["string", "null"],
       "pattern": "^sha256:[a-f0-9]{64}$"
     },
-    "required_scan_count": { "type": "integer", "minimum": 0, "maximum": 1 },
-    "image_scan_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "required_scan_count": { "type": "integer", "minimum": 0, "maximum": 2 },
+    "image_scan_count": { "type": "integer", "minimum": 0, "maximum": 2 },
     "image_scan_evidence_sha256": {
       "type": ["string", "null"],
       "pattern": "^[a-f0-9]{64}$"
+    },
+    "image_replacement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "previousImageDigest", "previousScanEvidenceSha256", "previousConservativeEstimateUsd",
+        "replacementImageDigest", "replacementScanEvidenceSha256", "replacementConservativeEstimateUsd",
+        "continuationSha256", "recordedAtUtc"
+      ],
+      "properties": {
+        "previousImageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "previousScanEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "previousConservativeEstimateUsd": { "type": "string" },
+        "replacementImageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "replacementScanEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "replacementConservativeEstimateUsd": { "type": "string" },
+        "continuationSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "recordedAtUtc": { "type": "string", "format": "date-time" }
+      }
     },
     "transitions": { "type": "array" },
     "cleanup_started_utc": {

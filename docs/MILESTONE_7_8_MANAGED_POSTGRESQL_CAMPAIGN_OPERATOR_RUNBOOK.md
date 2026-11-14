@@ -823,6 +823,113 @@ when that call ends, including on failure. It never caches current time, source
 checks, campaign admission, or live readbacks across calls, and it never replaces
 the required scoped Azure observations.
 
+### One corrected image in the existing startup attempt
+
+The seven-argument Entra catalog correction has one explicit same-bundle
+continuation. This does not authorize another campaign, base deployment, image
+build, controller renewal, or a later Milestone 7.8 evidence phase. Its image
+build source is `3e451e87b1f572b0ead310bb55c31063dc22e34f`; the executing operator
+commit is recorded separately. Canonical inputs must remain
+`11b16bc8f40915461dc358aeed64e5b4635565b4eb5af9d8637036926d5c4805`, and the
+retained Linux/amd64 image must remain
+`sha256:446eb66272d63682d70a6eac89a1ce7e6f279a4a75d5fa6751d7ac99a2cc1210`.
+Use `image_continuation` only after explicit approval of the exact plan and
+corrected clean operator checkpoint. Preparation of a plan is local and issues
+no expiring authorization:
+
+```powershell
+$bundle = '.runtime/milestone_7_8/p-run/ca'
+$continuation = "$bundle/image-continuation/plan.json"
+$replacementCost = '.runtime/milestone_7_8/p-run/signature-correction/proposed-cost-config.json'
+$retained = '.runtime/milestone_7_8/p-rec/image-3e451e8/retained-image.json'
+python -B -m infra.milestone_7_8.image_continuation plan `
+  --runtime "$bundle/runtime.json" --config "$bundle/campaign-cost.json" `
+  --ledger "$bundle/ledger.json" --cost $replacementCost `
+  --retained-image $retained --plan $continuation
+```
+
+The closed plan binds the original ledger, runtime/configuration, failed
+prerequisite, original admission and underlying raw evidence, retained corrected
+image, new operator source and cumulative cost history. It preserves all earlier
+files. The cost input retains every original allowance and adds both consumed
+extra diagnostics and one corrected prerequisite (each 900 seconds at 0.5 vCPU /
+1 GiB). With 25% contingency the reviewed forecasts are $49.1807 per bundle and
+$93.1843 cumulative. The unchanged limits remain $50/$94. Approval must explicitly
+cover the existing fixed $2 installed-Scout reserve across both admissions; no
+purchase or Azure builder is included. A second full $2 reserve instead exceeds
+both limits. No actual billing claim or spending reset follows from these estimates.
+
+After separate live approval, use the existing registry baseline, exact-egress
+and local-image approval procedure with `--image-continuation $continuation` on
+each `local_image plan`, `approve`, and `execute` command. Select `$retained` at
+plan time. Use a new plan/approval/output beneath `$bundle/image-continuation`.
+The replacement executor writes `local-image`, its own attempt marker and an
+immutable effective Scout runtime there, leaving the original directory intact.
+It performs zero builds, verifies pushed digest/platform/provenance, performs a
+fresh digest-pinned Scout scan, and verifies registry restoration before admission.
+Existing v5 phase/cleanup authorizations use the effective runtime returned by
+`image_continuation.load_context(..., operation='image')`, preserving all scope
+fields except the separately approved operator source and canonical input binding.
+Do not edit the original runtime or reuse an old source-bound authorization.
+
+With that completed image proof, the normal operator performs image-only updates:
+
+```powershell
+python -B -m infra.milestone_7_8.operator image-decision `
+  --runtime "$bundle/runtime.json" --config "$bundle/campaign-cost.json" `
+  --ledger "$bundle/ledger.json" --image-continuation $continuation `
+  --image-digest $verifiedPushedDigest `
+  --image-scan-evidence "$bundle/image-continuation/local-image/image-scan.json" `
+  --authorization $imageDecisionAndCleanupAuthorization --execute
+
+python -B -m infra.milestone_7_8.operator bootstrap `
+  --runtime "$bundle/runtime.json" --config "$bundle/campaign-cost.json" `
+  --ledger "$bundle/ledger.json" --image-continuation $continuation `
+  --authorization $bootstrapAndCleanupAuthorization --execute
+
+python -B -m infra.milestone_7_8.operator migrate `
+  --runtime "$bundle/runtime.json" --config "$bundle/campaign-cost.json" `
+  --ledger "$bundle/ledger.json" --image-continuation $continuation `
+  --authorization $migrationAndCleanupAuthorization --execute
+```
+
+Image admission first validates all ten exact existing workload GETs, then PATCHes
+only the sole container image in the API and nine job templates, with durable
+per-request intents and preservation readbacks. It never invokes Bicep, provisions
+base resources, starts a job or changes roles. All identities, other template
+fields, settings and tags remain bound to the prior observations. Provider-owned
+revision/timestamp fields have explicit, shape-preserving comparisons. The ledger
+then records both image/scan identities and the old/new estimates, truthfully
+requires two admission scans, and rejects a second replacement. Raw history and
+the continuation completion must validate again before dependent phases.
+
+The new bootstrap prerequisite is recorded under
+`image-continuation/prerequisites`; the original failed intent is never replayed
+or overwritten. Only its accepted marker unlocks the still-unused normal
+bootstrap. Migration retains its existing prerequisite and guarded-retry rules.
+Use the reviewed private startup helper adapted to this continuation for the one
+four-worker execution and bounded private API readiness/heartbeat probe. Its
+approval binds the continuation plan/admission, original runtime file, corrected
+build/image and fresh scan. Startup success is partial evidence, not a completed
+managed campaign.
+
+Pass `--image-continuation $continuation` to the existing `cleanup`, `cleanup-wait`,
+`cleanup-disarm`, `residue`, and `finalize` commands with their exact current
+authorizations. Cleanup remains available if replacement admission is incomplete
+or its new receipt is missing. Preserve the controller and require all fourteen
+observed residue counters before finalization. Do not reset the cleanup deadline
+or expand the original cleanup-only authority.
+
+An interrupted PATCH, lost response, failed persistence, preservation drift, or
+incomplete corrected prerequisite leaves admission blocked and preserves healthy
+infrastructure under scheduled cleanup while its limits hold. Mutation attempts
+are never automatically replayed. This implementation does not reconcile partial
+image updates or retry the corrected prerequisite: retain the exact attempt for
+scoped investigation and any separately required recovery decision. Existing
+mandatory expiry, exhausted-budget and lost-protection cleanup still applies.
+Directory crash-durability and Windows ACL limitations remain as previously
+documented; offline tests do not establish Azure behavior or eliminate those limits.
+
 ## Bootstrap, migrate, and prepare observed inputs
 
 ```powershell

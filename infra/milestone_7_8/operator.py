@@ -4783,6 +4783,7 @@ def main() -> int:
     parser.add_argument("--control-plane-evidence", type=Path)
     parser.add_argument("--resume-database-job", action="store_true")
     parser.add_argument("--bootstrap-source-transition", type=Path)
+    parser.add_argument("--image-continuation", type=Path)
     args = parser.parse_args()
     try:
         if args.resume_database_job and args.operation not in {"bootstrap", "migrate"}:
@@ -4794,9 +4795,20 @@ def main() -> int:
             "residue",
             "finalize",
         }
-        config = CampaignConfig.from_json(args.config, allow_expired=True)
-        runtime = load_runtime(args.runtime)
-        validate_prepared_bundle(args.runtime, runtime, config)
+        if args.image_continuation is not None:
+            if args.bootstrap_source_transition is not None:
+                raise CampaignError("independent source transitions cannot be combined")
+            from infra.milestone_7_8 import image_continuation
+
+            runtime, config, ledger = image_continuation.load_context(
+                args.image_continuation, args.runtime, args.config, args.ledger,
+                operation=args.operation,
+            )
+        else:
+            config = CampaignConfig.from_json(args.config, allow_expired=True)
+            runtime = load_runtime(args.runtime)
+            validate_prepared_bundle(args.runtime, runtime, config)
+            ledger = load_ledger(args.ledger, config)
         controller_authority = (
             load_bound_controller_authority(args.runtime, runtime, config)
             if args.operation == "capacity-check"
@@ -4808,7 +4820,6 @@ def main() -> int:
                 runtime,
                 config,
             )
-        ledger = load_ledger(args.ledger, config)
         source_transition = None
         if args.bootstrap_source_transition is not None:
             from infra.milestone_7_8.bootstrap_transition import (
@@ -4902,6 +4913,15 @@ def main() -> int:
                     runtime=runtime,
                     operation=authorized_operation,
                 )
+        if args.image_continuation is not None and args.operation == "image-decision":
+            if (args.image_digest is None or args.image_scan_evidence is None
+                    or (args.execute and args.authorization is None) or args.image_built):
+                raise CampaignError("replacement requires retained digest, scan and authority")
+            return image_continuation.execute_admission(
+                args.image_continuation, runtime, config, ledger,
+                digest=args.image_digest, scan_path=args.image_scan_evidence,
+                authorization=args.authorization or Path("unused-dry-run"), execute=args.execute,
+            )
         image_scan_sha256 = None
         verified_image_build_count = None
         if target is Phase.IMAGE_DECIDED and args.image_digest is not None:
@@ -5090,9 +5110,14 @@ def main() -> int:
                 if args.operation in {"bootstrap", "migrate"}:
                     if len(commands) != 1 or args.authorization is None:
                         raise _ProtectedStagePaused("database stage authorization is missing")
+                    prerequisite_folder = args.ledger.parent
+                    if args.image_continuation is not None:
+                        prerequisite_folder = image_continuation.prerequisite_directory(
+                            args.image_continuation, runtime, config, ledger,
+                        )
                     _database_prerequisites(
                         runner, commands[0], operation=args.operation, config=config,
-                        runtime=runtime, ledger=ledger, directory=args.ledger.parent,
+                        runtime=runtime, ledger=ledger, directory=prerequisite_folder,
                         authorization_path=args.authorization, retry=args.resume_database_job,
                     )
                 if args.operation in PROTECTED_STAGE_OPERATIONS and recovery_pause is None:

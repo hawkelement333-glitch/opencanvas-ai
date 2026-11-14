@@ -9,7 +9,7 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
-from decimal import ROUND_CEILING, Decimal
+from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from enum import StrEnum
 from pathlib import Path
 from typing import Final, Protocol, cast
@@ -27,6 +27,16 @@ CAMPAIGN_PATTERN: Final = re.compile(r"^[a-z][a-z0-9-]{7,47}$")
 GENERATION_PATTERN: Final = re.compile(r"^g[1-9][0-9]{0,5}-[a-f0-9]{12}$")
 DIGEST_PATTERN: Final = re.compile(r"^sha256:[a-f0-9]{64}$")
 HASH_PATTERN: Final = re.compile(r"^[a-f0-9]{64}$")
+IMAGE_REPLACEMENT_KEYS: Final = frozenset((
+    "previousImageDigest",
+    "previousScanEvidenceSha256",
+    "previousConservativeEstimateUsd",
+    "replacementImageDigest",
+    "replacementScanEvidenceSha256",
+    "replacementConservativeEstimateUsd",
+    "continuationSha256",
+    "recordedAtUtc",
+))
 CORRELATION_PATTERN: Final = re.compile(r"^[a-f0-9]{16}$")
 TARGET_RESOURCE_GROUP_PATTERN: Final = re.compile(r"^rg-m78-[a-f0-9]{10}-target$")
 CLEANUP_RESOURCE_GROUP_PATTERN: Final = re.compile(r"^rg-m78-controller-[a-f0-9]{10}$")
@@ -347,6 +357,7 @@ class Ledger:
     cleanup_offer_eligibility_source: str | None = None
     cleanup_offer_eligibility_sha256: str | None = None
     fresh_controller_admission_evidence_sha256: str | None = None
+    image_replacement: dict[str, str] | None = None
 
     def bind_cleanup_region(self, config: CampaignConfig) -> None:
         expected = (
@@ -426,8 +437,6 @@ class Ledger:
             or Decimal(self.contingency_percent) < Decimal("25")
             or self.resource_generation_count not in {0, 1}
             or self.image_generation_count not in {0, 1}
-            or self.required_scan_count not in {0, 1}
-            or self.image_scan_count not in {0, 1}
             or self.cleanup_disposition not in RESIDUE_DISPOSITIONS
             or (
                 self.cleanup_arm_evidence_sha256 is not None
@@ -479,12 +488,11 @@ class Ledger:
         image_reached = Phase.IMAGE_DECIDED in reached
         if image_reached != (self.image_digest is not None):
             raise CampaignError("resume image state is inconsistent")
-        if image_reached and (
-            self.required_scan_count != 1
-            or self.image_scan_count != 1
-            or self.image_scan_evidence_sha256 is None
-        ):
-            raise CampaignError("resume image scan state is inconsistent")
+        self._validate_image_history(image_reached=image_reached)
+        if self.image_replacement is not None and config.image_digest not in {
+            None, self.image_digest,
+        }:
+            raise CampaignError("resume configuration image differs from the replacement")
         if (
             self.actual_cost_usd is not None
             and Decimal(self.actual_cost_usd) > HARD_CEILING
@@ -577,7 +585,9 @@ class Ledger:
     def record_image(self, digest: str, *, built: bool) -> None:
         if DIGEST_PATTERN.fullmatch(digest) is None:
             raise CampaignError("image digest is invalid")
-        if self.image_digest is not None and self.image_digest != digest:
+        if self.image_replacement is not None or (
+            self.image_digest is not None and self.image_digest != digest
+        ):
             raise CampaignError("second image digest rejected")
         if built:
             if self.image_generation_count != 0:
@@ -598,6 +608,120 @@ class Ledger:
             raise CampaignError("second image admission scan rejected")
         self.image_scan_count = 1
         self.image_scan_evidence_sha256 = evidence_sha256
+
+    def _validate_image_history(self, *, image_reached: bool) -> None:
+        replacement = self.image_replacement
+        if replacement is None:
+            expected_count = int(image_reached)
+            if (
+                self.required_scan_count != expected_count
+                or self.image_scan_count != expected_count
+                or image_reached != (self.image_scan_evidence_sha256 is not None)
+            ):
+                raise CampaignError("resume image scan state is inconsistent")
+            return
+        if (
+            not image_reached
+            or self.required_scan_count != 2
+            or self.image_scan_count != 2
+            or self.resource_generation_count != 1
+            or self.image_generation_count not in {0, 1}
+        ):
+            raise CampaignError("resume image replacement counters are inconsistent")
+        self._validate_replacement(replacement)
+        if (
+            replacement["replacementImageDigest"] != self.image_digest
+            or replacement["replacementScanEvidenceSha256"] != self.image_scan_evidence_sha256
+            or replacement["replacementConservativeEstimateUsd"] != self.conservative_estimate_usd
+        ):
+            raise CampaignError("resume image replacement differs from the current binding")
+
+    def _validate_replacement(self, replacement: dict[str, str]) -> None:
+        if (
+            not isinstance(replacement, dict)
+            or set(replacement) != IMAGE_REPLACEMENT_KEYS
+            or any(not isinstance(value, str) for value in replacement.values())
+        ):
+            raise CampaignError("image replacement history is malformed")
+        previous_digest = replacement["previousImageDigest"]
+        next_digest = replacement["replacementImageDigest"]
+        previous_scan = replacement["previousScanEvidenceSha256"]
+        next_scan = replacement["replacementScanEvidenceSha256"]
+        if (
+            previous_digest == next_digest
+            or previous_scan == next_scan
+            or any(
+                DIGEST_PATTERN.fullmatch(digest) is None
+                for digest in (previous_digest, next_digest)
+            )
+            or any(
+                HASH_PATTERN.fullmatch(value) is None
+                for value in (previous_scan, next_scan, replacement["continuationSha256"])
+            )
+        ):
+            raise CampaignError("image replacement digest or evidence binding is invalid")
+        for key in ("previousConservativeEstimateUsd", "replacementConservativeEstimateUsd"):
+            try:
+                estimate = Decimal(replacement[key])
+            except InvalidOperation as exc:
+                raise CampaignError("image replacement cost estimate is invalid") from exc
+            if not estimate.is_finite() or not 0 <= estimate <= HARD_CEILING:
+                raise CampaignError("image replacement cost estimate is invalid")
+        recorded = parse_utc(replacement["recordedAtUtc"])
+        decision = next(
+            (item for item in self.transitions if item["to"] == Phase.IMAGE_DECIDED), None
+        )
+        later = next(
+            (item for item in self.transitions if item["from"] == Phase.IMAGE_DECIDED), None
+        )
+        if (
+            decision is None
+            or recorded < parse_utc(decision["atUtc"])
+            or (later is not None and recorded > parse_utc(later["atUtc"]))
+            or self.cleanup_deadline_utc is None
+            or self.first_billable_mutation_utc is None
+            or recorded < parse_utc(self.first_billable_mutation_utc)
+        ):
+            raise CampaignError("image replacement timestamp differs from its phase")
+        self._assert_time(recorded)
+
+    def record_image_replacement(
+        self,
+        digest: str,
+        scan_sha256: str,
+        continuation_sha256: str,
+        *,
+        conservative_estimate_usd: str,
+        now: datetime,
+    ) -> None:
+        if self.image_replacement is not None:
+            raise CampaignError("second image replacement rejected")
+        if (
+            self.phase != Phase.IMAGE_DECIDED.value
+            or self.image_digest is None
+            or self.image_scan_evidence_sha256 is None
+            or self.resource_generation_count != 1
+            or self.image_generation_count not in {0, 1}
+        ):
+            raise CampaignError("image replacement requires the original admitted image phase")
+        self._validate_image_history(image_reached=True)
+        replacement = {
+            "previousImageDigest": self.image_digest,
+            "previousScanEvidenceSha256": self.image_scan_evidence_sha256,
+            "previousConservativeEstimateUsd": self.conservative_estimate_usd,
+            "replacementImageDigest": digest,
+            "replacementScanEvidenceSha256": scan_sha256,
+            "replacementConservativeEstimateUsd": conservative_estimate_usd,
+            "continuationSha256": continuation_sha256,
+            "recordedAtUtc": utc(now),
+        }
+        self._validate_replacement(replacement)
+        self.image_replacement = replacement
+        self.image_digest = digest
+        self.image_scan_evidence_sha256 = scan_sha256
+        self.required_scan_count = 2
+        self.image_scan_count = 2
+        self.conservative_estimate_usd = conservative_estimate_usd
 
     def record_cleanup_arm_evidence(self, evidence_sha256: str) -> None:
         if HASH_PATTERN.fullmatch(evidence_sha256) is None:
@@ -858,7 +982,10 @@ def terminal_receipt(ledger: Ledger) -> dict[str, object]:
         or any(ledger.residue.values())
     ):
         raise CampaignError("terminal receipt requires finalized zero residue")
-    return {
+    ledger._validate_image_history(image_reached=any(
+        transition["to"] == Phase.IMAGE_DECIDED for transition in ledger.transitions
+    ))
+    receipt: dict[str, object] = {
         "version": "m7.8-terminal-receipt-v7",
         "campaignCorrelation": sanitize(ledger.campaign_id, domain="campaign"),
         "generationCorrelation": sanitize(ledger.generation_id, domain="generation"),
@@ -885,6 +1012,11 @@ def terminal_receipt(ledger: Ledger) -> dict[str, object]:
         "residue": ledger.residue,
         "status": "zero-residue",
     }
+    if ledger.image_replacement is not None:
+        receipt["imageReplacement"] = ledger.image_replacement.copy()
+        receipt["requiredScanCount"] = ledger.required_scan_count
+        receipt["imageScanCount"] = ledger.image_scan_count
+    return receipt
 
 
 def parse_utc(value: str) -> datetime:
@@ -912,6 +1044,8 @@ def load_ledger(path: Path, config: CampaignConfig) -> Ledger:
         )
     else:
         value = json.loads(path.read_text(encoding="utf-8"))
+        if "image_replacement" in value and value["image_replacement"] is None:
+            raise CampaignError("image replacement history is malformed")
         ledger = Ledger(**cast(dict[str, object], value))  # type: ignore[arg-type]
     ledger.bind_cleanup_region(config)
     ledger.validate_resume(config)
@@ -921,8 +1055,11 @@ def load_ledger(path: Path, config: CampaignConfig) -> Ledger:
 def save_ledger(path: Path, ledger: Ledger) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".next")
+    value = asdict(ledger)
+    if ledger.image_replacement is None:
+        del value["image_replacement"]
     temporary.write_text(
-        json.dumps(asdict(ledger), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     os.replace(temporary, path)
 

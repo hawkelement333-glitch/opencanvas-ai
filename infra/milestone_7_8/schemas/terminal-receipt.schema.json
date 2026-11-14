@@ -3,6 +3,11 @@
   "$id": "urn:solarplexus:mobius:milestone-7.8:terminal-receipt:v7",
   "type": "object",
   "additionalProperties": false,
+  "dependentRequired": {
+    "imageReplacement": ["requiredScanCount", "imageScanCount"],
+    "requiredScanCount": ["imageReplacement"],
+    "imageScanCount": ["imageReplacement"]
+  },
   "required": [
     "version",
     "campaignCorrelation",
@@ -36,6 +41,27 @@
       "maximum": 1
     },
     "imageGenerationCount": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "requiredScanCount": { "const": 2 },
+    "imageScanCount": { "const": 2 },
+    "imageReplacement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "previousImageDigest", "previousScanEvidenceSha256", "previousConservativeEstimateUsd",
+        "replacementImageDigest", "replacementScanEvidenceSha256", "replacementConservativeEstimateUsd",
+        "continuationSha256", "recordedAtUtc"
+      ],
+      "properties": {
+        "previousImageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "previousScanEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "previousConservativeEstimateUsd": { "type": "string" },
+        "replacementImageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "replacementScanEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "replacementConservativeEstimateUsd": { "type": "string" },
+        "continuationSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "recordedAtUtc": { "type": "string", "format": "date-time" }
+      }
+    },
     "cleanupCompletedUtc": { "type": "string", "format": "date-time" },
     "cleanupRegion": { "type": "string" },
     "cleanupRegionSelectionSha256": {
