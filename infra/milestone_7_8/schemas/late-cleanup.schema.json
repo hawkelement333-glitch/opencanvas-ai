@@ -26,7 +26,8 @@
     "allowedOperations": {},
     "authorizationSha256": {},
     "validationReceiptPath": {},
-    "validationReceiptSha256": {}
+    "validationReceiptSha256": {},
+    "imageContinuation": {}
   },
   "oneOf": [
     {
@@ -213,6 +214,54 @@
         "scheduledJobId": {
           "type": "string",
           "pattern": "^[a-fA-F0-9-]{36}$"
+        },
+        "imageContinuation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "planFile",
+            "planFileSha256",
+            "receiptFile",
+            "receiptFileSha256",
+            "continuationSha256",
+            "historicalSourceHead",
+            "canonicalBuildInputSha256",
+            "cleanupScriptSha256"
+          ],
+          "properties": {
+            "planFile": {
+              "type": "string",
+              "minLength": 1
+            },
+            "planFileSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "receiptFile": {
+              "type": "string",
+              "minLength": 1
+            },
+            "receiptFileSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "continuationSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "historicalSourceHead": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{40}$"
+            },
+            "canonicalBuildInputSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "cleanupScriptSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
         }
       }
     },

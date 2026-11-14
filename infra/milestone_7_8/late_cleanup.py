@@ -236,6 +236,55 @@ def validate_scheduled_cleanup(
     return resource
 
 
+def _continuation_context(
+    path: Path,
+    runtime_path: Path,
+    config_path: Path,
+    runtime: dict[str, str],
+    ledger: Ledger,
+) -> tuple[dict[str, object], CampaignConfig]:
+    # Replay historical admission against its own executing source. A new clean
+    # cleanup-only checkpoint is checked separately and cannot resume workloads.
+    from infra.milestone_7_8 import image_continuation
+
+    continuation = image_continuation.load_plan(path)
+    if (
+        str(runtime_path.resolve(strict=True)) != continuation["runtimeFile"]
+        or str(config_path.resolve(strict=True)) != continuation["configFile"]
+        or path.resolve().parent.parent != runtime_path.resolve().parent
+    ):
+        raise CampaignError("late cleanup continuation belongs to another bundle")
+    historical_head = str(continuation["sourceHead"])
+    canonical = str(continuation["canonicalBuildInputSha256"])
+    if (
+        re.fullmatch(r"[a-f0-9]{40}", historical_head) is None
+        or canonical_snapshot(historical_head)["buildInputSha256"] != canonical
+    ):
+        raise CampaignError("late cleanup historical continuation source differs")
+    _git("merge-base", "--is-ancestor", historical_head, "HEAD")
+    _git("diff", "--quiet", historical_head, "HEAD", "--",
+         "infra/milestone_7_8/scripts/Remove-M78Campaign.ps1")
+    effective_runtime, config = image_continuation._effective(continuation)
+    if effective_runtime != {
+        **runtime, "sourceHead": historical_head, "canonicalBuildInputSha256": canonical,
+    }:
+        raise CampaignError("late cleanup continuation changed original runtime scope")
+    ledger.validate_resume(config)
+    receipt = image_continuation.validate_admission(path, effective_runtime, config, ledger)
+    receipt_path = path.resolve().parent / "completed.json"
+    record: dict[str, object] = {
+        "planFile": str(path.resolve(strict=True)),
+        "planFileSha256": file_hash(path),
+        "receiptFile": str(receipt_path),
+        "receiptFileSha256": file_hash(receipt_path),
+        "continuationSha256": receipt["continuationSha256"],
+        "historicalSourceHead": historical_head,
+        "canonicalBuildInputSha256": canonical,
+        "cleanupScriptSha256": runtime["cleanupScriptSha256"],
+    }
+    return record, config
+
+
 def build_plan(
     *,
     runtime_path: Path,
@@ -245,6 +294,7 @@ def build_plan(
     output_result_path: Path,
     original_authorization_path: Path,
     output_directory: Path,
+    image_continuation_path: Path | None = None,
 ) -> dict[str, object]:
     if output_directory.exists() or not output_directory.resolve().is_relative_to(
         runtime_path.resolve().parent
@@ -255,7 +305,15 @@ def build_plan(
     runtime = op.load_runtime(runtime_path)
     config = CampaignConfig.from_json(config_path, allow_expired=True)
     op.validate_prepared_bundle(runtime_path, runtime, config)
-    ledger = load_ledger(ledger_path, config)
+    original_config = config
+    continuation_record: dict[str, object] | None = None
+    if image_continuation_path is None:
+        ledger = load_ledger(ledger_path, config)
+    else:
+        ledger = Ledger(**document(ledger_path))  # type: ignore[arg-type]
+        continuation_record, config = _continuation_context(
+            image_continuation_path, runtime_path, config_path, runtime, ledger,
+        )
     if Phase(ledger.phase) is not Phase.IMAGE_DECIDED:
         raise CampaignError("late cleanup requires the retained paused campaign")
     job, output = document(job_result_path), document(output_result_path)
@@ -263,7 +321,7 @@ def build_plan(
     props = cast(dict[str, object], cast(dict[str, object], _result(job))["properties"])
     load_execution_authorization(
         original_authorization_path,
-        config=config,
+        config=original_config,
         runtime=runtime,
         operation="cleanup",
         now=parse_utc(str(props["startTime"])),
@@ -292,6 +350,8 @@ def build_plan(
         "scheduledJobId": props["jobId"],
         "deletes": [list(cmd) for cmd in op.command_plan("cleanup-disarm", config, runtime)[:2]],
     }
+    if continuation_record is not None:
+        plan["imageContinuation"] = continuation_record
     plan["planSha256"] = digest("late-cleanup-plan", plan)
     return plan
 
@@ -299,7 +359,7 @@ def build_plan(
 def _load_plan(path: Path) -> tuple[dict[str, object], CampaignConfig, dict[str, str], Ledger]:
     plan = document(path)
     if (
-        set(plan) != PLAN_FIELDS
+        set(plan) not in (PLAN_FIELDS, PLAN_FIELDS | {"imageContinuation"})
         or plan.get("version") != PLAN_VERSION
         or plan.get("planSha256")
         != digest("late-cleanup-plan", {k: v for k, v in plan.items() if k != "planSha256"})
@@ -320,6 +380,16 @@ def _load_plan(path: Path) -> tuple[dict[str, object], CampaignConfig, dict[str,
     config = CampaignConfig.from_json(paths["config"], allow_expired=True)
     op.validate_prepared_bundle(paths["runtime"], runtime, config)
     ledger = Ledger(**cast(dict[str, object], plan["originalLedger"]))  # type: ignore[arg-type]
+    original_config = config
+    if "imageContinuation" in plan:
+        binding = plan["imageContinuation"]
+        if not isinstance(binding, dict) or not isinstance(binding.get("planFile"), str):
+            raise CampaignError("late cleanup continuation binding is malformed")
+        actual, config = _continuation_context(
+            Path(binding["planFile"]), paths["runtime"], paths["config"], runtime, ledger,
+        )
+        if binding != actual:
+            raise CampaignError("late cleanup accepted continuation changed")
     ledger.validate_resume(config)
     if Phase(ledger.phase) is not Phase.IMAGE_DECIDED:
         raise CampaignError("late cleanup original phase differs")
@@ -328,7 +398,7 @@ def _load_plan(path: Path) -> tuple[dict[str, object], CampaignConfig, dict[str,
     props = cast(dict[str, object], cast(dict[str, object], _result(job))["properties"])
     load_execution_authorization(
         paths["originalAuthorization"],
-        config=config,
+        config=original_config,
         runtime=runtime,
         operation="cleanup",
         now=parse_utc(str(props["startTime"])),
@@ -350,9 +420,16 @@ def _load_plan(path: Path) -> tuple[dict[str, object], CampaignConfig, dict[str,
 
 def _clean_source(plan: dict[str, object], runtime: dict[str, str]) -> str:
     head, script_hash = local_source_binding()
+    canonical = runtime["canonicalBuildInputSha256"]
+    if "imageContinuation" in plan:
+        continuation = cast(dict[str, object], plan["imageContinuation"])
+        canonical = str(continuation["canonicalBuildInputSha256"])
+        _git("merge-base", "--is-ancestor", str(continuation["historicalSourceHead"]), head)
+        if continuation["cleanupScriptSha256"] != runtime["cleanupScriptSha256"]:
+            raise CampaignError("late cleanup continuation changed cleanup content")
     if (
         script_hash != runtime["cleanupScriptSha256"]
-        or canonical_snapshot(head)["buildInputSha256"] != runtime["canonicalBuildInputSha256"]
+        or canonical_snapshot(head)["buildInputSha256"] != canonical
     ):
         raise CampaignError("late cleanup changed historical image or cleanup content")
     _git("merge-base", "--is-ancestor", str(plan["reviewSourceHead"]), head)
@@ -730,6 +807,7 @@ def main() -> int:
         "output",
         "authorization",
         "validation-receipt",
+        "image-continuation",
     ):
         parser.add_argument("--" + name, type=Path)
     parser.add_argument("--issued-at")
@@ -746,6 +824,7 @@ def main() -> int:
                 output_result_path=args.output_result,
                 original_authorization_path=args.original_authorization,
                 output_directory=args.output_directory,
+                image_continuation_path=args.image_continuation,
             )
         elif args.operation == "authorize":
             value = build_authorization(

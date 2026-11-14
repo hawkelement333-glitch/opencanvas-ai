@@ -17,7 +17,7 @@ from test_milestone_7_8_campaign_enablement import (
     _runtime,
 )
 
-from infra.milestone_7_8 import late_cleanup, operator
+from infra.milestone_7_8 import image_continuation, late_cleanup, operator
 from infra.milestone_7_8.campaign import (
     ORDER,
     RESIDUE_KEYS,
@@ -32,6 +32,8 @@ from infra.milestone_7_8.campaign import (
 )
 from infra.milestone_7_8.cleanup_controller import ARCHITECTURE
 from infra.milestone_7_8.controller_renewal import _durable_record
+
+REAL_CLEAN_SOURCE = late_cleanup._clean_source
 
 BEFORE = datetime(2030, 1, 1, tzinfo=UTC)
 NOW = BEFORE + timedelta(days=1)
@@ -577,3 +579,148 @@ def test_normal_cli_requires_execute_flag_and_runs_only_exact_cleanup(
     value = json.loads(capsys.readouterr().out)
     assert value == {"status": "failed-campaign-closed-zero-residue", "operation": "execute"}
     assert case.provider.deletes == ["binding", "schedule"]
+
+
+@pytest.fixture
+def continuation_case(case: Case, monkeypatch: pytest.MonkeyPatch) -> Case:
+    historical = "e" * 40
+    canonical = "9" * 64
+    folder = case.directory / "image-continuation-r3"
+    folder.mkdir()
+    path = write(folder / "plan.json", {
+        "sourceHead": historical, "canonicalBuildInputSha256": canonical,
+        "runtimeFile": str((case.directory / "runtime.json").resolve()),
+        "configFile": str((case.directory / "config.json").resolve()),
+        "planSha256": "8" * 64,
+    })
+    receipt_path = write(folder / "completed.json", {"continuationSha256": "7" * 64})
+    expected_plan, expected_receipt = path.read_bytes(), receipt_path.read_bytes()
+    ledger = load_ledger(case.directory / "ledger.json", case.config)
+    ledger.record_image_replacement(
+        "sha256:" + "e" * 64, "f" * 64, "7" * 64,
+        conservative_estimate_usd=ledger.conservative_estimate_usd, now=BEFORE,
+    )
+    save_ledger(case.directory / "ledger.json", ledger)
+    historical_runtime = {**case.runtime, "sourceHead": historical,
+                          "canonicalBuildInputSha256": canonical}
+
+    def retained_plan(candidate: Path) -> dict[str, object]:
+        if candidate != path or candidate.read_bytes() != expected_plan:
+            raise CampaignError("historical continuation altered")
+        return json.loads(expected_plan)  # type: ignore[no-any-return]
+
+    def accepted_admission(
+        candidate: Path, runtime: dict[str, str], config: CampaignConfig, value: Ledger,
+    ) -> dict[str, object]:
+        assert candidate == path and runtime == historical_runtime and config == case.config
+        if receipt_path.read_bytes() != expected_receipt:
+            raise CampaignError("accepted continuation receipt changed")
+        assert value.image_replacement is not None
+        assert value.image_replacement["continuationSha256"] == "7" * 64
+        return json.loads(expected_receipt)  # type: ignore[no-any-return]
+
+    monkeypatch.setattr(image_continuation, "load_plan", retained_plan)
+    monkeypatch.setattr(
+        image_continuation, "_effective", lambda _: (historical_runtime, case.config),
+    )
+    monkeypatch.setattr(image_continuation, "validate_admission", accepted_admission)
+    monkeypatch.setattr(
+        late_cleanup, "canonical_snapshot", lambda _: {"buildInputSha256": canonical},
+    )
+    monkeypatch.setattr(late_cleanup, "local_source_binding", lambda: (
+        SOURCE, case.runtime["cleanupScriptSha256"],
+    ))
+    monkeypatch.setattr(late_cleanup, "_clean_source", REAL_CLEAN_SOURCE)
+    plan = late_cleanup.build_plan(
+        runtime_path=case.directory / "runtime.json", config_path=case.directory / "config.json",
+        ledger_path=case.directory / "ledger.json",
+        job_result_path=case.directory / "job-result.json",
+        output_result_path=case.directory / "output-result.json",
+        original_authorization_path=case.directory / "original-authorization.json",
+        output_directory=case.output, image_continuation_path=path,
+    )
+    write(case.plan, plan)
+    write(case.directory / "explicit-approval.json", {
+        "approved": True, "planSha256": plan["planSha256"],
+        "allowedOperations": late_cleanup.OPERATIONS, "maximumMinutes": 30,
+    })
+    validation = write(case.directory / "validation-receipt.json", {
+        "status": "passed", "planSha256": plan["planSha256"],
+        "operatorSourceHead": SOURCE, "operatorContentSha256": "c" * 64,
+        "completedAtUtc": (NOW - timedelta(seconds=1)).isoformat(),
+        "checks": dict.fromkeys(("tests", "ruff", "mypy", "schemas", "hygiene"), "passed"),
+    })
+    write(case.authorization, late_cleanup.build_authorization(
+        case.plan, case.directory / "explicit-approval.json", validation_receipt_path=validation,
+        issued_at=NOW.isoformat(), expires_at=(NOW + timedelta(minutes=30)).isoformat(), now=NOW,
+    ))
+    return case
+
+
+def test_accepted_replacement_closes_with_new_cleanup_only_source(continuation_case: Case) -> None:
+    case = continuation_case
+    original_runtime = (case.directory / "runtime.json").read_bytes()
+    old_authority = (case.directory / "original-authorization.json").read_bytes()
+    retained = (case.directory / "image-continuation-r3/completed.json").read_bytes()
+    result = case.execute()
+    assert result["status"] == "failed-campaign-closed-zero-residue"
+    assert case.provider.deletes == ["binding", "schedule"]
+    assert not any(command[:3] == ("az", "group", "delete") for command in case.provider.commands)
+    assert not any("start" in command for command in case.provider.commands)
+    ledger = load_ledger(case.directory / "ledger.json", case.config)
+    assert ledger.phase == Phase.FINALIZED.value and not any(ledger.residue.values())
+    assert ledger.image_replacement is not None
+    assert ledger.image_replacement["continuationSha256"] == "7" * 64
+    assert (case.directory / "runtime.json").read_bytes() == original_runtime
+    assert (case.directory / "original-authorization.json").read_bytes() == old_authority
+    assert (case.directory / "image-continuation-r3/completed.json").read_bytes() == retained
+
+
+@pytest.mark.parametrize("fault", [
+    "plan-history", "receipt-missing", "receipt-altered", "new-canonical", "new-script",
+    "new-source", "historical-source", "original-authority",
+])
+def test_replacement_closure_rejects_history_or_source_drift_before_reads(
+    continuation_case: Case, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    case = continuation_case
+    folder = case.directory / "image-continuation-r3"
+    if fault == "plan-history":
+        write(folder / "plan.json", {"tampered": True})
+    elif fault == "receipt-missing":
+        (folder / "completed.json").unlink()
+    elif fault == "receipt-altered":
+        write(folder / "completed.json", {"continuationSha256": "1" * 64})
+    elif fault == "new-canonical":
+        monkeypatch.setattr(late_cleanup, "canonical_snapshot", lambda head: {
+            "buildInputSha256": "9" * 64 if head == "e" * 40 else "1" * 64,
+        })
+    elif fault == "new-script":
+        monkeypatch.setattr(late_cleanup, "local_source_binding", lambda: (SOURCE, "1" * 64))
+    elif fault == "new-source":
+        monkeypatch.setattr(late_cleanup, "local_source_binding", lambda: (
+            "1" * 40, case.runtime["cleanupScriptSha256"],
+        ))
+    elif fault == "historical-source":
+        monkeypatch.setattr(late_cleanup, "canonical_snapshot", lambda _: {
+            "buildInputSha256": "1" * 64,
+        })
+    else:
+        write(case.directory / "original-authorization.json", {"sourceHead": SOURCE})
+    with pytest.raises((CampaignError, OSError)):
+        case.execute()
+    assert case.provider.commands == [] and case.provider.deletes == []
+    assert not (case.directory / "terminal-receipt.json").exists()
+
+
+def test_optional_continuation_binding_stays_closed(continuation_case: Case) -> None:
+    case = continuation_case
+    plan = json.loads(case.plan.read_text())
+    plan["imageContinuation"]["allowWorkloadResume"] = True
+    plan["planSha256"] = late_cleanup.digest(
+        "late-cleanup-plan", {k: v for k, v in plan.items() if k != "planSha256"},
+    )
+    write(case.plan, plan)
+    with pytest.raises(CampaignError, match="continuation changed"):
+        case.execute()
+    assert case.provider.commands == []

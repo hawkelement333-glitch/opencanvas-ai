@@ -1443,6 +1443,25 @@ local failed-campaign closure. It cannot start a runbook, delete a resource grou
 create a resource, renew the controller, resume a campaign or claim a managed
 observation passed.
 
+For an already admitted replacement image, pass the exact retained continuation
+plan with `--image-continuation "$bundle/image-continuation-r3/plan.json"` to
+`late_cleanup plan`. Continue passing the original runtime and original config;
+the accepted continuation supplies its bound replacement cost config and ledger
+history. Planning and execution replay its original source-bound image, scan,
+workload preservation and admission receipts. The optional closed plan binding
+retains the exact continuation and completion file hashes. The scheduled job and
+its historical authorization remain checked against the original runtime/config.
+
+A cleanup-only source checkpoint may be a descendant of that historical
+continuation commit, provided its canonical image inputs match the admitted
+replacement and its cleanup script is unchanged. Clean branch/upstream, protected
+stashes, reviewed executable content, current closure authorization and exact
+readbacks remain mandatory. This does not rebind historical artifacts or enable
+any workload operation. Wait for the scheduled cleanup to complete and prove the
+target absent; do not invoke immediate cleanup merely to advance the ledger while
+scheduled cleanup is pending. The closure then adopts the completed job and
+removes only its exact binding and schedule before zero-residue finalization.
+
 Prepare only the local plan first. This example uses the retained private
 `p-rec/ca` captures; choose a new nonexistent closure directory and keep all
 outputs under the existing protected, ignored parent:
