@@ -840,6 +840,21 @@ that exact historical image pause for normal bootstrap. Missing completion,
 another pause, partial workload updates, and uncertain registry restoration
 remain blocked. This exception extends neither the campaign deadline nor costs.
 
+For the separately approved empty-response interruption after the API image
+PATCH, `--completed-image-plan "$bundle/image-continuation-r1/plan.json"`
+selects the exact retained completed image and eleven-request workload prefix;
+write its new plan to `$bundle/image-continuation-r2/plan.json`. Do not push or
+scan again, rewrite the prior approval, or repeat the API PATCH. An empty
+successful PATCH response is only acknowledgement: exact GET readback must prove
+the new digest and complete preservation. The continuation verifies the saved
+API GET and original dispatch authority, then freshly reads all ten workloads.
+Only the nine still-old jobs may receive their first image PATCH under new bound
+authority. Combined completion keeps the original source and dispatch history
+separate from the corrected executing source. Missing or contradictory history,
+drift, another attempted update, or any uncertain request blocks continuation.
+The existing operator `image-decision` command accepts the new continuation plan
+and the original r1 scan path. All subsequent phases use that same new plan.
+
 The seven-argument Entra catalog correction has one explicit same-bundle
 continuation. This does not authorize another campaign, base deployment, image
 build, controller renewal, or a later Milestone 7.8 evidence phase. Its image

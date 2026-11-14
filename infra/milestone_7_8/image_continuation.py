@@ -129,6 +129,7 @@ def _cost(original: Path, replacement: Path, budget: Path) -> tuple[CampaignConf
 def build_plan(
     runtime_path: Path, config_path: Path, ledger_path: Path, *,
     cost_path: Path, retained_image: Path, previous_plan: Path | None = None,
+    completed_image_plan: Path | None = None,
 ) -> dict[str, object]:
     from infra.milestone_7_8 import operator
 
@@ -202,13 +203,28 @@ def build_plan(
         from infra.milestone_7_8.image_continuation_recovery import build_prior
 
         plan["priorImageAttempt"] = build_prior(previous_plan)
+    if completed_image_plan is not None:
+        if previous_plan is not None:
+            raise CampaignError("independent image continuation predecessors cannot be combined")
+        predecessor = load_plan(completed_image_plan)
+        plan["priorImageAttempt"] = predecessor["priorImageAttempt"]
+        old_folder = completed_image_plan.resolve().parent
+        completed: dict[str, object] = {
+            "planFile": str(completed_image_plan.resolve()),
+            "planFileSha256": _file_hash(completed_image_plan),
+            "filesSha256": {str(item): _file_hash(item)
+                            for item in old_folder.rglob("*") if item.is_file()},
+        }
+        _validate_completed_image(completed)
+        plan["completedImagePlan"] = completed
     return {**plan, "planSha256": _hash(plan)}
 
 
 def load_plan(path: Path) -> dict[str, object]:
     plan = _read(_private(path))
     body = {key: value for key, value in plan.items() if key != "planSha256"}
-    if (set(plan) not in (FIELDS, FIELDS | {"priorImageAttempt"})
+    if (set(plan) not in (FIELDS, FIELDS | {"priorImageAttempt"},
+                         FIELDS | {"priorImageAttempt", "completedImagePlan"})
             or plan["planSha256"] != _hash(body)
             or plan["version"] != "m7.8-image-continuation-plan-v1"
             or plan["imageBuildSourceHead"] != IMAGE_BUILD_HEAD
@@ -224,13 +240,16 @@ def load_plan(path: Path) -> dict[str, object]:
         "runtimeFile", "configFile", "costFile", "retainedImageFile",
     )}
     folder = Path(str(plan["runtimeFile"])).parent
-    slot = "image-continuation-r1" if "priorImageAttempt" in plan else "image-continuation"
+    slot = ("image-continuation-r2" if "completedImagePlan" in plan else
+            "image-continuation-r1" if "priorImageAttempt" in plan else "image-continuation")
     if path.resolve() != folder / slot / "plan.json":
         raise CampaignError("continuation plan is outside its exact private attempt slot")
     if "priorImageAttempt" in plan:
         from infra.milestone_7_8.image_continuation_recovery import validate_prior
 
         validate_prior(_object(plan["priorImageAttempt"]))
+    if "completedImagePlan" in plan:
+        _validate_completed_image(_object(plan["completedImagePlan"]))
     required_files |= {str(folder / name) for name in (
         "budget-continuity.json", "bootstrap-prerequisite-intent.json",
         "local-image/completed.json", "local-image/image-scan.json",
@@ -250,6 +269,53 @@ def load_plan(path: Path) -> dict[str, object]:
         digest=ORIGINAL_IMAGE, scan_path=folder / "local-image/image-scan.json",
     )
     return plan
+
+
+def _validate_completed_image(record: dict[str, object]) -> None:
+    from infra.milestone_7_8 import local_image, operator, workload_image_update
+
+    if set(record) != {"planFile", "planFileSha256", "filesSha256"}:
+        raise CampaignError("completed image predecessor fields differ")
+    path = _private(Path(str(record["planFile"])))
+    old = load_plan(path)
+    if ("completedImagePlan" in old or old["sourceHead"] !=
+            "8d6be93e18923c0377eea5142f61f4ed95568155"
+            or old["planSha256"] !=
+            "0d4b9d53debc94351237d6206fae9c6058a6906a5df50403603712ba3bb09098"
+            or _file_hash(path) != record["planFileSha256"]):
+        raise CampaignError("completed image predecessor is not the exact reviewed attempt")
+    actual = {str(item): _file_hash(item) for item in path.parent.rglob("*") if item.is_file()}
+    if actual != record["filesSha256"]:
+        raise CampaignError("completed image or dispatched workload history changed")
+    runtime, config = _effective(old)
+    completed = _read(path.parent / "local-image/completed.json")
+    digest = str(completed["imageDigest"])
+    local_image.validate_completion(
+        Path(str(old["runtimeFile"])), runtime, config, digest=digest,
+        scan_path=path.parent / "local-image/image-scan.json", continuation=path,
+    )
+    intent = _read(path.parent / "admission-intent.json")
+    if (intent.get("planSha256") != old["planSha256"]
+            or intent.get("originalLedger") != old["baselineLedger"]
+            or intent.get("imageDigest") != digest
+            or intent.get("authorizationSha256") != _file_hash(path.parent / "authorization.json")
+            or intent.get("scanEvidenceSha256") != operator.load_image_scan_evidence(
+                path.parent / "local-image/image-scan.json", digest=digest, runtime=runtime,
+            )):
+        raise CampaignError("completed image original admission intent differs")
+    workload_image_update.inspect_remaining_prefix(
+        runtime, config, previous_digest=ORIGINAL_IMAGE, digest=digest,
+        prior_output=path.parent / "workload",
+        api_readback_directory=path.parent / "api-patch-readback",
+    )
+
+
+def image_evidence_context(path: Path) -> tuple[Path, dict[str, str], CampaignConfig]:
+    plan = load_plan(path)
+    selected = (Path(str(_object(plan["completedImagePlan"])["planFile"]))
+                if "completedImagePlan" in plan else path)
+    runtime, config = _effective(load_plan(selected))
+    return selected, runtime, config
 
 
 def _effective(plan: dict[str, object]) -> tuple[dict[str, str], CampaignConfig]:
@@ -280,6 +346,8 @@ def load_context(
             or _source() != plan["sourceHead"]):
         raise CampaignError("continuation operation, files, or executing source differs")
     runtime, config = _effective(plan)
+    if operation == "image" and "completedImagePlan" in plan:
+        raise CampaignError("this continuation reuses completed image admission; no image replay")
     raw = _read(ledger_path)
     replaced = raw.get("image_replacement") is not None
     if not replaced:
@@ -385,15 +453,24 @@ def validate_admission(
             folder / "authorization.json", config=config, runtime=runtime,
             operation=operation, now=parse_utc(str(intent.get("startedAtUtc"))),
         )
+    image_plan, image_runtime, image_config = image_evidence_context(path)
     local_image.validate_completion(
-        Path(str(plan["runtimeFile"])), runtime, replace(config, image_digest=None),
-        digest=str(receipt["imageDigest"]), scan_path=folder / "local-image/image-scan.json",
-        continuation=path,
+        Path(str(plan["runtimeFile"])), image_runtime, replace(image_config, image_digest=None),
+        digest=str(receipt["imageDigest"]),
+        scan_path=image_plan.parent / "local-image/image-scan.json", continuation=image_plan,
     )
-    workload = workload_image_update.validate_completion(
-        runtime, config, previous_digest=ORIGINAL_IMAGE, digest=str(receipt["imageDigest"]),
-        output=folder / "workload",
-    )
+    if "completedImagePlan" in plan:
+        workload = workload_image_update.validate_remaining_completion(
+            image_runtime, image_config, previous_digest=ORIGINAL_IMAGE,
+            digest=str(receipt["imageDigest"]), prior_output=image_plan.parent / "workload",
+            api_readback_directory=image_plan.parent / "api-patch-readback",
+            output=folder / "workload", source_transition=_workload_transition(plan, folder),
+        )
+    else:
+        workload = workload_image_update.validate_completion(
+            runtime, config, previous_digest=ORIGINAL_IMAGE, digest=str(receipt["imageDigest"]),
+            output=folder / "workload",
+        )
     if workload["completionSha256"] != receipt["workloadCompletionSha256"]:
         raise CampaignError("workload preservation receipt differs")
     # Preservation replay proves ordered exact requests, but the saved approval
@@ -406,6 +483,15 @@ def validate_admission(
                 operation=operation, now=dispatched,
             )
     return receipt
+
+
+def _workload_transition(plan: dict[str, object], folder: Path) -> dict[str, object]:
+    old = Path(str(_object(plan["completedImagePlan"])["planFile"])).parent
+    return {
+        "sourceHead": str(plan["sourceHead"]), "planSha256": str(plan["planSha256"]),
+        "authorizationSha256": _file_hash(folder / "authorization.json"),
+        "priorAuthorizationFile": str(old / "authorization.json"),
+    }
 
 
 def prerequisite_directory(path: Path, runtime: dict[str, str], config: CampaignConfig,
@@ -443,12 +529,15 @@ def execute_admission(
     plan = load_plan(path)
     runtime_path = Path(str(plan["runtimeFile"]))
     folder = path.resolve().parent
+    image_plan, image_runtime, image_config = image_evidence_context(path)
+    if scan_path.resolve() != image_plan.parent / "local-image/image-scan.json":
+        raise CampaignError("continuation scan path differs from its completed image attempt")
     if local_image.validate_completion(
-        runtime_path, runtime, replace(config, image_digest=None), digest=digest,
-        scan_path=scan_path, continuation=path,
+        runtime_path, image_runtime, replace(image_config, image_digest=None), digest=digest,
+        scan_path=scan_path, continuation=image_plan,
     ) != 0:
         raise CampaignError("corrected retained image must not claim another campaign build")
-    scan_sha256 = operator.load_image_scan_evidence(scan_path, digest=digest, runtime=runtime)
+    scan_sha256 = operator.load_image_scan_evidence(scan_path, digest=digest, runtime=image_runtime)
     if not execute:
         print(json.dumps({"status": "valid", "mutationAuthorized": False,
                           "operation": "image-decision", "baseDeployment": False,
@@ -481,16 +570,33 @@ def execute_admission(
             "scanEvidenceSha256": scan_sha256, "authorizationSha256": _file_hash(authorization),
             "originalLedger": plan["baselineLedger"], "startedAtUtc": datetime.now(UTC).isoformat(),
         })
-        updates = workload_image_update.execute_updates(
-            runtime, config, previous_digest=ORIGINAL_IMAGE, digest=digest,
-            output=folder / "workload", runner=runner, clock=lambda: datetime.now(UTC),
-            check_authority=check_authority,
-        )
+        if "completedImagePlan" in plan:
+            updates = workload_image_update.execute_remaining_jobs(
+                image_runtime, image_config, previous_digest=ORIGINAL_IMAGE, digest=digest,
+                prior_output=image_plan.parent / "workload",
+                api_readback_directory=image_plan.parent / "api-patch-readback",
+                output=folder / "workload", source_transition=_workload_transition(plan, folder),
+                runner=runner, clock=lambda: datetime.now(UTC), check_authority=check_authority,
+            )
+        else:
+            updates = workload_image_update.execute_updates(
+                runtime, config, previous_digest=ORIGINAL_IMAGE, digest=digest,
+                output=folder / "workload", runner=runner, clock=lambda: datetime.now(UTC),
+                check_authority=check_authority,
+            )
         check_authority()
-        replay = workload_image_update.validate_completion(
-            runtime, config, previous_digest=ORIGINAL_IMAGE, digest=digest,
-            output=folder / "workload",
-        )
+        if "completedImagePlan" in plan:
+            replay = workload_image_update.validate_remaining_completion(
+                image_runtime, image_config, previous_digest=ORIGINAL_IMAGE, digest=digest,
+                prior_output=image_plan.parent / "workload",
+                api_readback_directory=image_plan.parent / "api-patch-readback",
+                output=folder / "workload", source_transition=_workload_transition(plan, folder),
+            )
+        else:
+            replay = workload_image_update.validate_completion(
+                runtime, config, previous_digest=ORIGINAL_IMAGE, digest=digest,
+                output=folder / "workload",
+            )
         if replay != updates:
             raise CampaignError("replacement workload result differs from recorded evidence")
         body = {
@@ -533,14 +639,17 @@ def main() -> int:
     for name in ("runtime", "config", "ledger", "cost", "retained-image", "plan"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--previous-plan", type=Path)
+    parser.add_argument("--completed-image-plan", type=Path)
     args = parser.parse_args()
     try:
         if args.operation == "plan":
             plan = build_plan(
                 args.runtime, args.config, args.ledger, cost_path=args.cost,
                 retained_image=args.retained_image, previous_plan=args.previous_plan,
+                completed_image_plan=args.completed_image_plan,
             )
             slot = (
+                "image-continuation-r2" if args.completed_image_plan is not None else
                 "image-continuation-r1" if args.previous_plan is not None else "image-continuation"
             )
             folder = args.runtime.resolve().parent / slot

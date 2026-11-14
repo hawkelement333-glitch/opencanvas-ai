@@ -267,6 +267,18 @@ def _patch_response(resource: dict[str, object], target: dict[str, str]) -> None
         raise CampaignError("workload image update PATCH response identity is unproved")
 
 
+def _acknowledgement(result: dict[str, object], target: dict[str, str]) -> dict[str, object]:
+    if (type(result.get("exitCode")) is not int or result["exitCode"] != 0
+            or not isinstance(result.get("stdout"), str)
+            or not isinstance(result.get("stderr"), str)):
+        raise CampaignError("workload image update PATCH command failed or is incomplete")
+    if not cast(str, result["stdout"]).strip():
+        return {}  # Acknowledgement only; the exact GET still must establish completion.
+    resource = _decoded(result)
+    _patch_response(resource, target)
+    return resource
+
+
 def _preserved(before: dict[str, object], after: dict[str, object]) -> None:
     expected, actual = copy.deepcopy(before), copy.deepcopy(after)
     _object(_containers(actual)[0])["image"] = _object(_containers(expected)[0])["image"]
@@ -306,6 +318,7 @@ def _body(before: dict[str, object], runtime: dict[str, str], digest: str) -> di
 
 def _replay(
     runtime: dict[str, str], config: CampaignConfig, scope: dict[str, object], output: Path,
+    *, prefix_only: bool = False,
 ) -> dict[str, object]:
     attempt = _load(output / "attempt.json")
     if set(attempt) != {"scope", "scopeSha256", "startedAtUtc", "untilUtc"} or (
@@ -345,10 +358,7 @@ def _replay(
         if not last <= recorded <= sent <= received < until:
             raise CampaignError("workload image update dispatch time is invalid")
         last = received
-        resource = _decoded(result)
-        if body is not None:
-            _patch_response(resource, target)
-        return resource
+        return _acknowledgement(result, target) if body is not None else _decoded(result)
 
     before = [read(target, "before") for target in targets]
     for target, value in zip(targets, before, strict=True):
@@ -362,6 +372,11 @@ def _replay(
         if _load(body_path) != _body(old, runtime, str(scope["digest"])):
             raise CampaignError("workload image update PATCH body differs")
         read(target, "patch", body_path)
+        if prefix_only:
+            if {path.name for path in output.iterdir()} != allowed:
+                raise CampaignError("remaining jobs require exactly the original eleven requests")
+            return {"scope": scope, "before": before, "apiPatchCompletedAtUtc": last.isoformat(),
+                    "filesSha256": _files(output)}
         for _ in range(MAXIMUM_POLLS):
             observed = read(target, "after")
             state = _object(observed.get("properties")).get("provisioningState")
@@ -451,10 +466,7 @@ def execute_updates(
                     "status": "outcome-indeterminate-no-retry",
                 })
             raise CampaignError("workload image update outcome is indeterminate; no retry") from exc
-        resource = _decoded(response)
-        if body is not None:
-            _patch_response(resource, target)
-        return resource
+        return _acknowledgement(response, target) if body is not None else _decoded(response)
 
     targets = cast(list[dict[str, str]], scope["targets"])
     before = [run(target, "before") for target in targets]
@@ -484,3 +496,279 @@ def execute_updates(
     _durable_record(output / "completion.json", completion)
     return validate_completion(runtime, config, previous_digest=previous_digest,
                                digest=digest, output=output)
+
+
+def _files(folder: Path) -> dict[str, str]:
+    if any(path.is_symlink() or not path.is_file() for path in folder.iterdir()):
+        raise CampaignError("workload evidence directory contains an unexpected entry")
+    return {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(folder.iterdir()) if path.name != "completion.json"}
+
+
+def inspect_remaining_prefix(
+    original_runtime: dict[str, str], config: CampaignConfig, *, previous_digest: str,
+    digest: str, prior_output: Path, api_readback_directory: Path,
+) -> dict[str, object]:
+    """Replay the eleven original requests and an independently retained API GET."""
+    from infra.milestone_7_8.cleanup_controller import load_execution_authorization
+
+    scope = _scope(original_runtime, config, previous_digest, digest)
+    prefix = _replay(original_runtime, config, scope, prior_output, prefix_only=True)
+    authority = prior_output.parent / "authorization.json"
+    for path in sorted(prior_output.glob("*-dispatch.json")):
+        for operation in ("image-decision", "cleanup"):
+            load_execution_authorization(
+                authority, config=config, runtime=original_runtime, operation=operation,
+                now=parse_utc(str(_load(path)["dispatchedAtUtc"])),
+            )
+    target = cast(list[dict[str, str]], scope["targets"])[0]
+    before = cast(list[dict[str, object]], prefix["before"])
+    intent = _load(api_readback_directory / "intent.json")
+    response = _load(api_readback_directory / "response.json")
+    if (set(intent) != {"atUtc", "command", "purpose"}
+            or not isinstance(intent["purpose"], str)
+            or intent["command"] != list(_command(original_runtime, target, None))
+            or set(response) != {"completedAtUtc", "exitCode", "stdout", "stderr"}
+            or not parse_utc(str(prefix["apiPatchCompletedAtUtc"]))
+            <= parse_utc(str(intent["atUtc"]))
+            <= parse_utc(str(response["completedAtUtc"])) < parse_utc(config.cleanup_deadline_utc)):
+        raise CampaignError("remaining jobs API readback scope or observation time differs")
+    observed = _decoded(response)
+    _validate_resource(observed, target, scope, original_runtime, config, digest)
+    if _object(observed["properties"]).get("provisioningState") != "Succeeded":
+        raise CampaignError("remaining jobs API patch has not completed")
+    _preserved(before[0], observed)
+    summary = _load(api_readback_directory / "result.json")
+    if summary != {
+        "method": "GET", "mutationCount": 0, "provisioningState": "Succeeded",
+        "responseSha256": hashlib.sha256(
+            (api_readback_directory / "response.json").read_bytes()).hexdigest(),
+        "status": "observed-correct-image-and-preservation",
+    }:
+        raise CampaignError("remaining jobs API readback summary differs")
+    if set(_files(api_readback_directory)) != {"intent.json", "response.json", "result.json"}:
+        raise CampaignError("remaining jobs API readback history is ambiguous")
+    body = {
+        "version": "m7.8-workload-remaining-prefix-v1",
+        "priorSourceHead": original_runtime["sourceHead"],
+        "priorDirectory": str(prior_output.resolve()),
+        "apiReadbackDirectory": str(api_readback_directory.resolve()),
+        "scopeSha256": _hash(scope), "priorFilesSha256": _files(prior_output),
+        "apiReadbackFilesSha256": _files(api_readback_directory),
+        "priorAuthorizationFile": str(authority.resolve()),
+        "priorAuthorizationSha256": hashlib.sha256(authority.read_bytes()).hexdigest(),
+        "beforeSha256": _hash(before), "apiAfterSha256": _hash(observed),
+        "lastObservedAtUtc": response["completedAtUtc"],
+    }
+    return {**body, "prefixSha256": _hash(body)}
+
+
+def _remaining_context(
+    runtime: dict[str, str], config: CampaignConfig, previous_digest: str, digest: str,
+    prior_output: Path, api_readback_directory: Path, source_transition: dict[str, object],
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    prefix = inspect_remaining_prefix(
+        runtime, config, previous_digest=previous_digest, digest=digest,
+        prior_output=prior_output, api_readback_directory=api_readback_directory,
+    )
+    if (set(source_transition) != {"sourceHead", "planSha256", "authorizationSha256",
+                                  "priorAuthorizationFile"}
+            or re.fullmatch(r"[a-f0-9]{40}", str(source_transition["sourceHead"])) is None
+            or source_transition["sourceHead"] == runtime["sourceHead"]
+            or any(re.fullmatch(r"[a-f0-9]{64}", str(source_transition[key])) is None
+                   for key in ("planSha256", "authorizationSha256"))
+            or str(Path(str(source_transition["priorAuthorizationFile"])).resolve())
+            != prefix["priorAuthorizationFile"]):
+        raise CampaignError("remaining jobs source transition differs")
+    context: dict[str, object] = {
+        "scope": _scope(runtime, config, previous_digest, digest),
+        "prior": prefix, "sourceTransition": source_transition,
+    }
+    before = [_decoded(_load(prior_output / f"{index:03}-response.json"))
+              for index in range(1, 11)]
+    return context, before
+
+
+def _remaining_replay(
+    runtime: dict[str, str], config: CampaignConfig, context: dict[str, object],
+    before: list[dict[str, object]], output: Path,
+) -> dict[str, object]:
+    scope = _object(context["scope"])
+    targets = cast(list[dict[str, str]], scope["targets"])
+    attempt = _load(output / "attempt.json")
+    if set(attempt) != {"context", "contextSha256", "startedAtUtc", "untilUtc"} or (
+        attempt["context"] != context or attempt["contextSha256"] != _hash(context)
+    ):
+        raise CampaignError("remaining jobs attempt binding differs")
+    started, until = parse_utc(str(attempt["startedAtUtc"])), parse_utc(str(attempt["untilUtc"]))
+    if not (parse_utc(str(_object(context["prior"])["lastObservedAtUtc"])) <= started < until
+            <= min(started + timedelta(seconds=MAXIMUM_SECONDS),
+                   parse_utc(config.cleanup_deadline_utc))):
+        raise CampaignError("remaining jobs attempt window differs")
+    sequence, last = 0, started
+    allowed = {"attempt.json"}
+
+    def read(target: dict[str, str], phase: str, body: Path | None = None) -> dict[str, object]:
+        nonlocal sequence, last
+        sequence += 1
+        names = [f"{sequence:03}-{suffix}.json"
+                 for suffix in ("intent", "dispatch", "response", "completed")]
+        allowed.update(names)
+        intent, dispatch, response, completed = [_load(output / name) for name in names]
+        if (set(intent) != {"scopeSha256", "sequence", "phase", "command", "recordedAtUtc"}
+                or intent["scopeSha256"] != _hash(context) or intent["sequence"] != sequence
+                or intent["phase"] != phase
+                or intent["command"] != list(_command(runtime, target, body))
+                or set(dispatch) != {"intentSha256", "dispatchedAtUtc"}
+                or dispatch["intentSha256"] != _hash(intent)
+                or set(completed) != {"responseSha256", "completedAtUtc"}
+                or completed["responseSha256"] != _hash(response)):
+            raise CampaignError("remaining jobs exact request history differs")
+        sent, received = (parse_utc(str(value)) for value in (
+            dispatch["dispatchedAtUtc"], completed["completedAtUtc"]))
+        if not last <= parse_utc(str(intent["recordedAtUtc"])) <= sent <= received < until:
+            raise CampaignError("remaining jobs dispatch time differs")
+        last = received
+        return _acknowledgement(response, target) if body else _decoded(response)
+
+    fresh = [read(target, "fresh-before") for target in targets]
+    for index, (target, value) in enumerate(zip(targets, fresh, strict=True)):
+        expected = str(scope["digest"] if index == 0 else scope["previousDigest"])
+        _validate_resource(value, target, scope, runtime, config, expected)
+        _preserved(before[index], value)
+        if _object(value["properties"]).get("provisioningState") != "Succeeded":
+            raise CampaignError("remaining jobs fresh baseline is not stable")
+    after = [fresh[0]]
+    for index in range(1, 10):
+        target, old = targets[index], before[index]
+        body = output / f"target-{index + 1:02}-body.json"
+        allowed.add(body.name)
+        if _load(body) != _body(old, runtime, str(scope["digest"])):
+            raise CampaignError("remaining jobs PATCH body differs")
+        read(target, "patch", body)
+        for _ in range(MAXIMUM_POLLS):
+            observed = read(target, "after")
+            state = _object(observed.get("properties")).get("provisioningState")
+            if state == "Succeeded":
+                _validate_resource(observed, target, scope, runtime, config, str(scope["digest"]))
+                _preserved(old, observed)
+                after.append(observed)
+                break
+            if state not in {"Updating", "InProgress", "Accepted"}:
+                raise CampaignError("remaining jobs provider operation failed")
+        else:
+            raise CampaignError("remaining jobs readback is incomplete")
+    if set(_files(output)) != allowed:
+        raise CampaignError("remaining jobs history is incomplete or contradictory")
+    result = {
+        "version": "m7.8-workload-remaining-completion-v1", "contextSha256": _hash(context),
+        "priorPrefixSha256": _object(context["prior"])["prefixSha256"],
+        "sourceTransition": context["sourceTransition"], "previousDigest": scope["previousDigest"],
+        "digest": scope["digest"], "resourceCount": 10, "patchCount": 9,
+        "priorApiPatchCount": 1, "jobStartCount": 0, "baseResourceMutationCount": 0,
+        "beforeSha256": _hash(before), "afterSha256": _hash(after),
+        "lastObservedAtUtc": last.isoformat(), "filesSha256": _files(output),
+    }
+    return {**result, "completionSha256": _hash(result)}
+
+
+def validate_remaining_completion(
+    original_runtime: dict[str, str], config: CampaignConfig, *, previous_digest: str, digest: str,
+    prior_output: Path, api_readback_directory: Path, output: Path,
+    source_transition: dict[str, object],
+) -> dict[str, object]:
+    context, before = _remaining_context(original_runtime, config, previous_digest, digest,
+                                         prior_output, api_readback_directory, source_transition)
+    expected = _remaining_replay(original_runtime, config, context, before, output)
+    if _load(output / "completion.json") != expected:
+        raise CampaignError("remaining jobs completion differs")
+    return expected
+
+
+def execute_remaining_jobs(
+    original_runtime: dict[str, str], config: CampaignConfig, *, previous_digest: str, digest: str,
+    prior_output: Path, api_readback_directory: Path, output: Path,
+    source_transition: dict[str, object], runner: CommandRunner, clock: Callable[[], datetime],
+    check_authority: Callable[[], None],
+) -> dict[str, object]:
+    context, before = _remaining_context(original_runtime, config, previous_digest, digest,
+                                         prior_output, api_readback_directory, source_transition)
+    scope = _object(context["scope"])
+    targets = cast(list[dict[str, str]], scope["targets"])
+    started = clock().astimezone(UTC)
+    until = min(started + timedelta(seconds=MAXIMUM_SECONDS),
+                parse_utc(config.cleanup_deadline_utc))
+    observed_at = parse_utc(str(_object(context["prior"])["lastObservedAtUtc"]))
+    if started >= until or started < observed_at:
+        raise CampaignError("remaining jobs attempt window expired or predates prior observation")
+    check_authority()
+    output.mkdir(mode=0o700, exist_ok=False)
+    _durable_record(output / "attempt.json", {
+        "context": context, "contextSha256": _hash(context),
+        "startedAtUtc": started.isoformat(), "untilUtc": until.isoformat(),
+    })
+    sequence = 0
+
+    def run(target: dict[str, str], phase: str, body: Path | None = None) -> dict[str, object]:
+        nonlocal sequence
+        if clock() >= until:
+            raise CampaignError("remaining jobs window expired")
+        sequence += 1
+        command = _command(original_runtime, target, body)
+        intent = {"scopeSha256": _hash(context), "sequence": sequence, "phase": phase,
+                  "command": list(command), "recordedAtUtc": clock().isoformat()}
+        _durable_record(output / f"{sequence:03}-intent.json", intent)
+        _durable_record(output / f"{sequence:03}-dispatch.json", {
+            "intentSha256": _hash(intent), "dispatchedAtUtc": clock().isoformat(),
+        })
+        check_authority()
+        if clock() >= until:
+            raise CampaignError("remaining jobs window expired before dispatch")
+        try:
+            response = runner.run(command)
+            _durable_record(output / f"{sequence:03}-response.json", response)
+            _durable_record(output / f"{sequence:03}-completed.json", {
+                "responseSha256": _hash(response), "completedAtUtc": clock().isoformat(),
+            })
+        except Exception as exc:
+            with suppress(OSError):
+                _durable_record(output / f"{sequence:03}-indeterminate.json", {
+                    "intentSha256": _hash(intent), "exceptionClass": type(exc).__name__,
+                    "status": "outcome-indeterminate-no-retry",
+                })
+            raise CampaignError("remaining jobs outcome is indeterminate; no retry") from exc
+        return _acknowledgement(response, target) if body else _decoded(response)
+
+    fresh = [run(target, "fresh-before") for target in targets]
+    for index, (target, value) in enumerate(zip(targets, fresh, strict=True)):
+        _validate_resource(value, target, scope, original_runtime, config,
+                           digest if index == 0 else previous_digest)
+        _preserved(before[index], value)
+        if _object(value["properties"]).get("provisioningState") != "Succeeded":
+            raise CampaignError("remaining jobs fresh baseline is not stable")
+    for index in range(1, 10):
+        target, old = targets[index], before[index]
+        body = output / f"target-{index + 1:02}-body.json"
+        _durable_record(body, _body(old, original_runtime, digest))
+        run(target, "patch", body)
+        for _ in range(MAXIMUM_POLLS):
+            observed = run(target, "after")
+            state = _object(observed.get("properties")).get("provisioningState")
+            if state == "Succeeded":
+                _validate_resource(observed, target, scope, original_runtime, config, digest)
+                _preserved(old, observed)
+                break
+            if state not in {"Updating", "InProgress", "Accepted"}:
+                raise CampaignError("remaining jobs provider operation failed")
+            time.sleep(POLL_SECONDS)
+        else:
+            raise CampaignError("remaining jobs readback is incomplete")
+    if clock() >= until:
+        raise CampaignError("remaining jobs window expired before completion")
+    result = _remaining_replay(original_runtime, config, context, before, output)
+    _durable_record(output / "completion.json", result)
+    return validate_remaining_completion(
+        original_runtime, config, previous_digest=previous_digest, digest=digest,
+        prior_output=prior_output, api_readback_directory=api_readback_directory,
+        output=output, source_transition=source_transition,
+    )
