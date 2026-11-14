@@ -282,6 +282,13 @@ def _acknowledgement(result: dict[str, object], target: dict[str, str]) -> dict[
 def _preserved(before: dict[str, object], after: dict[str, object]) -> None:
     expected, actual = copy.deepcopy(before), copy.deepcopy(after)
     _object(_containers(actual)[0])["image"] = _object(_containers(expected)[0])["image"]
+    if str(before.get("type")).casefold() == "microsoft.app/jobs":
+        # ARM 2024-03-01 declares this field read-only. The retained job update
+        # returned the empty default as absent; nonempty values remain exact.
+        for value in (expected, actual):
+            resources = _object(_object(_containers(value)[0]).get("resources"))
+            if resources.get("ephemeralStorage") == "":
+                resources.pop("ephemeralStorage")
     paths = (METADATA_PATHS if str(before.get("type")).casefold()
              == "microsoft.app/containerapps" else METADATA_PATHS[:2])
     for path in paths:
@@ -566,6 +573,7 @@ def inspect_remaining_prefix(
 def _remaining_context(
     runtime: dict[str, str], config: CampaignConfig, previous_digest: str, digest: str,
     prior_output: Path, api_readback_directory: Path, source_transition: dict[str, object],
+    prior_remaining: tuple[Path, dict[str, object]] | None = None,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
     prefix = inspect_remaining_prefix(
         runtime, config, previous_digest=previous_digest, digest=digest,
@@ -586,12 +594,22 @@ def _remaining_context(
     }
     before = [_decoded(_load(prior_output / f"{index:03}-response.json"))
               for index in range(1, 11)]
+    if prior_remaining is not None:
+        prior_folder, prior_transition = prior_remaining
+        if source_transition["sourceHead"] == prior_transition.get("sourceHead"):
+            raise CampaignError("remaining jobs corrected source transition is missing")
+        context["completedJobPrefix"] = inspect_completed_job_prefix(
+            runtime, config, previous_digest=previous_digest, digest=digest,
+            prior_output=prior_output, api_readback_directory=api_readback_directory,
+            output=prior_folder, source_transition=prior_transition,
+        )
     return context, before
 
 
 def _remaining_replay(
     runtime: dict[str, str], config: CampaignConfig, context: dict[str, object],
     before: list[dict[str, object]], output: Path,
+    *, completed_job_prefix: bool = False,
 ) -> dict[str, object]:
     scope = _object(context["scope"])
     targets = cast(list[dict[str, str]], scope["targets"])
@@ -601,7 +619,8 @@ def _remaining_replay(
     ):
         raise CampaignError("remaining jobs attempt binding differs")
     started, until = parse_utc(str(attempt["startedAtUtc"])), parse_utc(str(attempt["untilUtc"]))
-    if not (parse_utc(str(_object(context["prior"])["lastObservedAtUtc"])) <= started < until
+    previous_observed = _object(context.get("completedJobPrefix", context["prior"]))
+    if not (parse_utc(str(previous_observed["lastObservedAtUtc"])) <= started < until
             <= min(started + timedelta(seconds=MAXIMUM_SECONDS),
                    parse_utc(config.cleanup_deadline_utc))):
         raise CampaignError("remaining jobs attempt window differs")
@@ -631,15 +650,16 @@ def _remaining_replay(
         last = received
         return _acknowledgement(response, target) if body else _decoded(response)
 
+    start_index = 2 if "completedJobPrefix" in context else 1
     fresh = [read(target, "fresh-before") for target in targets]
     for index, (target, value) in enumerate(zip(targets, fresh, strict=True)):
-        expected = str(scope["digest"] if index == 0 else scope["previousDigest"])
+        expected = str(scope["digest"] if index < start_index else scope["previousDigest"])
         _validate_resource(value, target, scope, runtime, config, expected)
         _preserved(before[index], value)
         if _object(value["properties"]).get("provisioningState") != "Succeeded":
             raise CampaignError("remaining jobs fresh baseline is not stable")
-    after = [fresh[0]]
-    for index in range(1, 10):
+    after = fresh[:start_index]
+    for index in range(start_index, 10):
         target, old = targets[index], before[index]
         body = output / f"target-{index + 1:02}-body.json"
         allowed.add(body.name)
@@ -658,27 +678,73 @@ def _remaining_replay(
                 raise CampaignError("remaining jobs provider operation failed")
         else:
             raise CampaignError("remaining jobs readback is incomplete")
+        if completed_job_prefix:
+            if (start_index != 1 or sequence != 13 or (output / "completion.json").exists()
+                    or set(_files(output)) != allowed
+                    or _object(_decoded(_load(output / "012-response.json"))["properties"])
+                    .get("provisioningState") != "InProgress"):
+                raise CampaignError(
+                    "completed worker prefix must contain exactly thirteen requests"
+                )
+            result = {
+                "version": "m7.8-workload-completed-worker-prefix-v1",
+                "directory": str(output.resolve()), "contextSha256": _hash(context),
+                "sourceTransition": context["sourceTransition"], "filesSha256": _files(output),
+                "workerAfterSha256": _hash(after[1]), "lastObservedAtUtc": last.isoformat(),
+            }
+            return {**result, "prefixSha256": _hash(result)}
     if set(_files(output)) != allowed:
         raise CampaignError("remaining jobs history is incomplete or contradictory")
     result = {
         "version": "m7.8-workload-remaining-completion-v1", "contextSha256": _hash(context),
         "priorPrefixSha256": _object(context["prior"])["prefixSha256"],
         "sourceTransition": context["sourceTransition"], "previousDigest": scope["previousDigest"],
-        "digest": scope["digest"], "resourceCount": 10, "patchCount": 9,
+        "digest": scope["digest"], "resourceCount": 10, "patchCount": 10 - start_index,
         "priorApiPatchCount": 1, "jobStartCount": 0, "baseResourceMutationCount": 0,
         "beforeSha256": _hash(before), "afterSha256": _hash(after),
         "lastObservedAtUtc": last.isoformat(), "filesSha256": _files(output),
     }
+    if start_index == 2:
+        result["priorJobPatchCount"] = 1
+        result["completedJobPrefixSha256"] = _object(context["completedJobPrefix"])["prefixSha256"]
     return {**result, "completionSha256": _hash(result)}
+
+
+def inspect_completed_job_prefix(
+    original_runtime: dict[str, str], config: CampaignConfig, *, previous_digest: str, digest: str,
+    prior_output: Path, api_readback_directory: Path, output: Path,
+    source_transition: dict[str, object],
+) -> dict[str, object]:
+    """Verify only the retained first-job completion; never resume an arbitrary prefix."""
+    from infra.milestone_7_8.cleanup_controller import load_execution_authorization
+
+    context, before = _remaining_context(original_runtime, config, previous_digest, digest,
+                                         prior_output, api_readback_directory, source_transition)
+    result = _remaining_replay(original_runtime, config, context, before, output,
+                               completed_job_prefix=True)
+    authorization = output.parent / "authorization.json"
+    authorization_hash = hashlib.sha256(authorization.read_bytes()).hexdigest()
+    if authorization_hash != source_transition["authorizationSha256"]:
+        raise CampaignError("completed worker prefix authorization binding differs")
+    executing_runtime = {**original_runtime, "sourceHead": str(source_transition["sourceHead"])}
+    for path in sorted(output.glob("*-dispatch.json")):
+        for operation in ("image-decision", "cleanup"):
+            load_execution_authorization(
+                authorization, config=config, runtime=executing_runtime, operation=operation,
+                now=parse_utc(str(_load(path)["dispatchedAtUtc"])),
+            )
+    return result
 
 
 def validate_remaining_completion(
     original_runtime: dict[str, str], config: CampaignConfig, *, previous_digest: str, digest: str,
     prior_output: Path, api_readback_directory: Path, output: Path,
     source_transition: dict[str, object],
+    prior_remaining: tuple[Path, dict[str, object]] | None = None,
 ) -> dict[str, object]:
     context, before = _remaining_context(original_runtime, config, previous_digest, digest,
-                                         prior_output, api_readback_directory, source_transition)
+                                         prior_output, api_readback_directory, source_transition,
+                                         prior_remaining)
     expected = _remaining_replay(original_runtime, config, context, before, output)
     if _load(output / "completion.json") != expected:
         raise CampaignError("remaining jobs completion differs")
@@ -690,15 +756,18 @@ def execute_remaining_jobs(
     prior_output: Path, api_readback_directory: Path, output: Path,
     source_transition: dict[str, object], runner: CommandRunner, clock: Callable[[], datetime],
     check_authority: Callable[[], None],
+    prior_remaining: tuple[Path, dict[str, object]] | None = None,
 ) -> dict[str, object]:
     context, before = _remaining_context(original_runtime, config, previous_digest, digest,
-                                         prior_output, api_readback_directory, source_transition)
+                                         prior_output, api_readback_directory, source_transition,
+                                         prior_remaining)
     scope = _object(context["scope"])
     targets = cast(list[dict[str, str]], scope["targets"])
     started = clock().astimezone(UTC)
     until = min(started + timedelta(seconds=MAXIMUM_SECONDS),
                 parse_utc(config.cleanup_deadline_utc))
-    observed_at = parse_utc(str(_object(context["prior"])["lastObservedAtUtc"]))
+    previous_observed = _object(context.get("completedJobPrefix", context["prior"]))
+    observed_at = parse_utc(str(previous_observed["lastObservedAtUtc"]))
     if started >= until or started < observed_at:
         raise CampaignError("remaining jobs attempt window expired or predates prior observation")
     check_authority()
@@ -739,14 +808,15 @@ def execute_remaining_jobs(
             raise CampaignError("remaining jobs outcome is indeterminate; no retry") from exc
         return _acknowledgement(response, target) if body else _decoded(response)
 
+    start_index = 2 if prior_remaining is not None else 1
     fresh = [run(target, "fresh-before") for target in targets]
     for index, (target, value) in enumerate(zip(targets, fresh, strict=True)):
         _validate_resource(value, target, scope, original_runtime, config,
-                           digest if index == 0 else previous_digest)
+                           digest if index < start_index else previous_digest)
         _preserved(before[index], value)
         if _object(value["properties"]).get("provisioningState") != "Succeeded":
             raise CampaignError("remaining jobs fresh baseline is not stable")
-    for index in range(1, 10):
+    for index in range(start_index, 10):
         target, old = targets[index], before[index]
         body = output / f"target-{index + 1:02}-body.json"
         _durable_record(body, _body(old, original_runtime, digest))
@@ -771,4 +841,5 @@ def execute_remaining_jobs(
         original_runtime, config, previous_digest=previous_digest, digest=digest,
         prior_output=prior_output, api_readback_directory=api_readback_directory,
         output=output, source_transition=source_transition,
+        prior_remaining=prior_remaining,
     )

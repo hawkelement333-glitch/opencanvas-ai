@@ -130,6 +130,7 @@ def build_plan(
     runtime_path: Path, config_path: Path, ledger_path: Path, *,
     cost_path: Path, retained_image: Path, previous_plan: Path | None = None,
     completed_image_plan: Path | None = None,
+    prior_jobs_plan: Path | None = None,
 ) -> dict[str, object]:
     from infra.milestone_7_8 import operator
 
@@ -203,6 +204,20 @@ def build_plan(
         from infra.milestone_7_8.image_continuation_recovery import build_prior
 
         plan["priorImageAttempt"] = build_prior(previous_plan)
+    if prior_jobs_plan is not None:
+        if previous_plan is not None or completed_image_plan is not None:
+            raise CampaignError("remaining job predecessors cannot be combined")
+        prior_jobs = load_plan(prior_jobs_plan)
+        completed_image_plan = Path(str(_object(prior_jobs["completedImagePlan"])["planFile"]))
+        record: dict[str, object] = {
+            "planFile": str(prior_jobs_plan.resolve()),
+            "planFileSha256": _file_hash(prior_jobs_plan),
+            "filesSha256": {str(item): _file_hash(item)
+                            for item in prior_jobs_plan.resolve().parent.rglob("*")
+                            if item.is_file()},
+        }
+        _validate_prior_jobs(record)
+        plan["priorJobUpdateAttempt"] = record
     if completed_image_plan is not None:
         if previous_plan is not None:
             raise CampaignError("independent image continuation predecessors cannot be combined")
@@ -224,7 +239,9 @@ def load_plan(path: Path) -> dict[str, object]:
     plan = _read(_private(path))
     body = {key: value for key, value in plan.items() if key != "planSha256"}
     if (set(plan) not in (FIELDS, FIELDS | {"priorImageAttempt"},
-                         FIELDS | {"priorImageAttempt", "completedImagePlan"})
+                         FIELDS | {"priorImageAttempt", "completedImagePlan"},
+                         FIELDS | {"priorImageAttempt", "completedImagePlan",
+                                   "priorJobUpdateAttempt"})
             or plan["planSha256"] != _hash(body)
             or plan["version"] != "m7.8-image-continuation-plan-v1"
             or plan["imageBuildSourceHead"] != IMAGE_BUILD_HEAD
@@ -240,7 +257,8 @@ def load_plan(path: Path) -> dict[str, object]:
         "runtimeFile", "configFile", "costFile", "retainedImageFile",
     )}
     folder = Path(str(plan["runtimeFile"])).parent
-    slot = ("image-continuation-r2" if "completedImagePlan" in plan else
+    slot = ("image-continuation-r3" if "priorJobUpdateAttempt" in plan else
+            "image-continuation-r2" if "completedImagePlan" in plan else
             "image-continuation-r1" if "priorImageAttempt" in plan else "image-continuation")
     if path.resolve() != folder / slot / "plan.json":
         raise CampaignError("continuation plan is outside its exact private attempt slot")
@@ -250,6 +268,11 @@ def load_plan(path: Path) -> dict[str, object]:
         validate_prior(_object(plan["priorImageAttempt"]))
     if "completedImagePlan" in plan:
         _validate_completed_image(_object(plan["completedImagePlan"]))
+    if "priorJobUpdateAttempt" in plan:
+        _validate_prior_jobs(_object(plan["priorJobUpdateAttempt"]))
+        prior_jobs = load_plan(Path(str(_object(plan["priorJobUpdateAttempt"])["planFile"])))
+        if prior_jobs["completedImagePlan"] != plan["completedImagePlan"]:
+            raise CampaignError("remaining jobs changed the original completed image binding")
     required_files |= {str(folder / name) for name in (
         "budget-continuity.json", "bootstrap-prerequisite-intent.json",
         "local-image/completed.json", "local-image/image-scan.json",
@@ -316,6 +339,50 @@ def image_evidence_context(path: Path) -> tuple[Path, dict[str, str], CampaignCo
                 if "completedImagePlan" in plan else path)
     runtime, config = _effective(load_plan(selected))
     return selected, runtime, config
+
+
+def _validate_prior_jobs(record: dict[str, object]) -> None:
+    from infra.milestone_7_8 import operator, workload_image_update
+
+    if set(record) != {"planFile", "planFileSha256", "filesSha256"}:
+        raise CampaignError("prior job update fields differ")
+    path = _private(Path(str(record["planFile"])))
+    old = load_plan(path)
+    if ("priorJobUpdateAttempt" in old or old["sourceHead"] !=
+            "3411578555bb89fd44e2d5ebd53400085e6106f5"
+            or old["planSha256"] !=
+            "05a1a607857f1427862c6b7a7a75e2ec16de4de7b298978ce1e00cc8fdb4ed4a"
+            or _file_hash(path) != record["planFileSha256"]):
+        raise CampaignError("prior job update is not the exact reviewed attempt")
+    actual = {str(item): _file_hash(item) for item in path.parent.rglob("*") if item.is_file()}
+    if actual != record["filesSha256"]:
+        raise CampaignError("prior job update history changed")
+    image_plan, runtime, config = image_evidence_context(path)
+    completed = _read(image_plan.parent / "local-image/completed.json")
+    intent = _read(path.parent / "admission-intent.json")
+    if (intent.get("planSha256") != old["planSha256"]
+            or intent.get("originalLedger") != old["baselineLedger"]
+            or intent.get("imageDigest") != completed["imageDigest"]
+            or intent.get("authorizationSha256") != _file_hash(path.parent / "authorization.json")
+            or intent.get("scanEvidenceSha256") != operator.load_image_scan_evidence(
+                image_plan.parent / "local-image/image-scan.json",
+                digest=str(completed["imageDigest"]), runtime=runtime,
+            )):
+        raise CampaignError("prior job update admission intent differs")
+    workload_image_update.inspect_completed_job_prefix(
+        runtime, config, previous_digest=ORIGINAL_IMAGE, digest=str(completed["imageDigest"]),
+        prior_output=image_plan.parent / "workload",
+        api_readback_directory=image_plan.parent / "api-patch-readback",
+        output=path.parent / "workload", source_transition=_workload_transition(old, path.parent),
+    )
+
+
+def _prior_remaining(plan: dict[str, object]) -> tuple[Path, dict[str, object]] | None:
+    if "priorJobUpdateAttempt" not in plan:
+        return None
+    path = Path(str(_object(plan["priorJobUpdateAttempt"])["planFile"]))
+    old = load_plan(path)
+    return path.parent / "workload", _workload_transition(old, path.parent)
 
 
 def _effective(plan: dict[str, object]) -> tuple[dict[str, str], CampaignConfig]:
@@ -465,6 +532,7 @@ def validate_admission(
             digest=str(receipt["imageDigest"]), prior_output=image_plan.parent / "workload",
             api_readback_directory=image_plan.parent / "api-patch-readback",
             output=folder / "workload", source_transition=_workload_transition(plan, folder),
+            prior_remaining=_prior_remaining(plan),
         )
     else:
         workload = workload_image_update.validate_completion(
@@ -576,6 +644,7 @@ def execute_admission(
                 prior_output=image_plan.parent / "workload",
                 api_readback_directory=image_plan.parent / "api-patch-readback",
                 output=folder / "workload", source_transition=_workload_transition(plan, folder),
+                prior_remaining=_prior_remaining(plan),
                 runner=runner, clock=lambda: datetime.now(UTC), check_authority=check_authority,
             )
         else:
@@ -591,6 +660,7 @@ def execute_admission(
                 prior_output=image_plan.parent / "workload",
                 api_readback_directory=image_plan.parent / "api-patch-readback",
                 output=folder / "workload", source_transition=_workload_transition(plan, folder),
+                prior_remaining=_prior_remaining(plan),
             )
         else:
             replay = workload_image_update.validate_completion(
@@ -640,6 +710,7 @@ def main() -> int:
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--previous-plan", type=Path)
     parser.add_argument("--completed-image-plan", type=Path)
+    parser.add_argument("--prior-jobs-plan", type=Path)
     args = parser.parse_args()
     try:
         if args.operation == "plan":
@@ -647,8 +718,10 @@ def main() -> int:
                 args.runtime, args.config, args.ledger, cost_path=args.cost,
                 retained_image=args.retained_image, previous_plan=args.previous_plan,
                 completed_image_plan=args.completed_image_plan,
+                prior_jobs_plan=args.prior_jobs_plan,
             )
             slot = (
+                "image-continuation-r3" if args.prior_jobs_plan is not None else
                 "image-continuation-r2" if args.completed_image_plan is not None else
                 "image-continuation-r1" if args.previous_plan is not None else "image-continuation"
             )

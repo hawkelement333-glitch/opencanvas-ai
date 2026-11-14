@@ -855,6 +855,20 @@ drift, another attempted update, or any uncertain request blocks continuation.
 The existing operator `image-decision` command accepts the new continuation plan
 and the original r1 scan path. All subsequent phases use that same new plan.
 
+The retained r2 attempt updated only the worker job before its preservation
+comparison rejected `resources.ephemeralStorage` changing from an empty string
+to absent. This field is provider-read-only in the 2024-03-01 API. Only that
+empty/absent representation is equivalent; nonempty changes, CPU, memory, and
+all other fields remain exact. Original request bodies and raw responses are
+never rewritten. A separately approved `--prior-jobs-plan
+"$bundle/image-continuation-r2/plan.json"` writes the new r3 plan, retaining the
+exact thirteen-request history and its completed worker readback. It requires
+fresh observations of the already updated API and worker, then permits only the
+eight untouched jobs under new source-bound authority. It cannot repeat the API
+or worker PATCH, image admission, a job start, or an uncertain request. This
+continuation needs explicit post-dispatch approval; the pre-dispatch correction
+allowance does not grant it.
+
 The seven-argument Entra catalog correction has one explicit same-bundle
 continuation. This does not authorize another campaign, base deployment, image
 build, controller renewal, or a later Milestone 7.8 evidence phase. Its image
