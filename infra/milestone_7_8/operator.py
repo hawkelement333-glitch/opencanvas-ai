@@ -4903,6 +4903,7 @@ def main() -> int:
                     operation=authorized_operation,
                 )
         image_scan_sha256 = None
+        verified_image_build_count = None
         if target is Phase.IMAGE_DECIDED and args.image_digest is not None:
             config = replace(config, image_digest=args.image_digest)
             config.validate()
@@ -4917,10 +4918,15 @@ def main() -> int:
 
                     # Validate against the prepared configuration before attaching
                     # its selected digest; local-image never deploys the workload.
-                    validate_completion(
-                        args.runtime, runtime, replace(config, image_digest=None),
-                        digest=args.image_digest, scan_path=args.image_scan_evidence,
+                    verified_image_build_count = validate_completion(
+                        args.runtime,
+                        runtime,
+                        replace(config, image_digest=None),
+                        digest=args.image_digest,
+                        scan_path=args.image_scan_evidence,
                     )
+                    if args.image_built and verified_image_build_count == 0:
+                        raise CampaignError("retained image admission cannot claim a new build")
         control_evidence = None
         if args.control_plane_evidence is not None:
             control_evidence = load_control_plane_evidence(args.control_plane_evidence)
@@ -5198,7 +5204,12 @@ def main() -> int:
                     raise CampaignError(
                         "immutable image decision or admission scan is missing"
                     )
-                ledger.record_image(args.image_digest, built=args.image_built)
+                ledger.record_image(
+                    args.image_digest,
+                    built=(verified_image_build_count == 1)
+                    if verified_image_build_count is not None
+                    else args.image_built,
+                )
                 ledger.record_image_scan(args.image_digest, image_scan_sha256)
             if target is Phase.CLEANUP_DEPLOYED:
                 if len(results) != 8:

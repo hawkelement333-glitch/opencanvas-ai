@@ -117,7 +117,12 @@ def _verify_registry(observed: object, plan: dict[str, object], *, opened: bool 
 
 
 def build_plan(
-    runtime: dict[str, str], config: CampaignConfig, before: object, *, egress_ipv4: str
+    runtime: dict[str, str],
+    config: CampaignConfig,
+    before: object,
+    *,
+    egress_ipv4: str,
+    retained_image: Path | None = None,
 ) -> dict[str, object]:
     """Create a reviewable exact plan from a separately captured registry GET."""
     try:
@@ -183,8 +188,54 @@ def build_plan(
         "openBody": {"properties": opened},
         "restoreBody": {"properties": original},
     }
+    if retained_image is not None:
+        from infra.milestone_7_8.retained_image import load_retained_image
+
+        plan["retainedImage"] = load_retained_image(
+            retained_image,
+            operator_head=runtime["sourceHead"],
+            canonical_input_sha256=runtime["canonicalBuildInputSha256"],
+        )
     plan["planSha256"] = _hash(plan)
     return plan
+
+
+def _rebuild_plan(
+    runtime: dict[str, str], config: CampaignConfig, plan: dict[str, object]
+) -> dict[str, object]:
+    retained = _object(plan["retainedImage"]) if "retainedImage" in plan else None
+    return build_plan(
+        runtime,
+        config,
+        plan.get("before"),
+        egress_ipv4=str(plan["egressIpv4"]),
+        retained_image=Path(str(retained["provenanceFile"])) if retained else None,
+    )
+
+
+def _image_build_head(plan: dict[str, object]) -> str:
+    if "retainedImage" in plan:
+        return str(_object(plan["retainedImage"])["imageBuildSourceHead"])
+    return str(plan["sourceHead"])
+
+
+def _validate_retained_inspection(value: object, plan: dict[str, object]) -> None:
+    retained = _object(plan["retainedImage"])
+    if not isinstance(value, list) or len(value) != 1:
+        raise CampaignError("retained image inspection is incomplete")
+    image = _object(value[0])
+    labels = _object(_object(image.get("Config")).get("Labels"))
+    size = image.get("Size")
+    if (
+        image.get("Id") != retained["imageId"]
+        or image.get("Os") != "linux"
+        or image.get("Architecture") != "amd64"
+        or type(size) is not int
+        or not 0 < size <= MAX_IMAGE_BYTES
+        or labels.get("org.opencontainers.image.revision") != retained["imageBuildSourceHead"]
+        or labels.get("mobius.canonical-input-sha256") != plan["canonicalBuildInputSha256"]
+    ):
+        raise CampaignError("retained image identity, platform or build provenance differs")
 
 
 def config_document(config: CampaignConfig) -> object:
@@ -373,7 +424,11 @@ def build_approval(
         raise CampaignError("local image approval or restoration window is invalid")
     document: dict[str, object] = {
         "version": "m7.8-local-image-approval-v1",
-        "operation": "one-local-build-push-scout-with-exact-network-restoration",
+        "operation": (
+            "one-retained-image-push-scout-with-exact-network-restoration"
+            if "retainedImage" in plan
+            else "one-local-build-push-scout-with-exact-network-restoration"
+        ),
         "planSha256": plan["planSha256"],
         "issuedAtUtc": issued_at,
         "expiresAtUtc": expires_at,
@@ -391,7 +446,7 @@ def validate_inputs(
     approval: dict[str, object],
     now: datetime,
 ) -> None:
-    if plan != build_plan(runtime, config, plan.get("before"), egress_ipv4=str(plan["egressIpv4"])):
+    if plan != _rebuild_plan(runtime, config, plan):
         raise CampaignError("local image plan binding differs")
     expected = build_approval(
         plan,
@@ -519,6 +574,12 @@ def execute_local_image(
             restore=restore,
         )
 
+    retained = _object(plan["retainedImage"]) if "retainedImage" in plan else None
+    if retained is not None:
+        _validate_retained_inspection(
+            _result(run(("docker", "image", "inspect", str(retained["imageId"])))),
+            plan,
+        )
     baseline = get()
     _verify_registry(baseline, plan)
     _durable_record(output / "fresh-before.json", baseline)
@@ -542,27 +603,32 @@ def execute_local_image(
             runtime["canonicalBuildInputSha256"],
             run,
         )
-        run(
-            (
-                "docker",
-                "build",
-                "--platform",
-                "linux/amd64",
-                "--file",
-                str(context / "apps/api/Dockerfile"),
-                "--label",
-                f"org.opencontainers.image.revision={head}",
-                "--label",
-                f"mobius.canonical-input-sha256={runtime['canonicalBuildInputSha256']}",
-                "--tag",
-                reference,
-                str(context),
+        if retained is not None:
+            run(("docker", "tag", str(retained["imageId"]), reference))
+        else:
+            run(
+                (
+                    "docker",
+                    "build",
+                    "--platform",
+                    "linux/amd64",
+                    "--file",
+                    str(context / "apps/api/Dockerfile"),
+                    "--label",
+                    f"org.opencontainers.image.revision={head}",
+                    "--label",
+                    f"mobius.canonical-input-sha256={runtime['canonicalBuildInputSha256']}",
+                    "--tag",
+                    reference,
+                    str(context),
+                )
             )
-        )
         image = _result(run(("docker", "image", "inspect", reference)))
         if not isinstance(image, list) or len(image) != 1:
             raise CampaignError("built image identity is missing")
         metadata = _object(image[0])
+        if retained is not None:
+            _validate_retained_inspection(image, plan)
         labels = _object(_object(metadata.get("Config")).get("Labels"))
         size = metadata.get("Size")
         if (
@@ -571,7 +637,7 @@ def execute_local_image(
             or metadata.get("Architecture") != "amd64"
             or type(size) is not int
             or not 0 < size <= MAX_IMAGE_BYTES
-            or labels.get("org.opencontainers.image.revision") != head
+            or labels.get("org.opencontainers.image.revision") != _image_build_head(plan)
             or labels.get("mobius.canonical-input-sha256") != runtime["canonicalBuildInputSha256"]
         ):
             raise CampaignError("built image platform, source labels or size bound differs")
@@ -594,7 +660,14 @@ def execute_local_image(
         if len(set(digests)) != 1:
             raise CampaignError("one exact pushed manifest digest is required")
         digest = digests[0]
+        if retained is not None and digest not in {
+            retained["imageId"],
+            retained["runtimeManifestDigest"],
+        }:
+            raise CampaignError("pushed digest differs from the retained image archive")
         pushed_image = _result(run(("docker", "image", "inspect", reference)))
+        if retained is not None:
+            _validate_retained_inspection(pushed_image, plan)
         if (
             not isinstance(pushed_image, list)
             or len(pushed_image) != 1
@@ -636,16 +709,23 @@ def execute_local_image(
             recover_transport=True,
         )
         receipt = {
-            "version": "m7.8-local-image-result-v1",
+            "version": "m7.8-local-image-result-v2" if retained else "m7.8-local-image-result-v1",
             "planSha256": plan["planSha256"],
             "approvalSha256": approval["approvalSha256"],
             "sourceHead": head,
             "canonicalBuildInputSha256": runtime["canonicalBuildInputSha256"],
             "imageDigest": digest,
             "imageBytes": size,
-            "imageBuildCount": 1,
+            "imageBuildCount": 0 if retained else 1,
             "sourceArchiveSha256": hashlib.sha256(archive_path.read_bytes()).hexdigest(),
         }
+        if retained is not None:
+            receipt.update(
+                {
+                    "imageBuildSourceHead": retained["imageBuildSourceHead"],
+                    "retainedImageId": retained["imageId"],
+                }
+            )
     except Exception as exc:
         failure = exc
     finally:
@@ -704,13 +784,15 @@ def validate_completion(
     *,
     digest: str,
     scan_path: Path,
-) -> None:
+) -> int:
     """An attempted local route cannot admit its pending scan before restoration."""
     output = runtime_path.parent / "local-image"
     marker = _object(json.loads((runtime_path.parent / "local-image-attempt.json").read_text()))
     receipt = _object(json.loads((output / "completed.json").read_text()))
     plan = _object(json.loads((output / "plan.json").read_text()))
     approval = _object(json.loads((output / "approval.json").read_text()))
+    retained = _object(plan["retainedImage"]) if "retainedImage" in plan else None
+    retained_fields = {"imageBuildSourceHead", "retainedImageId"} if retained else set()
     if (
         set(receipt)
         != {
@@ -727,17 +809,27 @@ def validate_completion(
             "scanFileSha256",
             "filesSha256",
         }
-        or plan
-        != build_plan(runtime, config, plan.get("before"), egress_ipv4=str(plan["egressIpv4"]))
+        | retained_fields
+        or plan != _rebuild_plan(runtime, config, plan)
         or marker
         != {"planSha256": plan["planSha256"], "approvalSha256": approval["approvalSha256"]}
-        or receipt.get("version") != "m7.8-local-image-result-v1"
+        or receipt.get("version")
+        != ("m7.8-local-image-result-v2" if retained else "m7.8-local-image-result-v1")
         or receipt.get("planSha256") != plan["planSha256"]
         or receipt.get("approvalSha256") != approval["approvalSha256"]
         or receipt.get("sourceHead") != runtime["sourceHead"]
         or receipt.get("canonicalBuildInputSha256") != runtime["canonicalBuildInputSha256"]
         or receipt.get("imageDigest") != digest
-        or receipt.get("imageBuildCount") != 1
+        or type(receipt.get("imageBuildCount")) is not int
+        or receipt.get("imageBuildCount") != (0 if retained else 1)
+        or (
+            retained is not None
+            and (
+                receipt.get("retainedImageId") != retained["imageId"]
+                or receipt.get("imageBuildSourceHead") != retained["imageBuildSourceHead"]
+                or digest not in {retained["imageId"], retained["runtimeManifestDigest"]}
+            )
+        )
         or approval
         != build_approval(
             plan,
@@ -823,16 +915,18 @@ def validate_completion(
         "json",
     ]
     opening_commands = [registry_get, registry_open, registry_get]
+    offset = 1 if retained else 0
+    opening_records = records[offset : offset + 3]
     if (
-        intents[:3] != opening_commands
-        or [command for command, _response in records[:3]] != opening_commands
-        or any(response.get("exitCode") != 0 for _command, response in records[:3])
+        intents[offset : offset + 3] != opening_commands
+        or [command for command, _response in opening_records] != opening_commands
+        or any(response.get("exitCode") != 0 for _command, response in opening_records)
         or json.loads((output / "openBody.json").read_text()) != plan["openBody"]
-        or json.loads((output / "fresh-before.json").read_text()) != _result(records[0][1])
+        or json.loads((output / "fresh-before.json").read_text()) != _result(opening_records[0][1])
     ):
         raise CampaignError("local image exact opening command or raw readback differs")
-    _verify_registry(_result(records[0][1]), plan)
-    _verify_registry(_result(records[2][1]), plan, opened=True)
+    _verify_registry(_result(opening_records[0][1]), plan)
+    _verify_registry(_result(opening_records[2][1]), plan, opened=True)
 
     source = str(output / "source")
     archive_command, _archive_response = required(
@@ -876,8 +970,19 @@ def validate_completion(
         runtime["canonicalBuildInputSha256"],
         extract=False,
     )
-    built = required(("docker", "build"))[0][0]
-    if built != [
+    if retained is not None:
+        if any(
+            command[:2] in (["docker", "build"], ["docker", "buildx"]) for command in intents
+        ) or required(("docker", "tag"))[0][0] != [
+            "docker",
+            "tag",
+            retained["imageId"],
+            plan["imageReference"],
+        ]:
+            raise CampaignError("retained image route rebuilt or retagged another image")
+        if not intents or intents[0] != ["docker", "image", "inspect", retained["imageId"]]:
+            raise CampaignError("retained image pre-mutation inspection is missing")
+    elif required(("docker", "build"))[0][0] != [
         "docker",
         "build",
         "--platform",
@@ -893,7 +998,13 @@ def validate_completion(
         source,
     ]:
         raise CampaignError("local image build source or tag differs")
-    inspected = required(("docker", "image", "inspect"), 2)
+    inspected = required(("docker", "image", "inspect"), 3 if retained else 2)
+    if retained is not None:
+        if inspected[0][0] != intents[0] or records[0] != inspected[0]:
+            raise CampaignError("retained image initial inspection binding differs")
+        for _command, response in inspected:
+            _validate_retained_inspection(_result(response), plan)
+        inspected = inspected[1:]
     if any(row[0] != ["docker", "image", "inspect", plan["imageReference"]] for row in inspected):
         raise CampaignError("local image inspection target differs")
     image_results = [_result(row[1]) for row in inspected]
@@ -910,7 +1021,7 @@ def validate_completion(
         or re.fullmatch(r"sha256:[a-f0-9]{64}", str(original.get("Id"))) is None
         or original.get("Os") != "linux"
         or original.get("Architecture") != "amd64"
-        or labels.get("org.opencontainers.image.revision") != runtime["sourceHead"]
+        or labels.get("org.opencontainers.image.revision") != _image_build_head(plan)
         or labels.get("mobius.canonical-input-sha256") != runtime["canonicalBuildInputSha256"]
         or f"{runtime['registryName']}.azurecr.io/mobius-api@{digest}"
         not in cast(list[object], pushed.get("RepoDigests", []))
@@ -1029,6 +1140,59 @@ def validate_completion(
         != receipt.get("scanFileSha256")
     ):
         raise CampaignError("local image restoration or scan binding differs")
+    if retained is not None:
+        expected_commands = [
+            ["docker", "image", "inspect", retained["imageId"]],
+            *opening_commands,
+            ["docker", "info", "--format", "{{json .}}"],
+            archive_command,
+            tree_command,
+            ["docker", "tag", retained["imageId"], plan["imageReference"]],
+            ["docker", "image", "inspect", plan["imageReference"]],
+            [
+                "az",
+                "acr",
+                "login",
+                "--name",
+                runtime["registryName"],
+                "--subscription",
+                runtime["subscriptionId"],
+            ],
+            push_command,
+            ["docker", "image", "inspect", plan["imageReference"]],
+            manifest_command,
+            ["git", "rev-parse", "HEAD"],
+            ["git", "status", "--porcelain=v1"],
+            ["docker", "scout", "version"],
+            *scan_intents,
+            *intents[-2:],
+        ]
+        if intents != expected_commands:
+            raise CampaignError("retained image command sequence differs")
+        last_time = parse_utc(str(approval["issuedAtUtc"]))
+        paths = sorted(output.glob("*-intent.json"))
+        for index, path in enumerate(paths):
+            intent = _object(json.loads(path.read_text()))
+            observed = parse_utc(str(intent.get("intentAtUtc")))
+            limit = "restoreUntilUtc" if index >= len(paths) - 2 else "expiresAtUtc"
+            if not last_time <= observed < parse_utc(str(approval[limit])):
+                raise CampaignError("retained image command window or order differs")
+            last_time = observed
+            # A lost restoration response is resolved only by the final exact GET.
+            # All other successful steps must have their original command result.
+            if index != len(paths) - 2 and intents[index][:3] != ["docker", "scout", "cves"]:
+                response_path = path.with_name(path.name.replace("-intent.json", "-response.json"))
+                response = _object(json.loads(response_path.read_text()))
+                uncertain = path.with_name(path.name.replace("-intent.json", "-indeterminate.json"))
+                if (
+                    type(response.get("exitCode")) is not int
+                    or response["exitCode"] != 0
+                    or not isinstance(response.get("stdout"), str)
+                    or not isinstance(response.get("stderr"), str)
+                    or uncertain.exists()
+                ):
+                    raise CampaignError("retained image successful command result is incomplete")
+    return cast(int, receipt["imageBuildCount"])
 
 
 class _RecordingRunner:
@@ -1048,6 +1212,7 @@ def main() -> int:
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--approval", type=Path)
     parser.add_argument("--registry-before", type=Path)
+    parser.add_argument("--retained-image", type=Path)
     parser.add_argument("--egress-ipv4")
     parser.add_argument("--expires-at")
     parser.add_argument("--restore-until")
@@ -1064,10 +1229,13 @@ def main() -> int:
             args.approval,
             args.registry_before,
             args.cleanup_authorization,
+            args.retained_image,
         ):
             if path is not None and not path.resolve().is_relative_to(root):
                 raise CampaignError("image artifacts must remain in the ignored private root")
         runtime = operator.load_runtime(args.runtime)
+        if args.retained_image is not None and args.operation != "plan":
+            raise CampaignError("retained image selection must be bound by the reviewed plan")
         config = CampaignConfig.from_json(args.config)
         operator.validate_prepared_bundle(args.runtime, runtime, config)
         ledger = load_ledger(args.ledger, config)
@@ -1079,6 +1247,7 @@ def main() -> int:
                 config,
                 json.loads(args.registry_before.read_text()),
                 egress_ipv4=args.egress_ipv4,
+                retained_image=args.retained_image,
             )
             _durable_record(args.plan, plan)
         else:

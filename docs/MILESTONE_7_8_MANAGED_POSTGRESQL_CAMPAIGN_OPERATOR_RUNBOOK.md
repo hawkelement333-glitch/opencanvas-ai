@@ -411,17 +411,20 @@ has executed successfully in Automation.
 
 ## One image decision
 
-The canonical source changes in this implementation require one new validation
-image. No retained image may be substituted. The template creates a Premium
-registry with public access disabled and a private endpoint. A hosted
+Use the build route when the canonical image inputs changed or no exact retained
+image and provenance are available. The retained-image route applies when a
+separately approved image has the same canonical build inputs as the prepared
+execution source. The template creates a Premium registry with public access
+disabled and a private endpoint. A hosted
 `az acr build` is not an established access path for that configuration; neither
 the retained records nor the template establish a private build agent or a
 workstation route. Docker Scout's `registry://` path also needs authenticated
 registry data-plane access. Do not run a build merely because ARM reads work.
 
-The executable local path uses the installed Linux Docker builder and Scout on
+The executable local path uses the installed Linux Docker engine and Scout on
 the workstation. It requires separate approval for temporary registry network
-access, one build/push, one digest read, and one scan. No VM, agent pool, VPN,
+access, the chosen image operation, one push, one digest read, one scan and
+network restoration. No VM, agent pool, VPN,
 role, or trusted-task bypass is added. Before requesting that approval:
 
 1. Bind a fresh private registry GET to the new bundle's subscription, group,
@@ -481,6 +484,8 @@ to make this validation pass.
 
 ```powershell
 $imagePlan = "$bundle/local-image-plan.json"
+# For the retained route, append --retained-image with the approved private
+# retained-image.json path. Leave that argument absent to plan a new build.
 .\.venv\Scripts\python.exe -m infra.milestone_7_8.local_image plan `
   --runtime $runtime --config $config --ledger $ledger --plan $imagePlan `
   --registry-before $registryBefore --egress-ipv4 $verifiedEgress
@@ -505,12 +510,28 @@ $scan = "$bundle/local-image/image-scan.json"
 # workload using the existing operator. local_image itself never deploys it.
 ```
 
-The executor archives only canonical tracked inputs from the exact clean source
-commit, verifies those bytes, builds Linux/amd64 once, and checks source/input
-labels and the 2-GiB size cap before push. Local image identity, pushed digest,
-registry manifest and the completed digest-pinned Scout assessment must agree. Scout explicitly
-uses `--platform linux/amd64`, including on Windows hosts. Raw command responses,
-the source archive, SARIF, approvals and network snapshots stay private.
+For a new build, the executor archives only canonical tracked inputs from the
+exact clean source commit, verifies those bytes, builds Linux/amd64 once, and
+checks source/input labels and the 2-GiB size cap before push.
+
+For a retained image, the plan binds its original image build source, immutable
+image ID, canonical build input hash, Linux manifest digest and the private
+provenance file hashes. The original build source and the prepared execution
+source must independently yield the same canonical build input hash. Review and
+approve the retained-image operation for that exact plan. Before changing
+registry access, the executor inspects the exact Linux/amd64 image ID on the
+workstation and verifies its original source and input labels and size. It tags
+that immutable ID with the approved registry reference and pushes once. The
+pushed digest must be the verified retained index ID or Linux manifest digest,
+and both the local RepoDigest and the registry manifest read must confirm it.
+The retained route performs zero builds. Its completion records the executing
+source HEAD, original image build source and original retained image ID
+separately. Keep the original private provenance available and unmodified for
+completion validation, which recomputes its hashes.
+
+Both routes require a fresh assessment of the exact pushed digest. Scout uses
+`--platform linux/amd64`, including on Windows hosts. Raw command responses,
+image provenance, SARIF, approvals and network snapshots stay private.
 Completion is written only after verified network restoration. The normal
 `image-decision` entry point validates that completion whenever the local attempt
 marker exists; a pending scan or failed restoration cannot advance this route.
@@ -544,7 +565,7 @@ the already armed deadline cleanup. Matching state cannot invent missing history
 Windows ACL and directory crash-durability limitations remain those documented
 below; Unix file modes alone do not establish Windows privacy.
 
-The local builder has zero incremental Azure build compute/resource cost. Keep
+The local routes have zero incremental Azure build compute/resource cost. Keep
 the existing build allowance as contingency rather than claiming a saving
 before execution. Public Azure pricing refreshed November 12, 2026 lists incoming
 transfer as free and North American internet egress at USD 0.087/GB before
@@ -564,10 +585,11 @@ entitlement or stop if unavailable.
 
 The separately authorized admission scanner must scan that exact digest and
 write a private receipt in the fresh bundle, conforming to
-`infra/milestone_7_8/schemas/image-scan.schema.json`. The receipt must bind the
-prepared source HEAD and canonical build-input hash and must report zero High
-and zero Critical findings. Validate and deploy the workload only after the
-receipt exists:
+`infra/milestone_7_8/schemas/image-scan.schema.json`. The receipt records the
+prepared execution source HEAD and canonical build input hash and must report
+zero High and zero Critical findings. For a retained image, the original
+build source is verified separately in the plan, image labels and provenance.
+Validate and deploy the workload only after the receipt exists.
 
 The local-image route already performs that scan; do not scan again. For a
 different separately approved access route, the existing Scout entry point runs one digest-pinned
@@ -583,9 +605,9 @@ an unsuccessful scan or nonempty High/Critical report:
 if ($LASTEXITCODE -ne 0) { throw 'image admission scan failed' }
 ```
 
-This command requires a separate live authorization and has not been proved
-against the managed registry by local tests. The digest must come from the one
-authorized campaign build and its registry readback.
+This command requires separate live authorization. Managed registry execution
+remains to be verified. The digest must come from the one authorized campaign
+push and its registry readback.
 
 ```powershell
 # Restore disabled registry access and verify its readback before admission.

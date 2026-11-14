@@ -1210,6 +1210,8 @@ def test_normal_cli_preserves_protected_infrastructure_after_restored_image_fail
 def test_recovered_scan_continues_normal_admission_and_bootstrap_with_cleanup_armed(
     case: Case, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from infra.milestone_7_8.campaign import CostItem
+
     folder = case.runtime_path.parent
     manifest = _manifest()
     principals = cast(dict[str, dict[str, str]], manifest["principals"])
@@ -1221,9 +1223,16 @@ def test_recovered_scan_continues_normal_admission_and_bootstrap_with_cleanup_ar
         )},
         "cleanup": principals["cleanup"]["name"],
     }
-    case.config = replace(case.config, principal_manifest_sha256=hashlib.sha256(
-        json.dumps(semantic_plan, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest())
+    case.config = replace(
+        case.config,
+        principal_manifest_sha256=hashlib.sha256(
+            json.dumps(semantic_plan, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+        resource_items=(*case.config.resource_items, CostItem(
+            "database-prerequisites", "0", 1, "0.0567",
+        )),
+        conservative_estimate_usd="25.7541",
+    )
     case.plan = local_image.build_plan(
         case.runtime, case.config, case.plan["before"], egress_ipv4="8.8.4.4",
     )
@@ -1231,6 +1240,7 @@ def test_recovered_scan_continues_normal_admission_and_bootstrap_with_cleanup_ar
         case.plan, issued_at="2030-01-01T00:00:00Z", expires_at="2030-01-01T01:00:00Z",
         restore_until="2030-01-01T05:00:00Z",
     )
+    case.ledger.conservative_estimate_usd = case.config.conservative_estimate_usd
     case.ledger.bind_deadline(case.config.cleanup_deadline_utc)
     case.ledger.first_billable_mutation_utc = "2030-01-01T00:00:00Z"
     save_ledger(folder / "ledger.json", case.ledger)
@@ -1261,6 +1271,36 @@ def test_recovered_scan_continues_normal_admission_and_bootstrap_with_cleanup_ar
     ):
         binding[key] = getattr(case.config, attribute)
 
+    subscription = case.runtime["subscriptionId"]
+    group = case.runtime["resourceGroupName"]
+    bootstrap_job = case.runtime["bootstrapJobName"]
+    job_id = (
+        f"/subscriptions/{subscription}/resourceGroups/{group}/providers/Microsoft.App/jobs/"
+        f"{bootstrap_job}"
+    )
+    bootstrap_principal = principals["bootstrap"]
+    identity_id = (
+        f"/subscriptions/{subscription}/resourceGroups/{group}/providers/"
+        f"Microsoft.ManagedIdentity/userAssignedIdentities/{bootstrap_principal['name']}"
+    )
+    client_id = "00000000-0000-0000-0000-000000000099"
+    bootstrap_image = f"{case.runtime['registryName']}.azurecr.io/mobius-api@{DIGEST}"
+    env = {
+        "OPENCANVAS_DATABASE_PRINCIPAL_MANIFEST": json.dumps(manifest),
+        "OPENCANVAS_CAMPAIGN_ID": case.config.campaign_id,
+        "OPENCANVAS_CAMPAIGN_GENERATION_ID": case.config.generation_id,
+        "OPENCANVAS_DATABASE_URL": (
+            f"postgresql+asyncpg://{bootstrap_principal['name']}"
+            f"@{case.runtime['postgresServerName']}.postgres.database.azure.com:5432/opencanvas"
+        ),
+        "OPENCANVAS_DATABASE_ROLE": "provisioning",
+        "OPENCANVAS_DATABASE_AUTH_MODE": "entra",
+        "OPENCANVAS_DATABASE_TLS_MODE": "require",
+        "OPENCANVAS_DATABASE_MANAGED_IDENTITY_CLIENT_ID": client_id,
+        "OPENCANVAS_DATABASE_CURRENT_PRINCIPAL_ID": bootstrap_principal["objectId"],
+    }
+    tokens: list[str] = []
+
     class ContinuingProvider(ScanRecoveryProvider):
         def run(self, command: tuple[str, ...]) -> dict[str, object]:
             if command[:4] == ("az", "deployment", "sub", "create"):
@@ -1279,13 +1319,67 @@ def test_recovered_scan_continues_normal_admission_and_bootstrap_with_cleanup_ar
                         "outputs": {key: {"value": value} for key, value in outputs.items()},
                     },
                 })}
-            if command[:4] == ("az", "containerapp", "job", "start"):
-                assert command[command.index("--name") + 1] == case.runtime["bootstrapJobName"]
+            if command[:4] == ("az", "containerapp", "job", "show"):
+                assert command[command.index("--name") + 1] == bootstrap_job
                 self.commands.append(command)
+                resource = {
+                    "id": job_id,
+                    "identity": {"type": "UserAssigned", "userAssignedIdentities": {
+                        identity_id: {
+                            "principalId": bootstrap_principal["objectId"],
+                            "clientId": client_id,
+                        },
+                    }},
+                    "properties": {
+                        "configuration": {
+                            "triggerType": "Manual", "replicaTimeout": 900,
+                            "replicaRetryLimit": 0,
+                            "manualTriggerConfig": {"parallelism": 1, "replicaCompletionCount": 1},
+                        },
+                        "template": {"containers": [{
+                            "name": "bootstrap",
+                            "image": bootstrap_image,
+                            "command": ["python", "-m", "scripts.bootstrap_postgres"],
+                            "resources": {"cpu": 0.5, "memory": "1Gi"},
+                            "env": [{"name": key, "value": value} for key, value in env.items()],
+                        }]},
+                    },
+                }
+                return {"exitCode": 0, "stderr": "", "stdout": json.dumps(resource)}
+            if command[:4] == ("az", "containerapp", "job", "start"):
+                assert command[command.index("--name") + 1] == bootstrap_job
+                self.commands.append(command)
+                execution = "synthetic-bootstrap-execution"
+                if "--yaml" in command:
+                    template = json.loads(Path(command[command.index("--yaml") + 1]).read_text())
+                    assert template["containers"][0]["args"] == ["--diagnose-prerequisites"]
+                    tokens.extend(
+                        item["value"] for item in template["containers"][0]["env"]
+                        if item["name"] == "M78_DATABASE_PREREQUISITE_TOKEN"
+                    )
+                    execution = "synthetic-bootstrap-prerequisite"
+                else:
+                    assert len(tokens) == 1
                 return {"exitCode": 0, "stderr": "", "stdout": json.dumps({
-                    "name": "synthetic-bootstrap-execution", "properties": {"status": "Succeeded"},
+                    "id": f"{job_id}/executions/{execution}",
+                    "name": execution, "properties": {"status": "Succeeded"},
                 })}
             return super().run(command)
+
+    def read_marker(*_args: object, **kwargs: object) -> dict[str, object]:
+        assert tokens == [kwargs["token"]]
+        assert kwargs["execution"] == "synthetic-bootstrap-prerequisite"
+        return {
+            "version": "m7.8-database-prerequisites-v1", "operation": "bootstrap",
+            "status": "read-only-prerequisites-passed", "identityDatabase": "postgres",
+            "applicationDatabase": "opencanvas", "identityMatches": True,
+            "applicationBindingMatches": True, "listingRead": True, "createExecute": True,
+            "campaignId": case.config.campaign_id, "generationId": case.config.generation_id,
+            "vector": {
+                "version": "0.8.2", "trusted": False, "superuserRequired": True,
+                "installed": False, "installerAllowed": True,
+            },
+        }
 
     provider = ContinuingProvider(case)
     cleanup: list[str] = []
@@ -1296,6 +1390,9 @@ def test_recovered_scan_continues_normal_admission_and_bootstrap_with_cleanup_ar
     monkeypatch.setattr(operator, "validate_prepared_bundle", lambda *_args: None)
     monkeypatch.setattr(operator, "load_bound_fresh_controller_admission", lambda *_args: None)
     monkeypatch.setattr(operator, "start_failure_cleanup", lambda *_args: cleanup.append("cleanup"))
+    monkeypatch.setattr("infra.milestone_7_8.evidence_console.read_job_marker", read_marker)
+    # The already verified cleanup arm is the upstream boundary for this test.
+    monkeypatch.setattr(operator, "_verify_retry_protection", lambda *_args: [])
     for module in (local_image, operator):
         monkeypatch.setattr(module, "SubprocessRunner", lambda **_kwargs: provider)
 
