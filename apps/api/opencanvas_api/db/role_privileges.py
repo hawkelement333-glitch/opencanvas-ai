@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from typing import Final, Literal
 
@@ -323,6 +325,7 @@ RUNTIME_SEQUENCE_PRIVILEGES: Final[Mapping[DatabaseRole, frozenset[str]]] = {
 }
 _VECTOR_TYPEMOD: Final = "public.vector(public.vector, pg_catalog.int4, pg_catalog.bool)"
 _VECTOR_COSINE: Final = "public.cosine_distance(public.vector, public.vector)"
+_AZURE_VECTOR_ROUTINE_COUNT: Final = 118
 RUNTIME_FUNCTION_PRIVILEGES: Final[Mapping[DatabaseRole, frozenset[str]]] = {
     DatabaseRole.API: frozenset({_VECTOR_TYPEMOD, _VECTOR_COSINE}),
     DatabaseRole.WORKER: frozenset({_VECTOR_TYPEMOD}),
@@ -375,7 +378,8 @@ async def _runtime_function_oids(connection: AsyncConnection, role: DatabaseRole
 
 async def require_runtime_function_privileges(
     connection: AsyncConnection, role: DatabaseRole, *, principal: str,
-) -> int:
+    managed: bool = False,
+) -> dict[str, object]:
     expected = await _runtime_function_oids(connection, role)
     rows = (
         await connection.execute(
@@ -387,19 +391,95 @@ async def require_runtime_function_privileges(
             {"principal": principal},
         )
     ).all()
-    if {int(oid) for oid, execute, _ in rows if execute} != expected or any(
+    observed = {int(oid) for oid, execute, _ in rows if execute}
+    provider, extension_version = (
+        await _azure_vector_routines(connection, principal) if managed else ({}, None)
+    )
+    if provider and not expected <= provider.keys():
+        raise RuntimeError("required routines are absent from the Azure vector baseline")
+    if observed != (set(provider) if provider else expected) or any(
         grant for _, _, grant in rows
     ):
         raise RuntimeError("runtime routine grants differ from the exact matrix")
-    return len(rows)
+    return {
+        "functionObjectsChecked": len(rows),
+        "effectiveExecuteCount": len(observed),
+        "requiredVectorSignatures": sorted(RUNTIME_FUNCTION_PRIVILEGES[role]),
+        "providerPublicVectorRoutineCount": len(provider),
+        "providerPublicVectorExtensionVersion": extension_version,
+        "providerPublicVectorInventorySha256": hashlib.sha256(
+            b"m7.8/azure-public-vector-inventory/v1\0"
+            + json.dumps({
+                "extension": "vector",
+                "schema": "public",
+                "version": extension_version,
+                "extensionOwner": "azuresu",
+                "routineOwner": "azuresu",
+                "publicGrantor": "azuresu",
+                "publicExecute": True,
+                "publicGrantOption": False,
+                "routineSignatures": sorted(provider.values()),
+            }, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest() if provider else None,
+    }
+
+
+async def _azure_vector_routines(
+    connection: AsyncConnection, principal: str,
+) -> tuple[dict[int, str], str | None]:
+    """Allow only the observed provider-owned vector extension's public baseline."""
+    rows = (await connection.execute(text("""
+        SELECT q.oid, q.routine, e.extversion,
+            q.owner='azuresu' AS provider_owner,
+            e.extowner=a.oid AS provider_extension,
+            EXISTS (SELECT 1 FROM pg_catalog.aclexplode(
+                COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))) x
+                WHERE x.grantee=0 AND x.privilege_type='EXECUTE' AND x.grantor=a.oid
+                  AND NOT x.is_grantable) AS provider_public,
+            NOT EXISTS (SELECT 1 FROM pg_catalog.aclexplode(
+                COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))) x
+                WHERE x.privilege_type='EXECUTE' AND (x.grantee=r.oid OR
+                (x.grantee=0 AND (x.grantor IS DISTINCT FROM a.oid OR x.is_grantable))))
+                AS no_direct_or_other_public,
+            (a.rolsuper AND r.rolcanlogin AND NOT (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole
+                OR r.rolreplication OR r.rolbypassrls)
+                AND NOT pg_catalog.pg_has_role(r.oid,a.oid,'MEMBER') AND NOT EXISTS (
+                SELECT 1 FROM pg_catalog.pg_roles admin WHERE admin.rolname='azure_pg_admin'
+                AND pg_catalog.pg_has_role(r.oid,admin.oid,'MEMBER'))) AS restricted
+        FROM (""" + _PUBLIC_ROUTINES + """) q
+        JOIN pg_catalog.pg_proc p ON p.oid=q.oid
+        CROSS JOIN pg_catalog.pg_roles r
+        LEFT JOIN pg_catalog.pg_roles a ON a.rolname='azuresu'
+        LEFT JOIN pg_catalog.pg_extension e ON e.extname='vector' AND e.extnamespace=(
+            SELECT n.oid FROM pg_catalog.pg_namespace n WHERE n.nspname='public')
+        WHERE q.is_vector AND r.rolname=:principal
+        ORDER BY q.routine
+    """), {"principal": principal})).all()
+    if not any(row.provider_extension or row.provider_owner for row in rows):
+        return {}, None
+    if len(rows) != _AZURE_VECTOR_ROUTINE_COUNT or any(
+        value is not True for row in rows for value in row[3:]
+    ):
+        raise RuntimeError("Azure provider vector ownership or PUBLIC grants differ")
+    version = rows[0].extversion
+    if not isinstance(version, str) or not version:
+        raise RuntimeError("Azure provider vector extension version is unproved")
+    return {int(row.oid): str(row.routine) for row in rows}, version
 
 
 async def configure_vector_runtime_functions(
     connection: AsyncConnection, *, api_principal: str, worker_principal: str,
+    managed: bool = False,
 ) -> None:
-    # The bootstrap identity installs vector and controls its ACL. There is no
-    # ownership transfer, role grant, or extension installation authority for
-    # the runtime identities.
+    provider, _ = await _azure_vector_routines(connection, api_principal) if managed else ({}, None)
+    if provider:
+        for role, principal in ((DatabaseRole.API, api_principal),
+                                (DatabaseRole.WORKER, worker_principal)):
+            await require_runtime_function_privileges(
+                connection, role, principal=principal, managed=True,
+            )
+        return
+    # For an installer-owned extension, control the exact runtime routine ACLs.
     for role in RUNTIME_FUNCTION_PRIVILEGES:
         await _runtime_function_oids(connection, role)
     routines = (

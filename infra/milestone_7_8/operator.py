@@ -2262,12 +2262,25 @@ def _active_protected_pause(
     *, resolved_image_pause_sha256: str | None = None,
     resolved_workload_pause_sha256: str | None = None,
 ) -> dict[str, object] | None:
+    grant_only = _grant_only_transition(source_transition)
     active: list[dict[str, object]] = []
     for operation in sorted(PROTECTED_STAGE_OPERATIONS):
-        path = directory / f"{operation}-stage-pause.json"
-        if not path.exists():
+        history_directory = directory
+        if grant_only and operation == "migrate":
+            assert source_transition is not None
+            history_directory = Path(str(source_transition["recoveryDirectory"]))
+        path = history_directory / f"{operation}-stage-pause.json"
+        if grant_only and operation == "migrate":
+            assert source_transition is not None
+            if path.exists():
+                raise _ProtectedStagePaused(
+                    "grant-only recovery must preserve its plan-bound pause"
+                )
+            pause = _grant_recovery_pause(source_transition)
+        elif not path.exists():
             continue
-        pause = _read_stage_record(path, "stage-pause")
+        else:
+            pause = _read_stage_record(path, "stage-pause")
         if (
             set(pause)
             != {
@@ -2300,30 +2313,36 @@ def _active_protected_pause(
         )
         if migration_history:
             assert source_transition is not None
-            if (
+            if grant_only:
+                _grant_recovery_pause(source_transition)
+            elif (
                 hashlib.sha256(path.read_bytes()).hexdigest()
                 != source_transition["migrationPauseSha256"]
                 or pause["bindings"] != source_transition["originalBindings"]
             ):
                 raise _ProtectedStagePaused("migration continuation original pause differs")
-            original = _database_attempt_history(directory, operation, pause)
-            if original["recordSha256"] != source_transition["originalAttemptSha256"]:
-                raise _ProtectedStagePaused("migration continuation original attempt differs")
-        completed_path = directory / f"{operation}-stage-recovery-completed.json"
+            if not grant_only:
+                original = _database_attempt_history(directory, operation, pause)
+                if original["recordSha256"] != source_transition["originalAttemptSha256"]:
+                    raise _ProtectedStagePaused("migration continuation original attempt differs")
+        completed_path = history_directory / f"{operation}-stage-recovery-completed.json"
         if completed_path.exists():
             if operation == "evidence":
                 _reconcile_evidence_stage_completion(directory, config, runtime, ledger)
                 continue
             if operation not in {"bootstrap", "migrate"}:
                 raise _ProtectedStagePaused("this stage has no supported completion reconciliation")
-            _database_attempt_history(directory, operation, pause)
+            if not grant_only:
+                _database_attempt_history(directory, operation, pause)
             retry = _read_stage_record(
-                directory / f"{operation}-stage-retry-intent.json", "stage-retry-intent"
+                history_directory / f"{operation}-stage-retry-intent.json", "stage-retry-intent"
             )
             started = _read_stage_record(
-                directory / f"{operation}-stage-retry-start.json", "stage-retry-start"
+                history_directory / f"{operation}-stage-retry-start.json", "stage-retry-start"
             )
             completed = _read_stage_record(completed_path, "stage-recovery-completed")
+            if grant_only:
+                _validate_committed_grant_proof(completed.get("runtimeGrantProof"))
             _require_retry_source(retry, source_transition)
             _require_retry_source(completed, source_transition)
             if (
@@ -2338,7 +2357,7 @@ def _active_protected_pause(
                 or re.fullmatch(r"job-recovery-[a-f0-9]{32}", capture_name) is None
             ):
                 raise _ProtectedStagePaused("database completion capture binding differs")
-            capture = directory / capture_name
+            capture = history_directory / capture_name
             try:
                 hashes = {
                     path.name: hashlib.sha256(path.read_bytes()).hexdigest()
@@ -2371,6 +2390,27 @@ def _migration_image_transition(transition: dict[str, object] | None) -> bool:
     return transition is not None and transition.get("kind") == "migration-image-continuation"
 
 
+def _grant_only_transition(transition: dict[str, object] | None) -> bool:
+    return _migration_image_transition(transition) and transition is not None and (
+        transition.get("grantOnly") is True
+    )
+
+
+def _grant_recovery_pause(transition: dict[str, object]) -> dict[str, object]:
+    pause = transition.get("recoveryPause")
+    if not isinstance(pause, dict):
+        raise _ProtectedStagePaused("grant recovery has no bound failed retry")
+    body = {key: value for key, value in pause.items() if key != "recordSha256"}
+    if (pause.get("recordSha256") != _stage_hash("stage-pause", body)
+            or pause.get("bindings") != transition.get("originalBindings")
+            or pause.get("attemptSha256") != transition.get("originalConsumedRetryIntentSha256")
+            or pause.get("attemptSha256") != transition.get("originalAttemptSha256")
+            or type(pause.get("maximumRetryDispatches")) is not int
+            or pause.get("maximumRetryDispatches") != 1):
+        raise _ProtectedStagePaused("grant recovery consumed retry binding differs")
+    return cast(dict[str, object], pause)
+
+
 def _source_transition_metadata(
     transition: dict[str, object] | None,
 ) -> dict[str, object]:
@@ -2381,6 +2421,7 @@ def _source_transition_metadata(
     return {
         "operatorSourceHead": transition["operatorSourceHead"],
         key: transition["transitionSha256"],
+        **({"grantOnly": True} if _grant_only_transition(transition) else {}),
     }
 
 
@@ -2389,6 +2430,7 @@ def _require_retry_source(
 ) -> None:
     names = {
         "operatorSourceHead", "bootstrapSourceTransitionSha256", "migrationImageTransitionSha256",
+        "grantOnly",
     }
     actual = {name: record[name] for name in names if name in record}
     if actual != _source_transition_metadata(transition):
@@ -2399,6 +2441,10 @@ def _validate_transition_dispatch(transition: dict[str, object]) -> None:
     from infra.milestone_7_8.bootstrap_transition import validate_dispatch_window
 
     try:
+        if _grant_only_transition(transition) and datetime.now(UTC) >= parse_utc(
+            str(transition["cleanupMustBeginByUtc"])
+        ):
+            raise CampaignError("grant-only recovery cleanup-start cutoff is closed")
         if _migration_image_transition(transition):
             from infra.milestone_7_8.image_continuation import validate_migration_retry_window
 
@@ -2408,6 +2454,55 @@ def _validate_transition_dispatch(transition: dict[str, object]) -> None:
     except CampaignError as exc:
         # An expired retry permission does not itself revoke cleanup protection.
         raise _ProtectedStagePaused(str(exc)) from exc
+
+
+def _database_recovery_deadline(
+    config: CampaignConfig, transition: dict[str, object] | None,
+) -> datetime:
+    deadline = parse_utc(config.cleanup_deadline_utc)
+    if _grant_only_transition(transition):
+        assert transition is not None
+        deadline = min(deadline, parse_utc(str(transition["cleanupMustBeginByUtc"])))
+    return deadline
+
+
+def _validate_committed_grant_proof(value: object) -> dict[str, object]:
+    if (not isinstance(value, dict)
+            or set(value) != {"version", "status", "alembicRevision", "routines"}
+            or value["version"] != "m7.8-runtime-grant-reconciliation-v1"
+            or value["status"] != "committed" or value["alembicRevision"] != "20260726_0029"
+            or not isinstance(value["routines"], dict)
+            or set(value["routines"]) != {"api", "worker"}):
+        raise _ProtectedStagePaused("grant-only recovery commit proof is incomplete")
+    expected = {"public.vector(public.vector, pg_catalog.int4, pg_catalog.bool)"}
+    fields = {"functionObjectsChecked", "effectiveExecuteCount", "requiredVectorSignatures",
+              "providerPublicVectorRoutineCount", "providerPublicVectorExtensionVersion",
+              "providerPublicVectorInventorySha256"}
+    observations: list[tuple[object, object, object]] = []
+    for role, profile in value["routines"].items():
+        signatures = expected | (
+            {"public.cosine_distance(public.vector, public.vector)"} if role == "api" else set()
+        )
+        if (not isinstance(profile, dict) or set(profile) != fields
+                or type(profile["functionObjectsChecked"]) is not int
+                or profile["functionObjectsChecked"] < 118
+                or type(profile["effectiveExecuteCount"]) is not int
+                or profile["effectiveExecuteCount"] != 118
+                or type(profile["providerPublicVectorRoutineCount"]) is not int
+                or profile["providerPublicVectorRoutineCount"] != 118
+                or profile["requiredVectorSignatures"] != sorted(signatures)
+                or not isinstance(profile["providerPublicVectorExtensionVersion"], str)
+                or not profile["providerPublicVectorExtensionVersion"]
+                or re.fullmatch(r"[a-f0-9]{64}", str(
+                    profile["providerPublicVectorInventorySha256"]
+                )) is None):
+            raise _ProtectedStagePaused("grant-only recovery routine baseline differs")
+        observations.append((profile["functionObjectsChecked"],
+                             profile["providerPublicVectorExtensionVersion"],
+                             profile["providerPublicVectorInventorySha256"]))
+    if observations[0] != observations[1]:
+        raise _ProtectedStagePaused("grant-only recovery role baselines disagree")
+    return cast(dict[str, object], value)
 
 
 def _retry_template_semantics(value: object) -> dict[str, object]:
@@ -2559,7 +2654,7 @@ def _database_prerequisites(
     )
     from infra.milestone_7_8.evidence_console import read_job_marker
 
-    deadline = parse_utc(config.cleanup_deadline_utc)
+    deadline = _database_recovery_deadline(config, source_transition)
     receipt = directory / f"{operation}-prerequisites.json"
     intent = directory / f"{operation}-prerequisite-intent.json"
     bindings = _stage_bindings(config, runtime, ledger)
@@ -2584,8 +2679,10 @@ def _database_prerequisites(
     if intent.exists() or (retry and not allow_fresh_retry):
         raise _ProtectedStagePaused("database prerequisite evidence is incomplete")
     if allow_fresh_retry:
+        allocation = ("grant-recovery-prerequisite" if _grant_only_transition(source_transition)
+                      else "corrected-migration-prerequisite")
         corrected = [item for item in config.resource_items
-                     if item.name == "corrected-migration-prerequisite"]
+                     if item.name == allocation]
         if len(corrected) != 1 or corrected[0].maximum() < Decimal("0.0378"):
             raise _ProtectedStagePaused("corrected migration prerequisite allowance is missing")
     allocated = [
@@ -2804,7 +2901,13 @@ def _execute_database_retry(
         raise _ProtectedStagePaused("database retry lacks an exact failed execution")
     if pause.get("maximumRetryDispatches") != 1:
         raise _ProtectedStagePaused("database retry attempt bound differs")
-    _database_attempt_history(directory, operation, pause)
+    grant_only = _grant_only_transition(source_transition)
+    if grant_only:
+        assert source_transition is not None
+        if operation != "migrate" or pause != _grant_recovery_pause(source_transition):
+            raise _ProtectedStagePaused("grant-only recovery failed-attempt binding differs")
+    else:
+        _database_attempt_history(directory, operation, pause)
     retry_path = directory / f"{operation}-stage-retry-intent.json"
     if (directory / f"{operation}-stage-retry-start.json").exists() and not retry_path.exists():
         raise _ProtectedStagePaused("database retry intent history is missing")
@@ -2865,10 +2968,10 @@ def _execute_database_retry(
             expected_manifest_hash=manifest_hash,
             source_transition=source_transition,
         )
-    allowance = [
-        item for item in config.resource_items if item.name == "database-recovery-job-allowance"
-    ]
-    if len(allowance) != 1 or allowance[0].maximum() < Decimal("0.0567"):
+    allocation = "grant-recovery-job" if grant_only else "database-recovery-job-allowance"
+    allowance = [item for item in config.resource_items if item.name == allocation]
+    minimum = Decimal("0.0378") if grant_only else Decimal("0.0567")
+    if len(allowance) != 1 or allowance[0].maximum() < minimum:
         raise _ProtectedStagePaused(
             "database retry cost allowance is missing from the gated config"
         )
@@ -2982,6 +3085,7 @@ def _execute_database_retry(
         image_digest=str(ledger.image_digest),
         expected_command=("python", "-m", module),
         before_dispatch=before_dispatch,
+        database_grants_only=grant_only,
     )
     if started.get("exitCode") != 0:
         raise _ProtectedStagePaused("database retry dispatch outcome is uncertain")
@@ -3036,7 +3140,7 @@ def _finish_database_retry(
         or started_value.get("name") == failed
     ):
         raise _ProtectedStagePaused("database retry did not start a distinct execution")
-    deadline = parse_utc(config.cleanup_deadline_utc)
+    deadline = _database_recovery_deadline(config, source_transition)
 
     class RetryReadRunner:
         def run(self, request: tuple[str, ...]) -> dict[str, object]:
@@ -3081,7 +3185,7 @@ def _finish_database_retry(
             execution,
         ),
         runtime=runtime,
-        deadline=parse_utc(config.cleanup_deadline_utc),
+        deadline=deadline,
         private_directory=directory,
         purpose="recovery",
     )
@@ -3097,6 +3201,15 @@ def _finish_database_retry(
         marker = json.loads(messages[0]) if len(messages) == 1 else None
     except (OSError, ValueError) as exc:
         raise _ProtectedStagePaused("database retry partial-state proof is unavailable") from exc
+    committed_grants: dict[str, object] | None = None
+    if _grant_only_transition(source_transition):
+        try:
+            grants = [json.loads(row["Log_s"][len("M78_RUNTIME_GRANTS "):]) for row in rows
+                      if isinstance(row, dict) and isinstance(row.get("Log_s"), str)
+                      and row["Log_s"].startswith("M78_RUNTIME_GRANTS ")]
+        except ValueError as exc:
+            raise _ProtectedStagePaused("grant-only recovery commit proof is malformed") from exc
+        committed_grants = _validate_committed_grant_proof(grants[0] if len(grants) == 1 else None)
     states = (
         {"bootstrap-empty", "bootstrap-partial", "bootstrap-existing"}
         if operation == "bootstrap"
@@ -3140,6 +3253,11 @@ def _finish_database_retry(
         )
     state, revision = marker["state"], marker["observedRevision"]
     principals, relations = marker["principalCount"], marker["applicationRelationCount"]
+    if _grant_only_transition(source_transition) and (
+        state != "migration-grants-reconcile" or revision != "20260726_0029"
+        or principals != 4 or relations <= 0
+    ):
+        raise _ProtectedStagePaused("grant-only recovery did not establish the existing exact head")
     if (
         operation == "bootstrap"
         and (
@@ -3172,6 +3290,7 @@ def _finish_database_retry(
             "sourceHead": runtime["sourceHead"],
             "resultSha256": _stage_hash("stage-result", waited),
             "marker": marker,
+            **({"runtimeGrantProof": committed_grants} if committed_grants is not None else {}),
             "capture": str(capture.name),
             "captureFilesSha256": {
                 path.name: hashlib.sha256(path.read_bytes()).hexdigest()
@@ -5183,6 +5302,14 @@ def main() -> int:
                 completed_transition_sha256=completed_transition,
             )
 
+        database_recovery_directory = args.ledger.parent
+        if _grant_only_transition(source_transition):
+            assert source_transition is not None and args.image_continuation is not None
+            database_recovery_directory = Path(str(source_transition["recoveryDirectory"]))
+            expected_recovery = args.image_continuation.resolve().parent / "grant-recovery"
+            if database_recovery_directory.resolve() != expected_recovery:
+                raise CampaignError("grant-only recovery output is outside its approved slot")
+
         def require_cleanup_authority() -> None:
             try:
                 if args.authorization is None:
@@ -5450,6 +5577,8 @@ def main() -> int:
         stage_attempt: dict[str, object] | None = None
         recovery_pause: dict[str, object] | None = None
         try:
+            if _grant_only_transition(source_transition) and args.operation == "migrate":
+                database_recovery_directory.mkdir(exist_ok=True)
             if not cleanup_only:
                 expected_previous = {
                     "deploy": Phase.BILLABLE_STARTED,
@@ -5472,7 +5601,7 @@ def main() -> int:
                 if recovery_pause is not None:
                     already_dispatched = (
                         args.resume_database_job
-                        and (args.ledger.parent
+                        and (database_recovery_directory
                              / f"{args.operation}-stage-retry-intent.json").exists()
                     )
                     amended_database = (
@@ -5510,6 +5639,10 @@ def main() -> int:
                         prerequisite_folder = image_continuation.prerequisite_directory(
                             args.image_continuation, runtime, config, ledger,
                         )
+                    if (_grant_only_transition(source_transition)
+                            and prerequisite_folder.resolve()
+                            != database_recovery_directory.resolve()):
+                        raise _ProtectedStagePaused("grant prerequisite escaped its approved slot")
                     _database_prerequisites(
                         runner, commands[0], operation=args.operation, config=config,
                         runtime=runtime, ledger=ledger, directory=prerequisite_folder,
@@ -5630,7 +5763,7 @@ def main() -> int:
                     raise _ProtectedStagePaused("database retry command binding differs")
                 result, stage_attempt = _execute_database_retry(
                     runner, commands[0], operation=args.operation, config=config, runtime=runtime,
-                    ledger=ledger, pause=recovery_pause, directory=args.ledger.parent,
+                    ledger=ledger, pause=recovery_pause, directory=database_recovery_directory,
                     authorization_path=args.authorization,
                     source_transition=source_transition,
                 )
@@ -5773,7 +5906,7 @@ def main() -> int:
                     _capture_failed_job_diagnostics(
                         phase_error, runtime=runtime,
                         deadline=parse_utc(config.cleanup_deadline_utc),
-                        private_directory=args.ledger.parent,
+                        private_directory=database_recovery_directory,
                     )
                 except Exception:
                     print(json.dumps({"status": "job-diagnostics-incomplete"}), file=sys.stderr)

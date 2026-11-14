@@ -36,6 +36,7 @@ class MigrationProvider(FakeProvider):
         self.operation = "migrate"
         self.execution = "failed-migration"
         self.defect = defect
+        self.grant_only = False
         self.prerequisite_token = ""
         self.manifest = _manifest()
         principals = cast(dict[str, dict[str, str]], self.manifest["principals"])
@@ -113,7 +114,37 @@ class MigrationProvider(FakeProvider):
                     "id": self.job_id() + "/executions/corrected-prerequisite",
                     "name": "corrected-prerequisite", "properties": {"status": "Succeeded"},
                 })
-        return super().run(command)
+            if self.grant_only:
+                assert container["args"] == [
+                    "--reconcile-grants-only", f"--retry-after-execution={self.execution}",
+                ]
+                self.commands.append(command)
+                self.retry_template = template
+                self.events.append("retry-start")
+                self.retry_execution = "grant-recovery-execution"
+                self.run_database_retry()
+                return self.execution_result(self.retry_execution, "Running")
+        response = super().run(command)
+        if (self.grant_only and self.retry_execution and self.defect != "missing-grant-proof"
+                and command[:4] == ("az", "monitor", "log-analytics", "query")):
+            rows = json.loads(str(response["stdout"]))
+            typmod = "public.vector(public.vector, pg_catalog.int4, pg_catalog.bool)"
+            profiles = {role: {
+                "functionObjectsChecked": 118, "effectiveExecuteCount": 118,
+                "requiredVectorSignatures": sorted([typmod, *(
+                    ["public.cosine_distance(public.vector, public.vector)"]
+                    if role == "api" else []
+                )]),
+                "providerPublicVectorRoutineCount": 118,
+                "providerPublicVectorExtensionVersion": "0.8.0",
+                "providerPublicVectorInventorySha256": "7" * 64,
+            } for role in ("api", "worker")}
+            rows.append({**rows[0], "Log_s": "M78_RUNTIME_GRANTS " + json.dumps({
+                "version": "m7.8-runtime-grant-reconciliation-v1", "status": "committed",
+                "alembicRevision": "20260726_0029", "routines": profiles,
+            })})
+            response["stdout"] = json.dumps(rows)
+        return response
 
     def execution_result(self, name: str, status: str) -> dict[str, object]:
         value = super().execution_result(name, status)
@@ -126,13 +157,16 @@ class MigrationProvider(FakeProvider):
     def run_database_retry(self) -> None:
         self.events.append("db-inspection")
         self.retry_status = "Failed" if self.defect == "retry-failure" else "Succeeded"
+        at_head = self.grant_only and self.defect != "bad-head"
         self.retry_marker = "M78_DATABASE_RECOVERY " + json.dumps({
             "version": "m7.8-database-recovery-observation-v1", "operation": "migrate",
             "previousExecution": self.execution, "campaignId": self.manifest["campaignId"],
             "generationId": self.manifest["generationId"],
             "manifestSha256": operator._stage_hash("database-recovery-manifest", self.manifest),
-            "observedRevision": "base", "state": "migration-empty", "principalCount": 4,
-            "applicationRelationCount": 0, "snapshotSha256": "9" * 64,
+            "observedRevision": "20260726_0029" if at_head else "base",
+            "state": "migration-grants-reconcile" if at_head else "migration-empty",
+            "principalCount": 4,
+            "applicationRelationCount": 160 if at_head else 0, "snapshotSha256": "9" * 64,
             "status": "retry-preflight-passed",
         })
         if self.defect == "wrong-marker":
@@ -382,3 +416,92 @@ def test_retry_rejects_nonempty_or_malformed_storage_and_other_resource_drift(
     assert "retry-start" not in value.provider.events
     assert "cleanup" not in value.provider.events
     assert value.ledger.phase == Phase.DATABASE_BOOTSTRAPPED.value
+
+
+@pytest.mark.parametrize("defect", [
+    "", "bad-head", "wrong-consumed-intent", "missing-grant-proof",
+])
+def test_grant_only_recovery_uses_new_slot_and_never_replays_consumed_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str,
+) -> None:
+    value = case(tmp_path, monkeypatch)
+    value.config = replace(value.config, resource_items=(
+        *value.config.resource_items,
+        CostItem("grant-recovery-prerequisite", "0", 1, "0.0378"),
+        CostItem("grant-recovery-job", "0", 1, "0.0378"),
+    ))
+    value.provider.grant_only = True
+    value.provider.defect = defect
+    value.provider.execution = "failed-guarded-migration"
+    # The separately tested closed plan verifies these historical artifacts.
+    # This normal-entry test verifies that the operator cannot overwrite them.
+    consumed = operator._stage_record(
+        tmp_path / "migrate-stage-retry-intent.json", "stage-retry-intent", {
+            "version": "m7.8-stage-retry-intent-v1", "operation": "migrate",
+            "bindings": value.transition["originalBindings"], "authorizationSha256": "4" * 64,
+            "startedAtUtc": (NOW - timedelta(minutes=20)).isoformat(),
+        },
+    )
+    operator._stage_record(tmp_path / "migrate-stage-retry-start.json", "stage-retry-start", {
+        "retryIntentSha256": consumed["recordSha256"],
+        "startResult": value.provider.execution_result(value.provider.execution, "Running"),
+    })
+    value.original.update({path: path.read_bytes() for path in (
+        tmp_path / "migrate-stage-retry-intent.json", tmp_path / "migrate-stage-retry-start.json",
+    )})
+    pause = {
+        "version": "m7.8-protected-stage-pause-v1", "operation": "migrate",
+        "bindings": value.transition["originalBindings"], "attemptSha256": consumed["recordSha256"],
+        "authorizationSha256": "4" * 64, "failedExecution": value.provider.execution,
+        "failedAtUtc": (NOW - timedelta(minutes=10)).isoformat(),
+        "recoveryUntilUtc": value.transition["expiresAtUtc"], "maximumRetryDispatches": 1,
+    }
+    recovery = tmp_path / "corrected/grant-recovery"
+    value.transition.update({
+        "grantOnly": True, "recoveryDirectory": str(recovery),
+        "recoveryPause": {**pause, "recordSha256": operator._stage_hash("stage-pause", pause)},
+        "originalConsumedRetryIntentSha256": consumed["recordSha256"],
+        "originalAttemptSha256": consumed["recordSha256"],
+        "cleanupMustBeginByUtc": value.config.cleanup_deadline_utc,
+    })
+    if defect == "wrong-consumed-intent":
+        value.transition["originalConsumedRetryIntentSha256"] = "0" * 64
+    monkeypatch.setattr(
+        image_continuation, "load_context", lambda *_, **__: (
+            value.runtime, value.config, value.ledger,
+        ),
+    )
+    monkeypatch.setattr(image_continuation, "prerequisite_directory", lambda *_: recovery)
+    status, errors = value.run(monkeypatch)
+    if defect:
+        assert status == 2, errors
+        assert value.ledger.phase == Phase.DATABASE_BOOTSTRAPPED.value
+        assert not (recovery / "migrate-stage-recovery-completed.json").exists()
+    else:
+        assert status == 0, errors
+        assert value.ledger.phase == Phase.MIGRATED.value
+        completed = operator._read_stage_record(
+            recovery / "migrate-stage-recovery-completed.json", "stage-recovery-completed",
+        )
+        assert completed["grantOnly"] is True
+        assert cast(dict[str, object], completed["marker"])["observedRevision"] == "20260726_0029"
+        assert not (tmp_path / "migrate-stage-recovery-completed.json").exists()
+        assert operator._active_protected_pause(
+            tmp_path, value.config, value.runtime, value.ledger, value.transition,
+            resolved_workload_pause_sha256=str(value.transition["resolvedWorkloadPauseSha256"]),
+        ) is None
+        later_pause = {
+            **pause, "operation": "evidence",
+            "bindings": operator._stage_bindings(value.config, value.runtime, value.ledger),
+        }
+        retained_later = operator._stage_record(
+            tmp_path / "evidence-stage-pause.json", "stage-pause", later_pause,
+        )
+        assert operator._active_protected_pause(
+            tmp_path, value.config, value.runtime, value.ledger, value.transition,
+            resolved_workload_pause_sha256=str(value.transition["resolvedWorkloadPauseSha256"]),
+        ) == retained_later
+        prior_starts = value.provider.events.count("retry-start")
+        status, _ = value.run(monkeypatch)
+        assert status == 2 and value.provider.events.count("retry-start") == prior_starts == 1
+    assert "cleanup" not in value.provider.events

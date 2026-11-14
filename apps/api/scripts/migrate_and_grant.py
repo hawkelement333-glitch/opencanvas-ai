@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 
 from sqlalchemy import text
@@ -16,6 +17,7 @@ from opencanvas_api.db.role_privileges import (
     require_runtime_function_privileges,
     runtime_privilege_statements,
 )
+from opencanvas_api.db.runtime import MIGRATION_ADVISORY_LOCK_ID
 from opencanvas_api.db.session import Database
 from scripts.m78_database_identity import (
     APPLICATION_DATABASE,
@@ -39,13 +41,16 @@ def _principals() -> tuple[str, str, str]:
     )
 
 
-async def _current_revision(*, retry_after_execution: str | None = None) -> str:
+async def _current_revision(*, retry_after_execution: str | None = None,
+                            grants_only: bool = False) -> str:
     settings = get_settings()
     if settings.database_role is not DatabaseRole.MIGRATION:
         raise RuntimeError("database migration role contract is invalid")
     database = Database.from_settings(settings, expected_role=DatabaseRole.MIGRATION)
     try:
         async with database.engine.connect() as connection:
+            if grants_only:
+                await connection.execute(text("SET TRANSACTION READ ONLY"))
             manifest = load_principal_manifest()
             await require_bound_connection(
                 connection, manifest, PrincipalSlot.MIGRATION, APPLICATION_DATABASE,
@@ -84,7 +89,7 @@ async def _current_revision(*, retry_after_execution: str | None = None) -> str:
         await database.dispose()
 
 
-async def apply_runtime_privileges() -> None:
+async def apply_runtime_privileges(*, grants_only: bool = False) -> None:
     settings = get_settings()
     settings.require_database_role(DatabaseRole.MIGRATION)
     if settings.database_role is not DatabaseRole.MIGRATION:
@@ -97,6 +102,18 @@ async def apply_runtime_privileges() -> None:
             await require_bound_connection(
                 connection, manifest, PrincipalSlot.MIGRATION, APPLICATION_DATABASE,
             )
+            if grants_only:
+                locked = (await connection.execute(
+                    text("SELECT pg_catalog.pg_try_advisory_xact_lock(:lock)"),
+                    {"lock": MIGRATION_ADVISORY_LOCK_ID},
+                )).scalar_one()
+                if locked is not True:
+                    raise RuntimeError("grant reconciliation migration lock is busy")
+                revisions = (await connection.execute(
+                    text("SELECT version_num FROM public.alembic_version LIMIT 2"),
+                )).scalars().all()
+                if revisions != [EXPECTED_DATABASE_REVISION]:
+                    raise RuntimeError("grant reconciliation requires the exact committed head")
             migration_flags = (
                 await connection.execute(
                     text(
@@ -147,10 +164,18 @@ async def apply_runtime_privileges() -> None:
                 any(bool(value) for value in row[1:]) for row in role_rows
             ):
                 raise RuntimeError("database runtime principal is overprivileged")
-            await require_runtime_function_privileges(connection, DatabaseRole.API, principal=api)
-            await require_runtime_function_privileges(
-                connection, DatabaseRole.WORKER, principal=worker,
-            )
+            function_grants = {
+                role.value: await require_runtime_function_privileges(
+                    connection, role, principal=principal,
+                    managed=settings.database_auth_mode == "entra",
+                ) for role, principal in ((DatabaseRole.API, api), (DatabaseRole.WORKER, worker))
+            }
+        if grants_only:
+            print("M78_RUNTIME_GRANTS " + json.dumps({
+                "version": "m7.8-runtime-grant-reconciliation-v1",
+                "status": "committed", "alembicRevision": EXPECTED_DATABASE_REVISION,
+                "routines": function_grants,
+            }, sort_keys=True), flush=True)
     finally:
         await database.dispose()
 
@@ -160,12 +185,21 @@ def main(arguments: list[str] | None = None) -> int:
         return diagnose("migrate")
     stage = "configuration"
     try:
-        retry = retry_argument(arguments)
+        args = list(arguments or [])
+        grants_only = "--reconcile-grants-only" in args
+        if grants_only:
+            args.remove("--reconcile-grants-only")
+        retry = retry_argument(args)
+        if grants_only and retry is None:
+            raise RuntimeError("grant reconciliation requires the failed execution binding")
         stage = "retry-inspection" if retry is not None else "database-revision"
         revision = asyncio.run(
-            _current_revision() if retry is None
+            _current_revision(retry_after_execution=retry, grants_only=True) if grants_only
+            else _current_revision() if retry is None
             else _current_revision(retry_after_execution=retry)
         )
+        if grants_only and revision != EXPECTED_DATABASE_REVISION:
+            raise RuntimeError("grant reconciliation cannot migrate or repair a partial schema")
         if revision == "base":
             stage = "migration-upgrade"
             result = run_migration(expected_current="base", target=EXPECTED_DATABASE_REVISION)
@@ -174,7 +208,8 @@ def main(arguments: list[str] | None = None) -> int:
         elif revision != EXPECTED_DATABASE_REVISION:
             raise RuntimeError("database migration state is inconsistent")
         stage = "runtime-grant-reconciliation"
-        asyncio.run(apply_runtime_privileges())
+        asyncio.run(apply_runtime_privileges(grants_only=True) if grants_only
+                    else apply_runtime_privileges())
         stage = "database-verification"
         if asyncio.run(_current_revision()) != EXPECTED_DATABASE_REVISION:
             raise RuntimeError("database migration verification failed")

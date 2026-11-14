@@ -61,6 +61,15 @@ MIGRATION_FIELDS = FIELDS | {
     "migrationPauseSha256", "failedMigrationExecution", "protectedStashesSha256",
 }
 MIGRATION_OPERATIONS = ALLOWED_OPERATIONS | {"evidence", "dispose"}
+GRANT_VERSION = "m7.8-grant-recovery-image-continuation-v1"
+GRANT_PREVIOUS_HEAD = "9ee46ba7d7431ca44ee1aa85a18adce031543daf"
+GRANT_PREVIOUS_PLAN = "e0384bb35a10d5a4df7cae56d1a5d5d7250c6cf9fc64bc465fecec93f60ce12d"
+GRANT_APPROVAL = "f7ff3f7a827e9fd31e5787bd66e4e7b69552f9b8ba036196c486ed7e879cd116"
+GRANT_FIELDS = FIELDS | {
+    "previousPlanFile", "previousPlanSha256", "originalImageDigest", "grantApprovalFile",
+    "consumedRetryIntentSha256", "consumedRetryExecution", "failedExecutionReadbackFile",
+    "protectedStashesSha256", "cleanupMustBeginByUtc",
+}
 
 
 def _migration_source(plan: dict[str, object] | None = None) -> dict[str, str]:
@@ -309,7 +318,475 @@ def _load_migration_plan(path: Path, plan: dict[str, object]) -> dict[str, objec
     return plan
 
 
+def _grant_source(
+    previous: dict[str, object], plan: dict[str, object] | None = None
+) -> dict[str, str]:
+    head, cleanup = local_source_binding()
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ("git", *args), cwd=ROOT, capture_output=True, text=True, check=True, timeout=30
+        ).stdout.strip()
+
+    allowed = {
+        "infra/milestone_7_8/image_continuation.py",
+        "infra/milestone_7_8/campaign.py",
+        "infra/milestone_7_8/operator.py",
+        "infra/milestone_7_8/measurement_handoff.py",
+        "infra/milestone_7_8/schemas/ledger.schema.json",
+        "infra/milestone_7_8/schemas/terminal-receipt.schema.json",
+        "apps/api/opencanvas_api/db/role_privileges.py",
+        "apps/api/scripts/bootstrap_postgres.py",
+        "apps/api/scripts/migrate_and_grant.py",
+        "apps/api/scripts/managed_postgres_evidence.py",
+        "apps/api/scripts/m78_database_recovery.py",
+        "apps/api/tests/test_milestone_7_8_migration_image_continuation.py",
+        "apps/api/tests/test_milestone_7_8_migration_operator_continuation.py",
+        "apps/api/tests/test_milestone_7_8_image_replacement_ledger.py",
+        "apps/api/tests/test_milestone_7_8_managed_extension_baseline.py",
+        "apps/api/tests/test_milestone_7_8_vector_grants_postgres.py",
+        "apps/api/tests/test_milestone_7_8_database_recovery.py",
+        "apps/api/tests/test_milestone_7_8_grant_recovery.py",
+        "docs/MILESTONE_7_8_MANAGED_POSTGRESQL_CAMPAIGN_OPERATOR_RUNBOOK.md",
+    }
+    changes = set(git("diff", "--name-only", GRANT_PREVIOUS_HEAD, head).splitlines())
+    runtime = _read(Path(str(previous["runtimeFile"])))
+    stashes = _hash(git("stash", "list", "--format=%H").splitlines())
+    if (
+        git("rev-list", "--parents", "-n", "1", head).split() != [head, GRANT_PREVIOUS_HEAD]
+        or not changes <= allowed
+        or "apps/api/opencanvas_api/db/role_privileges.py" not in changes
+        or cleanup != runtime["cleanupScriptSha256"]
+        or stashes != previous["protectedStashesSha256"]
+    ):
+        raise CampaignError("grant correction executing source is not the reviewed direct child")
+    result = {
+        "sourceHead": head,
+        "canonicalBuildInputSha256": str(canonical_snapshot(head)["buildInputSha256"]),
+        "protectedStashesSha256": stashes,
+    }
+    if plan is not None and any(plan[key] != value for key, value in result.items()):
+        raise CampaignError("grant correction executing source or canonical inputs changed")
+    return result
+
+
+def _grant_approval(path: Path, previous: dict[str, object]) -> dict[str, object]:
+    approval = _read(_private(path))
+    if (
+        _file_hash(path) != GRANT_APPROVAL
+        or approval.get("priorPlanSha256") != previous["planSha256"]
+        or approval.get("priorOperatorSourceHead") != GRANT_PREVIOUS_HEAD
+        or approval.get("bootstrapReplayAllowed") is not False
+        or approval.get("alembicReplayAllowed") is not False
+        or approval.get("maximumAdditionalGrantRecoveryDispatches") != 1
+        or approval.get("maximumAdditionalCorrectedPrerequisiteDispatches") != 1
+    ):
+        raise CampaignError("grant recovery explicit contract/attempt amendment differs")
+    for prefix in ("catalog", "owner"):
+        evidence = _private(Path(str(approval[prefix + "EvidenceFile"])))
+        if _file_hash(evidence) != approval[prefix + "EvidenceSha256"]:
+            raise CampaignError("approved managed-extension catalog evidence changed")
+    return approval
+
+
+def _grant_cost(previous: dict[str, object], path: Path) -> tuple[CampaignConfig, Decimal]:
+    original, after = _read(Path(str(previous["costFile"]))), _read(path)
+    if {key for key in original | after if original.get(key) != after.get(key)} - {
+        "resourceItems",
+        "conservativeEstimateUsd",
+    }:
+        raise CampaignError("grant recovery changed original campaign scope")
+    prior = original.get("resourceItems")
+    items = after.get("resourceItems")
+    if (
+        not isinstance(prior, list)
+        or not isinstance(items, list)
+        or items[: len(prior)] != prior
+        or len(items) != len(prior) + 4
+    ):
+        raise CampaignError("grant recovery did not preserve all prior allowances")
+    additions = [_object(item) for item in items[len(prior) :]]
+    if {item.get("name") for item in additions} != {
+        "completed-grant-diagnostic",
+        "completed-grant-owner-diagnostic",
+        "grant-recovery-prerequisite",
+        "grant-recovery-job",
+    } or any(Decimal(str(item.get("fixedUsd"))) < Decimal("0.0378") for item in additions):
+        raise CampaignError("grant recovery diagnostic and two-start allowance is incomplete")
+    config = CampaignConfig.from_json(path, allow_expired=True)
+    aggregate = Decimal("46.723665") * Decimal("1.25") + Decimal(config.conservative_estimate_usd)
+    if aggregate > 108 or Decimal(config.conservative_estimate_usd) > 50:
+        raise CampaignError("grant recovery exceeds the approved budget")
+    return config, aggregate
+
+
+def _grant_consumed_history(
+    previous_path: Path, previous: dict[str, object], ledger: Ledger
+) -> tuple[dict[str, object], dict[str, object], Path]:
+    from infra.milestone_7_8 import operator
+    from infra.milestone_7_8.cleanup_controller import load_execution_authorization
+
+    runtime, config = _effective(previous)
+    validate_admission(previous_path, runtime, config, ledger)
+    folder = Path(str(previous["runtimeFile"])).parent
+    intent = operator._read_stage_record(
+        folder / "migrate-stage-retry-intent.json", "stage-retry-intent"
+    )
+    start = operator._read_stage_record(
+        folder / "migrate-stage-retry-start.json", "stage-retry-start"
+    )
+    value = operator._json_result(_object(start["startResult"]))
+    execution = str(_object(value).get("name"))
+    if (
+        intent.get("operation") != "migrate"
+        or intent.get("operatorSourceHead") != GRANT_PREVIOUS_HEAD
+        or start.get("retryIntentSha256") != intent["recordSha256"]
+        or intent.get("bindings") != operator._stage_bindings(config, runtime, ledger)
+    ):
+        raise CampaignError("consumed migration retry source, image or journal differs")
+    authority = previous_path.parent / "captures/migrate-resume-01/authorization.json"
+    if _file_hash(authority) != intent.get("authorizationSha256"):
+        raise CampaignError("consumed migration retry authorization differs")
+    for operation in ("migrate", "cleanup"):
+        load_execution_authorization(
+            authority,
+            config=config,
+            runtime=runtime,
+            operation=operation,
+            now=parse_utc(str(intent["startedAtUtc"])),
+        )
+    matches = []
+    for file in folder.glob("job-failure-*/execution.json"):
+        saved = _read(file)
+        if saved.get("executionName") == execution:
+            terminal = _object(operator._json_result(_object(saved["lastResult"])))
+            expected = (
+                f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/"
+                f"{runtime['resourceGroupName']}/providers/Microsoft.App/jobs/"
+                f"{runtime['migrationJobName']}/executions/{execution}"
+            )
+            if (
+                terminal.get("name") != execution
+                or str(terminal.get("id")).casefold() != expected.casefold()
+                or _object(terminal.get("properties")).get("status") != "Failed"
+            ):
+                raise CampaignError("consumed migration retry terminal identity differs")
+            matches.append((saved, file))
+    if len(matches) != 1:
+        raise CampaignError("one exact consumed migration failure readback is required")
+    return intent, matches[0][0], matches[0][1]
+
+
+def build_grant_cleanup_source_amendment(
+    previous_plan: Path,
+    *,
+    explicit_approval: Path,
+) -> dict[str, object]:
+    previous = load_plan(previous_plan)
+    if previous.get("planSha256") != GRANT_PREVIOUS_PLAN:
+        raise CampaignError("grant cleanup source amendment predecessor differs")
+    approval = _grant_approval(explicit_approval, previous)
+    source = _grant_source(previous)
+    runtime, config = _effective(previous)
+    validate_admission(
+        previous_plan, runtime, config, load_ledger(Path(str(previous["ledgerFile"])), config)
+    )
+    body = {
+        "version": "m7.8-grant-cleanup-source-amendment-v1",
+        "previousPlanSha256": previous["planSha256"],
+        **source,
+        "approvalFile": str(_private(explicit_approval)),
+        "approvalSha256": GRANT_APPROVAL,
+        "cleanupMustBeginByUtc": approval["cleanupMustBeginByUtc"],
+    }
+    return {**body, "amendmentSha256": _hash(body)}
+
+
+def _grant_cleanup_source(previous: dict[str, object]) -> bool:
+    path = (
+        Path(str(previous["runtimeFile"])).parent
+        / "migration-image-continuation"
+        / "grant-cleanup-source-amendment.json"
+    )
+    if not path.exists():
+        return False
+    record = _read(path)
+    expected = build_grant_cleanup_source_amendment(
+        path.parent / "plan.json",
+        explicit_approval=Path(str(record["approvalFile"])),
+    )
+    if record != expected:
+        raise CampaignError("grant cleanup-only executing source amendment differs")
+    return True
+
+
+def build_grant_recovery_plan(
+    previous_plan: Path,
+    *,
+    cost_path: Path,
+    retained_image: Path,
+    explicit_approval: Path,
+) -> dict[str, object]:
+    previous = load_plan(previous_plan)
+    if previous.get("planSha256") != GRANT_PREVIOUS_PLAN:
+        raise CampaignError("grant recovery predecessor is not the accepted image correction")
+    approval = _grant_approval(explicit_approval, previous)
+    source = _grant_source(previous)
+    _, prior_config = _effective(previous)
+    ledger_path = Path(str(previous["ledgerFile"]))
+    ledger = load_ledger(ledger_path, prior_config)
+    if (
+        ledger.phase != Phase.DATABASE_BOOTSTRAPPED.value
+        or ledger.image_replacement is None
+        or ledger.previous_image_replacement is not None
+        or ledger.image_scan_count != 2
+    ):
+        raise CampaignError(
+            "grant recovery requires exactly one accepted migration image correction"
+        )
+    intent, failed, failed_file = _grant_consumed_history(previous_plan, previous, ledger)
+    provenance = load_retained_image(
+        retained_image,
+        operator_head=source["sourceHead"],
+        canonical_input_sha256=source["canonicalBuildInputSha256"],
+    )
+    if provenance["imageBuildSourceHead"] != source["sourceHead"]:
+        raise CampaignError("grant recovery image was not built from the corrected source")
+    _, aggregate = _grant_cost(previous, cost_path)
+    folder = Path(str(previous["runtimeFile"])).parent
+    files = {Path(str(previous[key])) for key in ("runtimeFile", "configFile", "costFile")}
+    files.update(
+        {
+            _private(cost_path),
+            _private(retained_image),
+            _private(explicit_approval),
+            failed_file,
+            folder / "migrate-stage-retry-intent.json",
+            folder / "migrate-stage-retry-start.json",
+        }
+    )
+    for directory in (
+        previous_plan.parent,
+        folder / "grant-diagnostic-01",
+        folder / "grant-owner-diagnostic-01",
+        failed_file.parent,
+    ):
+        files.update(
+            item
+            for item in directory.rglob("*")
+            if item.is_file() and "source" not in item.relative_to(directory).parts
+        )
+    body: dict[str, object] = {
+        "version": GRANT_VERSION,
+        **source,
+        "runtimeFile": previous["runtimeFile"],
+        "configFile": previous["configFile"],
+        "ledgerFile": str(ledger_path),
+        "costFile": str(_private(cost_path)),
+        "retainedImageFile": str(_private(retained_image)),
+        "imageBuildSourceHead": provenance["imageBuildSourceHead"],
+        "retainedImageId": provenance["imageId"],
+        "originalImageDigest": ledger.image_digest,
+        "baselineLedger": _read(ledger_path),
+        "baselineLedgerFileSha256": _file_hash(ledger_path),
+        "boundFilesSha256": {str(item): _file_hash(item) for item in sorted(files)},
+        "previousPlanFile": str(previous_plan.resolve()),
+        "previousPlanSha256": previous["planSha256"],
+        "grantApprovalFile": str(_private(explicit_approval)),
+        "amendmentSha256": GRANT_APPROVAL,
+        "historicalSubtotalUsd": "46.723665",
+        "aggregateEstimateUsd": str(aggregate),
+        "aggregateCeilingUsd": "108",
+        "scannerReserveCoversReplacement": True,
+        "consumedRetryIntentSha256": intent["recordSha256"],
+        "consumedRetryExecution": failed["executionName"],
+        "failedExecutionReadbackFile": str(failed_file),
+        "cleanupMustBeginByUtc": approval["cleanupMustBeginByUtc"],
+    }
+    return {**body, "planSha256": _hash(body)}
+
+
+def _load_grant_plan(path: Path, plan: dict[str, object]) -> dict[str, object]:
+    body = {key: value for key, value in plan.items() if key != "planSha256"}
+    if (
+        set(plan) != GRANT_FIELDS
+        or plan["planSha256"] != _hash(body)
+        or plan["amendmentSha256"] != GRANT_APPROVAL
+        or plan["previousPlanSha256"] != GRANT_PREVIOUS_PLAN
+        or plan["aggregateCeilingUsd"] != "108"
+        or plan["historicalSubtotalUsd"] != "46.723665"
+    ):
+        raise CampaignError("grant recovery plan shape or exact amendment differs")
+    previous_path = _private(Path(str(plan["previousPlanFile"])))
+    previous = load_plan(previous_path)
+    approval = _grant_approval(Path(str(plan["grantApprovalFile"])), previous)
+    folder = Path(str(previous["runtimeFile"])).parent
+    if (
+        path.resolve() != folder / "grant-image-continuation/plan.json"
+        or any(plan[key] != previous[key] for key in ("runtimeFile", "configFile", "ledgerFile"))
+        or plan["cleanupMustBeginByUtc"] != approval["cleanupMustBeginByUtc"]
+    ):
+        raise CampaignError("grant recovery exact existing bundle differs")
+    files = _object(plan["boundFilesSha256"])
+    for name, digest in files.items():
+        if _file_hash(_private(Path(name))) != digest:
+            raise CampaignError("grant recovery retained predecessor evidence changed")
+    required = {
+        str(previous_path),
+        str(Path(str(plan["failedExecutionReadbackFile"]))),
+        str(folder / "migrate-stage-retry-intent.json"),
+        str(folder / "migrate-stage-retry-start.json"),
+        str(plan["grantApprovalFile"]),
+        str(plan["retainedImageFile"]),
+        str(plan["costFile"]),
+    }
+    if not required <= set(files):
+        raise CampaignError("grant recovery predecessor evidence inventory is incomplete")
+    baseline = Ledger(**_object(plan["baselineLedger"]))  # type: ignore[arg-type]
+    _, prior_config = _effective(previous)
+    baseline.validate_resume(prior_config)
+    intent, failed, failed_file = _grant_consumed_history(previous_path, previous, baseline)
+    if (
+        intent["recordSha256"] != plan["consumedRetryIntentSha256"]
+        or failed["executionName"] != plan["consumedRetryExecution"]
+        or str(failed_file) != plan["failedExecutionReadbackFile"]
+        or baseline.image_digest != plan["originalImageDigest"]
+        or baseline.previous_image_replacement is not None
+    ):
+        raise CampaignError("grant recovery consumed attempt or prior image differs")
+    retained = load_retained_image(
+        Path(str(plan["retainedImageFile"])),
+        operator_head=str(plan["sourceHead"]),
+        canonical_input_sha256=str(plan["canonicalBuildInputSha256"]),
+    )
+    if (
+        retained["imageId"] != plan["retainedImageId"]
+        or retained["imageBuildSourceHead"] != plan["sourceHead"]
+    ):
+        raise CampaignError("grant recovery corrected image source differs")
+    return plan
+
+
+def _grant_retry_body(
+    path: Path, *, issued_at: datetime, expires_at: datetime
+) -> dict[str, object]:
+    plan = load_plan(path)
+    if plan.get("version") != GRANT_VERSION:
+        raise CampaignError("head-only grant recovery requires its exact second-image plan")
+    if (
+        issued_at.tzinfo is None
+        or expires_at.tzinfo is None
+        or not issued_at
+        < expires_at
+        <= min(issued_at + timedelta(minutes=15), parse_utc(str(plan["cleanupMustBeginByUtc"])))
+    ):
+        raise CampaignError("grant recovery dispatch window exceeds its approved cutoff")
+    admitted = _read(path.parent / "completed.json")
+    return {
+        "version": "m7.8-grant-only-retry-approval-v1",
+        "planSha256": plan["planSha256"],
+        "operatorSourceHead": plan["sourceHead"],
+        "explicitAmendmentSha256": GRANT_APPROVAL,
+        "consumedRetryIntentSha256": plan["consumedRetryIntentSha256"],
+        "failedExecution": plan["consumedRetryExecution"],
+        "imageDigest": admitted["imageDigest"],
+        "admissionReceiptSha256": _file_hash(path.parent / "completed.json"),
+        "issuedAtUtc": issued_at.isoformat(),
+        "expiresAtUtc": expires_at.isoformat(),
+        "cleanupMustBeginByUtc": plan["cleanupMustBeginByUtc"],
+        "maximumPrerequisiteDispatches": 1,
+        "maximumGrantRecoveryDispatches": 1,
+        "requiredRevision": "20260726_0029",
+        "bootstrapReplayAllowed": False,
+        "alembicReplayAllowed": False,
+    }
+
+
+def build_grant_retry_approval(
+    path: Path, *, issued_at: datetime, expires_at: datetime
+) -> dict[str, object]:
+    plan = load_plan(path)
+    _plan_source(plan)
+    runtime, config = _effective(plan)
+    validate_admission(path, runtime, config, load_ledger(Path(str(plan["ledgerFile"])), config))
+    slot = path.parent / "grant-recovery"
+    if (
+        any(
+            (slot / name).exists()
+            for name in (
+                "migrate-stage-retry-intent.json",
+                "migrate-stage-retry-start.json",
+            )
+        )
+        or (path.parent / "grant-retry-approval.json").exists()
+    ):
+        raise CampaignError("the one additional grant recovery approval or dispatch already exists")
+    body = _grant_retry_body(path, issued_at=issued_at, expires_at=expires_at)
+    return {**body, "authorizationSha256": _hash(body)}
+
+
+def grant_retry_transition(
+    path: Path, runtime: dict[str, str], config: CampaignConfig, ledger: Ledger
+) -> dict[str, object]:
+    from infra.milestone_7_8 import operator
+
+    plan = load_plan(path)
+    _plan_source(plan)
+    validate_admission(path, runtime, config, ledger)
+    authority = _read(path.parent / "grant-retry-approval.json")
+    body = _grant_retry_body(
+        path,
+        issued_at=parse_utc(str(authority["issuedAtUtc"])),
+        expires_at=parse_utc(str(authority["expiresAtUtc"])),
+    )
+    if authority != {**body, "authorizationSha256": _hash(body)}:
+        raise CampaignError("grant recovery authority or accepted image differs")
+    original_folder = Path(str(plan["runtimeFile"])).parent
+    intent = operator._read_stage_record(
+        original_folder / "migrate-stage-retry-intent.json", "stage-retry-intent"
+    )
+    failed = _read(Path(str(plan["failedExecutionReadbackFile"])))
+    pause_body = {
+        "version": "m7.8-protected-stage-pause-v1",
+        "operation": "migrate",
+        "bindings": intent["bindings"],
+        "attemptSha256": intent["recordSha256"],
+        "authorizationSha256": intent["authorizationSha256"],
+        "failedExecution": plan["consumedRetryExecution"],
+        "failedAtUtc": failed["observedAtUtc"],
+        "recoveryUntilUtc": authority["expiresAtUtc"],
+        "maximumRetryDispatches": 1,
+    }
+    pause = {**pause_body, "recordSha256": operator._stage_hash("stage-pause", pause_body)}
+    previous = load_plan(Path(str(plan["previousPlanFile"])))
+    workload = _read(Path(str(previous["workloadRecoveryPlanFile"])))
+    prefix = f"{runtime['registryName']}.azurecr.io/mobius-api@"
+    return {
+        "kind": "migration-image-continuation",
+        "grantOnly": True,
+        "operatorSourceHead": plan["sourceHead"],
+        "transitionSha256": authority["authorizationSha256"],
+        "issuedAtUtc": authority["issuedAtUtc"],
+        "expiresAtUtc": authority["expiresAtUtc"],
+        "cleanupMustBeginByUtc": plan["cleanupMustBeginByUtc"],
+        "recoveryDirectory": str(path.parent / "grant-recovery"),
+        "recoveryPause": pause,
+        "originalBindings": intent["bindings"],
+        "migrationPauseSha256": _hash(pause),
+        "originalAttemptSha256": intent["recordSha256"],
+        "originalConsumedRetryIntentSha256": intent["recordSha256"],
+        "previousImageReference": prefix + str(plan["originalImageDigest"]),
+        "replacementImageReference": prefix + str(authority["imageDigest"]),
+        "resolvedWorkloadPauseSha256": _object(workload["filesSha256"])[
+            "image-decision-stage-pause.json"
+        ],
+    }
+
+
 def _plan_source(plan: dict[str, object]) -> str:
+    if plan.get("version") == GRANT_VERSION:
+        previous = load_plan(Path(str(plan["previousPlanFile"])))
+        return _grant_source(previous, plan)["sourceHead"]
     if plan.get("version") != MIGRATION_VERSION:
         return _source()
     amendment = _source_amendment(plan)
@@ -607,6 +1084,8 @@ def migration_retry_transition(
     from infra.milestone_7_8 import operator
 
     plan = load_plan(path)
+    if plan.get("version") == GRANT_VERSION:
+        return grant_retry_transition(path, runtime, config, ledger)
     if plan.get("version") != MIGRATION_VERSION:
         return None
     executing_head = _plan_source(plan)
@@ -844,6 +1323,8 @@ def load_plan(path: Path) -> dict[str, object]:
     plan = _read(_private(path))
     if plan.get("version") == MIGRATION_VERSION:
         return _load_migration_plan(path, plan)
+    if plan.get("version") == GRANT_VERSION:
+        return _load_grant_plan(path, plan)
     body = {key: value for key, value in plan.items() if key != "planSha256"}
     if (set(plan) not in (FIELDS, FIELDS | {"priorImageAttempt"},
                          FIELDS | {"priorImageAttempt", "completedImagePlan"},
@@ -1000,6 +1481,8 @@ def _effective(plan: dict[str, object]) -> tuple[dict[str, str], CampaignConfig]
     original = CampaignConfig.from_json(Path(str(plan["configFile"])), allow_expired=True)
     operator.validate_prepared_bundle(path, runtime, original)
     config, aggregate = (
+        _grant_cost(load_plan(Path(str(plan["previousPlanFile"]))), Path(str(plan["costFile"])))
+        if plan.get("version") == GRANT_VERSION else
         _migration_cost(Path(str(plan["configFile"])), Path(str(plan["costFile"])))
         if plan.get("version") == MIGRATION_VERSION else _cost(
             Path(str(plan["configFile"])), Path(str(plan["costFile"])),
@@ -1016,9 +1499,12 @@ def load_context(
     path: Path, runtime_path: Path, config_path: Path, ledger_path: Path, *, operation: str,
 ) -> tuple[dict[str, str], CampaignConfig, Ledger]:
     plan = load_plan(path)
-    _plan_source(plan)
+    if not (operation in CLEANUP_OPERATIONS and plan.get("version") == MIGRATION_VERSION
+            and _grant_cleanup_source(plan)):
+        _plan_source(plan)
     allowed_operations = (MIGRATION_OPERATIONS - {"bootstrap", "startup"}
-                          if plan.get("version") == MIGRATION_VERSION else ALLOWED_OPERATIONS)
+                          if plan.get("version") in {MIGRATION_VERSION, GRANT_VERSION}
+                          else ALLOWED_OPERATIONS)
     if (operation not in allowed_operations
             or str(runtime_path.resolve()) != plan["runtimeFile"]
             or str(config_path.resolve()) != plan["configFile"]
@@ -1028,12 +1514,16 @@ def load_context(
     if operation == "image" and "completedImagePlan" in plan:
         raise CampaignError("this continuation reuses completed image admission; no image replay")
     raw = _read(ledger_path)
-    replaced = raw.get("image_replacement") is not None
+    replaced = (raw.get("previous_image_replacement") is not None
+                if plan.get("version") == GRANT_VERSION
+                else raw.get("image_replacement") is not None)
     if not replaced:
         if (operation not in CLEANUP_OPERATIONS and (raw != plan["baselineLedger"]
                 or _file_hash(ledger_path) != plan["baselineLedgerFileSha256"])):
             raise CampaignError("continuation original ledger changed before admission")
-        original = CampaignConfig.from_json(config_path, allow_expired=True)
+        original = (_effective(load_plan(Path(str(plan["previousPlanFile"]))))[1]
+                    if plan.get("version") == GRANT_VERSION
+                    else CampaignConfig.from_json(config_path, allow_expired=True))
         ledger = load_ledger(ledger_path, original)
         if operation in CLEANUP_OPERATIONS:
             config = original
@@ -1080,9 +1570,12 @@ def validate_image_request(
     baseline = _object(plan["baselineLedger"])
     if (asdict(ledger) != asdict(Ledger(**baseline))  # type: ignore[arg-type]
             or ledger.phase != (Phase.DATABASE_BOOTSTRAPPED.value
-                                if plan.get("version") == MIGRATION_VERSION
+                                if plan.get("version") in {MIGRATION_VERSION, GRANT_VERSION}
                                 else Phase.IMAGE_DECIDED.value)
-            or ledger.image_replacement is not None or _plan_source(plan) != plan["sourceHead"]
+            or (ledger.previous_image_replacement is not None
+                if plan.get("version") == GRANT_VERSION
+                else ledger.image_replacement is not None)
+            or _plan_source(plan) != plan["sourceHead"]
             or now >= parse_utc(config.cleanup_deadline_utc)
             or now >= parse_utc(str(approval["expiresAtUtc"]))):
         raise CampaignError("replacement image original admission or dispatch window differs")
@@ -1116,6 +1609,9 @@ def validate_admission(
             or ledger.image_generation_count != baseline.get("image_generation_count")
             or ledger.cleanup_arm_evidence_sha256 != baseline.get("cleanup_arm_evidence_sha256")):
         raise CampaignError("replacement admission spliced original image or generation history")
+    if (plan.get("version") == GRANT_VERSION
+            and ledger.previous_image_replacement != baseline.get("image_replacement")):
+        raise CampaignError("grant image admission changed its prior replacement record")
     before_transitions = baseline.get("transitions")
     if (not isinstance(before_transitions, list)
             or ledger.transitions[:len(before_transitions)] != before_transitions):
@@ -1181,7 +1677,10 @@ def _workload_transition(plan: dict[str, object], folder: Path) -> dict[str, obj
 def prerequisite_directory(path: Path, runtime: dict[str, str], config: CampaignConfig,
                            ledger: Ledger) -> Path:
     validate_admission(path, runtime, config, ledger)
-    folder = path.resolve().parent / "prerequisites"
+    plan = load_plan(path)
+    folder = path.resolve().parent / (
+        "grant-recovery" if plan.get("version") == GRANT_VERSION else "prerequisites"
+    )
     folder.mkdir(mode=0o700, exist_ok=True)
     return folder
 
@@ -1296,8 +1795,10 @@ def execute_admission(
         ledger.record_image_replacement(
             digest, scan_sha256, str(receipt["continuationSha256"]),
             conservative_estimate_usd=config.conservative_estimate_usd, now=datetime.now(UTC),
-            at_phase=(Phase.DATABASE_BOOTSTRAPPED if plan.get("version") == MIGRATION_VERSION
+            at_phase=(Phase.DATABASE_BOOTSTRAPPED
+                      if plan.get("version") in {MIGRATION_VERSION, GRANT_VERSION}
                       else Phase.IMAGE_DECIDED),
+            grant_recovery=plan.get("version") == GRANT_VERSION,
         )
         validate_admission(path, runtime, config, ledger)
         save_ledger(Path(str(plan["ledgerFile"])), ledger)

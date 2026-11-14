@@ -1186,6 +1186,49 @@ operator does not accept preclaimed failover, credential-recovery, tenant, or
 recovery-duration booleans. It derives those only after the corresponding
 managed commands reach terminal success.
 
+### Approved provider-vector baseline and grant-only recovery
+
+Azure can own the `vector` extension and its routines as `azuresu`, retaining
+provider-controlled `PUBLIC EXECUTE` grants that the provisioning administrator
+cannot revoke. This is distinct from installer-owned extensions, whose exact
+API/worker function matrix remains enforced. The managed contract accepts only
+the explicitly reviewed provider baseline: 118 actual `vector` extension
+members in `public`, provider ownership and PUBLIC grant provenance, the required
+API/worker functions, and no runtime grant options or administrative privileges.
+Record the observed inventory and effective execution count truthfully; do not
+describe 118 effective function privileges as two API privileges or one worker
+privilege. Unrelated application routines and all application table, sequence,
+schema, ownership and tenant-isolation checks retain their strict contracts.
+Provider ownership is not permission to assume `azuresu`, change its membership,
+transfer extension ownership, or widen a runtime role.
+
+A consumed migration retry cannot be recovered by renewing its unused-dispatch
+window. The separately approved grant-only continuation preserves the original
+migration failure, consumed retry intent/start/terminal failure, prior image
+admission and both diagnostic captures. Its new image and execution records
+must bind the immediately preceding accepted state and the actual corrected
+source, canonical inputs, build, digest, scan and registry-restoration evidence.
+No historical record is rewritten. The original runtime remains unchanged.
+
+The normal operator's additional recovery uses the existing migration job with
+both `--reconcile-grants-only` and
+`--retry-after-execution=<exact-failed-guarded-retry>`. It requires a current,
+separately bound approval, current cleanup protection, a successful corrected
+read-only prerequisite, and the existing safe-partial-state inspection. The
+application requires exactly `20260726_0029` before issuing any grant and runs
+only transactional grant reconciliation and its post-check. A missing, base or
+intermediate head fails closed; neither Alembic nor bootstrap may run in this
+mode. There is one additional append-only recovery slot, not an automatically
+renewable retry allowance. Failure or ambiguous completion remains paused and
+cannot advance the ledger to `migrated`.
+
+The approved two completed diagnostics, corrected prerequisite and grant-only
+execution must all remain in cumulative accounting. No correction extends the
+campaign, controller or cleanup deadlines. Prepare cleanup-source compatibility
+before image work so cleanup remains executable if a build, scan or admission
+fails. Reassess the remaining time before each live stage; all five managed
+observations remain open until their existing acceptance checks pass.
+
 ## Managed evidence and disposition
 
 ### Full five-observation replacement

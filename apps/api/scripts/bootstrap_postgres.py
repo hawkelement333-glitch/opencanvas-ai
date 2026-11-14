@@ -204,6 +204,7 @@ async def provision_database_principals(*, retry_after_execution: str | None = N
             await require_installed_vector(connection)
             await configure_vector_runtime_functions(
                 connection, api_principal=api.name, worker_principal=worker.name,
+                managed=settings.database_auth_mode == "entra",
             )
 
             stage = "schema-privileges"

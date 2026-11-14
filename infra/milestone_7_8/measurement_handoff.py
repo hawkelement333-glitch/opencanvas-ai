@@ -104,11 +104,18 @@ def start_evidence_job(
     image_digest: str,
     expected_command: tuple[str, ...] | None = None,
     before_dispatch: Callable[[dict[str, object]], None] | None = None,
+    database_grants_only: bool = False,
 ) -> dict[str, object]:
     """Submit a full execution template when a job's arguments or environment change."""
     args = next((arg for arg in command if arg.startswith((
         "--args=--phase=", "--args=--retry-after-execution=", "--args=--diagnose-prerequisites",
     ))), None)
+    if database_grants_only and (
+        args is None or not args.startswith("--args=--retry-after-execution=")
+        or expected_command != ("python", "-m", "scripts.migrate_and_grant")
+        or before_dispatch is None
+    ):
+        raise CampaignError("grant-only execution requires the exact guarded migration command")
     if args is None and "--env-vars" not in command:
         return runner.run(command)
     read = list(command)
@@ -158,7 +165,10 @@ def start_evidence_job(
     if args == "--args=--diagnose-prerequisites" and container.get("args") not in (None, []):
         raise CampaignError("database prerequisite requires the standard job arguments")
     if args is not None:
-        container["args"] = [args.removeprefix("--args=")]
+        container["args"] = [
+            *(["--reconcile-grants-only"] if database_grants_only else []),
+            args.removeprefix("--args="),
+        ]
     for env_override in env_overrides:
         key, separator, value = env_override.partition("=")
         env = container.get("env")

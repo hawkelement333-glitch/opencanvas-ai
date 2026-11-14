@@ -358,6 +358,7 @@ class Ledger:
     cleanup_offer_eligibility_sha256: str | None = None
     fresh_controller_admission_evidence_sha256: str | None = None
     image_replacement: dict[str, str] | None = None
+    previous_image_replacement: dict[str, str] | None = None
 
     def bind_cleanup_region(self, config: CampaignConfig) -> None:
         expected = (
@@ -612,6 +613,8 @@ class Ledger:
     def _validate_image_history(self, *, image_reached: bool) -> None:
         replacement = self.image_replacement
         if replacement is None:
+            if self.previous_image_replacement is not None:
+                raise CampaignError("image predecessor exists without a replacement")
             expected_count = int(image_reached)
             if (
                 self.required_scan_count != expected_count
@@ -622,13 +625,27 @@ class Ledger:
             return
         if (
             not image_reached
-            or self.required_scan_count != 2
-            or self.image_scan_count != 2
+            or self.required_scan_count != (3 if self.previous_image_replacement else 2)
+            or self.image_scan_count != (3 if self.previous_image_replacement else 2)
             or self.resource_generation_count != 1
             or self.image_generation_count not in {0, 1}
         ):
             raise CampaignError("resume image replacement counters are inconsistent")
         self._validate_replacement(replacement)
+        previous = self.previous_image_replacement
+        if previous is not None:
+            self._validate_replacement(previous)
+            if (self._replacement_phase(previous) is not Phase.DATABASE_BOOTSTRAPPED
+                    or self._replacement_phase(replacement) is not Phase.DATABASE_BOOTSTRAPPED
+                    or self.image_generation_count != 0
+                    or previous["replacementImageDigest"] != replacement["previousImageDigest"]
+                    or previous["replacementScanEvidenceSha256"]
+                    != replacement["previousScanEvidenceSha256"]
+                    or previous["replacementConservativeEstimateUsd"]
+                    != replacement["previousConservativeEstimateUsd"]
+                    or parse_utc(previous["recordedAtUtc"])
+                    > parse_utc(replacement["recordedAtUtc"])):
+                raise CampaignError("grant recovery image predecessor differs")
         if (
             replacement["replacementImageDigest"] != self.image_digest
             or replacement["replacementScanEvidenceSha256"] != self.image_scan_evidence_sha256
@@ -701,9 +718,19 @@ class Ledger:
         conservative_estimate_usd: str,
         now: datetime,
         at_phase: Phase = Phase.IMAGE_DECIDED,
+        grant_recovery: bool = False,
     ) -> None:
-        if self.image_replacement is not None:
+        if self.image_replacement is not None and not grant_recovery:
             raise CampaignError("second image replacement rejected")
+        if grant_recovery and (
+            self.image_replacement is None or self.previous_image_replacement is not None
+            or at_phase is not Phase.DATABASE_BOOTSTRAPPED
+            or self._replacement_phase(self.image_replacement) is not Phase.DATABASE_BOOTSTRAPPED
+            or self.image_generation_count != 0
+        ):
+            raise CampaignError(
+                "grant recovery requires exactly one prior migration image correction"
+            )
         if (
             at_phase not in {Phase.IMAGE_DECIDED, Phase.DATABASE_BOOTSTRAPPED}
             or self.phase != at_phase.value
@@ -727,11 +754,14 @@ class Ledger:
         if at_phase is Phase.DATABASE_BOOTSTRAPPED:
             replacement["replacementPhase"] = at_phase.value
         self._validate_replacement(replacement)
+        if grant_recovery:
+            assert self.image_replacement is not None
+            self.previous_image_replacement = self.image_replacement.copy()
         self.image_replacement = replacement
         self.image_digest = digest
         self.image_scan_evidence_sha256 = scan_sha256
-        self.required_scan_count = 2
-        self.image_scan_count = 2
+        self.required_scan_count = 3 if grant_recovery else 2
+        self.image_scan_count = 3 if grant_recovery else 2
         self.conservative_estimate_usd = conservative_estimate_usd
 
     def record_cleanup_arm_evidence(self, evidence_sha256: str) -> None:
@@ -1027,6 +1057,8 @@ def terminal_receipt(ledger: Ledger) -> dict[str, object]:
         receipt["imageReplacement"] = ledger.image_replacement.copy()
         receipt["requiredScanCount"] = ledger.required_scan_count
         receipt["imageScanCount"] = ledger.image_scan_count
+    if ledger.previous_image_replacement is not None:
+        receipt["previousImageReplacement"] = ledger.previous_image_replacement.copy()
     return receipt
 
 
@@ -1069,6 +1101,8 @@ def save_ledger(path: Path, ledger: Ledger) -> None:
     value = asdict(ledger)
     if ledger.image_replacement is None:
         del value["image_replacement"]
+    if ledger.previous_image_replacement is None:
+        del value["previous_image_replacement"]
     temporary.write_text(
         json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )

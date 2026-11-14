@@ -4,9 +4,19 @@
   "type": "object",
   "additionalProperties": false,
   "dependentRequired": {
-    "imageReplacement": ["requiredScanCount", "imageScanCount"],
-    "requiredScanCount": ["imageReplacement"],
-    "imageScanCount": ["imageReplacement"]
+    "imageReplacement": [
+      "requiredScanCount",
+      "imageScanCount"
+    ],
+    "requiredScanCount": [
+      "imageReplacement"
+    ],
+    "imageScanCount": [
+      "imageReplacement"
+    ],
+    "previousImageReplacement": [
+      "imageReplacement"
+    ]
   },
   "required": [
     "version",
@@ -32,48 +42,114 @@
     "status"
   ],
   "properties": {
-    "version": { "const": "m7.8-terminal-receipt-v7" },
-    "campaignCorrelation": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
-    "generationCorrelation": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "version": {
+      "const": "m7.8-terminal-receipt-v7"
+    },
+    "campaignCorrelation": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{16}$"
+    },
+    "generationCorrelation": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{16}$"
+    },
     "resourceGenerationCount": {
       "type": "integer",
       "minimum": 0,
       "maximum": 1
     },
-    "imageGenerationCount": { "type": "integer", "minimum": 0, "maximum": 1 },
-    "requiredScanCount": { "const": 2 },
-    "imageScanCount": { "const": 2 },
+    "imageGenerationCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "requiredScanCount": {
+      "enum": [
+        2,
+        3
+      ]
+    },
+    "imageScanCount": {
+      "enum": [
+        2,
+        3
+      ]
+    },
     "imageReplacement": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "previousImageDigest", "previousScanEvidenceSha256", "previousConservativeEstimateUsd",
-        "replacementImageDigest", "replacementScanEvidenceSha256", "replacementConservativeEstimateUsd",
-        "continuationSha256", "recordedAtUtc"
+        "previousImageDigest",
+        "previousScanEvidenceSha256",
+        "previousConservativeEstimateUsd",
+        "replacementImageDigest",
+        "replacementScanEvidenceSha256",
+        "replacementConservativeEstimateUsd",
+        "continuationSha256",
+        "recordedAtUtc"
       ],
       "properties": {
-        "previousImageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
-        "previousScanEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "previousConservativeEstimateUsd": { "type": "string" },
-        "replacementImageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
-        "replacementScanEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "replacementConservativeEstimateUsd": { "type": "string" },
-        "continuationSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "recordedAtUtc": { "type": "string", "format": "date-time" },
-        "replacementPhase": { "const": "database-bootstrapped" }
+        "previousImageDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "previousScanEvidenceSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "previousConservativeEstimateUsd": {
+          "type": "string"
+        },
+        "replacementImageDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "replacementScanEvidenceSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "replacementConservativeEstimateUsd": {
+          "type": "string"
+        },
+        "continuationSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "recordedAtUtc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "replacementPhase": {
+          "const": "database-bootstrapped"
+        }
       }
     },
-    "cleanupCompletedUtc": { "type": "string", "format": "date-time" },
-    "cleanupRegion": { "type": "string" },
+    "cleanupCompletedUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "cleanupRegion": {
+      "type": "string"
+    },
     "cleanupRegionSelectionSha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
-    "cleanupCandidateRegions": { "type": "string" },
-    "cleanupOfferClassification": { "type": "string" },
-    "cleanupOfferEligibilityDisposition": { "type": "string" },
-    "cleanupOfferEligibleRegions": { "type": "string" },
-    "cleanupOfferEligibilitySource": { "type": "string" },
+    "cleanupCandidateRegions": {
+      "type": "string"
+    },
+    "cleanupOfferClassification": {
+      "type": "string"
+    },
+    "cleanupOfferEligibilityDisposition": {
+      "type": "string"
+    },
+    "cleanupOfferEligibleRegions": {
+      "type": "string"
+    },
+    "cleanupOfferEligibilitySource": {
+      "type": "string"
+    },
     "cleanupOfferEligibilitySha256": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
@@ -90,8 +166,13 @@
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
-    "cleanupDisposition": { "const": "zero-residue" },
-    "residueEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "cleanupDisposition": {
+      "const": "zero-residue"
+    },
+    "residueEvidenceSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "residue": {
       "type": "object",
       "additionalProperties": false,
@@ -112,22 +193,130 @@
         "syntheticRows"
       ],
       "properties": {
-        "targetResourceGroups": { "const": 0 },
-        "cleanupResourceGroups": { "const": 0 },
-        "roleAssignments": { "const": 0 },
-        "cleanupSchedules": { "const": 0 },
-        "managedIdentities": { "const": 0 },
-        "postgresServers": { "const": 0 },
-        "containerRegistries": { "const": 0 },
-        "containerAppsEnvironments": { "const": 0 },
-        "containerAppsJobs": { "const": 0 },
-        "virtualNetworks": { "const": 0 },
-        "privateEndpoints": { "const": 0 },
-        "privateDnsZones": { "const": 0 },
-        "diagnosticSettings": { "const": 0 },
-        "syntheticRows": { "const": 0 }
+        "targetResourceGroups": {
+          "const": 0
+        },
+        "cleanupResourceGroups": {
+          "const": 0
+        },
+        "roleAssignments": {
+          "const": 0
+        },
+        "cleanupSchedules": {
+          "const": 0
+        },
+        "managedIdentities": {
+          "const": 0
+        },
+        "postgresServers": {
+          "const": 0
+        },
+        "containerRegistries": {
+          "const": 0
+        },
+        "containerAppsEnvironments": {
+          "const": 0
+        },
+        "containerAppsJobs": {
+          "const": 0
+        },
+        "virtualNetworks": {
+          "const": 0
+        },
+        "privateEndpoints": {
+          "const": 0
+        },
+        "privateDnsZones": {
+          "const": 0
+        },
+        "diagnosticSettings": {
+          "const": 0
+        },
+        "syntheticRows": {
+          "const": 0
+        }
       }
     },
-    "status": { "const": "zero-residue" }
-  }
+    "status": {
+      "const": "zero-residue"
+    },
+    "previousImageReplacement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "previousImageDigest",
+        "previousScanEvidenceSha256",
+        "previousConservativeEstimateUsd",
+        "replacementImageDigest",
+        "replacementScanEvidenceSha256",
+        "replacementConservativeEstimateUsd",
+        "continuationSha256",
+        "recordedAtUtc"
+      ],
+      "properties": {
+        "previousImageDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "previousScanEvidenceSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "previousConservativeEstimateUsd": {
+          "type": "string"
+        },
+        "replacementImageDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "replacementScanEvidenceSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "replacementConservativeEstimateUsd": {
+          "type": "string"
+        },
+        "continuationSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "recordedAtUtc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "replacementPhase": {
+          "const": "database-bootstrapped"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "previousImageReplacement"
+        ]
+      },
+      "then": {
+        "properties": {
+          "requiredScanCount": {
+            "const": 3
+          },
+          "imageScanCount": {
+            "const": 3
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "requiredScanCount": {
+            "maximum": 2
+          },
+          "imageScanCount": {
+            "maximum": 2
+          }
+        }
+      }
+    }
+  ]
 }

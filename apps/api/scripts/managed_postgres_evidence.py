@@ -29,7 +29,6 @@ from opencanvas_api.db.principal_manifest import (
     load_principal_manifest,
 )
 from opencanvas_api.db.role_privileges import (
-    RUNTIME_FUNCTION_PRIVILEGES,
     RUNTIME_SEQUENCE_PRIVILEGES,
     RUNTIME_TABLE_PRIVILEGES,
     application_routines,
@@ -363,6 +362,7 @@ async def _migration_lock_observation(
 
 async def _migration_runtime_assertions(
     connection: AsyncConnection, database: Database, manifest: PrincipalManifest,
+    *, managed: bool = False,
 ) -> list[Assertion]:
     if not isinstance(database.engine.pool, NullPool):
         raise EvidenceError("migration probe requires a non-pooled database engine")
@@ -389,8 +389,8 @@ async def _migration_runtime_assertions(
         name = manifest.principals[slot].name
         grants[role.value] = {
             "tableGrants": await _runtime_table_grants(connection, name, role),
-            "functionObjectsChecked": await require_runtime_function_privileges(
-                connection, role, principal=name,
+            "functionGrants": await require_runtime_function_privileges(
+                connection, role, principal=name, managed=managed,
             ),
         }
     guard_observation = await _migration_lock_observation(connection, database)
@@ -470,8 +470,9 @@ async def catalog_assertions(role: DatabaseRole) -> list[Assertion]:
                             raise EvidenceError(
                                 "runtime sequence privilege is broader than allowed"
                             )
-                function_objects = await require_runtime_function_privileges(
+                function_grants = await require_runtime_function_privileges(
                     connection, role, principal=str(current),
+                    managed=settings.database_auth_mode == "entra",
                 )
                 results.append(
                     _assertion(
@@ -481,9 +482,8 @@ async def catalog_assertions(role: DatabaseRole) -> list[Assertion]:
                             "role": role.value,
                             "tableGrants": observed,
                             "sequenceObjectsChecked": len(sequence_names),
-                            "functionObjectsChecked": function_objects,
+                            "functionGrants": function_grants,
                             "declaredSequenceGrantsEmpty": True,
-                            "declaredFunctionGrants": sorted(RUNTIME_FUNCTION_PRIVILEGES[role]),
                         },
                     )
                 )
@@ -575,7 +575,9 @@ async def catalog_assertions(role: DatabaseRole) -> list[Assertion]:
                         revision,
                     )
                 )
-                results.extend(await _migration_runtime_assertions(connection, database, manifest))
+                results.extend(await _migration_runtime_assertions(
+                    connection, database, manifest, managed=settings.database_auth_mode == "entra",
+                ))
                 suffix = _digest(
                     {"campaign": manifest.campaign_id, "generation": manifest.generation_id}
                 )[:12]

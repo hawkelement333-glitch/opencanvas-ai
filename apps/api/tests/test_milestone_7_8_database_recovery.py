@@ -723,6 +723,42 @@ def test_normal_head_retry_reads_internal_relation_kind_as_text(
     assert not connection.mutations
 
 
+@pytest.mark.parametrize("revision", ["base", EXPECTED_DATABASE_REVISION])
+def test_grant_only_recovery_checks_bound_retry_and_never_migrates(
+    monkeypatch: pytest.MonkeyPatch, revision: str,
+) -> None:
+    calls: list[str] = []
+
+    async def current(*, retry_after_execution: str | None = None,
+                      grants_only: bool = False) -> str:
+        if retry_after_execution is None:
+            calls.append("verify")
+        else:
+            assert grants_only and retry_after_execution == "failed-guarded-execution"
+            calls.append("safe-catalog-inspection")
+        return revision
+
+    async def grants(*, grants_only: bool) -> None:
+        assert grants_only
+        calls.append("grants-only")
+
+    def no_upgrade(**_kwargs: object) -> int:
+        raise AssertionError("grant-only recovery must not invoke Alembic")
+
+    monkeypatch.setattr(migrate_and_grant, "_current_revision", current)
+    monkeypatch.setattr(migrate_and_grant, "apply_runtime_privileges", grants)
+    monkeypatch.setattr(migrate_and_grant, "run_migration", no_upgrade)
+    assert migrate_and_grant.main(["--reconcile-grants-only"]) == 1
+    assert calls == []
+    result = migrate_and_grant.main([
+        "--reconcile-grants-only", "--retry-after-execution=failed-guarded-execution",
+    ])
+    assert result == int(revision == "base")
+    assert calls == (["safe-catalog-inspection"] if revision == "base" else [
+        "safe-catalog-inspection", "grants-only", "verify",
+    ])
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("drift", ["owner", "missing-table", "missing-principal"])
 async def test_migration_retry_head_partial_state_rejects_unsafe_reconciliation(
