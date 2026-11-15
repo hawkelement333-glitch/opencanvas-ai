@@ -1,5 +1,13 @@
 # Milestone 7.8 managed PostgreSQL campaign operator runbook
 
+Current campaign status — 2026-11-15: **complete**. The [completed PostgreSQL campaign](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15) records
+accepted PG-E01/E02/E03, TI-E01 and PG-E04, all 38 assertions passed, all 14
+cleanup counters zero, the reusable controller preserved and the ledger
+finalized. Earlier status and authorization snapshots below are historical.
+The runbook is retained for provenance; it is not authority to rerun the
+completed campaign, renew schedules or recreate resources. A future campaign
+would require its own authorization. Billing remains unsettled.
+
 Date: 2026-08-25
 
 Status: `architecture-corrected-live-execution-not-authorized`

@@ -1,5 +1,12 @@
 # Milestone 7.8 Automation offer-safe candidate reconciliation handoff
 
+> **Current-status reconciliation — 2026-11-15:** the [completed PostgreSQL campaign](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15)
+> accepted PG-E01/E02/E03, TI-E01 and PG-E04 (38 assertions), verified all
+> 14 cleanup counters zero, preserved the reusable controller and finalized
+> the ledger. Milestone 7.8 remains incomplete for its other existing items.
+> Status, blockers and authorization limits below describe this dated
+> historical checkpoint; they do not reopen the completed campaign.
+
 Date: 2026-08-14
 
 Status: M78-PG-009 is locally remediated; sanitized read-only evidence proves

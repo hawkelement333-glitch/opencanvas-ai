@@ -10,16 +10,16 @@ object ingestion and malware quarantine, durable work, shared rate limits,
 observability, recovery exercises, capacity/resilience testing, and the final
 production-readiness audit.
 
-Milestones 7.1 through 7.7 are complete. Milestone 7.8 is the active final
-production-readiness audit and has no numbered internal checkpoints. Revision
-`20260726_0029` is the sole Alembic head; 0030 is absent. The managed
-PostgreSQL High defects are locally remediated. The independent 7.8 campaign
-machinery is fail-closed and not executable: its Automation cleanup controller
-cannot meet the zero-residue invariant while deleted accounts are provider
-retained. The prior campaign's exact account remains present.
-M78-PG-E01, M78-PG-E02, M78-PG-E03, M78-TI-E01, and M78-PG-E04 remain open.
-This guide is not evidence that managed grants, capacity, failover, credential
-recovery, tenant isolation, or operational configuration have passed.
+Milestones 7.1 through 7.7 are complete. Milestone 7.8 remains incomplete for
+its [existing non-PostgreSQL evidence and consolidation requirements](MILESTONE_7_IMPLEMENTATION_PLAN.md#78-completion-checklist-reconciliation--2026-11-15).
+Revision `20260726_0029` is the sole Alembic head; 0030 is absent. The
+[completed PostgreSQL campaign](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15) accepted M78-PG-E01/E02/E03, M78-TI-E01 and M78-PG-E04 with all 38
+assertions passed. All 14 campaign cleanup residue counters are zero, the
+reusable controller is preserved and the ledger is finalized. Peak connections
+were 31, p95 latency 592.26 ms and failover recovery 45.05 seconds. The former
+controller-retention blocker is historical for this completed campaign.
+Billing remains unsettled; approved ceilings and retained forecasts are not
+settled charges. This status is not a new deployment or campaign authorization.
 
 The historical PostgreSQL compatibility amendments remain the audit trail for
 the earlier 0005/0021/0023/0024 corrections; their combined validation passed

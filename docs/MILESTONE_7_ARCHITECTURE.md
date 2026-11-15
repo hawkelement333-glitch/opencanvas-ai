@@ -1,8 +1,15 @@
 # Milestone 7 Production Hardening Architecture
 
+Current status reconciled 2026-11-15: the [completed PostgreSQL campaign](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15) and verified cleanup are
+complete; Milestone 7.8 remains incomplete for its
+[existing remaining requirements](MILESTONE_7_IMPLEMENTATION_PLAN.md#78-completion-checklist-reconciliation--2026-11-15).
+This status update changes no architecture or entry criterion. Dated design,
+entry and campaign-enablement sections below retain their historical scope;
+their open PostgreSQL statements are superseded by the accepted final receipts.
+
 Date: 2026-07-27
 
-Current status verified 2026-08-13: architecture and checkpoints 7.1–7.7 are
+Historical entry status verified 2026-08-13: architecture and checkpoints 7.1–7.7 are
 complete and committed. The retained checkpoint 7.7 terminal lifecycle chain
 validates through `MILESTONE_7_7_COMPLETE` at
 `b191a392922f94557e6ebf5914113b5e229ab00e`. Checkpoint 7.8 has begun only its

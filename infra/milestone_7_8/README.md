@@ -1,7 +1,17 @@
 # Milestone 7.8 managed PostgreSQL campaign
 
+Current status reconciled 2026-11-15: the
+[completed campaign handoff](../../docs/MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15)
+records all five PostgreSQL checks accepted (38 assertions), all 14 cleanup
+counters zero, reusable controller preservation and a finalized ledger.
+Milestone 7.8 remains incomplete for its
+[other existing requirements](../../docs/MILESTONE_7_IMPLEMENTATION_PLAN.md#78-completion-checklist-reconciliation--2026-11-15).
+The implementation/authorization snapshots below describe earlier stages;
+their unexecuted/open statements are historical. Do not replay the completed
+campaign or renew its expired schedules. Billing remains unsettled.
+
 This directory is the independent, bounded infrastructure and lifecycle surface
-for the still-unexecuted Milestone 7.8 managed PostgreSQL evidence campaign. It
+for the Milestone 7.8 managed PostgreSQL evidence campaign. It
 does not invoke or import the retained Milestone 7.7 lifecycle, does not begin
 the object-storage audit, and does not close any managed-evidence gap by its
 existence.

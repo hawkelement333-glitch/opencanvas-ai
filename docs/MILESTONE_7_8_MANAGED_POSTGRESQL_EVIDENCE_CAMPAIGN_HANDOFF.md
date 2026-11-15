@@ -1,5 +1,148 @@
 # Milestone 7.8 managed PostgreSQL evidence campaign handoff
 
+## Completed campaign — 2026-11-15
+
+Current status: **Azure PostgreSQL goal complete; Milestone 7.8 remains
+incomplete for the existing non-PostgreSQL requirements.** This section
+supersedes the open database/cleanup status in earlier handoffs. Their dated
+failures and local validation results remain historical facts.
+
+Campaign `m78-fresh-59217c3cb44f`, generation `g1-34a9eca839e4`, accepted
+all five checks at `2026-11-15T18:16:36.414360+00:00`. All **38 required assertion
+codes passed**, with no relaxed acceptance assertion or recovery bound.
+
+| Existing check | Current result | Accepted proof |
+| --- | --- | --- |
+| M78-PG-E01 | Complete / accepted | Connection capacity, reserve, steady traffic and rollout overlap; peak 31 |
+| M78-PG-E02 | Complete / accepted | Effective privileges, ownership, negative permissions and guarded migration |
+| M78-PG-E03 | Complete / accepted | Credential denial/restoration, failover, stale pools and durable replay; recovery 45.05 seconds |
+| M78-TI-E01 | Complete / accepted | Application, pooled and post-failover tenant isolation |
+| M78-PG-E04 | Complete / accepted | Operational configuration and measurements; p95 latency 592.26 ms |
+| Campaign cleanup | Complete / verified | All 14 residue counters zero; reusable controller preserved; ledger finalized |
+
+Peak connections were **31**, p95 latency **592.26 ms** (retained precision
+592.2591080000075 ms), and failover recovery **45.05 seconds** (45.047397 seconds).
+The capacity proof recorded `max_connections=859`, pool ceilings 80, rollout
+overlap 40, operator consumers 1, safety reserve 20 and Azure-reserved connections
+15. Operational proof recorded zone-redundant HA, distinct zones, Sunday 07:00
+maintenance, 64 GiB P6 storage, seven-day backups and geo-backup disabled. These
+are bounded campaign observations, not a general production SLO or closure of
+the separate load/soak/spike and recovery requirements.
+
+### Retained evidence and immutable bindings
+
+The private local evidence root is `.runtime/milestone_7_8/p-eight/ca/`.
+The paths below are repository-relative local artifact references, deliberately
+not public GitHub links. Raw receipts, identities, command output, credentials,
+subscription details and billing records remain ignored and outside Git.
+
+| Retained local artifact | File SHA-256 |
+| --- | --- |
+| `final-results.json` | `e6105b6c03850ee01c09870bb8a1d68b59ccc9107f26f2e30802c3f858a35677` |
+| `terminal-receipt.json` | `83a74d83b77751760156f2db968e98c719b23d081fdced9142e3e93ec4bb302d` |
+| `managed-assertion-evidence.json` | `923911e3f0b7966cb65396c3c00c49234631ea82be21d91dbd0abba5b6bf6890` |
+| `managed-evidence-execution.json` | `2e47f05611a5292c4c167bf02dd62a76c98749075b2d3e0a46e8a68258420272` |
+| `ledger.json` | `8b40e44440427f1de88bb8aaae76346fb42a903c37e50aca10b2bd2b893a6e9b` |
+
+The assertion proof's internal `evidenceSha256` is
+`d09c9ecdfd6c8405015e63477a5916b0ea045d02ad6fa35f02a252727f0c9b29`; it is distinct from the proof file hash.
+`final-results.json` maps every check to its contributing execution IDs and
+sample/capture hashes; `managed-evidence-execution.json` binds the accepted
+collection; `terminal-receipt.json` and `ledger.json` prove final cleanup.
+
+- Original campaign/operator source binding:
+  `0e1efd623edcb049dbc96ff141af166790e4cc35`.
+- Corrected artifact source commit:
+  `2f3f67ef7e2fec69856a5618e1e548c433bf2ed9`.
+- Corrected image: `sha256:c5cc6222656cdd097053c1278c9bf487963118d87d43638fab161b94106c7fde` (`linux/amd64`).
+- Canonical build-input SHA-256:
+  `e9adf645cf1973dbf7d73ad99f3231af6fa4323670027e9965d18bc7e6dc1263`.
+- Retained image metadata: `.runtime/milestone_7_8/p-eight/i-2f3f67e/retained-image.json`.
+- Correction validation: `.runtime/milestone_7_8/p-eight/ca/connection-refusal-correction/validation.json`.
+
+The corrected artifact commit does not replace the original operator source
+binding. Private operator corrections remain separately recorded in the runtime
+bundle. The registry was deleted during verified cleanup; the image is retained
+locally and its former registry URL is not an available deployment source.
+
+### Contributing successful executions
+
+| Contributing execution ID | Phase | Accepted checks |
+| --- | --- | --- |
+| `job-m78-64c74e2e74-evidence-13sfbs8` | steady-measurement | PG-E01 |
+| `job-m78-64c74e2e74-evidence-1g71bo1` | overlap-measurement | PG-E01 |
+| `job-m78-64c74e2e74-probe-api-9b0hj63` | api | PG-E01, PG-E02 |
+| `job-m78-64c74e2e74-probe-worker-e5fbwcb` | worker | PG-E01, PG-E02 |
+| `job-m78-64c74e2e74-evidence-w4jdk2m` | catalog | PG-E01, PG-E02 |
+| `job-m78-64c74e2e74-probe-migrate-kdnj4sl` | migration | PG-E01, PG-E02, PG-E03 |
+| `job-m78-64c74e2e74-probe-api-ynmz5br` | api | PG-E01, PG-E02 |
+| `job-m78-64c74e2e74-evidence-sc4ylw3` | operations | PG-E01, PG-E03, TI-E01, PG-E04 |
+| `job-m78-64c74e2e74-evidence-0wccxyg` | application | PG-E03, TI-E01 |
+| `job-m78-64c74e2e74-revoke-c9jvvry` | revoke | PG-E03 |
+| `job-m78-64c74e2e74-probe-api-k6hsu7t` | credential-denied | PG-E03 |
+| `job-m78-64c74e2e74-restore-t0ki0gp` | restore | PG-E03 |
+| `job-m78-64c74e2e74-probe-migrate-hckiob5` | failover-window | PG-E03, TI-E01 |
+
+Worker `job-m78-64c74e2e74-worker-78dfaht` supplied four running replicas before
+and after failover and was stopped after proof validation. Successful bootstrap
+`job-m78-64c74e2e74-bootstrap-2j1td68` and migration
+`job-m78-64c74e2e74-migration-ncnkf97` were preserved, not replayed. The retired
+failover probe's terminal log was recovered with its exact retained replica
+identity and original timestamps, without rerunning failover; provenance is
+`readiness-correction/retired-probe-continuation/retained-replica-provenance.json`
+under the private evidence root.
+
+### Cleanup, history and billing
+
+Cleanup completed at `2026-11-15T18:53:32.825748Z`. The cleanup runbook
+completed; its exact execution ID is retained in `final-results.json`.
+All 14 campaign residue counters are zero, the reusable controller was
+intentionally preserved, campaign schedules/bindings were disarmed, and the
+ledger is `finalized`. The initial deletion wait timed out; the same cleanup
+was subsequently reconciled and verified. Cleanup is complete, not pending.
+
+Earlier preflight, controller, image-admission and managed-execution failures
+remain failed historical attempts. Only the corrected-image executions above
+support the accepted final result. This documentation reconciliation does not
+rerun checks, rebuild images, renew schedules or reopen the campaign.
+
+Billing remains **unsettled**. The approved bundle ceiling is **USD 56.51** and
+the approved cumulative ceiling is **USD 220.89**. Retain the prior forecast
+**USD 164.3741** plus bundle forecast **USD 56.5095**, totaling **USD 220.8836**.
+Neither forecasts nor authorization ceilings are settled charges. The separate
+private observation at
+`.runtime/milestone_7_8/p-eight/ca/billing-reconciliation-20261115T190333Z/billing-reconciliation.json`
+records incomplete posted usage across reused groups and earlier campaigns;
+it does not establish this campaign's final cost or release headroom. Do not
+add posted usage again to forecasts that already cover it.
+
+### Remaining milestone scope and publication
+
+The [existing 7.8 checklist reconciliation](MILESTONE_7_IMPLEMENTATION_PLAN.md#78-completion-checklist-reconciliation--2026-11-15)
+lists the remaining requirements and their exact missing evidence. The
+[progress record](MILESTONE_7_PROGRESS.md#completed-postgresql-campaign--2026-11-15)
+records this closure. The historical provider-retention issue is not a current
+blocker for this completed campaign. Billing uncertainty is preserved as an
+evidence limitation, not a newly invented technical completion requirement.
+
+The user's 2026-11-15 checkpoint authorization permits committing this
+documentation and normally pushing the completed source corrections and
+documentation to the existing branch. It supersedes the earlier local-only,
+no-upstream/no-push restriction for this checkpoint only. It does not permit
+history rewriting, raw runtime publication, another campaign or Milestone 8.
+
+Documentation reconciliation checks passed: existing repository hygiene
+(734 source files), whitespace/diff checks, added local links and heading
+targets, receipt hashes, and the existing secret/private-path rules applied
+to all 311 outgoing source-history blobs plus the changed documents. Exact
+private campaign values were also checked without copying them into Git.
+The five protected stash object IDs match the starting inventory; no raw
+`.runtime` file is tracked. No unchanged test suite was rerun. The private
+check record is
+`.runtime/milestone_7_8/p-eight/ca/documentation-reconciliation/verification.json`.
+
+## Historical pre-mutation attempt — 2026-08-13
+
 Date: 2026-08-13
 
 Status: blocked at the mandatory pre-mutation cleanup gate; no Azure mutation,

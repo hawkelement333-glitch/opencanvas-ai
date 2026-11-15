@@ -1,8 +1,15 @@
 # Milestone 7 Production Hardening Progress
 
+Current status reconciled 2026-11-15: checkpoints 7.1–7.7 complete;
+**Azure PostgreSQL goal and verified campaign cleanup complete; 7.8 incomplete**
+for its [remaining existing requirements](MILESTONE_7_IMPLEMENTATION_PLAN.md#78-completion-checklist-reconciliation--2026-11-15).
+Milestone 8 remains unstarted. Dated entries and tables below retain their
+historical status; the final completion entry supersedes their open database
+and controller-execution claims.
+
 Date: 2026-08-13
 
-Overall status: architecture and checkpoints 7.1–7.7 complete and committed.
+Historical 2026-08-13 entry status: architecture and checkpoints 7.1–7.7 complete and committed.
 The retained checkpoint 7.7 terminal lifecycle chain validates through
 `MILESTONE_7_7_COMPLETE` at
 `b191a392922f94557e6ebf5914113b5e229ab00e`, including the uninterrupted
@@ -236,6 +243,9 @@ is part of this correction checkpoint.
 - no remote operation was required or performed.
 
 ## Architecture status
+
+The tables below retain their historical architecture/implementation snapshot;
+the current 2026-11-15 status and completed PostgreSQL entry supersede it.
 
 | Area                                               | Status                       |
 | -------------------------------------------------- | ---------------------------- |
@@ -767,3 +777,28 @@ does not wait for its soft-deleted inventory record to disappear. This source
 correction adds a local-only `controller-config` writer to break the former
 bootstrap/configuration cycle, but itself created no controller or campaign
 evidence.
+
+## Completed PostgreSQL campaign — 2026-11-15
+
+| Existing check | Current result | Accepted proof |
+| --- | --- | --- |
+| M78-PG-E01 | Complete / accepted | Connection capacity, reserve, steady traffic and rollout overlap; peak 31 |
+| M78-PG-E02 | Complete / accepted | Effective privileges, ownership, negative permissions and guarded migration |
+| M78-PG-E03 | Complete / accepted | Credential denial/restoration, failover, stale pools and durable replay; recovery 45.05 seconds |
+| M78-TI-E01 | Complete / accepted | Application, pooled and post-failover tenant isolation |
+| M78-PG-E04 | Complete / accepted | Operational configuration and measurements; p95 latency 592.26 ms |
+| Campaign cleanup | Complete / verified | All 14 residue counters zero; reusable controller preserved; ledger finalized |
+
+All 38 required assertions passed. The [completed PostgreSQL campaign](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15) records every contributing
+execution, immutable source/image binding and receipt hash. Cleanup completed
+at `2026-11-15T18:53:32.825748Z`; the reusable controller is preserved
+and the campaign ledger is finalized. Earlier failures remain history.
+
+Milestone 7.8 is not complete: the
+[existing checklist reconciliation](MILESTONE_7_IMPLEMENTATION_PLAN.md#78-completion-checklist-reconciliation--2026-11-15)
+identifies only its remaining provider-evidence and final-consolidation items.
+No acceptance test, Azure query, image build or campaign was rerun for this
+documentation checkpoint. Billing remains unsettled: USD 56.51/220.89 are
+approved bundle/cumulative ceilings; USD 164.3741 + 56.5095 = 220.8836 are retained
+forecasts, not settled charges. This checkpoint is authorized for commit and
+normal push to the existing branch; no next milestone is authorized.

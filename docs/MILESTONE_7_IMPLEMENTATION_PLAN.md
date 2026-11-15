@@ -1,8 +1,14 @@
 # Milestone 7 Production Hardening Implementation Plan
 
+Current status reconciled 2026-11-15: checkpoints 7.1–7.7 are complete;
+the [completed PostgreSQL campaign](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15) and verified cleanup are complete. Milestone 7.8 remains incomplete
+for the [existing remaining items](#78-completion-checklist-reconciliation--2026-11-15).
+Earlier dated entry authority is historical; the user now authorizes this
+documentation checkpoint and a normal push of the completed source corrections.
+
 Date: 2026-07-27
 
-Current status verified 2026-08-13: checkpoints 7.1–7.7 are complete and
+Historical entry status verified 2026-08-13: checkpoints 7.1–7.7 are complete and
 committed. The retained terminal lifecycle chain for checkpoint 7.7 validates
 through `MILESTONE_7_7_COMPLETE` at
 `b191a392922f94557e6ebf5914113b5e229ab00e`. Checkpoint 7.8 has entered its
@@ -53,7 +59,7 @@ created direct child `20260726_0026`; its immutable Git blob hash is
 Architecture:
 [`MILESTONE_7_ARCHITECTURE.md`](MILESTONE_7_ARCHITECTURE.md)
 
-Current sole Alembic head: `20260726_0028`
+Current sole Alembic head: `20260726_0029` (authorized 7.8 defect correction; historical checkpoint prerequisites below retain their original revision).
 
 ## Mobius Family Constitution inheritance
 
@@ -1025,6 +1031,54 @@ is the 2026-08-13 status at the start of this plan; it does not retroactively
 change the scope or claims of Internal Checkpoint 7.
 
 ## 10. Checkpoint 7.8 — Final Production-Readiness Audit
+
+### 7.8 completion checklist reconciliation — 2026-11-15
+
+**7.8 is incomplete.** The completed PostgreSQL campaign closes the managed
+database/tenant-isolation surface and its cleanup, not every requirement in
+this section. This is a reconciliation of the existing checklist and retained
+results, not a new audit or a new requirement. The
+[campaign handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15)
+contains acceptance, execution, source/image and receipt-hash evidence.
+
+| Existing check | Current result | Accepted proof |
+| --- | --- | --- |
+| M78-PG-E01 | Complete / accepted | Connection capacity, reserve, steady traffic and rollout overlap; peak 31 |
+| M78-PG-E02 | Complete / accepted | Effective privileges, ownership, negative permissions and guarded migration |
+| M78-PG-E03 | Complete / accepted | Credential denial/restoration, failover, stale pools and durable replay; recovery 45.05 seconds |
+| M78-TI-E01 | Complete / accepted | Application, pooled and post-failover tenant isolation |
+| M78-PG-E04 | Complete / accepted | Operational configuration and measurements; p95 latency 592.26 ms |
+| Campaign cleanup | Complete / verified | All 14 residue counters zero; reusable controller preserved; ledger finalized |
+
+The prior local audit shards remain valid historical evidence, including the
+local object-deletion correction and Indexer/regression coverage recorded in
+the [continuation validation ledger](MILESTONE_7_8_PRE_EXPIRY_MAXIMUM_SAFE_PROGRESS_HANDOFF.md#exact-validation-ledger).
+They are not relabeled as absent or rerun by this checkpoint. The remaining
+existing requirements are:
+
+| Existing checklist location | Remaining evidence or work |
+| --- | --- |
+| [Exact audit](#exact-audit), object storage; [Required final scenarios](#required-final-scenarios), quarantine/duplicates/failed transactions; register M78-D-001 | Current managed object/scanner proof covering authorization, checksum/version, quarantine and clean promotion, exact-version deletion/retention/recovery and failed-transaction behavior. M78-OS-001 is locally corrected; provider proof is still missing. |
+| [Exact audit](#exact-audit), shared limits; [Required final scenarios](#required-final-scenarios), atomic limits; register M78-D-002 | End-to-end approved isolated Managed Redis evidence proving atomic limits across replicas and safe dependency-failure behavior. Local adapter tests do not supply this provider proof. |
+| [Exact audit](#exact-audit), observability; [Required final scenarios](#required-final-scenarios), private-content exclusion; register M78-D-003/D-007 | Live telemetry destination, category-log delivery, dashboards, alerts, retention, access/revocation, privacy and runbook evidence. The older missing Stage 3 category-log observation has no recorded closure here. |
+| [Exact audit](#exact-audit), durable workers; register M78-D-004 | Recorded validation of production wake-up, operational telemetry and external multi-service delivery against the existing durable-work contract. Local shards and the PostgreSQL failover proof do not establish that full provider path. |
+| [Required final scenarios](#required-final-scenarios), managed backup/PITR/object restore/rollback; register M78-D-005 | Current-release reconciliation of managed recovery evidence for consistent database/object/index/queue/outbox recovery, rollback/DR and RPO/RTO. Retained 7.6 isolated exercises and this database failover result do not close the broader managed recovery requirement. No production deployment is required by this reconciliation. |
+| [Exact audit](#exact-audit), capacity/security; [Required final scenarios](#required-final-scenarios), ceilings and recovery; register M78-D-006 | Current-release capacity/failure closure and supported ceilings across load/stress/soak/spike/dependency recovery, with infrastructure/supply-chain evidence. Preserve the completed 7.7 soak and final image scan; the bounded PostgreSQL measurements do not establish every system-wide claim. Assess retained evidence before deciding whether any additional execution is needed. |
+| [Final validation](#final-validation) and [Documentation, commit, and exit](#documentation-commit-and-exit) | Consolidated current-release coverage for all affected backend/frontend/browser, provider, migration, build, security and protected-Git requirements; exact disposition of recorded skips, including the continuation's PostgreSQL fixtures and two real-PostgreSQL browser scenarios. No full final validation/completion record covers the later source corrections and outstanding provider items. Create `docs/MILESTONE_7_COMPLETION.md` only after these existing exit requirements and all Milestone 8 entry criteria are supported. |
+
+The [existing debt register](MILESTONE_7_8_DEFECT_REGISTER.md#evidence-debts-routed-to-later-audit-surfaces)
+and [historical remaining-gate inventory](MILESTONE_7_8_PRE_EXPIRY_MAXIMUM_SAFE_PROGRESS_HANDOFF.md#remaining-gates)
+are the sources for these items. They are evidence requirements, not newly
+declared defects. M78-D-008 remains a disclosed unsettled-cost limitation;
+settled billing is not added as a technical milestone exit gate. The old
+controller-retention/absence condition does not block the completed campaign.
+
+This checkpoint performs documentation/reference/privacy checks only; it does
+not repeat unchanged tests or authorize Azure execution. The user's explicit
+2026-11-15 commit and normal-push authorization supersedes the earlier
+local-only/no-upstream restriction for this completed checkpoint. All other
+milestone criteria, architecture, history and five protected stashes remain
+unchanged. Milestone 8 and later work remain unstarted.
 
 ### Purpose
 

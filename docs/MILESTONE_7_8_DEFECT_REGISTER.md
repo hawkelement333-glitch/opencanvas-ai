@@ -2,15 +2,18 @@
 
 Date: 2026-08-27
 
-Status: active; architecture and checkpoint-scope findings are corrected;
-managed PostgreSQL defects through M78-PG-017 and the first object-storage
-finding are locally remediated. The exact prior Automation account remains
-historical provider-retention evidence only. The disposable-controller
-architecture is superseded locally by one stable reusable controller outside
-campaign deletion scope; its state is
-`architecture-corrected-live-execution-not-authorized`.
-All five managed database evidence gaps remain open, and Milestone 7.8 is not
-complete.
+Status reconciled 2026-11-15: architecture/checkpoint-scope and recorded local
+defect corrections are preserved. All five managed PostgreSQL evidence checks
+are now **accepted**, with all 38 required assertions passed; campaign cleanup
+is **complete**, all 14 residue counters are zero, the reusable controller is
+preserved and the ledger is finalized. See the [completed PostgreSQL campaign](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15).
+Milestone 7.8 remains incomplete only for the
+[remaining existing requirements](MILESTONE_7_IMPLEMENTATION_PLAN.md#78-completion-checklist-reconciliation--2026-11-15).
+
+The defect narratives, local validation counts, missing-proof descriptions and
+failed-campaign dispositions below retain their historical inspection state.
+The current completion table supersedes their open PostgreSQL evidence status;
+it does not convert failed attempts into successes or alter prior findings.
 
 This register records defects proved by the Milestone 7.8 audit and, in a
 separate section, the evidence gaps the audit contract requires it to preserve.
@@ -591,9 +594,27 @@ not claimed and no tool was downloaded.
 
 ## Managed PostgreSQL and tenant-isolation evidence gaps
 
-An evidence gap is not silently labeled as a passing control or an
-implementation defect. These gaps are nevertheless blockers because this
-audit surface expressly requires the associated production-readiness proof.
+### Current completion checklist — 2026-11-15
+
+| Existing check | Current result | Accepted proof |
+| --- | --- | --- |
+| M78-PG-E01 | Complete / accepted | Connection capacity, reserve, steady traffic and rollout overlap; peak 31 |
+| M78-PG-E02 | Complete / accepted | Effective privileges, ownership, negative permissions and guarded migration |
+| M78-PG-E03 | Complete / accepted | Credential denial/restoration, failover, stale pools and durable replay; recovery 45.05 seconds |
+| M78-TI-E01 | Complete / accepted | Application, pooled and post-failover tenant isolation |
+| M78-PG-E04 | Complete / accepted | Operational configuration and measurements; p95 latency 592.26 ms |
+| Campaign cleanup | Complete / verified | All 14 residue counters zero; reusable controller preserved; ledger finalized |
+
+All entries are supported by the [completed PostgreSQL campaign](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15), including contributing executions,
+source/image bindings, private receipt locations and verified file hashes.
+These five checks and campaign cleanup are no longer outstanding requirements.
+
+### Historical gap definitions and earlier attempted dispositions
+
+The following table records the missing proof at the original audit, including
+the then-applicable risks and proposed validation. Its five gaps were closed
+by the final accepted campaign above; its rerun descriptions are historical,
+not instructions to execute another campaign.
 
 | Identifier | Evidence inspected and exact missing proof                                                                                                                                                                                                                                                                                                                                       | Affected production path                                                     | Severity / classification             | Validation and smallest authorized rerun                                                                                                                                                                                           | Residual risk                                                                                                           |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
@@ -603,7 +624,7 @@ audit surface expressly requires the associated production-readiness proof.
 | M78-TI-E01 | Central authority, 167 composite FKs, local cross-scope/revocation tests, and managed health are insufficient: no managed campaign combines cross-user/workspace/canvas/resource reads/writes, stale membership, worker/indexer paths, pool reuse, retry, and failover.                                                                                                          | All protected API and background database paths                              | High; unproved claim / evidence gap   | Local collaboration and data-path groups pass 24 + 108 tests. In an approved isolated campaign use two users/workspaces, revoke membership, force pool reuse/failover, and require zero cross-scope results or mutations.          | Managed-driver, PostgreSQL, pooled-transaction, or background-path behavior could differ from local SQLite proofs.      |
 | M78-PG-E04 | Bicep and retained topology prove PostgreSQL 17, pgvector, `centralus`, cross-region private peering to `southcentralus` compute, Entra-only auth, seven-day retention, ZoneRedundant HA, 64-GiB P6 storage, and disabled geo backup/autogrow. Exact assigned zones, maintenance window, connection ceiling, storage-growth rationale, and production capacity claim are absent. | Maintenance/restart, storage exhaustion, regional latency, backup durability | Medium; unproved claim / evidence gap | Focused PostgreSQL/runtime topology contracts pass; the handoff records the separate mixed infrastructure-suite result. Record the approved managed configuration and capacity rationale; no topology mutation is authorized here. | Maintenance timing, storage ceiling, exact zone behavior, and capacity remain operational unknowns.                     |
 
-### Latest managed campaign execution blocker
+### Historical managed campaign execution blocker
 
 The later campaign authorized from clean HEAD
 `e683ab00626fac9a1ac5a483ed4107e4ae47c60f` stopped in the committed operator's

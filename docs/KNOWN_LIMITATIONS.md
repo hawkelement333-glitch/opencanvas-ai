@@ -123,9 +123,13 @@ This register prevents the competition demo and public materials from implying c
 
 ## Current production-readiness boundary
 
-Milestones 7.1–7.7 are complete. Milestone 7.8 remains active and incomplete.
-All currently executable local audit work is recorded in the
-[pre-expiry continuation handoff](MILESTONE_7_8_PRE_EXPIRY_MAXIMUM_SAFE_PROGRESS_HANDOFF.md).
-The retained Automation account, the structurally non-armable Automation
-cleanup controller, and the separately authorized managed-provider evidence
-campaigns remain external gates. Milestone 8 has not begun.
+Milestones 7.1–7.7 are complete. Milestone 7.8 remains incomplete for the
+[existing provider-evidence and final-consolidation items](MILESTONE_7_IMPLEMENTATION_PLAN.md#78-completion-checklist-reconciliation--2026-11-15).
+The [completed PostgreSQL campaign](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15) accepted all five database/tenant checks and all 38 assertions;
+all 14 campaign residue counters are zero, the reusable controller is preserved
+and the ledger is finalized. Neither those checks nor the old disposable
+controller-retention condition remains a blocker for this completed campaign.
+The local audit evidence in the
+[pre-expiry continuation handoff](MILESTONE_7_8_PRE_EXPIRY_MAXIMUM_SAFE_PROGRESS_HANDOFF.md)
+remains historical. Billing is unsettled; forecasts and ceilings are not actual
+settled charges. Milestone 8 has not begun.
