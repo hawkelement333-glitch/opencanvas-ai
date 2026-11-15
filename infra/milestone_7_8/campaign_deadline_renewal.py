@@ -480,6 +480,12 @@ def completion_record(
 EVIDENCE_FIELDS = {"deadlineRenewalEvidenceFile", "deadlineRenewalEvidenceSha256"}
 
 
+def _configuration_binding(value: dict[str, Any]) -> str:
+    # Image admission and ledger transitions bind the digest independently. Renewal
+    # preserves the exact snapshot but owns every configuration field except image.
+    return _hash({key: item for key, item in value.items() if key != "image_digest"})
+
+
 def load_evidence(runtime: dict[str, str]) -> dict[str, Any] | None:
     """Validate every immutable renewal and its exact original/new binding."""
     if not EVIDENCE_FIELDS.intersection(runtime):
@@ -535,7 +541,8 @@ def load_evidence(runtime: dict[str, str]) -> dict[str, Any] | None:
         ):
             raise CampaignError("campaign renewal completion evidence differs")
         if prior is not None and (
-            _hash(plan["beforeConfig"]) != _hash(prior["plan"]["afterConfig"])
+            _configuration_binding(plan["beforeConfig"])
+            != _configuration_binding(prior["plan"]["afterConfig"])
             or {k: v for k, v in plan["beforeRuntime"].items() if k not in EVIDENCE_FIELDS}
             != {k: v for k, v in prior["plan"]["afterRuntime"].items() if k not in EVIDENCE_FIELDS}
             or plan["before"]["authoritySha256"] != prior["plan"]["after"]["authoritySha256"]
@@ -558,7 +565,10 @@ def origin_context(
     if evidence is None:
         return runtime, config
     records = evidence["records"]
-    if _hash(asdict(config)) != _hash(records[-1]["plan"]["afterConfig"]):
+    config.validate(allow_expired=True)
+    if _configuration_binding(asdict(config)) != _configuration_binding(
+        records[-1]["plan"]["afterConfig"]
+    ):
         raise CampaignError("campaign renewal active configuration was substituted")
     first = records[0]["plan"]
     return first["beforeRuntime"], config_from_snapshot(first["beforeConfig"])

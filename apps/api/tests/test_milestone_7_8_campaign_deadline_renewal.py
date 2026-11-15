@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -465,6 +466,149 @@ def test_evidence_preserves_original_foundation_and_disarms_all_bindings(monkeyp
     renewal.validate_ledger_binding(runtime, ledger)
     assert ledger.original_cleanup_deadline_utc == plan["before"]["deadlineUtc"]
     assert ledger.cleanup_deadline_utc == plan["after"]["deadlineUtc"]
+
+
+def write_renewal_evidence(directory, records):
+    directory.mkdir(exist_ok=True)
+    path = directory / f"renewal-{len(records)}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": "m7.8-campaign-deadline-renewal-evidence-v1",
+                "records": records,
+            }
+        )
+    )
+    return {
+        **records[-1]["plan"]["afterRuntime"],
+        "deadlineRenewalEvidenceFile": str(path),
+        "deadlineRenewalEvidenceSha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+
+
+def test_renewal_allows_independently_admitted_image_without_rewriting_evidence(
+    monkeypatch, tmp_path
+):
+    renewal, plan, _, kwargs, _ = execution_fixture(monkeypatch, tmp_path)
+    record = renewal.execute_plan(plan, **kwargs)
+    monkeypatch.chdir(tmp_path)
+    runtime = write_renewal_evidence(tmp_path / "runtime", [record])
+    evidence_path = Path(runtime["deadlineRenewalEvidenceFile"])
+    original_bytes = evidence_path.read_bytes()
+    digest = "sha256:" + "a" * 64
+    config = replace(renewal.config_from_snapshot(plan["afterConfig"]), image_digest=digest)
+    config.validate(allow_expired=True)
+    ledger = Ledger(**plan["beforeLedger"])
+    ledger.record_deadline_renewal(record["completion"])
+    ledger.record_image(digest, built=False)
+    ledger.record_image_scan(digest, "f" * 64)
+    ledger.transition(Phase.IMAGE_DECIDED, NOW)
+    renewal.validate_ledger_binding(runtime, ledger)
+    original_runtime, original_config = renewal.origin_context(runtime, config)
+    assert original_runtime == plan["beforeRuntime"]
+    assert original_config == renewal.config_from_snapshot(plan["beforeConfig"])
+    assert original_config.image_digest is None
+    assert ledger.image_digest == digest and ledger.image_scan_count == 1
+    assert evidence_path.read_bytes() == original_bytes
+    for changes in (
+        {"cleanup_deadline_utc": "2030-01-01T07:00:00Z"},
+        {"authorized_ceiling_usd": "50.00"},
+        {"maximum_hours": 4},
+        {"target_resource_group": "rg-different-target"},
+    ):
+        with pytest.raises(CampaignError):
+            renewal.origin_context(runtime, replace(config, **changes))
+
+
+def test_later_renewal_chain_allows_image_attachment_between_renewals(monkeypatch, tmp_path):
+    from infra.milestone_7_8 import campaign_deadline_renewal as renewal
+    from infra.milestone_7_8.operator import validate_cleanup_readback
+
+    config, runtime, ledger, baseline = fixture()
+    first = build_plan(
+        config,
+        runtime,
+        ledger,
+        new_deadline="2030-01-01T06:00:00Z",
+        authorized_not_after_utc="2030-01-01T08:00:00Z",
+        baseline=baseline,
+        now=NOW,
+    )
+
+    def record(plan, readback, observed, retained, now):
+        arm = validate_cleanup_readback(
+            readback,
+            renewal.config_from_snapshot(plan["afterConfig"]),
+            plan["afterRuntime"],
+            renewal_context=(runtime, config, retained),
+        )
+        journal = {"planSha256": plan["planSha256"], "filesSha256": {}}
+        completion = renewal.completion_record(
+            plan,
+            observed,
+            now=now,
+            old_authorization_sha256="a" * 64,
+            new_authorization_sha256="b" * 64,
+            journal=journal,
+            after_cleanup_arm_sha256=arm,
+        )
+        return dict(
+            plan=plan,
+            completion=completion,
+            snapshot=observed,
+            journal=journal,
+            cleanupReadback=readback,
+        )
+
+    first_record = record(
+        first, renewed_readback(first), snapshot(first, baseline, 3), [first["before"]], NOW
+    )
+    monkeypatch.chdir(tmp_path)
+    attached_runtime = write_renewal_evidence(tmp_path / "runtime", [first_record])
+    digest = "sha256:" + "a" * 64
+    attached_config = replace(
+        renewal.config_from_snapshot(first["afterConfig"]), image_digest=digest
+    )
+    ledger.record_deadline_renewal(first_record["completion"])
+    ledger.record_image(digest, built=False)
+    ledger.record_image_scan(digest, "f" * 64)
+    later = NOW + timedelta(hours=1)
+    ledger.transition(Phase.IMAGE_DECIDED, later)
+    first_active = snapshot(first, baseline, 3)
+    second_baseline = {
+        **baseline,
+        "observedAtUtc": "2030-01-01T02:00:00Z",
+        "target": first_active["target"],
+        "schedule": first_active["newSchedule"],
+        "binding": first_active["newBinding"],
+    }
+    second = build_plan(
+        attached_config,
+        attached_runtime,
+        ledger,
+        new_deadline="2030-01-01T08:00:00Z",
+        authorized_not_after_utc="2030-01-01T08:00:00Z",
+        baseline=second_baseline,
+        now=later,
+    )
+    readback = renewed_readback(second)
+    readback[:4] = first_record["cleanupReadback"][:4]
+    bindings = json.loads(readback[7]["stdout"])
+    bindings["value"].append(baseline["binding"])
+    readback[7] = _command_result(bindings)
+    second_record = record(
+        second,
+        readback,
+        snapshot(second, second_baseline, 3),
+        [first["before"], second["before"]],
+        later,
+    )
+    latest = write_renewal_evidence(tmp_path / "runtime", [first_record, second_record])
+    loaded = renewal.load_evidence(latest)
+    assert loaded["records"][0]["plan"]["afterConfig"]["image_digest"] is None
+    assert loaded["records"][1]["plan"]["beforeConfig"]["image_digest"] == digest
+    ledger.record_deadline_renewal(second_record["completion"])
+    renewal.validate_ledger_binding(latest, ledger)
 
 
 @pytest.mark.parametrize("absent_target", [False, True])
