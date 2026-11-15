@@ -536,6 +536,7 @@ def test_discard_never_removes_active_or_uncertain_protection(monkeypatch, tmp_p
         "duplicate",
         "foreign-terminal",
         "local-terminal",
+        "failed-empty-terminal",
         "active",
     ],
 )
@@ -579,7 +580,8 @@ def test_live_collector_requires_complete_inventories_and_exact_gets(conflict):
                 return _command_result(
                     {
                         "value": [{"id": job_id}]
-                        if conflict in {"foreign-terminal", "local-terminal", "active"}
+                        if conflict
+                        in {"foreign-terminal", "local-terminal", "failed-empty-terminal", "active"}
                         else []
                     }
                 )
@@ -588,8 +590,16 @@ def test_live_collector_requires_complete_inventories_and_exact_gets(conflict):
                     {
                         "id": job_id,
                         "properties": {
-                            "status": "Running" if conflict == "active" else "Completed",
-                            "parameters": {
+                            "status": (
+                                "Running"
+                                if conflict == "active"
+                                else "Failed"
+                                if conflict == "failed-empty-terminal"
+                                else "Completed"
+                            ),
+                            "parameters": {}
+                            if conflict == "failed-empty-terminal"
+                            else {
                                 **plan["before"]["parameters"],
                                 **(
                                     {
@@ -620,24 +630,95 @@ def test_live_collector_requires_complete_inventories_and_exact_gets(conflict):
             config, runtime, runner=Runner(), clock=lambda: NOW, plan=plan
         )
         assert classify_readback(plan, observed, now=NOW) == (
-            "uncertain" if conflict in {"local-terminal", "active"} else "old-active"
+            "uncertain" if conflict == "active" else "old-active"
         )
+        if conflict:
+            assert len(observed["cleanupJobs"]) == 1
+            assert observed["cleanupJobs"][0]["id"] == job_id
+            assert "parameters" in observed["cleanupJobs"][0]["properties"]
         assert observed["readStatus"]["newSchedule"] == "absent"
         assert len(calls) == (9 if conflict else 8)
 
 
-def test_fractional_requested_deadline_is_rejected_without_rounding():
+@pytest.mark.parametrize("deadline", ["2030-01-01T07:59:25Z", "2030-01-01T07:59:00.1Z"])
+def test_non_minute_requested_deadline_is_rejected_without_rounding(deadline):
     config, runtime, ledger, baseline = fixture()
-    with pytest.raises(CampaignError, match="whole-second"):
+    with pytest.raises(CampaignError, match="whole-minute"):
         build_plan(
             config,
             runtime,
             ledger,
-            new_deadline="2030-01-01T07:59:59.1Z",
+            new_deadline=deadline,
             authorized_not_after_utc="2030-01-01T08:00:00Z",
             baseline=baseline,
             now=NOW,
         )
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        "Completed",
+        "Failed",
+        "Stopped",
+        "Running",
+        "New",
+        "Activating",
+        "Starting",
+        "Queued",
+        "Suspended",
+        "Stopping",
+        "Unknown",
+        "completed",
+        "",
+        None,
+        [],
+        {},
+    ],
+)
+def test_only_explicit_terminal_job_states_allow_planning_and_readback(status):
+    config, runtime, ledger, baseline = fixture()
+    baseline["cleanupJobs"] = [
+        {
+            "id": "historical-p-six-job",
+            "properties": {
+                "status": status,
+                "parameters": {},
+            },
+        }
+    ]
+    options = dict(
+        new_deadline="2030-01-01T08:00:00Z",
+        authorized_not_after_utc="2030-01-01T08:00:00Z",
+        baseline=baseline,
+        now=NOW,
+    )
+    if isinstance(status, str) and status in {"Completed", "Failed", "Stopped"}:
+        plan = build_plan(config, runtime, ledger, **options)
+        assert plan["baseline"]["cleanupJobs"] == baseline["cleanupJobs"]
+        assert classify_readback(plan, snapshot(plan, baseline, 3), now=NOW) == "new-active"
+    else:
+        with pytest.raises(CampaignError, match="incomplete or drifted"):
+            build_plan(config, runtime, ledger, **options)
+        plan, _ = plan_fixture()
+        assert classify_readback(plan, snapshot(plan, baseline, 3), now=NOW) == "uncertain"
+
+
+@pytest.mark.parametrize("jobs", [None, {}, [None], [{}], [{"properties": None}]])
+def test_malformed_job_inventory_never_proves_no_active_jobs(jobs):
+    plan, baseline = plan_fixture()
+    observed = snapshot(plan, baseline, 2)
+    observed["cleanupJobs"] = jobs
+    assert classify_readback(plan, observed, now=NOW) == "uncertain"
+
+
+@pytest.mark.parametrize("complete", [False, None, "true"])
+def test_terminal_jobs_do_not_replace_complete_inventory_proof(complete):
+    plan, baseline = plan_fixture()
+    observed = snapshot(plan, baseline, 2)
+    observed["cleanupJobs"] = [{"properties": {"status": "Failed", "parameters": {}}}]
+    observed["cleanupJobsComplete"] = complete
+    assert classify_readback(plan, observed, now=NOW) == "uncertain"
 
 
 def test_focused_correction_gets_new_names_under_same_authority():

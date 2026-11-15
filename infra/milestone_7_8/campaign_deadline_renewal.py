@@ -124,6 +124,21 @@ def _binding_matches(value: object, expected: dict[str, Any]) -> bool:
     )
 
 
+def _no_active_cleanup_jobs(snapshot: dict[str, Any]) -> bool:
+    jobs = snapshot.get("cleanupJobs")
+    return (
+        snapshot.get("cleanupJobsComplete") is True
+        and isinstance(jobs, list)
+        and all(
+            isinstance(job, dict)
+            and isinstance(job.get("properties"), dict)
+            and isinstance(job["properties"].get("status"), str)
+            and job["properties"]["status"] in {"Completed", "Failed", "Stopped"}
+            for job in jobs
+        )
+    )
+
+
 def _snapshot_safe(snapshot: dict[str, Any], *, now: datetime) -> bool:
     """Snapshot must explicitly prove complete cleanup-job inventory and freshness."""
     try:
@@ -131,8 +146,7 @@ def _snapshot_safe(snapshot: dict[str, Any], *, now: datetime) -> bool:
         target = snapshot["target"]
         return (
             timedelta(0) <= now - observed <= timedelta(minutes=2)
-            and snapshot.get("cleanupJobsComplete") is True
-            and snapshot.get("cleanupJobs") == []
+            and _no_active_cleanup_jobs(snapshot)
             and target.get("properties", {}).get("provisioningState") == "Succeeded"
             and target.get("tags", {}).get("mobius.cleanup-started-utc") is None
         )
@@ -153,7 +167,7 @@ def build_plan(
     """Inputs are already locally validated; baseline is a complete live GET set.
 
     baseline keys: observedAtUtc, target (ARM RG), schedule (ARM schedule),
-    binding (exact ARM jobSchedule), cleanupJobs (this campaign only),
+    binding (exact ARM jobSchedule), cleanupJobs (complete controller job GETs),
     cleanupJobsComplete, controllerAuthorizedUntilUtc. This performs no I/O.
     """
     config.validate(allow_expired=True)
@@ -170,11 +184,8 @@ def build_plan(
         raise CampaignError("campaign deadline renewal requires an active bound campaign")
     old = parse_utc(config.cleanup_deadline_utc)
     new = parse_utc(new_deadline)
-    if (
-        re.fullmatch(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", new_deadline)
-        is None
-    ):
-        raise CampaignError("renewed cleanup deadline must be whole-second UTC")
+    if re.fullmatch(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:00Z", new_deadline) is None:
+        raise CampaignError("renewed cleanup deadline must be whole-minute UTC")
     maximum = parse_utc(authorized_not_after_utc)
     if old - now < timedelta(minutes=30):
         raise CampaignError("campaign renewal requires thirty minutes before the old deadline")
@@ -882,25 +893,9 @@ def collect_live_snapshot(
         properties = job.get("properties", {})
         if not isinstance(properties, dict):
             raise CampaignError("campaign renewal job properties are malformed")
-        parameters = properties.get("parameters", {})
-        scope_keys = {
-            "CampaignId",
-            "GenerationId",
-            "TargetResourceGroupName",
-            "SubscriptionCorrelation",
-        }
-        # A reusable controller can retain terminal jobs from other campaigns.
-        # Only complete exact job GETs can prove that a historical job is unrelated.
-        unrelated_terminal = (
-            properties.get("status") in {"Completed", "Failed", "Stopped"}
-            and isinstance(parameters, dict)
-            and scope_keys <= parameters.keys()
-            and (parameters["CampaignId"], parameters["GenerationId"])
-            != (config.campaign_id, config.generation_id)
-            and parameters["TargetResourceGroupName"] != config.target_resource_group
-        )
-        if not unrelated_terminal:
-            cleanup_jobs.append(job)
+        # Preserve every exact GET, including terminal jobs with missing parameters.
+        # Safety classification accepts only explicit terminal execution states.
+        cleanup_jobs.append(job)
     observed: dict[str, Any] = {
         "observedAtUtc": utc(started),
         "target": target,
@@ -1004,17 +999,7 @@ def discard_staged_plan(
         statuses = result.get("readStatus", {})
         absent = statuses.get("target") == "absent" and result.get("target") is None
         if absent:
-            jobs = result.get("cleanupJobs")
-            if (
-                result.get("cleanupJobsComplete") is not True
-                or not isinstance(jobs, list)
-                or any(
-                    not isinstance(job, dict)
-                    or job.get("properties", {}).get("status")
-                    not in {"Completed", "Failed", "Stopped"}
-                    for job in jobs
-                )
-            ):
+            if not _no_active_cleanup_jobs(result):
                 raise CampaignError("campaign renewal discard has unresolved cleanup jobs")
         elif classify_readback(plan, result, now=clock()) not in {"old-active", "new-staged"}:
             raise CampaignError("campaign renewal replacement is active or uncertain")

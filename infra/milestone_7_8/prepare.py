@@ -188,6 +188,8 @@ def main() -> int:
             if args.cleanup_deadline
             else (observed_at + timedelta(hours=4)).replace(second=0, microsecond=0)
         )
+        if deadline_time.second != 0 or deadline_time.microsecond != 0:
+            raise CampaignError("cleanup deadline must be whole-minute UTC")
         if deadline_time <= observed_at:
             raise CampaignError("cleanup deadline is expired")
         if deadline_time > observed_at + timedelta(hours=args.maximum_hours):

@@ -1783,10 +1783,13 @@ def test_prepare_rejects_invalid_local_boundary(
         assert not output.exists()
 
 
-@pytest.mark.parametrize("deadline_hour", [None, 0, 8])
+@pytest.mark.parametrize(
+    ("deadline_hour", "deadline_seconds"),
+    [(None, "00"), (0, "00"), (8, "00"), (8, "25"), (8, "00.5")],
+)
 def test_prepare_creates_one_private_restart_safe_bundle(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
-    deadline_hour: int | None,
+    deadline_hour: int | None, deadline_seconds: str,
 ) -> None:
     class FrozenDatetime(datetime):
         @classmethod
@@ -1947,7 +1950,7 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             "--controller-authority-evidence",
             str(authority_path),
             *(
-                ["--cleanup-deadline", f"2030-01-01T{deadline_hour:02}:00:00Z",
+                ["--cleanup-deadline", f"2030-01-01T{deadline_hour:02}:00:{deadline_seconds}Z",
                  "--maximum-hours", str(deadline_hour or 4),
                  "--authorized-ceiling-usd", "56.51" if deadline_hour == 8 else "50.00",
                  *(["--cost-fields", str(cost_path)] if deadline_hour == 8 else [])]
@@ -1955,10 +1958,12 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             ),
         ],
     )
-    if deadline_hour == 0:
+    if deadline_hour == 0 or deadline_seconds != "00":
         assert prepare.main() != 0
         assert not output.exists()
         assert not discovery_args
+        if deadline_seconds != "00":
+            assert "whole-minute" in capsys.readouterr().err
         return
     assert prepare.main() == 0
     assert existing_evidence.read_text(encoding="utf-8") == '{"preserved":true}'
