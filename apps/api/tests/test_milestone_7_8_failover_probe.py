@@ -184,8 +184,9 @@ def test_long_sampling_run_retains_real_transition_boundaries_with_bounded_conso
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("error", [TimeoutError, ConnectionRefusedError])
 async def test_snapshot_connection_timeout_records_disruption_then_fresh_recovery(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, error: type[OSError],
 ) -> None:
     async def respond(request: httpx.Request) -> httpx.Response:
         return httpx.Response(201 if request.method == "POST" else 200, json={})
@@ -199,7 +200,7 @@ async def test_snapshot_connection_timeout_records_disruption_then_fresh_recover
         )
         stamp = "2030-01-01T00:01:00+00:00"
         snapshots = AsyncMock(side_effect=[
-            TimeoutError("connection acquisition timed out"),
+            error("synthetic connection acquisition failure"),
             {
                 "heartbeats": [{"seen": stamp} for _ in range(4)],
                 "attempts": [{"started": stamp}],

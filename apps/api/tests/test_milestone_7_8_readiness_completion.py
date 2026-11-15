@@ -11,7 +11,7 @@ from infra.milestone_7_8 import image_continuation, operator
 from infra.milestone_7_8.campaign import CampaignError, Ledger, Phase
 
 
-def completion_case(tmp_path: Path, monkeypatch):
+def completion_case(tmp_path: Path, monkeypatch, *, failed_execution: str | None = None):
     config = _config(cleanup_deadline_utc="2030-01-01T01:00:00Z")
     runtime = _runtime()
     old, new = "sha256:" + "1" * 64, "sha256:" + "2" * 64
@@ -33,7 +33,7 @@ def completion_case(tmp_path: Path, monkeypatch):
     pause = operator._stage_record(tmp_path / "evidence-stage-pause.json", "stage-pause", {
         "version": "m7.8-protected-stage-pause-v1", "operation": "evidence",
         "bindings": prior, "attemptSha256": attempt["recordSha256"],
-        "authorizationSha256": "b" * 64, "failedExecution": None,
+        "authorizationSha256": "b" * 64, "failedExecution": failed_execution,
         "failedAtUtc": "2030-01-01T00:02:00Z", "recoveryUntilUtc": "2030-01-01T00:17:00Z",
         "maximumRetryDispatches": 1,
     })
@@ -41,6 +41,7 @@ def completion_case(tmp_path: Path, monkeypatch):
         "originalBindings": prior, "originalCommandSha256": attempt["commandSha256"],
         "originalAttemptSha256": attempt["recordSha256"],
         "originalPauseSha256": pause["recordSha256"], "continuationSha256": "c" * 64,
+        "originalFailedExecution": failed_execution,
     }
     monkeypatch.setattr(image_continuation, "validate_readiness_evidence_origin",
                         lambda *a, **k: origin, raising=False)
@@ -85,3 +86,25 @@ def test_corrected_image_cannot_use_legacy_missing_history_path(tmp_path, monkey
         (tmp_path / f"evidence-stage-{kind}.json").unlink()
     with pytest.raises(CampaignError, match="original history"):
         operator._reconcile_evidence_stage_completion(tmp_path, config, runtime, ledger, {})
+
+
+@pytest.mark.parametrize("origin_execution", ["failed-probe-exact", "other-probe", None])
+def test_failed_acceptance_completion_requires_exact_validated_failure_origin(
+    tmp_path, monkeypatch, origin_execution,
+):
+    config, runtime, ledger, origin = completion_case(
+        tmp_path, monkeypatch, failed_execution="failed-probe-exact",
+    )
+    pause_path = tmp_path / "evidence-stage-pause.json"
+    original = pause_path.read_bytes()
+    origin["originalFailedExecution"] = origin_execution
+    if origin_execution == "failed-probe-exact":
+        operator._reconcile_evidence_stage_completion(tmp_path, config, runtime, ledger, {})
+        assert (tmp_path / "evidence-stage-recovery-completed.json").exists()
+        ledger.phase = Phase.EVIDENCE_EXECUTED.value
+        operator._reconcile_evidence_stage_completion(tmp_path, config, runtime, ledger)
+    else:
+        with pytest.raises(CampaignError, match="pause binding"):
+            operator._reconcile_evidence_stage_completion(tmp_path, config, runtime, ledger, {})
+        assert not (tmp_path / "evidence-stage-recovery-completed.json").exists()
+    assert pause_path.read_bytes() == original

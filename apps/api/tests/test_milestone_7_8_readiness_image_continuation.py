@@ -572,3 +572,138 @@ def test_successor_rejects_changed_predecessor_binding(case, monkeypatch, field,
     write(path, plan)
     with pytest.raises(CampaignError):
         continuation.load_plan(path)
+
+
+@pytest.fixture
+def failed_acceptance_case(case):
+    folder, runtime, config, *_ = case
+    reconciliation = folder / "failed-evidence-reconciliation"
+    reconciliation.mkdir()
+    for index in (1, 2):
+        for suffix in ("intent", "result"):
+            source = (folder / "measurement-failure-diagnosis/terminal-reconciliation"
+                      / f"{index:02}-{suffix}.json")
+            write(reconciliation / f"{index + 1:03}-{suffix}.json",
+                  json.loads(source.read_text()))
+    phase = folder / "phases/evidence-first"
+    write(phase / "command-result.json", {"exitCode": 2, "stderr": "managed job failed"})
+    job = runtime["migrationProbeJobName"]
+    execution = job + "-failed-execution"
+    resource_id = (
+        f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/"
+        f"{config.target_resource_group}/providers/Microsoft.App/jobs/{job}/executions/{execution}"
+    )
+    scope = ["--name", job, "--resource-group", config.target_resource_group,
+             "--subscription", runtime["subscriptionId"]]
+    write(phase / "003-intent.json", {"command": ["az", "containerapp", "job", "start", *scope]})
+    write(phase / "003-result.json", {"exitCode": 0, "stdout": json.dumps({
+        "id": resource_id, "name": execution,
+    })})
+    write(reconciliation / "001-intent.json", {"command": [
+        "az", "containerapp", "job", "execution", "show", *scope,
+        "--job-execution-name", execution,
+    ]})
+    write(reconciliation / "001-result.json", {"exitCode": 0, "stdout": json.dumps({
+        "id": resource_id, "name": execution, "properties": {
+            "status": "Failed", "template": {"containers": [{
+                "image": f"{runtime['registryName']}.azurecr.io/mobius-api@{OLD}",
+                "args": ["--phase=failover-window"],
+            }]},
+        },
+    })})
+    write(phase / "004-intent.json", {"command": [
+        "az", "postgres", "flexible-server", "restart", "--name", runtime["postgresServerName"],
+        "--resource-group", config.target_resource_group,
+        "--subscription", runtime["subscriptionId"],
+        "--failover", "Forced",
+    ]})
+    write(phase / "004-result.json", {"exitCode": 0, "stdout": "{}"})
+    pause_path = folder / "evidence-stage-pause.json"
+    pause = json.loads(pause_path.read_text())
+    pause.pop("recordSha256")
+    pause["failedExecution"] = execution
+    pause["recordSha256"] = operator._stage_hash("stage-pause", pause)
+    write(pause_path, pause)
+    write(folder / "managed-assertion-captures/prior-pass.json", {"status": "passed"})
+    return case, reconciliation
+
+
+def build_failed_acceptance_plan(failed_acceptance_case):
+    case, reconciliation = failed_acceptance_case
+    folder, *_ = case
+    return continuation.build_readiness_plan(
+        folder / "runtime.json", folder / "config.json", folder / "ledger.json",
+        retained_image=folder / "retained-image.json",
+        source_authority=folder / "source-authority.json",
+        failed_evidence_reconciliation=reconciliation,
+    )
+
+
+def test_failed_acceptance_replacement_preserves_truthful_failure_and_migrations(
+    failed_acceptance_case,
+):
+    case, _ = failed_acceptance_case
+    folder, runtime, config, ledger, plan_path, scan, auth, provider = case
+    original = {name: (folder / name).read_bytes() for name in (
+        "runtime.json", "config.json", "evidence-stage-pause.json",
+        "managed-assertion-captures/prior-pass.json",
+    )}
+    transitions = list(ledger.transitions)
+    plan = build_failed_acceptance_plan(failed_acceptance_case)
+    assert plan["version"] == continuation.FAILED_EVIDENCE_VERSION
+    write(plan_path, plan)
+    assert continuation.load_plan(plan_path) == plan
+    assert continuation.execute_admission(
+        plan_path, runtime, config, ledger, digest=NEW, scan_path=scan,
+        authorization=auth, execute=True,
+    ) == 0
+    actual = load_ledger(folder / "ledger.json", config)
+    assert actual.phase == Phase.MIGRATED and actual.transitions == transitions
+    assert actual.image_digest == NEW and provider.patches == 10
+    assert all((folder / name).read_bytes() == value for name, value in original.items())
+    assert continuation.validate_readiness_evidence_origin(
+        folder, replace(config, image_digest=NEW), runtime, actual,
+    )["originalPauseSha256"] == json.loads(original["evidence-stage-pause.json"])["recordSha256"]
+
+
+@pytest.mark.parametrize("defect", [
+    "running", "unknown-restart", "wrong-image", "missing-result", "wrong-failed-execution",
+    "wrong-phase", "missing-final-result", "completed-proof",
+])
+def test_failed_acceptance_replacement_rejects_unreconciled_history(failed_acceptance_case, defect):
+    case, reconciliation = failed_acceptance_case
+    folder, *_ = case
+    path = reconciliation / "001-result.json"
+    envelope = json.loads(path.read_text())
+    resource = json.loads(envelope["stdout"])
+    if defect == "running":
+        resource["properties"]["status"] = "Running"
+    elif defect == "wrong-image":
+        resource["properties"]["template"]["containers"][0]["image"] = "other@" + NEW
+    elif defect == "wrong-phase":
+        resource["properties"]["template"]["containers"][0]["args"] = ["--phase=migration"]
+    elif defect == "wrong-failed-execution":
+        resource["name"] = "other-execution"
+    envelope["stdout"] = json.dumps(resource)
+    write(path, envelope)
+    if defect == "unknown-restart":
+        write(folder / "phases/evidence-first/004-result.json", {"exitCode": 1, "stdout": ""})
+    elif defect == "missing-result":
+        path.unlink()
+    elif defect == "missing-final-result":
+        (folder / "phases/evidence-first/command-result.json").unlink()
+    elif defect == "completed-proof":
+        write(folder / "managed-evidence-execution.json", {"requiresReconciliation": True})
+    with pytest.raises(CampaignError, match="failed evidence"):
+        build_failed_acceptance_plan(failed_acceptance_case)
+
+
+def test_original_readiness_plan_still_rejects_failed_acceptance(failed_acceptance_case):
+    case, _ = failed_acceptance_case
+    folder, *_ = case
+    with pytest.raises(CampaignError, match="original evidence history"):
+        continuation.build_readiness_plan(
+            folder / "runtime.json", folder / "config.json", folder / "ledger.json",
+            retained_image=folder / "retained-image.json",
+            source_authority=folder / "source-authority.json",
+        )

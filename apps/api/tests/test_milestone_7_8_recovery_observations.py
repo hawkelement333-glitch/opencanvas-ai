@@ -236,7 +236,8 @@ def test_generic_evidence_marker_retains_exact_token(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", [
-    "invalidate", "sqlstate", "timeout", "persistent", "persistent-timeout", "auth", "cancel",
+    "invalidate", "sqlstate", "timeout", "refused", "persistent", "persistent-timeout",
+    "persistent-refused", "auth", "cancel",
 ])
 async def test_worker_reconnects_only_from_transient_database_failure(
     monkeypatch: pytest.MonkeyPatch, outcome: str,
@@ -272,6 +273,8 @@ async def test_worker_reconnects_only_from_transient_database_failure(
             raise failure("57P03")
         if outcome == "persistent-timeout":
             raise TimeoutError("connection acquisition timed out")
+        if outcome == "persistent-refused":
+            raise ConnectionRefusedError(111, "synthetic database connection refused")
         if outcome == "auth":
             raise failure("28P01", invalidated=True)
         if outcome == "cancel":
@@ -281,6 +284,8 @@ async def test_worker_reconnects_only_from_transient_database_failure(
                 raise failure(None, invalidated=True)
             if outcome == "timeout":
                 raise TimeoutError("connection acquisition timed out")
+            if outcome == "refused":
+                raise ConnectionRefusedError(111, "synthetic database connection refused")
             raise failure("57P01")
         if iterations == 2:
             return True
@@ -293,12 +298,15 @@ async def test_worker_reconnects_only_from_transient_database_failure(
     monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: clock))
     monkeypatch.setattr(jobs, "_WORKER_DATABASE_RECOVERY_SECONDS", 2.0)
     monkeypatch.setattr(asyncio, "sleep", sleep)
-    if outcome in {"persistent", "persistent-timeout", "auth"}:
-        with pytest.raises(TimeoutError if outcome == "persistent-timeout" else DBAPIError):
+    if outcome in {"persistent", "persistent-timeout", "persistent-refused", "auth"}:
+        expected_error = {
+            "persistent-timeout": TimeoutError, "persistent-refused": ConnectionRefusedError,
+        }.get(outcome, DBAPIError)
+        with pytest.raises(expected_error):
             await DocumentWorker.run_forever(fake_worker)
         assert events == (
             ["iteration", "sleep", "iteration", "sleep"]
-            if outcome in {"persistent", "persistent-timeout"}
+            if outcome in {"persistent", "persistent-timeout", "persistent-refused"}
             else ["iteration"]
         )
     else:

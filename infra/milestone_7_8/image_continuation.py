@@ -77,6 +77,8 @@ GRANT_FIELDS = FIELDS | {
     "cleanupMustBeginByUtc",
 }
 READINESS_VERSION = "m7.8-readiness-image-continuation-plan-v1"
+FAILED_EVIDENCE_VERSION = "m7.8-failed-evidence-image-continuation-plan-v1"
+MIGRATED_IMAGE_VERSIONS = {READINESS_VERSION, FAILED_EVIDENCE_VERSION}
 READINESS_OPERATIONS = CLEANUP_OPERATIONS | {"image", "image-decision", "evidence", "dispose"}
 READINESS_FIELDS = FIELDS | {
     "originalImageDigest",
@@ -87,6 +89,7 @@ READINESS_FIELDS = FIELDS | {
 READINESS_SUCCESSOR_FIELDS = READINESS_FIELDS | {
     "previousPlanFile", "previousPlanSha256", "previousAdmissionSha256", "readinessSequence",
 }
+FAILED_EVIDENCE_FIELDS = READINESS_FIELDS | {"failedEvidenceReconciliationDirectory"}
 
 
 def _readiness_path(folder: Path, sequence: int) -> Path:
@@ -103,7 +106,7 @@ def _readiness_predecessor(plan: dict[str, object]) -> dict[str, object] | None:
             or path != _readiness_path(folder, sequence - 1)):
         raise CampaignError("readiness predecessor path or sequence differs")
     previous = load_plan(path)
-    if (previous.get("version") != READINESS_VERSION
+    if (previous.get("version") not in MIGRATED_IMAGE_VERSIONS
             or previous["planSha256"] != plan["previousPlanSha256"]
             or any(previous[key] != plan[key]
                    for key in ("runtimeFile", "configFile", "ledgerFile"))
@@ -273,7 +276,8 @@ def _readiness_history(plan: dict[str, object]) -> tuple[dict[str, object], dict
         or pause.get("bindings") != expected
         or pause.get("attemptSha256") != attempt["recordSha256"]
         or pause.get("authorizationSha256") != attempt["authorizationSha256"]
-        or pause.get("failedExecution") is not None
+        or (pause.get("failedExecution") is not None
+            and plan.get("version") != FAILED_EVIDENCE_VERSION)
         or _file_hash(folder / "evidence-stage-pause.json") != plan["preassertionPauseSha256"]
     ):
         raise CampaignError("readiness image correction original evidence history differs")
@@ -285,6 +289,9 @@ def _readiness_measurement_dispatches(plan: dict[str, object]) -> None:
     if "previousPlanFile" in plan:
         # The predecessor loader replays the original preassertion proof. Later
         # failed assertions remain retained; they are not reclassified as preassertion.
+        return
+    if plan.get("version") == FAILED_EVIDENCE_VERSION:
+        _failed_evidence_dispatches(plan)
         return
     runtime, config = _readiness_context(plan)
     folder = Path(str(plan["runtimeFile"])).parent
@@ -371,6 +378,116 @@ def _readiness_measurement_dispatches(plan: dict[str, object]) -> None:
         raise CampaignError("readiness worker/sampler terminal reconciliation is incomplete")
 
 
+def _failed_evidence_dispatches(plan: dict[str, object]) -> None:
+    """Reconcile real failed acceptance without reclassifying it as preassertion."""
+    from infra.milestone_7_8 import operator
+
+    runtime, config = _readiness_context(plan)
+    folder = Path(str(plan["runtimeFile"])).parent
+    reconciliation = _private(Path(str(plan["failedEvidenceReconciliationDirectory"])))
+    if not reconciliation.is_relative_to(folder) or not reconciliation.is_dir():
+        raise CampaignError("failed evidence reconciliation scope differs")
+    files = _object(plan["boundFilesSha256"])
+    pause = operator._read_stage_record(folder / "evidence-stage-pause.json", "stage-pause")
+    failed = pause.get("failedExecution")
+    if not isinstance(failed, str) or not failed:
+        raise CampaignError("failed evidence execution identity is absent")
+    starts: set[tuple[str, str, str]] = set()
+    terminal: dict[tuple[str, str, str], str] = {}
+    failovers = 0
+    failed_phases = 0
+
+    def option(command: list[str], name: str) -> str:
+        try:
+            return command[command.index(name) + 1]
+        except (ValueError, IndexError) as exc:
+            raise CampaignError("failed evidence command scope is incomplete") from exc
+
+    for name in sorted(files):
+        path = Path(name)
+        evidence_phase = path.parent.parent == folder / "phases" and path.parent.name.startswith(
+            "evidence-"
+        )
+        if evidence_phase and path.name == "command-result.json":
+            result = _read(path)
+            if type(result.get("exitCode")) is not int or result["exitCode"] == 0:
+                raise CampaignError("failed evidence invocation has no terminal failure")
+            if any(str(item) not in files for item in path.parent.rglob("*") if item.is_file()):
+                raise CampaignError("failed evidence invocation history is incomplete")
+            failed_phases += 1
+        if not path.name.endswith("-intent.json") or not (
+            evidence_phase or path.parent == reconciliation
+        ):
+            continue
+        command = _read(path).get("command")
+        if not isinstance(command, list) or not all(isinstance(part, str) for part in command):
+            raise CampaignError("failed evidence dispatch history is malformed")
+        start = evidence_phase and command[:4] == ["az", "containerapp", "job", "start"]
+        show = command[:5] == ["az", "containerapp", "job", "execution", "show"]
+        restart = evidence_phase and command[:4] == [
+            "az", "postgres", "flexible-server", "restart"
+        ]
+        if not (start or show or restart):
+            continue
+        if (option(command, "--resource-group") != config.target_resource_group
+                or option(command, "--subscription") != runtime["subscriptionId"]):
+            raise CampaignError("failed evidence command scope differs")
+        result_path = path.with_name(path.name.replace("-intent.json", "-result.json"))
+        if str(result_path) not in files:
+            raise CampaignError("failed evidence dispatch response is not retained")
+        envelope = _read(result_path)
+        if envelope.get("exitCode") != 0 or not isinstance(envelope.get("stdout"), str):
+            raise CampaignError("failed evidence dispatch outcome is unknown")
+        if restart:
+            if (option(command, "--name") != runtime["postgresServerName"]
+                    or option(command, "--failover") != "Forced"):
+                raise CampaignError("failed evidence failover scope differs")
+            failovers += 1
+            continue
+        job = option(command, "--name")
+        if job not in {value for key, value in runtime.items() if key.endswith("JobName")}:
+            raise CampaignError("failed evidence job is outside the campaign")
+        value = _object(json.loads(str(envelope["stdout"])))
+        execution = value.get("name")
+        if not isinstance(execution, str) or not execution:
+            raise CampaignError("failed evidence execution identity is absent")
+        resource_id = (
+            f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/"
+            f"{config.target_resource_group}/providers/Microsoft.App/jobs/{job}"
+            f"/executions/{execution}"
+        )
+        if str(value.get("id", "")).casefold() != resource_id.casefold():
+            raise CampaignError("failed evidence execution differs from exact scope")
+        identity = (job, execution, resource_id.casefold())
+        if start:
+            if identity in starts:
+                raise CampaignError("failed evidence contains duplicate dispatch identity")
+            starts.add(identity)
+            continue
+        if option(command, "--job-execution-name") != execution:
+            raise CampaignError("failed evidence terminal GET names another execution")
+        properties = _object(value.get("properties"))
+        containers = _object(properties.get("template")).get("containers")
+        if not isinstance(containers, list) or len(containers) != 1:
+            raise CampaignError("failed evidence execution template is incomplete")
+        if _object(containers[0]).get("image") != (
+            f"{runtime['registryName']}.azurecr.io/mobius-api@{plan['originalImageDigest']}"
+        ):
+            raise CampaignError("failed evidence terminal image differs")
+        status = properties.get("status")
+        if status in {"Succeeded", "Failed", "Stopped"}:
+            terminal[identity] = str(status)
+        if execution == failed and (
+            job != runtime["migrationProbeJobName"]
+            or _object(containers[0]).get("args") != ["--phase=failover-window"]
+        ):
+            raise CampaignError("failed evidence recovery probe binding differs")
+    if (not starts or failed_phases != 1 or failovers != 1
+            or any(item not in terminal for item in starts)
+            or not any(item[1] == failed and terminal.get(item) == "Failed" for item in starts)):
+        raise CampaignError("failed evidence terminal reconciliation is incomplete")
+
+
 def build_readiness_plan(
     runtime_path: Path,
     config_path: Path,
@@ -379,6 +496,7 @@ def build_readiness_plan(
     retained_image: Path,
     source_authority: Path,
     previous_plan: Path | None = None,
+    failed_evidence_reconciliation: Path | None = None,
 ) -> dict[str, object]:
     """Bind one readiness correction to the migrated campaign's retained evidence."""
     from infra.milestone_7_8 import operator
@@ -427,6 +545,18 @@ def build_readiness_plan(
         "sourceAuthoritySha256": _file_hash(source_authority),
         "preassertionPauseSha256": _file_hash(folder / "evidence-stage-pause.json"),
     }
+    if failed_evidence_reconciliation is not None:
+        if previous_plan is not None:
+            raise CampaignError("failed evidence origin cannot replace predecessor history")
+        if any((folder / name).exists() for name in (
+            "managed-evidence-execution.json", "managed-assertion-evidence.json",
+        )):
+            raise CampaignError("failed evidence with completed proof requires reconciliation")
+        reconciliation = _private(failed_evidence_reconciliation)
+        plan.update({
+            "version": FAILED_EVIDENCE_VERSION,
+            "failedEvidenceReconciliationDirectory": str(reconciliation),
+        })
     bound = {
         runtime_path,
         config_path,
@@ -447,7 +577,7 @@ def build_readiness_plan(
     if previous_plan is not None:
         previous_plan = _private(previous_plan)
         previous = load_plan(previous_plan)
-        if previous.get("version") != READINESS_VERSION:
+        if previous.get("version") not in MIGRATED_IMAGE_VERSIONS:
             raise CampaignError("readiness successor requires a readiness predecessor")
         receipt = validate_admission(previous_plan, *_readiness_context(previous), ledger)
         plan.update({
@@ -458,6 +588,10 @@ def build_readiness_plan(
         })
         bound.update(path for path in previous_plan.parent.rglob("*") if path.is_file())
     bound.update(path for path in (folder / "phases").rglob("*") if path.is_file())
+    if failed_evidence_reconciliation is not None:
+        bound.update(path for path in reconciliation.rglob("*") if path.is_file())
+        bound.update(path for path in (folder / "managed-assertion-captures").rglob("*")
+                     if path.is_file())
     bound.update(
         path for path in (folder / "measurement-failure-diagnosis").rglob("*") if path.is_file()
     )
@@ -465,7 +599,7 @@ def build_readiness_plan(
     _readiness_source(plan)
     _readiness_history(plan)
     _readiness_measurement_dispatches(plan)
-    if previous_plan is None and (
+    if previous_plan is None and failed_evidence_reconciliation is None and (
         (folder / "managed-evidence-execution.json").exists()
         or (folder / "managed-assertion-evidence.json").exists()
         or (folder / "managed-assertion-captures").exists()
@@ -477,7 +611,9 @@ def build_readiness_plan(
 
 def _load_readiness_plan(path: Path, plan: dict[str, object]) -> dict[str, object]:
     if (
-        set(plan) not in (READINESS_FIELDS, READINESS_SUCCESSOR_FIELDS)
+        set(plan) not in (READINESS_FIELDS, READINESS_SUCCESSOR_FIELDS, FAILED_EVIDENCE_FIELDS)
+        or ((plan.get("version") == FAILED_EVIDENCE_VERSION)
+            != (set(plan) == FAILED_EVIDENCE_FIELDS))
         or plan["planSha256"] != _hash({k: v for k, v in plan.items() if k != "planSha256"})
         or path.resolve()
         != _readiness_path(Path(str(plan["runtimeFile"])).parent,
@@ -1219,7 +1355,7 @@ def grant_retry_transition(
 
 
 def _plan_source(plan: dict[str, object]) -> str:
-    if plan.get("version") == READINESS_VERSION:
+    if plan.get("version") in MIGRATED_IMAGE_VERSIONS:
         return _readiness_source(plan)
     if plan.get("version") == GRANT_VERSION:
         previous = load_plan(Path(str(plan["previousPlanFile"])))
@@ -1758,7 +1894,7 @@ def build_plan(
 
 def load_plan(path: Path) -> dict[str, object]:
     plan = _read(_private(path))
-    if plan.get("version") == READINESS_VERSION:
+    if plan.get("version") in MIGRATED_IMAGE_VERSIONS:
         return _load_readiness_plan(path, plan)
     if plan.get("version") == MIGRATION_VERSION:
         return _load_migration_plan(path, plan)
@@ -1862,7 +1998,7 @@ def _validate_completed_image(record: dict[str, object]) -> None:
 
 def image_evidence_context(path: Path) -> tuple[Path, dict[str, str], CampaignConfig]:
     plan = load_plan(path)
-    if plan.get("version") == READINESS_VERSION:
+    if plan.get("version") in MIGRATED_IMAGE_VERSIONS:
         runtime, config = _readiness_context(plan, image=True)
         return path, runtime, config
     selected = (Path(str(_object(plan["completedImagePlan"])["planFile"]))
@@ -1916,7 +2052,7 @@ def _prior_remaining(plan: dict[str, object]) -> tuple[Path, dict[str, object]] 
 
 
 def _effective(plan: dict[str, object]) -> tuple[dict[str, str], CampaignConfig]:
-    if plan.get("version") == READINESS_VERSION:
+    if plan.get("version") in MIGRATED_IMAGE_VERSIONS:
         return _readiness_context(plan)
     from infra.milestone_7_8 import operator
 
@@ -1946,7 +2082,8 @@ def load_context(
     if not (operation in CLEANUP_OPERATIONS and plan.get("version") == MIGRATION_VERSION
             and _grant_cleanup_source(plan)):
         _plan_source(plan)
-    allowed_operations = (READINESS_OPERATIONS if plan.get("version") == READINESS_VERSION else
+    allowed_operations = (READINESS_OPERATIONS
+                          if plan.get("version") in MIGRATED_IMAGE_VERSIONS else
                           MIGRATION_OPERATIONS - {"bootstrap", "startup"}
                           if plan.get("version") in {MIGRATION_VERSION, GRANT_VERSION}
                           else ALLOWED_OPERATIONS)
@@ -1960,7 +2097,7 @@ def load_context(
         raise CampaignError("this continuation reuses completed image admission; no image replay")
     raw = _read(ledger_path)
     baseline_equal = asdict(Ledger(**raw)) == asdict(Ledger(**_object(plan["baselineLedger"])))
-    replaced = (not baseline_equal if plan.get("version") == READINESS_VERSION else
+    replaced = (not baseline_equal if plan.get("version") in MIGRATED_IMAGE_VERSIONS else
                 raw.get("previous_image_replacement") is not None
                 if plan.get("version") == GRANT_VERSION
                 else raw.get("image_replacement") is not None)
@@ -1987,7 +2124,7 @@ def load_context(
     if (operation in {"image", "startup"}
             and parse_utc(config.cleanup_deadline_utc) <= datetime.now(UTC)):
         raise CampaignError("continuation cleanup deadline has expired")
-    if operation == "image" and plan.get("version") == READINESS_VERSION:
+    if operation == "image" and plan.get("version") in MIGRATED_IMAGE_VERSIONS:
         runtime, config = _readiness_context(plan, image=True)
     return runtime, config, ledger
 
@@ -1998,7 +2135,7 @@ def validate_image_completion_context(
 ) -> None:
     plan = load_plan(continuation)
     effective_runtime, effective_config = (
-        _readiness_context(plan, image=True) if plan.get("version") == READINESS_VERSION
+        _readiness_context(plan, image=True) if plan.get("version") in MIGRATED_IMAGE_VERSIONS
         else _effective(plan)
     )
     if (runtime != effective_runtime or config != effective_config
@@ -2022,11 +2159,11 @@ def validate_image_request(
     baseline = _object(plan["baselineLedger"])
     if (asdict(ledger) != asdict(Ledger(**baseline))  # type: ignore[arg-type]
             or ledger.phase != (Phase.MIGRATED.value
-                                if plan.get("version") == READINESS_VERSION else
+                                if plan.get("version") in MIGRATED_IMAGE_VERSIONS else
                                 Phase.DATABASE_BOOTSTRAPPED.value
                                 if plan.get("version") in {MIGRATION_VERSION, GRANT_VERSION}
                                 else Phase.IMAGE_DECIDED.value)
-            or (False if plan.get("version") == READINESS_VERSION else
+            or (False if plan.get("version") in MIGRATED_IMAGE_VERSIONS else
                 ledger.previous_image_replacement is not None
                 if plan.get("version") == GRANT_VERSION
                 else ledger.image_replacement is not None)
@@ -2055,7 +2192,7 @@ def validate_admission(
             or ledger.image_scan_evidence_sha256 != receipt["scanEvidenceSha256"]):
         raise CampaignError("replacement admission receipt or ledger binding differs")
     baseline = _object(plan["baselineLedger"])
-    if plan.get("version") == READINESS_VERSION:
+    if plan.get("version") in MIGRATED_IMAGE_VERSIONS:
         expected_history = list(baseline.get("readiness_image_replacements", []))
         if "previousPlanFile" in plan:
             expected_history.append(baseline.get("image_replacement"))
@@ -2169,7 +2306,7 @@ def readiness_plan_for_ledger(directory: Path, ledger: Ledger) -> Path:
     path = _readiness_path(directory.resolve(), sequence)
     plan = load_plan(path)
     receipt = _read(path.parent / "completed.json")
-    if (plan.get("version") != READINESS_VERSION
+    if (plan.get("version") not in MIGRATED_IMAGE_VERSIONS
             or receipt.get("continuationSha256") != ledger.image_replacement["continuationSha256"]):
         raise CampaignError("latest readiness admission differs from ledger")
     return path
@@ -2182,7 +2319,7 @@ def validate_readiness_evidence_origin(
     path = readiness_plan_for_ledger(directory, ledger)
     plan = load_plan(path)
     original_runtime, original_config = _readiness_context(plan)
-    if (plan.get("version") != READINESS_VERSION or runtime != original_runtime
+    if (plan.get("version") not in MIGRATED_IMAGE_VERSIONS or runtime != original_runtime
             or replace(config, image_digest=original_config.image_digest) != original_config
             or ledger.image_replacement is None
             or ledger.image_replacement.get("replacementPhase") != Phase.MIGRATED.value
@@ -2199,6 +2336,7 @@ def validate_readiness_evidence_origin(
         "continuationSha256": receipt["continuationSha256"],
         "originalAttemptSha256": attempt["recordSha256"],
         "originalPauseSha256": pause["recordSha256"],
+        "originalFailedExecution": pause["failedExecution"],
     }
 
 
@@ -2213,7 +2351,7 @@ def execute_admission(
 
     plan = load_plan(path)
     runtime_path = Path(str(plan["runtimeFile"]))
-    if plan.get("version") == READINESS_VERSION and (
+    if plan.get("version") in MIGRATED_IMAGE_VERSIONS and (
         asdict(ledger) != asdict(Ledger(**_object(plan["baselineLedger"])))
         or _file_hash(Path(str(plan["ledgerFile"]))) != plan["baselineLedgerFileSha256"]
         or (runtime, config) != _readiness_context(plan)
@@ -2303,12 +2441,12 @@ def execute_admission(
         ledger.record_image_replacement(
             digest, scan_sha256, str(receipt["continuationSha256"]),
             conservative_estimate_usd=config.conservative_estimate_usd, now=datetime.now(UTC),
-            at_phase=(Phase.MIGRATED if plan.get("version") == READINESS_VERSION else
+            at_phase=(Phase.MIGRATED if plan.get("version") in MIGRATED_IMAGE_VERSIONS else
                       Phase.DATABASE_BOOTSTRAPPED
                       if plan.get("version") in {MIGRATION_VERSION, GRANT_VERSION}
                       else Phase.IMAGE_DECIDED),
             grant_recovery=plan.get("version") == GRANT_VERSION,
-            readiness_successor=(plan.get("version") == READINESS_VERSION
+            readiness_successor=(plan.get("version") in MIGRATED_IMAGE_VERSIONS
                                  and "previousPlanFile" in plan),
         )
         validate_admission(path, runtime, config, ledger)

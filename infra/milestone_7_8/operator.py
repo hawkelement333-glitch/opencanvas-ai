@@ -4643,7 +4643,7 @@ def _reconcile_evidence_stage_completion(
     )
     image_origin = None
     if readiness_replacement:
-        # A corrected image may preserve a pre-assertion failed measurement.
+        # A corrected image preserves its failed measurement or acceptance attempt.
         # Validate its explicit admission link before accepting the old bindings.
         from infra.milestone_7_8 import image_continuation
 
@@ -4696,7 +4696,9 @@ def _reconcile_evidence_stage_completion(
             and pause["recordSha256"] != image_origin["originalPauseSha256"])
         or pause["attemptSha256"] != attempt["recordSha256"]
         or pause["authorizationSha256"] != attempt["authorizationSha256"]
-        or pause["failedExecution"] is not None
+        or pause["failedExecution"] != (
+            image_origin.get("originalFailedExecution") if image_origin is not None else None
+        )
         or pause["maximumRetryDispatches"] != 1
     ):
         raise _ProtectedStagePaused("managed evidence completion pause binding differs")
