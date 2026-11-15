@@ -165,10 +165,29 @@ class CampaignConfig:
     cleanup_offer_eligibility_sha256: str
     fresh_controller_admission_evidence_sha256: str
     image_digest: str | None = None
+    authorized_ceiling_usd: str = "50.00"
+    maximum_hours: int = 4
+
+    def binding_document(self) -> dict[str, object]:
+        """Preserve the exact historical hash payload for legacy limits."""
+        value = asdict(self)
+        if self.authorized_ceiling_usd == "50.00" and self.maximum_hours == 4:
+            value.pop("authorized_ceiling_usd")
+            value.pop("maximum_hours")
+        return value
+
+    @property
+    def cost_ceiling_cents(self) -> int:
+        return int(Decimal(self.authorized_ceiling_usd) * 100)
 
     @classmethod
     def from_json(cls, path: Path, *, allow_expired: bool = False) -> CampaignConfig:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        return cls.from_document(
+            json.loads(path.read_text(encoding="utf-8")), allow_expired=allow_expired
+        )
+
+    @classmethod
+    def from_document(cls, raw: object, *, allow_expired: bool = False) -> CampaignConfig:
         required = {
             "campaignId",
             "generationId",
@@ -194,7 +213,9 @@ class CampaignConfig:
             "freshControllerAdmissionEvidenceSha256",
             "imageDigest",
         }
-        if not isinstance(raw, dict) or set(raw) != required:
+        if not isinstance(raw, dict) or set(raw) not in (
+            required, required | {"authorizedCeilingUsd", "maximumHours"}
+        ):
             raise CampaignError("campaign configuration fields are invalid")
         if not isinstance(raw["resourceItems"], list):
             raise CampaignError("resourceItems must be an array")
@@ -236,11 +257,17 @@ class CampaignConfig:
                 "freshControllerAdmissionEvidenceSha256"
             ],
             image_digest=raw["imageDigest"],
+            authorized_ceiling_usd=raw.get("authorizedCeilingUsd", "50.00"),
+            maximum_hours=raw.get("maximumHours", 4),
         )
         config.validate(allow_expired=allow_expired)
         return config
 
     def validate(self, *, allow_expired: bool = False) -> None:
+        if self.authorized_ceiling_usd not in {"50.00", "56.51"}:
+            raise CampaignError("campaign cost ceiling is not a recorded approved limit")
+        if type(self.maximum_hours) is not int or self.maximum_hours not in {4, 8}:
+            raise CampaignError("campaign maximum hours is not a recorded approved window")
         if CAMPAIGN_PATTERN.fullmatch(self.campaign_id) is None:
             raise CampaignError("campaign identity is malformed")
         if GENERATION_PATTERN.fullmatch(self.generation_id) is None:
@@ -315,7 +342,7 @@ class CampaignConfig:
             raise CampaignError("cost contingency is below 25 percent")
         if estimate < subtotal * (Decimal("1") + contingency / Decimal("100")):
             raise CampaignError("conservative estimate does not cover itemized cost")
-        if estimate > HARD_CEILING:
+        if estimate > Decimal(self.authorized_ceiling_usd):
             raise CampaignError("cost ceiling exceeded")
 
 
@@ -358,6 +385,7 @@ class Ledger:
     fresh_controller_admission_evidence_sha256: str | None = None
     image_replacement: dict[str, str] | None = None
     previous_image_replacement: dict[str, str] | None = None
+    deadline_renewals: list[dict[str, object]] = field(default_factory=list)
 
     def bind_cleanup_region(self, config: CampaignConfig) -> None:
         expected = (
@@ -431,7 +459,7 @@ class Ledger:
         ):
             raise CampaignError("resume campaign or generation does not match")
         if (
-            Decimal(self.authorized_ceiling_usd) != HARD_CEILING
+            self.authorized_ceiling_usd != config.authorized_ceiling_usd
             or Decimal(self.conservative_estimate_usd)
             != Decimal(config.conservative_estimate_usd)
             or Decimal(self.contingency_percent) < Decimal("25")
@@ -477,8 +505,24 @@ class Ledger:
             reached.add(target)
         if self.phase != current.value:
             raise CampaignError("resume phase differs from its transition chain")
+        deadline = self.original_cleanup_deadline_utc
+        previous_arm = None
+        if self.deadline_renewals:
+            from infra.milestone_7_8.campaign_deadline_renewal import validate_completion
+
+            for receipt in self.deadline_renewals:
+                validate_completion(receipt)
+                if receipt["beforeDeadlineUtc"] != deadline or (
+                    previous_arm is not None
+                    and receipt["beforeCleanupArmSha256"] != previous_arm
+                ):
+                    raise CampaignError("resume cleanup renewal chain is discontinuous")
+                deadline = str(receipt["afterDeadlineUtc"])
+                previous_arm = receipt["afterCleanupArmSha256"]
+            if previous_arm != self.cleanup_arm_evidence_sha256:
+                raise CampaignError("resume cleanup renewal arm proof differs")
         if self.original_cleanup_deadline_utc is not None and (
-            self.cleanup_deadline_utc != self.original_cleanup_deadline_utc
+            self.cleanup_deadline_utc != deadline
             or self.cleanup_deadline_utc != config.cleanup_deadline_utc
         ):
             raise CampaignError("resume cleanup deadline was substituted")
@@ -495,7 +539,7 @@ class Ledger:
             raise CampaignError("resume configuration image differs from the replacement")
         if (
             self.actual_cost_usd is not None
-            and Decimal(self.actual_cost_usd) > HARD_CEILING
+            and Decimal(self.actual_cost_usd) > Decimal(self.authorized_ceiling_usd)
         ):
             raise CampaignError("resume actual cost exceeds the ceiling")
         cleanup_armed_reached = Phase.CLEANUP_ARMED in reached
@@ -574,6 +618,8 @@ class Ledger:
 
     def bind_deadline(self, deadline: str) -> None:
         parsed = parse_utc(deadline)
+        if self.deadline_renewals and deadline == self.cleanup_deadline_utc:
+            return
         if (
             self.original_cleanup_deadline_utc is not None
             and deadline != self.original_cleanup_deadline_utc
@@ -581,6 +627,21 @@ class Ledger:
             raise CampaignError("cleanup deadline extension or substitution rejected")
         self.cleanup_deadline_utc = utc(parsed)
         self.original_cleanup_deadline_utc = utc(parsed)
+
+    def record_deadline_renewal(self, receipt: dict[str, object]) -> None:
+        from infra.milestone_7_8.campaign_deadline_renewal import validate_completion
+
+        validate_completion(receipt)
+        if (
+            ORDER.index(Phase(self.phase)) >= ORDER.index(Phase.CLEANING)
+            or self.cleanup_started_utc is not None
+            or receipt["beforeDeadlineUtc"] != self.cleanup_deadline_utc
+            or receipt["beforeCleanupArmSha256"] != self.cleanup_arm_evidence_sha256
+        ):
+            raise CampaignError("cleanup renewal cannot reopen or substitute a campaign")
+        self.deadline_renewals.append(dict(receipt))
+        self.cleanup_deadline_utc = str(receipt["afterDeadlineUtc"])
+        self.cleanup_arm_evidence_sha256 = str(receipt["afterCleanupArmSha256"])
 
     def record_image(self, digest: str, *, built: bool) -> None:
         if DIGEST_PATTERN.fullmatch(digest) is None:
@@ -684,7 +745,10 @@ class Ledger:
                 estimate = Decimal(replacement[key])
             except InvalidOperation as exc:
                 raise CampaignError("image replacement cost estimate is invalid") from exc
-            if not estimate.is_finite() or not 0 <= estimate <= HARD_CEILING:
+            if (
+                not estimate.is_finite()
+                or not 0 <= estimate <= Decimal(self.authorized_ceiling_usd)
+            ):
                 raise CampaignError("image replacement cost estimate is invalid")
         recorded = parse_utc(replacement["recordedAtUtc"])
         decision = next((item for item in self.transitions if item["to"] == phase), None)
@@ -848,7 +912,7 @@ class CleanupBinding:
             or self.target_resource_group != config.target_resource_group
             or self.cleanup_resource_group != config.cleanup_resource_group
             or self.deadline_utc != config.cleanup_deadline_utc
-            or Decimal(self.ceiling_usd) != HARD_CEILING
+            or Decimal(self.ceiling_usd) != Decimal(config.authorized_ceiling_usd)
             or self.schedule_count != 0
             or self.binding_count != 0
             or HASH_PATTERN.fullmatch(self.cleanup_principal_sha256) is None
@@ -1079,6 +1143,7 @@ def load_ledger(path: Path, config: CampaignConfig) -> Ledger:
             config.campaign_id,
             config.generation_id,
             conservative_estimate_usd=config.conservative_estimate_usd,
+            authorized_ceiling_usd=config.authorized_ceiling_usd,
         )
     else:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -1098,6 +1163,8 @@ def save_ledger(path: Path, ledger: Ledger) -> None:
         del value["image_replacement"]
     if ledger.previous_image_replacement is None:
         del value["previous_image_replacement"]
+    if not ledger.deadline_renewals:
+        del value["deadline_renewals"]
     temporary.write_text(
         json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -1125,7 +1192,10 @@ def main() -> int:
         elif args.operation == "failure-matrix":
             results = {}
             for phase in ORDER[1:-1]:
-                candidate = Ledger(config.campaign_id, config.generation_id)
+                candidate = Ledger(
+                    config.campaign_id, config.generation_id,
+                    authorized_ceiling_usd=config.authorized_ceiling_usd,
+                )
                 result = Lifecycle(
                     config, candidate, SimulatedRunner()
                 ).fail_and_cleanup(phase, now=now)

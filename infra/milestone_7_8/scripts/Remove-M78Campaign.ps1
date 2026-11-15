@@ -10,7 +10,7 @@ param(
   [Parameter(Mandatory = $true)][ValidatePattern('^[a-f0-9-]{36}$')][string]$CleanupBindingName,
   [Parameter(Mandatory = $true)][ValidatePattern('^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$')][string]$CleanupDeadlineUtc,
   [Parameter(Mandatory = $true)][ValidatePattern('^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$')][string]$CleanupAuthorityExpiresUtc,
-  [Parameter(Mandatory = $true)][ValidateRange(5000, 5000)][int]$CostCeilingCents,
+  [Parameter(Mandatory = $true)][ValidateSet(5000, 5651)][int]$CostCeilingCents,
   [Parameter(Mandatory = $true)][ValidatePattern('^[a-f0-9]{64}$')][string]$ControllerBindingSha256,
   [Parameter(Mandatory = $true)][ValidatePattern('^[a-f0-9]{64}$')][string]$FreshControllerAdmissionEvidenceSha256,
   [Parameter(Mandatory = $true)][ValidateSet('m7.8-fresh-subscription-predeployment-absence-evidence-v1')][string]$FreshControllerAdmissionEvidenceVersion,
@@ -284,6 +284,7 @@ $requiredTags = @{
   'mobius.fresh-controller-admission-version' = $FreshControllerAdmissionEvidenceVersion
 }
 foreach ($key in $requiredTags.Keys) {
+  if ($key -eq 'mobius.cleanup-deadline-utc') { continue }
   if ($targetGroup.Tags[$key] -ne $requiredTags[$key]) { throw 'cleanup-resource-tag-mismatch' }
 }
 
@@ -294,9 +295,87 @@ $expectedRoles = @(
   'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
 )
 $observedRoles = @($assignments | ForEach-Object { [string]$_.RoleDefinitionId } | Sort-Object -Unique)
-if ($assignments.Count -ne 2 -or (Compare-Object $expectedRoles $observedRoles)) {
+if (
+  $assignments.Count -ne 2 -or (Compare-Object $expectedRoles $observedRoles) -or
+  @($assignments | Where-Object { $_.Scope -ine $targetScope }).Count -ne 0
+) {
   throw 'cleanup-target-authority-mismatch'
 }
+
+if ($targetGroup.Tags['mobius.cleanup-deadline-utc'] -cne $CleanupDeadlineUtc) {
+  # A predecessor stays armed during renewal. It may yield only to an exact,
+  # enabled replacement selected by the target group's single tag update.
+  # This is a pre-expiry, single-writer protocol, not an ARM concurrency lock.
+  $activeDeadline = $targetGroup.Tags['mobius.cleanup-deadline-utc']
+  $activeSchedule = $targetGroup.Tags['mobius.cleanup-schedule']
+  $activeBinding = $targetGroup.Tags['mobius.cleanup-binding']
+  $activeAuthority = $targetGroup.Tags['mobius.cleanup-authority-sha256']
+  $plannedAt = $targetGroup.Tags['mobius.cleanup-renewal-planned-utc']
+  if (
+    $activeDeadline -isnot [string] -or
+    $activeDeadline -cnotmatch '^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' -or
+    $activeSchedule -isnot [string] -or $activeSchedule -cnotmatch '^m78-deadline-[a-f0-9]{10}$' -or
+    $activeBinding -isnot [string] -or $activeBinding -cnotmatch '^[a-f0-9-]{36}$' -or
+    $activeAuthority -isnot [string] -or $activeAuthority -cnotmatch '^[a-f0-9]{64}$' -or
+    $plannedAt -isnot [string] -or
+    $plannedAt -cnotmatch '^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z$' -or
+    $activeSchedule -ceq $CleanupScheduleName -or $activeBinding -ceq $CleanupBindingName -or
+    $targetGroup.Tags['mobius.cleanup-parent-binding'] -cne $CleanupBindingName -or
+    $targetGroup.Tags['mobius.cleanup-parent-authority-sha256'] -cne $CleanupAuthoritySha256 -or
+    $targetGroup.Tags['mobius.expiry'] -cne $activeDeadline
+  ) { throw 'cleanup-renewal-selection-invalid' }
+  $activeTime = [DateTimeOffset]::ParseExact(
+    $activeDeadline, 'yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture,
+    [Globalization.DateTimeStyles]::AssumeUniversal
+  )
+  $plannedTime = [DateTimeOffset]::Parse(
+    $plannedAt, [Globalization.CultureInfo]::InvariantCulture,
+    [Globalization.DateTimeStyles]::AssumeUniversal
+  )
+  $activeExpiry = $activeTime.AddHours(1).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+  if (
+    $activeTime -le $parsedDeadline -or $plannedTime -ge $parsedDeadline -or
+    $plannedTime -gt [DateTimeOffset]::UtcNow -or [DateTimeOffset]::UtcNow -ge $activeTime -or
+    $controllerAuthorizedUntil -lt $activeTime.AddHours(1)
+  ) { throw 'cleanup-renewal-window-invalid' }
+  $replacementValues = @(
+    'reusable-automation-controller-v1', $CampaignId, $GenerationId, $SubscriptionCorrelation,
+    $TargetResourceGroupName, $ControllerResourceGroupName, $AutomationAccountName,
+    $CleanupRunbookName, $activeSchedule, $activeBinding, $activeDeadline, $activeExpiry,
+    [string]$CostCeilingCents, $ControllerBindingSha256,
+    $FreshControllerAdmissionEvidenceSha256, $FreshControllerAdmissionEvidenceVersion
+  )
+  $replacementHash = Get-Sha256 ("m7.8/cleanup-authority/v4`0" + ($replacementValues -join "`0"))
+  if ($replacementHash -cne $activeAuthority) { throw 'cleanup-renewal-authority-mismatch' }
+  $replacementParameters = $expectedBindingParameters.Clone()
+  $replacementParameters.CleanupScheduleName = $activeSchedule
+  $replacementParameters.CleanupBindingName = $activeBinding
+  $replacementParameters.CleanupDeadlineUtc = $activeDeadline
+  $replacementParameters.CleanupAuthorityExpiresUtc = $activeExpiry
+  $replacementParameters.CleanupAuthoritySha256 = $activeAuthority
+  $replacementContent = Get-ArmContent "$automationBase/jobSchedules/$activeBinding`?api-version=2024-10-23"
+  Assert-CleanupBindingParameters $replacementContent $replacementParameters
+  $replacement = $replacementContent | ConvertFrom-Json -Depth 32 -AsHashtable
+  Assert-CleanupBindingIdentity $replacement "$automationBase/jobSchedules/$activeBinding" $activeBinding
+  $replacementSchedule = Get-ArmJson "$automationBase/schedules/$activeSchedule`?api-version=2024-10-23"
+  if (
+    $replacement.properties.runbook.name -cne $CleanupRunbookName -or
+    $replacement.properties.schedule.name -cne $activeSchedule -or
+    ($replacement['properties'].ContainsKey('runOn') -and
+      -not [string]::IsNullOrEmpty($replacement['properties']['runOn'])) -or
+    $replacementSchedule.name -cne $activeSchedule -or
+    $replacementSchedule.properties.frequency -cne 'OneTime' -or
+    $replacementSchedule.properties.isEnabled -ne $true -or
+    [DateTimeOffset]$replacementSchedule.properties.startTime -ne $activeTime
+  ) { throw 'cleanup-renewal-replacement-invalid' }
+  [ordered]@{
+    status = 'superseded-cleanup-verified'
+    targetDeletionStarted = $false
+    observedAtUtc = [DateTime]::UtcNow.ToString('o')
+  } | ConvertTo-Json -Compress
+  return
+}
+
 
 try {
   Remove-AzResourceGroup -Name $TargetResourceGroupName -Force

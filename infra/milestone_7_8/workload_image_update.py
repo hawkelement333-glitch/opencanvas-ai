@@ -15,7 +15,6 @@ import time
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -90,7 +89,7 @@ def _tags(runtime: dict[str, str], config: CampaignConfig) -> dict[str, str]:
         "mobius.milestone": "7.8", "mobius.campaign": config.campaign_id,
         "mobius.generation": config.generation_id,
         "mobius.cleanup-deadline-utc": config.cleanup_deadline_utc,
-        "mobius.cost-ceiling-cents": "5000",
+        "mobius.cost-ceiling-cents": str(config.cost_ceiling_cents),
         "mobius.cleanup-region-selection-sha256": config.cleanup_region_selection_sha256,
         "mobius.cleanup-candidate-regions": config.cleanup_candidate_regions,
         "mobius.cleanup-offer-classification": config.cleanup_offer_classification,
@@ -163,7 +162,7 @@ def _scope(
         raise CampaignError("workload image update environment binding differs")
     return {
         "version": "m7.8-workload-image-update-scope-v1",
-        "runtimeSha256": _hash(runtime), "configSha256": _hash(asdict(config)),
+        "runtimeSha256": _hash(runtime), "configSha256": _hash(config.binding_document()),
         "parametersSha256": hashlib.sha256(parameter_path.read_bytes()).hexdigest(),
         "previousDigest": previous_digest, "digest": digest,
         "cleanupDeadlineUtc": config.cleanup_deadline_utc,

@@ -10,7 +10,7 @@ import sys
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -275,11 +275,16 @@ def load_runtime(path: Path) -> dict[str, str]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if (
         not isinstance(value, dict)
-        or not RUNTIME_FIELDS <= set(value) <= RUNTIME_FIELDS | {"controllerBootstrapScriptSha256"}
+        or not RUNTIME_FIELDS <= set(value) <= RUNTIME_FIELDS | {
+            "controllerBootstrapScriptSha256", "deadlineRenewalEvidenceFile",
+            "deadlineRenewalEvidenceSha256",
+        }
         or not all(isinstance(item, str) and item for item in value.values())
     ):
         raise CampaignError("operator runtime fields are incomplete")
     value = cast(dict[str, str], value)
+    if ("deadlineRenewalEvidenceFile" in value) != ("deadlineRenewalEvidenceSha256" in value):
+        raise CampaignError("operator deadline renewal evidence fields must occur together")
     for field in (
         "bootstrapJobName",
         "migrationJobName",
@@ -340,14 +345,16 @@ def load_runtime(path: Path) -> dict[str, str]:
     return value
 
 
-def _load_arm_parameter_values(path: Path, *, expected: set[str]) -> dict[str, object]:
+def _load_arm_parameter_values(
+    path: Path, *, expected: set[str], extended: set[str] | None = None
+) -> dict[str, object]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if (
         not isinstance(value, dict)
         or set(value) != {"$schema", "contentVersion", "parameters"}
         or value.get("contentVersion") != "1.0.0.0"
         or not isinstance(value.get("parameters"), dict)
-        or set(value["parameters"]) != expected
+        or set(value["parameters"]) not in (expected, expected | (extended or set()))
     ):
         raise CampaignError("operator parameter bundle fields are invalid")
     result: dict[str, object] = {}
@@ -469,6 +476,12 @@ def validate_prepared_bundle(
     runtime: dict[str, str],
     config: CampaignConfig,
 ) -> None:
+    if "deadlineRenewalEvidenceFile" in runtime:
+        from infra.milestone_7_8.campaign_deadline_renewal import origin_context
+
+        original_runtime, original_config = origin_context(runtime, config)
+        validate_prepared_bundle(runtime_path, original_runtime, original_config)
+        return
     load_bound_fresh_controller_admission(
         runtime_path,
         runtime,
@@ -504,10 +517,12 @@ def validate_prepared_bundle(
         return resolved
 
     cleanup = _load_arm_parameter_values(
-        sibling("cleanupParametersFile"), expected=CLEANUP_PARAMETER_FIELDS
+        sibling("cleanupParametersFile"), expected=CLEANUP_PARAMETER_FIELDS,
+        extended={"costCeilingCents"}
     )
     campaign = _load_arm_parameter_values(
-        sibling("campaignParametersFile"), expected=CAMPAIGN_PARAMETER_FIELDS
+        sibling("campaignParametersFile"), expected=CAMPAIGN_PARAMETER_FIELDS,
+        extended={"costCeilingCents", "maximumHours"}
     )
     selection_path = sibling("cleanupRegionSelectionFile")
     selection = selection_from_document(
@@ -607,7 +622,10 @@ def validate_prepared_bundle(
         "evidence": campaign.get("evidenceIdentityName"),
     }
     if (
-        campaign.get("resourceNameSuffix") != suffix
+        campaign.get("costCeilingCents", 5000) != config.cost_ceiling_cents
+        or cleanup.get("costCeilingCents", 5000) != config.cost_ceiling_cents
+        or campaign.get("maximumHours", 4) != config.maximum_hours
+        or campaign.get("resourceNameSuffix") != suffix
         or campaign.get("cleanupIdentityName") != runtime["automationAccountName"]
         or any(
             identity_names[role] != f"id-m78-{suffix}-{role}" for role in identity_names
@@ -681,7 +699,7 @@ def validate_prepared_bundle(
         "mobius.campaign": config.campaign_id,
         "mobius.generation": config.generation_id,
         "mobius.cleanup-deadline-utc": config.cleanup_deadline_utc,
-        "mobius.cost-ceiling-cents": "5000",
+        "mobius.cost-ceiling-cents": str(config.cost_ceiling_cents),
         "mobius.cleanup-region-selection-sha256": config.cleanup_region_selection_sha256,
         "mobius.cleanup-candidate-regions": config.cleanup_candidate_regions,
         "mobius.cleanup-offer-classification": config.cleanup_offer_classification,
@@ -734,7 +752,7 @@ def cleanup_job_parameters(
         "CleanupBindingName": runtime["bindingName"],
         "CleanupDeadlineUtc": config.cleanup_deadline_utc,
         "CleanupAuthorityExpiresUtc": runtime["cleanupAuthorityExpiresUtc"],
-        "CostCeilingCents": "5000",
+        "CostCeilingCents": str(config.cost_ceiling_cents),
         "ControllerBindingSha256": runtime["controllerBindingSha256"],
         "FreshControllerAdmissionEvidenceSha256": (
             config.fresh_controller_admission_evidence_sha256
@@ -974,7 +992,7 @@ def command_plan(
                 f"mobius.campaign={config.campaign_id}",
                 f"mobius.generation={config.generation_id}",
                 f"mobius.cleanup-deadline-utc={config.cleanup_deadline_utc}",
-                "mobius.cost-ceiling-cents=5000",
+                f"mobius.cost-ceiling-cents={config.cost_ceiling_cents}",
                 (
                     "mobius.cleanup-region-selection-sha256="
                     + config.cleanup_region_selection_sha256
@@ -1632,7 +1650,16 @@ def command_plan(
             ),
         )
     if operation == "cleanup-disarm":
-        return (
+        from infra.milestone_7_8.campaign_deadline_renewal import retained_tuples
+
+        predecessors = retained_tuples(runtime)
+        predecessor_commands = tuple(
+            ("az", "rest", "--method", "delete", "--url",
+             "https://management.azure.com" + str(item[field]) + f"?api-version={api_version}",
+             "--output", "none")
+            for item in predecessors for field in ("bindingId", "scheduleId")
+        )
+        return (*predecessor_commands,
             (
                 "az",
                 "rest",
@@ -1846,7 +1873,7 @@ def _stage_bindings(
         "generationId": config.generation_id,
         "sourceHead": runtime["sourceHead"],
         "runtimeSha256": _stage_hash("stage-runtime", runtime),
-        "configSha256": _stage_hash("stage-config", asdict(config)),
+        "configSha256": _stage_hash("stage-config", config.binding_document()),
         "imageDigest": config.image_digest or ledger.image_digest,
         "ledgerPhase": ledger.phase,
         "cleanupArmSha256": ledger.cleanup_arm_evidence_sha256,
@@ -3414,8 +3441,8 @@ def validate_deployed_principal_manifest(
         or binding.get("generationId") != config.generation_id
         or binding.get("subscriptionCorrelation") != config.subscription_correlation
         or binding.get("cleanupDeadlineUtc") != config.cleanup_deadline_utc
-        or binding.get("maximumHours") != 4
-        or binding.get("costCeilingCents") != 5000
+        or binding.get("maximumHours") != config.maximum_hours
+        or binding.get("costCeilingCents") != config.cost_ceiling_cents
         or binding.get("cleanupResourceGroupName") != config.cleanup_resource_group
         or binding.get("cleanupLocation") != config.cleanup_region
         or binding.get("cleanupRegionSelectionSha256")
@@ -3581,12 +3608,21 @@ def runtime_authority_expiry(config: CampaignConfig) -> str:
 
 
 def validate_cleanup_readback(
-    results: list[dict[str, object]], config: CampaignConfig, runtime: dict[str, str]
+    results: list[dict[str, object]], config: CampaignConfig, runtime: dict[str, str],
+    *,
+    renewal_context: tuple[dict[str, str], CampaignConfig, list[dict[str, object]]] | None = None,
 ) -> str:
     if len(results) != 9:
         raise CampaignError("cleanup readback is incomplete")
+    from infra.milestone_7_8.campaign_deadline_renewal import origin_context, retained_tuples
+
+    if renewal_context is None:
+        foundation_runtime, foundation_config = origin_context(runtime, config)
+        retained = retained_tuples(runtime)
+    else:
+        foundation_runtime, foundation_config, retained = renewal_context
     expected_binding, deployment_outputs, _account = validate_cleanup_foundation(
-        results[:4], config, runtime
+        results[:4], foundation_config, foundation_runtime
     )
     runbook = _json_result(results[4])
     content = results[5].get("stdout")
@@ -3597,7 +3633,8 @@ def validate_cleanup_readback(
     )
     validate_cleanup_schedule(schedule, config=config, runtime=runtime)
     validate_cleanup_bindings(
-        binding_response, config=config, runtime=runtime, exact_binding=_json_result(results[8])
+        binding_response, config=config, runtime=runtime, exact_binding=_json_result(results[8]),
+        retained=retained,
     )
     proof = {
         "version": "m7.8-cleanup-arm-proof-v1",
@@ -3946,12 +3983,34 @@ def validate_cleanup_bindings(
     config: CampaignConfig,
     runtime: dict[str, str],
     exact_binding: object | None = None,
+    retained: list[dict[str, object]] | None = None,
 ) -> None:
     if not isinstance(response, dict) or set(response) - {"value", "nextLink"}:
         raise CampaignError("cleanup binding collection is malformed")
     bindings = response.get("value")
     if response.get("nextLink") not in {None, ""} or not isinstance(bindings, list):
         raise CampaignError("cleanup binding collection is incomplete")
+    if retained is None:
+        from infra.milestone_7_8.campaign_deadline_renewal import retained_tuples
+
+        retained = retained_tuples(runtime)
+    for previous in retained:
+        matches = [item for item in bindings if isinstance(item, dict)
+                   and str(item.get("id", "")).casefold() == str(previous["bindingId"]).casefold()]
+        if len(matches) != 1:
+            raise CampaignError("retained cleanup binding inventory differs")
+        previous_binding = matches[0]
+        properties = previous_binding.get("properties", {})
+        parameters = properties.get("parameters")
+        if (
+            properties.get("jobScheduleId") != previous["bindingName"]
+            or properties.get("schedule") != {"name": previous["scheduleName"]}
+            or properties.get("runbook") != {"name": runtime["runbookName"]}
+            or (parameters is not None and parameters != previous["parameters"])
+            or properties.get("runOn") not in (None, "")
+        ):
+            raise CampaignError("retained cleanup binding was substituted")
+        bindings = [item for item in bindings if item is not previous_binding]
     binding = bindings[0] if len(bindings) == 1 else None
     if not isinstance(binding, dict):
         raise CampaignError("exactly one expected cleanup binding is required")
@@ -4016,7 +4075,9 @@ def validate_cleanup_bindings(
     ):
         raise CampaignError("cleanup binding readback drifted")
     if exact_binding is not None:
-        validate_cleanup_bindings({"value": [exact_binding]}, config=config, runtime=runtime)
+        validate_cleanup_bindings(
+            {"value": [exact_binding]}, config=config, runtime=runtime, retained=[]
+        )
 
 
 def execute_cleanup_arm_commands(
@@ -4088,11 +4149,14 @@ def execute_cleanup_disarm_commands(
     config: CampaignConfig,
     runtime: dict[str, str],
 ) -> tuple[list[dict[str, object]], str]:
-    if len(commands) != 4:
+    from infra.milestone_7_8.campaign_deadline_renewal import retained_tuples
+
+    expected = 4 + 2 * len(retained_tuples(runtime))
+    if len(commands) != expected:
         raise CampaignError("cleanup disarming command sequence is incomplete")
-    results = [runner.run(commands[0]), runner.run(commands[1])]
-    results.extend(_run_required(runner, command) for command in commands[2:])
-    return results, validate_disarm_readback(results[2:], config, runtime)
+    results = [runner.run(command) for command in commands[:-2]]
+    results.extend(_run_required(runner, command) for command in commands[-2:])
+    return results, validate_disarm_readback(results[-2:], config, runtime)
 
 
 def validate_disarm_readback(
@@ -4909,7 +4973,7 @@ def start_direct_cleanup(
         or tags.get("mobius.campaign") != config.campaign_id
         or tags.get("mobius.generation") != config.generation_id
         or tags.get("mobius.cleanup-deadline-utc") != config.cleanup_deadline_utc
-        or tags.get("mobius.cost-ceiling-cents") != "5000"
+        or tags.get("mobius.cost-ceiling-cents") != str(config.cost_ceiling_cents)
     ):
         raise CampaignError("direct cleanup target ownership differs")
     properties = group.get("properties")
@@ -5146,7 +5210,7 @@ def validate_operation_results(
             or tags.get("mobius.generation") != config.generation_id
             or tags.get("mobius.milestone") != "7.8"
             or tags.get("mobius.cleanup-deadline-utc") != config.cleanup_deadline_utc
-            or tags.get("mobius.cost-ceiling-cents") != "5000"
+            or tags.get("mobius.cost-ceiling-cents") != str(config.cost_ceiling_cents)
             or tags.get("mobius.cleanup-region-selection-sha256")
             != config.cleanup_region_selection_sha256
             or tags.get("mobius.cleanup-candidate-regions")
@@ -5180,7 +5244,10 @@ def validate_operation_results(
             )
         ):
             raise CampaignError("campaign deployment binding differs")
-        validate_deployed_principal_manifest(outputs, config)
+        from infra.milestone_7_8.campaign_deadline_renewal import origin_context
+
+        _origin_runtime, deployment_config = origin_context(runtime, config)
+        validate_deployed_principal_manifest(outputs, deployment_config)
 
 
 def main() -> int:
@@ -5233,6 +5300,9 @@ def main() -> int:
             runtime = load_runtime(args.runtime)
             validate_prepared_bundle(args.runtime, runtime, config)
             ledger = load_ledger(args.ledger, config)
+        from infra.milestone_7_8.campaign_deadline_renewal import validate_ledger_binding
+
+        validate_ledger_binding(runtime, ledger)
         controller_authority = (
             load_bound_controller_authority(args.runtime, runtime, config)
             if args.operation == "capacity-check"

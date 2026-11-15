@@ -36,8 +36,7 @@ param cleanupRunbookName string
 param cleanupScheduleName string
 param cleanupBindingName string
 
-@minValue(5000)
-@maxValue(5000)
+@allowed([5000, 5651])
 param costCeilingCents int = 5000
 
 // The campaign path may only adopt the one separately provisioned reusable

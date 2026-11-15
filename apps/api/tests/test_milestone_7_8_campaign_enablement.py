@@ -1802,6 +1802,13 @@ def test_prepare_creates_one_private_restart_safe_bundle(
     existing_evidence = parent / "existing-private-evidence.json"
     existing_evidence.write_text('{"preserved":true}', encoding="utf-8")
     output = parent / "new-campaign"
+    cost_path = tmp_path / "cost-fields.json"
+    cost_path.write_text(json.dumps({
+        "conservativeEstimateUsd": "56.5095", "contingencyPercent": "25",
+        "resourceItems": [{"name": "reviewed-nine-hour-envelope", "fixedUsd": "45.2076",
+                           "hourlyUsd": "0", "hours": 1,
+                           "pricedAtUtc": "2030-01-01T00:00:00Z"}],
+    }))
     monkeypatch.setenv("M78_SUBSCRIPTION_ID", subscription)
     monkeypatch.setenv("M78_TENANT_ID", tenant)
     fresh_scope_document = predeployment.build_runtime_document(
@@ -1940,7 +1947,10 @@ def test_prepare_creates_one_private_restart_safe_bundle(
             "--controller-authority-evidence",
             str(authority_path),
             *(
-                ["--cleanup-deadline", f"2030-01-01T{deadline_hour:02}:00:00Z"]
+                ["--cleanup-deadline", f"2030-01-01T{deadline_hour:02}:00:00Z",
+                 "--maximum-hours", str(deadline_hour or 4),
+                 "--authorized-ceiling-usd", "56.51" if deadline_hour == 8 else "50.00",
+                 *(["--cost-fields", str(cost_path)] if deadline_hour == 8 else [])]
                 if deadline_hour is not None else []
             ),
         ],
@@ -1956,6 +1966,8 @@ def test_prepare_creates_one_private_restart_safe_bundle(
     assert subscription not in stdout and tenant not in stdout
     config = CampaignConfig.from_json(output / "campaign.json")
     expected_hour = deadline_hour if deadline_hour is not None else 4
+    assert config.authorized_ceiling_usd == ("56.51" if deadline_hour == 8 else "50.00")
+    assert config.maximum_hours == expected_hour
     assert config.cleanup_deadline_utc == f"2030-01-01T{expected_hour:02}:00:00Z"
     assert config.campaign_id == "mobius78-managed-proof"
     assert config.cleanup_candidate_regions == CLEANUP_CANDIDATE_REGIONS_BINDING

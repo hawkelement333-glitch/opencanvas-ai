@@ -51,12 +51,10 @@ param evidenceIdentityName string
 param cleanupIdentityName string
 param cleanupDeadlineUtc string
 
-@minValue(4)
-@maxValue(4)
+@allowed([4, 8])
 param maximumHours int = 4
 
-@minValue(5000)
-@maxValue(5000)
+@allowed([5000, 5651])
 param costCeilingCents int = 5000
 
 param lifecycleTags object

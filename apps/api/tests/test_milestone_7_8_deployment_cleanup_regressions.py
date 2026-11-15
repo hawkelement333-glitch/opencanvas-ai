@@ -127,12 +127,14 @@ try {
 """
 
 
-def _runbook_fixture(defect: str | None) -> dict[str, object]:
+def _runbook_fixture(
+    defect: str | None, *, ceiling: str = "50.00"
+) -> dict[str, object]:
     runtime = _runtime()
     runtime["scheduleName"] = "m78-deadline-aabbccddee"
     subscription = runtime["subscriptionId"]
     correlation = hashlib.sha256(b"m7.8/subscription\0" + subscription.encode()).hexdigest()[:16]
-    config = _config(subscription_correlation=correlation)
+    config = _config(subscription_correlation=correlation, authorized_ceiling_usd=ceiling)
     parameters = cleanup_job_parameters(config, runtime)
     controller_tags = {
         "mobius.milestone": "7.8",
@@ -149,7 +151,7 @@ def _runbook_fixture(defect: str | None) -> dict[str, object]:
         "mobius.campaign": config.campaign_id,
         "mobius.generation": config.generation_id,
         "mobius.cleanup-deadline-utc": config.cleanup_deadline_utc,
-        "mobius.cost-ceiling-cents": "5000",
+        "mobius.cost-ceiling-cents": str(config.cost_ceiling_cents),
         "mobius.fresh-controller-admission-sha256": "0" * 64,
         "mobius.fresh-controller-admission-version": runtime[
             "freshControllerAdmissionEvidenceVersion"
@@ -605,3 +607,32 @@ def test_direct_cleanup_does_not_repeat_an_owned_in_progress_deletion(
         assert provider.delete_calls == (0 if deleting else 1)
         assert provider.exists_reads == (1 if deleting else 2)
         assert provider.deleted is not deleting  # Returning for Deleting never proves absence.
+
+
+@pytest.mark.parametrize("cents,accepted", [(5651, True), (5652, False)])
+def test_cleanup_runbook_enforces_new_explicit_ceiling(
+    tmp_path: Path, cents: int, accepted: bool,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is required for the cleanup response replay")
+    value = _runbook_fixture(None, ceiling="56.51")
+    value["parameters"]["CostCeilingCents"] = base64.b64encode(str(cents).encode()).decode()
+    fixture = tmp_path / "synthetic.json"
+    fixture.write_text(json.dumps(value), encoding="utf-8")
+    harness = tmp_path / "run.ps1"
+    harness.write_text(HARNESS, encoding="utf-8")
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-NonInteractive", "-File", str(harness), str(RUNBOOK), str(fixture)],
+        capture_output=True, text=True, check=False, timeout=30,
+        env={**os.environ, "POWERSHELL_TELEMETRY_OPTOUT": "1"},
+    )
+    observed = json.loads(result.stdout)
+    if accepted:
+        assert result.returncode == 0, observed
+        assert observed["removed"] is True
+    else:
+        assert result.returncode == 2, observed
+        assert observed["removed"] is False
+        assert observed["reads"] == 0
+        assert "CostCeilingCents" in observed["error"]

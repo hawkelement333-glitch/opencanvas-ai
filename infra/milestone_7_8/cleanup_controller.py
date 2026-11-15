@@ -193,7 +193,7 @@ def cleanup_authority_sha256(
         runtime["bindingName"],
         config.cleanup_deadline_utc,
         runtime["cleanupAuthorityExpiresUtc"],
-        "5000",
+        str(config.cost_ceiling_cents),
         runtime["controllerBindingSha256"],
         config.fresh_controller_admission_evidence_sha256,
         runtime["freshControllerAdmissionEvidenceVersion"],
@@ -239,6 +239,10 @@ def load_execution_authorization(
         "allowedOperations",
         "authorizationSha256",
     }
+    version = value.get("version") if isinstance(value, dict) else None
+    fresh = version == "m7.8-execution-authorization-v6"
+    if fresh:
+        required |= {"authorizedCeilingUsd", "maximumHours"}
     if not isinstance(value, dict) or set(value) != required:
         raise CampaignError("Azure execution authorization fields are invalid")
     operations = value.get("allowedOperations")
@@ -246,11 +250,14 @@ def load_execution_authorization(
         key: item for key, item in value.items() if key != "authorizationSha256"
     }
     expected_hash = hashlib.sha256(
-        b"m7.8/execution-authorization/v5\0"
+        (b"m7.8/execution-authorization/v6\0" if fresh else b"m7.8/execution-authorization/v5\0")
         + json.dumps(unsigned, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
     if (
-        value.get("version") != "m7.8-execution-authorization-v5"
+        version not in {"m7.8-execution-authorization-v5", "m7.8-execution-authorization-v6"}
+        or value.get("authorizedCeilingUsd", "50.00") != config.authorized_ceiling_usd
+        or type(value.get("maximumHours", 4)) is not int
+        or value.get("maximumHours", 4) != config.maximum_hours
         or value.get("disposition") != "separately-authorized-azure-execution"
         or value.get("campaignId") != config.campaign_id
         or value.get("generationId") != config.generation_id

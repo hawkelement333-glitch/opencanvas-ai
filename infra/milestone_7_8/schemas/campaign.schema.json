@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign:v6",
+  "$id": "urn:solarplexus:mobius:milestone-7.8:campaign:v7",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -28,7 +28,13 @@
     "freshControllerAdmissionEvidenceSha256",
     "imageDigest"
   ],
+  "dependentRequired": {
+    "authorizedCeilingUsd": ["maximumHours"],
+    "maximumHours": ["authorizedCeilingUsd"]
+  },
   "properties": {
+    "authorizedCeilingUsd": { "enum": ["50.00", "56.51"] },
+    "maximumHours": { "enum": [4, 8] },
     "campaignId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,47}$" },
     "generationId": {
       "type": "string",

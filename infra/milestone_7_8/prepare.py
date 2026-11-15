@@ -8,6 +8,7 @@ import subprocess
 import sys
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 from infra.milestone_7_8.automation_region import (
@@ -17,6 +18,7 @@ from infra.milestone_7_8.automation_region import (
 from infra.milestone_7_8.campaign import (
     CAMPAIGN_PATTERN,
     GENERATION_PATTERN,
+    CampaignConfig,
     CampaignError,
     SubprocessRunner,
     parse_utc,
@@ -82,10 +84,26 @@ def _parameters(values: dict[str, object]) -> dict[str, object]:
     }
 
 
+def load_cost_fields(path: Path | None, *, required: bool) -> dict[str, object]:
+    if path is None:
+        if required:
+            raise CampaignError("nonlegacy execution limits require reviewed --cost-fields")
+        return {}
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or set(value) != {
+        "conservativeEstimateUsd", "contingencyPercent", "resourceItems"
+    }:
+        raise CampaignError("cost fields must contain exactly the three supported cost fields")
+    return value
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Create one immutable untracked M7.8 runtime bundle"
     )
+    parser.add_argument("--authorized-ceiling-usd", choices=("50.00", "56.51"), default="50.00")
+    parser.add_argument("--maximum-hours", type=int, choices=(4, 8), default=4)
+    parser.add_argument("--cost-fields", type=Path)
     parser.add_argument("--campaign-id", required=True)
     parser.add_argument("--generation-id", required=True)
     parser.add_argument("--output", type=Path, default=Path(".runtime/milestone_7_8"))
@@ -102,6 +120,10 @@ def main() -> int:
     )
     args = parser.parse_args()
     try:
+        cost_fields = load_cost_fields(
+            args.cost_fields,
+            required=args.authorized_ceiling_usd != "50.00" or args.maximum_hours != 4,
+        )
         if CAMPAIGN_PATTERN.fullmatch(args.campaign_id) is None:
             raise CampaignError("campaign identity is malformed")
         if GENERATION_PATTERN.fullmatch(args.generation_id) is None:
@@ -168,7 +190,10 @@ def main() -> int:
         )
         if deadline_time <= observed_at:
             raise CampaignError("cleanup deadline is expired")
+        if deadline_time > observed_at + timedelta(hours=args.maximum_hours):
+            raise CampaignError("cleanup deadline exceeds the selected execution window")
         deadline = utc(deadline_time)
+        cost_ceiling_cents = int(Decimal(args.authorized_ceiling_usd) * 100)
         controller_authority = load_authority_evidence(args.controller_authority_evidence)
         verified_controller = validate_authority_evidence(controller_authority)
         if (
@@ -255,7 +280,7 @@ def main() -> int:
             "mobius.campaign": args.campaign_id,
             "mobius.generation": generation_id,
             "mobius.cleanup-deadline-utc": deadline,
-            "mobius.cost-ceiling-cents": "5000",
+            "mobius.cost-ceiling-cents": str(cost_ceiling_cents),
             "mobius.cleanup-region-selection-sha256": region_selection_sha256,
             "mobius.cleanup-candidate-regions": candidate_regions,
             "mobius.cleanup-offer-classification": (
@@ -276,7 +301,6 @@ def main() -> int:
             "mobius.owner": "managed-postgresql-evidence",
             "mobius.expiry": deadline,
         }
-        args.output.mkdir(parents=True, exist_ok=False)
         config_path = args.output / "campaign.json"
         runtime_path = args.output / "runtime.json"
         cleanup_path = args.output / "cleanup.parameters.json"
@@ -297,6 +321,8 @@ def main() -> int:
             "cleanupRegion": cleanup_region,
             "postgresRegion": args.postgres_region,
             "cleanupDeadlineUtc": deadline,
+            "authorizedCeilingUsd": args.authorized_ceiling_usd,
+            "maximumHours": args.maximum_hours,
             "conservativeEstimateUsd": "25.6832",
             "contingencyPercent": "25",
             "resourceItems": [
@@ -323,6 +349,8 @@ def main() -> int:
             "freshControllerAdmissionEvidenceSha256": admission.evidence_sha256,
             "imageDigest": None,
         }
+        config.update(cost_fields)
+        CampaignConfig.from_document(config)
         cleanup_parameters = _parameters(
             {
                 "campaignId": args.campaign_id,
@@ -345,6 +373,7 @@ def main() -> int:
                     region_selection.offer_eligibility_sha256
                 ),
                 "freshControllerAdmissionEvidenceSha256": admission.evidence_sha256,
+                "costCeilingCents": cost_ceiling_cents,
                 "cleanupDeadlineUtc": deadline,
                 "cleanupAuthorityExpiresUtc": cleanup_authority_expires,
                 "automationAccountName": account,
@@ -395,7 +424,9 @@ def main() -> int:
                 "workerIdentityName": identity_names["worker"],
                 "evidenceIdentityName": identity_names["evidence"],
                 "cleanupIdentityName": account,
+                "costCeilingCents": cost_ceiling_cents,
                 "cleanupDeadlineUtc": deadline,
+                "maximumHours": args.maximum_hours,
                 "lifecycleTags": tags,
             }
         )
@@ -466,6 +497,7 @@ def main() -> int:
         }
         if bootstrap_script_hash(controller_authority) != cleanup_script_sha256:
             runtime["controllerBootstrapScriptSha256"] = bootstrap_script_hash(controller_authority)
+        args.output.mkdir(parents=True, exist_ok=False)
         _write_new(
             fresh_runtime_path,
             json.loads(args.fresh_subscription_runtime.read_text(encoding="utf-8")),

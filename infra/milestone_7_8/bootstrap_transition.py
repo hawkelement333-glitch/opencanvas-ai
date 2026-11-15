@@ -10,7 +10,6 @@ import hashlib
 import json
 import re
 import subprocess
-from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -201,7 +200,7 @@ def _build_transition(
         "generationId": config.generation_id,
         "sourceHead": original,
         "runtimeSha256": _hash("stage-runtime", runtime),
-        "configSha256": _hash("stage-config", asdict(config)),
+        "configSha256": _hash("stage-config", config.binding_document()),
         "imageDigest": image.get("imageDigest"),
         "ledgerPhase": "image-decided",
         "cleanupArmSha256": bindings.get("cleanupArmSha256"),

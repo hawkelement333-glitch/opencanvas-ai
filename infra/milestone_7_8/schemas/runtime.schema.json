@@ -3,6 +3,10 @@
   "$id": "urn:solarplexus:mobius:milestone-7.8:operator-runtime:v9",
   "type": "object",
   "additionalProperties": false,
+  "dependentRequired": {
+    "deadlineRenewalEvidenceFile": ["deadlineRenewalEvidenceSha256"],
+    "deadlineRenewalEvidenceSha256": ["deadlineRenewalEvidenceFile"]
+  },
   "$defs": {
     "containerAppJobName": {
       "type": "string",
@@ -65,6 +69,8 @@
     "campaignParametersFile"
   ],
   "properties": {
+    "deadlineRenewalEvidenceFile": {"type": "string", "minLength": 1},
+    "deadlineRenewalEvidenceSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "controllerAuthorizedUntilUtc": { "type": "string", "format": "date-time" },
     "controllerAuthorityEvidenceFile": { "type": "string", "minLength": 1 },
     "controllerAuthorityEvidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },

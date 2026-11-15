@@ -249,9 +249,7 @@ def _validate_retained_inspection(value: object, plan: dict[str, object]) -> Non
 
 
 def config_document(config: CampaignConfig) -> object:
-    from dataclasses import asdict
-
-    return asdict(config)
+    return config.binding_document()
 
 
 def _extract_source(
