@@ -68,21 +68,18 @@ async def validate_database_runtime(
                 expected_revision=settings.database_expected_revision,
             )
 
+            # Readiness probes may overlap; migrations remain exclusive.
+            # The connection's transaction releases this lock on exit.
             lock_available = bool(
                 (
                     await connection.execute(
-                        text("SELECT pg_try_advisory_lock(:lock_id)"),
+                        text("SELECT pg_catalog.pg_try_advisory_xact_lock_shared(:lock_id)"),
                         {"lock_id": MIGRATION_ADVISORY_LOCK_ID},
                     )
                 ).scalar_one()
             )
             if not lock_available:
                 raise DatabaseRuntimeError("database_migration_in_progress")
-            await connection.execute(
-                text("SELECT pg_advisory_unlock(:lock_id)"),
-                {"lock_id": MIGRATION_ADVISORY_LOCK_ID},
-            )
-
             role = (
                 await connection.execute(
                     text(

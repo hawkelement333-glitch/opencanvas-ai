@@ -108,6 +108,13 @@ def _tags(runtime: dict[str, str], config: CampaignConfig) -> dict[str, str]:
     }
 
 
+def _prepared_tags(runtime: dict[str, str], config: CampaignConfig) -> dict[str, str]:
+    from infra.milestone_7_8.campaign_deadline_renewal import origin_context
+
+    original_runtime, original_config = origin_context(runtime, config)
+    return _tags(original_runtime, original_config)
+
+
 def _scope(
     runtime: dict[str, str], config: CampaignConfig, previous_digest: str, digest: str,
 ) -> dict[str, object]:
@@ -134,7 +141,7 @@ def _scope(
     if (values.get("targetResourceGroupName") != config.target_resource_group
             or values.get("resourceNameSuffix") != suffix
             or values.get("registryName") != runtime["registryName"]
-            or values.get("lifecycleTags") != _tags(runtime, config)):
+            or values.get("lifecycleTags") != _prepared_tags(runtime, config)):
         raise CampaignError("workload image update prepared parameter binding differs")
     base = (
         f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{config.target_resource_group}"
@@ -196,7 +203,7 @@ def _validate_resource(
         != config.target_region.casefold()
         or resource.get("resourceGroup", config.target_resource_group)
         != config.target_resource_group
-        or any(tags.get(key) != value for key, value in _tags(runtime, config).items())
+        or any(tags.get(key) != value for key, value in _prepared_tags(runtime, config).items())
         or identity.get("type") != "UserAssigned"
         or {key.casefold() for key in assigned} != {target["identityId"].casefold()}
         or str(properties.get("environmentId", "")).casefold()

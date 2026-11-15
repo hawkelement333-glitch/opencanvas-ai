@@ -767,10 +767,12 @@ class Ledger:
     def _replacement_phase(self, replacement: dict[str, str]) -> Phase:
         if "replacementPhase" not in replacement:
             return Phase.IMAGE_DECIDED
-        if (replacement["replacementPhase"] != Phase.DATABASE_BOOTSTRAPPED.value
+        if (replacement["replacementPhase"] not in {
+                Phase.DATABASE_BOOTSTRAPPED.value, Phase.MIGRATED.value,
+            }
                 or self.image_generation_count != 0):
             raise CampaignError("image replacement migration phase or zero-build binding differs")
-        return Phase.DATABASE_BOOTSTRAPPED
+        return Phase(replacement["replacementPhase"])
 
     def record_image_replacement(
         self,
@@ -795,7 +797,7 @@ class Ledger:
                 "grant recovery requires exactly one prior migration image correction"
             )
         if (
-            at_phase not in {Phase.IMAGE_DECIDED, Phase.DATABASE_BOOTSTRAPPED}
+            at_phase not in {Phase.IMAGE_DECIDED, Phase.DATABASE_BOOTSTRAPPED, Phase.MIGRATED}
             or self.phase != at_phase.value
             or self.image_digest is None
             or self.image_scan_evidence_sha256 is None
@@ -814,7 +816,7 @@ class Ledger:
             "continuationSha256": continuation_sha256,
             "recordedAtUtc": utc(now),
         }
-        if at_phase is Phase.DATABASE_BOOTSTRAPPED:
+        if at_phase in {Phase.DATABASE_BOOTSTRAPPED, Phase.MIGRATED}:
             replacement["replacementPhase"] = at_phase.value
         self._validate_replacement(replacement)
         if grant_recovery:

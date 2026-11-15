@@ -4623,11 +4623,29 @@ def _reconcile_evidence_stage_completion(
     )
     attempt_path = directory / "evidence-stage-attempt.json"
     pause_path = directory / "evidence-stage-pause.json"
+    readiness_replacement = (
+        ledger.image_replacement is not None
+        and ledger.image_replacement.get("replacementPhase") == Phase.MIGRATED.value
+    )
+    if readiness_replacement and (not attempt_path.exists() or not pause_path.exists()):
+        raise _ProtectedStagePaused("corrected image completion requires its original history")
     if not attempt_path.exists() and not pause_path.exists() and existing is None:
         # Historical receipt-only recovery predates durable protected-stage records.
         return
     expected_bindings = _stage_bindings(
         config, runtime, replace(ledger, phase=Phase.MIGRATED.value),
+    )
+    image_origin = None
+    if readiness_replacement:
+        # A corrected image may preserve a pre-assertion failed measurement.
+        # Validate its explicit admission link before accepting the old bindings.
+        from infra.milestone_7_8 import image_continuation
+
+        image_origin = image_continuation.validate_readiness_evidence_origin(
+            directory, config, runtime, ledger,
+        )
+    attempt_bindings = (
+        image_origin["originalBindings"] if image_origin is not None else expected_bindings
     )
     attempt = _read_stage_record(attempt_path, "stage-attempt")
     commands = tuple(
@@ -4644,8 +4662,13 @@ def _reconcile_evidence_stage_completion(
         }
         or attempt["version"] != "m7.8-protected-stage-attempt-v1"
         or attempt["operation"] != "evidence"
-        or attempt["bindings"] != expected_bindings
-        or attempt["commandSha256"] != _stage_hash("stage-command", commands)
+        or attempt["bindings"] != attempt_bindings
+        or attempt["commandSha256"] != (
+            image_origin["originalCommandSha256"] if image_origin is not None
+            else _stage_hash("stage-command", commands)
+        )
+        or (image_origin is not None
+            and attempt["recordSha256"] != image_origin["originalAttemptSha256"])
         or re.fullmatch(r"[a-f0-9]{64}", str(attempt["authorizationSha256"])) is None
         or ORDER.index(Phase(ledger.phase)) < ORDER.index(Phase.MIGRATED)
     ):
@@ -4661,14 +4684,18 @@ def _reconcile_evidence_stage_completion(
         or pause["version"] != "m7.8-protected-stage-pause-v1"
         or pause["operation"] != "evidence"
         or pause["bindings"] not in (
-            expected_bindings, {**expected_bindings, "ledgerPhase": Phase.EVIDENCE_EXECUTED.value},
+            attempt_bindings, {**attempt_bindings, "ledgerPhase": Phase.EVIDENCE_EXECUTED.value},
         )
+        or (image_origin is not None
+            and pause["recordSha256"] != image_origin["originalPauseSha256"])
         or pause["attemptSha256"] != attempt["recordSha256"]
         or pause["authorizationSha256"] != attempt["authorizationSha256"]
         or pause["failedExecution"] is not None
         or pause["maximumRetryDispatches"] != 1
     ):
         raise _ProtectedStagePaused("managed evidence completion pause binding differs")
+    if image_origin is not None and pause is None:
+        raise _ProtectedStagePaused("corrected image completion requires its original pause")
     completed: dict[str, object] = {
         "version": "m7.8-managed-evidence-completion-reconciliation-v1",
         "bindings": expected_bindings,
@@ -4677,6 +4704,8 @@ def _reconcile_evidence_stage_completion(
         "receiptSha256": hashlib.sha256(receipt.read_bytes()).hexdigest(),
         "controlPlaneEvidence": control_plane_evidence,
     }
+    if image_origin is not None:
+        completed["imageContinuationSha256"] = image_origin["continuationSha256"]
     if existing is not None:
         if existing != {**completed, "recordSha256": _stage_hash(
             "stage-recovery-completed", completed,

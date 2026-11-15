@@ -120,7 +120,7 @@
           "format": "date-time"
         },
         "replacementPhase": {
-          "const": "database-bootstrapped"
+          "enum": ["database-bootstrapped", "migrated"]
         }
       }
     },

@@ -66,10 +66,386 @@ GRANT_PREVIOUS_HEAD = "9ee46ba7d7431ca44ee1aa85a18adce031543daf"
 GRANT_PREVIOUS_PLAN = "e0384bb35a10d5a4df7cae56d1a5d5d7250c6cf9fc64bc465fecec93f60ce12d"
 GRANT_APPROVAL = "f7ff3f7a827e9fd31e5787bd66e4e7b69552f9b8ba036196c486ed7e879cd116"
 GRANT_FIELDS = FIELDS | {
-    "previousPlanFile", "previousPlanSha256", "originalImageDigest", "grantApprovalFile",
-    "consumedRetryIntentSha256", "consumedRetryExecution", "failedExecutionReadbackFile",
-    "protectedStashesSha256", "cleanupMustBeginByUtc",
+    "previousPlanFile",
+    "previousPlanSha256",
+    "originalImageDigest",
+    "grantApprovalFile",
+    "consumedRetryIntentSha256",
+    "consumedRetryExecution",
+    "failedExecutionReadbackFile",
+    "protectedStashesSha256",
+    "cleanupMustBeginByUtc",
 }
+READINESS_VERSION = "m7.8-readiness-image-continuation-plan-v1"
+READINESS_OPERATIONS = CLEANUP_OPERATIONS | {"image", "image-decision", "evidence", "dispose"}
+READINESS_FIELDS = FIELDS | {
+    "originalImageDigest",
+    "sourceAuthorityFile",
+    "sourceAuthoritySha256",
+    "preassertionPauseSha256",
+}
+
+
+def _readiness_authority(plan: dict[str, object]) -> dict[str, object]:
+    authority = _read(_private(Path(str(plan["sourceAuthorityFile"]))))
+    fields = {
+        "version",
+        "originalRuntimeSourceHead",
+        "parentSourceHead",
+        "sourceHead",
+        "canonicalBuildInputSha256",
+        "cleanupScriptSha256",
+        "allowedChangedPaths",
+        "budgetApprovalFile",
+        "budgetApprovalSha256",
+        "replacementCoveredByApprovedBudget",
+        "cleanupDeadlineUtc",
+        "authorizedCeilingUsd",
+        "maximumHours",
+        "allowedOperations",
+        "issuedAtUtc",
+        "expiresAtUtc",
+        "authoritySha256",
+    }
+    digest = hashlib.sha256(
+        b"m7.8/readiness-image-source-authority/v1\0"
+        + json.dumps(
+            {k: v for k, v in authority.items() if k != "authoritySha256"},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    config = CampaignConfig.from_json(Path(str(plan["configFile"])), allow_expired=True)
+    runtime = _read(Path(str(plan["runtimeFile"])))
+    if (
+        set(authority) != fields
+        or authority["version"] != "m7.8-readiness-image-source-authority-v1"
+        or authority["authoritySha256"] != digest
+        or plan["amendmentSha256"] != digest
+        or _file_hash(Path(str(plan["sourceAuthorityFile"]))) != plan["sourceAuthoritySha256"]
+        or authority["sourceHead"] != plan["sourceHead"]
+        or authority["canonicalBuildInputSha256"] != plan["canonicalBuildInputSha256"]
+        or authority["originalRuntimeSourceHead"] != runtime["sourceHead"]
+        or authority["cleanupScriptSha256"] != runtime["cleanupScriptSha256"]
+        or authority["cleanupDeadlineUtc"] != config.cleanup_deadline_utc
+        or authority["expiresAtUtc"] != config.cleanup_deadline_utc
+        or parse_utc(str(authority["issuedAtUtc"])) >= parse_utc(str(authority["expiresAtUtc"]))
+        or authority["authorizedCeilingUsd"] != config.authorized_ceiling_usd
+        or authority["maximumHours"] != config.maximum_hours
+        or authority["replacementCoveredByApprovedBudget"] is not True
+        or not isinstance(authority["allowedOperations"], list)
+        or set(authority["allowedOperations"]) != READINESS_OPERATIONS
+        or not isinstance(authority["allowedChangedPaths"], list)
+        or not authority["allowedChangedPaths"]
+    ):
+        raise CampaignError("readiness image source authority differs")
+    budget_path = _private(Path(str(authority["budgetApprovalFile"])))
+    budget = _read(budget_path)
+    aggregate = Decimal(str(budget["priorForecastPreservedUsd"])) + Decimal(
+        config.conservative_estimate_usd
+    )
+    if (
+        _file_hash(budget_path) != authority["budgetApprovalSha256"]
+        or budget["approvedFreshBundleCeilingUsd"] != config.authorized_ceiling_usd
+        or budget["activeExecutionHours"] != config.maximum_hours
+        or aggregate > Decimal(str(budget["approvedAggregateCeilingUsd"]))
+        or str(aggregate) != plan["aggregateEstimateUsd"]
+        or budget["approvedAggregateCeilingUsd"] != plan["aggregateCeilingUsd"]
+        or budget["priorForecastPreservedUsd"] != plan["historicalSubtotalUsd"]
+    ):
+        raise CampaignError("readiness image replacement exceeds its preserved budget")
+    return authority
+
+
+def _readiness_source(plan: dict[str, object]) -> str:
+    authority = _readiness_authority(plan)
+    head, cleanup = local_source_binding()
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ("git", *args), cwd=ROOT, check=True, capture_output=True, text=True, timeout=30
+        ).stdout.strip()
+
+    if (
+        head != authority["sourceHead"]
+        or cleanup != authority["cleanupScriptSha256"]
+        or git("rev-list", "--parents", "-n", "1", head).split()
+        != [head, authority["parentSourceHead"]]
+        or sorted(git("diff", "--name-only", str(authority["parentSourceHead"]), head).splitlines())
+        != sorted(authority["allowedChangedPaths"])
+        or git("merge-base", str(authority["originalRuntimeSourceHead"]), head)
+        != authority["originalRuntimeSourceHead"]
+        or canonical_snapshot(head)["buildInputSha256"] != plan["canonicalBuildInputSha256"]
+    ):
+        raise CampaignError("readiness image executing source differs from exact authority")
+    return head
+
+
+def _readiness_context(
+    plan: dict[str, object],
+    *,
+    image: bool = False,
+) -> tuple[dict[str, str], CampaignConfig]:
+    from infra.milestone_7_8 import operator
+
+    runtime_path = Path(str(plan["runtimeFile"]))
+    runtime = operator.load_runtime(runtime_path)
+    config = CampaignConfig.from_json(Path(str(plan["configFile"])), allow_expired=True)
+    operator.validate_prepared_bundle(runtime_path, runtime, config)
+    if image:
+        runtime = {
+            **runtime,
+            "sourceHead": str(plan["sourceHead"]),
+            "canonicalBuildInputSha256": str(plan["canonicalBuildInputSha256"]),
+        }
+    return runtime, config
+
+
+def _readiness_history(plan: dict[str, object]) -> tuple[dict[str, object], dict[str, object]]:
+    from infra.milestone_7_8 import operator
+
+    runtime, config = _readiness_context(plan)
+    baseline = Ledger(**_object(plan["baselineLedger"]))  # type: ignore[arg-type]
+    baseline.validate_resume(config)
+    folder = Path(str(plan["runtimeFile"])).parent
+    attempt = operator._read_stage_record(folder / "evidence-stage-attempt.json", "stage-attempt")
+    pause = operator._read_stage_record(folder / "evidence-stage-pause.json", "stage-pause")
+    expected = operator._stage_bindings(
+        replace(config, image_digest=baseline.image_digest), runtime, baseline
+    )
+    commands = tuple(
+        (*command, "--subscription", runtime["subscriptionId"])
+        for command in operator.command_plan(
+            "evidence",
+            config,
+            runtime,
+            control_plane_evidence="<derived-after-successful-managed-probes>",
+        )
+    )
+    if (
+        baseline.phase != Phase.MIGRATED.value
+        or baseline.image_replacement is not None
+        or baseline.previous_image_replacement is not None
+        or baseline.image_generation_count != 0
+        or baseline.image_scan_count != 1
+        or baseline.image_digest != plan["originalImageDigest"]
+        or attempt.get("operation") != "evidence"
+        or attempt.get("bindings") != expected
+        or attempt.get("commandSha256") != operator._stage_hash("stage-command", commands)
+        or pause.get("operation") != "evidence"
+        or pause.get("bindings") != expected
+        or pause.get("attemptSha256") != attempt["recordSha256"]
+        or pause.get("authorizationSha256") != attempt["authorizationSha256"]
+        or pause.get("failedExecution") is not None
+        or _file_hash(folder / "evidence-stage-pause.json") != plan["preassertionPauseSha256"]
+    ):
+        raise CampaignError("readiness image correction original evidence history differs")
+    return attempt, pause
+
+
+def _readiness_measurement_dispatches(plan: dict[str, object]) -> None:
+    """Replay starts against exact terminal GETs; job name alone does not prove phase."""
+    runtime, config = _readiness_context(plan)
+    folder = Path(str(plan["runtimeFile"])).parent
+    files = _object(plan["boundFilesSha256"])
+    starts: list[tuple[str, str, str]] = []
+    terminal: set[tuple[str, str, str]] = set()
+
+    def option(command: list[str], name: str) -> str:
+        try:
+            return command[command.index(name) + 1]
+        except (ValueError, IndexError) as exc:
+            raise CampaignError("readiness job dispatch scope is incomplete") from exc
+
+    for name in sorted(files):
+        path = Path(name)
+        evidence_phase = path.parent.parent == folder / "phases" and path.parent.name.startswith(
+            "evidence-"
+        )
+        diagnosis = path.parent == folder / "measurement-failure-diagnosis/terminal-reconciliation"
+        if not path.name.endswith("-intent.json") or not (evidence_phase or diagnosis):
+            continue
+        command = _read(path).get("command")
+        if not isinstance(command, list) or not all(isinstance(part, str) for part in command):
+            raise CampaignError("readiness measurement dispatch history is malformed")
+        if command[:3] == ["az", "postgres", "flexible-server"] and "restart" in command:
+            raise CampaignError("readiness correction follows a failover dispatch")
+        start = evidence_phase and command[:4] == ["az", "containerapp", "job", "start"]
+        show = command[:5] == ["az", "containerapp", "job", "execution", "show"]
+        if not start and not show:
+            continue
+        job = option(command, "--name")
+        if start and job not in {runtime["workerJobName"], runtime["evidenceJobName"]}:
+            raise CampaignError("readiness correction follows an acceptance dispatch")
+        if option(command, "--resource-group") != config.target_resource_group or (
+            option(command, "--subscription") != runtime["subscriptionId"]
+        ):
+            raise CampaignError("readiness job dispatch scope differs")
+        result_path = path.with_name(path.name.replace("-intent.json", "-result.json"))
+        if str(result_path) not in files:
+            raise CampaignError("readiness job dispatch response is not retained")
+        envelope = _read(result_path)
+        if envelope.get("exitCode") != 0 or not isinstance(envelope.get("stdout"), str):
+            raise CampaignError("readiness job dispatch outcome is unknown")
+        value = _object(json.loads(str(envelope["stdout"])))
+        execution = value.get("name")
+        if not isinstance(execution, str) or not execution:
+            raise CampaignError("readiness execution identity is absent")
+        expected_id = (
+            f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/"
+            f"{config.target_resource_group}/providers/Microsoft.App/jobs/{job}"
+            f"/executions/{execution}"
+        )
+        if str(value.get("id", "")).casefold() != expected_id.casefold():
+            raise CampaignError("readiness execution identity differs from exact start")
+        identity = (job, execution, expected_id.casefold())
+        if start:
+            starts.append(identity)
+            continue
+        if option(command, "--job-execution-name") != execution:
+            raise CampaignError("readiness execution GET differs from its request")
+        if job not in {runtime["workerJobName"], runtime["evidenceJobName"]}:
+            continue  # Separate diagnostic API GETs remain retained, never dispatched here.
+        properties = _object(value.get("properties"))
+        containers = _object(properties.get("template")).get("containers")
+        if not isinstance(containers, list) or len(containers) != 1:
+            raise CampaignError("readiness execution template is incomplete")
+        container = _object(containers[0])
+        if container.get("image") != (
+            f"{runtime['registryName']}.azurecr.io/mobius-api@{plan['originalImageDigest']}"
+        ):
+            raise CampaignError("readiness failed execution image differs")
+        if job == runtime["evidenceJobName"]:
+            if container.get("args") != ["--phase=measurement-sample"]:
+                raise CampaignError("readiness correction follows a non-measurement execution")
+            if properties.get("status") == "Failed":
+                terminal.add(identity)
+        elif properties.get("status") == "Stopped":
+            terminal.add(identity)
+    if (
+        not starts
+        or {item[0] for item in starts} != {runtime["workerJobName"], runtime["evidenceJobName"]}
+        or any(item not in terminal for item in starts)
+    ):
+        raise CampaignError("readiness worker/sampler terminal reconciliation is incomplete")
+
+
+def build_readiness_plan(
+    runtime_path: Path,
+    config_path: Path,
+    ledger_path: Path,
+    *,
+    retained_image: Path,
+    source_authority: Path,
+) -> dict[str, object]:
+    """Bind one readiness correction to the migrated campaign's retained evidence."""
+    from infra.milestone_7_8 import operator
+
+    runtime_path, config_path, ledger_path, retained_image, source_authority = (
+        _private(path)
+        for path in (runtime_path, config_path, ledger_path, retained_image, source_authority)
+    )
+    folder = runtime_path.parent
+    if config_path.parent != folder or ledger_path.parent != folder:
+        raise CampaignError("readiness image inputs must share their original generation")
+    operator.load_runtime(runtime_path)
+    config = CampaignConfig.from_json(config_path, allow_expired=True)
+    ledger = load_ledger(ledger_path, config)
+    authority = _read(source_authority)
+    budget_path = _private(Path(str(authority["budgetApprovalFile"])))
+    budget = _read(budget_path)
+    retained = load_retained_image(
+        retained_image,
+        operator_head=str(authority["sourceHead"]),
+        canonical_input_sha256=str(authority["canonicalBuildInputSha256"]),
+    )
+    plan: dict[str, object] = {
+        "version": READINESS_VERSION,
+        "runtimeFile": str(runtime_path),
+        "configFile": str(config_path),
+        "ledgerFile": str(ledger_path),
+        "costFile": str(config_path),
+        "retainedImageFile": str(retained_image),
+        "sourceHead": authority["sourceHead"],
+        "imageBuildSourceHead": retained["imageBuildSourceHead"],
+        "canonicalBuildInputSha256": authority["canonicalBuildInputSha256"],
+        "retainedImageId": retained["imageId"],
+        "baselineLedger": asdict(ledger),
+        "baselineLedgerFileSha256": _file_hash(ledger_path),
+        "historicalSubtotalUsd": budget["priorForecastPreservedUsd"],
+        "aggregateEstimateUsd": str(
+            Decimal(str(budget["priorForecastPreservedUsd"]))
+            + Decimal(config.conservative_estimate_usd)
+        ),
+        "aggregateCeilingUsd": budget["approvedAggregateCeilingUsd"],
+        "scannerReserveCoversReplacement": True,
+        "amendmentSha256": authority["authoritySha256"],
+        "originalImageDigest": ledger.image_digest,
+        "sourceAuthorityFile": str(source_authority),
+        "sourceAuthoritySha256": _file_hash(source_authority),
+        "preassertionPauseSha256": _file_hash(folder / "evidence-stage-pause.json"),
+    }
+    bound = {
+        runtime_path,
+        config_path,
+        retained_image,
+        source_authority,
+        budget_path,
+        *(
+            folder / name
+            for name in (
+                "evidence-stage-attempt.json",
+                "evidence-stage-pause.json",
+                "managed-evidence-attempt.json",
+                "local-image/completed.json",
+                "local-image/image-scan.json",
+            )
+        ),
+    }
+    bound.update(path for path in (folder / "phases").rglob("*") if path.is_file())
+    bound.update(
+        path for path in (folder / "measurement-failure-diagnosis").rglob("*") if path.is_file()
+    )
+    plan["boundFilesSha256"] = {str(path): _file_hash(path) for path in sorted(bound)}
+    _readiness_source(plan)
+    _readiness_history(plan)
+    _readiness_measurement_dispatches(plan)
+    if (
+        (folder / "managed-evidence-execution.json").exists()
+        or (folder / "managed-assertion-evidence.json").exists()
+        or (folder / "managed-assertion-captures").exists()
+    ):
+        raise CampaignError("readiness image correction must precede managed assertions")
+    plan["planSha256"] = _hash(plan)
+    return plan
+
+
+def _load_readiness_plan(path: Path, plan: dict[str, object]) -> dict[str, object]:
+    if (
+        set(plan) != READINESS_FIELDS
+        or plan["planSha256"] != _hash({k: v for k, v in plan.items() if k != "planSha256"})
+        or path.resolve()
+        != Path(str(plan["runtimeFile"])).parent / "readiness-correction/plan.json"
+        or plan["costFile"] != plan["configFile"]
+        or plan["scannerReserveCoversReplacement"] is not True
+    ):
+        raise CampaignError("readiness image plan differs from its exact private binding")
+    folder = Path(str(plan["runtimeFile"])).parent
+    required = {str(plan[key]) for key in (
+        "runtimeFile", "configFile", "sourceAuthorityFile", "retainedImageFile",
+    )} | {str(folder / name) for name in (
+        "evidence-stage-attempt.json", "evidence-stage-pause.json", "managed-evidence-attempt.json",
+        "local-image/completed.json", "local-image/image-scan.json",
+    )}
+    if not required <= set(_object(plan["boundFilesSha256"])):
+        raise CampaignError("readiness image plan omitted original evidence bindings")
+    for name, expected in _object(plan["boundFilesSha256"]).items():
+        if _file_hash(_private(Path(name))) != expected:
+            raise CampaignError("readiness image original evidence changed")
+    _readiness_authority(plan)
+    _readiness_history(plan)
+    _readiness_measurement_dispatches(plan)
+    return plan
 
 
 def _migration_source(plan: dict[str, object] | None = None) -> dict[str, str]:
@@ -784,6 +1160,8 @@ def grant_retry_transition(
 
 
 def _plan_source(plan: dict[str, object]) -> str:
+    if plan.get("version") == READINESS_VERSION:
+        return _readiness_source(plan)
     if plan.get("version") == GRANT_VERSION:
         previous = load_plan(Path(str(plan["previousPlanFile"])))
         return _grant_source(previous, plan)["sourceHead"]
@@ -1321,6 +1699,8 @@ def build_plan(
 
 def load_plan(path: Path) -> dict[str, object]:
     plan = _read(_private(path))
+    if plan.get("version") == READINESS_VERSION:
+        return _load_readiness_plan(path, plan)
     if plan.get("version") == MIGRATION_VERSION:
         return _load_migration_plan(path, plan)
     if plan.get("version") == GRANT_VERSION:
@@ -1423,6 +1803,9 @@ def _validate_completed_image(record: dict[str, object]) -> None:
 
 def image_evidence_context(path: Path) -> tuple[Path, dict[str, str], CampaignConfig]:
     plan = load_plan(path)
+    if plan.get("version") == READINESS_VERSION:
+        runtime, config = _readiness_context(plan, image=True)
+        return path, runtime, config
     selected = (Path(str(_object(plan["completedImagePlan"])["planFile"]))
                 if "completedImagePlan" in plan else path)
     runtime, config = _effective(load_plan(selected))
@@ -1474,6 +1857,8 @@ def _prior_remaining(plan: dict[str, object]) -> tuple[Path, dict[str, object]] 
 
 
 def _effective(plan: dict[str, object]) -> tuple[dict[str, str], CampaignConfig]:
+    if plan.get("version") == READINESS_VERSION:
+        return _readiness_context(plan)
     from infra.milestone_7_8 import operator
 
     path = Path(str(plan["runtimeFile"]))
@@ -1502,7 +1887,8 @@ def load_context(
     if not (operation in CLEANUP_OPERATIONS and plan.get("version") == MIGRATION_VERSION
             and _grant_cleanup_source(plan)):
         _plan_source(plan)
-    allowed_operations = (MIGRATION_OPERATIONS - {"bootstrap", "startup"}
+    allowed_operations = (READINESS_OPERATIONS if plan.get("version") == READINESS_VERSION else
+                          MIGRATION_OPERATIONS - {"bootstrap", "startup"}
                           if plan.get("version") in {MIGRATION_VERSION, GRANT_VERSION}
                           else ALLOWED_OPERATIONS)
     if (operation not in allowed_operations
@@ -1540,6 +1926,8 @@ def load_context(
     if (operation in {"image", "startup"}
             and parse_utc(config.cleanup_deadline_utc) <= datetime.now(UTC)):
         raise CampaignError("continuation cleanup deadline has expired")
+    if operation == "image" and plan.get("version") == READINESS_VERSION:
+        runtime, config = _readiness_context(plan, image=True)
     return runtime, config, ledger
 
 
@@ -1548,7 +1936,10 @@ def validate_image_completion_context(
     continuation: Path,
 ) -> None:
     plan = load_plan(continuation)
-    effective_runtime, effective_config = _effective(plan)
+    effective_runtime, effective_config = (
+        _readiness_context(plan, image=True) if plan.get("version") == READINESS_VERSION
+        else _effective(plan)
+    )
     if (runtime != effective_runtime or config != effective_config
             or image_plan.get("continuationFile") != str(continuation.resolve())
             or image_plan.get("continuationPlanSha256") != plan["planSha256"]):
@@ -1569,7 +1960,9 @@ def validate_image_request(
     plan = load_plan(path)
     baseline = _object(plan["baselineLedger"])
     if (asdict(ledger) != asdict(Ledger(**baseline))  # type: ignore[arg-type]
-            or ledger.phase != (Phase.DATABASE_BOOTSTRAPPED.value
+            or ledger.phase != (Phase.MIGRATED.value
+                                if plan.get("version") == READINESS_VERSION else
+                                Phase.DATABASE_BOOTSTRAPPED.value
                                 if plan.get("version") in {MIGRATION_VERSION, GRANT_VERSION}
                                 else Phase.IMAGE_DECIDED.value)
             or (ledger.previous_image_replacement is not None
@@ -1700,6 +2093,33 @@ def resolved_image_pause(
     return _file_hash(pause_path)
 
 
+def validate_readiness_evidence_origin(
+    directory: Path, config: CampaignConfig, runtime: dict[str, str], ledger: Ledger,
+) -> dict[str, object]:
+    """Link the preserved old-image pause to a fully admitted readiness replacement."""
+    path = directory.resolve() / "readiness-correction/plan.json"
+    plan = load_plan(path)
+    original_runtime, original_config = _readiness_context(plan)
+    if (plan.get("version") != READINESS_VERSION or runtime != original_runtime
+            or replace(config, image_digest=original_config.image_digest) != original_config
+            or ledger.image_replacement is None
+            or ledger.image_replacement.get("replacementPhase") != Phase.MIGRATED.value
+            or ledger.phase not in {Phase.MIGRATED.value, Phase.EVIDENCE_EXECUTED.value,
+                                    Phase.DISPOSED.value, Phase.CLEANING.value, Phase.CLEANED.value,
+                                    Phase.CLEANUP_DISARMED.value, Phase.RESIDUE_VERIFIED.value,
+                                    Phase.FINALIZED.value}):
+        raise CampaignError("readiness evidence continuation scope or phase differs")
+    receipt = validate_admission(path, runtime, original_config, ledger)
+    attempt, pause = _readiness_history(plan)
+    return {
+        "originalBindings": attempt["bindings"],
+        "originalCommandSha256": attempt["commandSha256"],
+        "continuationSha256": receipt["continuationSha256"],
+        "originalAttemptSha256": attempt["recordSha256"],
+        "originalPauseSha256": pause["recordSha256"],
+    }
+
+
 def execute_admission(
     path: Path, runtime: dict[str, str], config: CampaignConfig, ledger: Ledger, *,
     digest: str, scan_path: Path, authorization: Path, execute: bool,
@@ -1795,7 +2215,8 @@ def execute_admission(
         ledger.record_image_replacement(
             digest, scan_sha256, str(receipt["continuationSha256"]),
             conservative_estimate_usd=config.conservative_estimate_usd, now=datetime.now(UTC),
-            at_phase=(Phase.DATABASE_BOOTSTRAPPED
+            at_phase=(Phase.MIGRATED if plan.get("version") == READINESS_VERSION else
+                      Phase.DATABASE_BOOTSTRAPPED
                       if plan.get("version") in {MIGRATION_VERSION, GRANT_VERSION}
                       else Phase.IMAGE_DECIDED),
             grant_recovery=plan.get("version") == GRANT_VERSION,
