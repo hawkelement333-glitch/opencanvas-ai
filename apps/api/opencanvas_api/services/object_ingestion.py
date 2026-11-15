@@ -597,7 +597,7 @@ class UploadLifecycleService:
             session=record,
             event_type="upload.completed",
             subject_id=record.session_id,
-            source=f"completed:{upload_transition.sequence}",
+            source=f"completed:{record.session_id}:{upload_transition.sequence}",
             payload={
                 "state": "completed",
                 "documentId": str(record.document_id),

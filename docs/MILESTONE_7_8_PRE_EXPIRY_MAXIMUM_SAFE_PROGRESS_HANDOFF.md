@@ -4,8 +4,23 @@
 > accepted PG-E01/E02/E03, TI-E01 and PG-E04 (38 assertions), verified all
 > 14 cleanup counters zero, preserved the reusable controller and finalized
 > the ledger. Milestone 7.8 remains incomplete for its other existing items.
+> The later [managed object/scanner campaign](MILESTONE_7_8_MANAGED_OBJECT_STORAGE_EXECUTION_PACKAGE.md)
+> accepted six upload assertions out of 24. M78-D-001 remains open: five scanner,
+> eight deletion/failed-transaction and five recovery assertions are unproved.
+> Actual first-pair log delays were 514.20/514.74 seconds; warm clean/infected
+> delays were 483.85/444.25 seconds, exceeding the unchanged 300-second window.
+> Late diagnostic evidence was not accepted; validators and timeouts were not
+> weakened. Object campaign cleanup is verified: all 19 object-campaign
+> residue counters are zero; the reusable controller is preserved and the ledger
+> finalized.
+> Billing remains unsettled; ceilings and forecasts are not settled charges.
+> Focused regressions passed for narrow immutable-request row-lock column grants
+> and session-specific upload completion event identity, including historical
+> replay. The local M78-OS-001 correction and disabled legacy development/demo
+> unlink limitation remain preserved. See the [current defect reconciliation](MILESTONE_7_8_DEFECT_REGISTER.md#m78-d-001-managed-campaign-reconciliation--2026-11-15).
 > Status, blockers and authorization limits below describe this dated
-> historical checkpoint; they do not reopen the completed campaign.
+> historical checkpoint; they do not reopen the completed PostgreSQL campaign
+> or override this later managed-object result.
 
 Date: 2026-08-18
 

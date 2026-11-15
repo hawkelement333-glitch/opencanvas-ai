@@ -7,6 +7,12 @@ defect corrections are preserved. All five managed PostgreSQL evidence checks
 are now **accepted**, with all 38 required assertions passed; campaign cleanup
 is **complete**, all 14 residue counters are zero, the reusable controller is
 preserved and the ledger is finalized. See the [completed PostgreSQL campaign](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15).
+The later [managed object/scanner campaign](MILESTONE_7_8_MANAGED_OBJECT_STORAGE_EXECUTION_PACKAGE.md)
+accepted six of 24 assertions. M78-D-001 remains open: five scanner, eight
+deletion and five recovery assertions are unproved after actual scanner log
+delivery exceeded the unchanged 300-second acceptance window. Object campaign
+cleanup is verified: all 19 object-campaign residue counters are zero;
+the reusable controller is preserved and the ledger finalized; billing remains unsettled.
 Milestone 7.8 remains incomplete only for the
 [remaining existing requirements](MILESTONE_7_IMPLEMENTATION_PLAN.md#78-completion-checklist-reconciliation--2026-11-15).
 
@@ -446,6 +452,48 @@ local PostgreSQL fixture skipped. The legacy unlink-before-relational-commit
 path remains an explicit development/demo limitation; staging and production
 require trusted secure ingestion and cannot fall back to it.
 
+### M78-D-001 managed campaign reconciliation — 2026-11-15
+
+**Disposition:** open; six upload assertions accepted, 18 downstream assertions
+unproved. The [managed object execution package](MILESTONE_7_8_MANAGED_OBJECT_STORAGE_EXECUTION_PACKAGE.md)
+records the actual executions, retained private evidence, source/image bindings
+and receipt hashes. Accepted upload proof covers cross-workspace denial,
+forged-capability denial, checksum-substitution denial, exact quarantine version
+bytes, pending-object read denial and API clean-write denial. Preserve this
+successful proof independently of the later scanner failures.
+
+The first pair's scanner logs arrived 514.20/514.74 seconds after scanning.
+The warm pair's clean/infected logs arrived after 483.85/444.25 seconds. Both
+pairs exceeded the existing 300-second dual-source acceptance window. Late
+provider decisions are diagnostic evidence, not accepted scanner results.
+The five scanner/promotion, eight deletion/failed-transaction and five
+retention/recovery assertions therefore remain unproved. No acceptance rule,
+timeout or validator was weakened; no unchanged failed observation was repeated
+after the second pair established the delivery-latency blocker. Object campaign
+cleanup is verified: all 19 object-campaign residue counters are zero;
+the reusable controller is preserved and the ledger finalized. Approved ceilings and forecasts
+remain distinct from unsettled billing.
+
+Two demonstrated production defects were corrected during this campaign:
+
+- `db/role_privileges.py` now grants column-level `UPDATE` on
+  `upload_sessions(session_id)`, `malware_scan_requests(scan_request_id)` and
+  `object_deletion_requests(deletion_request_id)` where the existing services
+  require PostgreSQL row locks. Table-level mutation authority was not granted;
+  existing immutable-row guards remain effective. Focused grant regressions
+  passed, and the managed grant action verified the three column grants and
+  retained mutation guards.
+- `services/object_ingestion.py` now includes the upload session in the
+  `upload.completed` source identity. Two different uploads in one canvas no
+  longer collide on the same transition sequence. Focused regressions passed
+  for distinct uploads and unchanged replay of historical completion events.
+
+These corrections do not close the outstanding managed scanner/deletion/recovery
+proof or reopen the completed PostgreSQL campaign. The earlier M78-OS-001
+correction and its valid local tests remain retained. The disabled legacy
+unlink-before-relational-commit development/demo limitation remains disclosed;
+trusted staging/production ingestion cannot fall back to that path.
+
 ### Current validation-contract corrections
 
 Two repository-validation failures were local harness drift rather than
@@ -842,7 +890,7 @@ implementation defects, so this first audit surface does not fix them.
 
 | Identifier | Source                                            | Description                                                                                                  | Classification                                      | 7.8 contract consequence                                                                                                     |
 | ---------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| M78-D-001  | `docs/KNOWN_LIMITATIONS.md`                       | File unlink and relational commit are not atomic; staged trash/outbox cleanup is deferred.                   | Architectural, reliability, and operational debt    | The object lifecycle and failed-transaction audit must validate it; remediation is conditional on a proved defect.           |
+| M78-D-001  | `docs/KNOWN_LIMITATIONS.md`                       | File unlink and relational commit are not atomic; staged trash/outbox cleanup is deferred.                   | Architectural, reliability, and operational debt    | Open: local M78-OS-001 correction retained; managed upload 6/24 accepted. Scanner 5, deletion/failed-transaction 8 and recovery 5 remain unproved after late dual-source logs; see the [current campaign reconciliation](#m78-d-001-managed-campaign-reconciliation--2026-11-15). Legacy development/demo unlink limitation remains disclosed. |
 | M78-D-002  | `docs/KNOWN_LIMITATIONS.md`                       | The shared-rate-limit adapter lacks recorded end-to-end revalidation against approved isolated Azure Redis.  | Validation, reliability, and operational debt       | The shared-limit audit and final atomic-across-replicas scenario are mandatory; remediation is conditional on failure.       |
 | M78-D-003  | `docs/KNOWN_LIMITATIONS.md`; `docs/DEPLOYMENT.md` | Full live telemetry destination, dashboards, alerts, retention, access, and revocation validation is absent. | Validation, operational, privacy, and security debt | The observability audit is mandatory; retained evidence must be assessed before any separately authorized Azure mutation.    |
 | M78-D-004  | `docs/KNOWN_LIMITATIONS.md`                       | Production queue wake-up, operational telemetry, and external multi-service delivery require validation.     | Validation, reliability, and operational debt       | The durable-work audit is mandatory; remediation is conditional on a proved contract failure.                                |

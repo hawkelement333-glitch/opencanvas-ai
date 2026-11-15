@@ -323,6 +323,17 @@ RUNTIME_SEQUENCE_PRIVILEGES: Final[Mapping[DatabaseRole, frozenset[str]]] = {
     DatabaseRole.API: frozenset(),
     DatabaseRole.WORKER: frozenset(),
 }
+# PostgreSQL SELECT FOR UPDATE requires UPDATE on at least one column. These
+# immutable identities are locked but never changed; their BEFORE UPDATE/DELETE
+# guards remain authoritative. Do not widen the table-level UPDATE inventories.
+RUNTIME_ROW_LOCK_COLUMNS: Final[Mapping[DatabaseRole, Mapping[str, str]]] = {
+    DatabaseRole.API: {"upload_sessions": "session_id"},
+    DatabaseRole.WORKER: {
+        "upload_sessions": "session_id",
+        "malware_scan_requests": "scan_request_id",
+        "object_deletion_requests": "deletion_request_id",
+    },
+}
 _VECTOR_TYPEMOD: Final = "public.vector(public.vector, pg_catalog.int4, pg_catalog.bool)"
 _VECTOR_COSINE: Final = "public.cosine_distance(public.vector, public.vector)"
 _AZURE_VECTOR_ROUTINE_COUNT: Final = 118
@@ -567,6 +578,11 @@ def runtime_privilege_statements(
             tables = sorted(RUNTIME_TABLE_PRIVILEGES[role][operation])
             if tables:
                 statements.append(_table_grant(operation, tables, principal))
+        for table, column in sorted(RUNTIME_ROW_LOCK_COLUMNS[role].items()):
+            statements.append(
+                f"GRANT UPDATE ({quote_identifier(column)}) ON TABLE "
+                f"public.{quote_identifier(table)} TO {quoted}"
+            )
     for object_kind in ("TABLES", "SEQUENCES", "FUNCTIONS"):
         statements.append(
             f"ALTER DEFAULT PRIVILEGES FOR ROLE {quoted_migration} IN SCHEMA public "
@@ -581,6 +597,7 @@ __all__ = [
     "API_SELECT_TABLES",
     "API_UPDATE_TABLES",
     "RUNTIME_FUNCTION_PRIVILEGES",
+    "RUNTIME_ROW_LOCK_COLUMNS",
     "RUNTIME_SEQUENCE_PRIVILEGES",
     "RUNTIME_TABLE_PRIVILEGES",
     "WORKER_DELETE_TABLES",
