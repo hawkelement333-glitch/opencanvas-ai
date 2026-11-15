@@ -416,14 +416,10 @@ class CampaignMeasurement:
         )
         snapshots: list[tuple[datetime, datetime, dict[str, object], dict[str, object]]] = []
         expires = time.monotonic() + min(240, self.remaining())
-        with ThreadPoolExecutor(max_workers=len(revisions) + 2) as pool:
+        with ThreadPoolExecutor(max_workers=len(revisions) + 3) as pool:
             while time.monotonic() < expires:
-                status = self.sampler_status(execution)
-                if status == "Succeeded":
-                    break
-                if status not in {"Running", "Processing", "Pending", "Starting"}:
-                    raise CampaignError("measurement sampler did not reach terminal success")
                 capture_start = datetime.now(UTC)
+                status_read = pool.submit(self.sampler_status, execution)
                 worker_read = pool.submit(
                     collect_worker_replicas, self.runner, subscription=self.subscription,
                     group=self.group, job=self.worker, execution=worker_execution,
@@ -433,7 +429,10 @@ class CampaignMeasurement:
                 workers = worker_read.result()
                 active = active_read.result()
                 replica_sets = [read.result() for read in api_reads]
+                status = status_read.result()
                 capture_end = datetime.now(UTC)
+                if status not in {"Running", "Processing", "Pending", "Starting", "Succeeded"}:
+                    raise CampaignError("measurement sampler did not reach terminal success")
                 if set(active) != set(revisions) or not all(map(_four_running, replica_sets)):
                     raise CampaignError("API replica ceiling or intended revision overlap changed")
                 api: dict[str, object] = {
@@ -444,7 +443,9 @@ class CampaignMeasurement:
                     ],
                 }
                 snapshots.append((capture_start, capture_end, workers, api))
-                time.sleep(min(1, self.remaining(), max(0, expires - time.monotonic())))
+                if status == "Succeeded":
+                    break
+                time.sleep(min(0.1, self.remaining(), max(0, expires - time.monotonic())))
             else:
                 raise CampaignError("measurement sampler did not finish before timeout")
         completed = datetime.now(UTC)

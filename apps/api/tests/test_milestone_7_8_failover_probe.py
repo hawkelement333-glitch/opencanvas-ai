@@ -181,3 +181,58 @@ def test_long_sampling_run_retains_real_transition_boundaries_with_bounded_conso
     selected = _transition_observations(rows)
     assert selected == [rows[index] for index in (1, 249, 250, 499, 898, 899)]
     assert len(json.dumps(selected).encode()) < 8_192
+
+
+@pytest.mark.asyncio
+async def test_snapshot_connection_timeout_records_disruption_then_fresh_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(201 if request.method == "POST" else 200, json={})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="http://test"
+    ) as client:
+        probe = FailoverProbe(
+            client, client, cast(Database, object()), token="a" * 32,
+            worker_execution="exact-worker-execution",
+        )
+        stamp = "2030-01-01T00:01:00+00:00"
+        snapshots = AsyncMock(side_effect=[
+            TimeoutError("connection acquisition timed out"),
+            {
+                "heartbeats": [{"seen": stamp} for _ in range(4)],
+                "attempts": [{"started": stamp}],
+                "outcomes": [{"recorded": stamp}],
+            },
+        ])
+        monkeypatch.setattr(probe, "worker_snapshot", snapshots)
+        interrupted = await probe.observe()
+        recovered = await probe.observe()
+        assert interrupted["apiReadPassed"] is True
+        assert interrupted["apiWritePassed"] is True
+        assert interrupted["workerDatabaseActive"] is False
+        assert interrupted["workerObservedAtUtc"] is None
+        assert interrupted["workerClaims"] == interrupted["workerOutcomes"] == 0
+        assert recovered["workerDatabaseActive"] is True
+        assert recovered["workerClaims"] == recovered["workerOutcomes"] == 1
+        assert snapshots.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_snapshot_programming_failure_is_not_classified_as_disruption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(201 if request.method == "POST" else 200, json={})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="http://test"
+    ) as client:
+        probe = FailoverProbe(
+            client, client, cast(Database, object()), token="a" * 32,
+            worker_execution="exact-worker-execution",
+        )
+        monkeypatch.setattr(probe, "worker_snapshot", AsyncMock(side_effect=RuntimeError("bug")))
+        with pytest.raises(RuntimeError, match="bug"):
+            await probe.observe()

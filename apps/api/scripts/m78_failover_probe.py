@@ -294,6 +294,10 @@ class FailoverProbe:
             if (not exc.connection_invalidated
                     and sqlstate(exc) not in {"08003", "08006", "57P01", "57P02", "57P03"}):
                 raise
+        except TimeoutError:
+            # A new snapshot opens a fresh connection on the next bounded iteration.
+            # Connection acquisition can time out before a DBAPI error exists.
+            pass
         heartbeats = snapshot["heartbeats"]
         return {
             "observedAtUtc": _now(),

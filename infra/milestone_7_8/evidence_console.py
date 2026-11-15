@@ -127,7 +127,46 @@ def assertions(payload: dict[str, object], phase: str) -> set[str]:
     return codes
 
 
+def _credential_identity(runtime: dict[str, str]) -> tuple[str, str]:
+    """Resolve canonical identity from the existing, exact controller authority proof."""
+    if "controllerAuthorityEvidenceFile" not in runtime:
+        values = runtime.get("campaignId"), runtime.get("generationId")
+        if not all(isinstance(value, str) and value for value in values):
+            raise CampaignError("credential campaign identity is absent")
+        return values
+    from infra.milestone_7_8.campaign import sanitize
+    from infra.milestone_7_8.controller_admission import (
+        validate_authority_evidence,
+        validate_controller_admission,
+    )
+
+    try:
+        evidence = json.loads(Path(runtime["controllerAuthorityEvidenceFile"]).read_text())
+        anchor = validate_authority_evidence(evidence)
+        digest = validate_controller_admission(
+            evidence, subscription_id=runtime["subscriptionId"],
+            subscription_correlation=sanitize(runtime["subscriptionId"], domain="subscription"),
+            resource_group=runtime["cleanupResourceGroupName"],
+            account=runtime["automationAccountName"],
+            cleanup_script_sha256=runtime["cleanupScriptSha256"],
+            fresh_evidence_sha256=runtime["freshControllerAdmissionEvidenceSha256"],
+            location=runtime["cleanupRegion"],
+            observed_deadline=runtime["controllerAuthorizedUntilUtc"],
+        )
+        campaign, generation = anchor.campaign_id, anchor.generation_id
+        suffix = hashlib.sha256(f"{campaign}\0{generation}".encode()).hexdigest()[:10]
+        if (digest != runtime["controllerAuthorityEvidenceSha256"]
+                or runtime["resourceGroupName"] != f"rg-m78-{suffix}-target"
+                or runtime.get("campaignId", campaign) != campaign
+                or runtime.get("generationId", generation) != generation):
+            raise CampaignError("credential campaign authority binding differs")
+        return campaign, generation
+    except (OSError, KeyError, ValueError, TypeError) as exc:
+        raise CampaignError("credential campaign authority is unreadable or incomplete") from exc
+
+
 def credential(payload: dict[str, object], phase: str, runtime: dict[str, str]) -> None:
+    campaign_id, generation_id = _credential_identity(runtime)
     if (
         set(payload)
         != {
@@ -143,8 +182,8 @@ def credential(payload: dict[str, object], phase: str, runtime: dict[str, str]) 
         or payload.get("version") != "m7.8-credential-recovery-observation-v1"
         or payload.get("status") != "observed"
         or payload.get("mode") != phase
-        or payload.get("campaignId") != runtime["campaignId"]
-        or payload.get("generationId") != runtime["generationId"]
+        or payload.get("campaignId") != campaign_id
+        or payload.get("generationId") != generation_id
         or payload.get("loginEnabled") is not (phase == "restore")
     ):
         raise CampaignError("credential observation binding differs")

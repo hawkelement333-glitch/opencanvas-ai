@@ -235,7 +235,9 @@ def test_generic_evidence_marker_retains_exact_token(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome", ["invalidate", "sqlstate", "persistent", "auth", "cancel"])
+@pytest.mark.parametrize("outcome", [
+    "invalidate", "sqlstate", "timeout", "persistent", "persistent-timeout", "auth", "cancel",
+])
 async def test_worker_reconnects_only_from_transient_database_failure(
     monkeypatch: pytest.MonkeyPatch, outcome: str,
 ) -> None:
@@ -268,6 +270,8 @@ async def test_worker_reconnects_only_from_transient_database_failure(
         events.append("iteration")
         if outcome == "persistent":
             raise failure("57P03")
+        if outcome == "persistent-timeout":
+            raise TimeoutError("connection acquisition timed out")
         if outcome == "auth":
             raise failure("28P01", invalidated=True)
         if outcome == "cancel":
@@ -275,6 +279,8 @@ async def test_worker_reconnects_only_from_transient_database_failure(
         if iterations in {1, 3}:
             if outcome == "invalidate":
                 raise failure(None, invalidated=True)
+            if outcome == "timeout":
+                raise TimeoutError("connection acquisition timed out")
             raise failure("57P01")
         if iterations == 2:
             return True
@@ -287,11 +293,12 @@ async def test_worker_reconnects_only_from_transient_database_failure(
     monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: clock))
     monkeypatch.setattr(jobs, "_WORKER_DATABASE_RECOVERY_SECONDS", 2.0)
     monkeypatch.setattr(asyncio, "sleep", sleep)
-    if outcome in {"persistent", "auth"}:
-        with pytest.raises(DBAPIError):
+    if outcome in {"persistent", "persistent-timeout", "auth"}:
+        with pytest.raises(TimeoutError if outcome == "persistent-timeout" else DBAPIError):
             await DocumentWorker.run_forever(fake_worker)
         assert events == (
-            ["iteration", "sleep", "iteration", "sleep"] if outcome == "persistent"
+            ["iteration", "sleep", "iteration", "sleep"]
+            if outcome in {"persistent", "persistent-timeout"}
             else ["iteration"]
         )
     else:

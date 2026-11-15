@@ -459,8 +459,8 @@ class DocumentWorker:
             while True:
                 try:
                     processed = await self.run_once()
-                except DBAPIError as exc:
-                    if not _worker_database_disconnect(exc):
+                except (DBAPIError, TimeoutError) as exc:
+                    if isinstance(exc, DBAPIError) and not _worker_database_disconnect(exc):
                         raise
                     if disconnected_until is None:
                         disconnected_until = time.monotonic() + _WORKER_DATABASE_RECOVERY_SECONDS
