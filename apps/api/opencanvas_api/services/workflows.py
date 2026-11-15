@@ -1203,6 +1203,14 @@ class ControlledWorkflowService:
     ) -> list[WorkflowDefinitionRecord]:
         if limit < 1 or limit > 100 or offset < 0 or offset > 10_000:
             raise WorkflowValidationError("Workflow page is invalid.")
+        await self._require_permission(
+            user_id, workspace_id, CollaborationPermission.WORKFLOW_VIEW
+        )
+        canvas = await self.session.scalar(
+            select(Canvas.id).where(Canvas.id == canvas_id, Canvas.workspace_id == workspace_id)
+        )
+        if canvas is None:
+            raise WorkflowNotFoundError()
         rows = list(
             (
                 await self.session.scalars(

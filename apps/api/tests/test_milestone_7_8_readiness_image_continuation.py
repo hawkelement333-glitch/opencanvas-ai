@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import replace
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from test_milestone_7_8_campaign_enablement import _runtime
@@ -426,3 +427,148 @@ def test_updater_retains_original_tags_but_uses_current_renewed_deadline(tmp_pat
         workload_image_update._validate_resource(
             provider.states[target["id"]], target, scope, runtime, current, OLD
         )
+
+
+def test_standard_saved_ledger_loads_image_context_with_omitted_optional_fields(case):
+    folder, _, config, ledger, path, *_ = case
+    raw = json.loads((folder / "ledger.json").read_text())
+    assert "image_replacement" not in raw
+    loaded_runtime, loaded_config, loaded_ledger = continuation.load_context(
+        path,
+        folder / "runtime.json",
+        folder / "config.json",
+        folder / "ledger.json",
+        operation="image",
+    )
+    assert loaded_runtime["sourceHead"] == HEAD
+    assert loaded_config == config and loaded_ledger == ledger
+
+
+def _successor(case, monkeypatch, previous, digest, head):
+    folder = case[0]
+    previous_plan = continuation.load_plan(previous)
+    number = int(previous_plan.get("readinessSequence", 1)) + 1
+    target = folder / f"rc{number:02d}"
+    authority = continuation._read(Path(previous_plan["sourceAuthorityFile"]))
+    authority.update(parentSourceHead=previous_plan["sourceHead"], sourceHead=head)
+    authority.pop("authoritySha256")
+    authority["authoritySha256"] = hashlib.sha256(
+        b"m7.8/readiness-image-source-authority/v1\0"
+        + json.dumps(authority, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    source_authority = write(target / "source-authority.json", authority)
+    retained = write(target / "retained.json", {"fixture": head})
+    monkeypatch.setattr(continuation, "_readiness_source", lambda plan: plan["sourceHead"])
+    monkeypatch.setattr(
+        continuation,
+        "load_retained_image",
+        lambda *a, **k: {
+            "imageId": digest,
+            "imageBuildSourceHead": head,
+        },
+    )
+    monkeypatch.setattr(local_image, "validate_completion", lambda *a, **k: 0)
+    plan = continuation.build_readiness_plan(
+        folder / "runtime.json",
+        folder / "config.json",
+        folder / "ledger.json",
+        retained_image=retained,
+        source_authority=source_authority,
+        previous_plan=previous,
+    )
+    path = write(target / "plan.json", plan)
+    scan = write(
+        target / "local-image/image-scan.json",
+        {
+            "version": "m7.8-image-admission-v1",
+            "sourceHead": head,
+            "canonicalBuildInputSha256": "b" * 64,
+            "imageDigest": digest,
+            "scanner": "Docker Scout",
+            "scannerVersion": "v1",
+            "scannedAtUtc": NOW.isoformat(),
+            "result": "passed",
+            "criticalFindings": 0,
+            "highFindings": 0,
+        },
+    )
+    return path, scan
+
+
+def test_successive_readiness_corrections_preserve_chain_and_original_pause(case, monkeypatch):
+    from dataclasses import asdict
+
+    folder, runtime, config, ledger, first, scan, auth, provider = case
+    continuation.execute_admission(
+        first, runtime, config, ledger, digest=NEW, scan_path=scan, authorization=auth, execute=True
+    )
+    first_files = {p: p.read_bytes() for p in first.parent.rglob("*") if p.is_file()}
+    transitions = list(ledger.transitions)
+    previous = first
+    for index, character in enumerate(("c", "d"), 2):
+        digest = "sha256:" + character * 64
+        before = asdict(ledger)
+        path, scan = _successor(case, monkeypatch, previous, digest, character * 40)
+        loaded_runtime, _, loaded_ledger = continuation.load_context(
+            path,
+            folder / "runtime.json",
+            folder / "config.json",
+            folder / "ledger.json",
+            operation="image",
+        )
+        assert loaded_runtime["sourceHead"] == character * 40
+        assert asdict(loaded_ledger) == before
+        assert continuation.readiness_plan_for_ledger(folder, ledger) == previous
+        continuation.execute_admission(
+            path,
+            runtime,
+            config,
+            ledger,
+            digest=digest,
+            scan_path=scan,
+            authorization=auth,
+            execute=True,
+        )
+        assert ledger.phase == Phase.MIGRATED and ledger.transitions == transitions
+        assert ledger.image_scan_count == index + 1
+        assert ledger.readiness_image_replacements[-1] == before["image_replacement"]
+        assert ledger.resource_generation_count == 1 and ledger.image_generation_count == 0
+        assert continuation.readiness_plan_for_ledger(folder, ledger) == path
+        link = continuation.validate_readiness_evidence_origin(
+            folder,
+            replace(config, image_digest=digest),
+            runtime,
+            ledger,
+        )
+        assert link["originalBindings"]["imageDigest"] == OLD
+        assert link["continuationSha256"] == ledger.image_replacement["continuationSha256"]
+        assert load_ledger(folder / "ledger.json", config) == ledger
+        previous = path
+    assert provider.patches == 30
+    assert all(p.read_bytes() == value for p, value in first_files.items())
+    ledger.readiness_image_replacements[0]["replacementImageDigest"] = "sha256:" + "f" * 64
+    with pytest.raises(CampaignError, match="predecessor differs"):
+        ledger.validate_resume(config)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("previousPlanSha256", "0" * 64),
+        ("previousAdmissionSha256", "0" * 64),
+        ("originalImageDigest", OLD),
+        ("readinessSequence", 3),
+    ],
+)
+def test_successor_rejects_changed_predecessor_binding(case, monkeypatch, field, value):
+    _, runtime, config, ledger, first, scan, auth, _ = case
+    continuation.execute_admission(
+        first, runtime, config, ledger, digest=NEW, scan_path=scan, authorization=auth, execute=True
+    )
+    path, _ = _successor(case, monkeypatch, first, "sha256:" + "c" * 64, "c" * 40)
+    plan = continuation._read(path)
+    plan[field] = value
+    plan["planSha256"] = continuation._hash({k: v for k, v in plan.items() if k != "planSha256"})
+    write(path, plan)
+    with pytest.raises(CampaignError):
+        continuation.load_plan(path)

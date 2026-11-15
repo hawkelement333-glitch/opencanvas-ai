@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from opencanvas_api.core.config import DatabaseRole
 from opencanvas_api.db.role_privileges import (
     configure_vector_runtime_functions,
+    public_function_restrictions,
     require_runtime_function_privileges,
 )
 from tests.postgres_support import disposable_postgres_database
@@ -61,6 +62,16 @@ async def test_provider_vector_baseline_cannot_expand_to_other_routines_or_grant
                     "public.vector(public.vector, pg_catalog.int4, pg_catalog.bool)",
                 ]
                 assert len(str(observed["providerPublicVectorInventorySha256"])) == 64
+                assert await public_function_restrictions(
+                    connection, principal=api, managed=True,
+                ) == {
+                    "publicFunctionExecute": 118,
+                    "providerPublicVectorRoutineCount": 118,
+                    "unexpectedPublicFunctionExecute": 0,
+                }
+                assert (await public_function_restrictions(
+                    connection, principal=api,
+                ))["unexpectedPublicFunctionExecute"] == 118
                 with pytest.raises(RuntimeError, match="exact matrix"):
                     await require_runtime_function_privileges(
                         connection, DatabaseRole.API, principal=api,
@@ -68,6 +79,9 @@ async def test_provider_vector_baseline_cannot_expand_to_other_routines_or_grant
                 await connection.execute(text("RESET ROLE"))
                 await connection.execute(text("GRANT EXECUTE ON FUNCTION public.outside_vector() "
                                               "TO PUBLIC"))
+                assert (await public_function_restrictions(
+                    connection, principal=worker, managed=True,
+                ))["unexpectedPublicFunctionExecute"] == 1
                 with pytest.raises(RuntimeError, match="exact matrix"):
                     await require_runtime_function_privileges(
                         connection, DatabaseRole.WORKER, principal=worker, managed=True,
@@ -80,6 +94,10 @@ async def test_provider_vector_baseline_cannot_expand_to_other_routines_or_grant
                 with pytest.raises(RuntimeError, match="ownership or PUBLIC grants differ"):
                     await require_runtime_function_privileges(
                         connection, DatabaseRole.WORKER, principal=worker, managed=True,
+                    )
+                with pytest.raises(RuntimeError, match="ownership or PUBLIC grants differ"):
+                    await public_function_restrictions(
+                        connection, principal=worker, managed=True,
                     )
             finally:
                 await transaction.rollback()

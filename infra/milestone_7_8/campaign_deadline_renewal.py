@@ -271,11 +271,11 @@ def build_plan(
         "after": after,
         "beforeConfig": asdict(config),
         "beforeRuntime": dict(runtime),
-        "beforeLedger": asdict(ledger),
+        "beforeLedger": _ledger_snapshot(ledger),
         "baseline": copy.deepcopy(baseline),
         "beforeConfigSha256": _hash(asdict(config)),
         "beforeRuntimeSha256": _hash(runtime),
-        "beforeLedgerSha256": _hash(asdict(ledger)),
+        "beforeLedgerSha256": _hash(_ledger_snapshot(ledger)),
         "baselineSha256": _hash(baseline),
         "afterConfig": asdict(after_config),
         "afterRuntime": after_runtime,
@@ -388,6 +388,14 @@ def config_from_snapshot(value: dict[str, Any]) -> CampaignConfig:
     fields = copy.deepcopy(value)
     fields["resource_items"] = tuple(CostItem(**item) for item in fields["resource_items"])
     return CampaignConfig(**fields)
+
+
+def _ledger_snapshot(ledger: Ledger) -> dict[str, Any]:
+    # Omit newly introduced empty history so immutable pre-feature plan hashes replay.
+    snapshot = asdict(ledger)
+    if not ledger.readiness_image_replacements:
+        del snapshot["readiness_image_replacements"]
+    return snapshot
 
 
 def validate_plan(plan: dict[str, Any]) -> None:
@@ -794,7 +802,7 @@ def adopt_completion(
     if (
         _hash(asdict(config)) != plan["beforeConfigSha256"]
         or _hash(runtime) != plan["beforeRuntimeSha256"]
-        or _hash(asdict(ledger)) != plan["beforeLedgerSha256"]
+        or _hash(_ledger_snapshot(ledger)) != plan["beforeLedgerSha256"]
     ):
         raise CampaignError("campaign renewal adoption inputs changed after planning")
     old = load_evidence(runtime)
@@ -825,7 +833,7 @@ def adopt_completion(
     raw_config = json.loads(config_path.read_text())
     raw_config["cleanupDeadlineUtc"] = plan["after"]["deadlineUtc"]
     ledger.record_deadline_renewal(record["completion"])
-    raw_ledger = asdict(ledger)
+    raw_ledger = _ledger_snapshot(ledger)
     for key in ("image_replacement", "previous_image_replacement"):
         if raw_ledger[key] is None:
             del raw_ledger[key]
@@ -1186,7 +1194,8 @@ def main() -> int:
         if (
             _hash(asdict(config)) != plan["beforeConfigSha256"]
             or _hash(runtime) != plan["beforeRuntimeSha256"]
-            or (args.operation == "execute" and _hash(asdict(ledger)) != plan["beforeLedgerSha256"])
+            or (args.operation == "execute"
+                and _hash(_ledger_snapshot(ledger)) != plan["beforeLedgerSha256"])
         ):
             raise CampaignError("campaign renewal inputs changed after planning")
 

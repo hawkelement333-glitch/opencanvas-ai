@@ -32,6 +32,7 @@ from opencanvas_api.db.role_privileges import (
     RUNTIME_SEQUENCE_PRIVILEGES,
     RUNTIME_TABLE_PRIVILEGES,
     application_routines,
+    public_function_restrictions,
     require_runtime_function_privileges,
 )
 from opencanvas_api.db.runtime import MIGRATION_ADVISORY_LOCK_ID
@@ -526,19 +527,10 @@ async def catalog_assertions(role: DatabaseRole) -> list[Assertion]:
                         )
                     ).scalar_one()
                 )
-                public_function_execute = int(
-                    (
-                        await connection.execute(
-                            text(
-                                "SELECT count(*) FROM pg_catalog.pg_proc AS p "
-                                "JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace "
-                                "CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE("
-                                "p.proacl, pg_catalog.acldefault('f', p.proowner))) AS acl "
-                                "WHERE n.nspname = 'public' AND acl.grantee = 0 "
-                                "AND acl.privilege_type = 'EXECUTE'"
-                            )
-                        )
-                    ).scalar_one()
+                public_functions = await public_function_restrictions(
+                    connection,
+                    principal=str(current),
+                    managed=settings.database_auth_mode == "entra",
                 )
                 results.extend(
                     [
@@ -552,10 +544,11 @@ async def catalog_assertions(role: DatabaseRole) -> list[Assertion]:
                         ),
                         _assertion(
                             "catalog.public-restrictions",
-                            public_schema_create == 0 and public_function_execute == 0,
+                            public_schema_create == 0
+                            and public_functions["unexpectedPublicFunctionExecute"] == 0,
                             {
                                 "publicSchemaCreate": public_schema_create,
-                                "publicFunctionExecute": public_function_execute,
+                                **public_functions,
                             },
                         ),
                     ]

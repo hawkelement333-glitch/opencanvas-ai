@@ -16,6 +16,9 @@
     ],
     "previousImageReplacement": [
       "imageReplacement"
+    ],
+    "readinessImageReplacements": [
+      "imageReplacement"
     ]
   },
   "required": [
@@ -64,16 +67,12 @@
       "maximum": 1
     },
     "requiredScanCount": {
-      "enum": [
-        2,
-        3
-      ]
+      "type": "integer",
+      "minimum": 2
     },
     "imageScanCount": {
-      "enum": [
-        2,
-        3
-      ]
+      "type": "integer",
+      "minimum": 2
     },
     "imageReplacement": {
       "type": "object",
@@ -120,7 +119,10 @@
           "format": "date-time"
         },
         "replacementPhase": {
-          "enum": ["database-bootstrapped", "migrated"]
+          "enum": [
+            "database-bootstrapped",
+            "migrated"
+          ]
         }
       }
     },
@@ -288,32 +290,79 @@
           "const": "database-bootstrapped"
         }
       }
+    },
+    "readinessImageReplacements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/properties/imageReplacement",
+        "required": [
+          "replacementPhase"
+        ],
+        "properties": {
+          "replacementPhase": {
+            "const": "migrated"
+          }
+        }
+      }
     }
   },
   "allOf": [
     {
       "if": {
         "required": [
-          "previousImageReplacement"
+          "readinessImageReplacements"
         ]
       },
       "then": {
         "properties": {
           "requiredScanCount": {
-            "const": 3
+            "minimum": 3
           },
           "imageScanCount": {
-            "const": 3
+            "minimum": 3
+          },
+          "imageReplacement": {
+            "required": [
+              "replacementPhase"
+            ],
+            "properties": {
+              "replacementPhase": {
+                "const": "migrated"
+              }
+            }
           }
+        },
+        "not": {
+          "required": [
+            "previousImageReplacement"
+          ]
         }
       },
       "else": {
-        "properties": {
-          "requiredScanCount": {
-            "maximum": 2
-          },
-          "imageScanCount": {
-            "maximum": 2
+        "if": {
+          "required": [
+            "previousImageReplacement"
+          ]
+        },
+        "then": {
+          "properties": {
+            "requiredScanCount": {
+              "const": 3
+            },
+            "imageScanCount": {
+              "const": 3
+            }
+          }
+        },
+        "else": {
+          "properties": {
+            "requiredScanCount": {
+              "maximum": 2
+            },
+            "imageScanCount": {
+              "maximum": 2
+            }
           }
         }
       }

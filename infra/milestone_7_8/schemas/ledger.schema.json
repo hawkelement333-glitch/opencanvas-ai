@@ -11,16 +11,10 @@
   "then": {
     "properties": {
       "required_scan_count": {
-        "enum": [
-          2,
-          3
-        ]
+        "minimum": 2
       },
       "image_scan_count": {
-        "enum": [
-          2,
-          3
-        ]
+        "minimum": 2
       },
       "resource_generation_count": {
         "const": 1
@@ -80,25 +74,73 @@
   ],
   "properties": {
     "deadline_renewals": {
-      "type": "array", "minItems": 1,
-      "items": {"type": "object", "additionalProperties": false,
-        "required": ["version", "planSha256", "beforeDeadlineUtc", "afterDeadlineUtc",
-          "beforeCleanupArmSha256", "afterCleanupArmSha256", "completedAtUtc",
-          "oldAuthorizationSha256", "newAuthorizationSha256", "journalSha256",
-          "snapshotSha256", "receiptSha256"],
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "planSha256",
+          "beforeDeadlineUtc",
+          "afterDeadlineUtc",
+          "beforeCleanupArmSha256",
+          "afterCleanupArmSha256",
+          "completedAtUtc",
+          "oldAuthorizationSha256",
+          "newAuthorizationSha256",
+          "journalSha256",
+          "snapshotSha256",
+          "receiptSha256"
+        ],
         "properties": {
-          "version": {"const": "m7.8-campaign-deadline-renewal-completion-v1"},
-          "planSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-          "beforeDeadlineUtc": {"type": "string", "format": "date-time"},
-          "afterDeadlineUtc": {"type": "string", "format": "date-time"},
-          "beforeCleanupArmSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-          "afterCleanupArmSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-          "completedAtUtc": {"type": "string", "format": "date-time"},
-          "oldAuthorizationSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-          "newAuthorizationSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-          "journalSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-          "snapshotSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-          "receiptSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+          "version": {
+            "const": "m7.8-campaign-deadline-renewal-completion-v1"
+          },
+          "planSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "beforeDeadlineUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "afterDeadlineUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "beforeCleanupArmSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "afterCleanupArmSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "completedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "oldAuthorizationSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "newAuthorizationSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "journalSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "snapshotSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "receiptSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
         }
       }
     },
@@ -165,13 +207,11 @@
     },
     "required_scan_count": {
       "type": "integer",
-      "minimum": 0,
-      "maximum": 3
+      "minimum": 0
     },
     "image_scan_count": {
       "type": "integer",
-      "minimum": 0,
-      "maximum": 3
+      "minimum": 0
     },
     "image_scan_evidence_sha256": {
       "type": [
@@ -225,7 +265,10 @@
           "format": "date-time"
         },
         "replacementPhase": {
-          "enum": ["database-bootstrapped", "migrated"]
+          "enum": [
+            "database-bootstrapped",
+            "migrated"
+          ]
         }
       }
     },
@@ -443,10 +486,28 @@
           "const": "database-bootstrapped"
         }
       }
+    },
+    "readiness_image_replacements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/properties/image_replacement",
+        "required": [
+          "replacementPhase"
+        ],
+        "properties": {
+          "replacementPhase": {
+            "const": "migrated"
+          }
+        }
+      }
     }
   },
   "dependentRequired": {
     "previous_image_replacement": [
+      "image_replacement"
+    ],
+    "readiness_image_replacements": [
       "image_replacement"
     ]
   },
@@ -454,26 +515,58 @@
     {
       "if": {
         "required": [
-          "previous_image_replacement"
+          "readiness_image_replacements"
         ]
       },
       "then": {
         "properties": {
           "required_scan_count": {
-            "const": 3
+            "minimum": 3
           },
           "image_scan_count": {
-            "const": 3
+            "minimum": 3
+          },
+          "image_replacement": {
+            "required": [
+              "replacementPhase"
+            ],
+            "properties": {
+              "replacementPhase": {
+                "const": "migrated"
+              }
+            }
           }
+        },
+        "not": {
+          "required": [
+            "previous_image_replacement"
+          ]
         }
       },
       "else": {
-        "properties": {
-          "required_scan_count": {
-            "maximum": 2
-          },
-          "image_scan_count": {
-            "maximum": 2
+        "if": {
+          "required": [
+            "previous_image_replacement"
+          ]
+        },
+        "then": {
+          "properties": {
+            "required_scan_count": {
+              "const": 3
+            },
+            "image_scan_count": {
+              "const": 3
+            }
+          }
+        },
+        "else": {
+          "properties": {
+            "required_scan_count": {
+              "maximum": 2
+            },
+            "image_scan_count": {
+              "maximum": 2
+            }
           }
         }
       }

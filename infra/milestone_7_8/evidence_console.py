@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import time
 import uuid
@@ -758,6 +759,22 @@ def validate_proofs(
     return recovery
 
 
+def _console_io_path(path: Path) -> Path:
+    """Use Windows' absolute long-path form without changing retained logical paths."""
+    if os.name != "nt":
+        return path
+    absolute = str(path.resolve())
+    if absolute.startswith("\\\\?\\"):
+        return Path(absolute)
+    return Path("\\\\?\\UNC\\" + absolute[2:] if absolute.startswith("\\\\")
+                else "\\\\?\\" + absolute)
+
+
+def _capture_path(directory: Path, sequence: int) -> Path:
+    # Execution, token and phase remain inside the validated, hashed record.
+    return directory / f"c{sequence:04d}.json"
+
+
 class EvidenceConsole:
     def __init__(
         self,
@@ -771,7 +788,7 @@ class EvidenceConsole:
     ) -> None:
         self.runner, self.runtime, self.image_digest = runner, runtime, image_digest
         self.directory, self.deadline, self.authorize = directory, deadline, authorize
-        self.directory.mkdir(mode=0o700, exist_ok=False)
+        _console_io_path(self.directory).mkdir(mode=0o700, exist_ok=False)
         self.sequence = 0
 
     def guard(self) -> None:
@@ -786,7 +803,7 @@ class EvidenceConsole:
         self.sequence += 1
         stem = self.directory / f"{self.sequence:04d}"
         _durable_record(
-            stem.with_suffix(".intent.json"),
+            _console_io_path(stem.with_suffix(".intent.json")),
             {
                 "command": command,
                 "requestedAtUtc": datetime.now(UTC).isoformat(),
@@ -795,7 +812,7 @@ class EvidenceConsole:
         self.guard()
         result = self.runner.run(command)
         _durable_record(
-            stem.with_suffix(".result.json"),
+            _console_io_path(stem.with_suffix(".result.json")),
             {
                 **result,
                 "observedAtUtc": datetime.now(UTC).isoformat(),
@@ -974,10 +991,8 @@ class EvidenceConsole:
                 }
                 record["evidenceSha256"] = evidence_hash(record)
                 validate_capture(record, rt, self.image_digest)
-                path = (
-                    self.directory / f"capture-{execution}-{'ready' if ready else 'terminal'}.json"
-                )
-                _durable_record(path, record)
+                path = _capture_path(self.directory, self.sequence)
+                _durable_record(_console_io_path(path), record)
                 return record
             time.sleep(min(5, max(0, until - time.monotonic())))
         raise CampaignError("managed probe marker did not arrive before its capture timeout")

@@ -928,3 +928,14 @@ def test_adoption_after_old_cutoff_preserves_original_files(monkeypatch, tmp_pat
     options["now"] = NOW + timedelta(hours=7)
     with pytest.raises(CampaignError, match="execution window has expired"):
         renewal.adopt_completion(record, **options)
+
+
+def test_new_empty_readiness_history_preserves_immutable_renewal_plan_hash():
+    from infra.milestone_7_8.campaign_deadline_renewal import _hash, validate_plan
+
+    plan, _ = plan_fixture()
+    assert 'readiness_image_replacements' not in plan['beforeLedger']
+    retained = copy.deepcopy(plan)
+    validate_plan(retained)
+    assert retained == plan
+    assert retained['beforeLedgerSha256'] == _hash(retained['beforeLedger'])

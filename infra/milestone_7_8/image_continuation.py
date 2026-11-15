@@ -84,6 +84,40 @@ READINESS_FIELDS = FIELDS | {
     "sourceAuthoritySha256",
     "preassertionPauseSha256",
 }
+READINESS_SUCCESSOR_FIELDS = READINESS_FIELDS | {
+    "previousPlanFile", "previousPlanSha256", "previousAdmissionSha256", "readinessSequence",
+}
+
+
+def _readiness_path(folder: Path, sequence: int) -> Path:
+    return folder / ("readiness-correction" if sequence == 1 else f"rc{sequence:02d}") / "plan.json"
+
+
+def _readiness_predecessor(plan: dict[str, object]) -> dict[str, object] | None:
+    if "previousPlanFile" not in plan:
+        return None
+    sequence = plan.get("readinessSequence")
+    folder = Path(str(plan["runtimeFile"])).parent
+    path = Path(str(plan["previousPlanFile"]))
+    if (type(sequence) is not int or sequence < 2
+            or path != _readiness_path(folder, sequence - 1)):
+        raise CampaignError("readiness predecessor path or sequence differs")
+    previous = load_plan(path)
+    if (previous.get("version") != READINESS_VERSION
+            or previous["planSha256"] != plan["previousPlanSha256"]
+            or any(previous[key] != plan[key]
+                   for key in ("runtimeFile", "configFile", "ledgerFile"))
+            or _readiness_authority(plan)["parentSourceHead"] != previous["sourceHead"]):
+        raise CampaignError("readiness predecessor source or scope differs")
+    runtime, config = _readiness_context(plan)
+    baseline = Ledger(**_object(plan["baselineLedger"]))  # type: ignore[arg-type]
+    baseline.validate_resume(config)
+    receipt = validate_admission(path, runtime, config, baseline)
+    if (baseline.phase != Phase.MIGRATED.value
+            or baseline.image_digest != plan["originalImageDigest"]
+            or receipt["continuationSha256"] != plan["previousAdmissionSha256"]):
+        raise CampaignError("readiness predecessor admission differs")
+    return previous
 
 
 def _readiness_authority(plan: dict[str, object]) -> dict[str, object]:
@@ -204,6 +238,9 @@ def _readiness_context(
 def _readiness_history(plan: dict[str, object]) -> tuple[dict[str, object], dict[str, object]]:
     from infra.milestone_7_8 import operator
 
+    previous = _readiness_predecessor(plan)
+    if previous is not None:
+        return _readiness_history(previous)
     runtime, config = _readiness_context(plan)
     baseline = Ledger(**_object(plan["baselineLedger"]))  # type: ignore[arg-type]
     baseline.validate_resume(config)
@@ -245,6 +282,10 @@ def _readiness_history(plan: dict[str, object]) -> tuple[dict[str, object], dict
 
 def _readiness_measurement_dispatches(plan: dict[str, object]) -> None:
     """Replay starts against exact terminal GETs; job name alone does not prove phase."""
+    if "previousPlanFile" in plan:
+        # The predecessor loader replays the original preassertion proof. Later
+        # failed assertions remain retained; they are not reclassified as preassertion.
+        return
     runtime, config = _readiness_context(plan)
     folder = Path(str(plan["runtimeFile"])).parent
     files = _object(plan["boundFilesSha256"])
@@ -337,6 +378,7 @@ def build_readiness_plan(
     *,
     retained_image: Path,
     source_authority: Path,
+    previous_plan: Path | None = None,
 ) -> dict[str, object]:
     """Bind one readiness correction to the migrated campaign's retained evidence."""
     from infra.milestone_7_8 import operator
@@ -402,6 +444,19 @@ def build_readiness_plan(
             )
         ),
     }
+    if previous_plan is not None:
+        previous_plan = _private(previous_plan)
+        previous = load_plan(previous_plan)
+        if previous.get("version") != READINESS_VERSION:
+            raise CampaignError("readiness successor requires a readiness predecessor")
+        receipt = validate_admission(previous_plan, *_readiness_context(previous), ledger)
+        plan.update({
+            "previousPlanFile": str(previous_plan),
+            "previousPlanSha256": previous["planSha256"],
+            "previousAdmissionSha256": receipt["continuationSha256"],
+            "readinessSequence": int(previous.get("readinessSequence", 1)) + 1,
+        })
+        bound.update(path for path in previous_plan.parent.rglob("*") if path.is_file())
     bound.update(path for path in (folder / "phases").rglob("*") if path.is_file())
     bound.update(
         path for path in (folder / "measurement-failure-diagnosis").rglob("*") if path.is_file()
@@ -410,7 +465,7 @@ def build_readiness_plan(
     _readiness_source(plan)
     _readiness_history(plan)
     _readiness_measurement_dispatches(plan)
-    if (
+    if previous_plan is None and (
         (folder / "managed-evidence-execution.json").exists()
         or (folder / "managed-assertion-evidence.json").exists()
         or (folder / "managed-assertion-captures").exists()
@@ -422,10 +477,11 @@ def build_readiness_plan(
 
 def _load_readiness_plan(path: Path, plan: dict[str, object]) -> dict[str, object]:
     if (
-        set(plan) != READINESS_FIELDS
+        set(plan) not in (READINESS_FIELDS, READINESS_SUCCESSOR_FIELDS)
         or plan["planSha256"] != _hash({k: v for k, v in plan.items() if k != "planSha256"})
         or path.resolve()
-        != Path(str(plan["runtimeFile"])).parent / "readiness-correction/plan.json"
+        != _readiness_path(Path(str(plan["runtimeFile"])).parent,
+                           int(plan.get("readinessSequence", 1)))
         or plan["costFile"] != plan["configFile"]
         or plan["scannerReserveCoversReplacement"] is not True
     ):
@@ -437,6 +493,9 @@ def _load_readiness_plan(path: Path, plan: dict[str, object]) -> dict[str, objec
         "evidence-stage-attempt.json", "evidence-stage-pause.json", "managed-evidence-attempt.json",
         "local-image/completed.json", "local-image/image-scan.json",
     )}
+    if "previousPlanFile" in plan:
+        prior = Path(str(plan["previousPlanFile"]))
+        required |= {str(prior), str(prior.parent / "completed.json")}
     if not required <= set(_object(plan["boundFilesSha256"])):
         raise CampaignError("readiness image plan omitted original evidence bindings")
     for name, expected in _object(plan["boundFilesSha256"]).items():
@@ -1900,11 +1959,13 @@ def load_context(
     if operation == "image" and "completedImagePlan" in plan:
         raise CampaignError("this continuation reuses completed image admission; no image replay")
     raw = _read(ledger_path)
-    replaced = (raw.get("previous_image_replacement") is not None
+    baseline_equal = asdict(Ledger(**raw)) == asdict(Ledger(**_object(plan["baselineLedger"])))
+    replaced = (not baseline_equal if plan.get("version") == READINESS_VERSION else
+                raw.get("previous_image_replacement") is not None
                 if plan.get("version") == GRANT_VERSION
                 else raw.get("image_replacement") is not None)
     if not replaced:
-        if (operation not in CLEANUP_OPERATIONS and (raw != plan["baselineLedger"]
+        if (operation not in CLEANUP_OPERATIONS and (not baseline_equal
                 or _file_hash(ledger_path) != plan["baselineLedgerFileSha256"])):
             raise CampaignError("continuation original ledger changed before admission")
         original = (_effective(load_plan(Path(str(plan["previousPlanFile"]))))[1]
@@ -1965,7 +2026,8 @@ def validate_image_request(
                                 Phase.DATABASE_BOOTSTRAPPED.value
                                 if plan.get("version") in {MIGRATION_VERSION, GRANT_VERSION}
                                 else Phase.IMAGE_DECIDED.value)
-            or (ledger.previous_image_replacement is not None
+            or (False if plan.get("version") == READINESS_VERSION else
+                ledger.previous_image_replacement is not None
                 if plan.get("version") == GRANT_VERSION
                 else ledger.image_replacement is not None)
             or _plan_source(plan) != plan["sourceHead"]
@@ -1993,6 +2055,12 @@ def validate_admission(
             or ledger.image_scan_evidence_sha256 != receipt["scanEvidenceSha256"]):
         raise CampaignError("replacement admission receipt or ledger binding differs")
     baseline = _object(plan["baselineLedger"])
+    if plan.get("version") == READINESS_VERSION:
+        expected_history = list(baseline.get("readiness_image_replacements", []))
+        if "previousPlanFile" in plan:
+            expected_history.append(baseline.get("image_replacement"))
+        if ledger.readiness_image_replacements != expected_history:
+            raise CampaignError("readiness admission changed its immutable predecessor history")
     if (ledger.image_replacement["previousImageDigest"] != baseline.get("image_digest")
             or ledger.image_replacement["previousScanEvidenceSha256"]
             != baseline.get("image_scan_evidence_sha256")
@@ -2093,11 +2161,25 @@ def resolved_image_pause(
     return _file_hash(pause_path)
 
 
+def readiness_plan_for_ledger(directory: Path, ledger: Ledger) -> Path:
+    """Resolve by the admitted hash, never by the newest directory or an unadmitted plan."""
+    if ledger.image_replacement is None:
+        raise CampaignError("readiness admission is absent")
+    sequence = len(ledger.readiness_image_replacements) + 1
+    path = _readiness_path(directory.resolve(), sequence)
+    plan = load_plan(path)
+    receipt = _read(path.parent / "completed.json")
+    if (plan.get("version") != READINESS_VERSION
+            or receipt.get("continuationSha256") != ledger.image_replacement["continuationSha256"]):
+        raise CampaignError("latest readiness admission differs from ledger")
+    return path
+
+
 def validate_readiness_evidence_origin(
     directory: Path, config: CampaignConfig, runtime: dict[str, str], ledger: Ledger,
 ) -> dict[str, object]:
     """Link the preserved old-image pause to a fully admitted readiness replacement."""
-    path = directory.resolve() / "readiness-correction/plan.json"
+    path = readiness_plan_for_ledger(directory, ledger)
     plan = load_plan(path)
     original_runtime, original_config = _readiness_context(plan)
     if (plan.get("version") != READINESS_VERSION or runtime != original_runtime
@@ -2131,6 +2213,12 @@ def execute_admission(
 
     plan = load_plan(path)
     runtime_path = Path(str(plan["runtimeFile"]))
+    if plan.get("version") == READINESS_VERSION and (
+        asdict(ledger) != asdict(Ledger(**_object(plan["baselineLedger"])))
+        or _file_hash(Path(str(plan["ledgerFile"]))) != plan["baselineLedgerFileSha256"]
+        or (runtime, config) != _readiness_context(plan)
+    ):
+        raise CampaignError("readiness admission original ledger or operational scope changed")
     folder = path.resolve().parent
     image_plan, image_runtime, image_config = image_evidence_context(path)
     if scan_path.resolve() != image_plan.parent / "local-image/image-scan.json":
@@ -2220,6 +2308,8 @@ def execute_admission(
                       if plan.get("version") in {MIGRATION_VERSION, GRANT_VERSION}
                       else Phase.IMAGE_DECIDED),
             grant_recovery=plan.get("version") == GRANT_VERSION,
+            readiness_successor=(plan.get("version") == READINESS_VERSION
+                                 and "previousPlanFile" in plan),
         )
         validate_admission(path, runtime, config, ledger)
         save_ledger(Path(str(plan["ledgerFile"])), ledger)

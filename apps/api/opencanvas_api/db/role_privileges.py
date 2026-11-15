@@ -467,6 +467,25 @@ async def _azure_vector_routines(
     return {int(row.oid): str(row.routine) for row in rows}, version
 
 
+async def public_function_restrictions(
+    connection: AsyncConnection, *, principal: str, managed: bool = False,
+) -> dict[str, int]:
+    """Count PUBLIC execution outside the exact validated provider vector baseline."""
+    provider, _ = await _azure_vector_routines(connection, principal) if managed else ({}, None)
+    public_oids = set((await connection.execute(text("""
+        SELECT p.oid FROM pg_catalog.pg_proc AS p
+        JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace
+        CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(
+            p.proacl, pg_catalog.acldefault('f', p.proowner))) AS acl
+        WHERE n.nspname = 'public' AND acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+    """))).scalars())
+    return {
+        "publicFunctionExecute": len(public_oids),
+        "providerPublicVectorRoutineCount": len(provider),
+        "unexpectedPublicFunctionExecute": len(public_oids - provider.keys()),
+    }
+
+
 async def configure_vector_runtime_functions(
     connection: AsyncConnection, *, api_principal: str, worker_principal: str,
     managed: bool = False,
