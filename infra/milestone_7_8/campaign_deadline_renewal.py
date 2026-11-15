@@ -587,6 +587,20 @@ def retained_tuples(runtime: dict[str, str]) -> list[dict[str, Any]]:
     return [] if evidence is None else [r["plan"]["before"] for r in evidence["records"]]
 
 
+def deployment_overrides(config: CampaignConfig, runtime: dict[str, str]) -> tuple[str, ...]:
+    """Keep ARM deployments from restoring the immutable pre-renewal parameters."""
+    evidence = load_evidence(runtime)
+    if evidence is None:
+        return ()
+    plan = evidence["records"][-1]["plan"]
+    if _configuration_binding(asdict(config)) != _configuration_binding(plan["afterConfig"]):
+        raise CampaignError("campaign renewal active configuration was substituted")
+    return (
+        f"cleanupDeadlineUtc={config.cleanup_deadline_utc}",
+        "lifecycleTags=" + json.dumps(plan["afterTags"], sort_keys=True, separators=(",", ":")),
+    )
+
+
 def validate_ledger_binding(runtime: dict[str, str], ledger: Ledger) -> None:
     evidence = load_evidence(runtime)
     receipts = [] if evidence is None else [r["completion"] for r in evidence["records"]]

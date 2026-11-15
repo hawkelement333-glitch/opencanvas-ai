@@ -1387,6 +1387,8 @@ def command_plan(
             ),
         )
     if operation == "deploy":
+        from infra.milestone_7_8.campaign_deadline_renewal import deployment_overrides
+
         return (
             (
                 "az",
@@ -1402,11 +1404,14 @@ def command_plan(
                 "--parameters",
                 "@" + runtime["campaignParametersFile"],
                 "deploymentStage=base",
+                *deployment_overrides(config, runtime),
                 "--output",
                 "json",
             ),
         )
     if operation == "image-decision":
+        from infra.milestone_7_8.campaign_deadline_renewal import deployment_overrides
+
         digest = config.image_digest
         if digest is None:
             return ()
@@ -1426,6 +1431,7 @@ def command_plan(
                 "@" + runtime["campaignParametersFile"],
                 "deploymentStage=workload",
                 f"imageDigest={digest}",
+                *deployment_overrides(config, runtime),
                 "--output",
                 "json",
             ),
@@ -5275,8 +5281,8 @@ def validate_operation_results(
             raise CampaignError("campaign deployment binding differs")
         from infra.milestone_7_8.campaign_deadline_renewal import origin_context
 
-        _origin_runtime, deployment_config = origin_context(runtime, config)
-        validate_deployed_principal_manifest(outputs, deployment_config)
+        origin_context(runtime, config)
+        validate_deployed_principal_manifest(outputs, config)
 
 
 def main() -> int:

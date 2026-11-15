@@ -486,6 +486,38 @@ def write_renewal_evidence(directory, records):
     }
 
 
+@pytest.mark.parametrize("operation", ["deploy", "image-decision"])
+def test_deployment_preserves_active_renewal_selection(monkeypatch, tmp_path, operation):
+    from infra.milestone_7_8.operator import command_plan
+
+    renewal, plan, _, kwargs, _ = execution_fixture(monkeypatch, tmp_path)
+    record = renewal.execute_plan(plan, **kwargs)
+    monkeypatch.chdir(tmp_path)
+    runtime = write_renewal_evidence(tmp_path / "runtime", [record])
+    config = replace(renewal.config_from_snapshot(plan["afterConfig"]),
+                     image_digest="sha256:" + "1" * 64)
+    # ARM applies inline values after the immutable original parameter file.
+    parameters = Path(runtime["campaignParametersFile"])
+    original = json.dumps({"parameters": {
+        "cleanupDeadlineUtc": {"value": plan["before"]["deadlineUtc"]},
+        "lifecycleTags": {"value": plan["beforeTags"]},
+    }}).encode()
+    parameters.write_bytes(original)
+    command = command_plan(operation, config, runtime)[0]
+    effective = {key: item["value"] for key, item in json.loads(original)["parameters"].items()}
+    for argument in command[command.index("--parameters") + 2:command.index("--output")]:
+        key, value = argument.split("=", 1)
+        effective[key] = json.loads(value) if key == "lifecycleTags" else value
+    assert effective["cleanupDeadlineUtc"] == "2030-01-01T08:00:00Z"
+    assert effective["lifecycleTags"] == plan["afterTags"]
+    assert effective["lifecycleTags"]["unrelated"] == "preserved"
+    assert parameters.read_bytes() == original
+    # Altered authority cannot be used to generate deployment overrides.
+    with pytest.raises(CampaignError, match="configuration was substituted"):
+        command_plan(operation, replace(config, cleanup_deadline_utc="2030-01-01T09:00:00Z"),
+                     runtime)
+
+
 def test_renewal_allows_independently_admitted_image_without_rewriting_evidence(
     monkeypatch, tmp_path
 ):
