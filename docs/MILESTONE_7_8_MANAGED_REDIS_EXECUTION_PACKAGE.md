@@ -2,6 +2,9 @@
 
 Current result — 2026-11-16 UTC: **M78-D-002 remains open: 0 accepted, 0 failed, 17 unproved out of 17 existing assertions.** All 18 cleanup counters are zero; the reusable controller is preserved and the campaign ledger finalized. PostgreSQL and M78-D-001 remain closed. Milestone 7.8 remains incomplete. Billing remains **unsettled**.
 See the [managed campaign reconciliation](#managed-campaign-reconciliation).
+The [bounded continuation proposal](MILESTONE_7_8_MANAGED_REDIS_CONTINUATION_PACKAGE.md)
+uses a new campaign and corrected controller publication; it requires separate
+approval and does not change this finalized result.
 
 ## Exact blocker and minimum continuation
 
