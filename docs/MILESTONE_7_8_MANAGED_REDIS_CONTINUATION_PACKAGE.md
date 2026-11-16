@@ -131,11 +131,11 @@ ceiling. Do not promise completion if the managed evidence fails.
 | New incremental ceiling | USD **10.00** |
 | Prior cumulative approved ceiling, unsettled | USD **330.89** |
 | Proposed cumulative ceiling | USD **340.89** |
-| Earliest paid start | November 16, 2026 **19:00 UTC / 13:00 CST** |
-| Begin provisioning by | November 16, 2026 **21:00 UTC / 15:00 CST** |
-| Stop proof and scheduled cleanup | November 17, 2026 **01:00 UTC / November 16, 19:00 CST** |
-| Runbook binding expiry | November 17, 2026 **02:00 UTC / November 16, 20:00 CST** |
-| Cleanup/controller authority ends | November 17, 2026 **03:00 UTC / November 16, 21:00 CST** |
+| Earliest paid start | November 16, 2026 **18:00 UTC / 12:00 CST**, only after explicit approval |
+| Begin provisioning by | November 16, 2026 **20:00 UTC / 14:00 CST** |
+| Stop proof and scheduled cleanup | November 17, 2026 **00:00 UTC / November 16, 18:00 CST** |
+| Runbook binding expiry | November 17, 2026 **01:00 UTC / November 16, 19:00 CST** |
+| Cleanup/controller authority ends | November 17, 2026 **02:00 UTC / November 16, 20:00 CST** |
 
 The retained same-day retail-meter estimate prices eight hours including cleanup
 reserve, two HA Redis nodes, both jobs continuously, a full day of ACR, two
@@ -146,8 +146,9 @@ none is a settled charge or an unused allowance available for this campaign.
 The prior failed Automation execution may still incur charges. Billing remains
 unsettled throughout.
 
-If approval or execution misses the provisioning cutoff, do not create an empty
-target or arm a campaign merely to wait. Reconcile current state and prepare a
+The target and schedule may be created only inside the provisioning window.
+If approval or execution misses the cutoff, do not create an empty target or
+arm a campaign merely to wait. Reconcile current state and prepare a
 new concrete window before paid execution. The documented window is a bound,
 not authority by itself.
 
