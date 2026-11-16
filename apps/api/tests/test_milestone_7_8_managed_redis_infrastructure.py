@@ -53,7 +53,10 @@ def test_managed_redis_is_private_entra_only_ha_and_fixed_size(compiled):
         "highAvailability": "Enabled",
         "publicNetworkAccess": "Disabled",
     }
-    assert compiled["parameters"]["location"]["allowedValues"] == ["canadacentral"]
+    # Keep the historical default; only the separately provider-validated East
+    # US candidate is added, without allowing arbitrary region or SKU fallback.
+    assert compiled["parameters"]["location"]["allowedValues"] == ["canadacentral", "eastus"]
+    assert compiled["parameters"]["location"]["defaultValue"] == "canadacentral"
     assert one(compiled, "Microsoft.Cache/redisEnterprise/databases")["properties"] == {
         "accessKeysAuthentication": "Disabled",
         "clientProtocol": "Encrypted",
@@ -102,7 +105,13 @@ def test_dependencies_exclude_closed_campaigns_and_external_telemetry(compiled):
         )
     )
     environment = one(compiled, "Microsoft.App/managedEnvironments")["properties"]
-    assert environment["appLogsConfiguration"] == {"destination": "none"}
+    # The CLI's --logs-destination none is translated to JSON null, not the
+    # string "none". Match the provider payload contract and exclude paid sinks.
+    # https://github.com/Azure/azure-cli-extensions/blob/main/src/containerapp/
+    # azext_containerapp/containerapp_env_decorator.py (set_up_app_log_configuration)
+    logs = environment.get("appLogsConfiguration") or {}
+    assert logs.get("destination") is None
+    assert logs.get("logAnalyticsConfiguration") is None
     assert environment["vnetConfiguration"]["internal"] is True
     assert environment["workloadProfiles"] == [
         {"name": "Consumption", "workloadProfileType": "Consumption"}

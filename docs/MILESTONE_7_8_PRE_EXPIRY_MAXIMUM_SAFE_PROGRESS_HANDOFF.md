@@ -11,7 +11,7 @@
 > window and 20-second retry cap. All 19 cleanup counters are zero, controller
 > preserved and ledger finalized. Original 300-second failures and late
 > diagnostic rows remain historical; the application default was not changed.
-> The [managed Redis result](MILESTONE_7_8_MANAGED_REDIS_EXECUTION_PACKAGE.md#managed-campaign-reconciliation) records M78-D-002 as **open / no managed proof executed**: 0 accepted, 0 failed, 17 unproved.
+> The [managed Redis continuation result](MILESTONE_7_8_MANAGED_REDIS_CONTINUATION_PACKAGE.md#managed-campaign-reconciliation) records M78-D-002 as **open / foundation preflight failed**: 0 accepted, 0 failed, 17 unproved. The [prior Redis attempt](MILESTONE_7_8_MANAGED_REDIS_EXECUTION_PACKAGE.md#managed-campaign-reconciliation) remains finalized history with no managed proof executed.
 > All 18 cleanup counters are zero; controller preserved and ledger finalized.
 > PostgreSQL and M78-D-001 remain closed; Milestone 7.8 remains incomplete.
 > Billing remains unsettled; ceilings and forecasts are not settled charges.

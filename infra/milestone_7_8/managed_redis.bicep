@@ -2,7 +2,7 @@
 // Reuses the admitted image; the probe is a separate hash-bound execution input.
 targetScope = 'resourceGroup'
 
-@allowed(['canadacentral'])
+@allowed(['canadacentral', 'eastus'])
 param location string = 'canadacentral'
 @minLength(10)
 @maxLength(10)
@@ -139,7 +139,7 @@ resource managedEnvironment 'Microsoft.App/managedEnvironments@2024-10-02-previe
   location: location
   tags: lifecycleTags
   properties: {
-    appLogsConfiguration: { destination: 'none' }
+    appLogsConfiguration: { destination: null }
     vnetConfiguration: { infrastructureSubnetId: '${network.id}/subnets/container-apps', internal: true }
     workloadProfiles: [{ name: 'Consumption', workloadProfileType: 'Consumption' }]
     zoneRedundant: false

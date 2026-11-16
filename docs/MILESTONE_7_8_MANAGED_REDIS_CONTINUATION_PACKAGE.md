@@ -1,5 +1,63 @@
 # M78-D-002 managed Redis continuation package
 
+Current result — 2026-11-16 UTC: **M78-D-002 remains open: 0 accepted, 0 failed, 17 unproved out of 17 existing assertions.** All 18 cleanup counters are zero; the reusable controller is preserved and the campaign ledger finalized. PostgreSQL and M78-D-001 remain closed. Milestone 7.8 remains incomplete. Billing remains **unsettled**.
+See the [managed campaign reconciliation](#managed-campaign-reconciliation).
+
+## Actual foundation failure and completed cleanup
+
+Unlike the earlier expired-window attempt, this continuation dispatched its
+foundation at 2026-11-16 18:28:39 UTC. Operation
+`foundation-deploy-20261116T182839-0efdc6` returned `InvalidTemplateDeployment`
+with two provider preflight errors:
+
+- `CacheCapacityUnavailable`: **Balanced_B0 is not currently available in
+  Canada Central due to insufficient capacity.**
+- `InvalidRequestParameterWithDetails`: the Container Apps API rejected the
+  literal `appLogsConfiguration.destination: 'none'` value.
+
+The logging correction uses JSON `null`, matching
+[Microsoft's CLI payload translation](https://github.com/Azure/azure-cli-extensions/blob/main/src/containerapp/azext_containerapp/containerapp_env_decorator.py).
+The revised provider-contract test failed on the old literal and passed after
+the correction, including Bicep compilation. Validation of the corrected B0
+template then reported **only** `CacheCapacityUnavailable`. Validation-only
+checks of B1 and B3 in Canada Central returned the same capacity error; neither
+was provisioned. No Redis adapter, assertion or image change was made.
+
+The deployment readback was `DeploymentNotFound`; a successful deployment-list
+query returned empty, the target inventory was empty, and exact environment and
+expected provider-managed-group absence were recorded. The failed foundation
+was reconciled as **failed with no resource effects**, not described as an
+undispatched operation. Therefore all **17 managed assertions remain unproved**;
+there are no contributing probe execution IDs.
+
+Cleanup job **`f56269ef-0ba3-4cad-acbf-f5533807ffa7`** completed at
+2026-11-16 18:42:23 UTC using the corrected published runbook. All **18 residue
+counters are zero**, including campaign binding/schedule absence. Controller
+identity, Reader, bootstrap history and accepted content hash
+`38cfeb6cd6e706d197e7a689e5080c36fdc6c3007ad14c0c0cbf35ca626cefd9`
+are preserved. The ledger is finalized; this attempt is closed.
+
+Private evidence under `.runtime/milestone_7_8/redis-continuation-20261116/`:
+
+| Evidence | Meaning |
+| --- | --- |
+| `operations/foundation-deploy-20261116T182839-0efdc6-result.json` | Exact original provider errors |
+| Matching `-reconciliation.json` and its bound provider reads | No deployment/resources created; outcome reconciled |
+| `corrected-foundation-validation-result.json` | Logging fixed; B0 regional capacity still unavailable |
+| `candidate-b1-validation-result.json`, `candidate-b3-validation-result.json` | Candidate validation only; same regional capacity rejection |
+| `cleanup-no-environment-evidence.json` | Actual predelete absence after reconciled failed preflight; no invented environment attribution |
+| `cleanup-verification.json`, `final-results.json`, `terminal-receipt.json` | Verified cleanup and 0 accepted / 0 failed / 17 unproved classification |
+
+Final-results SHA-256:
+`49b50a13980e439ab267968c7c57bb1718776131d2566d76eae386488f1d52e2`.
+Terminal-receipt SHA-256:
+`f225f19456404d4a77e1d84bcc4ab0ddf3e15999991e760fde6266c6981ac50e`.
+Billing remains **unsettled**; absence of Redis resources is not a claim of zero
+controller charges. The user authorized preparation of another region, subject
+to existing residency requirements and a separate exact spending package.
+
+## Historical preparation package
+
 Prepared from recovery checkpoint
 `cb8ffa8d65d926625def7141a0b8765034293387` on
 `milestone-7-8-production-readiness-audit-local`.
@@ -178,3 +236,72 @@ checkpoints as well as completed areas, with remote-SHA verification. Such a
 commit does not imply acceptance or authorize Azure operations. Preserve all
 five protected stashes, unrelated work and Git history; raw `.runtime` evidence
 and secrets remain outside Git. Do not force-push, rewrite history or merge.
+
+<!-- M78-D-002 continuation terminal documentation reconciliation -->
+## Managed campaign reconciliation
+
+Reconciled 2026-11-16 UTC after verified cleanup and ledger finalization.
+
+**M78-D-002 remains open: 0 accepted, 0 failed, 17 unproved out of 17 existing assertions.** All 18 cleanup counters are zero; the reusable controller is preserved and the campaign ledger finalized. PostgreSQL and M78-D-001 remain closed. Milestone 7.8 remains incomplete. Billing remains **unsettled**.
+
+The [prior Redis attempt](MILESTONE_7_8_MANAGED_REDIS_EXECUTION_PACKAGE.md#managed-campaign-reconciliation) remains finalized history: 0 accepted, 0 failed, 17 unproved with its separate verified cleanup. The preparation text above is retained historical scope, not authority for another run. Accepted results retain their actual contributing execution IDs. Failed and uncertain attempts remain history; cleanup does not turn them into accepted proof.
+
+| Existing assertion | Phase | Result | Actual contributing executions | Missing evidence or work |
+| --- | --- | --- | --- | --- |
+| `managed-entra-private-tls` | `admission` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `foreign-prefix-acl-denied` | `admission` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `replica-atomic-network` | `healthy` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `replica-atomic-user` | `healthy` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `replica-atomic-workspace` | `healthy` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `replica-atomic-resource` | `healthy` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `replica-atomic-operation` | `healthy` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `replica-atomic-provider` | `healthy` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `replica-atomic-global` | `healthy` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `denial-all-or-nothing` | `healthy` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `burst-refill-bounded-expiry` | `healthy` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `workspace-deployment-isolation` | `healthy` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `opaque-versioned-keys` | `healthy` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `http-429-retry-after` | `healthy` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `dependency-failure-http-503-no-effect` | `fault` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `dependency-health-degraded-no-fallback` | `fault` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+| `dependency-restored-health-and-decision` | `recovery` | unproved | None accepted | Missing accepted leader and follower replica evidence for this assertion. |
+
+### Execution and failure history
+
+| Phase | Replica | Actual execution | Observed terminal status |
+| --- | --- | --- | --- |
+| No managed execution | — | — | No managed assertion accepted |
+
+No probe failure marker was recorded in the finalized evidence. Execution statuses above retain any stopped or unsuccessful provider execution.
+
+Operator failures or uncertain operations remain recorded separately:
+
+| Operation receipt | Operation | Exit/status |
+| --- | --- | --- |
+| `foundation-deploy-20261116T182839-0efdc6` | `foundation-deploy` | `1` |
+| `foundation-readback-20261116T182946-e1f27a` | `foundation-readback` | `3` |
+
+### Bound artifacts and cleanup
+
+| Binding | Value |
+| --- | --- |
+| Approved package SHA-256 | `1560635160517abb5c109fd80b0f0f72648892e3d7c412cb400db8c15b35e6ff` |
+| Source checkpoint | `eecc9a32f8f3ed31bd7e3bd9b00d09428c83e7a0` |
+| Injected Redis probe SHA-256 | `f610ff80a42cb3545fc3ce7fa199c76ab217e7684ed5bb6b9819b8dc3baf691e` |
+| Retained image/index | `sha256:f498e5aa0f5e44dc7becc92868e1bb989372ef09a3f30d694e89d172eaa66b0a` |
+| Preserved approved cleanup runbook SHA-256 | `38cfeb6cd6e706d197e7a689e5080c36fdc6c3007ad14c0c0cbf35ca626cefd9` |
+| Cleanup execution | `f56269ef-0ba3-4cad-acbf-f5533807ffa7` |
+| Cleanup method / actual runbook status | `automation-runbook` / `Completed` |
+| `final-results.json` SHA-256 | `49b50a13980e439ab267968c7c57bb1718776131d2566d76eae386488f1d52e2` |
+| `terminal-receipt.json` SHA-256 | `f225f19456404d4a77e1d84bcc4ab0ddf3e15999991e760fde6266c6981ac50e` |
+| `cleanup-verification.json` SHA-256 | `77e0cb8db26ef785b187c195b26a2a15b711cd35b08d4e609065abd54dd0fa9a` |
+| `campaign-ledger.json` SHA-256 | `0db24fd24258de37553ae7265be4214315defb8dda416983f95e691e657ee014` |
+| `assertion-inventory.json` SHA-256 | `bfdf57053aa18c1a5cb5bcbccca9f988c48eff7d163963b3f190c91f0f273f03` |
+
+Raw evidence remains ignored under `.runtime/milestone_7_8/redis-continuation-20261116/`; it is not published. Final results bind the actual native exports, execution/source/image receipts and cleanup observations listed above. All 18 counters verify target/provider-managed-group, Redis/cache/database/ACL, NSG, network, job, identity, registry, role and schedule/binding absence. The reusable controller, identity, Reader grant and approved published runbook/content are preserved. This is active-resource absence, not physical-erasure or settled-billing evidence.
+
+The corrected 1,000-cent-compatible runbook publication was accepted and its exact bytes were preserved at final cleanup. The cleanup method and actual runbook status are recorded above; no failed runbook is relabeled successful. Earlier failed publication/operation or proof attempts remain in their receipts and history. This finalized continuation is not authority for another paid execution.
+
+Approved incremental ceiling: USD 10.00; prior cumulative ceiling: USD 330.89; cumulative ceiling: USD 340.89. These are approved ceilings, not settled charges. Billing remains unsettled. No previous campaign budget is reused.
+
+This reconciliation closes only supported M78-D-002 assertions. Existing observability, durable-worker, broader managed recovery, capacity/failure and consolidated final-validation requirements remain in the milestone checklist. It does not authorize another campaign or milestone.
