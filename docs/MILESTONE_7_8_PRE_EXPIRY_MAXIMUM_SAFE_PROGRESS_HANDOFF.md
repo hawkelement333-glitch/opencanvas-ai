@@ -11,6 +11,9 @@
 > window and 20-second retry cap. All 19 cleanup counters are zero, controller
 > preserved and ledger finalized. Original 300-second failures and late
 > diagnostic rows remain historical; the application default was not changed.
+> The [managed Redis result](MILESTONE_7_8_MANAGED_REDIS_EXECUTION_PACKAGE.md#managed-campaign-reconciliation) records M78-D-002 as **open / no managed proof executed**: 0 accepted, 0 failed, 17 unproved.
+> All 18 cleanup counters are zero; controller preserved and ledger finalized.
+> PostgreSQL and M78-D-001 remain closed; Milestone 7.8 remains incomplete.
 > Billing remains unsettled; ceilings and forecasts are not settled charges.
 > Focused regressions passed for narrow immutable-request row-lock column grants
 > and session-specific upload completion event identity, including historical
@@ -18,7 +21,7 @@
 > unlink limitation remain preserved. See the [current defect reconciliation](MILESTONE_7_8_DEFECT_REGISTER.md#m78-d-001-completed-managed-continuation).
 > Status, blockers and authorization limits below describe this dated
 > historical checkpoint; they do not reopen the completed PostgreSQL campaign
-> or override this later managed-object result.
+> or override these later managed-object and Redis results.
 
 Date: 2026-08-18
 

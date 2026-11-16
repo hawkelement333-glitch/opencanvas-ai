@@ -609,14 +609,24 @@ def test_direct_cleanup_does_not_repeat_an_owned_in_progress_deletion(
         assert provider.deleted is not deleting  # Returning for Deleting never proves absence.
 
 
-@pytest.mark.parametrize("cents,accepted", [(5651, True), (5652, False)])
+@pytest.mark.parametrize(
+    "ceiling,cents,accepted",
+    [
+        ("10.00", 1000, True),
+        ("10.00", 999, False),
+        ("10.00", 1001, False),
+        ("50.00", 5000, True),
+        ("56.51", 5651, True),
+        ("56.51", 5652, False),
+    ],
+)
 def test_cleanup_runbook_enforces_new_explicit_ceiling(
-    tmp_path: Path, cents: int, accepted: bool,
+    tmp_path: Path, ceiling: str, cents: int, accepted: bool,
 ) -> None:
     pwsh = shutil.which("pwsh")
     if pwsh is None:
         pytest.skip("PowerShell 7 is required for the cleanup response replay")
-    value = _runbook_fixture(None, ceiling="56.51")
+    value = _runbook_fixture(None, ceiling=ceiling)
     value["parameters"]["CostCeilingCents"] = base64.b64encode(str(cents).encode()).decode()
     fixture = tmp_path / "synthetic.json"
     fixture.write_text(json.dumps(value), encoding="utf-8")

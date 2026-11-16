@@ -10,7 +10,7 @@ param(
   [Parameter(Mandatory = $true)][ValidatePattern('^[a-f0-9-]{36}$')][string]$CleanupBindingName,
   [Parameter(Mandatory = $true)][ValidatePattern('^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$')][string]$CleanupDeadlineUtc,
   [Parameter(Mandatory = $true)][ValidatePattern('^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$')][string]$CleanupAuthorityExpiresUtc,
-  [Parameter(Mandatory = $true)][ValidateSet(5000, 5651)][int]$CostCeilingCents,
+  [Parameter(Mandatory = $true)][ValidateSet(1000, 5000, 5651)][int]$CostCeilingCents,
   [Parameter(Mandatory = $true)][ValidatePattern('^[a-f0-9]{64}$')][string]$ControllerBindingSha256,
   [Parameter(Mandatory = $true)][ValidatePattern('^[a-f0-9]{64}$')][string]$FreshControllerAdmissionEvidenceSha256,
   [Parameter(Mandatory = $true)][ValidateSet('m7.8-fresh-subscription-predeployment-absence-evidence-v1')][string]$FreshControllerAdmissionEvidenceVersion,
