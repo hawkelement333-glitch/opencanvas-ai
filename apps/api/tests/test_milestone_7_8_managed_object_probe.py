@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +22,7 @@ from opencanvas_api.db import models as m
 from opencanvas_api.services.auth import Principal
 from opencanvas_api.services.documents.errors import DocumentStorageError
 from opencanvas_api.services.documents.storage import MemoryVersionedObjectStorage
+from opencanvas_api.services.scanner_bridge import BlobScanEvidence, LogAnalyticsScanEvidence
 
 ROOT = Path(__file__).resolve().parents[3]
 SPEC = importlib.util.spec_from_file_location(
@@ -889,3 +891,429 @@ async def test_warm_scan_reconciles_delayed_exact_originals_without_mutation(nam
         )
     instance.worker.put_immutable.assert_not_awaited()
     instance.worker.delete_version.assert_not_awaited()
+
+
+def continuation_manifest(monkeypatch):
+    campaign = uuid.uuid4()
+    prior = {
+        "campaign": str(uuid.uuid4()),
+        "execution_id": "prior-export-execution",
+        "source_sha256": "b" * 64,
+        "receipts": [
+            {
+                "phase": "upload",
+                "assertions": ["previous-six-assertions"],
+                "execution_id": "prior-contributing-execution",
+                "source_sha256": "b" * 64,
+                "image_digest": "sha256:" + "c" * 64,
+                "source_commit": "d" * 40,
+                "receipt_sha256": "e" * 64,
+                "observations": {"clean": {}, "infected": {}},
+            }
+        ],
+    }
+    # Synthetic normalized evidence has its own independently pinned fixture digest;
+    # the production pin remains the hash of the retained managed export.
+    monkeypatch.setattr(probe, "PRESERVED_UPLOAD_EXPORT_SHA256", probe.digest(prior))
+    manifest = {
+        "schema_version": "m78-object-new-request-continuation-v1",
+        "campaign": str(campaign),
+        "prior_upload_export": prior,
+        "prior_journal_sha256": "2494048a0c735a47e03b56fd01d1d6e65000a9fec24004e29a6b899bfcc8fffe",
+        "prior_terminal_receipt_sha256": (
+            "674ea9a33476c4a59b80de35d8055da3709ef2c852654187e06cdc5ad3d87109"
+        ),
+        "decision_timeout_seconds": 900,
+        "retry_max_seconds": 20,
+        "probe_window_seconds": 1000,
+    }
+    settings = Settings(
+        malware_scan_timeout_seconds=900, scanner_result_bridge_retry_max_seconds=20
+    )
+    environment = {
+        "OPENCANVAS_OBJECT_PROBE_IMAGE_DIGEST": prior["receipts"][0]["image_digest"],
+        "OPENCANVAS_OBJECT_PROBE_SCAN_SECONDS": "1000",
+    }
+    return campaign, manifest, settings, environment
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        None,
+        "prior",
+        "journal",
+        "campaign",
+        "timeout",
+        "retry",
+        "outer",
+        "image",
+        "hash",
+        "old-resume",
+    ],
+)
+def test_continuation_manifest_preserves_exact_external_proof_and_new_policy(monkeypatch, changed):
+    campaign, manifest, settings, environment = continuation_manifest(monkeypatch)
+    if changed == "prior":
+        manifest["prior_upload_export"]["receipts"][0]["execution_id"] = "relabeled"
+    elif changed == "journal":
+        manifest["prior_journal_sha256"] = "0" * 64
+    elif changed == "campaign":
+        campaign = uuid.uuid4()
+    elif changed == "timeout":
+        settings = settings.model_copy(update={"malware_scan_timeout_seconds": 300})
+    elif changed == "retry":
+        settings = settings.model_copy(update={"scanner_result_bridge_retry_max_seconds": 300})
+    elif changed == "outer":
+        environment["OPENCANVAS_OBJECT_PROBE_SCAN_SECONDS"] = "1800"
+    elif changed == "image":
+        environment["OPENCANVAS_OBJECT_PROBE_IMAGE_DIGEST"] = "sha256:" + "0" * 64
+    elif changed == "old-resume":
+        environment["OPENCANVAS_OBJECT_PROBE_WARM_SCAN_RESUME_JSON"] = "{}"
+    environment["OPENCANVAS_OBJECT_PROBE_CONTINUATION_JSON"] = json.dumps(manifest)
+    environment["OPENCANVAS_OBJECT_PROBE_CONTINUATION_SHA256"] = (
+        "0" * 64 if changed == "hash" else probe.digest(manifest)
+    )
+    if changed:
+        with pytest.raises(probe.ProbeFailure):
+            probe.continuation_authority(environment, campaign, settings)
+    else:
+        assert probe.continuation_authority(environment, campaign, settings) == manifest
+        assert probe.continuation_authority({}, campaign, settings) is None
+        assert (
+            manifest["prior_upload_export"]["receipts"][0]["execution_id"]
+            == "prior-contributing-execution"
+        )
+        assert Settings().malware_scan_timeout_seconds == 300
+
+
+def test_continuation_phase_selection_never_reexecutes_upload():
+    assert probe.selected_phases("continue", True) == ("scan", "delete", "recovery")
+    assert probe.selected_phases("receipts", True) == ("scan", "delete", "recovery")
+    assert probe.selected_phases("all", False) == ("upload", "scan", "delete", "recovery")
+    for phase in ("upload", "all"):
+        with pytest.raises(probe.ProbeFailure):
+            probe.selected_phases(phase, True)
+    with pytest.raises(probe.ProbeFailure):
+        probe.selected_phases("continue", False)
+
+
+async def test_continuation_pair_is_exactly_two_idempotent_fixtures_without_authorization():
+    instance = object.__new__(probe.Probe)
+    instance.continuation = {"approved": "fixture-only"}
+    journal = {}
+    instance.read_receipt = AsyncMock(side_effect=lambda phase: journal.get(phase))
+
+    async def record(phase, status, result):
+        assert phase.startswith("continuation-fixture-") and status == "accepted"
+        journal[phase] = result
+
+    instance.record = AsyncMock(side_effect=record)
+    instance.upload_one = AsyncMock(
+        side_effect=lambda name, content, **kwargs: {
+            "object_version_id": str(uuid.uuid5(uuid.NAMESPACE_URL, name)),
+            "content_sha256": probe.digest(content),
+        }
+    )
+    pair = await instance.continuation_pair()
+    assert await instance.continuation_pair() == pair
+    assert instance.upload_one.await_count == 2
+    for call, content in zip(
+        instance.upload_one.await_args_list, (probe.CLEAN, probe.EICAR), strict=True
+    ):
+        assert call.args[1] == content and call.kwargs == {"verify_authorization": False}
+    assert "upload" not in journal
+    with pytest.raises(probe.ProbeFailure, match="upload-reexecution-denied"):
+        await instance.upload()
+    assert instance.upload_one.await_count == 2
+
+
+async def test_continuation_new_900_second_requests_do_not_extend_prior_300_request(
+    database, tmp_path
+):
+    await install_registration_triggers(database)
+    instance = configured(database, tmp_path)
+    await instance.seed_fixture()
+    old = await instance.upload_one("old-window", probe.CLEAN, verify_authorization=False)
+    async with database.sessions() as session:
+        old_request = await session.scalar(
+            select(m.MalwareScanRequest).where(
+                m.MalwareScanRequest.object_version_id == uuid.UUID(old["object_version_id"])
+            )
+        )
+        old_deadline = old_request.deadline_at
+        assert old_request.timeout_seconds == 300
+    instance.settings = instance.settings.model_copy(update={"malware_scan_timeout_seconds": 900})
+    new = await instance.upload_one("new-window", probe.EICAR, verify_authorization=False)
+    async with database.sessions() as session:
+        old_request = await session.scalar(
+            select(m.MalwareScanRequest).where(
+                m.MalwareScanRequest.object_version_id == uuid.UUID(old["object_version_id"])
+            )
+        )
+        new_request = await session.scalar(
+            select(m.MalwareScanRequest).where(
+                m.MalwareScanRequest.object_version_id == uuid.UUID(new["object_version_id"])
+            )
+        )
+        assert old_request.deadline_at == old_deadline and old_request.timeout_seconds == 300
+        assert new_request.timeout_seconds == 900
+        assert new_request.deadline_at - new_request.requested_at == timedelta(seconds=900)
+        assert await session.scalar(select(func.count()).select_from(m.MalwareScanResult)) == 0
+        assert await session.scalar(select(func.count()).select_from(m.ObjectPromotion)) == 0
+
+
+def continuation_gate_fixture(monkeypatch, changed=None):
+    instance = object.__new__(probe.Probe)
+    instance.campaign = uuid.uuid4()
+    instance.workspace = uuid.uuid4()
+    instance.settings = Settings(
+        malware_scan_timeout_seconds=900, scanner_result_bridge_retry_max_seconds=20
+    )
+    instance.worker_settings = instance.settings
+    instance.continuation = {
+        "probe_window_seconds": 1000,
+        "prior_upload_export": {
+            "receipts": [
+                {"observations": {"clean": {}, "infected": {}}, "receipt_sha256": "f" * 64}
+            ]
+        },
+    }
+    started = datetime.now(UTC) - timedelta(seconds=1)
+    versions, requests, pair, blobs, logs, events = {}, [], {}, {}, {}, []
+    for index, kind in enumerate(("clean", "infected")):
+        vid = uuid.uuid4()
+        version = m.StorageObjectVersion(
+            object_version_id=vid,
+            workspace_id=instance.workspace,
+            security_class="quarantine",
+            physical_key=f"quarantine/{kind}",
+            provider_name="azure",
+            provider_version_id=f"version-{kind}",
+            etag=f'"0xABC{index}"',
+            content_sha256=probe.digest(probe.CLEAN if kind == "clean" else probe.EICAR),
+        )
+        versions[vid] = version
+        pair[kind] = {
+            "object_version_id": str(vid),
+            **{
+                key: getattr(version, key)
+                for key in ("physical_key", "provider_version_id", "etag", "content_sha256")
+            },
+        }
+        request = m.MalwareScanRequest(
+            scan_request_id=uuid.uuid4(),
+            object_version_id=vid,
+            timeout_seconds=900,
+            requested_at=started,
+            deadline_at=started + timedelta(seconds=900),
+        )
+        requests.append(request)
+        finished = started + timedelta(milliseconds=100)
+        uri = f"https://testscanner.blob.core.windows.net/quarantine/{kind}"
+        verdict = "No threats found" if kind == "clean" else "Malicious"
+        blobs[vid] = BlobScanEvidence(
+            "testscanner",
+            uri,
+            version.provider_version_id,
+            version.etag,
+            verdict,
+            finished,
+            finished.isoformat(),
+            "a" * 64,
+        )
+        logs[uri] = (
+            LogAnalyticsScanEvidence(
+                "testscanner",
+                uri,
+                version.etag,
+                verdict,
+                str(uuid.uuid4()),
+                finished,
+                finished.isoformat(),
+                finished,
+                "b" * 64,
+            ),
+        )
+    if changed == "expired":
+        requests[1].requested_at = started - timedelta(seconds=901)
+        requests[1].deadline_at = requests[1].requested_at + timedelta(seconds=900)
+    elif changed == "wrong-timeout":
+        requests[0].timeout_seconds = 300
+    elif changed == "mismatch":
+        uri = blobs[next(iter(versions))].object_uri
+        logs[uri] = (replace(logs[uri][0], etag='"0xBAD"'),)
+    elif changed == "missing":
+        logs[blobs[list(versions)[1]].object_uri] = ()
+    session = SimpleNamespace(
+        get=AsyncMock(side_effect=lambda model, vid: versions[vid]),
+        scalars=AsyncMock(side_effect=[SimpleNamespace(all=lambda r=r: [r]) for r in requests]),
+        scalar=AsyncMock(side_effect=[0, 0, "scan_pending", 0, 0, "scan_pending"]),
+        rollback=AsyncMock(),
+        commit=AsyncMock(),
+    )
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=session)
+    context.__aexit__ = AsyncMock(return_value=False)
+    instance.db = SimpleNamespace(sessions=lambda: context)
+
+    async def read_blob(version, **kwargs):
+        events.append("blob:" + version.physical_key)
+        return blobs[version.object_version_id]
+
+    async def read_logs(**kwargs):
+        events.append("log:" + kwargs["object_uri"].rsplit("/", 1)[1])
+        return logs[kwargs["object_uri"]]
+
+    bridge = SimpleNamespace(
+        blob_reader=SimpleNamespace(read=AsyncMock(side_effect=read_blob)),
+        log_reader=SimpleNamespace(read=AsyncMock(side_effect=read_logs)),
+        consume_once=AsyncMock(),
+    )
+    monkeypatch.setattr(probe, "build_private_scanner_result_bridge", lambda settings: bridge)
+    return instance, pair, bridge, session, requests, events
+
+
+@pytest.mark.parametrize("changed", [None, "missing", "mismatch", "expired", "wrong-timeout"])
+async def test_continuation_gate_requires_both_native_pairs_in_actual_window(monkeypatch, changed):
+    instance, pair, bridge, session, requests, _ = continuation_gate_fixture(monkeypatch, changed)
+    if changed in {"mismatch", "expired", "wrong-timeout"}:
+        with pytest.raises(probe.ProbeFailure):
+            await instance.continuation_gate_observation(bridge, pair)
+    else:
+        result = await instance.continuation_gate_observation(bridge, pair)
+        if changed == "missing":
+            assert result is None
+        else:
+            assert set(result["sources"]) == {"clean", "infected"}
+            ready = datetime.fromisoformat(result["pair_ready_at"])
+            for kind, request in zip(("clean", "infected"), requests, strict=True):
+                observed = result["sources"][kind]
+                assert (
+                    datetime.fromisoformat(observed["log_query_finished_at"])
+                    <= ready
+                    < request.deadline_at
+                )
+                assert observed["scannerBlobTagEvidenceSha256"] == "a" * 64
+                assert observed["scannerLogAnalyticsEvidenceSha256"] == "b" * 64
+                assert observed["timeout_seconds"] == 900
+    bridge.consume_once.assert_not_awaited()
+    session.commit.assert_not_awaited()
+
+
+async def test_continuation_scan_preflights_and_journals_both_pairs_before_consumer(monkeypatch):
+    instance, pair, bridge, session, requests, events = continuation_gate_fixture(monkeypatch)
+    journal = {}
+    instance.read_receipt = AsyncMock(side_effect=lambda phase: journal.get(phase))
+    instance.required = AsyncMock(side_effect=lambda phase: journal[phase])
+    instance.continuation_pair = AsyncMock(return_value=pair)
+
+    async def record(phase, status, value):
+        assert phase == "continuation-pair-gate" and status == "accepted"
+        assert value["assertions"] == []
+        journal[phase] = value
+        events.append("journal-gate")
+
+    instance.record = AsyncMock(side_effect=record)
+    session.scalars.side_effect = [
+        *(SimpleNamespace(all=lambda r=r: [r]) for r in requests),
+        SimpleNamespace(all=lambda: []),
+        SimpleNamespace(all=lambda: requests),
+    ]
+
+    async def consume(_session):
+        events.append("consume")
+        assert set(journal["continuation-pair-gate"]["observations"]["sources"]) == {
+            "clean",
+            "infected",
+        }
+        raise RuntimeError("test stops at unchanged production admission")
+
+    bridge.consume_once.side_effect = consume
+    with pytest.raises(RuntimeError, match="test stops"):
+        await instance.scan()
+    assert events == [
+        "blob:quarantine/clean",
+        "log:clean",
+        "blob:quarantine/infected",
+        "log:infected",
+        "journal-gate",
+        "consume",
+    ]
+    assert "upload" not in journal
+    instance.continuation_pair.assert_awaited_once()
+    instance.required.assert_awaited_once_with("continuation-pair-gate")
+    gate = await instance.require_continuation_gate(bridge, pair)
+    assert gate == journal["continuation-pair-gate"]
+    assert bridge.blob_reader.read.await_count == 2
+
+
+async def test_continuation_failed_pair_never_invokes_consumer_or_records_gate(monkeypatch):
+    instance, pair, bridge, _, _, _ = continuation_gate_fixture(monkeypatch, "mismatch")
+    instance.read_receipt = AsyncMock(return_value=None)
+    instance.continuation_pair = AsyncMock(return_value=pair)
+    instance.record = AsyncMock()
+    with pytest.raises(probe.ProbeFailure, match="evidence-mismatch"):
+        await instance.scan()
+    bridge.consume_once.assert_not_awaited()
+    instance.record.assert_awaited_once()
+    phase, status, evidence = instance.record.await_args.args
+    assert phase == "continuation-pair-observation" and status == "failed"
+    assert evidence["assertions"] == []
+    assert evidence["diagnostic"]["code"] == "continuation-scanner-evidence-mismatch"
+    assert evidence["observations"]["clean"]["native_log_rows"] == 1
+
+
+async def test_continuation_partial_receipts_export_keeps_contributing_execution():
+    instance = object.__new__(probe.Probe)
+    instance.continuation = {"prior_upload_export": {"unchanged": True}}
+    accepted = {
+        "assertions": ["clean-promotion-exact-bytes"],
+        "observations": {},
+        "execution_id": "actual-managed-scan-execution",
+        "source_sha256": "a" * 64,
+        "image_digest": "sha256:" + "b" * 64,
+        "source_commit": "c" * 40,
+    }
+    instance.read_receipt = AsyncMock(
+        side_effect=lambda phase: accepted if phase == "scan" else None
+    )
+    instance.required = AsyncMock(
+        side_effect=AssertionError("No aggregate pass from missing phases")
+    )
+    receipts = await instance.export_accepted_receipts(("scan", "delete", "recovery"))
+    assert receipts == [probe.public_receipt("scan", accepted)]
+    assert receipts[0]["execution_id"] == "actual-managed-scan-execution"
+    assert receipts[0]["receipt_sha256"] == probe.digest(accepted)
+    assert instance.continuation["prior_upload_export"] == {"unchanged": True}
+    assert [call.args[0] for call in instance.read_receipt.await_args_list] == [
+        "scan",
+        "delete",
+        "recovery",
+    ]
+
+
+async def test_continuation_deadline_crossed_during_native_reads_fails_closed(monkeypatch):
+    instance, pair, bridge, session, requests, _ = continuation_gate_fixture(monkeypatch)
+    before = datetime.now(UTC)
+    clock = {"now": before}
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock["now"]
+
+    monkeypatch.setattr(probe, "datetime", Clock)
+    original_read = bridge.log_reader.read.side_effect
+
+    async def late_read(**kwargs):
+        result = await original_read(**kwargs)
+        if kwargs["object_uri"].endswith("infected"):
+            clock["now"] = requests[1].deadline_at + timedelta(microseconds=1)
+        return result
+
+    bridge.log_reader.read.side_effect = late_read
+    with pytest.raises(probe.ProbeFailure, match="window-closed-during-observation"):
+        await instance.continuation_gate_observation(bridge, pair)
+    bridge.consume_once.assert_not_awaited()
+    session.commit.assert_not_awaited()

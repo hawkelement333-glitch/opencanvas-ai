@@ -1,5 +1,11 @@
 # Milestone 7.8 managed object-storage execution package
 
+Current status: [M78-D-001 is complete](MILESTONE_7_8_MANAGED_OBJECT_STORAGE_CONTINUATION_PACKAGE.md#completed-continuation), with 24/24 assertions
+accepted and all 19 continuation cleanup counters zero. Milestone 7.8 remains
+incomplete for its other existing requirements; billing remains unsettled.
+
+Historical disposition of the original 300-second campaign follows:
+
 Status: the approved campaign preserved **6 of 24 accepted managed assertions**.
 M78-D-001 remains **open**: timely dual-source scanner evidence was not obtained;
 18 scanner, promotion, deletion and recovery assertions remain unproved. Cleanup
@@ -328,3 +334,23 @@ Raw evidence, credentials, full object keys and runtime parameter files remain
 ignored outside Git. Billing remains **unsettled**; forecasts and approved
 ceilings are not settled charges. The five protected stashes and unrelated work
 are preserved.
+
+## Read-only scanner continuation decision - 2026-11-15
+
+The [scanner gate investigation and decision](MILESTONE_7_8_SCANNER_GATE_DECISION.md)
+traces all four retained rows to exact fixtures and distinguishes the failed
+300-second dual-source gates from downstream unproved assertions. No new
+managed assertion was accepted. It proposes an explicit 900-second timing
+amendment for new requests; the existing 300-second requirement stays in force
+until approved. This proposal does not modify the finalized campaign receipts,
+ledger, cleanup disposition, or unsettled billing.
+
+### Subsequent timing approval and bounded package
+
+The user approved 900 seconds total and a 20-second retry cap for new requests
+in the next managed proof only. The [continuation package](MILESTONE_7_8_MANAGED_OBJECT_STORAGE_CONTINUATION_PACKAGE.md)
+was separately approved and executed. Its [completed continuation](MILESTONE_7_8_MANAGED_OBJECT_STORAGE_CONTINUATION_PACKAGE.md#completed-continuation)
+accepted the 18 remaining assertions and verified all 19 cleanup counters zero,
+preserving the six upload assertions and original 300-second failures. M78-D-001
+is complete; Milestone 7.8 remains incomplete. The retained image was reused;
+billing remains unsettled.

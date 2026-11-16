@@ -16,7 +16,7 @@ import os
 import re
 import uuid
 import xml.etree.ElementTree as ET
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select, text
@@ -38,14 +38,18 @@ from opencanvas_api.services.object_ingestion import (
     UploadLifecycleService,
 )
 from opencanvas_api.services.scanner_bridge import (
+    ScannerBridgeEvidenceError,
+    _aware_utc,
     _normalize_azure_etag,
     build_private_scanner_result_bridge,
+    correlate_scan_evidence,
 )
 
 CLEAN = b"M78-D-001 managed immutable object acceptance. Exact retained bytes.\n"
 # Standard non-executable antivirus test fixture; never promoted or downloaded.
 EICAR = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
 PHASES = ("upload", "scan", "delete", "recovery")
+PRESERVED_UPLOAD_EXPORT_SHA256 = "47dd87d4f289fa39ab24149703faa8b26a817199dc5d1900c7973a93a767228c"
 JOURNAL_DDL = """CREATE TABLE IF NOT EXISTS m78_object_probe.receipts (
 campaign uuid NOT NULL, phase text NOT NULL, attempt uuid NOT NULL,
 status text NOT NULL, source_sha256 text NOT NULL, result jsonb NOT NULL,
@@ -66,6 +70,55 @@ def check(condition: bool, code: str) -> None:
 
 class ProbeFailure(RuntimeError):
     pass
+
+
+def continuation_authority(
+    environment: Any, campaign: uuid.UUID, settings: Settings
+) -> dict[str, Any] | None:
+    """Bind preserved evidence separately; never import its deleted fixtures."""
+    encoded = environment.get("OPENCANVAS_OBJECT_PROBE_CONTINUATION_JSON")
+    if encoded is None:
+        return None
+    manifest = json.loads(encoded)
+    check(
+        digest(manifest) == environment["OPENCANVAS_OBJECT_PROBE_CONTINUATION_SHA256"],
+        "continuation-manifest-hash-differs",
+    )
+    prior = manifest["prior_upload_export"]
+    check(
+        manifest["schema_version"] == "m78-object-new-request-continuation-v1"
+        and manifest["campaign"] == str(campaign)
+        and prior["campaign"] != str(campaign)
+        and digest(prior) == PRESERVED_UPLOAD_EXPORT_SHA256
+        and manifest["prior_journal_sha256"]
+        == "2494048a0c735a47e03b56fd01d1d6e65000a9fec24004e29a6b899bfcc8fffe"
+        and manifest["prior_terminal_receipt_sha256"]
+        == "674ea9a33476c4a59b80de35d8055da3709ef2c852654187e06cdc5ad3d87109",
+        "continuation-prior-evidence-binding-differs",
+    )
+    check(
+        manifest["decision_timeout_seconds"] == settings.malware_scan_timeout_seconds == 900
+        and manifest["retry_max_seconds"] == settings.scanner_result_bridge_retry_max_seconds == 20
+        and settings.scanner_result_bridge_retry_base_seconds == 5
+        and manifest["probe_window_seconds"]
+        == int(environment.get("OPENCANVAS_OBJECT_PROBE_SCAN_SECONDS", "1800"))
+        == 1000
+        and environment["OPENCANVAS_OBJECT_PROBE_IMAGE_DIGEST"]
+        == prior["receipts"][0]["image_digest"],
+        "continuation-approved-configuration-differs",
+    )
+    check(
+        not any(
+            environment.get(key)
+            for key in (
+                "OPENCANVAS_OBJECT_PROBE_CLEAN_REPLACEMENT_TOKEN",
+                "OPENCANVAS_OBJECT_PROBE_MANAGED_RESUME_JSON",
+                "OPENCANVAS_OBJECT_PROBE_WARM_SCAN_RESUME_JSON",
+            )
+        ),
+        "continuation-old-campaign-resume-not-permitted",
+    )
+    return manifest
 
 
 def clean_replacement_authority(environment: Any, campaign: uuid.UUID) -> dict[str, Any] | None:
@@ -383,6 +436,7 @@ class Probe:
         check(bool(self.execution), "execution-id-missing")
         self.image = os.environ["OPENCANVAS_OBJECT_PROBE_IMAGE_DIGEST"]
         self.source_commit = os.environ["OPENCANVAS_OBJECT_PROBE_SOURCE_COMMIT"]
+        self.continuation = continuation_authority(os.environ, self.campaign, settings)
         check(
             bool(re.fullmatch(r"sha256:[0-9a-f]{64}", self.image)),
             "image-digest-invalid",
@@ -1081,7 +1135,227 @@ class Probe:
                 "content_sha256": version.content_sha256,
             }
 
+    async def continuation_pair(self) -> dict[str, Any]:
+        """Exactly two new fixtures; old authorization assertions stay external."""
+        check(self.continuation is not None, "continuation-authority-missing")
+        pair = {}
+        for kind, content in (("clean", CLEAN), ("infected", EICAR)):
+            phase = f"continuation-fixture-{kind}"
+            fixture = await self.read_receipt(phase)
+            if fixture is None:
+                fixture = await self.upload_one(
+                    f"continuation-{kind}", content, verify_authorization=False
+                )
+                await self.record(phase, "accepted", fixture)
+            check(
+                fixture["content_sha256"] == digest(content),
+                "continuation-fixture-bytes-differ",
+            )
+            pair[kind] = fixture
+        check(
+            pair["clean"]["object_version_id"] != pair["infected"]["object_version_id"],
+            "continuation-fixtures-not-distinct",
+        )
+        return pair
+
+    async def continuation_gate_observation(
+        self, bridge: Any, pair: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Read both native sources for both fixtures without accepting/promoting."""
+        observations: dict[str, Any] = {}
+        self.continuation_gate_observations = observations
+        deadlines: list[datetime] = []
+        missing = False
+        async with self.db.sessions() as session:
+            for kind, expected_verdict in (
+                ("clean", "clean"),
+                ("infected", "infected"),
+            ):
+                fixture = pair[kind]
+                version_id = uuid.UUID(fixture["object_version_id"])
+                version = await session.get(m.StorageObjectVersion, version_id)
+                requests = list(
+                    (
+                        await session.scalars(
+                            select(m.MalwareScanRequest).where(
+                                m.MalwareScanRequest.object_version_id == version_id
+                            )
+                        )
+                    ).all()
+                )
+                check(
+                    version is not None and len(requests) == 1,
+                    "continuation-request-missing",
+                )
+                request = requests[0]
+                requested = _aware_utc(request.requested_at)
+                deadline = _aware_utc(request.deadline_at)
+                deadlines.append(deadline)
+                check(
+                    request.timeout_seconds == 900
+                    and deadline - requested == timedelta(seconds=900)
+                    and deadline > datetime.now(UTC),
+                    "continuation-request-window-invalid-or-expired",
+                )
+                check(
+                    version.workspace_id == self.workspace
+                    and all(
+                        getattr(version, key) == fixture[key]
+                        for key in (
+                            "physical_key",
+                            "provider_version_id",
+                            "etag",
+                            "content_sha256",
+                        )
+                    ),
+                    "continuation-request-version-binding-differs",
+                )
+                for model, column in (
+                    (m.MalwareScanResult, m.MalwareScanResult.object_version_id),
+                    (m.ObjectPromotion, m.ObjectPromotion.source_object_version_id),
+                ):
+                    count = await session.scalar(
+                        select(func.count()).select_from(model).where(column == version_id)
+                    )
+                    check(count == 0, "continuation-admission-before-pair-gate")
+                state = await session.scalar(
+                    select(m.StorageObjectLifecycleTransition.current_state)
+                    .where(m.StorageObjectLifecycleTransition.object_version_id == version_id)
+                    .order_by(m.StorageObjectLifecycleTransition.sequence.desc())
+                    .limit(1)
+                )
+                check(state == "scan_pending", "continuation-fixture-not-pending")
+                tag_start = datetime.now(UTC)
+                observed = {
+                    **version_observation(fixture),
+                    "scan_request_id": str(request.scan_request_id),
+                    "requested_at": requested.isoformat(),
+                    "deadline_at": deadline.isoformat(),
+                    "timeout_seconds": request.timeout_seconds,
+                    "blob_read_started_at": tag_start.isoformat(),
+                }
+                observations[kind] = observed
+                try:
+                    blob = await bridge.blob_reader.read(version, observed_at=tag_start)
+                    tag_end = datetime.now(UTC)
+                    observed.update(
+                        blob_read_finished_at=tag_end.isoformat(),
+                        blob_evidence_sha256=blob.evidence_sha256,
+                        blob_scan_finished_at=blob.scan_finished_at.isoformat(),
+                    )
+                    log_start = datetime.now(UTC)
+                    observed["log_query_started_at"] = log_start.isoformat()
+                    logs = await bridge.log_reader.read(
+                        account_name=blob.account_name,
+                        object_uri=blob.object_uri,
+                        etag=blob.etag,
+                        requested_at=request.requested_at,
+                        observed_at=log_start,
+                    )
+                    log_end = datetime.now(UTC)
+                    observed.update(
+                        log_query_finished_at=log_end.isoformat(),
+                        native_log_rows=len(logs),
+                        native_log_evidence_sha256=[row.evidence_sha256 for row in logs],
+                    )
+                except (DocumentStorageError, ScannerBridgeEvidenceError) as error:
+                    observed["source_error"] = type(error).__name__
+                    observed["source_error_at"] = datetime.now(UTC).isoformat()
+                    missing = True
+                    continue
+                decision = correlate_scan_evidence(
+                    version=version,
+                    request=request,
+                    blob=blob,
+                    logs=logs,
+                    observed_at=log_end,
+                    maximum_age=timedelta(
+                        seconds=self.settings.malware_scan_result_max_age_seconds
+                    ),
+                )
+                if decision is None:
+                    check(not logs, "continuation-scanner-evidence-mismatch")
+                    missing = True
+                    continue
+                check(
+                    decision.verdict == expected_verdict,
+                    "continuation-scanner-verdict-differs",
+                )
+                observations[kind] = {
+                    **version_observation(fixture),
+                    **decision.event_evidence(),
+                    "scan_request_id": str(request.scan_request_id),
+                    "requested_at": requested.isoformat(),
+                    "deadline_at": deadline.isoformat(),
+                    "timeout_seconds": request.timeout_seconds,
+                    "blob_read_started_at": tag_start.isoformat(),
+                    "blob_read_finished_at": tag_end.isoformat(),
+                    "log_query_started_at": log_start.isoformat(),
+                    "log_query_finished_at": log_end.isoformat(),
+                    "log_time_generated": _aware_utc(logs[0].time_generated).isoformat(),
+                }
+            await session.rollback()
+        ready_at = datetime.now(UTC)
+        check(
+            all(deadline > ready_at for deadline in deadlines),
+            "continuation-request-window-closed-during-observation",
+        )
+        return None if missing else {"pair_ready_at": ready_at.isoformat(), "sources": observations}
+
+    async def require_continuation_gate(self, bridge: Any, pair: dict[str, Any]) -> dict[str, Any]:
+        binding = digest({kind: version_observation(pair[kind]) for kind in ("clean", "infected")})
+        manifest_hash = digest(self.continuation)
+        old = await self.read_receipt("continuation-pair-gate")
+        if old is not None:
+            check(
+                old["pair_binding_sha256"] == binding and old["manifest_sha256"] == manifest_hash,
+                "continuation-accepted-pair-binding-differs",
+            )
+            return old
+        end = asyncio.get_running_loop().time() + self.continuation["probe_window_seconds"]
+        while True:
+            try:
+                observed = await self.continuation_gate_observation(bridge, pair)
+            except Exception as error:
+                await self.record(
+                    "continuation-pair-observation",
+                    "failed",
+                    {
+                        "assertions": [],
+                        "diagnostic": safe_failure(error),
+                        "observations": getattr(self, "continuation_gate_observations", {}),
+                    },
+                )
+                raise
+            if observed is not None:
+                await self.record(
+                    "continuation-pair-gate",
+                    "accepted",
+                    {
+                        "assertions": [],
+                        "classification": "both-native-source-pairs-observed-before-admission",
+                        "pair_binding_sha256": binding,
+                        "manifest_sha256": manifest_hash,
+                        "observations": observed,
+                    },
+                )
+                return await self.required("continuation-pair-gate")
+            await self.record(
+                "continuation-pair-observation",
+                "observed",
+                {"assertions": [], "observations": self.continuation_gate_observations},
+            )
+            check(
+                asyncio.get_running_loop().time() < end,
+                "continuation-pair-gate-wait-exhausted",
+            )
+            await asyncio.sleep(10)
+
     async def upload(self) -> dict[str, Any]:
+        check(
+            getattr(self, "continuation", None) is None,
+            "continuation-upload-reexecution-denied",
+        )
         result: dict[str, Any] = {}
         for name, content in (("clean", CLEAN), ("infected", EICAR)):
             old = await self.read_receipt(f"upload-{name}")
@@ -1131,9 +1405,16 @@ class Probe:
         return result
 
     async def scan(self) -> dict[str, Any]:
-        uploads = await self.required("upload")
-        authorized_clean = uploads["clean"]
-        authorized_infected = uploads["infected"]
+        continuation = getattr(self, "continuation", None)
+        if continuation is not None:
+            uploads = await self.continuation_pair()
+            prior = continuation["prior_upload_export"]["receipts"][0]
+            authorized = prior["observations"]
+        else:
+            uploads = await self.required("upload")
+            authorized = {
+                kind: version_observation(uploads[kind]) for kind in ("clean", "infected")
+            }
         warm = warm_scan_authority(os.environ, self.campaign)
         resume = managed_resume_authority(os.environ, self.campaign)
         if warm is not None:
@@ -1158,6 +1439,11 @@ class Probe:
             uploads = {**uploads, "clean": scanner_clean}
         bridge = build_private_scanner_result_bridge(self.worker_settings)
         check(bridge is not None, "private-dual-source-bridge-required")
+        pair_gate = (
+            await self.require_continuation_gate(bridge, uploads)
+            if continuation is not None
+            else None
+        )
         seconds = int(os.environ.get("OPENCANVAS_OBJECT_PROBE_SCAN_SECONDS", "1800"))
         check(30 <= seconds <= 3600, "scan-window-invalid")
         end = asyncio.get_running_loop().time() + seconds
@@ -1260,6 +1546,12 @@ class Probe:
                     )
                 }
                 check(all(evidence.values()), "scanner-dual-source-fields-missing")
+                request = await session.get(m.MalwareScanRequest, row.scan_request_id)
+                check(request is not None, "accepted-scanner-request-missing")
+                check(
+                    _aware_utc(row.received_at) <= _aware_utc(request.deadline_at),
+                    "scanner-admission-after-request-deadline",
+                )
                 observations[name] = {
                     **version_observation(uploads[name]),
                     **evidence,
@@ -1270,6 +1562,10 @@ class Probe:
                     "result_digest": row.result_digest,
                     "domain_event_payload_digest": event.payload_digest,
                     "promotion_id": str(promotion.promotion_id) if promotion else None,
+                    "requested_at": _aware_utc(request.requested_at).isoformat(),
+                    "deadline_at": _aware_utc(request.deadline_at).isoformat(),
+                    "received_at": _aware_utc(row.received_at).isoformat(),
+                    "timeout_seconds": request.timeout_seconds,
                 }
         # Withholding consumption is a real indeterminate state, not a forged verdict.
         pending = await self.upload_one(
@@ -1289,8 +1585,8 @@ class Probe:
         result["clean_upload"] = uploads["clean"]
         result["observations"] = {
             **observations,
-            "authorized_clean_upload": version_observation(authorized_clean),
-            "authorized_infected_upload": version_observation(authorized_infected),
+            "authorized_clean_upload": authorized["clean"],
+            "authorized_infected_upload": authorized["infected"],
             "target": version_observation(result["target"]),
             "withheld": {
                 **version_observation(pending),
@@ -1298,6 +1594,9 @@ class Probe:
                 "state": "scan_pending",
             },
         }
+        if continuation is not None:
+            result["observations"]["preserved_upload_receipt_sha256"] = prior["receipt_sha256"]
+            result["observations"]["pair_gate_receipt_sha256"] = digest(pair_gate)
         result["assertions"] = [
             "defender-dual-source-clean",
             "defender-dual-source-eicar",
@@ -1308,8 +1607,8 @@ class Probe:
         return result
 
     async def delete(self) -> dict[str, Any]:
-        uploads, scanned = await self.required("upload"), await self.required("scan")
-        source = scanned.get("clean_upload", uploads["clean"])
+        scanned = await self.required("scan")
+        source = scanned.get("clean_upload") or (await self.required("upload"))["clean"]
         sid = uuid.UUID(source["session_id"])
         target = scanned["target"]
         exact = {k: target[k] for k in ("physical_key", "provider_version_id")}
@@ -1441,14 +1740,15 @@ class Probe:
         }
 
     async def verify_recovered_policy(self, target: dict[str, Any]) -> dict[str, Any]:
-        uploads, scanned = await self.required("upload"), await self.required("scan")
-        source = scanned.get("clean_upload", uploads["clean"])
+        scanned = await self.required("scan")
+        source = scanned.get("clean_upload") or (await self.required("upload"))["clean"]
         original = scanned["observations"]["clean"]
         async with self.db.sessions() as session:
             result = await session.get(m.MalwareScanResult, uuid.UUID(original["scan_result_id"]))
             promotion = await session.get(m.ObjectPromotion, uuid.UUID(original["promotion_id"]))
             check(
-                result is not None and promotion is not None, "recovered-original-evidence-missing"
+                result is not None and promotion is not None,
+                "recovered-original-evidence-missing",
             )
             check(
                 str(result.object_version_id) == source["object_version_id"]
@@ -1554,6 +1854,16 @@ class Probe:
         check(result is not None, f"required-{phase}-receipt-missing")
         return result
 
+    async def export_accepted_receipts(self, phases: tuple[str, ...]) -> list[dict[str, Any]]:
+        if getattr(self, "continuation", None) is None:
+            return [public_receipt(phase, await self.required(phase)) for phase in phases]
+        receipts = []
+        for phase in phases:
+            accepted = await self.read_receipt(phase)
+            if accepted is not None:
+                receipts.append(public_receipt(phase, accepted))
+        return receipts
+
     async def execute(self, phase: str) -> dict[str, Any]:
         old = await self.read_receipt(phase)
         if old is not None:
@@ -1578,6 +1888,17 @@ async def expect_denied(operation: Any) -> None:
     raise ProbeFailure("unauthorized-operation-accepted")
 
 
+def selected_phases(phase: str, continuation: bool) -> tuple[str, ...]:
+    if continuation:
+        check(
+            phase in ("setup", "continue", "scan", "delete", "recovery", "receipts"),
+            "continuation-phase-selector-invalid",
+        )
+        return PHASES[1:] if phase in {"continue", "receipts"} else (phase,)
+    check(phase in (*PHASES, "setup", "all", "receipts"), "phase-selector-invalid")
+    return PHASES if phase in {"all", "receipts"} else (phase,)
+
+
 async def run() -> None:
     settings = Settings()
     check(
@@ -1593,9 +1914,9 @@ async def run() -> None:
     )
     database = Database.from_settings(settings, expected_role=DatabaseRole.API)
     phase = os.environ["OPENCANVAS_OBJECT_PROBE_PHASE"]
-    check(phase in (*PHASES, "setup", "all", "receipts"), "phase-selector-invalid")
     try:
         probe = Probe(settings, database)
+        phases = selected_phases(phase, probe.continuation is not None)
         # Session-level lock held on a dedicated connection, outside transactions;
         # other phases can still commit journal/provider reconciliation independently.
         async with database.engine.connect() as lock:
@@ -1611,12 +1932,9 @@ async def run() -> None:
                     await probe.record("setup", "accepted", result)
                     receipts = [public_receipt("setup", result)]
                 elif phase == "receipts":
-                    receipts = [public_receipt(p, await probe.required(p)) for p in PHASES]
+                    receipts = await probe.export_accepted_receipts(phases)
                 else:
-                    receipts = [
-                        public_receipt(p, await probe.execute(p))
-                        for p in (PHASES if phase == "all" else (phase,))
-                    ]
+                    receipts = [public_receipt(p, await probe.execute(p)) for p in phases]
                 print(
                     "M78_OBJECT_PROBE="
                     + json.dumps(
@@ -1625,6 +1943,18 @@ async def run() -> None:
                             "execution_id": probe.execution,
                             "source_sha256": probe.source,
                             "receipts": receipts,
+                            **(
+                                {
+                                    "preserved_upload_export": probe.continuation[
+                                        "prior_upload_export"
+                                    ],
+                                    "not_accepted_phases": [
+                                        p for p in phases if p not in {r["phase"] for r in receipts}
+                                    ],
+                                }
+                                if probe.continuation is not None
+                                else {}
+                            ),
                         },
                         sort_keys=True,
                     )

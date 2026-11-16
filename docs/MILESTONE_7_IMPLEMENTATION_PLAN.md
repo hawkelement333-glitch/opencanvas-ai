@@ -1,13 +1,14 @@
 # Milestone 7 Production Hardening Implementation Plan
 
-Current status reconciled 2026-11-15: checkpoints 7.1–7.7 are complete;
+Current status reconciled 2026-11-16 UTC: checkpoints 7.1–7.7 are complete;
 the [completed PostgreSQL campaign](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15) and verified cleanup are complete. Milestone 7.8 remains incomplete
 for the [existing remaining items](#78-completion-checklist-reconciliation--2026-11-15).
 Earlier dated entry authority is historical; the user now authorizes this
 documentation checkpoint and a normal push of the completed source corrections.
-The later authorized [managed object/scanner campaign](MILESTONE_7_8_MANAGED_OBJECT_STORAGE_EXECUTION_PACKAGE.md)
-accepted six upload assertions; M78-D-001 remains open because scanner log
-delivery exceeded the unchanged 300-second acceptance window.
+The [completed managed object/scanner continuation](MILESTONE_7_8_MANAGED_OBJECT_STORAGE_CONTINUATION_PACKAGE.md#completed-continuation) closes M78-D-001:
+24/24 assertions accepted, all 19 cleanup counters zero, controller preserved
+and ledger finalized. Its approved 900-second/20-second amendment applied only
+to new requests in that proof; prior 300-second failures remain historical failures.
 
 Date: 2026-07-27
 
@@ -1052,7 +1053,7 @@ contains acceptance, execution, source/image and receipt-hash evidence.
 | M78-TI-E01 | Complete / accepted | Application, pooled and post-failover tenant isolation |
 | M78-PG-E04 | Complete / accepted | Operational configuration and measurements; p95 latency 592.26 ms |
 | PostgreSQL campaign cleanup | Complete / verified | All 14 residue counters zero; reusable controller preserved; ledger finalized |
-| M78-D-001 managed object/scanner campaign | Open; 6 of 24 assertions accepted | Upload authorization, checksum/version integrity, quarantine read denial and API clean-write denial accepted; five scanner, eight deletion and five recovery assertions unproved |
+| M78-D-001 managed object/scanner campaign | Complete / accepted; 24 of 24 | Six preserved upload, five scanner/promotion, eight deletion/rollback and five recovery assertions; [accepted continuation](MILESTONE_7_8_MANAGED_OBJECT_STORAGE_CONTINUATION_PACKAGE.md#completed-continuation) and all 19 cleanup counters zero |
 
 The prior local audit shards remain valid historical evidence, including the
 local object-deletion correction and Indexer/regression coverage recorded in
@@ -1062,7 +1063,6 @@ existing requirements are:
 
 | Existing checklist location | Remaining evidence or work |
 | --- | --- |
-| [Exact audit](#exact-audit), object storage; [Required final scenarios](#required-final-scenarios), quarantine/duplicates/failed transactions; register M78-D-001 | Six upload assertions are accepted in the [managed execution package](MILESTONE_7_8_MANAGED_OBJECT_STORAGE_EXECUTION_PACKAGE.md). Still missing: five scanner/promotion assertions, eight exact-version deletion/failed-transaction assertions and five retention/recovery assertions. Actual dual-source scanner logs arrived after the unchanged 300-second window; M78-OS-001 remains locally corrected, with managed deletion execution unproved. |
 | [Exact audit](#exact-audit), shared limits; [Required final scenarios](#required-final-scenarios), atomic limits; register M78-D-002 | End-to-end approved isolated Managed Redis evidence proving atomic limits across replicas and safe dependency-failure behavior. Local adapter tests do not supply this provider proof. |
 | [Exact audit](#exact-audit), observability; [Required final scenarios](#required-final-scenarios), private-content exclusion; register M78-D-003/D-007 | Live telemetry destination, category-log delivery, dashboards, alerts, retention, access/revocation, privacy and runbook evidence. The older missing Stage 3 category-log observation has no recorded closure here. |
 | [Exact audit](#exact-audit), durable workers; register M78-D-004 | Recorded validation of production wake-up, operational telemetry and external multi-service delivery against the existing durable-work contract. Local shards and the PostgreSQL failover proof do not establish that full provider path. |
@@ -1098,6 +1098,13 @@ approved ceilings and forecasts are not settled charges. The user's explicit
 local-only/no-upstream restriction for this completed checkpoint. All other
 milestone criteria, architecture, history and five protected stashes remain
 unchanged. Milestone 8 and later work remain unstarted.
+
+The later [completed continuation](MILESTONE_7_8_MANAGED_OBJECT_STORAGE_CONTINUATION_PACKAGE.md#completed-continuation)
+preserved those failed attempts and accepted the remaining 18 assertions under
+the separately approved 900-second/20-second policy for new requests only.
+The combined M78-D-001 result is 24/24 accepted, with all 19 continuation cleanup
+counters zero, controller preserved and ledger finalized. The historical
+300-second result above is not the current requirement disposition.
 
 ### Purpose
 
