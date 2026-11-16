@@ -12,15 +12,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from opencanvas_api.core.config import Settings
 from opencanvas_api.db.models import (
+    AIResponseSource,
     Canvas,
     CanvasDocumentNode,
     CanvasNode,
+    Citation,
     Document,
     DocumentChunk,
     DocumentEmbedding,
     DocumentFile,
     DocumentProcessingJob,
     DocumentVersion,
+    DurableJobRequest,
     IndexRevision,
     MalwareScanResult,
     ObjectPromotion,
@@ -268,9 +271,12 @@ class DocumentProcessor:
         manage_job: bool,
     ) -> Document:
         document = await session.scalar(
-            select(Document).where(Document.id == document_id).with_for_update()
+            select(Document)
+            .where(Document.id == document_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
-        if document is None:
+        if document is None or document.deleted_at is not None or document.status == "deleted":
             raise DocumentProcessingError(
                 "The document does not exist.", code="document_not_found", status_code=404
             )
@@ -575,8 +581,13 @@ async def delete_document(
     *,
     document_id: uuid.UUID,
 ) -> str | None:
-    document = await session.get(Document, document_id)
-    if document is None:
+    document = await session.scalar(
+        select(Document)
+        .where(Document.id == document_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if document is None or document.deleted_at is not None or document.status == "deleted":
         raise DocumentProcessingError(
             "The document does not exist.", code="document_not_found", status_code=404
         )
@@ -603,6 +614,29 @@ async def delete_document(
     )
     if node_ids:
         await session.execute(delete(CanvasNode).where(CanvasNode.id.in_(node_ids)))
-    await session.delete(document)
+    retained_request = await session.scalar(
+        select(DurableJobRequest.request_id)
+        .where(DurableJobRequest.document_id == document_id)
+        .limit(1)
+    )
+    if retained_request is None:
+        await session.delete(document)
+    else:
+        # Durable job intent retains the document and version scope by RESTRICT
+        # foreign keys. Preserve that evidence while removing live projections
+        # and fencing every subsequent read, claim and processing retry.
+        deleted_at = datetime.now(UTC)
+        document.deleted_at = deleted_at
+        document.status = "deleted"
+        document.processing_stage = "deleted"
+        await session.execute(
+            update(DocumentVersion)
+            .where(DocumentVersion.document_id == document_id)
+            .values(deleted_at=deleted_at)
+        )
+        await session.execute(delete(Citation).where(Citation.document_id == document_id))
+        await session.execute(
+            delete(AIResponseSource).where(AIResponseSource.document_id == document_id)
+        )
     await session.flush()
     return storage_key

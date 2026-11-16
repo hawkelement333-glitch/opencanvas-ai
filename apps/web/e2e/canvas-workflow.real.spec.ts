@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./real-api-fixture";
 
 test.describe("real FastAPI + PostgreSQL workflow", () => {
   test.skip(!process.env.E2E_REAL_API, "Set E2E_REAL_API=1 to run against the local API stack.");
@@ -13,7 +13,10 @@ test.describe("real FastAPI + PostgreSQL workflow", () => {
     await page.getByTestId("new-canvas-name").fill(canvasName);
     await page.getByTestId("create-canvas-submit").click();
     await expect(
-      page.getByLabel("Canvas toolbar").getByText(canvasName, { exact: true }),
+      page.getByRole("navigation", { name: "Canvases" }).getByRole("button", {
+        name: `Solar System · ${canvasName}`,
+        exact: true,
+      }),
     ).toBeVisible();
 
     await page.getByTestId("add-note").click();
@@ -51,12 +54,18 @@ test.describe("real FastAPI + PostgreSQL workflow", () => {
     );
     await expect(page.locator(".react-flow__edge")).toHaveCount(1);
 
+    await test.info().attach("graph-persistence-confirmed", {
+      body: JSON.stringify({ notesRestored: 2, edgesRestored: 1 }),
+      contentType: "application/json",
+    });
+
     cards = page.locator('[data-testid^="canvas-node-"]');
     await cards.nth(0).locator(".canvas-node__header").click();
     await cards
       .nth(1)
       .locator(".canvas-node__header")
       .click({ modifiers: ["Shift"] });
+    await expect(page.getByTestId("assistant-input")).toBeVisible();
     await page
       .getByTestId("assistant-input")
       .fill("Synthesize a product opportunity from these two notes.");

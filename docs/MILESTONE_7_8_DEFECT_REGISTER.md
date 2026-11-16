@@ -914,10 +914,29 @@ artifact mappings. An open debt does not authorize a whole-area rerun.
 | M78-D-002  | `docs/KNOWN_LIMITATIONS.md`                       | The shared-rate-limit adapter lacks recorded end-to-end revalidation against approved isolated Azure Redis.  | Validation, reliability, and operational debt       | Complete / accepted. 17 accepted, 0 failed, 0 unproved; [execution/receipt/source evidence](MILESTONE_7_8_MANAGED_REDIS_REGIONAL_PACKAGE.md#managed-campaign-reconciliation). Cleanup verified (18 zero counters); controller retained, ledger finalized. The original missing-proof description is historical. |
 | M78-D-003  | `docs/KNOWN_LIMITATIONS.md`; `docs/DEPLOYMENT.md` | Destination-bound application telemetry/privacy, dashboards, alert delivery/recovery, retention, access and revocation remain unproved. | Validation, operational, privacy, and security debt | Open for these observations; local 7.5 passes and later D001 native scanner-log ingestion are credited. Reconcile retained artifacts before any narrowly scoped managed proof. |
 | M78-D-004  | `docs/KNOWN_LIMITATIONS.md`                       | Production worker wake-up/polling, operational telemetry and external delivery/acknowledgment receipts remain unlocated. | Validation, reliability, and operational debt | Open for provider-path evidence mapping; preserve 7.4 local durability, PG failover/replay and D001 deletion/rollback. No full durable-work rerun or new broker is implied. |
-| M78-D-005  | `docs/KNOWN_LIMITATIONS.md`                       | Current-release joint DB/object/index/queue/outbox recovery and rollback compatibility remains unmapped. | Recovery and validation debt | Open for native-artifact/current-change reconciliation. 7.6 managed PITR/full restore/portable recovery/failback passed historically; current PG/object proof is retained. Only an uncovered affected path warrants new proof. Production deployment remains excluded. |
-| M78-D-006  | `docs/KNOWN_LIMITATIONS.md`                       | Application-wide workload ceilings/failure-under-load and remaining provenance/security-control evidence need mapping/publication. | Capacity, security-evidence and documentation debt | Open in that scope. Completed 7.7 health soak, measured PG limits and object/Redis failure behavior remain credited. Current retained image build/critical-high scan subcriterion is satisfied; no unchanged rebuild/rescan. |
+| M78-D-005  | `docs/KNOWN_LIMITATIONS.md`                       | Current-release joint DB/object/index/queue/outbox recovery and rollback compatibility remains unmapped. | Recovery and validation debt | Four affected restore assertions are now mapped in the [historical retrieval record](MILESTONE_7_8_HISTORICAL_EVIDENCE_RECOVERY.md); original 7.6 report/receipts remain unlocated after bounded searches. 7.6 managed PITR/full restore/portable recovery/failback passed historically; current PG/object proof is retained. Only an uncovered affected path warrants new proof. Production deployment remains excluded. |
+| M78-D-006  | `docs/KNOWN_LIMITATIONS.md`                       | Application-wide workload ceilings/failure-under-load and remaining provenance/security-control evidence need mapping/publication. | Capacity, security-evidence and documentation debt | Open in that scope. Completed 7.7 health soak, measured PG limits and object/Redis failure behavior remain credited. Retained image build/scan stays accepted; unsigned provenance and retrospective SBOM are verified, and all 74 dependency alerts were mapped and corrected. Signed provenance and a future artifact for the later API corrections remain; see the [local report](MILESTONE_7_8_LOCAL_GAP_COMPLETION.md). |
 | M78-D-007  | `docs/MILESTONE_7_ARCHITECTURE.md`                | Stage 3 infrastructure category-log rows had not arrived before cleanup. | Observability validation debt | Still open for those usable category rows/queries and retention. Later D001 malware-scanner rows close scanner ingestion, not the different infrastructure categories. Share observations with D003. |
 | M78-D-008  | `docs/MILESTONE_7_ARCHITECTURE.md`                | Exact Stage 3 posted cost was unavailable because of throttling and delayed usage posting.                   | Operational and cost-evidence debt                  | Final results must record the proved cost boundary and any exact-cost limitation; remediation is not automatically required. |
 
 This routing authorizes no Azure operation, migration, image build,
 publication, scanner execution, secret access, or Git remote operation.
+
+## 2026-11-16 focused local corrections
+
+The [authorized local-gap report](MILESTONE_7_8_LOCAL_GAP_COMPLETION.md#demonstrated-api-corrections-and-affected-validation)
+records reproduced local failures and their corrections: empty document-card
+context, wrong provider instruction, missing relevance selection, version filtering
+after retrieval limits, document text leaking into note context, and legacy local
+deletion conflicting with immutable durable intent. These are corrected with 27
+related grounded/retrieval/API passes, four deletion passes, strict typing and a
+successful real API/PostgreSQL browser journey through deletion. Failed attempts
+remain private history. Local processes, databases and temporary storage were
+cleaned up and verified.
+
+The two older browser scenarios retain failed/incomplete editable-AI expectations;
+the current controlled-draft pass does not amend that product contract. The five
+changed API build inputs require a future source-bound release artifact; the
+retained image and its historical scan remain accepted for their exact bytes.
+PostgreSQL, D001 and D002 remain closed. This checkpoint does not close 7.8 or
+assert deployment readiness; billing remains unsettled.

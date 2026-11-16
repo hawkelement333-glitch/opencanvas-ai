@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import os
-import subprocess
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -11,7 +10,6 @@ from types import ModuleType
 
 import asyncpg
 import pytest
-from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
@@ -20,8 +18,9 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from alembic import command
 from opencanvas_api.db.models import Base
-from tests.postgres_support import disposable_postgres_database
+from tests.postgres_support import disposable_postgres_database, restart_disposable_postgres
 
 pytestmark = pytest.mark.postgres
 
@@ -88,6 +87,7 @@ def _load_migration(filename: str) -> ModuleType:
 
 MIGRATION_0023 = _load_migration("20260725_0023_resource_sharing_ownership_revocation.py")
 MIGRATION_0024 = _load_migration("20260725_0024_comments_collaboration_activity.py")
+MIGRATION_0028 = _load_migration("20260726_0028_durable_jobs_shared_limits.py")
 
 
 @pytest.fixture
@@ -1747,41 +1747,7 @@ def test_postgresql_trigger_identity_and_mutations_survive_same_database_restart
         )
     )
 
-    subprocess.run(
-        [
-            "wsl.exe",
-            "-d",
-            "Ubuntu-24.04",
-            "-u",
-            "root",
-            "--",
-            "systemctl",
-            "restart",
-            "postgresql",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    subprocess.run(
-        [
-            "wsl.exe",
-            "-d",
-            "Ubuntu-24.04",
-            "-u",
-            "root",
-            "--",
-            "systemctl",
-            "is-active",
-            "--quiet",
-            "postgresql",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    restart_disposable_postgres(postgres_migration_database_url)
 
     catalog_after = asyncio.run(_assert_protected_trigger_catalog(postgres_migration_database_url))
     assert catalog_after == catalog_before
@@ -1805,14 +1771,14 @@ async def _assert_clean_head(database_url: str) -> None:
     connection = await asyncpg.connect(_asyncpg_url(database_url))
     try:
         assert await connection.fetchval("SELECT version_num FROM alembic_version") == (
-            "20260726_0026"
+            "20260726_0029"
         )
         assert int(await connection.fetchval("SHOW server_version_num")) // 10_000 == 17
         assert (
             await connection.fetchval(
                 "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
             )
-            == "0.8.5"
+            == os.getenv("OPENCANVAS_POSTGRES_TEST_VECTOR_VERSION", "0.8.5")
         )
         tables = {
             row["tablename"]
@@ -1883,7 +1849,7 @@ async def _assert_clean_head(database_url: str) -> None:
         await connection.close()
 
 
-def test_postgresql_clean_chain_reaches_0025_and_cycles_final_revision(
+def test_postgresql_clean_chain_reaches_0029_and_cycles_final_revision(
     postgres_migration_database_url: str,
 ) -> None:
     config = _config(postgres_migration_database_url)
@@ -1896,7 +1862,16 @@ def test_postgresql_clean_chain_reaches_0025_and_cycles_final_revision(
         _assert_registry_constraints(
             postgres_migration_database_url,
             MIGRATION_0024,
-            MIGRATION_0024._REGISTRIES_AFTER,
+            {
+                **MIGRATION_0024._REGISTRIES_AFTER,
+                "ck_domain_events_type": (
+                    MIGRATION_0028._DOMAIN_EVENT_TYPES_0027 + MIGRATION_0028._JOB_EVENT_TYPES
+                ),
+                "ck_domain_events_subject_kind": (
+                    MIGRATION_0028._DOMAIN_EVENT_SUBJECT_KINDS_0027
+                    + MIGRATION_0028._JOB_SUBJECT_KINDS
+                ),
+            },
         )
     )
 

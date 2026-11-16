@@ -1041,6 +1041,8 @@ async def search_selected_documents(
             select(Document).where(
                 Document.canvas_id == canvas_id,
                 Document.id.in_(payload.document_ids),
+                Document.deleted_at.is_(None),
+                Document.status != "deleted",
             )
         )
     ).all()

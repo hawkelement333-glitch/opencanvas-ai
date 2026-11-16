@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from opencanvas_api.db.models import (
     Canvas,
+    CanvasDocumentNode,
     CanvasNode,
     ControlledAgentAuditEvent,
     ControlledAgentExecution,
@@ -232,6 +233,42 @@ class ResolvedContextResource(ContractModel):
     document_id: uuid.UUID | None = None
     document_version: int | None = Field(default=None, ge=1)
     untrusted_content: Literal[True] = True
+
+
+async def resolve_selected_node_resource(
+    session: AsyncSession, node: CanvasNode
+) -> ResolvedContextResource:
+    """Resolve an already scope-authorized node without trusting document-card text."""
+    scope = ResourceScope(kind=ResourceKind.NODE, resource_id=node.id, version=node.revision)
+    if node.type != "document":
+        return ResolvedContextResource(
+            scope=scope, canvas_id=node.canvas_id, title=node.title, content=node.text
+        )
+    version = await session.scalar(
+        select(DocumentVersion)
+        .join(Document, Document.id == DocumentVersion.document_id)
+        .join(CanvasDocumentNode, CanvasDocumentNode.document_id == Document.id)
+        .where(
+            CanvasDocumentNode.node_id == node.id,
+            CanvasDocumentNode.canvas_id == node.canvas_id,
+            Document.canvas_id == node.canvas_id,
+            Document.status == "ready",
+            Document.deleted_at.is_(None),
+            DocumentVersion.version == Document.current_version,
+            DocumentVersion.status == "ready",
+            DocumentVersion.deleted_at.is_(None),
+        )
+    )
+    if version is None or not version.extracted_text:
+        raise ImmutableContextDenied("context_resource_missing")
+    return ResolvedContextResource(
+        scope=scope,
+        canvas_id=node.canvas_id,
+        title=node.title,
+        content=version.extracted_text,
+        document_id=version.document_id,
+        document_version=version.version,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -596,12 +633,7 @@ class ImmutableSelectedContextResolver:
             )
             if row is None:
                 raise ImmutableContextDenied("context_resource_missing")
-            resource = ResolvedContextResource(
-                scope=scope,
-                canvas_id=row.canvas_id,
-                title=row.title,
-                content=row.text,
-            )
+            resource = await resolve_selected_node_resource(self.session, row)
         elif scope.kind is ResourceKind.DOCUMENT_VERSION:
             row = await self.session.scalar(
                 select(DocumentVersion)

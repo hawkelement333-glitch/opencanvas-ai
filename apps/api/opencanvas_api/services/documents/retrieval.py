@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import math
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -58,8 +59,10 @@ async def search_documents(
     top_k: int,
     threshold: float,
     settings: Settings | None = None,
+    document_versions: Mapping[uuid.UUID, int] | None = None,
 ) -> list[RetrievedChunk]:
     selected_ids = tuple(dict.fromkeys(document_ids))
+    selected_versions = None if document_versions is None else dict(document_versions)
     if not selected_ids or not query.strip():
         return []
     query_vector = (await provider.embed([query]))[0]
@@ -72,6 +75,7 @@ async def search_documents(
             provider=provider,
             candidate_limit=candidate_limit,
             settings=settings,
+            document_versions=selected_versions,
         )
     else:
         candidates = await _search_in_memory(
@@ -81,6 +85,7 @@ async def search_documents(
             provider=provider,
             candidate_limit=candidate_limit,
             settings=settings,
+            document_versions=selected_versions,
         )
     ranked: list[RetrievedChunk] = []
     for rank, candidate in enumerate(candidates, start=1):
@@ -109,6 +114,7 @@ async def _search_postgresql(
     provider: EmbeddingProvider,
     candidate_limit: int,
     settings: Settings | None,
+    document_versions: Mapping[uuid.UUID, int] | None,
 ) -> list[RetrievedChunk]:
     embedding_column = cast(Any, DocumentEmbedding.embedding)
     distance = embedding_column.cosine_distance(query_vector)
@@ -118,7 +124,7 @@ async def _search_postgresql(
         .join(Document, Document.id == DocumentChunk.document_id)
         .outerjoin(RetrievalHead, RetrievalHead.document_id == Document.id)
         .where(
-            DocumentChunk.document_id.in_(document_ids),
+            _selected_document_chunks(document_ids, document_versions),
             _published_or_legacy_without_request(settings),
             Document.status == "ready",
             DocumentEmbedding.model == provider.model,
@@ -141,6 +147,7 @@ async def _search_in_memory(
     provider: EmbeddingProvider,
     candidate_limit: int,
     settings: Settings | None,
+    document_versions: Mapping[uuid.UUID, int] | None,
 ) -> list[RetrievedChunk]:
     statement = (
         select(DocumentChunk, Document.file_name, Document.file_type, DocumentEmbedding.embedding)
@@ -148,7 +155,7 @@ async def _search_in_memory(
         .join(Document, Document.id == DocumentChunk.document_id)
         .outerjoin(RetrievalHead, RetrievalHead.document_id == Document.id)
         .where(
-            DocumentChunk.document_id.in_(document_ids),
+            _selected_document_chunks(document_ids, document_versions),
             _published_or_legacy_without_request(settings),
             Document.status == "ready",
             DocumentEmbedding.model == provider.model,
@@ -166,6 +173,20 @@ async def _search_in_memory(
     ]
     scored.sort(key=lambda item: (-item.score, item.chunk_index, item.chunk_id.hex))
     return scored[:candidate_limit]
+
+
+def _selected_document_chunks(
+    document_ids: tuple[uuid.UUID, ...], document_versions: Mapping[uuid.UUID, int] | None
+) -> ColumnElement[bool]:
+    if document_versions is None:
+        return DocumentChunk.document_id.in_(document_ids)
+    return tuple_(DocumentChunk.document_id, DocumentChunk.document_version).in_(
+        [
+            (document_id, document_versions[document_id])
+            for document_id in document_ids
+            if document_id in document_versions
+        ]
+    )
 
 
 def _retrieved(

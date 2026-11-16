@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./real-api-fixture";
 
 const FACT_PDF_BASE64 =
   "JVBERi0xLjMKJeLjz9MKMSAwIG9iago8PAovUHJvZHVjZXIgKHB5cGRmKQo+PgplbmRvYmoKMiAwIG9iago8PAovVHlwZSAvUGFnZXMKL0NvdW50IDEKL0tpZHMgWyA1IDAgUiBdCj4+CmVuZG9iagozIDAgb2JqCjw8Ci9UeXBlIC9DYXRhbG9nCi9QYWdlcyAyIDAgUgo+PgplbmRvYmoKNCAwIG9iago8PAovVHlwZSAvRm9udAovU3VidHlwZSAvVHlwZTEKL0Jhc2VGb250IC9IZWx2ZXRpY2EKPj4KZW5kb2JqCjUgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1Jlc291cmNlcyA8PAovRm9udCA8PAovRjEgNCAwIFIKPj4KPj4KL01lZGlhQm94IFsgMC4wIDAuMCA2MTIgNzkyIF0KL1BhcmVudCAyIDAgUgovQ29udGVudHMgNiAwIFIKPj4KZW5kb2JqCjYgMCBvYmoKPDwKL0xlbmd0aCAxMTMKPj4Kc3RyZWFtCkJUIC9GMSAxMiBUZiA3MiA3MjAgVGQgKFRoZSBvYnNlcnZhdG9yeSBjYWxpYnJhdGlvbiBjb2RlIGlzIE5PVkEtNzMxLiBUaGUgdmVyaWZpZWQgYXBlcnR1cmUgaXMgNi41IG1ldGVycy4pIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDcKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE1IDAwMDAwIG4gCjAwMDAwMDAwNTQgMDAwMDAgbiAKMDAwMDAwMDExMyAwMDAwMCBuIAowMDAwMDAwMTYyIDAwMDAwIG4gCjAwMDAwMDAyMzIgMDAwMDAgbiAKMDAwMDAwMDM2NCAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9TaXplIDcKL1Jvb3QgMyAwIFIKL0luZm8gMSAwIFIKPj4Kc3RhcnR4cmVmCjUyOAolJUVPRgo=";
@@ -15,7 +15,10 @@ test.describe("real document intelligence workflow", () => {
     await page.getByTestId("new-canvas-name").fill(canvasName);
     await page.getByTestId("create-canvas-submit").click();
     await expect(
-      page.getByLabel("Canvas toolbar").getByText(canvasName, { exact: true }),
+      page.getByRole("navigation", { name: "Canvases" }).getByRole("button", {
+        name: `Solar System · ${canvasName}`,
+        exact: true,
+      }),
     ).toBeVisible();
 
     await page.getByTestId("document-file-input").setInputFiles({
@@ -28,12 +31,15 @@ test.describe("real document intelligence workflow", () => {
       .locator("article.document-node")
       .filter({ hasText: "observatory-facts.pdf" });
     await expect(documentNode).toBeVisible();
-    await expect(documentNode.getByText("Ready", { exact: true })).toBeVisible({
+    await expect(
+      documentNode.getByRole("status").filter({ hasText: /^Ready source$/ }),
+    ).toBeVisible({
       timeout: 30_000,
     });
 
-    await documentNode.locator(".document-node__body").click({ force: true });
+    await documentNode.locator(".canvas-node__header").click();
     await expect(page.getByTestId("selected-node-list").getByRole("listitem")).toHaveCount(1);
+    await expect(page.getByTestId("assistant-input")).toBeVisible();
     await page
       .getByTestId("assistant-input")
       .fill("What is the observatory calibration code NOVA-731?");

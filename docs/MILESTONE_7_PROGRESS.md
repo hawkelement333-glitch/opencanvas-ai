@@ -6,8 +6,15 @@ Current status reconciled 2026-11-16: checkpoints 7.1–7.7 complete;
 [remaining-evidence reconciliation](MILESTONE_7_8_REMAINING_EVIDENCE_RECONCILIATION.md#requirement-by-requirement-disposition).
 Completed local checks, 7.6 managed recovery, the 7.7 health soak and the current
 retained image build/critical-high scan remain credited. No whole-area rerun
-follows from an open summary heading. This documentation checkpoint runs no
-tests or Azure operations and declares no website deployment readiness.
+follows from an open summary heading. The initial documentation checkpoint ran no tests or Azure operations. Later
+authorized local validation is recorded below; no Azure operations were added.
+The [local-gap work](MILESTONE_7_8_LOCAL_GAP_COMPLETION.md) recovered seven archived
+7.7 payloads and all 14 skipped test identities; the 14 local scenarios now pass.
+Dependency-alert applicability and retained-image inventory gaps are closed.
+The current real-stack document/controlled-draft journey passed, with 27 affected
+grounded/retrieval checks and four deletion checks. Local cleanup is verified.
+The original legacy editable-AI contract conflict remains separate; no
+website-readiness claim follows.
 Milestone 8 remains unstarted. Dated entries and tables below retain their
 historical status; current accepted campaign entries supersede their open
 database/object/Redis and controller-execution claims. Billing remains unsettled.

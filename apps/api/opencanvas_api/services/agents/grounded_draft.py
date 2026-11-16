@@ -26,7 +26,6 @@ from opencanvas_api.db.models import (
     Citation,
     ControlledAgentRequestIdentity,
     Document,
-    DocumentChunk,
     DocumentVersion,
     UsageRecord,
     Workspace,
@@ -61,6 +60,7 @@ from opencanvas_api.services.agents.execution import (
     ResolvedContextResource,
     ResolvedSelectedContext,
     ResultAcceptanceRequest,
+    resolve_selected_node_resource,
     resolved_resource_digest,
 )
 from opencanvas_api.services.agents.persistence import (
@@ -84,6 +84,11 @@ from opencanvas_api.services.ai import (
     validate_grounded_result,
 )
 from opencanvas_api.services.context import ContextBundle
+from opencanvas_api.services.documents import (
+    DocumentServiceError,
+    build_embedding_provider,
+    search_documents,
+)
 from opencanvas_api.services.trace import (
     CompleteTraceInput,
     FailTraceInput,
@@ -249,16 +254,12 @@ class ControlledGroundedDraftService:
             )
         ]
         for node in ordered_nodes:
-            resources.append(
-                ResolvedContextResource(
-                    scope=ResourceScope(
-                        kind=ResourceKind.NODE, resource_id=node.id, version=node.revision
-                    ),
-                    canvas_id=canvas.id,
-                    title=node.title,
-                    content=node.text,
-                )
-            )
+            try:
+                resources.append(await resolve_selected_node_resource(self.session, node))
+            except ImmutableContextDenied as exc:
+                raise ControlledDraftError(
+                    "immutable_context_unavailable", "The selected evidence is unavailable."
+                ) from exc
         document_node_ids = [node.id for node in ordered_nodes if node.type == "document"]
         references = (
             tuple(
@@ -279,7 +280,7 @@ class ControlledGroundedDraftService:
                 "document_reference_missing",
                 "A selected document is missing its stored-document reference.",
             )
-        remaining_chunks = self.settings.document_retrieval_top_k
+        selected_versions: dict[uuid.UUID, int] = {}
         for reference in references:
             document = await self.session.scalar(
                 select(Document).where(
@@ -320,36 +321,40 @@ class ControlledGroundedDraftService:
                     document_version=version.version,
                 )
             )
-            if remaining_chunks:
-                chunks = tuple(
-                    (
-                        await self.session.scalars(
-                            select(DocumentChunk)
-                            .where(
-                                DocumentChunk.document_id == document.id,
-                                DocumentChunk.document_version == version.version,
-                            )
-                            .order_by(DocumentChunk.chunk_index)
-                            .limit(remaining_chunks)
-                        )
-                    ).all()
+            selected_versions[document.id] = version.version
+        if selected_versions:
+            try:
+                candidates = await search_documents(
+                    self.session,
+                    document_ids=list(selected_versions),
+                    query=instruction,
+                    provider=build_embedding_provider(self.settings),
+                    top_k=self.settings.document_retrieval_top_k,
+                    threshold=self.settings.document_relevance_threshold,
+                    settings=self.settings,
+                    document_versions=selected_versions,
                 )
-                remaining_chunks -= len(chunks)
-                resources.extend(
-                    ResolvedContextResource(
-                        scope=ResourceScope(
-                            kind=ResourceKind.CHUNK,
-                            resource_id=chunk.id,
-                            version=chunk.document_version,
-                        ),
-                        canvas_id=canvas.id,
-                        title=chunk.heading or f"Chunk {chunk.chunk_index + 1}",
-                        content=chunk.content,
-                        document_id=document.id,
-                        document_version=chunk.document_version,
-                    )
-                    for chunk in chunks
+            except DocumentServiceError as exc:
+                raise ControlledDraftError(
+                    exc.code, exc.safe_message, status_code=exc.status_code
+                ) from exc
+            resources.extend(
+                ResolvedContextResource(
+                    scope=ResourceScope(
+                        kind=ResourceKind.CHUNK,
+                        resource_id=chunk.chunk_id,
+                        version=chunk.document_version,
+                    ),
+                    canvas_id=canvas.id,
+                    title=chunk.heading or f"Chunk {chunk.chunk_index + 1}",
+                    content=chunk.content,
+                    document_id=chunk.document_id,
+                    document_version=chunk.document_version,
                 )
+                for chunk in candidates
+                if chunk.included_in_context
+                and selected_versions.get(chunk.document_id) == chunk.document_version
+            )
         context = ContextSnapshot(
             snapshot_id=uuid.uuid4(),
             user_id=authenticated_user_id,
@@ -1099,11 +1104,13 @@ class ControlledGroundedDraftService:
         await self.session.commit()
 
     def _instruction_from_request(self, request: ControlledExecutionRequest) -> str:
-        return request.client_request_id or "Create a grounded draft from the selected evidence."
+        return request.instruction
 
     def _notes_context(self, resolved: ResolvedSelectedContext) -> ContextBundle:
         entries = [
-            resource for resource in resolved.resources if resource.scope.kind is ResourceKind.NODE
+            resource
+            for resource in resolved.resources
+            if resource.scope.kind is ResourceKind.NODE and resource.document_id is None
         ]
         remaining = self.settings.ai_context_character_limit
         snapshot: list[dict[str, str]] = []
