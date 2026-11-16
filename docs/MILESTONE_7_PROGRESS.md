@@ -1,11 +1,16 @@
 # Milestone 7 Production Hardening Progress
 
-Current status reconciled 2026-11-15: checkpoints 7.1–7.7 complete;
-**Azure PostgreSQL goal and verified campaign cleanup complete; 7.8 incomplete**
-for its [remaining existing requirements](MILESTONE_7_IMPLEMENTATION_PLAN.md#78-completion-checklist-reconciliation--2026-11-15).
+Current status reconciled 2026-11-16: checkpoints 7.1–7.7 complete;
+**PostgreSQL, M78-D-001 and M78-D-002 complete with verified cleanup;
+7.8 incomplete** for the specific assertions and artifact mappings in the
+[remaining-evidence reconciliation](MILESTONE_7_8_REMAINING_EVIDENCE_RECONCILIATION.md#requirement-by-requirement-disposition).
+Completed local checks, 7.6 managed recovery, the 7.7 health soak and the current
+retained image build/critical-high scan remain credited. No whole-area rerun
+follows from an open summary heading. This documentation checkpoint runs no
+tests or Azure operations and declares no website deployment readiness.
 Milestone 8 remains unstarted. Dated entries and tables below retain their
-historical status; the final completion entry supersedes their open database
-and controller-execution claims.
+historical status; current accepted campaign entries supersede their open
+database/object/Redis and controller-execution claims. Billing remains unsettled.
 
 Date: 2026-08-13
 

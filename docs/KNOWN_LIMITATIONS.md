@@ -74,21 +74,27 @@ This register prevents the competition demo and public materials from implying c
 - Production-shaped processing uses persisted database jobs and an independently scalable worker.
   The PostgreSQL queue is not a dedicated broker and has no browser lease
   control or full dead-letter administration UI.
-- Shared atomic rate limiting is implemented, but the application adapter has
-  not yet been revalidated end to end against the approved isolated Azure
-  Managed Redis topology.
+- Shared atomic rate limiting has accepted end-to-end isolated Azure Managed
+  Redis evidence: M78-D-002, 17 assertions and 18 zero cleanup counters. See the
+  [regional campaign](MILESTONE_7_8_MANAGED_REDIS_REGIONAL_PACKAGE.md#managed-campaign-reconciliation).
 - Provider-neutral operational observability, dashboards, provisional
   objectives, alerts, health controls, redaction, and bounded failure behavior
-  are implemented locally. No approved isolated live telemetry destination was
-  available during Milestone 7.5; live exporter authentication/TLS, Azure
-  Monitor or Log Analytics, dashboard rendering, alert routing/recovery,
-  retention, access revocation, and application-to-Azure behavior remain
-  unvalidated.
+  are implemented locally. Milestone 7.5 had no live destination; later D001
+  evidence directly proves native scanner-result ingestion into Log Analytics.
+  Application logs/metrics/spans, destination privacy, dashboard rendering,
+  alert delivery/recovery, retention, access revocation and the older missing
+  infrastructure category rows still need their specific evidence. See the
+  [remaining-evidence matrix](MILESTONE_7_8_REMAINING_EVIDENCE_RECONCILIATION.md#requirement-by-requirement-disposition).
 - Canonical domain events, provenance, transactional outbox delivery attempts,
   and activity projections are durable. Production queue wake-up, operational
   telemetry, and external multi-service delivery still require the Milestone 7
   contract validation.
-- No published load/performance benchmarks or capacity claims.
+- Accepted component measurements include PostgreSQL peak connections 31,
+  p95 592.26 ms and failover recovery 45.05 seconds; object and Redis dependency
+  failure behavior is accepted. The completed 7.7 health/stability soak is
+  preserved. These do not establish application-wide stress/spike/mixed-load
+  capacity or a safe pilot user count; supported workload ceilings and remaining
+  failure-under-load evidence still need mapping and publication.
 
 ## Canonical compatibility
 
@@ -103,8 +109,12 @@ This register prevents the competition demo and public materials from implying c
 
 - Account deletion and data-export request entry points exist, but export artifact generation,
   formal retention schedules, and legal-hold workflows are not implemented.
-- Backup/restore/rollback procedures are documented but have not been validated against a managed
-  production deployment.
+- Milestone 7.6 recorded successful isolated managed PITR/full restore, portable
+  recovery and failback. Current exact-version object recovery and PostgreSQL
+  failover are also accepted. Current-release joint database/object/index/queue/
+  outbox restore and rollback compatibility still needs evidence mapping for
+  later schema/role/runtime/worker changes. This is not a requirement to deploy
+  production or repeat all completed recovery exercises.
 - Milestone 6 completed a local collaboration-security audit. No production
   infrastructure penetration test, compliance certification, or
   vulnerability-free guarantee exists.

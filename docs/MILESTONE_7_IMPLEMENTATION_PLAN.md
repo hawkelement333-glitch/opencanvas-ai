@@ -1038,10 +1038,12 @@ change the scope or claims of Internal Checkpoint 7.
 
 ### 7.8 completion checklist reconciliation — 2026-11-15
 
-**7.8 is incomplete.** The completed PostgreSQL campaign closes the managed
-database/tenant-isolation surface and its cleanup, not every requirement in
-this section. This is a reconciliation of the existing checklist and retained
-results, not a new audit or a new requirement. The
+**7.8 is incomplete. Current reconciliation: 2026-11-16.** PostgreSQL,
+M78-D-001 and M78-D-002 are complete and closed, including verified cleanup.
+The [remaining-evidence matrix](MILESTONE_7_8_REMAINING_EVIDENCE_RECONCILIATION.md#requirement-by-requirement-disposition)
+distinguishes directly inspected receipts, historical accepted results and
+unlocated artifacts. An open heading does not require repeating completed work.
+The
 [campaign handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15)
 contains acceptance, execution, source/image and receipt-hash evidence.
 
@@ -1064,11 +1066,11 @@ existing requirements are:
 
 | Existing checklist location | Remaining evidence or work |
 | --- | --- |
-| [Exact audit](#exact-audit), observability; [Required final scenarios](#required-final-scenarios), private-content exclusion; register M78-D-003/D-007 | Live telemetry destination, category-log delivery, dashboards, alerts, retention, access/revocation, privacy and runbook evidence. The older missing Stage 3 category-log observation has no recorded closure here. |
-| [Exact audit](#exact-audit), durable workers; register M78-D-004 | Recorded validation of production wake-up, operational telemetry and external multi-service delivery against the existing durable-work contract. Local shards and the PostgreSQL failover proof do not establish that full provider path. |
-| [Required final scenarios](#required-final-scenarios), managed backup/PITR/object restore/rollback; register M78-D-005 | Current-release reconciliation of managed recovery evidence for consistent database/object/index/queue/outbox recovery, rollback/DR and RPO/RTO. Retained 7.6 isolated exercises and this database failover result do not close the broader managed recovery requirement. No production deployment is required by this reconciliation. |
-| [Exact audit](#exact-audit), capacity/security; [Required final scenarios](#required-final-scenarios), ceilings and recovery; register M78-D-006 | Current-release capacity/failure closure and supported ceilings across load/stress/soak/spike/dependency recovery, with infrastructure/supply-chain evidence. Preserve the completed 7.7 soak and final image scan; the bounded PostgreSQL measurements do not establish every system-wide claim. Assess retained evidence before deciding whether any additional execution is needed. |
-| [Final validation](#final-validation) and [Documentation, commit, and exit](#documentation-commit-and-exit) | Consolidated current-release coverage for all affected backend/frontend/browser, provider, migration, build, security and protected-Git requirements; exact disposition of recorded skips, including the continuation's PostgreSQL fixtures and two real-PostgreSQL browser scenarios. No full final validation/completion record covers the later source corrections and outstanding provider items. Create `docs/MILESTONE_7_COMPLETION.md` only after these existing exit requirements and all Milestone 8 entry criteria are supported. |
+| [Exact audit](#exact-audit), observability; [Required final scenarios](#required-final-scenarios), private-content exclusion; register M78-D-003/D-007 | Local redaction/exporter/alert checks remain credited. D001 directly proves native scanner Log Analytics delivery; it does not prove infrastructure category rows or the application logs/metrics/spans destination, dashboards/alert delivery and recovery, retention, access/revocation and destination privacy. Reconcile shared observations once; do not rerun unchanged local suites. |
+| [Exact audit](#exact-audit), durable workers; register M78-D-004 | Preserve 7.4 durability, PG failover/replay and D001 deletion/rollback/replay proof. Locate production worker polling/wake-up, operational telemetry and external delivery/acknowledgment receipts; only an uncovered provider-path assertion warrants additional execution. No new broker is required. |
+| [Required final scenarios](#required-final-scenarios), managed backup/PITR/object restore/rollback; register M78-D-005 | Preserve successful 7.6 managed PITR/full restore/portable recovery/failback and current PG/object proofs. Locate native 7.6 results and map current 0029/roles/runtime/worker/object changes to consistent DB/object/index/queue/outbox recovery and rollback. Conditional affected proof only if retained evidence cannot close that delta; production deployment is excluded. |
+| [Exact audit](#exact-audit), capacity/security; [Required final scenarios](#required-final-scenarios), ceilings and recovery; register M78-D-006 | Current retained image build and critical/high scan subcriterion is satisfied; unchanged canonical inputs require no rebuild/rescan. Preserve the 7.7 health soak and PG/object/Redis measurements. Missing mapping concerns application-wide workload ceilings/stress/spike/recovery and remaining signed-provenance/inventory/security controls, not every component. Retrieve artifacts and publish measured scopes before proposing execution. |
+| [Final validation](#final-validation) and [Documentation, commit, and exit](#documentation-commit-and-exit) | Reuse unchanged local Indexer/application/frontend passes and build. Map historical PostgreSQL skip identities to later acceptance and later backend corrections to affected checks. Two named real-stack browser scenarios remain without recorded passes. Consolidate results and protected-Git/migration evidence; create `docs/MILESTONE_7_COMPLETION.md` only after existing requirements are supported. No blanket suite rerun follows from the open heading. |
 
 The [existing debt register](MILESTONE_7_8_DEFECT_REGISTER.md#evidence-debts-routed-to-later-audit-surfaces)
 and [historical remaining-gate inventory](MILESTONE_7_8_PRE_EXPIRY_MAXIMUM_SAFE_PROGRESS_HANDOFF.md#remaining-gates)
