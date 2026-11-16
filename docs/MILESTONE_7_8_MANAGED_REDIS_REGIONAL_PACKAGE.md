@@ -1,5 +1,10 @@
 # M78-D-002 East US managed Redis package
 
+Current result — 2026-11-16 UTC: **M78-D-002 is complete: 17 accepted, 0 failed, 0 unproved out of 17 existing assertions.** All 18 cleanup counters are zero; the reusable controller is preserved and the campaign ledger finalized. PostgreSQL and M78-D-001 remain closed. Milestone 7.8 remains incomplete. Billing remains **unsettled**.
+See the [managed campaign reconciliation](#managed-campaign-reconciliation).
+
+## Historical preparation package
+
 **Prepared for separate approval; no regional provisioning or spending is
 authorized by this document.** M78-D-002 remains open: **0 accepted, 0 failed,
 17 unproved**. PostgreSQL and M78-D-001 remain closed. Billing remains unsettled.
@@ -174,3 +179,135 @@ authorizes normal commits/pushes of useful sanitized recovery checkpoints and
 completed areas with remote-SHA verification, but those commits do not imply
 acceptance or Azure authority. Preserve unrelated changes and all five stashes;
 no secrets or raw `.runtime` artifacts enter Git. Do not force-push or merge.
+
+<!-- M78-D-002 regional terminal documentation reconciliation -->
+## Managed campaign reconciliation
+
+Reconciled 2026-11-16 UTC after verified cleanup and ledger finalization.
+
+**M78-D-002 is complete: 17 accepted, 0 failed, 0 unproved out of 17 existing assertions.** All 18 cleanup counters are zero; the reusable controller is preserved and the campaign ledger finalized. PostgreSQL and M78-D-001 remain closed. Milestone 7.8 remains incomplete. Billing remains **unsettled**.
+
+Both earlier Redis attempts remain finalized history: [the first attempt](MILESTONE_7_8_MANAGED_REDIS_EXECUTION_PACKAGE.md#managed-campaign-reconciliation) and [the Canada Central continuation](MILESTONE_7_8_MANAGED_REDIS_CONTINUATION_PACKAGE.md#managed-campaign-reconciliation) each accepted no managed assertions and retained their own failed operations and verified cleanup. The preparation text above is retained historical scope, not authority for another run. Accepted results retain their actual contributing execution IDs. Failed and uncertain attempts remain history; cleanup does not turn them into accepted proof.
+
+| Existing assertion | Phase | Result | Actual contributing executions | Missing evidence or work |
+| --- | --- | --- | --- | --- |
+| `managed-entra-private-tls` | `admission` | accepted | `caj-m78r-5e40fefee0-leader-i5oi4er`, `caj-m78r-5e40fefee0-follower-39k1y2u` | Both source-bound replica receipts accepted. |
+| `foreign-prefix-acl-denied` | `admission` | accepted | `caj-m78r-5e40fefee0-leader-i5oi4er`, `caj-m78r-5e40fefee0-follower-39k1y2u` | Both source-bound replica receipts accepted. |
+| `replica-atomic-network` | `healthy` | accepted | `caj-m78r-5e40fefee0-leader-owoixnm`, `caj-m78r-5e40fefee0-follower-5t3ossk` | Both source-bound replica receipts accepted. |
+| `replica-atomic-user` | `healthy` | accepted | `caj-m78r-5e40fefee0-leader-owoixnm`, `caj-m78r-5e40fefee0-follower-5t3ossk` | Both source-bound replica receipts accepted. |
+| `replica-atomic-workspace` | `healthy` | accepted | `caj-m78r-5e40fefee0-leader-owoixnm`, `caj-m78r-5e40fefee0-follower-5t3ossk` | Both source-bound replica receipts accepted. |
+| `replica-atomic-resource` | `healthy` | accepted | `caj-m78r-5e40fefee0-leader-owoixnm`, `caj-m78r-5e40fefee0-follower-5t3ossk` | Both source-bound replica receipts accepted. |
+| `replica-atomic-operation` | `healthy` | accepted | `caj-m78r-5e40fefee0-leader-owoixnm`, `caj-m78r-5e40fefee0-follower-5t3ossk` | Both source-bound replica receipts accepted. |
+| `replica-atomic-provider` | `healthy` | accepted | `caj-m78r-5e40fefee0-leader-owoixnm`, `caj-m78r-5e40fefee0-follower-5t3ossk` | Both source-bound replica receipts accepted. |
+| `replica-atomic-global` | `healthy` | accepted | `caj-m78r-5e40fefee0-leader-owoixnm`, `caj-m78r-5e40fefee0-follower-5t3ossk` | Both source-bound replica receipts accepted. |
+| `denial-all-or-nothing` | `healthy` | accepted | `caj-m78r-5e40fefee0-leader-owoixnm`, `caj-m78r-5e40fefee0-follower-5t3ossk` | Both source-bound replica receipts accepted. |
+| `burst-refill-bounded-expiry` | `healthy` | accepted | `caj-m78r-5e40fefee0-leader-owoixnm`, `caj-m78r-5e40fefee0-follower-5t3ossk` | Both source-bound replica receipts accepted. |
+| `workspace-deployment-isolation` | `healthy` | accepted | `caj-m78r-5e40fefee0-leader-owoixnm`, `caj-m78r-5e40fefee0-follower-5t3ossk` | Both source-bound replica receipts accepted. |
+| `opaque-versioned-keys` | `healthy` | accepted | `caj-m78r-5e40fefee0-leader-owoixnm`, `caj-m78r-5e40fefee0-follower-5t3ossk` | Both source-bound replica receipts accepted. |
+| `http-429-retry-after` | `healthy` | accepted | `caj-m78r-5e40fefee0-leader-owoixnm`, `caj-m78r-5e40fefee0-follower-5t3ossk` | Both source-bound replica receipts accepted. |
+| `dependency-failure-http-503-no-effect` | `fault` | accepted | `caj-m78r-5e40fefee0-leader-043qwqf`, `caj-m78r-5e40fefee0-follower-88kfwof` | Both source-bound replica receipts accepted. |
+| `dependency-health-degraded-no-fallback` | `fault` | accepted | `caj-m78r-5e40fefee0-leader-043qwqf`, `caj-m78r-5e40fefee0-follower-88kfwof` | Both source-bound replica receipts accepted. |
+| `dependency-restored-health-and-decision` | `recovery` | accepted | `caj-m78r-5e40fefee0-leader-sv1pyn7`, `caj-m78r-5e40fefee0-follower-nevxrhm` | Both source-bound replica receipts accepted. |
+
+### Execution and failure history
+
+| Phase | Replica | Actual execution | Observed terminal status |
+| --- | --- | --- | --- |
+| `admission` | `follower` | `caj-m78r-5e40fefee0-follower-39k1y2u` | `Succeeded` |
+| `admission` | `leader` | `caj-m78r-5e40fefee0-leader-i5oi4er` | `Succeeded` |
+| `fault` | `follower` | `caj-m78r-5e40fefee0-follower-88kfwof` | `Succeeded` |
+| `fault` | `leader` | `caj-m78r-5e40fefee0-leader-043qwqf` | `Succeeded` |
+| `healthy` | `follower` | `caj-m78r-5e40fefee0-follower-4avj260` | `Failed` |
+| `healthy` | `follower` | `caj-m78r-5e40fefee0-follower-5t3ossk` | `Succeeded` |
+| `healthy` | `leader` | `caj-m78r-5e40fefee0-leader-miw7flx` | `Stopped` |
+| `healthy` | `leader` | `caj-m78r-5e40fefee0-leader-owoixnm` | `Succeeded` |
+| `receipts` | `follower` | `caj-m78r-5e40fefee0-follower-87441ry` | `Succeeded` |
+| `receipts` | `leader` | `caj-m78r-5e40fefee0-leader-gb4oqjz` | `Succeeded` |
+| `recovery` | `follower` | `caj-m78r-5e40fefee0-follower-nevxrhm` | `Succeeded` |
+| `recovery` | `leader` | `caj-m78r-5e40fefee0-leader-sv1pyn7` | `Succeeded` |
+
+Healthy dimension results retain their original immutable case contributors, which can precede the later aggregate receipt executions above:
+
+| Dimension | Replica | Original case execution |
+| --- | --- | --- |
+| `global` | `follower` | `caj-m78r-5e40fefee0-follower-5t3ossk` |
+| `global` | `leader` | `caj-m78r-5e40fefee0-leader-owoixnm` |
+| `network` | `follower` | `caj-m78r-5e40fefee0-follower-5t3ossk` |
+| `network` | `leader` | `caj-m78r-5e40fefee0-leader-owoixnm` |
+| `operation` | `follower` | `caj-m78r-5e40fefee0-follower-5t3ossk` |
+| `operation` | `leader` | `caj-m78r-5e40fefee0-leader-owoixnm` |
+| `provider` | `follower` | `caj-m78r-5e40fefee0-follower-5t3ossk` |
+| `provider` | `leader` | `caj-m78r-5e40fefee0-leader-owoixnm` |
+| `resource` | `follower` | `caj-m78r-5e40fefee0-follower-5t3ossk` |
+| `resource` | `leader` | `caj-m78r-5e40fefee0-leader-owoixnm` |
+| `user` | `follower` | `caj-m78r-5e40fefee0-follower-5t3ossk` |
+| `user` | `leader` | `caj-m78r-5e40fefee0-leader-owoixnm` |
+| `workspace` | `follower` | `caj-m78r-5e40fefee0-follower-5t3ossk` |
+| `workspace` | `leader` | `caj-m78r-5e40fefee0-leader-owoixnm` |
+
+Observed failed attempts remain failed historical observations:
+
+- `caj-m78r-5e40fefee0-follower-4avj260`, `healthy`/`follower`: `SharedRateLimitUnavailable`.
+
+Operator failures or uncertain operations remain recorded separately:
+
+| Operation receipt | Operation | Exit/status |
+| --- | --- | --- |
+| `fault-follower-logs-20261116T193844-8291c2` | `fault-follower-logs` | `1` |
+| `fault-leader-logs-20261116T193851-dfef26` | `fault-leader-logs` | `1` |
+| `healthy-follower-logs-20261116T193459-4fdfac` | `healthy-follower-logs` | `1` |
+| `healthy-leader-logs-20261116T192229-b929fc` | `healthy-leader-logs` | `1` |
+| `healthy-leader-logs-20261116T193507-a8fb5d` | `healthy-leader-logs` | `1` |
+| `recovery-follower-logs-20261116T194204-cd7e46` | `recovery-follower-logs` | `1` |
+| `recovery-leader-logs-20261116T194210-ef551b` | `recovery-leader-logs` | `1` |
+
+### Preserved local recovery and abandoned healthy attempt
+
+Foundation deployment succeeded. Local admission initially rejected the provider display name `East US` because it compared it literally with `eastus`. A separately hash-bound helper normalized case and spaces only for that exact region, retained the other admission gates, and completed admission from the saved deployment readback. Five focused checks accepted the two East US spellings and rejected other regions. The frozen helper was unchanged and the deployment was not repeated.
+
+Healthy follower `caj-m78r-5e40fefee0-follower-4avj260` failed with `SharedRateLimitUnavailable` before its first coordination intent. Leader `caj-m78r-5e40fefee0-leader-miw7flx` waited behind the absent start barrier and was stopped. The underlying exception cause was not retained; these receipts do not establish a Lua or concurrency defect.
+
+Read-only diagnostic `caj-m78r-5e40fefee0-follower-hqtdup2` found all seven original bucket keys absent, the follower intent and start barrier absent, and only the abandoned leader intent/ready records present. Read-only Lua TIME/HMGET checks passed. Recovery `caj-m78r-5e40fefee0-follower-0ros2gm` bound the original values and expired only those two abandoned coordination records; absence was verified. No budget call was repeated and no accepted assertion changed. These diagnostic/recovery observations are not additional acceptance results.
+
+The affected healthy phase resumed with unchanged source, image, assertions and timeouts; accepted admission remained closed. Actual accepted replacement contributors are listed in the assertion and case tables above. The first failed/stopped executions remain historical failures, independently of later accepted results.
+
+
+### Bound artifacts and cleanup
+
+| Binding | Value |
+| --- | --- |
+| Approved package SHA-256 | `23c68ba7c8685b9009d590829da5910f941692e9f444748686e79ca993cdf8f5` |
+| Source checkpoint | `121048813095714e865fd6e664f0ce8e1989b53b` |
+| Injected Redis probe SHA-256 | `f610ff80a42cb3545fc3ce7fa199c76ab217e7684ed5bb6b9819b8dc3baf691e` |
+| Retained image/index | `sha256:f498e5aa0f5e44dc7becc92868e1bb989372ef09a3f30d694e89d172eaa66b0a` |
+| Preserved approved cleanup runbook SHA-256 | `38cfeb6cd6e706d197e7a689e5080c36fdc6c3007ad14c0c0cbf35ca626cefd9` |
+| Cleanup execution | `4fe074eb-a768-4490-824c-1461bb46a178` |
+| Cleanup method / actual runbook status | `automation-runbook` / `Completed` |
+| `final-results.json` SHA-256 | `fffa9b4269cd19d7694f729697b4652e36e83191cc9c68b22254a18c02f06238` |
+| `terminal-receipt.json` SHA-256 | `ee626147e4f7a93eabf17b19e66e9ddcd815307cd1dd5fbb7ed0ca886fbd0b1f` |
+| `cleanup-verification.json` SHA-256 | `e3d36bad5516e5c40e0c6aca4ac986d8067afca22db924b0c1029fbbde490c79` |
+| `campaign-ledger.json` SHA-256 | `8b6ec07264d95281caba573911a88f3e9509b5ca795ff963000bb77f47294738` |
+| `assertion-inventory.json` SHA-256 | `bfdf57053aa18c1a5cb5bcbccca9f988c48eff7d163963b3f190c91f0f273f03` |
+| `controller-reuse-spec.json` SHA-256 | `eb4531089c25910eb1cebff990ed704175352622087bb3ae2f1ffce4213adbfe` |
+| `controller-wrapper-recovery.json` SHA-256 | `45598487dc688a826142a8227dc7139b8f620ba64ea192cec39b566f08f11a75` |
+| `foundation-admission-recovery.json` SHA-256 | `201ffcacd63c353512ebc573518c983343cef8dd6c531e7d20cc840eea5f39a4` |
+| `diagnostic-readonly-result.json` SHA-256 | `ebdbd9933b49afca92f85e7e1ecfd1f66d10c117c41a6bc8e0c41201ea26526f` |
+| `coordination-recovery-result.json` SHA-256 | `526c8de57b7ace2b7150e3810d3b6200a0054bf0b9fb161b3f6cfaa054e9bb53` |
+| `jobs/healthy-leader-2-resumption.json` SHA-256 | `75def1e5662193b505a9f7861e74c1865b05f1fc594e4125bf0cc6ecfc14cbcc` |
+| `jobs/healthy-follower-2-resumption.json` SHA-256 | `01a769e513dddcfe1f76bf5d2be0cdf1893496a9d393c6ac0f0d637b1303f8ec` |
+| `admission`/`leader` receipt; `caj-m78r-5e40fefee0-leader-i5oi4er` | `30a73f85c955ab2b9ab3733561022d82fa521d8cf38014d23a8c4ecfaf612c69` |
+| `admission`/`follower` receipt; `caj-m78r-5e40fefee0-follower-39k1y2u` | `2755159e263365439c0027fcc1a1bf8382192e19b71ed51c117fa008a54fef8e` |
+| `healthy`/`leader` receipt; `caj-m78r-5e40fefee0-leader-owoixnm` | `fee024d78a7a96dab2758e580dcfda8635df7b07c1abfb1db72d5e5d6f464282` |
+| `healthy`/`follower` receipt; `caj-m78r-5e40fefee0-follower-5t3ossk` | `e5fbbacf1a3b93825e1be8bbc29ae9515b862023fdc33cea5fdf9dd28e21cc3e` |
+| `fault`/`leader` receipt; `caj-m78r-5e40fefee0-leader-043qwqf` | `85ef50db545c99289e3873af4fd9f8d8bc70eb583fc8d559a38347da61d40174` |
+| `fault`/`follower` receipt; `caj-m78r-5e40fefee0-follower-88kfwof` | `0087d9fd16de12368675c1b8ed7fbde599b23b593ba0ab832264ba73bbe7a48b` |
+| `recovery`/`leader` receipt; `caj-m78r-5e40fefee0-leader-sv1pyn7` | `405e81c1d8aeaeb8cf6150f23fed2f897188ef2583a45af0c6223f08c153d484` |
+| `recovery`/`follower` receipt; `caj-m78r-5e40fefee0-follower-nevxrhm` | `da65977688804f347c77a28c13d98457d2ab1420197cc555b4d41b64446bb2d1` |
+
+Raw evidence remains ignored under `.runtime/milestone_7_8/redis-regional-20261116/`; it is not published. Final results bind the actual native exports, execution/source/image receipts and cleanup observations listed above. All 18 counters verify target/provider-managed-group, Redis/cache/database/ACL, NSG, network, job, identity, registry, role and schedule/binding absence. The reusable controller, identity, Reader grant and approved published runbook/content are preserved. This is active-resource absence, not physical-erasure or settled-billing evidence.
+
+The existing accepted 1,000-cent-compatible runbook publication was inherited through the renewal-only authority chain; its exact bytes were preserved at final cleanup. This regional campaign performed no new runbook publication. The local controller_gate import failure occurred after the accepted renewal; it was recovered from the saved completed authority evidence without replaying Azure mutations. The cleanup method and actual runbook status are recorded above; no failed runbook is relabeled successful. Earlier failed publication/operation or proof attempts remain in their receipts and history. This finalized regional campaign is not authority for another paid execution.
+
+Approved incremental ceiling: USD 10.00; prior cumulative ceiling: USD 340.89; cumulative ceiling: USD 350.89. These are approved ceilings, not settled charges. Billing remains unsettled. No previous campaign budget is reused.
+
+This reconciliation closes only supported M78-D-002 assertions. Existing observability, durable-worker, broader managed recovery, capacity/failure and consolidated final-validation requirements remain in the milestone checklist. It does not authorize another campaign or milestone.
