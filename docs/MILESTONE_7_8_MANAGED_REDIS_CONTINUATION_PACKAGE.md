@@ -45,9 +45,13 @@ evidence. The approval must name that package's digest.
 | Canonical image inputs | `d94e350754821b1172a9b4452466391053e0221d3095e336e43379f6f33c312f` |
 
 Reuse the 27 passing probe tests, six infrastructure checks, Bicep compilation,
-focused Ruff results and retained-image provenance. Only the changed controller
-publication integration and exact prepared cleanup parameter binding need new
-local validation. The runbook is outside image build inputs; **zero image
+focused Ruff results and retained-image provenance. New focused validation covers
+controller publication integration, exact prepared cleanup parameter binding,
+cleanup before environment creation and retained-receipt metadata. The copied
+receipt helper now uses the unchanged probe's actual `execution_id` field for
+reused receipts; it still requires the original contributing execution. This
+local helper correction did not cause the prior unexecuted result.
+The runbook is outside image build inputs; **zero image
 builds** are included. Source bytes and the clean checkpoint are checked again
 before publication; a line-ending change requires rebinding, not an assumed hash.
 
