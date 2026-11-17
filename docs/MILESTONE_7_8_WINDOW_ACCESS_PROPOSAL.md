@@ -1,13 +1,94 @@
 # Milestone 7.8 window and operator-access proposal
 
-Local preparation only. No Azure resource, role assignment, VPN client change,
-paid/authenticated provider call, message or deployment was executed. Public
+Local preparation only. No Azure resource mutation, role assignment, VPN client
+change, paid provider call, message or deployment was executed. The scoped
+read-only account/permission checks below are now authorized and retained. Public
 unauthenticated retail-price reads are identified below. The user selected admission6
 per API replica, lock-stage concurrency13, and Firewall/VM diagnostics as not
 applicable to the proposed ACA topology. Historical missing evidence remains
 unproved; networking, egress and deployed-resource diagnostics still apply.
 The user selected the +2/+10/+12-hour window for preparation. Spending/cleanup
-approval remains separate. Optional access additions remain unselected. Billing remains **unsettled**.
+approval remains separate. The user selected the temporary VPN/private-DNS option for preparation only. Billing remains **unsettled**.
+
+## Account and access resolution after the signed checkpoint
+
+Preparation continues from source checkpoint
+`80a9e6f6ab79bae92fcba95081ef0d3ec30d7f4f`. The signed API/frontend bytes,
+accepted key policy, closed PostgreSQL/D001/D002 evidence and selected window
+are unchanged. No passing test or image build was repeated.
+
+Scoped read-only checks of the already-bound subscription established:
+
+- The current Azure CLI account matches the bound subscription and tenant;
+  native subscription read and signed-in Entra user lookup succeeded.
+- The signed-in principal has existing unconditional subscription Owner
+  assignments. The native role definition and current permission response
+  include the three regional deleted-vault purge/readback actions, campaign
+  resource-group deletion and role-assignment cleanup. The at-scope deny query
+  returned no assignments and no continuation page. This is observed current
+  permission evidence, not execution authority or a guarantee of future access.
+- The same principal can be proposed for operator, cleanup and exact-vault
+  purge duties without a new subscription-wide grant. Its identity and native
+  evidence are retained privately; the user confirmed availability through the later
+  approved cleanup deadline. Recheck permissions at
+  execution admission and before cleanup. Purge remains restricted to the named
+  campaign vault; preserve the reusable controller and pre-existing grants.
+- No Windows VPN profile was returned, while Azure VPN Client is installed.
+  This does not establish that its separately managed profile is absent or
+  that an existing private route works. No existing gateway/host was identified; no broad network inventory was run. The user subsequently confirmed no existing route and selected the temporary option for preparation.
+
+Private evidence lives in
+`.runtime/milestone_7_8/full-closure-prerequisites/access-resolution/`:
+`bound-account.json`, `subscription.json`, `signed-in-identity.json`,
+`signed-in-role-assignments.json`, `assigned-role-definition-0.json`,
+`subscription-effective-permissions.json`,
+`subscription-deny-assignments-corrected.json`, `permission-evidence.json`,
+and `workstation-network.json`. The permission receipt binds native file hashes.
+An initial deny query failed in the Windows command wrapper before an Azure
+request because of query-string escaping. The corrected direct CLI interpreter
+query succeeded; retain the initial diagnostic rather than calling it a
+permission denial. No token retrieval/output was used.
+
+### Supply account values without inventing identifiers
+
+Edit only missing fields in the protected `inputs.private.json`; text values
+must be quoted JSON strings and confirmations must be booleans. Do not paste
+secrets in chat or shell arguments. Preserve populated model/tenant/subscription,
+STARTTLS, signing and window fields. Local syntax/presence checks do not prove
+remote credential validity. A file being edited must not be overwritten by an
+automated identity merge.
+
+1. In the existing OpenAI Platform project, obtain the project credential from
+   its API Keys settings and the project ID from General. Supply organization
+   ID only where explicit organization selection is needed. The owner checks
+   the prefilled models under Limits/Model usage before setting
+   `openai.entitlementConfirmedByOwner` to true. Application calls use Responses
+   and Embeddings; an admin API key is not required. Do not make paid calls to
+   confirm entitlement during preparation.
+2. Identify the existing email provider first. Copy its documented STARTTLS587
+   host and account into `smtp.host`, `username` and `password`; use the exact
+   permitted address in `fromAddress`. Select an inbox the operator can access
+   for `approvedInbox`. Describe the native message export/receipt procedure in
+   `nativeInboxReceiptMethod`. The existing password-reset validator requires
+   received raw MIME, Message-ID, actual received time and approved receiver
+   identity; SMTP acceptance alone is insufficient. No test message is sent.
+3. The signed-in Entra object ID is already resolved privately; the user need
+   not look up or invent it. If an existing private route is available, identify
+   its Azure VPN connection/gateway or private workstation/host. Copy that
+   specific resource's Resource ID from Azure Portal Properties, or supply its
+   exact name and resource group for a scoped lookup. Record where the browser
+   runs and the configured private DNS resolvers; derive those values from the
+   route, not from example addresses. Selecting the optional route is a separate
+   preparation decision before templates, client pool and cleanup are frozen.
+4. Existing Owner permissions remove the need for a new purge-role proposal
+   for the signed-in principal. Confirm it will remain available for the later
+   approved cleanup window, or identify the alternate existing executor for
+   a scoped permission check. Do not assign a new role during preparation.
+
+The earlier retained candidate package remains unapproved and superseded by the final package assembly. Do not
+reuse its hash as final spending approval after access bindings change. Provider credential format, Gmail fields, owner-confirmed model access, the
+private-route choice and cleanup availability are now resolved. Final package
+assembly binds these private inputs without exposing them in Git. Derive absolute deadlines from that later approval.
 
 ## Recommended window
 
@@ -114,7 +195,7 @@ export access from the operator workstation. Existing in-VNet proof jobs do
 not prove that interactive route, and public Blob/Log Analytics access must not
 be opened as a substitute.
 
-Optional, **unselected** scoped access addition in East US:
+Selected for preparation only, scoped access addition in East US:
 
 - One **VpnGw1AZ** route-based P2S gateway using OpenVPN and Microsoft Entra
   authentication, one Standard static IPv4 public IP, one permitted operator
@@ -134,15 +215,20 @@ Optional, **unselected** scoped access addition in East US:
 VpnGw1AZ is the smallest suitable current AZ gateway in this prepared option;
 new non-AZ VpnGw1 creation is no longer supported. This is an operator-access
 option, not new hosting-topology research. [Microsoft gateway SKU policy](https://learn.microsoft.com/en-us/azure/vpn-gateway/secure-vpn-gateway).
-The Microsoft-registered VPN application avoids creating a new app identity;
-access still must be limited to the approved operator/group by the tenant
-administrator and client configuration. The required OpenVPN/Azure VPN Client
+The Microsoft-registered VPN client is retained. A dedicated single-tenant
+audience application and service principal are now included in the proposed
+execution scope to restrict this gateway to the one approved operator. The
+service principal requires assignment; only that user receives its app role.
+The shared Microsoft application and pre-existing enterprise assignments are
+not modified. This corrects the earlier assumption that the standard audience
+alone established operator restriction. The required OpenVPN/Azure VPN Client
 and tenant/audience/issuer settings follow the
 [Microsoft P2S configuration](https://learn.microsoft.com/en-us/azure/vpn-gateway/point-to-site-entra-gateway).
 
 For12hours the optional resource delta is **$5.5389**:
 VpnGw1AZ$0.21/hour=$2.52, Standard IPv4$0.005/hour=$0.06,
 DNS resolver inbound$180/month prorated by730hours=$2.9589.
+The tenant application and direct-user assignment add no metered resource charge.
 One P2S connection is included; VPN data consumes the same existing10GB total
 egress allowance, not an additional allowance. Current public Retail responses
 for gateway/IP and the retained DNS meter are private evidence; the
@@ -162,9 +248,11 @@ permission grant is inferred. Setup can take substantial time: validate the
 route before the+2h readiness gate, or stop with partial results. If an existing
 route is supplied, this entire optional scope and cost are excluded.
 
-Before selection becomes executable, compile the exact additional resources,
-name/address bindings, gateway diagnostics, restricted tenant/client settings
-and cleanup counters. Cleanup must remove the gateway, public IP, resolver,
+The selected templates, native-binding validators and exact command/cleanup
+sequence are now prepared in [operator access execution](MILESTONE_7_8_OPERATOR_ACCESS_EXECUTION.md).
+Six new offline boundary tests passed and the composed Bicep compiled.
+The only compiler warning is the pre-existing managed-object secret-input warning.
+Native delivery and private connectivity remain unproved until approved execution. Cleanup must remove the gateway, public IP, resolver,
 inbound endpoint, dedicated subnets, temporary grants/client configuration and
 any exact dedicated enterprise assignment, while preserving pre-existing tenant
 objects. Do not add an unverified networking path to an approved manifest.
@@ -209,3 +297,32 @@ A key-only policy must still pin the explicitly trusted public key, verify the
 exact signed content and transitive image/inventory hashes, and disclose absence
 of transparency-log assurance. No criterion is weakened and no signature is
 accepted merely because a key was generated.
+
+## Resolved input status
+
+The OpenAI key/project fields and Gmail app-password fields passed local syntax
+checks. Owner-confirmed model entitlement is recorded; no provider authentication
+or inference was attempted. The approved Gmail inbox supplies original received
+MIME and native receipt evidence during execution, not a fabricated delivery
+receipt. The user confirmed the signed-in account for VPN and cleanup through
+the eventual +12-hour deadline. Native Entra membership additionally showed
+Global Administrator, so no new tenant admin role is proposed. Its role evidence
+is private in `access-resolution/signed-in-directory-roles.json`.
+
+The protected JSON had duplicated/missing string quotes; only those delimiters
+were corrected, preserving credential values. Missing known SMTP host/username,
+native inbox method and observed identity/permission references were filled.
+The optional organization ID remains unnecessary for this project credential.
+Application-user IDs and native VPN application IDs are runtime-derived bindings,
+not additional user inputs. No operational acceptance follows from these local
+checks. The final spending/cleanup request remains a separate decision.
+
+The existing destination-access validator requires operator and evidence
+read/revoke/restore, with fresh sessions and an actual 403 after removal. The
+user selected one temporary restricted Entra user because inherited Owner
+authority would make that denial impossible for the administrator. It receives
+only the campaign workspace query grant; the administrator retains VPN/export/
+cleanup duties. The duplicate planned evidence query grant was removed so the
+foundation grant is its sole read authority. This is a focused preparation
+correction, not a rerun of a closed campaign. Seven distinct new offline tests
+cover the selected access boundaries; all passed.

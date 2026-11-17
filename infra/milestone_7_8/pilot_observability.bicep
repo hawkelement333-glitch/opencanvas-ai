@@ -91,8 +91,9 @@ resource exporterGrant 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb')
   }
 }
+// Foundation already supplies the evidence identity's sole query grant.
+// A second grant here would make exact-grant revocation ineffective.
 resource readers 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principal in [
-  { id: evidencePrincipalId, type: 'ServicePrincipal' }
   { id: operatorPrincipalId, type: operatorPrincipalType }
 ]: {
   scope: workspace

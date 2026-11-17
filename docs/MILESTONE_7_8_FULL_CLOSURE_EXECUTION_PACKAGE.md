@@ -2,8 +2,9 @@
 
 **Preparation only; not spending or execution authority.** This replaces the
 current scope of the earlier pilot proposal. Prior campaign budgets are closed,
-prior billing remains unsettled, and no new Azure operation, paid provider call,
-publication or deployment has been performed. The prior $25.57 forecast/$50
+prior billing remains unsettled, and no Azure mutation, paid provider call,
+publication or deployment has been performed. Scoped read-only account and
+permission checks were authorized and completed. The prior $25.57 forecast/$50
 proposal is not an allowance for this larger package.
 
 The [finite ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md) identifies existing
@@ -19,10 +20,9 @@ unresolved recommendations and timing/cost estimates in the reviewed
 package, SHA-256 `1f658e1393a1ce86d60573d1b13db84a9e68c086be64cc7f2db8d4d7e5eeb746`,
 is retained as unapproved history; it must not be executed. The current compiler
 uses supported five-minute evaluation, with catalog windows unchanged. Neither
-recommendations nor blank input forms constitute chosen bindings. This campaign
-is **not executable** until the product/signing/input decisions are resolved,
-the resulting artifacts and timed commands are frozen, and separate spending
-and cleanup approval is recorded.
+recommendations nor blank input forms constitute chosen bindings. Product/signing/input decisions are now resolved. The final private package
+binds the signed artifacts and selected operator route; it remains **unapproved**
+and cannot execute until its exact spending and cleanup approval is recorded.
 
 ## Scope and artifact binding
 
@@ -33,7 +33,10 @@ subscription changes, Firewall, VM, public website or new architecture is includ
 Foundation is the existing private Blob/Defender/Log Analytics/AMPLS, private
 HA Redis B0, PostgreSQL General Purpose D2ds_v4 (2vCore/32GB) with one isolated
 PITR copy, temporary Premium ACR, Key Vault, VNet/delegated subnet/private DNS,
-six Private Endpoints and the reusable cleanup controller. Operational alert
+six Private Endpoints and the reusable cleanup controller. The selected temporary
+operator-access addition is VpnGw1AZ, Standard IPv4, inbound DNS Resolver, two
+subnets, a dedicated single-user Entra audience and one campaign client profile;
+see the [exact access operations](MILESTONE_7_8_OPERATOR_ACCESS_EXECUTION.md). Operational alert
 delivery uses the already prepared private Standard Event Hub/action group.
 Six application services run seven replicas: API two (0.5CPU/1GiB each),
 worker one (0.5/1), frontend one (0.5/1), gateway one (0.25/0.5), activity-v1
@@ -64,7 +67,8 @@ provider-assigned hostnames: frontend now validates the server-side public
 No secret or server credential is serialized to the browser.
 
 The private preparation root is
-`.runtime/milestone_7_8/full-closure-local/package/`. `manifest.json` binds exact
+`.runtime/milestone_7_8/full-closure-prerequisites/executable-package/`.
+Earlier preparation directories are retained as superseded unapproved history. `manifest.json` binds exact
 source files and full catalog; `planned-bindings.json` binds exact target IDs,
 source commit, image digests, workload allocations, native query hashes,
 operations and relative window. The final review-package hash is reported only
@@ -83,20 +87,30 @@ focused evidence and selected artifacts are in the
 [editable release checkpoint](MILESTONE_7_8_EDITABLE_AI_RELEASE_CHECKPOINT.md).
 The separate activity-v1 receiver decision remains resolved.
 
-Missing inputs are existing OpenAI entitlement/credential references, SMTP
-TLS account/permitted sender/native inbox, Entra operator/private browser and
-export route, and existing entitled cleanup/purge executors. Only an existing
-route is included in the base scope. An optional route is separately described
-in the [window/access proposal](MILESTONE_7_8_WINDOW_ACCESS_PROPOSAL.md); it is
-not selected or added automatically. Purging the exact vault requires existing
-subscription-level entitlement for deleted-vault read/purge and operation-result
-read; RG Contributor alone is insufficient. No broad grant is automatic.
+OpenAI project credentials and owner-confirmed model entitlement, Gmail STARTTLS
+app-password/sender/native inbox, signed-in Entra administrator and existing entitled
+cleanup/purge executor are bound privately. A separate temporary restricted
+Entra member is selected for the unchanged human-operator query revocation
+assertion; its exact native ID and sole workspace grant are bound after approval. Provider credentials passed local
+format checks only; no paid authentication/inference/email was attempted. The
+user selected the temporary VPN/private-DNS route and confirmed account
+availability through the eventual cleanup deadline. Scoped native checks found
+existing subscription Owner and tenant Global Administrator entitlements; no
+new administrative role is proposed. Exact named-vault purge/readback remains
+restricted to this campaign. See the [access proposal](MILESTONE_7_8_WINDOW_ACCESS_PROPOSAL.md).
+
+Selected forecast **$36.6423** includes the **$5.5389** access addition to the
+**$31.1034** base estimate. Proposed incremental ceiling remains **$50**, with
+proposed cumulative ceiling **$400.89 only if approved**. Neither estimate nor
+ceiling is a settled charge. The 10,000 HTTP/200 model-attempt/160M embedding-token
+bounds and fixed 7,800/400/1,800 HTTP partitions are unchanged.
 
 The user selected +2h ready/+10h proof stop/+12h cleanup, giving2hours restore,
 1hour export and25minutes contingency. This selection grants no spending authority. No acceptance window, request ceiling or model allowance is shortened
-or enlarged. After these inputs and signatures are complete, one exact
-source/image/command/deadline/cleanup package requires separate spending
-approval. No ongoing hosting authority is included.
+or enlarged. The exact source/image/command/access/cleanup package requires separate
+spending approval. Native app IDs, service URLs and synthetic application-user
+IDs are derived from the approved operations and verified readbacks; they are
+not invented preparation values. Absolute times derive only from that approval. No ongoing hosting authority is included.
 
 ## Execution sequence and actual observations
 
@@ -242,7 +256,9 @@ The retained public meter prices and quantities are in the
 | Existing second job overlapping the proof job, at most40minutes | 0.0360 |
 | Ten-hour subtotal (historical window) | 29.3238 |
 | Proposed additional2hours and6-hour restore-copy allocation | 1.7796 |
-| **Recommended twelve-hour temporary forecast** | **31.1034** |
+| Twelve-hour base forecast | 31.1034 |
+| Selected temporary VPN/private-DNS addition | 5.5389 |
+| **Selected twelve-hour temporary forecast** | **36.6423** |
 
 Total ACA allocation is3.25CPU/6.5GiB including sequential probes. Existing
 allowances remain:200 model attempts at15k input/1600 output (including reasoning
@@ -358,7 +374,7 @@ defines these request fields.
 
 The bounded second-job overlap remains $0.0360 (2,400 seconds at 0.5CPU/1GiB).
 The supported five-minute cadence and recommended twelve-hour allocation yield
-**$31.1034 USD** total. This is part
+**$31.1034 USD** base, or **$36.6423** with the selected access option. This is part
 of the same proposed $50 incremental/$400.89 cumulative ceilings, not a new
 authorization or a claim of settled cost.
 

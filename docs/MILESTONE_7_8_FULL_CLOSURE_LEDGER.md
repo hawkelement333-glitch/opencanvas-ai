@@ -3,7 +3,7 @@
 Current local checkpoint, 2026-11-17 UTC. **Milestone 7.8 remains incomplete.**
 PostgreSQL, M78-D-001 and M78-D-002 remain closed. Their accepted assertions,
 failed-attempt history, finalized ledgers and verified cleanup are unchanged.
-No new managed acceptance, Azure operation, provider request, publication or
+No new managed acceptance, Azure mutation, paid provider request, publication or
 website deployment is claimed by this local implementation checkpoint.
 
 This ledger supersedes current preparation gaps in the earlier pilot proposal;
@@ -22,8 +22,14 @@ and final-topology Firewall/VM not-applicable are selected. The local release
 key fingerprint/key-only policy is explicitly trusted. New0030 append-only
 artifact identities and0029-to-0030 migration are locally validated; historical
 0028-to-0029 proof remains credited. No managed requirement is accepted merely
-from these local checks. Provider/operator/access/cleanup inputs and separate
-spending approval remain; the longer +2/+10/+12 window is selected for preparation only.
+from these local checks. Provider credentials, owner-confirmed entitlement, the
+selected temporary VPN/DNS route and existing cleanup authority are now bound
+privately. The selected restricted Entra test user preserves the query-revocation
+assertion; a duplicate planned evidence query grant was removed. Scoped native
+identity/permission reads and seven new offline access checks are preparation
+evidence only. See [access execution](MILESTONE_7_8_OPERATOR_ACCESS_EXECUTION.md).
+Separate spending/cleanup approval and managed observations remain required;
+the +2/+10/+12 window is unchanged.
 
 ## Existing criteria and disposition
 

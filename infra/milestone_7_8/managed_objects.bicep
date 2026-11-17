@@ -10,6 +10,8 @@ param location string = 'canadacentral'
 @allowed([32, 64])
 param postgresStorageGiB int = 64
 param pilotDestinationPrivacy bool = false
+// Opt-in only for the separately approved full-closure operator route.
+param pilotOperatorAccess bool = false
 param applicationDatabaseName string = 'opencanvas_objects'
 @minLength(10)
 @maxLength(10)
@@ -63,7 +65,7 @@ resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   tags: lifecycleTags
   properties: {
     addressSpace: { addressPrefixes: ['10.79.0.0/16'] }
-    subnets: [
+    subnets: concat([
       {
         name: 'postgres'
         properties: {
@@ -79,7 +81,16 @@ resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
         }
       }
       { name: 'private-endpoints', properties: { addressPrefix: '10.79.8.0/24', privateEndpointNetworkPolicies: 'Disabled' } }
-    ]
+    ], pilotOperatorAccess ? [
+      { name: 'GatewaySubnet', properties: { addressPrefix: '10.79.9.0/27' } }
+      {
+        name: 'operator-dns'
+        properties: {
+          addressPrefix: '10.79.9.32/28'
+          delegations: [{ name: 'dns-resolver', properties: { serviceName: 'Microsoft.Network/dnsResolvers' } }]
+        }
+      }
+    ] : [])
   }
 }
 

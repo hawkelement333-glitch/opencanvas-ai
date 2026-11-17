@@ -116,6 +116,9 @@ def prepare(
         "docs/observability/signals-v1.json",
     ]
     closure_paths = [
+        "infra/milestone_7_8/operator_access_package.py",
+        "infra/milestone_7_8/pilot_operator_access.bicep",
+        "docs/MILESTONE_7_8_OPERATOR_ACCESS_EXECUTION.md",
         "infra/milestone_7_8/destination_acceptance.py",
         "infra/milestone_7_8/capacity_validation.py",
         "infra/milestone_7_8/capacity_fixtures.py",

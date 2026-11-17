@@ -10,12 +10,16 @@ param lifecycleTags object
 @allowed(['foundation', 'jobs', 'application'])
 param stage string = 'foundation'
 param enableExternalDelivery bool = false
+param enableOperatorAccess bool = false
+param operatorVpnAudienceAppId string = ''
 @minValue(0)
 param apiRequestConcurrencyLimit int = 0
 param storageDataScannerResourceId string = ''
 param bootstrapPrincipalId string = ''
 param catalog object
 param operatorPrincipalId string
+// Separate administrator export identity from the revocable query test user.
+param operatorExportPrincipalId string = operatorPrincipalId
 param operatorPrincipalType string = 'User'
 param campaignId string
 param generationId string
@@ -56,7 +60,21 @@ module foundation './managed_objects.bicep' = {
     postgresStorageGiB: 32
     applicationDatabaseName: 'opencanvas'
     pilotDestinationPrivacy: true
+    pilotOperatorAccess: enableOperatorAccess
   }
+}
+
+module operatorAccess './pilot_operator_access.bicep' = if (enableOperatorAccess) {
+  name: '${prefix}-operator-access'
+  params: {
+    location: location
+    suffix: suffix
+    lifecycleTags: lifecycleTags
+    virtualNetworkName: 'vnet-m78o-${suffix}'
+    workspaceName: 'law-m78o-${suffix}'
+    audienceAppId: operatorVpnAudienceAppId
+  }
+  dependsOn: [foundation]
 }
 
 var extraIdentityNames = ['migration', 'gateway', 'frontend']
@@ -251,6 +269,7 @@ output foundationBindings object = {
 }
 output observabilityBindings object = { dcrId: observability.outputs.dcrId, actionGroupId: observability.outputs.actionGroupId, alertNamespace: observability.outputs.alertNamespace, alertIds: observability.outputs.alertIds, workbookIds: observability.outputs.workbookIds }
 output runtimeJobNames array = jobsEnabled ? runtime!.outputs.jobNames : []
+output operatorAccessBindings object = enableOperatorAccess ? operatorAccess!.outputs.bindings : {}
 
 // Immutable private execution payloads; no anonymous access or broad account writer.
 resource artifactStorage 'Microsoft.Storage/storageAccounts@2023-05-01' existing = { name: 'stm78o${suffix}' }
@@ -276,6 +295,16 @@ resource proofEvidence 'Microsoft.Storage/storageAccounts/blobServices/container
   name: 'operational-evidence'
   properties: { publicAccess: 'None' }
   dependsOn: [foundation]
+}
+// Private export is scoped to one campaign container, never the storage account.
+resource operatorEvidenceReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableOperatorAccess) {
+  scope: proofEvidence
+  name: guid(proofEvidence.id, operatorExportPrincipalId, 'operator-export')
+  properties: {
+    principalId: operatorExportPrincipalId
+    principalType: operatorPrincipalType
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')
+  }
 }
 resource evidenceExportGrants 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for role in concat(['evidence', 'api', 'worker'], (enableExternalDelivery || proofRole == 'migration') ? ['migration'] : []): {
   scope: proofEvidence
