@@ -16,6 +16,7 @@ import { memo, type MouseEvent } from "react";
 import { useCanvasNodeActions } from "@/components/canvas/canvas-node";
 import type { CanvasFlowNode } from "@/lib/flow";
 import { documentStageDetails, nodeRole } from "@/lib/universe";
+import { secureUploadPresentation } from "@/lib/secure-upload";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1_024) return `${bytes} B`;
@@ -38,7 +39,11 @@ export const DocumentNodeCard = memo(function DocumentNodeCard({
   const stage = document?.processingStage ?? "failed";
   const details = documentStageDetails[stage];
   const role = nodeRole(node);
-  const ready = document?.status === "ready";
+  const security = data.secureUploadRequired
+    ? secureUploadPresentation(data.secureUpload, Date.now(), data.secureUploadRefreshFailed)
+    : null;
+  const securityBlocked = security !== null && !security.scanAccepted;
+  const ready = document?.status === "ready" && !securityBlocked;
   const failed =
     !document || ["failed", "retryable_failure", "permanent_failure"].includes(document.status);
 
@@ -155,9 +160,13 @@ export const DocumentNodeCard = memo(function DocumentNodeCard({
             ) : (
               <LoaderCircle size={13} className="spin" aria-hidden="true" />
             )}
-            {details.label}
+            {securityBlocked ? security.label : details.label}
           </span>
-          {!failed && !ready && <small>{details.userAction}</small>}
+          {securityBlocked ? (
+            <small>{security.detail}</small>
+          ) : (
+            !failed && !ready && <small>{details.userAction}</small>
+          )}
           {failed && document?.errorMessage && <p>{document.errorMessage}</p>}
           {document?.status === "permanent_failure" && (
             <p>Automatic retries are exhausted. Review the file or retry manually.</p>
@@ -165,7 +174,7 @@ export const DocumentNodeCard = memo(function DocumentNodeCard({
         </div>
 
         <div className="document-node__footer">
-          {failed ? (
+          {failed && !securityBlocked ? (
             <button
               type="button"
               onClick={() => actions.onRetryDocument(id)}

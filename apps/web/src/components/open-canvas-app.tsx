@@ -52,7 +52,14 @@ import { ReversibleEffectRollback } from "@/components/reversible-effect-rollbac
 import { CanvasNodeActionsProvider, CanvasNodeCard } from "@/components/canvas/canvas-node";
 import { DocumentNodeCard } from "@/components/canvas/document-node";
 import { DocumentPreviewPanel } from "@/components/document-preview-panel";
-import { agentApi, canvasApi, getErrorMessage, getTraceUrl, workspaceApi } from "@/lib/api-client";
+import {
+  agentApi,
+  canvasApi,
+  getErrorMessage,
+  getTraceUrl,
+  secureUploadApi,
+  workspaceApi,
+} from "@/lib/api-client";
 import { AutosaveQueue, type SaveState } from "@/lib/autosave-queue";
 import {
   buildAIRequest,
@@ -64,8 +71,10 @@ import {
   type DocumentFileType,
   type DocumentMetadata,
   type RuntimeMode,
+  type SecureUpload,
   type Workspace,
 } from "@/lib/contracts";
+import { secureUploadPresentation } from "@/lib/secure-upload";
 import {
   removeDocumentCitations,
   removeResponseCitationEdges,
@@ -576,38 +585,114 @@ function CanvasWorkspace({
     [replaceNodes],
   );
 
+  const updateSecureUploadReferences = useCallback(
+    (upload: SecureUpload) => {
+      if (upload.objectState === "deleted") {
+        const removed = new Set(
+          nodesRef.current
+            .filter((node) => node.data.node.document?.id === upload.documentId)
+            .map((node) => node.id),
+        );
+        replaceNodes(
+          removeDocumentCitations(
+            nodesRef.current.filter((node) => !removed.has(node.id)),
+            new Set([upload.documentId]),
+          ),
+        );
+        replaceEdges(
+          edgesRef.current.filter((edge) => !removed.has(edge.source) && !removed.has(edge.target)),
+        );
+        return;
+      }
+      // Keep only public status in React state, never the one-use upload capability.
+      const publicStatus = { ...upload, capability: null, uploadPath: null };
+      replaceNodes(
+        nodesRef.current.map((flowNode) =>
+          flowNode.data.node.document?.id === upload.documentId
+            ? {
+                ...flowNode,
+                data: {
+                  ...flowNode.data,
+                  secureUpload: publicStatus,
+                  secureUploadRefreshFailed: false,
+                  node: upload.document
+                    ? { ...flowNode.data.node, document: upload.document }
+                    : flowNode.data.node,
+                },
+              }
+            : flowNode,
+        ),
+      );
+    },
+    [replaceNodes, replaceEdges],
+  );
+
   const processingDocumentIds = useMemo(
     () =>
       Array.from(
         new Set(
           nodes
-            .map((node) => node.data.node.document)
-            .filter((document) =>
-              document
-                ? ["uploaded", "queued", "processing", "retrying"].includes(document.status)
-                : false,
-            )
-            .map((document) => document?.id)
+            .filter((node) => {
+              const document = node.data.node.document;
+              if (!document || node.data.pending) return false;
+              if (runtime?.secureUploadsRequired) {
+                const security = secureUploadPresentation(
+                  node.data.secureUpload,
+                  0, // Clock changes labels only; polling and acceptance are server-state decisions.
+                  node.data.secureUploadRefreshFailed,
+                );
+                if (!security.scanAccepted) return security.poll;
+              }
+              return ["uploaded", "queued", "processing", "retrying"].includes(document.status);
+            })
+            .map((node) => node.data.node.document?.id)
             .filter((id): id is string => Boolean(id)),
         ),
       ),
-    [nodes],
+    [nodes, runtime?.secureUploadsRequired],
   );
 
+  const processingDocumentKey = processingDocumentIds.join(",");
   useEffect(() => {
-    if (processingDocumentIds.length === 0) return;
+    if (!processingDocumentKey) return;
+    const documentIds = processingDocumentKey.split(",");
     let disposed = false;
     let timer: number | undefined;
 
     const poll = async () => {
       const results = await Promise.allSettled(
-        processingDocumentIds.map((documentId) => canvasApi.getDocument(documentId)),
+        documentIds.map(async (documentId) => {
+          if (runtime?.secureUploadsRequired) {
+            const upload = await secureUploadApi.getForDocument(documentId);
+            return {
+              documentId,
+              upload,
+              document:
+                upload.objectState === "deleted"
+                  ? null
+                  : (upload.document ?? (await canvasApi.getDocument(documentId))),
+            };
+          }
+          return { documentId, upload: null, document: await canvasApi.getDocument(documentId) };
+        }),
       );
       if (disposed) return;
-      for (const result of results) {
-        if (result.status === "fulfilled") updateDocumentReferences(result.value);
+      for (const [index, result] of results.entries()) {
+        if (result.status === "fulfilled") {
+          if (result.value.upload) updateSecureUploadReferences(result.value.upload);
+          if (result.value.document) updateDocumentReferences(result.value.document);
+        } else if (runtime?.secureUploadsRequired) {
+          const documentId = documentIds[index];
+          replaceNodes(
+            nodesRef.current.map((node) =>
+              node.data.node.document?.id === documentId
+                ? { ...node, data: { ...node.data, secureUploadRefreshFailed: true } }
+                : node,
+            ),
+          );
+        }
       }
-      timer = window.setTimeout(() => void poll(), 1_400);
+      timer = window.setTimeout(() => void poll(), runtime?.secureUploadsRequired ? 10_000 : 1_400);
     };
 
     timer = window.setTimeout(() => void poll(), 700);
@@ -615,7 +700,13 @@ function CanvasWorkspace({
       disposed = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [processingDocumentIds, updateDocumentReferences]);
+  }, [
+    processingDocumentKey,
+    updateDocumentReferences,
+    updateSecureUploadReferences,
+    replaceNodes,
+    runtime?.secureUploadsRequired,
+  ]);
 
   const updateSavedNode = useCallback(
     (saved: CanvasNode) => {
@@ -837,10 +928,46 @@ function CanvasWorkspace({
     [updateDocumentReferences],
   );
 
+  const requestSecureDeletion = useCallback(async (documentId: string) => {
+    const upload = await secureUploadApi.getForDocument(documentId);
+    try {
+      return await secureUploadApi.requestDeletion(
+        upload.workspaceId,
+        upload.canvasId,
+        upload.sessionId,
+        crypto.randomUUID(),
+      );
+    } catch (error) {
+      // A lost response can follow a committed request. Reconcile before retrying.
+      const observed = await secureUploadApi.getForDocument(documentId).catch(() => null);
+      if (observed?.objectState === "deletion_requested" || observed?.objectState === "deleted")
+        return observed;
+      throw error;
+    }
+  }, []);
+
   const deleteDocument = useCallback(
     async (nodeId: string) => {
       const document = nodesRef.current.find((node) => node.id === nodeId)?.data.node.document;
       if (!document) return;
+      if (runtime?.secureUploadsRequired) {
+        try {
+          updateSecureUploadReferences(await requestSecureDeletion(document.id));
+          replaceNodes(removeDocumentCitations(nodesRef.current, new Set([document.id])));
+          setPreview((current) => (current?.document.id === document.id ? null : current));
+          setSurfaceError(null);
+        } catch (error) {
+          replaceNodes(
+            nodesRef.current.map((node) =>
+              node.data.node.document?.id === document.id
+                ? { ...node, data: { ...node.data, secureUploadRefreshFailed: true } }
+                : node,
+            ),
+          );
+          setSurfaceError(getErrorMessage(error));
+        }
+        return;
+      }
       const beforeNodes = nodesRef.current;
       const beforeEdges = edgesRef.current;
       const removedIds = new Set(
@@ -867,7 +994,7 @@ function CanvasWorkspace({
         setSurfaceError(getErrorMessage(error));
       }
     },
-    [replaceEdges, replaceNodes],
+    [replaceEdges, replaceNodes, runtime, requestSecureDeletion, updateSecureUploadReferences],
   );
 
   const handlers = useMemo<NodeHandlers>(
@@ -1039,6 +1166,10 @@ function CanvasWorkspace({
   const uploadDocuments = useCallback(
     async (files: readonly File[]) => {
       if (files.length === 0 || uploadState) return;
+      if (!runtime) {
+        setSurfaceError("Runtime configuration is still loading. Please wait before uploading.");
+        return;
+      }
       const invalid = files.find(
         (file) => !SUPPORTED_DOCUMENT_EXTENSIONS.has(documentExtension(file.name)),
       );
@@ -1111,7 +1242,37 @@ function CanvasWorkspace({
           toFlowNode(temporaryNode, { pending: true, selected: true }),
         ]);
 
+        let initiated: SecureUpload | null = null;
         try {
+          if (runtime.secureUploadsRequired) {
+            if (!workspace) throw new Error("Select a workspace before uploading.");
+            initiated = await secureUploadApi.initiate(
+              workspace.id,
+              snapshot.canvas.id,
+              file,
+              position,
+              crypto.randomUUID(),
+            );
+            if (!initiated.node || !initiated.document || !initiated.capability) {
+              throw new Error(
+                "The server did not return a complete upload session. The upload was not retried.",
+              );
+            }
+            const saved = toFlowNode(
+              { ...initiated.node, document: initiated.document },
+              { selected: true },
+            );
+            saved.data.secureUpload = { ...initiated, capability: null, uploadPath: null };
+            replaceNodes(nodesRef.current.map((node) => (node.id === tempNodeId ? saved : node)));
+            await secureUploadApi.uploadContent(initiated.sessionId, file, initiated.capability);
+            const completed = await secureUploadApi.complete(
+              workspace.id,
+              snapshot.canvas.id,
+              initiated.sessionId,
+            );
+            updateSecureUploadReferences(completed);
+            continue;
+          }
           const result = await canvasApi.uploadDocument(snapshot.canvas.id, file, position);
           const savedNode: CanvasNode = {
             ...result.node,
@@ -1124,13 +1285,37 @@ function CanvasWorkspace({
           );
         } catch (error) {
           replaceNodes(nodesRef.current.filter((node) => node.id !== tempNodeId));
+          if (initiated) {
+            // Reconcile uncertain writes once; never repeat upload/completion blindly.
+            try {
+              updateSecureUploadReferences(
+                await secureUploadApi.getForDocument(initiated.documentId),
+              );
+            } catch {
+              replaceNodes(
+                nodesRef.current.map((node) =>
+                  node.data.node.document?.id === initiated?.documentId
+                    ? { ...node, data: { ...node.data, secureUploadRefreshFailed: true } }
+                    : node,
+                ),
+              );
+            }
+          }
           setSurfaceError(getErrorMessage(error));
           break;
         }
       }
       setUploadState(null);
     },
-    [flow, replaceNodes, snapshot.canvas.id, uploadState],
+    [
+      flow,
+      replaceNodes,
+      snapshot.canvas.id,
+      uploadState,
+      runtime,
+      workspace,
+      updateSecureUploadReferences,
+    ],
   );
 
   const chooseDocuments = useCallback(
@@ -1164,6 +1349,7 @@ function CanvasWorkspace({
     );
     const selectedNodeIds = new Set(
       beforeNodes
+        .filter((node) => !runtime?.secureUploadsRequired || node.data.node.type !== "document")
         .filter(
           (node) =>
             selectedNodes.some((selected) => selected.id === node.id) ||
@@ -1195,7 +1381,11 @@ function CanvasWorkspace({
         }
       }
       for (const documentId of selectedDocumentIds) {
-        await canvasApi.deleteDocument(documentId);
+        if (runtime?.secureUploadsRequired) {
+          updateSecureUploadReferences(await requestSecureDeletion(documentId));
+        } else {
+          await canvasApi.deleteDocument(documentId);
+        }
       }
       for (const node of selectedNodes.filter((node) => node.data.node.type !== "document")) {
         await canvasApi.deleteNode(snapshot.canvas.id, node.id, node.data.node.revision);
@@ -1205,11 +1395,44 @@ function CanvasWorkspace({
       );
       setSurfaceError(null);
     } catch (error) {
-      replaceNodes(beforeNodes);
+      // Preserve authoritative secure outcomes already received; failed writes
+      // leave the selected document unavailable until the next status refresh.
+      const currentDocuments = new Map(
+        nodesRef.current.filter((node) => node.data.node.document).map((node) => [node.id, node]),
+      );
+      replaceNodes(
+        runtime?.secureUploadsRequired
+          ? beforeNodes
+              .filter(
+                (node) =>
+                  !node.data.node.document ||
+                  !selectedDocumentIds.has(node.data.node.document.id) ||
+                  currentDocuments.has(node.id),
+              )
+              .map((node) =>
+                node.data.node.document && selectedDocumentIds.has(node.data.node.document.id)
+                  ? {
+                      ...(currentDocuments.get(node.id) ?? node),
+                      data: {
+                        ...(currentDocuments.get(node.id) ?? node).data,
+                        secureUploadRefreshFailed: true,
+                      },
+                    }
+                  : node,
+              )
+          : beforeNodes,
+      );
       replaceEdges(beforeEdges);
       setSurfaceError(getErrorMessage(error));
     }
-  }, [replaceEdges, replaceNodes, snapshot.canvas.id]);
+  }, [
+    replaceEdges,
+    replaceNodes,
+    snapshot.canvas.id,
+    runtime,
+    requestSecureDeletion,
+    updateSecureUploadReferences,
+  ]);
 
   const flush = useCallback(async () => {
     await saveQueueRef.current?.flush();
@@ -1459,7 +1682,10 @@ function CanvasWorkspace({
 
         <CanvasNodeActionsProvider actions={handlers}>
           <ReactFlow<CanvasFlowNode, CanvasFlowEdge>
-            nodes={nodes}
+            nodes={nodes.map((node) => ({
+              ...node,
+              data: { ...node.data, secureUploadRequired: Boolean(runtime?.secureUploadsRequired) },
+            }))}
             edges={edges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}

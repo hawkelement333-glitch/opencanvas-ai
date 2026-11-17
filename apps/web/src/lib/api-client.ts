@@ -26,6 +26,7 @@ import {
   indexRequestSchema,
   problemDetailsSchema,
   runtimeModeSchema,
+  secureUploadSchema,
   authSessionSchema,
   passwordResetRequestSchema,
   userSchema,
@@ -294,6 +295,77 @@ async function requestZip(path: string): Promise<Blob> {
     window.clearTimeout(timeout);
   }
 }
+
+export const secureUploadApi = {
+  async initiate(
+    workspaceId: string,
+    canvasId: string,
+    file: File,
+    position: { x: number; y: number },
+    idempotencyKey: string,
+  ) {
+    const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+    const sha256 = Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/upload-sessions`,
+      secureUploadSchema,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          fileName: file.name,
+          mediaType: file.type || "application/octet-stream",
+          sizeBytes: file.size,
+          sha256,
+          idempotencyKey,
+          x: position.x,
+          y: position.y,
+        }),
+      },
+    );
+  },
+  uploadContent(sessionId: string, file: File, capability: string) {
+    // Never follow an arbitrary uploadPath with a bearer capability. This route
+    // stays on the configured API origin and is bound to the returned session.
+    return request(
+      `/upload-sessions/${encodeURIComponent(sessionId)}/content`,
+      secureUploadSchema,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream", "X-Upload-Capability": capability },
+        body: file,
+      },
+      LONG_OPERATION_TIMEOUT_MS,
+    );
+  },
+  complete(workspaceId: string, canvasId: string, sessionId: string) {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/upload-sessions/${encodeURIComponent(sessionId)}/complete`,
+      secureUploadSchema,
+      { method: "POST" },
+    );
+  },
+  getForDocument(documentId: string, signal?: AbortSignal) {
+    return request(
+      `/documents/${encodeURIComponent(documentId)}/upload-session`,
+      secureUploadSchema,
+      { signal },
+    );
+  },
+  requestDeletion(
+    workspaceId: string,
+    canvasId: string,
+    sessionId: string,
+    idempotencyKey: string,
+  ) {
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(canvasId)}/upload-sessions/${encodeURIComponent(sessionId)}/deletion-requests`,
+      secureUploadSchema,
+      { method: "POST", body: JSON.stringify({ idempotencyKey, reasonCode: "user_requested" }) },
+    );
+  },
+};
 
 export const canvasApi = {
   getRuntimeMode(signal?: AbortSignal): Promise<RuntimeMode> {

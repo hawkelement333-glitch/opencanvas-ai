@@ -12,6 +12,7 @@ test.describe("real core document and controlled grounded-draft workflow", () =>
     page,
   }) => {
     test.setTimeout(120_000);
+    const securePilot = process.env.E2E_SECURE_PILOT === "1";
     const canvasName = `Controlled document E2E ${Date.now()}`;
     const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000/api/v1").replace(
       /\/$/,
@@ -38,6 +39,11 @@ test.describe("real core document and controlled grounded-draft workflow", () =>
       .locator("article.document-node")
       .filter({ hasText: "observatory-facts.pdf" });
     await expect(documentNode).toBeVisible();
+    if (securePilot) {
+      await expect(documentNode).toContainText(/quarantine|scanning/i);
+      await page.reload();
+      await expect(documentNode).toBeVisible();
+    }
     await expect(
       documentNode.getByRole("status").filter({ hasText: /^Ready source$/ }),
     ).toBeVisible({
@@ -151,22 +157,54 @@ test.describe("real core document and controlled grounded-draft workflow", () =>
     // A controlled draft stays read-only; it must not materialize a legacy AI node.
     await expect(page.locator(".canvas-node--ai")).toHaveCount(0);
 
-    const deletionResponse = page.waitForResponse(
-      (response) =>
-        response.url().endsWith(`/documents/${citation.documentId}`) &&
-        response.request().method() === "DELETE",
+    const deletionResponse = page.waitForResponse((response) =>
+      securePilot
+        ? response.url().endsWith("/deletion-requests") && response.request().method() === "POST"
+        : response.url().endsWith(`/documents/${citation.documentId}`) &&
+          response.request().method() === "DELETE",
     );
     await documentNode.locator('[data-testid^="delete-document-"]').click();
-    expect((await deletionResponse).status()).toBe(204);
-    await expect(documentNode).toHaveCount(0);
-    expect((await page.request.get(`${apiBase}/documents/${citation.documentId}`)).status()).toBe(
-      404,
-    );
+    expect((await deletionResponse).status()).toBe(securePilot ? 200 : 204);
+    if (securePilot) {
+      await expect(documentNode).toContainText("Deletion requested", { timeout: 15_000 });
+    } else {
+      await expect(documentNode).toHaveCount(0);
+      expect((await page.request.get(`${apiBase}/documents/${citation.documentId}`)).status()).toBe(
+        404,
+      );
+    }
     expect((await page.request.get(`${apiBase}${passagePath}`)).status()).toBe(404);
     const afterDeletion = await page.request.post(searchPath, searchRequest);
-    expect(afterDeletion.status()).toBe(400);
-    expect(await afterDeletion.json()).toMatchObject({ code: "invalid_selected_documents" });
+    if (securePilot) {
+      expect(afterDeletion.status()).toBe(200);
+      expect(await afterDeletion.json()).toMatchObject({ matches: [], insufficientContext: true });
+    } else {
+      expect(afterDeletion.status()).toBe(400);
+      expect(await afterDeletion.json()).toMatchObject({ code: "invalid_selected_documents" });
+    }
     await page.reload();
-    await expect(documentNode).toHaveCount(0);
+    if (securePilot) {
+      await expect
+        .poll(
+          async () => {
+            const status = await page.request.get(
+              `${apiBase}/documents/${citation.documentId}/upload-session`,
+            );
+            expect(status.status()).toBe(200);
+            const { objectState } = await status.json();
+            expect(["deletion_requested", "deleted"]).toContain(objectState);
+            if (objectState === "deleted") return (await documentNode.count()) === 0;
+            if ((await documentNode.count()) !== 1) return false;
+            return (
+              (await documentNode.textContent())?.includes("Deletion requested") &&
+              (await documentNode.getByRole("button", { name: /preview/i }).isDisabled())
+            );
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(true);
+    } else {
+      await expect(documentNode).toHaveCount(0);
+    }
   });
 });

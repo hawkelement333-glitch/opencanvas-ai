@@ -318,6 +318,41 @@ export const documentUploadResultSchema = z.object({
   node: canvasNodeSchema,
 });
 
+export const secureUploadSchema = z.object({
+  sessionId: z.string().uuid(),
+  workspaceId: z.string().uuid(),
+  canvasId: z.string().uuid(),
+  documentId: z.string().uuid(),
+  documentVersionId: z.string().uuid(),
+  objectVersionId: z.string().uuid(),
+  state: z.enum(["requested", "uploaded", "completed", "canceled", "expired", "error"]),
+  objectState: z
+    .enum([
+      "quarantined",
+      "scan_pending",
+      "clean",
+      "rejected",
+      "retained",
+      "deletion_requested",
+      "deleted",
+      "legacy_unscanned",
+      "canceled",
+      "error",
+    ])
+    .nullable(),
+  scanOutcome: z
+    .enum(["clean", "infected", "suspicious", "unsupported", "error", "timeout"])
+    .nullable(),
+  safeReasonCode: z.string().nullable(),
+  capability: z.string().nullable().default(null),
+  uploadPath: z.string().nullable().default(null),
+  expiresAt: timestampSchema,
+  scanDeadlineAt: timestampSchema.nullable(),
+  duplicate: z.boolean().default(false),
+  document: documentMetadataSchema.nullable().optional(),
+  node: canvasNodeSchema.nullable().optional(),
+});
+
 export const documentTextSectionSchema = z.object({
   pageNumber: z.number().int().positive().nullable(),
   heading: z.string().max(500).nullable(),
@@ -416,6 +451,8 @@ export const runtimeModeSchema = z.object({
   label: z.string().min(1),
   demoCanvasId: z.string().uuid().nullable(),
   demoTraceId: z.string().uuid().nullable(),
+  secureUploadsRequired: z.boolean().optional(),
+  malwareScanTimeoutSeconds: z.number().int().positive().optional(),
 });
 
 export const userSchema = z.object({
@@ -473,6 +510,7 @@ export type Point = z.infer<typeof pointSchema>;
 export type Citation = z.infer<typeof citationSchema>;
 export type DocumentFileType = z.infer<typeof documentFileTypeSchema>;
 export type DocumentMetadata = z.infer<typeof documentMetadataSchema>;
+export type SecureUpload = z.infer<typeof secureUploadSchema>;
 export type DocumentProcessingStage = z.infer<typeof documentProcessingStageSchema>;
 export type DocumentText = z.infer<typeof documentTextSchema>;
 export type SourcePassage = z.infer<typeof sourcePassageSchema>;

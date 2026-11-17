@@ -1071,6 +1071,8 @@ class IngestionService:
                 publication_id=publication.publication_id,
                 compatibility_projection_id=None,
                 generation=generation,
+                created_at=now,
+                updated_at=now,
             )
             self.session.add(head)
         else:

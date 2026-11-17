@@ -47,6 +47,7 @@ from opencanvas_api.api.serialization import (
     document_metadata_out,
     node_out,
     source_passage_out,
+    utc,
 )
 from opencanvas_api.core.config import Settings, get_settings
 from opencanvas_api.db.models import (
@@ -107,8 +108,17 @@ def _ingestion_error(error: ObjectIngestionError) -> ApiError:
     return ApiError(error.status_code, error.code, error.safe_message)
 
 
-def _secure_upload_out(view: UploadSessionView, *, api_prefix: str) -> SecureUploadOut:
+def _secure_upload_out(
+    view: UploadSessionView,
+    *,
+    api_prefix: str,
+    document: Document | None = None,
+    node: CanvasNode | None = None,
+) -> SecureUploadOut:
+    metadata = document_metadata_out(document) if document is not None else None
     return SecureUploadOut(
+        document=metadata,
+        node=node_out(node, document=metadata) if node is not None else None,
         session_id=view.session.session_id,
         workspace_id=view.session.workspace_id,
         canvas_id=view.session.canvas_id,
@@ -147,7 +157,11 @@ def _secure_upload_out(view: UploadSessionView, *, api_prefix: str) -> SecureUpl
             else None
         ),
         safe_reason_code=(
-            view.scan_result.safe_reason_code if view.scan_result is not None else None
+            view.scan_result.safe_reason_code
+            if view.scan_result is not None
+            else view.object_transition.reason_code
+            if view.object_transition is not None
+            else None
         ),
         capability=view.capability,
         upload_path=(
@@ -155,7 +169,10 @@ def _secure_upload_out(view: UploadSessionView, *, api_prefix: str) -> SecureUpl
             if view.capability
             else None
         ),
-        expires_at=view.session.expires_at,
+        expires_at=utc(view.session.expires_at),
+        scan_deadline_at=utc(view.scan_request.deadline_at)
+        if view.scan_request is not None
+        else None,
         duplicate=view.duplicate,
     )
 
@@ -274,13 +291,44 @@ async def initiate_secure_upload(
             sha256=payload.sha256,
             idempotency_key=payload.idempotency_key,
         )
+        # The session creates the immutable source; this API owns its canvas card.
+        # Serialize duplicate requests on the source so retries cannot add cards.
+        document = await session.scalar(
+            select(Document).where(Document.id == view.session.document_id).with_for_update()
+        )
+        reference = await session.scalar(
+            select(CanvasDocumentNode).where(
+                CanvasDocumentNode.document_id == view.session.document_id,
+                CanvasDocumentNode.canvas_id == canvas_id,
+            )
+        )
+        node = await session.get(CanvasNode, reference.node_id) if reference is not None else None
+        if document is not None and reference is None and not view.duplicate:
+            node = CanvasNode(
+                canvas_id=canvas_id,
+                type="document",
+                title=document.file_name[:160],
+                text="",
+                position_x=payload.x,
+                position_y=payload.y,
+                width=360,
+                height=260,
+            )
+            session.add(node)
+            await session.flush()
+            session.add(
+                CanvasDocumentNode(node_id=node.id, canvas_id=canvas_id, document_id=document.id)
+            )
+            canvas = await session.get(Canvas, canvas_id)
+            if canvas is not None:
+                await _bump_canvas(session, canvas)
         await session.commit()
     except (ObjectIngestionError, DocumentServiceError) as exc:
         await session.rollback()
         if isinstance(exc, ObjectIngestionError):
             raise _ingestion_error(exc) from exc
         raise _service_error(exc) from exc
-    return _secure_upload_out(view, api_prefix=settings.api_prefix)
+    return _secure_upload_out(view, api_prefix=settings.api_prefix, document=document, node=node)
 
 
 @router.put(
@@ -663,6 +711,31 @@ async def get_document(
     document_id: uuid.UUID, principal: PrincipalDep, session: SessionDep
 ) -> DocumentMetadata:
     return document_metadata_out(await _require_document(session, document_id, principal))
+
+
+@router.get("/documents/{document_id}/upload-session", response_model=SecureUploadOut)
+async def get_document_upload_session(
+    document_id: uuid.UUID,
+    principal: PrincipalDep,
+    session: SessionDep,
+    settings: SettingsDep,
+    storage: ObjectStorageDep,
+) -> SecureUploadOut:
+    await _require_document(session, document_id, principal)
+    upload = await session.scalar(
+        select(UploadSession).where(UploadSession.document_id == document_id)
+    )
+    if upload is None:
+        raise ApiError(404, "secure_upload_not_found", "The secure upload was not found.")
+    return await get_secure_upload(
+        workspace_id=upload.workspace_id,
+        canvas_id=upload.canvas_id,
+        session_id=upload.session_id,
+        principal=principal,
+        session=session,
+        settings=settings,
+        storage=storage,
+    )
 
 
 @router.get("/documents/{document_id}/file")

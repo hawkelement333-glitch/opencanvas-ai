@@ -8,18 +8,27 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from opencanvas_api.core.config import Settings
 from opencanvas_api.db.models import (
+    CanvasDocumentNode,
     Document,
     DocumentProcessingJob,
     DocumentVersion,
+    DurableJobRequest,
+    ObjectPromotion,
+    UploadSession,
     WorkerHeartbeat,
 )
 from opencanvas_api.services.auth import Principal
+from opencanvas_api.services.collaboration_resources import (
+    ShareAccessLevel,
+    ShareResourceKind,
+    SharingService,
+)
 from opencanvas_api.services.documents import (
     DocumentProcessingError,
     DocumentProcessor,
@@ -30,10 +39,12 @@ from opencanvas_api.services.documents import (
 from opencanvas_api.services.durable_jobs import (
     DurableJobConflictError,
     DurableJobMetrics,
+    DurableJobNotFoundError,
     DurableJobService,
     JobLease,
     RetryClassification,
 )
+from opencanvas_api.services.indexer import IndexerError, IngestionService
 from opencanvas_api.services.object_ingestion import ObjectReconciler
 from opencanvas_api.services.observability import OperationalTelemetry, Severity
 from opencanvas_api.services.scanner_bridge import build_private_scanner_result_bridge
@@ -350,6 +361,8 @@ class DocumentWorker:
             if self.scanner_bridge is not None and await self.scanner_bridge.consume_once(session):
                 await session.commit()
                 return True
+            if self.object_storage is not None:
+                await self._enqueue_promoted_document(session)
             service = _durable_service(session, self.settings, metrics=self.metrics)
             await service.refresh_backlog_metrics()
             self._observe_metrics()
@@ -398,12 +411,16 @@ class DocumentWorker:
         renewal = asyncio.create_task(self._renew_lease(lease, stop=stop_renewal, lost=lease_lost))
         try:
             async with self.sessions() as session:
-                await self.processor.process_with_session(
-                    session,
-                    document_id,
-                    force=True,
-                    manage_job=False,
-                )
+                result_id = publication_id = None
+                if self.settings.object_ingestion_mode != "disabled":
+                    result_id, publication_id = await self._process_secure_document(session, lease)
+                else:
+                    await self.processor.process_with_session(
+                        session,
+                        document_id,
+                        force=True,
+                        manage_job=False,
+                    )
                 stop_renewal.set()
                 await renewal
                 if lease_lost.is_set():
@@ -415,7 +432,7 @@ class DocumentWorker:
                     session,
                     self.settings,
                     metrics=self.metrics,
-                ).complete(lease)
+                ).complete(lease, result_id=result_id, publication_id=publication_id)
                 await self._heartbeat(session, "ready")
                 await session.commit()
             if span is not None:
@@ -452,6 +469,120 @@ class DocumentWorker:
             if not renewal.done():
                 await renewal
         return True
+
+    async def _enqueue_promoted_document(self, session: AsyncSession) -> None:
+        """Recover the API-card handoff after clean promotion, including worker restarts."""
+        row = (
+            await session.execute(
+                select(Document, UploadSession)
+                .join(UploadSession, UploadSession.document_id == Document.id)
+                .join(DocumentVersion, DocumentVersion.id == UploadSession.document_version_id)
+                .where(
+                    Document.status == "queued",
+                    Document.deleted_at.is_(None),
+                    DocumentVersion.version == Document.current_version,
+                    DocumentVersion.deleted_at.is_(None),
+                    exists(
+                        select(CanvasDocumentNode.node_id).where(
+                            CanvasDocumentNode.document_id == Document.id,
+                            CanvasDocumentNode.canvas_id == Document.canvas_id,
+                        )
+                    ),
+                    exists(
+                        select(ObjectPromotion.promotion_id).where(
+                            ObjectPromotion.source_object_version_id
+                            == UploadSession.object_version_id,
+                        )
+                    ),
+                    ~exists(
+                        select(DurableJobRequest.request_id).where(
+                            DurableJobRequest.document_id == Document.id,
+                            DurableJobRequest.document_version_id == DocumentVersion.id,
+                        )
+                    ),
+                )
+                .order_by(Document.created_at, Document.id)
+                .limit(1)
+                .with_for_update(skip_locked=True, of=Document)
+            )
+        ).one_or_none()
+        if row is None:
+            return
+        document, upload = row
+        try:
+            access = await SharingService(session).evaluate_access(
+                principal=Principal(
+                    user_id=upload.user_id,
+                    email="",
+                    display_name="",
+                    session_id=None,
+                    csrf_token_hash=None,
+                ),
+                workspace_id=upload.workspace_id,
+                resource_kind=ShareResourceKind.CANVAS,
+                resource_id=upload.canvas_id,
+                access_level=ShareAccessLevel.CONTRIBUTE,
+                expected_authority_generation=upload.authority_generation,
+            )
+            if not access.allowed or access.membership_id != upload.membership_id:
+                raise DurableJobNotFoundError()
+            await DatabaseJobProvider(self.settings).enqueue(
+                session, user_id=upload.user_id, workspace_id=upload.workspace_id, document=document
+            )
+        except DurableJobNotFoundError:
+            # Revoked source authority cannot become a runnable job or block the next source.
+            document.status = "failed"
+            document.processing_stage = "failed"
+            document.safe_error_category = "authority_revoked"
+            document.error_message = "Document processing authority is no longer available."
+
+    async def _process_secure_document(
+        self, session: AsyncSession, lease: JobLease
+    ) -> tuple[uuid.UUID, uuid.UUID]:
+        """Use existing private-clean publication inside the durable lease transaction."""
+        job = await session.get(DocumentProcessingJob, lease.job_run_id)
+        request = await session.get(DurableJobRequest, job.request_id) if job is not None else None
+        version = (
+            await session.get(DocumentVersion, request.document_version_id) if request else None
+        )
+        if job is None or request is None or version is None:
+            raise DocumentProcessingError("The secure source request is unavailable.")
+        service = IngestionService(
+            session,
+            settings=self.settings,
+            storage=self.processor.storage,
+            provider=self.processor.provider,
+        )
+        try:
+            view = await service.request(
+                principal=Principal(
+                    user_id=request.user_id,
+                    email="",
+                    display_name="",
+                    session_id=None,
+                    csrf_token_hash=None,
+                ),
+                workspace_id=request.workspace_id,
+                canvas_id=request.canvas_id,
+                document_id=request.document_id,
+                document_version=version.version,
+                idempotency_key=f"secure-job:{request.request_id}",
+            )
+            revision = await service.build(view.request.request_id)
+            publication = (
+                await service.publish(view.request.request_id, revision.revision_id)
+                if revision is not None
+                else None
+            )
+            if revision is None or publication is None:
+                raise DocumentProcessingError(
+                    "The secure source was not published.", code="publication_disabled"
+                )
+            return revision.revision_id, publication.publication_id
+        except IndexerError as exc:
+            raise DocumentProcessingError(
+                exc.safe_message, code=exc.code, status_code=exc.status_code
+            ) from exc
 
     async def run_forever(self) -> None:
         disconnected_until: float | None = None
@@ -594,6 +725,8 @@ def _retry_classification(code: str) -> RetryClassification:
         "provider_timeout": RetryClassification.PROVIDER_TIMEOUT,
         "source_not_clean": RetryClassification.POLICY_REJECTED,
         "clean_source_changed": RetryClassification.SOURCE_SUPERSEDED,
+        "source_changed": RetryClassification.SOURCE_SUPERSEDED,
+        "authority_revoked": RetryClassification.AUTHORITY_REVOKED,
         "unsupported_format": RetryClassification.UNSUPPORTED_FORMAT,
     }
     return mapping.get(code, RetryClassification.UNKNOWN_FAILURE)

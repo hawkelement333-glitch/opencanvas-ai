@@ -1,5 +1,13 @@
 # Milestone 7.8 Defect Register
 
+Current pilot follow-up: [local preparation and corrected candidate](MILESTONE_7_8_PILOT_PREPARATION.md)
+pass their stated local checks. The secure website/worker handoff and native
+retrieval-head timestamp corrections are release-integration fixes, not reopened
+PostgreSQL/object/Redis campaigns. Pilot controlled drafts and 900/20 scanning
+are explicitly approved. The [managed package](MILESTONE_7_8_PILOT_MANAGED_VALIDATION_PACKAGE.md)
+awaits the listed external inputs and separate spending authority; 7.8 remains
+incomplete and billing unsettled.
+
 Date: 2026-08-27
 
 Status reconciled 2026-11-16 UTC: architecture/checkpoint-scope and recorded local

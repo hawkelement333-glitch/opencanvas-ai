@@ -1047,7 +1047,11 @@ unlocated artifacts. An open heading does not require repeating completed work. 
 historical PostgreSQL skips, dependency applicability and retained-image inventory
 mapping. The current real-stack document/controlled-draft journey passes after
 focused corrections and verified local cleanup; the legacy editable-AI contract
-decision and managed gates remain open.
+conflict remains for full 7.8; the pilot decision is now read-only controlled drafts.
+The [pilot preparation](MILESTONE_7_8_PILOT_PREPARATION.md) records approved
+900/20 settings, passing secure browser/worker integration and the corrected
+API candidate with zero Critical/High findings. Trusted signing, frontend
+origin/artifact and the [bounded managed observations](MILESTONE_7_8_PILOT_MANAGED_VALIDATION_PACKAGE.md) remain open; no deployment is declared ready.
 The
 [campaign handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15)
 contains acceptance, execution, source/image and receipt-hash evidence.

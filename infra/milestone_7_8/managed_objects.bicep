@@ -1,10 +1,16 @@
-// M78-D-001 only. The independently armed cleanup controller is outside this group.
+// Accepted M78-D-001 foundation, also composed by the isolated pilot template.
+// The independently armed cleanup controller is outside this group.
 // Foundation creates no execution; workload requires the retained image's digest
 // and the Defender-created scanner binding discovered from this account.
 targetScope = 'resourceGroup'
 
-@allowed(['canadacentral'])
+@allowed(['canadacentral', 'eastus'])
 param location string = 'canadacentral'
+// Pilot composition opts in; historical campaign inputs/defaults stay unchanged.
+@allowed([32, 64])
+param postgresStorageGiB int = 64
+param pilotDestinationPrivacy bool = false
+param applicationDatabaseName string = 'opencanvas_objects'
 @minLength(10)
 @maxLength(10)
 param resourceNameSuffix string
@@ -36,7 +42,7 @@ var roleSpecs = [
   { key: 'worker-quarantine', actions: ['${blobActions}read', '${blobActions}tags/read', '${blobActions}delete', '${blobActions}deleteBlobVersion/action'] }
   { key: 'worker-promote', actions: ['${blobActions}read', '${blobActions}add/action', '${blobActions}write', '${blobActions}delete', '${blobActions}deleteBlobVersion/action'] }
   // Temporary isolated proof authority: exact-version recovery/deletion, no tag writes.
-  { key: 'probe-lifecycle', actions: ['${blobActions}read', '${blobActions}add/action', '${blobActions}write', '${blobActions}delete', '${blobActions}deleteBlobVersion/action', '${blobActions}permanentDelete/action', '${blobActions}tags/read'] }
+  { key: 'probe-lifecycle', actions: pilotDestinationPrivacy ? ['${blobActions}read', '${blobActions}tags/read'] : ['${blobActions}read', '${blobActions}add/action', '${blobActions}write', '${blobActions}delete', '${blobActions}deleteBlobVersion/action', '${blobActions}permanentDelete/action', '${blobActions}tags/read'] }
 ]
 var containerNames = ['quarantine', 'clean', 'rejected', 'retained']
 var identityNames = ['bootstrap', 'api', 'worker', 'probe']
@@ -172,6 +178,7 @@ resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
     publicNetworkAccessForQuery: 'Disabled'
     sku: { name: 'PerGB2018' }
     workspaceCapping: { dailyQuotaGb: 1 }
+    features: pilotDestinationPrivacy ? { immediatePurgeDataOn30Days: true } : {}
   }
 }
 
@@ -268,11 +275,26 @@ resource probeLifecycleRoles 'Microsoft.Authorization/roleAssignments@2022-04-01
   name: guid(containers[index].id, identities[3].id, storageRoles[4].id)
   properties: { principalId: identities[3].properties.principalId, principalType: 'ServicePrincipal', roleDefinitionId: storageRoles[4].id }
 }]
-resource logReaders 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for identityIndex in [2, 3]: {
+resource logReaders 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for identityIndex in (pilotDestinationPrivacy ? [3] : [2, 3]): {
   scope: logs
   name: guid(logs.id, identities[identityIndex].id, logReaderRoleId)
   properties: { principalId: identities[identityIndex].properties.principalId, principalType: 'ServicePrincipal', roleDefinitionId: logReaderRoleId }
 }]
+resource scannerQueryRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = if (pilotDestinationPrivacy) {
+  name: guid(resourceGroup().id, 'pilot-scanner-table-query')
+  properties: {
+    roleName: '${prefix}-scanner-table-query'
+    description: 'Native scanner result table only; no application or security telemetry queries.'
+    type: 'CustomRole'
+    assignableScopes: [resourceGroup().id]
+    permissions: [{ actions: ['Microsoft.OperationalInsights/workspaces/read', 'Microsoft.OperationalInsights/workspaces/query/StorageMalwareScanningResults/read'], notActions: [], dataActions: [], notDataActions: [] }]
+  }
+}
+resource scannerQueryAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (pilotDestinationPrivacy) {
+  scope: logs
+  name: guid(logs.id, identities[2].id, 'pilot-scanner-table-query')
+  properties: { principalId: identities[2].properties.principalId, principalType: 'ServicePrincipal', roleDefinitionId: scannerQueryRole.id }
+}
 resource registryReaders 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for identityIndex in [0, 3]: {
   scope: registry
   name: guid(registry.id, identities[identityIndex].id, acrPullRoleId)
@@ -291,7 +313,7 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
     version: '17'
     authConfig: { activeDirectoryAuth: 'Enabled', passwordAuth: 'Disabled', tenantId: tenant().tenantId }
     highAvailability: { mode: 'Disabled' }
-    storage: { storageSizeGB: 64, autoGrow: 'Disabled', tier: 'P6' }
+    storage: { storageSizeGB: postgresStorageGiB, autoGrow: 'Disabled', tier: postgresStorageGiB == 32 ? 'P4' : 'P6' }
     backup: { backupRetentionDays: 7, geoRedundantBackup: 'Disabled' }
     network: { delegatedSubnetResourceId: '${network.id}/subnets/postgres', privateDnsZoneArmResourceId: dnsZones[6].id, publicNetworkAccess: 'Disabled' }
   }
@@ -310,7 +332,7 @@ resource vectorExtension 'Microsoft.DBforPostgreSQL/flexibleServers/configuratio
 }
 resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = {
   parent: postgres
-  name: 'opencanvas_objects'
+  name: applicationDatabaseName
   properties: { charset: 'UTF8', collation: 'en_US.utf8' }
   dependsOn: [vectorExtension]
 }
@@ -434,6 +456,8 @@ output workspaceCustomerId string = logs.properties.customerId
 output registryId string = registry.id
 output registryLoginServer string = registry.properties.loginServer
 output managedEnvironmentId string = managedEnvironment.id
+output managedEnvironmentDefaultDomain string = managedEnvironment.properties.defaultDomain
+output managedEnvironmentStaticIp string = managedEnvironment.properties.staticIp
 output postgresServerId string = postgres.id
 output postgresHost string = postgres.properties.fullyQualifiedDomainName
 output databaseName string = database.name

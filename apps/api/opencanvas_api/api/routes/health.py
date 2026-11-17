@@ -54,6 +54,8 @@ class RuntimeModeResponse(ApiModel):
     app_mode: Literal["demo", "development", "test", "staging", "production"]
     external_ai_enabled: bool
     label: str
+    secure_uploads_required: bool = False
+    malware_scan_timeout_seconds: int = 300
     demo_canvas_id: uuid.UUID | None = None
     demo_trace_id: uuid.UUID | None = None
 
@@ -107,6 +109,8 @@ async def runtime_mode(settings: SettingsDep) -> RuntimeModeResponse:
         mode="live",
         app_mode=settings.runtime_mode.value,
         external_ai_enabled=settings.openai_configured,
+        secure_uploads_required=settings.object_ingestion_mode != "disabled",
+        malware_scan_timeout_seconds=settings.malware_scan_timeout_seconds,
         label=(
             f"{settings.runtime_mode.value.title()} · live providers"
             if settings.openai_configured

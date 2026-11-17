@@ -307,6 +307,8 @@ class SecureUploadCreate(ApiModel):
     media_type: str = Field(min_length=1, max_length=160)
     size_bytes: int = Field(gt=0)
     sha256: str = Field(pattern=r"^[0-9A-Fa-f]{64}$")
+    x: float = Field(default=80.0, ge=-1_000_000, le=1_000_000)
+    y: float = Field(default=80.0, ge=-1_000_000, le=1_000_000)
     idempotency_key: str = Field(
         min_length=1,
         max_length=160,
@@ -329,6 +331,8 @@ class SecureObjectDeletionCreate(ApiModel):
 
 
 class SecureUploadOut(ApiModel):
+    document: DocumentMetadata | None = None
+    node: NodeOut | None = None
     session_id: uuid.UUID
     workspace_id: uuid.UUID
     canvas_id: uuid.UUID
@@ -366,6 +370,7 @@ class SecureUploadOut(ApiModel):
     capability: str | None = None
     upload_path: str | None = None
     expires_at: datetime
+    scan_deadline_at: datetime | None = None
     duplicate: bool = False
 
 

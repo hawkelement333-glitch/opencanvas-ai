@@ -10,6 +10,8 @@ from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 
+from scripts.telemetry_destination import AzureLogsDestination, DestinationError
+
 MAXIMUM_BODY_BYTES = 512 * 1024
 MAXIMUM_SIGNALS = 512
 EXPECTED_SCHEMA = "mobius-operational-v1"
@@ -18,6 +20,16 @@ AUTH_ENVIRONMENT_VARIABLE = "OPENCANVAS_TELEMETRY_GATEWAY_TOKEN"
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("mobius.telemetry-gateway")
 application = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
+
+
+def _destination() -> AzureLogsDestination | None:
+    mode = os.getenv("OPENCANVAS_TELEMETRY_GATEWAY_DESTINATION", "receipt_only")
+    if mode == "receipt_only":
+        # Historical 7.7 receiver, explicitly not destination acceptance.
+        return None
+    if mode != "azure_logs":
+        raise DestinationError("telemetry_destination_not_configured")
+    return AzureLogsDestination.from_environment()
 
 
 def _authentication_token() -> str:
@@ -49,6 +61,10 @@ def _validate_payload(payload: object) -> tuple[int, str]:
 @application.get("/health")
 async def health() -> dict[str, str]:
     _authentication_token()
+    try:
+        _destination()
+    except DestinationError as exc:
+        raise HTTPException(status_code=503, detail="destination_not_configured") from exc
     return {"status": "healthy"}
 
 
@@ -58,7 +74,11 @@ async def ingest(
     authorization: Annotated[str | None, Header()] = None,
 ) -> Response:
     _authorize(authorization)
-    body = await request.body()
+    body = bytearray()
+    async for part in request.stream():
+        if len(body) + len(part) > MAXIMUM_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="bounded")
+        body.extend(part)
     if not body or len(body) > MAXIMUM_BODY_BYTES:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="bounded")
     try:
@@ -68,12 +88,23 @@ async def ingest(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid"
         ) from exc
     signal_count, digest = _validate_payload(payload)
+    try:
+        destination = _destination()
+        if destination is not None:
+            await destination.export(payload)
+    except DestinationError as exc:
+        code = str(exc)
+        raise HTTPException(
+            status_code=422 if code == "invalid_operational_signal" else 503,
+            detail="invalid" if code == "invalid_operational_signal" else "destination_unavailable",
+        ) from None
     logger.info(
         json.dumps(
             {
                 "event": "telemetry-batch-accepted",
                 "payloadSha256": digest,
                 "signalCount": signal_count,
+                "destinationAcknowledged": destination is not None,
             },
             separators=(",", ":"),
             sort_keys=True,

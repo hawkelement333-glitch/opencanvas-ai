@@ -1,5 +1,12 @@
 # Milestone 7.8 remaining evidence reconciliation
 
+> **Subsequent pilot preparation - 2026-11-16:** the user selected read-only
+> controlled drafts and pilot-only 900-second/20-second scanning. Focused secure
+> UI/worker/native-PostgreSQL integration and the corrected API artifact now pass
+> locally. See [current pilot preparation](MILESTONE_7_8_PILOT_PREPARATION.md) and
+> the [bounded execution package](MILESTONE_7_8_PILOT_MANAGED_VALIDATION_PACKAGE.md).
+> Earlier findings below remain dated history; full 7.8 remains incomplete.
+
 Date: 2026-11-16. Reviewed source checkpoint:
 `224fbf852dd8fbb7a6f23cd5b3dc19a0e53bf0a2` on
 `milestone-7-8-production-readiness-audit-local`.

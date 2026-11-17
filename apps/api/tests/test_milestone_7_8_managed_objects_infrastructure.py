@@ -158,8 +158,15 @@ def test_api_worker_and_probe_use_distinct_container_scoped_permissions(
         if key.startswith("worker-")
         for action in values
     )
-    assert any("permanentDelete/action" in action for action in roles["probe-lifecycle"])
-    definitions = one(compiled, "Microsoft.Authorization/roleDefinitions")
+    # Default D001 authority is preserved; the pilot opts into read-only evidence.
+    assert compiled["parameters"]["pilotDestinationPrivacy"]["defaultValue"] is False
+    assert "permanentDelete/action" in roles["probe-lifecycle"]
+    assert "if(parameters('pilotDestinationPrivacy')" in roles["probe-lifecycle"]
+    definitions = next(
+        item
+        for item in resources(compiled, "Microsoft.Authorization/roleDefinitions")
+        if item.get("copy", {}).get("name") == "storageRoles"
+    )
     assert definitions["properties"]["assignableScopes"] == ["[resourceGroup().id]"]
     assert "resourceGroup().id" in definitions["name"]
     assignments = resources(compiled, "Microsoft.Authorization/roleAssignments")
@@ -176,7 +183,13 @@ def test_transaction_dependency_is_minimal_private_and_passwordless(
     props = postgres["properties"]
     assert props["version"] == "17"
     assert props["highAvailability"] == {"mode": "Disabled"}
-    assert props["storage"] == {"storageSizeGB": 64, "autoGrow": "Disabled", "tier": "P6"}
+    assert compiled["parameters"]["postgresStorageGiB"]["defaultValue"] == 64
+    assert compiled["parameters"]["applicationDatabaseName"]["defaultValue"] == "opencanvas_objects"
+    assert props["storage"] == {
+        "storageSizeGB": "[parameters('postgresStorageGiB')]",
+        "autoGrow": "Disabled",
+        "tier": "[if(equals(parameters('postgresStorageGiB'), 32), 'P4', 'P6')]",
+    }
     assert props["authConfig"]["passwordAuth"] == "Disabled"
     assert props["authConfig"]["activeDirectoryAuth"] == "Enabled"
     assert props["network"]["publicNetworkAccess"] == "Disabled"

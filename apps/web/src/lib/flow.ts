@@ -1,11 +1,14 @@
 import { MarkerType, type Edge, type Node } from "@xyflow/react";
 
-import type { CanvasEdge, CanvasNode, Citation } from "./contracts";
+import type { CanvasEdge, CanvasNode, Citation, SecureUpload } from "./contracts";
 import { edgeKindDetails } from "./universe";
 
 export type CanvasNodeData = Record<string, unknown> & {
   node: CanvasNode;
   pending: boolean;
+  secureUploadRequired?: boolean;
+  secureUpload?: SecureUpload;
+  secureUploadRefreshFailed?: boolean;
 };
 
 export type CanvasFlowNode = Node<CanvasNodeData, "canvasCard" | "documentCard">;
