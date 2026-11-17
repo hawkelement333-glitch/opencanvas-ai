@@ -11,6 +11,7 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from infra.milestone_7_8.campaign import (
@@ -39,6 +40,8 @@ TARGET = f"rg-m78-{SUFFIX}-target"
 CAMPAIGN = f"m78-full-closure-{SUFFIX}"
 GENERATION = f"g1-{SUFFIX}00"
 MINUTE_REVIEW_SCHEMA = "m78-full-closure-regional-minute-v1"
+ALERT_REPAIR_REVIEW_SCHEMA = "m78-full-closure-alert-repair-v1"
+MINUTE_REVIEW_SCHEMAS = {MINUTE_REVIEW_SCHEMA, ALERT_REPAIR_REVIEW_SCHEMA}
 MINUTE_START_RULE = "first-whole-utc-minute-after-approval"
 OPERATIONS = (
     "preflight",
@@ -92,7 +95,7 @@ def window(approved_at: str, execution_start_at: str | None = None) -> dict[str,
 
 def approved_window(review: dict, approval: dict) -> dict[str, str]:
     execution_start_at = approval.get("executionStartAt")
-    if review["schema"] == MINUTE_REVIEW_SCHEMA:
+    if review["schema"] in MINUTE_REVIEW_SCHEMAS:
         if (
             review.get("executionStartRule") != MINUTE_START_RULE
             or not isinstance(execution_start_at, str)
@@ -141,7 +144,7 @@ def validate_review(package: Path, approval: dict) -> dict:
     review_path = package / "review-package.json"
     review = read(review_path)
     schema = review.get("schema")
-    if schema in {"m78-full-closure-regional-v1", MINUTE_REVIEW_SCHEMA}:
+    if schema in {"m78-full-closure-regional-v1", *MINUTE_REVIEW_SCHEMAS}:
         pricing = read(package / "regional-pricing.json")
         forecast = review.get("forecastUsd")
         region_valid = (
@@ -152,7 +155,7 @@ def validate_review(package: Path, approval: dict) -> dict:
             and review.get("redisRegion") == "eastus"
             and "regional-pricing.json" in review["files"]
             and (
-                schema != MINUTE_REVIEW_SCHEMA
+                schema not in MINUTE_REVIEW_SCHEMAS
                 or review.get("spendingApprovalReady") is True
             )
         )
@@ -161,13 +164,37 @@ def validate_review(package: Path, approval: dict) -> dict:
             schema == "m78-full-closure-replacement-v1"
             and review.get("forecastUsd") == 36.6423
         )
+    cumulative_valid = review.get("proposedCumulativeCeilingUsd") == 400.89
+    if schema == ALERT_REPAIR_REVIEW_SCHEMA:
+        reconciliation = read(package / "cost-reconciliation.json")
+        try:
+            reserve = Decimal(str(review["priorAttemptReserveUsd"]))
+            allowance = Decimal(str(review["successorExecutionAllowanceUsd"]))
+            combined = reserve + allowance
+            cumulative = Decimal("350.89") + combined
+            cumulative_valid = (
+                reserve.is_finite()
+                and allowance == Decimal("49.75")
+                and reserve > 0
+                and combined == Decimal(str(review["combinedCeilingUsd"]))
+                and cumulative == Decimal(str(review["proposedCumulativeCeilingUsd"]))
+                and combined - Decimal("50") == Decimal(str(review["netCeilingIncreaseProposedUsd"]))
+                and reserve == Decimal(reconciliation["priorReserveUsd"])
+                and allowance == Decimal(reconciliation["nextExecutionCeilingUsd"])
+                and cumulative == Decimal(reconciliation["cumulativeCeilingProposedUsd"])
+                and file_hash(package / "cost-reconciliation.json")
+                == review["costReconciliationSha256"]
+                and "cost-reconciliation.json" in review["files"]
+            )
+        except (InvalidOperation, KeyError, TypeError, ValueError):
+            cumulative_valid = False
     if (
         approval.get("approved") is not True
         or approval.get("reviewPackageSha256") != file_hash(review_path)
         or approval.get("sourceHead") != review["sourceCommit"]
         or not region_valid
         or review.get("incrementalCeilingUsd") != 50
-        or review.get("proposedCumulativeCeilingUsd") != 400.89
+        or not cumulative_valid
         or any(
             file_hash(package / name) != sha for name, sha in review["files"].items()
         )
@@ -404,7 +431,7 @@ def materialize(
                 "offline rehearsal requires the exact retained controller"
             )
         start = parse_utc(controller.controller_authorized_until_utc) - timedelta(hours=11)
-        if review["schema"] == MINUTE_REVIEW_SCHEMA:
+        if review["schema"] in MINUTE_REVIEW_SCHEMAS:
             start = start.replace(second=0, microsecond=0)
             values = window(utc(start - timedelta(seconds=1)), utc(start))
         else:
@@ -448,6 +475,11 @@ def materialize(
         bindingName=binding_name(deadline),
     )
     config_model = CampaignConfig.from_document(config, allow_expired=simulation)
+    if review["schema"] == ALERT_REPAIR_REVIEW_SCHEMA and (
+        Decimal(config_model.conservative_estimate_usd)
+        > Decimal(str(review["successorExecutionAllowanceUsd"]))
+    ):
+        raise CampaignError("successor estimate exceeds its reconciled remaining allowance")
     if config_model.target_region != review.get("targetRegion", "eastus"):
         raise CampaignError("campaign region differs from the sealed review")
     initial = read(template / "ledger.json")

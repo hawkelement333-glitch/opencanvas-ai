@@ -7,8 +7,12 @@ PostgreSQL/object/Redis campaigns. Pilot controlled drafts and 900/20 scanning
 are explicitly approved. The [whole-minute successor](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#whole-minute-successor-native-execution-and-terminal-cleanup)
 passed native schedule/binding admission and the separately approved vault
 correction. Two Azure Monitor rules failed with unknown function percentileif.
-New proof stopped, all 48 cleanup counters are zero, and the controller is
-preserved. Milestone 7.8 remains incomplete and billing is unsettled.
+The [local percentile repair](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#percentile-alert-repair-and-successor-proposal)
+now passes semantic analysis while preserving its catalog criteria. Managed
+rule creation and firing/recovery remain unproved. The predecessor's 48
+cleanup counters are zero and the controller is preserved. The successor
+requires separate execution and spending approval. Milestone 7.8 remains
+incomplete and billing is unsettled.
 
 Date: 2026-08-27
 

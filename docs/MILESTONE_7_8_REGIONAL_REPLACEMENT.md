@@ -317,3 +317,68 @@ private evidence remain outside Git. The underlying operator ledger is
 cleanup-disarmed. Milestone 7.8 remains incomplete, with zero new managed
 assertions accepted by this attempt. PostgreSQL, M78-D-001 and M78-D-002
 remain closed.
+
+## Percentile alert repair and successor proposal
+
+The local compiler now uses the supported percentile aggregate with an iff
+expression that passes through only the rule's signal values and supplies
+real(null) for other signals. The API rule selects mobius.api.duration.
+The database rule selects mobius.database.pool.acquire while retaining its
+independent sumif of mobius.database.timeouts. The exact old-to-new catalog
+comparison permits only these two substitutions in the rule query and its
+observation query. The other 14 rules and every workbook retain their content.
+
+The five-minute populations, sample deduplication, source filters and signal
+presence checks are preserved. API latency still fires after two windows at
+or above 1,000 ms and recovers after two below 750 ms, holding on missing data.
+Database saturation still fires after two windows at or above 500 ms or with
+a positive timeout count and recovers after three windows below 250 ms with
+zero timeouts. Its missing-data breach policy and five-minute evaluation
+frequency are preserved.
+
+Microsoft's Kusto.Language 12.4.1 parser and semantic analyzer reproduced
+the unknown-function failure for both retained queries. Both corrected
+complete queries have zero diagnostics against the deployed table schemas.
+This is local language validation. Native rule creation, alert firing and
+recovery remain unproved until managed execution. The next package keeps
+skipQueryValidation false and requires native admission of the two rules
+before starting application proof. The prior Provider validation alone did
+not establish successful query creation and will not be treated as such.
+[Microsoft Kusto language service](https://github.com/microsoft/Kusto-Query-Language)
+[Percentile aggregate](https://learn.microsoft.com/en-us/kusto/query/percentiles-aggregation-function?view=azure-data-explorer)
+
+The November 17 scoped ActualCost read returned no posted rows for the exact
+campaign group and shared Automation account, without another page. Billing
+remains unsettled. The recorded campaign lifetime from 15:55:00 to 17:04:29 UTC
+is covered by a two-hour occupancy allowance. A conservative retained-rate
+estimate is $8.9280, including daily ACR and DNS allowances, the existing
+maximum diagnostic/scan/transfer allowances, and control-plane reserve.
+There were no application replicas, application job executions, restore copy, model calls
+or test emails to charge from this attempt. The proposal rounds the exposure
+reserve to $9. This reserve is an estimate and must be reconciled against
+later posted usage.
+
+The successor forecast remains $39.4128, or $49.2660 with 25% contingency.
+Propose a $49.75 ceiling for successor execution plus the $9 prior-cost reserve.
+The combined allowance would become $58.75 and the cumulative ceiling would
+be $409.64. This requires an explicit $8.75 increase from the existing $50
+combined allowance. Local preparation authorizes none of that spending.
+The package binds the cost calculation and rejects inconsistent reserve,
+successor allowance, net increase or cumulative total.
+
+The scope remains the temporary Canada Central campaign with East US private
+HA Redis, existing signed API/frontend images, selected VPN/DNS and temporary
+Entra access. The approved vault property correction is included. The
+first-whole-UTC-minute-after-approval rule and +2/+10/+11/+12 deadlines remain.
+The private runtime uses the same successful short directory depth, with
+canonical source staging exercised before requesting execution approval.
+Successful historical regional/component evidence is credited. Native
+allocation, route, two alert rules, application observations and 48-counter
+cleanup are still required during a future separately approved execution.
+PostgreSQL, M78-D-001 and M78-D-002 remain closed.
+
+The new temporary Gmail app password is named OpenCanvas M78 alert successor.
+It is bound only in protected files, checked for format and difference from
+the revoked predecessor, and awaits actual provider acceptance. Its cleanup
+requires owner revocation and absence confirmation. The old packages and
+terminal receipts remain immutable.

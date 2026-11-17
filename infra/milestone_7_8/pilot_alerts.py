@@ -34,14 +34,14 @@ def sample_query(release: str, deployment: str) -> str:
 # conditions retain the existing catalog. Outbox is disabled for this pilot.
 SPECS = {
     "api-latency-v1": (
-        "V=percentileif(V,95,Name=='mobius.api.duration')",
+        "V=percentile(iff(Name=='mobius.api.duration',V,real(null)),95)",
         "V>=1000",
         "V<750",
         2,
         2,
     ),
     "database-saturation-v1": (
-        "V=percentileif(V,95,Name=='mobius.database.pool.acquire'), "
+        "V=percentile(iff(Name=='mobius.database.pool.acquire',V,real(null)),95), "
         "T=sumif(V,Name=='mobius.database.timeouts')",
         "V>=500 or T>0",
         "V<250 and T==0",

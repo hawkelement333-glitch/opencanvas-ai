@@ -110,3 +110,89 @@ def test_catalog_boundaries_reject_query_injection_and_missing_ceiling() -> None
     for release, ceiling in [('bad" | take 1', 40), ("rc-123", 0), ("rc-123", float("inf"))]:
         with pytest.raises(ValueError):
             compile_catalog(release=release, deployment="m78-0123456789", ceiling=ceiling)
+
+
+@pytest.mark.parametrize(
+    ("alert_id", "signal", "breach", "recovery", "bad_windows", "good_windows", "missing"),
+    [
+        ("api-latency-v1", "mobius.api.duration", "V>=1000", "V<750", 2, 2, "false"),
+        (
+            "database-saturation-v1", "mobius.database.pool.acquire",
+            "V>=500 or T>0", "V<250 and T==0", 2, 3, "true",
+        ),
+    ],
+)
+def test_percentile_rules_keep_population_missing_data_and_hysteresis(
+    alert_id, signal, breach, recovery, bad_windows, good_windows, missing,
+) -> None:
+    catalog = compile_catalog(
+        release="rc-123", deployment="m78-0123456789", ceiling=40, full_closure=True
+    )
+    rule = next(row for row in catalog["alerts"] if row["id"] == alert_id)
+    query = rule["query"]
+    assert f"V=percentile(iff(Name=='{signal}',V,real(null)),95)" in query
+    assert "percentileif" not in query
+    assert "bin_at(TimeGenerated,5m,End)" in query
+    assert f"Breach=iff(Missing,{missing},coalesce({breach},false))" in query
+    assert f"Healthy=iff(Missing,false,coalesce({recovery},false))" in query
+    assert f"s.Bad+1>={bad_windows}" in query
+    assert f"s.Good+1>={good_windows}" in query
+    assert rule["evaluationFrequency"] == "PT5M"
+    assert rule["evaluationWindowMinutes"] == 5
+    assert rule["autoMitigate"] is True
+    if alert_id == "database-saturation-v1":
+        assert "T=sumif(V,Name=='mobius.database.timeouts')" in query
+        assert "Name in ('mobius.database.pool.acquire','mobius.database.timeouts')" in query
+    else:
+        assert "Presence=countif(Name in ('mobius.api.duration'))" in query
+
+
+@pytest.mark.parametrize("invalid", ["reserve", "allowance", "cumulative", "increase"])
+def test_reconciled_alert_successor_ceiling_is_sealed(tmp_path, invalid) -> None:
+    from infra.milestone_7_8.campaign import CampaignError
+    from infra.milestone_7_8.pilot_cleanup import (
+        ALERT_REPAIR_REVIEW_SCHEMA,
+        MINUTE_START_RULE,
+        validate_review,
+    )
+
+    write_new(tmp_path / "regional-pricing.json", {"forecastUsd": 39.4128})
+    reconciliation = {
+        "priorReserveUsd": "9",
+        "nextExecutionCeilingUsd": "49.75",
+        "cumulativeCeilingProposedUsd": "409.64",
+    }
+    write_new(tmp_path / "cost-reconciliation.json", reconciliation)
+    review = {
+        "schema": ALERT_REPAIR_REVIEW_SCHEMA, "sourceCommit": "a" * 40,
+        "forecastUsd": 39.4128, "targetRegion": "canadacentral", "redisRegion": "eastus",
+        "spendingApprovalReady": True, "incrementalCeilingUsd": 50,
+        "priorAttemptReserveUsd": 9, "successorExecutionAllowanceUsd": 49.75,
+        "combinedCeilingUsd": 58.75, "proposedCumulativeCeilingUsd": 409.64,
+        "netCeilingIncreaseProposedUsd": 8.75,
+        "costReconciliationSha256": digest(tmp_path / "cost-reconciliation.json"),
+        "executionStartRule": MINUTE_START_RULE,
+        "files": {
+            name: digest(tmp_path / name)
+            for name in ("regional-pricing.json", "cost-reconciliation.json")
+        },
+    }
+    write_new(tmp_path / "review-package.json", review)
+    approval = {
+        "approved": True, "sourceHead": "a" * 40,
+        "approvedAt": "2030-01-01T00:00:37Z",
+        "executionStartAt": "2030-01-01T00:01:00Z",
+        "reviewPackageSha256": digest(tmp_path / "review-package.json"),
+    }
+    assert validate_review(tmp_path, approval) == review
+    field = {
+        "reserve": "priorAttemptReserveUsd",
+        "allowance": "successorExecutionAllowanceUsd",
+        "cumulative": "proposedCumulativeCeilingUsd",
+        "increase": "netCeilingIncreaseProposedUsd",
+    }[invalid]
+    review[field] += 1
+    (tmp_path / "review-package.json").write_text(json.dumps(review), encoding="utf-8")
+    approval["reviewPackageSha256"] = digest(tmp_path / "review-package.json")
+    with pytest.raises(CampaignError, match="exact replacement review"):
+        validate_review(tmp_path, approval)
