@@ -99,3 +99,60 @@ EXECUTION.md after prerequisites and replacement approval. The bound review
 reuses the approved signatures, API and frontend digests, protected provider
 inputs, transport and acceptance validators. No image build or managed
 acceptance ran during regional preparation.
+
+## Approved regional attempt stopped at cleanup admission
+
+The user approved the provider-admitted package with SHA-256
+`c8eb76c719a4c686e1ef8d2f4caa95e83659d8003ed53631b79613a3ae59c566`
+at source `885abca6cbf45f327982a8ff54de11c7b4c6a290`. The approval clock was
+2026-11-17 15:04:37 UTC. The resulting deadlines were 17:04:37 UTC for
+readiness, 2026-11-18 01:04:37 UTC to stop proof and schedule cleanup,
+02:04:37 UTC for Automation expiry, and 03:04:37 UTC for operator cleanup.
+The $39.4128 forecast, $50 replacement ceiling and $400.89 cumulative ceiling
+remain recorded. Billing is unsettled.
+
+All package hashes, the five retained endorsements, the provider registration
+and validation receipts, controller renewal, live capacity and cost admission
+passed. The first target creation command stopped in the local source-staging
+check when Windows could not extract a generated path at 260 characters.
+Native readback proved the target group absent. A shorter protected runtime
+passed the same check and retained the admitted ledger, authority and
+deadlines. The target group and cleanup grants were then created.
+
+The actual `cleanup-arm` command stopped with
+`cleanup schedule readback drifted: startTime`. The approved schedule start
+was 2026-11-18 01:04:37 UTC. Azure returned 01:04:00 UTC for both
+`startTime` and `nextRun`. The exact job-schedule binding was absent. The
+failure-cleanup runbook job
+`8b05068d-fa5b-402e-8e16-e9d1ce5b0f00` reached Failed with
+`cleanup-binding-parameter-set-mismatch:parameters-shape`. No application,
+data service, tenant object, registry publication, provider attempt or email
+was dispatched. The ledger recorded no billable start and no managed
+assertion was accepted.
+
+After verifying the runbook job was terminal and the target inventory was
+empty, the operator's scoped direct failure-cleanup path removed the target
+group. Cleanup wait and disarm passed. Native readback found no target
+resources, grants, schedule or binding and verified the retained controller's
+identity, Reader grant and runbook. The exact Canada Central deleted-vault
+readback returned absence. The vault was never created, so there was nothing
+to purge. The Gmail account owner removed the campaign app password and
+confirmed its absence. All 48 cleanup counters are zero. The broad campaign
+terminal receipt records the full evidence. The underlying operator ledger is
+at cleanup-disarmed.
+
+Protected evidence is under
+`.runtime/milestone_7_8/full-closure-prerequisites/run-c8eb76c7/`.
+The terminal receipt SHA-256 is
+`5f41c4e47ec735f319d585a7875abc2be61663443959b54a2966dd8dcbff6384`.
+Schedule and failed-job native receipt hashes are
+`1c149c99ca6ca243a149422f49a97cf81dac3da50a1a4f71ee95b7386006b89a` and
+`cc795fe874f7dedf7a1fbadd742bef7eee8f7997c6b15edee0f9bdfaaf062d9c`.
+
+The attempt is terminal and Milestone 7.8 remains open. A later package needs
+an explicitly approved whole-minute clock or an explicitly approved separate
+provider schedule time, validated against native schedule behavior before
+workload provisioning. The pre-binding failure path must also select the
+scoped direct cleanup path when the exact binding is absent. Retain the
+signed images and valid regional admission evidence. PostgreSQL, M78-D-001
+and M78-D-002 remain closed.

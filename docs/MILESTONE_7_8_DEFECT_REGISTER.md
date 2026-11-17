@@ -4,9 +4,9 @@ Current pilot follow-up: [local preparation and corrected candidate](MILESTONE_7
 pass their stated local checks. The secure website/worker handoff and native
 retrieval-head timestamp corrections are release-integration fixes, not reopened
 PostgreSQL/object/Redis campaigns. Pilot controlled drafts and 900/20 scanning
-are explicitly approved. The [managed package](MILESTONE_7_8_PILOT_MANAGED_VALIDATION_PACKAGE.md)
-awaits the listed external inputs and separate spending authority; 7.8 remains
-incomplete and billing unsettled.
+are explicitly approved. The [approved regional attempt](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#approved-regional-attempt-stopped-at-cleanup-admission)
+stopped at cleanup scheduling before any workload dispatch. All 48 cleanup
+counters are zero. Milestone 7.8 remains incomplete and billing is unsettled.
 
 Date: 2026-08-27
 
