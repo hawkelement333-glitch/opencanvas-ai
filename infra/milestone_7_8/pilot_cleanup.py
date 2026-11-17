@@ -38,6 +38,8 @@ SUFFIX = "a712b8c940"
 TARGET = f"rg-m78-{SUFFIX}-target"
 CAMPAIGN = f"m78-full-closure-{SUFFIX}"
 GENERATION = f"g1-{SUFFIX}00"
+MINUTE_REVIEW_SCHEMA = "m78-full-closure-regional-minute-v1"
+MINUTE_START_RULE = "first-whole-utc-minute-after-approval"
 OPERATIONS = (
     "preflight",
     "correlate",
@@ -65,20 +67,40 @@ def file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def window(approved_at: str) -> dict[str, str]:
-    start = parse_utc(approved_at)
-    if start.microsecond:
+def window(approved_at: str, execution_start_at: str | None = None) -> dict[str, str]:
+    receipt = parse_utc(approved_at)
+    start = receipt
+    values = {"approvedAt": utc(receipt)}
+    if execution_start_at is not None:
+        start = receipt.replace(second=0, microsecond=0) + timedelta(minutes=1)
+        if execution_start_at != utc(start):
+            raise CampaignError("execution start must be the first whole UTC minute after approval")
+        values["executionStartAt"] = execution_start_at
+    elif receipt.microsecond:
         raise CampaignError("approval timestamp must resolve to whole seconds")
-    return {
+    values.update({
         key: utc(start + timedelta(hours=hours))
         for key, hours in (
-            ("approvedAt", 0),
             ("readyBy", 2),
             ("stopProofBy", 10),
             ("automationBindingExpiresAt", 11),
             ("operatorCleanupExpiresAt", 12),
         )
-    }
+    })
+    return values
+
+
+def approved_window(review: dict, approval: dict) -> dict[str, str]:
+    execution_start_at = approval.get("executionStartAt")
+    if review["schema"] == MINUTE_REVIEW_SCHEMA:
+        if (
+            review.get("executionStartRule") != MINUTE_START_RULE
+            or not isinstance(execution_start_at, str)
+        ):
+            raise CampaignError("explicit whole-minute execution start required")
+    elif execution_start_at is not None:
+        raise CampaignError("unexpected execution start for historical review")
+    return window(approval["approvedAt"], execution_start_at)
 
 
 def binding_name(deadline: str) -> str:
@@ -92,7 +114,7 @@ def validate_window(runtime_path: Path, runtime: dict, config: CampaignConfig) -
     if path != runtime_path.resolve().with_name("window.json"):
         raise CampaignError("pilot cleanup window escaped its bound runtime")
     value = read(path)
-    expected = window(value["approvedAt"])
+    expected = window(value["approvedAt"], value.get("executionStartAt"))
     if any(value.get(k) != v for k, v in expected.items()):
         raise CampaignError("pilot cleanup deadlines must be +2/+10/+11/+12")
     if (
@@ -119,7 +141,7 @@ def validate_review(package: Path, approval: dict) -> dict:
     review_path = package / "review-package.json"
     review = read(review_path)
     schema = review.get("schema")
-    if schema == "m78-full-closure-regional-v1":
+    if schema in {"m78-full-closure-regional-v1", MINUTE_REVIEW_SCHEMA}:
         pricing = read(package / "regional-pricing.json")
         forecast = review.get("forecastUsd")
         region_valid = (
@@ -129,6 +151,10 @@ def validate_review(package: Path, approval: dict) -> dict:
             and review.get("targetRegion") == "canadacentral"
             and review.get("redisRegion") == "eastus"
             and "regional-pricing.json" in review["files"]
+            and (
+                schema != MINUTE_REVIEW_SCHEMA
+                or review.get("spendingApprovalReady") is True
+            )
         )
     else:
         region_valid = (
@@ -147,6 +173,7 @@ def validate_review(package: Path, approval: dict) -> dict:
         )
     ):
         raise CampaignError("exact replacement review approval required")
+    approved_window(review, approval)
     return review
 
 
@@ -154,9 +181,9 @@ def prepare_renewal(package: Path, approval: dict, output: Path) -> None:
     from infra.milestone_7_8.controller_renewal import build_plan
 
     review = validate_review(package, approval)
-    times = window(approval["approvedAt"])
+    times = approved_window(review, approval)
     if (
-        not parse_utc(times["approvedAt"])
+        not parse_utc(times.get("executionStartAt", times["approvedAt"]))
         <= datetime.now(UTC)
         < parse_utc(times["readyBy"])
     ):
@@ -206,7 +233,7 @@ def bind_renewal_write(package: Path, approval: dict, output: Path) -> None:
 
     review = validate_review(package, approval)
     plan = read(output / "controller-renewal-plan.json")
-    times = window(approval["approvedAt"])
+    times = approved_window(review, approval)
     if (
         plan["renewedConfig"]["sourceHead"] != review["sourceCommit"]
         or plan["renewedDeadlineUtc"] != times["automationBindingExpiresAt"]
@@ -233,7 +260,7 @@ def bind_renewal_reconcile(package: Path, approval: dict, output: Path) -> None:
     )
 
     review = validate_review(package, approval)
-    times = window(approval["approvedAt"])
+    times = approved_window(review, approval)
     plan = read(output / "controller-renewal-plan.json")
     if (
         plan["renewedConfig"]["sourceHead"] != review["sourceCommit"]
@@ -268,6 +295,7 @@ def validate_live(runtime_path: Path, runtime: dict, config: CampaignConfig) -> 
     approval = read(directory / "replacement-approval.json")
     package = Path(value["packageDirectory"]).resolve()
     review = validate_review(package, approval)
+    times = approved_window(review, approval)
     from infra.milestone_7_8.controller import local_source_binding
 
     source, script_hash = local_source_binding()
@@ -276,10 +304,10 @@ def validate_live(runtime_path: Path, runtime: dict, config: CampaignConfig) -> 
         or config.target_region != review.get("targetRegion", "eastus")
         or runtime["sourceHead"] != source
         or runtime["cleanupScriptSha256"] != script_hash
-        or window(approval["approvedAt"])["approvedAt"] != value["approvedAt"]
+        or any(value.get(key) != expected for key, expected in times.items())
         or value["cleanupExecutorObjectId"]
         != read(package / "cleanup-plan.json")["executorObjectId"]
-        or datetime.now(UTC) < parse_utc(value["approvedAt"])
+        or datetime.now(UTC) < parse_utc(times.get("executionStartAt", times["approvedAt"]))
         or datetime.now(UTC) >= parse_utc(value["operatorCleanupExpiresAt"])
     ):
         raise CampaignError("pilot cleanup approval, source, or executor differs")
@@ -305,9 +333,14 @@ def validate_operator_invocation(
         raise CampaignError("pilot cleanup namespace requires its exact ledger.json")
     if execute:
         from infra.milestone_7_8.campaign import ORDER
-        from infra.milestone_7_8.operator import OPERATION_PHASE
+        from infra.milestone_7_8.operator import OPERATION_PHASE, pilot_cleanup_journal
 
         value = validate_live(runtime_path, runtime, config)
+        journal = pilot_cleanup_journal(runtime)
+        failure_path = journal / "failure.json" if journal is not None else None
+        failure = read(failure_path) if failure_path is not None and failure_path.is_file() else None
+        if failure is not None and operation not in {"cleanup", "cleanup-wait", "cleanup-disarm"}:
+            raise CampaignError("campaign admission failed; reconcile cleanup before any further operation")
         if operation in {"cleanup-wait", "cleanup-disarm"}:
             cutoff = "operatorCleanupExpiresAt"
         elif operation == "cleanup":
@@ -325,6 +358,11 @@ def validate_operator_invocation(
                 not ORDER.index(Phase.SCOPE_CREATED)
                 <= ORDER.index(current)
                 < ORDER.index(Phase.CLEANING)
+                and not (
+                    current is Phase.COST_GATED
+                    and failure is not None
+                    and failure.get("operation") == "scope-create"
+                )
             ):
                 raise CampaignError(
                     "reconcile the campaign phase before dispatching cleanup"
@@ -365,23 +403,25 @@ def materialize(
             raise CampaignError(
                 "offline rehearsal requires the exact retained controller"
             )
-        start = utc(
-            parse_utc(controller.controller_authorized_until_utc) - timedelta(hours=11)
-        )
+        start = parse_utc(controller.controller_authorized_until_utc) - timedelta(hours=11)
+        if review["schema"] == MINUTE_REVIEW_SCHEMA:
+            start = start.replace(second=0, microsecond=0)
+            values = window(utc(start - timedelta(seconds=1)), utc(start))
+        else:
+            values = window(utc(start))
     else:
         approval = read(approval_file)
         review = validate_review(package, approval)
-        start = approval["approvedAt"]
+        values = approved_window(review, approval)
         if (
             evidence.get("renewal", {}).get("priorAuthorityEvidence") != prior
             or controller.source_head != review["sourceCommit"]
-            or datetime.now(UTC) < parse_utc(start)
-            or datetime.now(UTC) >= parse_utc(window(start)["readyBy"])
+            or datetime.now(UTC) < parse_utc(values.get("executionStartAt", values["approvedAt"]))
+            or datetime.now(UTC) >= parse_utc(values["readyBy"])
         ):
             raise CampaignError(
                 "fresh deadline renewal against the bound controller required"
             )
-    values = window(start)
     if parse_utc(controller.controller_authorized_until_utc) < parse_utc(
         values["automationBindingExpiresAt"]
     ):
@@ -522,7 +562,7 @@ def materialize(
                 {
                     **probe,
                     "approved": True,
-                    "approvedAt": values["approvedAt"],
+                    "approvedAt": values.get("executionStartAt", values["approvedAt"]),
                 },
             )
 

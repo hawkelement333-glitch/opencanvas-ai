@@ -2236,6 +2236,93 @@ class _OrderedCleanupRunner:
         return self.results[index]
 
 
+def test_regional_cleanup_uses_explicit_minute_start_for_all_deadlines() -> None:
+    from infra.milestone_7_8.pilot_cleanup import window
+
+    receipt = "2026-11-17T15:04:37Z"
+    assert window(receipt, "2026-11-17T15:05:00Z") == {
+        "approvedAt": receipt,
+        "executionStartAt": "2026-11-17T15:05:00Z",
+        "readyBy": "2026-11-17T17:05:00Z",
+        "stopProofBy": "2026-11-18T01:05:00Z",
+        "automationBindingExpiresAt": "2026-11-18T02:05:00Z",
+        "operatorCleanupExpiresAt": "2026-11-18T03:05:00Z",
+    }
+    for start in ("2026-11-17T15:04:00Z", receipt, "2026-11-17T15:06:00Z"):
+        with pytest.raises(CampaignError, match="first whole UTC minute"):
+            window(receipt, start)
+    assert window(receipt)["stopProofBy"] == "2026-11-18T01:04:37Z"
+
+
+@pytest.mark.parametrize("schedule_exists", [False, True])
+def test_regional_prebinding_failure_dispatches_scoped_direct_cleanup(
+    tmp_path: Path, schedule_exists: bool, capsys: pytest.CaptureFixture[str]
+) -> None:
+    runtime = _runtime()
+    runtime["pilotCleanupWindowFile"] = str(tmp_path / "window.json")
+    config = _config(subscription_correlation=campaign_operator.sanitize(
+        runtime["subscriptionId"], domain="subscription"
+    ))
+    rows = _cleanup_arm_success_results(config, runtime, existing_schedule=schedule_exists)
+    group = {
+        "name": config.target_resource_group,
+        "properties": {"provisioningState": "Succeeded"},
+        "tags": {
+            "mobius.milestone": "7.8",
+            "mobius.campaign": config.campaign_id,
+            "mobius.generation": config.generation_id,
+            "mobius.cleanup-deadline-utc": config.cleanup_deadline_utc,
+            "mobius.cost-ceiling-cents": str(config.cost_ceiling_cents),
+        },
+    }
+    runner = _OrderedCleanupRunner([
+        *rows[6:8],
+        _command_result({"id": runtime["subscriptionId"]}),
+        _command_result(True), _command_result(group),
+        _command_result({}), _command_result(False),
+    ])
+    campaign_operator.start_failure_cleanup(runner, config, runtime)  # type: ignore[arg-type]
+    deletes = [command for command in runner.commands if command[:3] == ("az", "group", "delete")]
+    assert len(deletes) == 1 and config.target_resource_group in deletes[0]
+    assert not any("runbook" in command for command in runner.commands)
+    assert (tmp_path / "cleanup-journal/direct-delete-intent.json").is_file()
+    assert json.loads(capsys.readouterr().err)["status"] == "direct-cleanup-started"
+
+
+def test_regional_failure_preserves_bound_runbook(tmp_path: Path) -> None:
+    config, runtime = _config(), _runtime()
+    runtime["pilotCleanupWindowFile"] = str(tmp_path / "window.json")
+    rows = _cleanup_arm_success_results(
+        config, runtime, existing_schedule=True, existing_binding=True,
+    )
+    runner = _OrderedCleanupRunner([*rows[6:8], rows[12], _command_result({"name": "job"})])
+    campaign_operator.start_failure_cleanup(runner, config, runtime)  # type: ignore[arg-type]
+    assert runner.commands[-1] == (
+        *command_plan("cleanup", config, runtime)[0],
+        "--subscription", runtime["subscriptionId"],
+    )
+    assert (tmp_path / "cleanup-journal/runbook-response.json").is_file()
+
+
+@pytest.mark.parametrize("uncertain", ["read", "pagination", "schedule", "binding"])
+def test_regional_unresolved_cleanup_does_not_dispatch(
+    tmp_path: Path, uncertain: str,
+) -> None:
+    config, runtime = _config(), _runtime()
+    runtime["pilotCleanupWindowFile"] = str(tmp_path / "window.json")
+    rows = _cleanup_arm_success_results(config, runtime)
+    if uncertain in {"schedule", "binding"}:
+        journal = tmp_path / "cleanup-journal"
+        journal.mkdir()
+        (journal / f"{uncertain}-intent.json").write_text("{}", encoding="utf-8")
+    if uncertain == "pagination":
+        rows[7] = _command_result({"value": [], "nextLink": "pending"})
+    runner = _OrderedCleanupRunner(rows[6:8], fail_at=1 if uncertain == "read" else None)
+    with pytest.raises(CampaignError):
+        campaign_operator.start_failure_cleanup(runner, config, runtime)  # type: ignore[arg-type]
+    assert runner.commands == list(command_plan("cleanup-arm", config, runtime)[6:8])
+
+
 def _controller_baseline_results(
     config: CampaignConfig,
     runtime: dict[str, str],

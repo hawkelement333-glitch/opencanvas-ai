@@ -4113,6 +4113,35 @@ def validate_cleanup_bindings(
         )
 
 
+def pilot_cleanup_journal(runtime: dict[str, str]) -> Path | None:
+    window_file = runtime.get("pilotCleanupWindowFile")
+    return Path(window_file).parent / "cleanup-journal" if window_file else None
+
+
+def _record_cleanup_intent(journal: Path, operation: str, request: dict) -> None:
+    journal.mkdir(exist_ok=True)
+    try:
+        _durable_record(journal / f"{operation}-intent.json", request)
+    except FileExistsError as exc:
+        raise CampaignError(f"previous cleanup {operation} requires native reconciliation") from exc
+
+
+def _journal_cleanup_write(
+    runner: CommandRunner,
+    command: tuple[str, ...],
+    journal: Path | None,
+    operation: str,
+) -> dict[str, object]:
+    if journal is None:
+        return _run_required(runner, command)
+    _record_cleanup_intent(journal, operation, {"command": list(command)})
+    result = runner.run(command)
+    _durable_record(journal / f"{operation}-response.json", result)
+    if result.get("exitCode") != 0:
+        raise CampaignError(f"cleanup {operation} write outcome requires reconciliation")
+    return result
+
+
 def execute_cleanup_arm_commands(
     runner: SubprocessRunner,
     commands: tuple[tuple[str, ...], ...],
@@ -4121,6 +4150,7 @@ def execute_cleanup_arm_commands(
 ) -> tuple[list[dict[str, object]], str]:
     if len(commands) != 13:
         raise CampaignError("cleanup arming command sequence is incomplete")
+    journal = pilot_cleanup_journal(runtime)
     results = [_run_required(runner, command) for command in commands[:8]]
     validate_cleanup_foundation(results[:4], config, runtime)
     validate_published_runbook(
@@ -4148,7 +4178,7 @@ def execute_cleanup_arm_commands(
         }
     else:
         if existing_schedule is None:
-            results.append(_run_required(runner, commands[8]))
+            results.append(_journal_cleanup_write(runner, commands[8], journal, "schedule"))
             schedule_result = _run_required(runner, commands[9])
             results.append(schedule_result)
         else:
@@ -4160,7 +4190,7 @@ def execute_cleanup_arm_commands(
         validate_cleanup_schedule(
             _json_result(schedule_result), config=config, runtime=runtime
         )
-        results.append(_run_required(runner, commands[10]))
+        results.append(_journal_cleanup_write(runner, commands[10], journal, "binding"))
         binding_result = _run_required(runner, commands[11])
         results.append(binding_result)
     detail_result = _run_required(runner, commands[12])
@@ -4978,10 +5008,79 @@ def verify_zero_residue(
     return observation.counters
 
 
+def _start_pilot_cleanup(
+    runner: SubprocessRunner,
+    config: CampaignConfig,
+    runtime: dict[str, str],
+    journal: Path,
+    before_dispatch: Callable[[], None] | None,
+) -> None:
+    """Require authoritative state before choosing a binding-dependent operation."""
+    arm = command_plan("cleanup-arm", config, runtime)
+    schedules = _collection(
+        _json_result(_run_required(runner, arm[6])), label="cleanup schedule"
+    )
+    bindings = _collection(
+        _json_result(_run_required(runner, arm[7])), label="cleanup binding"
+    )
+    if len(schedules) > 1 or (
+        schedules and (
+            not isinstance(schedules[0], dict)
+            or schedules[0].get("name") != runtime["scheduleName"]
+        )
+    ):
+        raise CampaignError("cleanup schedule ownership is unresolved")
+    if (
+        (journal / "schedule-intent.json").exists() and not schedules
+        or (journal / "binding-intent.json").exists() and not bindings
+    ):
+        raise CampaignError("cleanup arming write outcome requires native reconciliation")
+    if bindings:
+        if not schedules or (journal / "direct-delete-intent.json").exists():
+            raise CampaignError("cleanup binding state conflicts with current cleanup")
+        validate_cleanup_schedule(schedules[0], config=config, runtime=runtime)
+        detail = _json_result(_run_required(runner, arm[12]))
+        if not isinstance(detail, dict):
+            raise CampaignError("exact cleanup binding readback is missing")
+        validate_cleanup_bindings(
+            {"value": bindings}, config=config, runtime=runtime, exact_binding=detail
+        )
+        if before_dispatch is not None:
+            before_dispatch()
+        (command,) = command_plan("cleanup", config, runtime)
+        _journal_cleanup_write(
+            runner, (*command, "--subscription", runtime["subscriptionId"]), journal, "runbook"
+        )
+        return
+    if (journal / "runbook-intent.json").exists():
+        raise CampaignError("previous cleanup job outcome requires native reconciliation")
+
+    def record_direct_delete() -> None:
+        if before_dispatch is not None:
+            before_dispatch()
+        _record_cleanup_intent(journal, "direct-delete", {"target": config.target_resource_group})
+
+    start_direct_cleanup(
+        runner,
+        config,
+        runtime,
+        record_direct_delete,
+        target_write_unresolved=(
+            (journal / "scope-intent.json").exists()
+            and not (journal / "scope-observed.json").exists()
+            and not (journal / "direct-delete-intent.json").exists()
+        ),
+    )
+
+
 def start_failure_cleanup(
     runner: SubprocessRunner, config: CampaignConfig, runtime: dict[str, str],
     before_dispatch: Callable[[], None] | None = None,
 ) -> None:
+    journal = pilot_cleanup_journal(runtime)
+    if journal is not None:
+        _start_pilot_cleanup(runner, config, runtime, journal, before_dispatch)
+        return
     for command in command_plan("cleanup", config, runtime):
         if before_dispatch is not None:
             before_dispatch()
@@ -4997,6 +5096,8 @@ def start_failure_cleanup(
 def start_direct_cleanup(
     runner: SubprocessRunner, config: CampaignConfig, runtime: dict[str, str],
     before_dispatch: Callable[[], None] | None = None,
+    *,
+    target_write_unresolved: bool = False,
 ) -> None:
     account = _json_result(
         _run_required(runner, ("az", "account", "show", "--output", "json"))
@@ -5008,9 +5109,16 @@ def start_direct_cleanup(
         != config.subscription_correlation
     ):
         raise CampaignError("direct cleanup subscription correlation differs")
-    exists_command = ("az", "group", "exists", "--name", config.target_resource_group)
+    subscription = (
+        ("--subscription", runtime["subscriptionId"])
+        if pilot_cleanup_journal(runtime) is not None
+        else ()
+    )
+    exists_command = ("az", "group", "exists", "--name", config.target_resource_group, *subscription)
     exists = _json_result(_run_required(runner, exists_command))
     if exists is False:
+        if target_write_unresolved:
+            raise CampaignError("target creation outcome requires native reconciliation")
         return
     if exists is not True:
         raise CampaignError("direct cleanup target existence is malformed")
@@ -5023,6 +5131,7 @@ def start_direct_cleanup(
                 "show",
                 "--name",
                 config.target_resource_group,
+                *subscription,
                 "--output",
                 "json",
             ),
@@ -5054,6 +5163,7 @@ def start_direct_cleanup(
             "delete",
             "--name",
             config.target_resource_group,
+            *subscription,
             "--yes",
             "--output",
             "none",
@@ -5741,6 +5851,7 @@ def main() -> int:
                     "and reconcile retained evidence before any retry"
                 ) from exc
         runner = SubprocessRunner()
+        cleanup_journal = pilot_cleanup_journal(runtime)
         stage_attempt: dict[str, object] | None = None
         recovery_pause: dict[str, object] | None = None
         try:
@@ -5923,6 +6034,12 @@ def main() -> int:
                 results, cleanup_disarm_evidence_sha256 = (
                     execute_cleanup_disarm_commands(runner, commands, config, runtime)
                 )
+            elif args.operation == "cleanup" and cleanup_journal is not None:
+                start_failure_cleanup(runner, config, runtime, require_cleanup_authority)
+                results = []
+            elif args.operation == "scope-create" and cleanup_journal is not None:
+                (command,) = commands
+                results = [_journal_cleanup_write(runner, command, cleanup_journal, "scope")]
             elif args.operation == "residue":
                 results = execute_residue_commands(runner, commands)
             elif recovery_pause is not None and args.resume_database_job:
@@ -5958,6 +6075,8 @@ def main() -> int:
             if target is Phase.COST_GATED:
                 config.validate()
                 ledger.bind_deadline(config.cleanup_deadline_utc)
+            if target is Phase.SCOPE_CREATED and cleanup_journal is not None:
+                _durable_record(cleanup_journal / "scope-observed.json", {"target": config.target_resource_group})
             if target is Phase.IMAGE_DECIDED:
                 if args.image_digest is None or image_scan_sha256 is None:
                     raise CampaignError(
@@ -6016,7 +6135,16 @@ def main() -> int:
                         )
                     )
                     return 3
-            ledger.transition(target, datetime.now(UTC))
+            ledger.transition(
+                target,
+                datetime.now(UTC),
+                scope_write_attempted=(
+                    target is Phase.CLEANING
+                    and Phase(ledger.phase) is Phase.COST_GATED
+                    and cleanup_journal is not None
+                    and (cleanup_journal / "failure.json").is_file()
+                ),
+            )
             save_ledger(args.ledger, ledger)
             output: object = (
                 terminal_receipt(ledger)
@@ -6086,10 +6214,11 @@ def main() -> int:
                 if (
                     args.operation == "cleanup-wait"
                     and Phase(ledger.phase) is Phase.CLEANING
+                    and cleanup_journal is None
                 ):
                     require_cleanup_authority()
                     start_direct_cleanup(runner, config, runtime, require_cleanup_authority)
-                if (
+                if (args.operation != "cleanup" or cleanup_journal is None) and (
                     target is Phase.SCOPE_CREATED
                     or ORDER.index(Phase(ledger.phase)) >= ORDER.index(Phase.SCOPE_CREATED)
                 ) and Phase(ledger.phase) not in {
@@ -6099,6 +6228,12 @@ def main() -> int:
                     Phase.RESIDUE_VERIFIED,
                     Phase.FINALIZED,
                 }:
+                    if cleanup_journal is not None:
+                        cleanup_journal.mkdir(exist_ok=True)
+                        with contextlib.suppress(FileExistsError):
+                            _durable_record(
+                                cleanup_journal / "failure.json", {"operation": args.operation}
+                            )
                     require_cleanup_authority()
                     try:
                         start_failure_cleanup(runner, config, runtime, require_cleanup_authority)
@@ -6111,6 +6246,8 @@ def main() -> int:
                             ),
                             file=sys.stderr,
                         )
+                        if cleanup_journal is not None:
+                            raise
                     ledger.transition(
                         Phase.CLEANING, datetime.now(UTC),
                         scope_write_attempted=target is Phase.SCOPE_CREATED,

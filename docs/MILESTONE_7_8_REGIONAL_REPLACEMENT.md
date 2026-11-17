@@ -156,3 +156,57 @@ workload provisioning. The pre-binding failure path must also select the
 scoped direct cleanup path when the exact binding is absent. Retain the
 signed images and valid regional admission evidence. PostgreSQL, M78-D-001
 and M78-D-002 remain closed.
+
+## Successor cleanup repair
+
+The successor explicitly requires approval of the first whole UTC minute
+strictly after receipt of execution approval. Record the actual receipt time
+and the derived execution start separately. For example, a receipt at
+15:04:37 UTC yields a start at 15:05:00 UTC. A receipt at exactly 15:05:00 UTC
+yields 15:06:00 UTC. An omitted, earlier or later execution start is rejected.
+The successor derives readiness, proof stop, Automation expiry and operator
+cleanup expiry at +2h, +10h, +11h and +12h from that start. Probe authorizations
+use the same start. The Automation schedule must return the exact +10h
+timestamp and the exact binding must pass readback before workload provisioning.
+The rule applies to the successor and preserves the original approved times
+and native failure receipt.
+
+The operator journals intents before target, schedule, binding and runbook
+writes. For an admission failure, it reads complete schedule and binding
+inventories. With confirmed absent binding and no unresolved arming write, it
+uses the existing ownership-checked direct deletion of the campaign group.
+A valid binding uses the existing runbook path. An incomplete read, a possible
+unobserved write or a conflicting binding stops dispatch. Reconcile the native
+state before retrying any operation. A failed admission blocks further proof.
+After target absence, cleanup disarm clears the exact campaign schedule and
+binding and verifies the retained controller. The published controller is
+unchanged.
+
+The protected runtime uses the same directory depth as the successful
+short-path recovery. Use .runtime/milestone_7_8/c8s for the new bound runtime.
+The package rehearsal stages the canonical source at that depth and drives
+the actual operator CLI through fixtures based on the retained native schedule
+and failed attempt. Local acceptance covers the control flow. Execution still
+requires native Azure schedule and binding readback.
+
+The successor retains the signed OCI images, credentials other than the
+revoked Gmail password, the Canada Central/East US split topology, the
+controller, and the provider validation receipts for the unchanged compiled
+template. The new Gmail app password is bound privately under the label
+OpenCanvas M78 successor. Only local format and difference from the revoked
+value were checked. Revoke the successor password after execution and verify
+its absence under the existing 48-counter cleanup plan.
+
+A scoped ActualCost query for the prior target group and exact Automation
+account returned no posted rows. The native job receipt shows one failed
+Automation job and no prior workload or email dispatch. The public
+Automation Basic Runtime rate is $0.002 per job minute. Reserve $0.25 for
+possible later attribution inside the same $50 ceiling. The successor
+workload forecast remains $39.4128, with $49.75 available for successor
+execution. The combined conservative admission estimate is $49.5785 including
+25% contingency on the forecast and reserve. The cumulative ceiling stays
+$400.89. If the prior attributable cost exceeds the reserve or fresh forecasts
+exceed the remaining allowance, stop before paid dispatch and reconcile.
+Billing remains unsettled.
+[Azure Automation pricing](https://azure.microsoft.com/en-us/pricing/details/automation/)
+[Azure Cost Management Query](https://learn.microsoft.com/en-us/rest/api/cost-management/query/usage?view=rest-cost-management-2025-03-01)
