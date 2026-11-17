@@ -346,6 +346,11 @@ def raw_recovery_export(tmp_path):
     tables = {name: [] for name in (*SNAPSHOT_TABLES, *RELATED_TABLES)}
     for name in (
         "legacy_creation_request_identities",
+        "controlled_draft_artifacts",
+        "ai_execution_citations",
+        "ai_requests",
+        "ai_responses",
+        "citations",
         "upload_sessions",
         "storage_object_versions",
         "malware_scan_results",
@@ -360,7 +365,7 @@ def raw_recovery_export(tmp_path):
     ]
     state = {
         "tables": tables,
-        "schemaRevision": "20260726_0029",
+        "schemaRevision": "20261116_0030",
         "identity": {"role": "observer", "database": "synthetic", "tls": True, "privileged": False},
         "workspaceId": "same-workspace",
         "grants": [{"table_name": "documents", "privilege_type": "SELECT"}],
@@ -420,7 +425,7 @@ def raw_recovery_export(tmp_path):
                 "tablesChecked": 20,
                 "runtimeReport": {
                     "dialect": "postgresql",
-                    "schema_revision": "20260726_0029",
+                    "schema_revision": "20261116_0030",
                     "database_user": role,
                 },
                 "assertions": {"R2FreshRuntimeRoleOwnershipPositiveNegativePrivileges": "accepted"},
@@ -770,3 +775,42 @@ def test_collect_recovery_rejects_packed_execution_binding_tampering(tmp_path, m
     export()
     with pytest.raises(ValueError):
         collect_recovery(plan, manifest, directory)
+
+
+@pytest.mark.parametrize(
+    "source,target,accepted",
+    [
+        ("20261116_0030", "20261116_0030", True),
+        ("20260726_0029", "20261116_0030", False),
+        ("20261116_0030", "20260726_0029", False),
+    ],
+)
+def test_artifact_schema_requires_exact_current_restore(source, target, accepted):
+    plan, records = chain()
+    restore = next(r for r in records if r["phase"] == "restore")["evidence"]
+    restore.update(sourceSchema=source, targetSchema=target)
+    rebind(records)
+    if accepted:
+        assert reconcile_recovery(plan, records)["status"] == "accepted"
+    else:
+        with pytest.raises(ValueError, match="schema compatibility"):
+            reconcile_recovery(plan, records)
+
+
+def test_native_current_restore_rejects_old_schema_even_with_complete_rows(tmp_path):
+    plan, manifest, raw, export = raw_recovery_export(tmp_path)
+    raw["snapshot"]["snapshot"]["schemaRevision"] = "20260726_0029"
+    export()
+    with pytest.raises(ValueError, match="current-release scoped snapshot"):
+        collect_recovery(plan, manifest, tmp_path)
+
+
+def test_restored_artifact_requires_immutable_citation_evidence(tmp_path):
+    plan, manifest, raw, export = raw_recovery_export(tmp_path)
+    for name in ("quiescent-before", "snapshot", "verify"):
+        raw[name]["snapshot"]["tables"]["ai_execution_citations"] = []
+    export()
+    with pytest.raises(
+        ValueError, match="editable artifact evidence absent: ai_execution_citations"
+    ):
+        collect_recovery(plan, manifest, tmp_path)

@@ -65,13 +65,26 @@ test.describe("real FastAPI + PostgreSQL workflow", () => {
       .nth(1)
       .locator(".canvas-node__header")
       .click({ modifiers: ["Shift"] });
-    await expect(page.getByTestId("assistant-input")).toBeVisible();
+    await expect(page.getByTestId("controlled-draft-input")).toBeVisible();
     await page
-      .getByTestId("assistant-input")
+      .getByTestId("controlled-draft-input")
       .fill("Synthesize a product opportunity from these two notes.");
-    await page.getByTestId("ask-assistant").click();
+    await page.getByTestId("start-controlled-draft").click();
+    const result = page.getByTestId("controlled-draft-result");
+    await expect(result).toBeVisible();
+    const originalText = await result.locator("p").first().textContent();
+    expect(originalText).toBeTruthy();
+    // Generation remains read-only. Only explicit saving creates the derivative.
+    await expect(page.locator(".canvas-node--ai")).toHaveCount(0);
+    await page.getByTestId("save-draft-artifact").click();
+    await expect(page.getByText("Saved as an editable canvas artifact")).toBeVisible();
     const aiCard = page.locator(".canvas-node--ai");
     await expect(aiCard).toBeVisible();
+    await aiCard.getByText("Original AI evidence").click();
+    await expect(aiCard.getByTestId("draft-original-text")).toHaveText(originalText!);
+    const originalTrace = await aiCard
+      .getByRole("link", { name: "Inspect original Trace" })
+      .getAttribute("href");
     await aiCard.locator("textarea").fill("Edited AI synthesis persisted by the real stack.");
     await page.getByTestId("save-canvas").click();
     await expect(page.getByText("Saved", { exact: true })).toBeVisible();
@@ -80,5 +93,15 @@ test.describe("real FastAPI + PostgreSQL workflow", () => {
     await expect(page.locator(".canvas-node--ai textarea")).toHaveValue(
       "Edited AI synthesis persisted by the real stack.",
     );
+    const reloadedArtifact = page.locator(".canvas-node--ai");
+    await expect(reloadedArtifact).toContainText(
+      "User-edited content � original evidence unchanged",
+    );
+    await reloadedArtifact.getByText("Original AI evidence").click();
+    await expect(reloadedArtifact.getByTestId("draft-original-text")).toHaveText(originalText!);
+    await expect(
+      reloadedArtifact.getByRole("link", { name: "Inspect original Trace" }),
+    ).toHaveAttribute("href", originalTrace!);
+    await expect(page.locator(".react-flow__edge")).toHaveCount(3);
   });
 });

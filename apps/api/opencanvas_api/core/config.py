@@ -30,7 +30,7 @@ DEVELOPMENT_UPLOAD_CAPABILITY_SECRET = (
 DEVELOPMENT_SCANNER_RESULT_SECRET = "development-only-scanner-result-secret-change-before-deploying"
 DEVELOPMENT_RATE_LIMIT_SECRET = "development-only-rate-limit-secret-change-before-deploying"
 DEVELOPMENT_TELEMETRY_SECRET = "development-only-telemetry-secret-change-before-deploying"
-EXPECTED_DATABASE_REVISION = "20260726_0029"
+EXPECTED_DATABASE_REVISION = "20261116_0030"
 
 
 class AppMode(StrEnum):

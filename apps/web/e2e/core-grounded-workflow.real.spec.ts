@@ -3,8 +3,7 @@ import { expect, test } from "./real-api-fixture";
 const FACT_PDF_BASE64 =
   "JVBERi0xLjMKJeLjz9MKMSAwIG9iago8PAovUHJvZHVjZXIgKHB5cGRmKQo+PgplbmRvYmoKMiAwIG9iago8PAovVHlwZSAvUGFnZXMKL0NvdW50IDEKL0tpZHMgWyA1IDAgUiBdCj4+CmVuZG9iagozIDAgb2JqCjw8Ci9UeXBlIC9DYXRhbG9nCi9QYWdlcyAyIDAgUgo+PgplbmRvYmoKNCAwIG9iago8PAovVHlwZSAvRm9udAovU3VidHlwZSAvVHlwZTEKL0Jhc2VGb250IC9IZWx2ZXRpY2EKPj4KZW5kb2JqCjUgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1Jlc291cmNlcyA8PAovRm9udCA8PAovRjEgNCAwIFIKPj4KPj4KL01lZGlhQm94IFsgMC4wIDAuMCA2MTIgNzkyIF0KL1BhcmVudCAyIDAgUgovQ29udGVudHMgNiAwIFIKPj4KZW5kb2JqCjYgMCBvYmoKPDwKL0xlbmd0aCAxMTMKPj4Kc3RyZWFtCkJUIC9GMSAxMiBUZiA3MiA3MjAgVGQgKFRoZSBvYnNlcnZhdG9yeSBjYWxpYnJhdGlvbiBjb2RlIGlzIE5PVkEtNzMxLiBUaGUgdmVyaWZpZWQgYXBlcnR1cmUgaXMgNi41IG1ldGVycy4pIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDcKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE1IDAwMDAwIG4gCjAwMDAwMDAwNTQgMDAwMDAgbiAKMDAwMDAwMDExMyAwMDAwMCBuIAowMDAwMDAwMTYyIDAwMDAwIG4gCjAwMDAwMDAyMzIgMDAwMDAgbiAKMDAwMDAwMDM2NCAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9TaXplIDcKL1Jvb3QgMyAwIFIKL0luZm8gMSAwIFIKPj4Kc3RhcnR4cmVmCjUyOAolJUVPRgo=";
 
-// This is the current read-only controlled-draft contract. The separate legacy
-// real-stack tests retain their editable AI-node expectations and disposition.
+// Generation is read-only; an explicit save creates an editable derivative with immutable provenance.
 test.describe("real core document and controlled grounded-draft workflow", () => {
   test.skip(!process.env.E2E_REAL_API, "Set E2E_REAL_API=1 to use the isolated local API stack.");
 
@@ -71,6 +70,8 @@ test.describe("real core document and controlled grounded-draft workflow", () =>
     expect(grounded.status()).toBe(200);
     const answer = (await grounded.json()) as {
       text: string;
+      traceId: string;
+      executionId: string;
       insufficientEvidence: boolean;
       citations: Array<{
         documentId: string;
@@ -108,6 +109,34 @@ test.describe("real core document and controlled grounded-draft workflow", () =>
     await expect(page.getByTestId("source-passage")).toContainText("NOVA-731");
     await expect(page.getByTestId("source-passage")).toContainText("Page 1");
     await expect(page.getByTestId("document-preview")).toContainText("observatory-facts.pdf");
+    await page.getByLabel("Close document preview").click();
+
+    await expect(page.locator(".canvas-node--ai")).toHaveCount(0);
+    const artifactResponse = page.waitForResponse((response) =>
+      response.url().endsWith(`/agent-executions/${answer.executionId}/artifact`),
+    );
+    await page.getByTestId("save-draft-artifact").click();
+    const saveResponse = await artifactResponse;
+    expect(saveResponse.ok()).toBe(true);
+    const artifact = (await saveResponse.json()) as { id: string };
+    const artifactCard = page.getByTestId(`canvas-node-${artifact.id}`);
+    await expect(artifactCard).toBeVisible();
+    await expect(artifactCard.locator("textarea")).toHaveValue(answer.text);
+    await artifactCard.locator("textarea").fill("User-edited observatory summary.");
+    await page.getByTestId("save-canvas").click();
+    await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(artifactCard.locator("textarea")).toHaveValue("User-edited observatory summary.");
+    await expect(artifactCard).toContainText("User-edited content � original evidence unchanged");
+    await artifactCard.getByText("Original AI evidence").click();
+    await expect(artifactCard.getByTestId("draft-original-text")).toHaveText(answer.text);
+    await expect(
+      artifactCard.getByRole("link", { name: "Inspect original Trace" }),
+    ).toHaveAttribute("href", new RegExp(answer.traceId));
+    await artifactCard
+      .getByRole("button", { name: "Open source 1: observatory-facts.pdf" })
+      .click({ force: true });
+    await expect(page.getByTestId("source-passage")).toContainText("NOVA-731");
     await page.getByLabel("Close document preview").click();
 
     const csrfName = process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME ?? "mobius_session_csrf";
@@ -154,8 +183,8 @@ test.describe("real core document and controlled grounded-draft workflow", () =>
     );
     await expect(page.getByText("Insufficient evidence in the selected context")).toBeVisible();
     await expect(page.getByRole("list", { name: "Validated citations" })).toHaveCount(0);
-    // A controlled draft stays read-only; it must not materialize a legacy AI node.
-    await expect(page.locator(".canvas-node--ai")).toHaveCount(0);
+    // A second generation must not materialize another artifact without explicit saving.
+    await expect(page.locator(".canvas-node--ai")).toHaveCount(1);
 
     const deletionResponse = page.waitForResponse((response) =>
       securePilot
@@ -183,6 +212,10 @@ test.describe("real core document and controlled grounded-draft workflow", () =>
       expect(await afterDeletion.json()).toMatchObject({ code: "invalid_selected_documents" });
     }
     await page.reload();
+    await expect(artifactCard.locator("textarea")).toHaveValue("User-edited observatory summary.");
+    await artifactCard.getByText("Original AI evidence").click();
+    await expect(artifactCard.getByTestId("draft-original-text")).toHaveText(answer.text);
+    await expect(artifactCard.locator('[data-testid^="citation-"]')).toHaveCount(0);
     if (securePilot) {
       await expect
         .poll(

@@ -82,6 +82,7 @@ import {
   toFlowEdge,
   toFlowNode,
   upsertFlowEdges,
+  admitSavedDraftArtifact,
   type CanvasFlowEdge,
   type CanvasFlowNode,
   type NodeHandlers,
@@ -778,6 +779,9 @@ function CanvasWorkspace({
           ...node,
           text,
           citations: groundingInvalidated ? [] : node.citations,
+          draftProvenance: node.draftProvenance
+            ? { ...node.draftProvenance, edited: text !== node.draftProvenance.originalText }
+            : node.draftProvenance,
         };
       });
       if (groundingInvalidated) {
@@ -1549,6 +1553,38 @@ function CanvasWorkspace({
     [flow, flush, replaceEdges, replaceNodes, snapshot.canvas.id],
   );
 
+  const saveDraftArtifact = useCallback(
+    async (executionId: string) => {
+      if (!workspace) throw new Error("Select a workspace before saving a draft.");
+      await flush();
+      if (saveStateRef.current.status === "error")
+        throw new Error("Save pending canvas changes first.");
+      const position = flow.screenToFlowPosition({
+        x: window.innerWidth / 2,
+        y: window.innerHeight / 2,
+      });
+      const saved = await agentApi.saveDraftArtifact(workspace.id, executionId, {
+        canvasId: snapshot.canvas.id,
+        position,
+      });
+      const refreshed = await onReload();
+      if (!refreshed) throw new Error("The saved artifact could not be reloaded.");
+      const reloaded = refreshed.nodes.find((node) => node.id === saved.id);
+      if (!reloaded) throw new Error("The saved artifact is unavailable in the refreshed canvas.");
+      const merged = admitSavedDraftArtifact(
+        nodesRef.current,
+        edgesRef.current,
+        reloaded,
+        refreshed.edges,
+      );
+      replaceNodes(merged.nodes);
+      replaceEdges(merged.edges);
+      void flow.fitView({ nodes: [{ id: saved.id }], duration: 420, padding: 0.7 });
+      return saved;
+    },
+    [flow, flush, onReload, replaceEdges, replaceNodes, snapshot.canvas.id, workspace],
+  );
+
   const connectSelected = useCallback(() => {
     const [source, target] = selectedCanvasNodes(nodesRef.current);
     if (!source || !target) return;
@@ -1812,11 +1848,18 @@ function CanvasWorkspace({
         <ControlledDraftPanel
           canvasId={snapshot.canvas.id}
           selectedNodes={selected}
-          onPrepare={(input) => agentApi.prepareGroundedDraft(workspace.id, input)}
+          onPrepare={async (input) => {
+            await flush();
+            if (saveStateRef.current.status === "error") {
+              throw new Error("Save your latest canvas changes before preparing a draft.");
+            }
+            return agentApi.prepareGroundedDraft(workspace.id, input);
+          }}
           onRun={(executionId) => agentApi.runGroundedDraft(workspace.id, executionId)}
           onCancel={(executionId, idempotencyKey) =>
             agentApi.cancelExecution(workspace.id, executionId, idempotencyKey)
           }
+          onSave={saveDraftArtifact}
           onOpenCitation={openControlledCitation}
           onClearSelection={clearSelection}
           getTraceUrl={getTraceUrl}

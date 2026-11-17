@@ -4,7 +4,7 @@
 
 > A visual, source-grounded workspace for auditable AI knowledge work
 
-SolarPlexus Mobius turns notes and source documents into a spatial knowledge workspace. A user chooses the exact canvas objects supplied to AI, receives an editable response as a connected node, and can open every validated citation at the supporting page or section.
+SolarPlexus Mobius turns notes and source documents into a spatial knowledge workspace. A user chooses the exact canvas objects supplied to AI, receives a read-only grounded draft and can explicitly save an editable connected artifact, and can open every validated citation at the supporting page or section.
 
 Competition release candidate: `v0.3.0-buildweek-demo`. Source is published at
 [github.com/hawkelement333-glitch/opencanvas-ai](https://github.com/hawkelement333-glitch/opencanvas-ai);
@@ -31,7 +31,7 @@ Knowledge workers often lose the boundary between evidence, interpretation, and 
 3. Upload PDF, TXT, Markdown, or DOCX sources.
 4. Select the exact notes and ready documents that should become context.
 5. Ask a question or give an instruction.
-6. Receive an editable AI-response node connected to the selected context.
+6. Review the read-only draft, then explicitly save an editable canvas artifact connected to the selected context.
 7. Open a citation to inspect the exact page, section, or extracted passage.
 8. Use the Trace API and structured execution records to audit what happened.
 

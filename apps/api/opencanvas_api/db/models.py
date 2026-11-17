@@ -272,6 +272,26 @@ class LegacyCreationRequestIdentity(Base):
     )
 
 
+class ControlledDraftArtifact(Base):
+    """Append-only save identity; node_id remains a tombstone after node deletion."""
+
+    __tablename__ = "controlled_draft_artifacts"
+    execution_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    response_id: Mapped[uuid.UUID] = mapped_column(nullable=False, unique=True)
+    trace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    canvas_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    node_id: Mapped[uuid.UUID] = mapped_column(nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class AIRequest(TimestampMixin, Base):
     __tablename__ = "ai_requests"
     __table_args__ = (
@@ -8490,7 +8510,10 @@ COLLABORATION_IMMUTABLE_MODELS = (
     CollaborationCommentTransition,
 )
 
-LEGACY_CREATION_IMMUTABLE_MODELS = (LegacyCreationRequestIdentity,)
+LEGACY_CREATION_IMMUTABLE_MODELS = (
+    LegacyCreationRequestIdentity,
+    ControlledDraftArtifact,
+)
 
 INDEXER_IMMUTABLE_MODELS = (
     PipelineManifest,

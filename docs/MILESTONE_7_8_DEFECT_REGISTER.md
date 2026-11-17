@@ -924,8 +924,17 @@ artifact mappings. An open debt does not authorize a whole-area rerun.
 | M78-D-004  | `docs/KNOWN_LIMITATIONS.md`                       | Production worker wake-up/polling, operational telemetry and external delivery/acknowledgment receipts remain unlocated. | Validation, reliability, and operational debt | Open for provider-path evidence mapping; preserve 7.4 local durability, PG failover/replay and D001 deletion/rollback. No full durable-work rerun or new broker is implied. |
 | M78-D-005  | `docs/KNOWN_LIMITATIONS.md`                       | Current-release joint DB/object/index/queue/outbox recovery and rollback compatibility remains unmapped. | Recovery and validation debt | Four affected restore assertions are now mapped in the [historical retrieval record](MILESTONE_7_8_HISTORICAL_EVIDENCE_RECOVERY.md); original 7.6 report/receipts remain unlocated after bounded searches. 7.6 managed PITR/full restore/portable recovery/failback passed historically; current PG/object proof is retained. Only an uncovered affected path warrants new proof. Production deployment remains excluded. |
 | M78-D-006  | `docs/KNOWN_LIMITATIONS.md`                       | Application-wide workload ceilings/failure-under-load and remaining provenance/security-control evidence need mapping/publication. | Capacity, security-evidence and documentation debt | Open in that scope. Completed 7.7 health soak, measured PG limits and object/Redis failure behavior remain credited. Retained image build/scan stays accepted; unsigned provenance and retrospective SBOM are verified, and all 74 dependency alerts were mapped and corrected. Signed provenance and a future artifact for the later API corrections remain; see the [local report](MILESTONE_7_8_LOCAL_GAP_COMPLETION.md). |
-| M78-D-007  | `docs/MILESTONE_7_ARCHITECTURE.md`                | Stage 3 infrastructure category-log rows had not arrived before cleanup. | Observability validation debt | Still open for those usable category rows/queries and retention. Later D001 malware-scanner rows close scanner ingestion, not the different infrastructure categories. Share observations with D003. |
+| M78-D-007  | `docs/MILESTONE_7_ARCHITECTURE.md`                | Stage 3 infrastructure category-log rows had not arrived before cleanup. | Observability validation debt | Open for applicable deployed-resource category rows/queries and retention. User explicitly selected Firewall/VM not-applicable to the final ACA topology; historical missing rows remain unproved, with networking/egress controls unchanged. Later D001 malware-scanner rows close scanner ingestion, not the different infrastructure categories. Share observations with D003. |
 | M78-D-008  | `docs/MILESTONE_7_ARCHITECTURE.md`                | Exact Stage 3 posted cost was unavailable because of throttling and delayed usage posting.                   | Operational and cost-evidence debt                  | Final results must record the proved cost boundary and any exact-cost limitation; remediation is not automatically required. |
+
+Current local release update: the user-selected explicit editable-artifact
+implementation adds0030 after the unchanged0029 migration, and current API5/
+frontend web3 have verified detached signatures under the explicitly trusted
+local key. See the [release checkpoint](MILESTONE_7_8_EDITABLE_AI_RELEASE_CHECKPOINT.md).
+Earlier statements that0030 was absent or provenance unsigned describe their
+historical checkpoints. Managed deployment/recovery/security observations remain
+open; this does not reopen completed PostgreSQL acceptance.
+
 
 This routing authorizes no Azure operation, migration, image build,
 publication, scanner execution, secret access, or Git remote operation.

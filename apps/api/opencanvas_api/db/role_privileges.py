@@ -136,6 +136,7 @@ API_SELECT_TABLES: Final = frozenset(
         "ingestion_request_transitions",
         "ingestion_requests",
         "legacy_creation_request_identities",
+        "controlled_draft_artifacts",
         "malware_scan_requests",
         "malware_scan_results",
         "nodes",

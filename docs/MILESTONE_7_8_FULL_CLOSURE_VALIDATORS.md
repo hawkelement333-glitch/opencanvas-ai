@@ -310,3 +310,18 @@ under `.runtime/milestone_7_8/full-closure-local/destination/fencing-review/`.
 These source corrections supersede API3. The final API4 artifact and exact
 verified source/image bindings are in the finite closure ledger. They do not reopen closed PostgreSQL,
 M78-D-001 or M78-D-002 acceptance and do not establish new managed acceptance.
+
+
+## Selected editable-artifact release extension
+
+The [local release checkpoint](MILESTONE_7_8_EDITABLE_AI_RELEASE_CHECKPOINT.md)
+records explicit save, immutable original evidence and selected0030 schema.
+Managed core now proves generation leaves the canvas unchanged, then explicit
+save, duplicate save, edit/reload and exact original response/citation/Trace
+binding. Its seven additional HTTP calls consume the existing1,800-request
+core/access/recovery partition and add no model call. Current native recovery
+requires0030 and complete hashes for the artifact mapping, original request/
+response, live citations, immutable execution citations and existing Trace.
+The historical0028-to-0029 path remains separate; no old receipt is relabeled.
+Full-closure package deadlines use selected+2ready/+10proof/+12cleanup. Existing
+pilot-default+2/+8/+10 and historical evidence remain unchanged.

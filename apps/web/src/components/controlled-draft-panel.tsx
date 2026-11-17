@@ -10,7 +10,7 @@ import {
   MousePointer2,
   X,
 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 
 import {
   controlledDraftStartInputSchema,
@@ -34,6 +34,7 @@ interface ControlledDraftPanelProps {
   }) => Promise<ControlledDraftPrepared>;
   onRun: (executionId: string) => Promise<ControlledDraft>;
   onCancel: (executionId: string, idempotencyKey: string) => Promise<ControlledDraftCancellation>;
+  onSave: (executionId: string) => Promise<CanvasNode>;
   onOpenCitation: (citation: ControlledDraftCitation, ordinal: number) => void;
   onClearSelection: () => void;
   getTraceUrl: (traceId: string) => string;
@@ -49,6 +50,7 @@ export function ControlledDraftPanel({
   onPrepare,
   onRun,
   onCancel,
+  onSave,
   onOpenCitation,
   onClearSelection,
   getTraceUrl,
@@ -63,9 +65,28 @@ export function ControlledDraftPanel({
     | { type: "succeeded"; result: ControlledDraft }
     | { type: "failed"; message: string }
   >({ type: "idle" });
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const saving = useRef(false);
+  const saveArtifact = async () => {
+    if (status.type !== "succeeded" || saving.current || saveStatus === "saved") return;
+    saving.current = true;
+    setSaveStatus("saving");
+    try {
+      await onSave(status.result.executionId);
+      setSaveStatus("saved");
+    } catch {
+      // Retry the same execution; the server owns its single durable artifact identity.
+      setSaveStatus("failed");
+    } finally {
+      saving.current = false;
+    }
+  };
   const selectedResources = summarizeResources(selectedNodes, selectedNodes);
   const active =
-    status.type === "starting" || status.type === "running" || status.type === "cancelling";
+    status.type === "starting" ||
+    status.type === "running" ||
+    status.type === "cancelling" ||
+    saveStatus === "saving";
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -84,6 +105,7 @@ export function ControlledDraftPanel({
       return;
     }
 
+    setSaveStatus("idle");
     setStatus({ type: "starting" });
     try {
       const prepared = await onPrepare(parsed.data);
@@ -232,6 +254,28 @@ export function ControlledDraftPanel({
                 : "Grounded draft confirmed by the server"}
             </span>
             <p>{status.result.text}</p>
+            <button
+              type="button"
+              onClick={() => void saveArtifact()}
+              disabled={saveStatus === "saving" || saveStatus === "saved"}
+              data-testid="save-draft-artifact"
+            >
+              {saveStatus === "saving"
+                ? "Saving to canvas�"
+                : saveStatus === "saved"
+                  ? "Saved to canvas"
+                  : "Save as editable canvas artifact"}
+            </button>
+            {saveStatus === "saved" && (
+              <span role="status">Saved as an editable canvas artifact</span>
+            )}
+            {saveStatus === "failed" && (
+              <span role="alert">
+                The save could not be confirmed. Retry to retrieve or create this draft&apos;s
+                single artifact.
+              </span>
+            )}
+            <small>Saving creates an editable copy. Original AI evidence stays unchanged.</small>
             {status.result.citations.length > 0 && (
               <ol aria-label="Validated citations">
                 {status.result.citations.map((citation, index) => (

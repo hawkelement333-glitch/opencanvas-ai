@@ -93,7 +93,7 @@ var commonBase = [
   { name: 'OPENCANVAS_DATABASE_TLS_MODE', value: 'verify-full' }
   { name: 'OPENCANVAS_DATABASE_POOL_SIZE', value: '5' }
   { name: 'OPENCANVAS_DATABASE_MAX_OVERFLOW', value: '0' }
-  { name: 'OPENCANVAS_DATABASE_EXPECTED_REVISION', value: '20260726_0029' }
+  { name: 'OPENCANVAS_DATABASE_EXPECTED_REVISION', value: '20261116_0030' }
   { name: 'PGSSLROOTCERT', value: '/etc/ssl/certs/ca-certificates.crt' }
   { name: 'OPENCANVAS_STORAGE_PROVIDER', value: 'azure' }
   { name: 'OPENCANVAS_AZURE_STORAGE_ACCOUNT_URL', value: storageUrl }

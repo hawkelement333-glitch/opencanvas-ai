@@ -12,6 +12,7 @@ import {
   controlledDraftSchema,
   controlledDraftPreparedSchema,
   controlledDraftStartInputSchema,
+  saveDraftArtifactInputSchema,
   reversibleWriteRollbackApprovalSchema,
   reversibleWriteRollbackInputSchema,
   reversibleWriteRollbackResultSchema,
@@ -40,6 +41,7 @@ import {
   type Canvas,
   type CanvasEdge,
   type CanvasSnapshot,
+  type CanvasNode,
   type ControlledDraft,
   type ControlledDraftPrepared,
   type ControlledDraftCancellation,
@@ -636,6 +638,19 @@ export const agentApi = {
       controlledDraftSchema,
       { method: "POST", body: JSON.stringify(input) },
       LONG_OPERATION_TIMEOUT_MS,
+    );
+  },
+
+  saveDraftArtifact(
+    workspaceId: string,
+    executionId: string,
+    rawInput: { canvasId: string; position: { x: number; y: number } },
+  ): Promise<CanvasNode> {
+    const input = saveDraftArtifactInputSchema.parse(rawInput);
+    return request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/agent-executions/${encodeURIComponent(executionId)}/artifact`,
+      canvasNodeSchema,
+      { method: "POST", body: JSON.stringify(input) },
     );
   },
 

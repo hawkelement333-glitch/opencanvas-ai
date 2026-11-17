@@ -196,6 +196,21 @@ class NodeDuplicate(ApiModel):
     position: Point | None = None
 
 
+class DraftArtifactSave(ApiModel):
+    canvas_id: uuid.UUID
+    position: Point
+
+
+class DraftProvenanceOut(ApiModel):
+    execution_id: uuid.UUID
+    response_id: uuid.UUID
+    trace_id: uuid.UUID
+    original_text: str
+    edited: bool
+    insufficient_evidence: bool
+    citations: list[CitationOut] = Field(default_factory=list)
+
+
 class NodeOut(ApiModel):
     id: uuid.UUID
     canvas_id: uuid.UUID
@@ -210,6 +225,7 @@ class NodeOut(ApiModel):
     updated_at: datetime
     document: DocumentMetadata | None = None
     citations: list[CitationOut] = Field(default_factory=list)
+    draft_provenance: DraftProvenanceOut | None = None
 
 
 class EdgeCreate(ApiModel):

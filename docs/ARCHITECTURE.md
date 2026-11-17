@@ -117,7 +117,7 @@ deletion cancellation, and heartbeats. Demo mode keeps deterministic inline proc
 5. Source blocks are delimited as untrusted data with server-created stable source IDs.
 6. The provider is instructed not to follow source-embedded instructions and to return citations or insufficient evidence.
 7. The API rejects citations not present in the retrieved allow-list and rejects an allegedly grounded answer with no valid citation.
-8. One transaction creates the AI node, response, citation/source records, generated edges, and execution evidence.
+8. Controlled generation persists the original response, citations and execution evidence without changing the canvas. An explicit save action atomically creates one editable derivative node, its append-only original-evidence identity, generated edges and canvas revision. Duplicate saves return that artifact; deleting it does not permit a retry to recreate it. Editing changes only the derivative, never the original response/citations/Trace. The deterministic legacy demo retains its historical automatic-node path.
 9. Citation clicks fetch the exact source passage and open the document preview at its page, heading, or offsets.
 
 Mock mode is deterministic and makes no external OpenAI call. It is a development/demo mechanism, not a semantic-quality benchmark.

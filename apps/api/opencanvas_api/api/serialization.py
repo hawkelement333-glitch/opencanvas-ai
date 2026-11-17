@@ -14,16 +14,19 @@ from opencanvas_api.api.schemas import (
     DocumentMetadata,
     DocumentProcessingStage,
     DocumentStatus,
+    DraftProvenanceOut,
     NodeOut,
     NodeType,
     Point,
     SourcePassageOut,
 )
 from opencanvas_api.db.models import (
+    AIRequest,
     AIResponse,
     CanvasDocumentNode,
     CanvasNode,
     Citation,
+    ControlledDraftArtifact,
     Document,
     DocumentChunk,
 )
@@ -90,6 +93,7 @@ def node_out(
     *,
     document: DocumentMetadata | None = None,
     citations: list[CitationOut] | None = None,
+    draft_provenance: DraftProvenanceOut | None = None,
 ) -> NodeOut:
     return NodeOut(
         id=node.id,
@@ -105,6 +109,7 @@ def node_out(
         updated_at=utc(node.updated_at),
         document=document,
         citations=citations or [],
+        draft_provenance=draft_provenance,
     )
 
 
@@ -156,3 +161,59 @@ async def enrich_nodes(
                 citation_out(citation, chunk, document)
             )
     return document_by_node, citations_by_node
+
+
+async def draft_provenance_for_nodes(
+    session: AsyncSession, nodes: Sequence[CanvasNode]
+) -> dict[uuid.UUID, DraftProvenanceOut]:
+    """Original evidence is separate from mutable content's active grounding."""
+    by_id = {node.id: node for node in nodes}
+    if not by_id:
+        return {}
+    rows = (
+        await session.execute(
+            select(ControlledDraftArtifact, AIResponse)
+            .join(AIRequest, AIRequest.id == ControlledDraftArtifact.execution_id)
+            .join(AIResponse, AIResponse.id == ControlledDraftArtifact.response_id)
+            .where(
+                ControlledDraftArtifact.node_id.in_(by_id),
+                AIResponse.request_id == AIRequest.id,
+                AIRequest.canvas_id == ControlledDraftArtifact.canvas_id,
+                AIRequest.workspace_id == ControlledDraftArtifact.workspace_id,
+                AIRequest.user_id == ControlledDraftArtifact.user_id,
+                AIRequest.trace_id == ControlledDraftArtifact.trace_id,
+            )
+        )
+    ).all()
+    citations: dict[uuid.UUID, list[CitationOut]] = {}
+    if rows:
+        originals = (
+            await session.execute(
+                select(Citation, DocumentChunk, Document)
+                .join(DocumentChunk, DocumentChunk.id == Citation.chunk_id)
+                .join(Document, Document.id == Citation.document_id)
+                .where(
+                    Citation.ai_response_id.in_([response.id for _, response in rows]),
+                    Document.deleted_at.is_(None),
+                    Document.status.not_in(("deleting", "deleted")),
+                )
+                .order_by(Citation.ai_response_id, Citation.ordinal, Citation.id)
+            )
+        ).all()
+        for citation, chunk, document in originals:
+            citations.setdefault(citation.ai_response_id, []).append(
+                citation_out(citation, chunk, document)
+            )
+    return {
+        saved.node_id: DraftProvenanceOut(
+            execution_id=saved.execution_id,
+            response_id=saved.response_id,
+            trace_id=saved.trace_id,
+            original_text=response.content,
+            edited=by_id[saved.node_id].text != response.content,
+            insufficient_evidence=response.insufficient_evidence,
+            citations=citations.get(response.id, []),
+        )
+        for saved, response in rows
+        if by_id[saved.node_id].canvas_id == saved.canvas_id
+    }

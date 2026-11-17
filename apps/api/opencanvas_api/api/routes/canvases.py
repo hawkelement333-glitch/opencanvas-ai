@@ -39,7 +39,13 @@ from opencanvas_api.api.schemas import (
     UniverseViewportOut,
     Viewport,
 )
-from opencanvas_api.api.serialization import document_metadata_out, enrich_nodes, node_out, utc
+from opencanvas_api.api.serialization import (
+    document_metadata_out,
+    draft_provenance_for_nodes,
+    enrich_nodes,
+    node_out,
+    utc,
+)
 from opencanvas_api.core.config import Settings, get_settings
 from opencanvas_api.db.models import (
     AIClaim,
@@ -499,6 +505,7 @@ async def get_snapshot(
         )
     ).all()
     document_by_node, citations_by_node = await enrich_nodes(session, nodes)
+    provenance = await draft_provenance_for_nodes(session, nodes)
     return SnapshotOut(
         canvas=_canvas_out(canvas),
         nodes=[
@@ -506,6 +513,7 @@ async def get_snapshot(
                 node,
                 document=document_by_node.get(node.id),
                 citations=citations_by_node.get(node.id),
+                draft_provenance=provenance.get(node.id),
             )
             for node in nodes
         ],
@@ -634,6 +642,7 @@ async def get_universe_viewport(
     )
     all_enriched = list({row.id: row for row in [*nodes, *selected_rows]}.values())
     document_by_node, citations_by_node = await enrich_nodes(session, all_enriched)
+    provenance = await draft_provenance_for_nodes(session, all_enriched)
     graph_revision = await session.scalar(
         select(WorkspaceGraphState.revision).where(
             WorkspaceGraphState.workspace_id == canvas.workspace_id
@@ -648,6 +657,7 @@ async def get_universe_viewport(
                 node,
                 document=document_by_node.get(node.id),
                 citations=citations_by_node.get(node.id),
+                draft_provenance=provenance.get(node.id),
             )
             for node in nodes
         ],
@@ -666,6 +676,7 @@ async def get_universe_viewport(
                 node,
                 document=document_by_node.get(node.id),
                 citations=citations_by_node.get(node.id),
+                draft_provenance=provenance.get(node.id),
             )
             for node in selected_rows
         ],
@@ -740,7 +751,8 @@ async def create_node(
     await _bump_canvas(session, canvas_id)
     await session.commit()
     await session.refresh(node)
-    return node_out(node)
+    provenance = await draft_provenance_for_nodes(session, [node])
+    return node_out(node, draft_provenance=provenance.get(node.id))
 
 
 @router.patch("/{canvas_id}/nodes/{node_id}", response_model=NodeOut)
@@ -815,7 +827,8 @@ async def patch_node(
     await _bump_canvas(session, canvas_id)
     await session.commit()
     await session.refresh(node)
-    return node_out(node)
+    provenance = await draft_provenance_for_nodes(session, [node])
+    return node_out(node, draft_provenance=provenance.get(node.id))
 
 
 @router.post(

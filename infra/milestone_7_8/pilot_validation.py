@@ -148,7 +148,11 @@ def prepare(
         "deployment": deployment,
         "sourceBindings": {path: digest(ROOT / path) for path in paths},
         "catalogSha256": digest(output / "catalog.json"),
-        "relativeWindowHours": {"provisionBy": 2, "stopProof": 8, "cleanupBy": 10},
+        "relativeWindowHours": (
+            {"provisionBy": 2, "readyBy": 2, "stopProof": 10, "cleanupBy": 12}
+            if full_closure
+            else {"provisionBy": 2, "stopProof": 8, "cleanupBy": 10}
+        ),
         "operations": list(
             (
                 *OPERATIONS,

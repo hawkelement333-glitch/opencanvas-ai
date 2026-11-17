@@ -363,10 +363,75 @@ class Api:
             require("NOVA-731" in result["text"], "supported calibration fact missing")
         return {
             "executionId": prepared["executionId"],
+            "responseId": result["responseId"],
+            "traceId": result["traceId"],
+            "textSha256": hashlib.sha256(result["text"].encode()).hexdigest(),
             "responseSha256": sha(result),
             "insufficientEvidence": result["insufficientEvidence"],
             "citations": result["citations"],
         }
+
+
+async def save_editable_artifact(api: Api, fixture: dict, generated: dict) -> dict:
+    """Exercise explicit materialization without another model request."""
+    path = f"/api/v1/workspaces/{fixture['workspaceId']}/agent-executions/{generated['executionId']}/artifact"
+    payload = {"canvasId": fixture["canvasId"], "position": {"x": 640, "y": 100}}
+    node = await api.request("POST", path, statuses=(200, 201), data=payload)
+    provenance = node["draftProvenance"]
+    require(
+        provenance["responseId"] == generated["responseId"]
+        and provenance["traceId"] == generated["traceId"]
+        and provenance["executionId"] == generated["executionId"]
+        and hashlib.sha256(provenance["originalText"].encode()).hexdigest()
+        == generated["textSha256"]
+        and provenance["edited"] is False
+        and node["text"] == provenance["originalText"]
+        and provenance["insufficientEvidence"] == generated["insufficientEvidence"]
+        and [
+            (c["sourceId"], c["documentId"], c["chunkId"], c["claim"], c["excerpt"])
+            for c in provenance["citations"]
+        ]
+        == [
+            (c["sourceId"], c["documentId"], c["chunkId"], c["claim"], c["quote"])
+            for c in generated["citations"]
+        ],
+        "saved artifact original evidence differs",
+    )
+    replay = await api.request("POST", path, statuses=(200, 201), data=payload)
+    require(replay["id"] == node["id"], "duplicate save created another artifact")
+    edited_text = (
+        "User-edited synthetic artifact; original AI evidence remains separate."
+    )
+    await api.request(
+        "PATCH",
+        f"/api/v1/canvases/{fixture['canvasId']}/nodes/{node['id']}",
+        data={"revision": node["revision"], "text": edited_text},
+    )
+    reloaded = await api.request(
+        "GET", f"/api/v1/canvases/{fixture['canvasId']}/snapshot"
+    )
+    matches = [n for n in reloaded["nodes"] if n["id"] == node["id"]]
+    require(
+        len(matches) == 1 and matches[0]["text"] == edited_text,
+        "artifact edit did not survive reload",
+    )
+    expected = {**provenance, "edited": True}
+    require(
+        matches[0]["draftProvenance"] == expected,
+        "artifact edit changed original evidence",
+    )
+    replay = await api.request("POST", path, statuses=(200, 201), data=payload)
+    require(
+        replay["text"] == edited_text and replay["draftProvenance"] == expected,
+        "duplicate save overwrote edited artifact or provenance",
+    )
+    return {
+        "nodeId": node["id"],
+        "executionId": generated["executionId"],
+        "provenanceSha256": sha(provenance),
+        "editedTextSha256": hashlib.sha256(edited_text.encode()).hexdigest(),
+        "explicitSaveDuplicateEditReloadOriginalEvidence": "accepted",
+    }
 
 
 async def core(api: Api) -> dict:
@@ -437,10 +502,25 @@ async def core(api: Api) -> dict:
         hashlib.sha256(file).hexdigest() == fixture["primary"]["contentSha256"],
         "served exact file checksum changed",
     )
+    before_generation = await api.request(
+        "GET", f"/api/v1/canvases/{canvas['id']}/snapshot"
+    )
     positive, negative = (
         await api.ground(fixture),
         await api.ground(fixture, refusal=True),
     )
+    after_generation = await api.request(
+        "GET", f"/api/v1/canvases/{canvas['id']}/snapshot"
+    )
+    require(
+        {n["id"] for n in before_generation["nodes"]}
+        == {n["id"] for n in after_generation["nodes"]}
+        and {e["id"] for e in before_generation["edges"]}
+        == {e["id"] for e in after_generation["edges"]},
+        "generation changed the canvas before explicit save",
+    )
+    artifact = await save_editable_artifact(api, fixture, positive)
+    fixture["draftArtifact"] = artifact
     secondary = await api.signin(secondary=True)
     foreign = await api.request(
         "POST",
@@ -467,7 +547,12 @@ async def core(api: Api) -> dict:
     fixture["deletion"] = await api.clean_upload(fixture, "deletion-recovery")
     return {
         "fixture": fixture,
-        "core": {"status": "accepted", "positive": positive, "refusal": negative},
+        "core": {
+            "status": "accepted",
+            "positive": positive,
+            "refusal": negative,
+            "editableArtifact": artifact,
+        },
         "providerCalls": 2,
         "managedAcceptance": "only listed core observations accepted",
     }
@@ -570,6 +655,8 @@ async def workload(api: Api, fixture: dict, plan: dict) -> dict:
 # exported; credentials, document content and provider payloads never enter receipts.
 SNAPSHOT_TABLES = (
     "legacy_creation_request_identities",
+    "controlled_draft_artifacts",
+    "ai_requests",
     "upload_sessions",
     "storage_objects",
     "storage_object_versions",
@@ -599,6 +686,9 @@ SNAPSHOT_TABLES = (
     "ingestion_request_transitions",
 )
 RELATED_TABLES = (
+    "ai_execution_citations",
+    "ai_responses",
+    "citations",
     "nodes",
     "edges",
     "canvas_document_nodes",
@@ -676,7 +766,7 @@ async def snapshot(db: Any, fixture: dict) -> dict:
         revision = (
             await connection.execute(text("SELECT version_num FROM alembic_version"))
         ).scalar_one()
-        require(str(revision).endswith("0029"), "current release schema 0029 required")
+        require(revision == "20261116_0030", "current release schema 0030 required")
         for name in (*SNAPSHOT_TABLES, *RELATED_TABLES):
             table = Base.metadata.tables[name]
             if "workspace_id" in table.c:
@@ -687,6 +777,20 @@ async def snapshot(db: Any, fixture: dict) -> dict:
                         Base.metadata.tables["canvases"].c.workspace_id == workspace
                     )
                 )
+            elif name in {"ai_responses", "citations", "ai_execution_citations"}:
+                requests = Base.metadata.tables["ai_requests"]
+                request_ids = select(requests.c.id).where(
+                    requests.c.workspace_id == workspace
+                )
+                if name in {"ai_responses", "ai_execution_citations"}:
+                    scoped = table.c.request_id.in_(request_ids)
+                else:
+                    responses = Base.metadata.tables["ai_responses"]
+                    scoped = table.c.ai_response_id.in_(
+                        select(responses.c.id).where(
+                            responses.c.request_id.in_(request_ids)
+                        )
+                    )
             elif "document_id" in table.c:
                 documents = Base.metadata.tables["documents"]
                 canvases = Base.metadata.tables["canvases"]
@@ -770,6 +874,18 @@ def compare_snapshots(before: dict, after: dict) -> dict:
         "retrieval_heads",
     ):
         require(bool(after["tables"][name]), f"joint manifest missing {name}")
+    if after["schemaRevision"] == "20261116_0030":
+        for name in (
+            "controlled_draft_artifacts",
+            "ai_execution_citations",
+            "ai_requests",
+            "ai_responses",
+            "citations",
+        ):
+            require(
+                bool(after["tables"].get(name)),
+                f"editable artifact evidence absent: {name}",
+            )
     return {
         "R1RestoredIdentityRows": "accepted",
         "R2ObserverSessionAndGrants": "accepted",

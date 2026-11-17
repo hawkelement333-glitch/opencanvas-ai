@@ -91,12 +91,27 @@ export function removeDocumentCitations(
   return nodes.map((node) => {
     const citations = node.data.node.citations ?? [];
     const retained = citations.filter((citation) => !deletedDocumentIds.has(citation.documentId));
-    if (retained.length === citations.length) return node;
+    const provenance = node.data.node.draftProvenance;
+    const availableOriginalCitations = provenance?.citations.filter(
+      (citation) => !deletedDocumentIds.has(citation.documentId),
+    );
+    if (
+      retained.length === citations.length &&
+      availableOriginalCitations?.length === provenance?.citations.length
+    )
+      return node;
     return {
       ...node,
       data: {
         ...node.data,
-        node: { ...node.data.node, citations: retained },
+        node: {
+          ...node.data.node,
+          citations: retained,
+          // Remove unavailable navigation only; immutable evidence remains server-owned.
+          draftProvenance: provenance
+            ? { ...provenance, citations: availableOriginalCitations ?? [] }
+            : provenance,
+        },
       },
     };
   });
@@ -109,4 +124,32 @@ export function removeResponseCitationEdges(
   return edges.filter(
     (edge) => !(edge.source === responseNodeId && edge.data?.edge.kind === "cites"),
   );
+}
+
+/** Admit one saved derivative without replacing concurrent local canvas work. */
+export function admitSavedDraftArtifact(
+  nodes: readonly CanvasFlowNode[],
+  edges: readonly CanvasFlowEdge[],
+  saved: CanvasNode,
+  refreshedEdges: readonly CanvasEdge[],
+): { nodes: CanvasFlowNode[]; edges: CanvasFlowEdge[] } {
+  const current = nodes.map((node) => ({ ...node, selected: false }));
+  const existing = current.find((node) => node.id === saved.id);
+  const next = upsertFlowNode(
+    current,
+    existing ? { ...existing, selected: true } : toFlowNode(saved, { selected: true }),
+  );
+  // A duplicate save only selects the existing local artifact. It cannot restore
+  // links the user has removed or overwrite pending local edits with a snapshot.
+  if (existing) return { nodes: next, edges: [...edges] };
+  const ids = new Set(next.map((node) => node.id));
+  const edgeIds = new Set(edges.map((edge) => edge.id));
+  const createdEdges = refreshedEdges.filter(
+    (edge) =>
+      !edgeIds.has(edge.id) &&
+      (edge.sourceNodeId === saved.id || edge.targetNodeId === saved.id) &&
+      ids.has(edge.sourceNodeId) &&
+      ids.has(edge.targetNodeId),
+  );
+  return { nodes: next, edges: [...edges, ...createdEdges.map(toFlowEdge)] };
 }

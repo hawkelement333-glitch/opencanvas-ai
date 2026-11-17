@@ -1046,16 +1046,17 @@ unlocated artifacts. An open heading does not require repeating completed work. 
 [authorized local-gap work](MILESTONE_7_8_LOCAL_GAP_COMPLETION.md) closes all 14
 historical PostgreSQL skips, dependency applicability and retained-image inventory
 mapping. The current real-stack document/controlled-draft journey passes after
-focused corrections and verified local cleanup; the legacy editable-AI contract
-conflict remains for full 7.8; the pilot decision is now read-only controlled drafts.
+focused corrections and verified local cleanup. The later full-7.8 decision
+selects explicit save-as-editable-artifact while generation stays read-only;
+see the [editable release checkpoint](MILESTONE_7_8_EDITABLE_AI_RELEASE_CHECKPOINT.md).
 The [pilot preparation](MILESTONE_7_8_PILOT_PREPARATION.md) records approved
 900/20 settings, passing secure browser/worker integration and the corrected
 API candidate with zero Critical/High findings. The subsequent
 [full-closure ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md) records production
 telemetry, separate activity-v1 delivery, destination/recovery/capacity validators
 and revised API/frontend artifacts. Frontend runtime-origin binding is locally
-resolved. Trusted signing, exact managed observations and the editable-AI
-criterion remain open; the [revised package](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md)
+resolved. Local signed release endorsement is verified; exact managed observations
+and provider/operator inputs remain open; the [revised package](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md)
 requires separate spending authority. No deployment is declared ready.
 The
 [campaign handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15)
@@ -1084,7 +1085,7 @@ existing requirements are:
 | [Exact audit](#exact-audit), durable workers; register M78-D-004 | Preserve 7.4 durability, PG failover/replay and D001 deletion/rollback/replay proof. Locate production worker polling/wake-up, operational telemetry and external delivery/acknowledgment receipts; only an uncovered provider-path assertion warrants additional execution. No new broker is required. |
 | [Required final scenarios](#required-final-scenarios), managed backup/PITR/object restore/rollback; register M78-D-005 | Preserve successful 7.6 managed PITR/full restore/portable recovery/failback and current PG/object proofs. Locate native 7.6 results and map current 0029/roles/runtime/worker/object changes to consistent DB/object/index/queue/outbox recovery and rollback. Conditional affected proof only if retained evidence cannot close that delta; production deployment is excluded. |
 | [Exact audit](#exact-audit), capacity/security; [Required final scenarios](#required-final-scenarios), ceilings and recovery; register M78-D-006 | Retained image build/scan remains accepted; original unsigned provenance and retrospective SBOM are now verified. All 74 dependency alerts were mapped and corrected for this branch. Seven archived 7.7 payloads and the original full-chain validator result are recovered. Remaining items are application-wide workload limits, signed provenance/release controls and current-release managed controls. Revised API/frontend artifact and focused local implementation evidence are recorded in the [finite closure ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md); they do not close managed workload acceptance. |
-| [Final validation](#final-validation) and [Documentation, commit, and exit](#documentation-commit-and-exit) | All 14 identified historical PostgreSQL skips have passing local results, and the corrected frontend dependency build passes. The two original browser scenarios were executed: their legacy editable-AI expectations conflict with the current controlled-draft UI. Current core-flow validation is separately recorded in the local report. Resolve that explicit contract decision and the remaining provider/release gates before a full completion record; no blanket rerun is required. |
+| [Final validation](#final-validation) and [Documentation, commit, and exit](#documentation-commit-and-exit) | All 14 identified historical PostgreSQL skips have passing local results, and the corrected frontend dependency build passes. The two original browser scenarios were executed: their legacy editable-AI expectations conflict with the current controlled-draft UI. Current core-flow validation is separately recorded in the local report. The later user decision selects explicit editable derivatives; affected local implementation/validation and immutable evidence are recorded in the editable release checkpoint. Remaining managed/provider/release gates still precede full completion; historical failures remain intact. |
 
 The [existing debt register](MILESTONE_7_8_DEFECT_REGISTER.md#evidence-debts-routed-to-later-audit-surfaces)
 and [historical remaining-gate inventory](MILESTONE_7_8_PRE_EXPIRY_MAXIMUM_SAFE_PROGRESS_HANDOFF.md#remaining-gates)

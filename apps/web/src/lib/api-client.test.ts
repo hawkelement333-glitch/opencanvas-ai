@@ -327,3 +327,56 @@ describe("Dynamic Universe API client", () => {
     });
   });
 });
+
+describe("controlled draft artifact API", () => {
+  it("sends only the target and position, preserving server-owned original evidence", async () => {
+    const id = "10000000-0000-4000-8000-000000000001";
+    const provenance = {
+      executionId: id,
+      responseId: id,
+      traceId: id,
+      originalText: "Original",
+      edited: true,
+      insufficientEvidence: false,
+      citations: [],
+    };
+    const node = {
+      id,
+      canvasId: id,
+      type: "ai_response",
+      title: "Draft",
+      text: "Edited",
+      position: { x: 10, y: 20 },
+      width: 340,
+      height: 280,
+      revision: 1,
+      createdAt: validCanvas.createdAt,
+      updatedAt: validCanvas.updatedAt,
+      draftProvenance: provenance,
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify(node), { status: 200 }));
+    await expect(
+      agentApi.saveDraftArtifact(id, id, { canvasId: id, position: node.position }),
+    ).resolves.toEqual(node);
+    expect(fetchMock.mock.calls[0]?.[0]).toMatch(
+      /\/agent-executions\/10000000-0000-4000-8000-000000000001\/artifact$/,
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
+      canvasId: id,
+      position: node.position,
+    });
+  });
+
+  it("rejects invalid artifact targets before making a request", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    expect(() =>
+      agentApi.saveDraftArtifact("workspace", "execution", {
+        canvasId: "invalid",
+        position: { x: 0, y: 0 },
+      }),
+    ).toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

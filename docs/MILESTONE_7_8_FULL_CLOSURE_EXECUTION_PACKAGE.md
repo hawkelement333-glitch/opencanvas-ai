@@ -57,7 +57,8 @@ The durable existing PostgreSQL activity receipt is the deduplication boundary.
 Use the exact API/frontend OCI index digests and source input bindings in the
 [release ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md#release-bindings).
 Preserve their unsigned provenance, inventory, scan and archive receipts.
-Both images are built locally; neither is published. No build follows from
+Both images are built locally and have verified detached endorsements under the
+explicitly trusted key-only policy; neither is published. No build follows from
 provider-assigned hostnames: frontend now validates the server-side public
 `OPENCANVAS_PUBLIC_API_URL` and renders only that URL into HTML at runtime.
 No secret or server credential is serialized to the browser.
@@ -71,45 +72,31 @@ after those bytes are frozen. Unknown provider-created IDs enter only through
 existing exact ARM readback admission. No `approved:true` record is created by
 local preparation.
 
-## Decisions that cannot be supplied by implementation
+## Selected decisions and remaining prerequisites
 
-1. **Full editable-AI contract:** keep the historical editable-node criterion and
-   authorize its product change, or explicitly amend that exact full-7.8
-   criterion to the current controlled read-only draft with affected validation.
-   The earlier pilot choice is not an amendment to full milestone acceptance.
-2. **Trusted release endorsement:** identify an approved signing public key or
-   exact certificate identity/issuer, and policy accepting an endorsement of
-   locally generated provenance. Both artifacts currently remain unsigned.
-   Existing detached signing commands are in the
-   [release record](MILESTONE_7_8_PILOT_RELEASE_CANDIDATE.md#signing-decision).
-3. **Actual provider and operator inputs:** existing SMTP TLS account/permitted
-   sender plus one approved native inbox, OpenAI credential/entitlement for the
-   previously selected models, exact operator principal and an existing private
-   browser/export route. A bounded check found no configured environment keys or
-   repository `.env` files; no credential vault was searched. Generate synthetic
-   account/session/delivery secrets privately. No new integration or cheaper
-   hosting topology is proposed. Without a private route the workbook screenshots
-   and evidence export cannot be claimed; a VM/Firewall is not added implicitly.
-4. **Historical Firewall/VM category evidence:** supply the missing original usable
-   category receipts or explicitly decide their applicability to the final
-   architecture. This environment contains neither; its other category rows do
-   not close those two historical gaps.
-5. **API admission ceiling:** recommend six in-flight requests per API replica
-   for this proof; user selection remains pending. The existing ratio-valued saturation signal has no
-   legitimate denominator today. Optional admission/counting is implemented; no
-   limit is selected or inferred from CPU, test concurrency or invited-user count.
-   `apiRequestConcurrencyLimit=0` in preparation means unresolved/disabled, not
-   an accepted capacity ceiling.
-6. **One separate spending/cleanup approval after bindings are complete:** include
-   exact controller renewal, temporary exact-IP ACR access (at most20minutes),
-   registry publication of the verified artifacts, bounded fault interventions,
-   provider observations and exact Key Vault purge. No ongoing hosting authority.
+The user selected explicit save-as-editable-artifact, admission6 per replica
+with13 only for the scoped lock stages, and Firewall/VM diagnostics not
+applicable to this ACA topology. Original AI evidence and historical missing
+category results remain unchanged. The user also approved the local encrypted
+release key fingerprint and key-only endorsement policy. Implementation,
+focused evidence and selected artifacts are in the
+[editable release checkpoint](MILESTONE_7_8_EDITABLE_AI_RELEASE_CHECKPOINT.md).
+The separate activity-v1 receiver decision remains resolved.
 
-The selected activity-v1 receiver decision is resolved and is not requested again.
-Apart from the missing existing API admission bound, no new latency target or
-safe user-cohort number is requested: retain existing
-catalog objectives, report actual tested envelopes and leave saturation unproved
-if it is not reached inside the approved finite workload.
+Missing inputs are existing OpenAI entitlement/credential references, SMTP
+TLS account/permitted sender/native inbox, Entra operator/private browser and
+export route, and existing entitled cleanup/purge executors. Only an existing
+route is included in the base scope. An optional route is separately described
+in the [window/access proposal](MILESTONE_7_8_WINDOW_ACCESS_PROPOSAL.md); it is
+not selected or added automatically. Purging the exact vault requires existing
+subscription-level entitlement for deleted-vault read/purge and operation-result
+read; RG Contributor alone is insufficient. No broad grant is automatic.
+
+The user selected +2h ready/+10h proof stop/+12h cleanup, giving2hours restore,
+1hour export and25minutes contingency. This selection grants no spending authority. No acceptance window, request ceiling or model allowance is shortened
+or enlarged. After these inputs and signatures are complete, one exact
+source/image/command/deadline/cleanup package requires separate spending
+approval. No ongoing hosting authority is included.
 
 ## Execution sequence and actual observations
 
@@ -180,10 +167,13 @@ bindings below supersede their historical pilot feature flags and digests.
    failures and unproved assertions. Update/commit/push sanitized checkpoint under
    standing authority; no deployment or next milestone follows.
 
-The current managed restore source is0029. The local seeded0028→0029 guarded
+The current managed restore source is0030, including the editable artifact identity. The local seeded0028→0029 guarded
 migration proves preservation and new identity fences separately. It does not
 fabricate pre0029 idempotency identities or claim a managed0028 restoration.
-No immutable migration is edited or a new migration introduced.
+No historical migration is edited. New append-only0030 artifact identities have
+a separately validated0029-to-0030 transition; current recovery snapshots include
+those identities, original requests/responses, live and immutable execution
+citations, and existing Trace hashes.
 
 ## Concrete entry points
 
@@ -245,22 +235,24 @@ The retained public meter prices and quantities are in the
 
 | Bound | Temporary USD |
 |---|---:|
-| Retained temporary scope, conservative10-hour allocation | 25.5678 |
+| Retained temporary scope, original10-hour allocation | 25.5678 |
 | Two independent0.25CPU/0.5GiB activity services, active10hours | 0.5400 |
 | All16 alerts at supported5-minute cadence (included in retained scope) | 0.0000 |
 | Embeddings increased from1M to160M worst-case token allowance | 3.1800 |
 | Existing second job overlapping the proof job, at most40minutes | 0.0360 |
-| **Current proposed temporary forecast** | **29.3238** |
+| Ten-hour subtotal (historical window) | 29.3238 |
+| Proposed additional2hours and6-hour restore-copy allocation | 1.7796 |
+| **Recommended twelve-hour temporary forecast** | **31.1034** |
 
 Total ACA allocation is3.25CPU/6.5GiB including sequential probes. Existing
 allowances remain:200 model attempts at15k input/1600 output (including reasoning
 and retry reservations),1GiB logs,1GiB scanning,10GB stored Blob/version data,
 10GB processed/egress,10k each storage read/write/list,1millionACA requests,
-restored PostgreSQL4hours, full-day ACR and two DNS billing days. The45 clean capacity documents total9,176,064bytes and10,777,584UTF8chunkbytes
+restored PostgreSQL6hours in the selected window, full-day ACR and two DNS billing days. The45 clean capacity documents total9,176,064bytes and10,777,584UTF8chunkbytes
 including overlap. With three SDK attempts and four durable worker attempts,
 the conservative initial embedding bound is129,331,008tokens;160M reserves
-scoped core/query/recovery headroom ($3.20), not expected usage. The concrete
-24-stage generator reserves6,262 HTTP operations, four synthetic capacity users,
+scoped core/query/recovery headroom ($3.20), not expected usage. The retained original
+24-stage generator reserved6,262 HTTP operations, four synthetic capacity users,
 11workspaces/21canvases and12 logical model calls (at most36SDK attempts); core,
 alert and recovery requests share the overall10,000 request/200provider-attempt
 limits. Concurrent setup uploads are capped at4. No full45-document
@@ -270,19 +262,22 @@ proposal before approval if they do not. No provider retry is a fresh allowance.
 The ceiling includes headroom; it does not guarantee Azure stops billing at it.
 
 The preceding $29.6526 forecast included $0.3288 for unsupported one-minute
-rules. Removing that increment yields $29.3238; no other meter or resource
-quantity changes. Historical monthly illustrations are not current hosting
+rules. Removing that increment yields the ten-hour subtotal $29.3238. The longer
+window adds $1.7796 using retained rates, yielding $31.1034; fixed request/data
+allowances and resource SKUs stay unchanged. Historical monthly illustrations are not current hosting
 proposals and are not recalculated here. Ongoing hosting remains a separate
 decision. The final forecast must be rebound if the product decision changes
 scope or if timed reservations exceed existing limits.
 
 ## Window and verified cleanup
 
-Relative to separate recorded approval: begin provisioning by+2hours; stop new
-proof and scheduled cleanup at+8hours; cleanup authority ends+10hours. Record
+Selected preparation window, subject to separate spending/cleanup approval:
+services/core/private route ready by+2hours; stop new proof and scheduled cleanup
+at+10hours; cleanup authority ends+12hours. The prior+2/+8/+10 proposal is retained
+as history and is not the recommended current window. Record
 absoluteUTC deadlines before first paid operation. Feasibility requires the
 stronger operational gate of services/core/destination ready by+2hours. The
-[decision sheet](MILESTONE_7_8_EXECUTION_PREREQUISITE_DECISIONS.md#timing-and-cost)
+[selected window](MILESTONE_7_8_WINDOW_ACCESS_PROPOSAL.md#recommended-window)
 allocates index, capacity, restore and export time and identifies native
 observations whose completion cannot be guaranteed within that window. Long alert windows may run
 in parallel with compatible workload/reset-expiry observations. Reserve restore
@@ -322,9 +317,9 @@ The private `package/capacity-final/` preparation binds 24 exact stages: four
 synthetic accounts, 11 workspaces, 21 canvases and 45 documents totaling
 9,176,064 bytes; 6,262 reserved HTTP requests, 12 logical model calls and at
 most 36 SDK attempts. The global bounds remain 10,000 HTTP requests, 200 model
-attempts and 160 million embedding tokens. This retained plan caps concurrency at eight. The separate unselected
-prerequisite variant proposes thirteen only for the existing sixteen-write
-row-lock stage, against six admitted requests per each of two replicas.
+attempts and 160 million embedding tokens. This retained plan caps concurrency at eight. The selected timed
+variant uses thirteen only for the existing sixteen-write
+row-lock stage, against the configured six-request admission limit on each of two replicas.
 All other stages remain capped at eight. Timed stages and their separate
 hard suballocations are described in the decision sheet; the old 24-stage
 plan alone does not sustain the required alert windows.
@@ -362,7 +357,8 @@ evidence. The [native Forecast API contract](https://learn.microsoft.com/en-us/r
 defines these request fields.
 
 The bounded second-job overlap remains $0.0360 (2,400 seconds at 0.5CPU/1GiB).
-The supported five-minute cadence yields **$29.3238 USD** total. This is part
+The supported five-minute cadence and recommended twelve-hour allocation yield
+**$31.1034 USD** total. This is part
 of the same proposed $50 incremental/$400.89 cumulative ceilings, not a new
 authorization or a claim of settled cost.
 
@@ -387,7 +383,8 @@ This package can close the existing D003 destination assertions, D004 worker
 and multi-service/reset delivery, D005 four affected recovery assertions, D006
 current-artifact/security and measured capacity observations, and applicable
 D007 native categories **only where their actual results are accepted and
-cleanup is verified**. It cannot decide the editable-AI contract, authenticate
-an unsigned artifact, supply operator/provider credentials, recover unlocated
-historical Firewall/VM receipts or infer an unobserved saturation threshold.
+cleanup is verified**. The editable-AI/admission/applicability decisions are now resolved and local
+signing is authorized. It still cannot supply unavailable operator/provider
+credentials, claim a new private route, recover unlocated historical category
+receipts or infer an unobserved saturation threshold.
 These are explicit remaining dispositions, not a reason to reopen PG/D001/D002.

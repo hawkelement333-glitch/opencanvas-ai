@@ -8,6 +8,7 @@ test.describe("real document intelligence workflow", () => {
 
   test("uploads, retrieves, cites, navigates, and refuses unsupported claims", async ({ page }) => {
     test.setTimeout(120_000);
+    const securePilot = process.env.E2E_SECURE_PILOT === "1";
     const canvasName = `Document E2E ${Date.now()}`;
 
     await page.goto("/");
@@ -39,15 +40,23 @@ test.describe("real document intelligence workflow", () => {
 
     await documentNode.locator(".canvas-node__header").click();
     await expect(page.getByTestId("selected-node-list").getByRole("listitem")).toHaveCount(1);
-    await expect(page.getByTestId("assistant-input")).toBeVisible();
+    await expect(page.getByTestId("controlled-draft-input")).toBeVisible();
     await page
-      .getByTestId("assistant-input")
+      .getByTestId("controlled-draft-input")
       .fill("What is the observatory calibration code NOVA-731?");
-    await page.getByTestId("ask-assistant").click();
+    await page.getByTestId("start-controlled-draft").click();
 
-    await expect(page.getByText("Grounded response added with citations")).toBeVisible();
-    const groundedAnswer = page.locator(".canvas-node--ai").last();
-    await expect(groundedAnswer).toContainText("NOVA-731");
+    await expect(page.getByText("Grounded draft confirmed by the server")).toBeVisible();
+    await expect(page.locator(".canvas-node--ai")).toHaveCount(0);
+    const groundedSave = page.waitForResponse((response) =>
+      /\/agent-executions\/[^/]+\/artifact$/.test(response.url()),
+    );
+    await page.getByTestId("save-draft-artifact").click();
+    await expect(page.getByText("Saved as an editable canvas artifact")).toBeVisible();
+    const groundedId = ((await (await groundedSave).json()) as { id: string }).id;
+    const groundedAnswer = page.getByTestId(`canvas-node-${groundedId}`);
+    await expect(groundedAnswer.locator("textarea")).toHaveValue(/NOVA-731/);
+    await groundedAnswer.getByText("Original AI evidence").click();
     const citation = groundedAnswer.locator('[data-testid^="citation-"]').first();
     await expect(citation).toContainText("observatory-facts.pdf");
     await expect(citation).toContainText("Page 1");
@@ -58,16 +67,33 @@ test.describe("real document intelligence workflow", () => {
 
     await documentNode.locator(".document-node__body").click({ force: true });
     await page
-      .getByTestId("assistant-input")
+      .getByTestId("controlled-draft-input")
       .fill("What is the orbital velocity of Neptune's moon Proteus?");
-    await page.getByTestId("ask-assistant").click();
+    await page.getByTestId("start-controlled-draft").click();
 
-    const insufficientAnswer = page.locator(".canvas-node--ai").last();
-    await expect(insufficientAnswer).toContainText(/lack sufficient evidence/i);
+    await expect(page.getByText("Insufficient evidence in the selected context")).toBeVisible();
+    await expect(page.locator(".canvas-node--ai")).toHaveCount(1);
+    const refusalSave = page.waitForResponse((response) =>
+      /\/agent-executions\/[^/]+\/artifact$/.test(response.url()),
+    );
+    await page.getByTestId("save-draft-artifact").click();
+    await expect(page.getByText("Saved as an editable canvas artifact")).toBeVisible();
+    const refusalId = ((await (await refusalSave).json()) as { id: string }).id;
+    const insufficientAnswer = page.getByTestId(`canvas-node-${refusalId}`);
+    await insufficientAnswer.getByText("Original AI evidence").click();
+    await expect(insufficientAnswer).toContainText(
+      /lack sufficient evidence|do not contain sufficient evidence/i,
+    );
     await expect(insufficientAnswer).toContainText("No source citations");
 
     await documentNode.locator('[data-testid^="delete-document-"]').click({ force: true });
-    await expect(documentNode).toHaveCount(0);
+    if (securePilot) {
+      await expect(documentNode).toContainText("Deletion requested");
+      await expect(documentNode.getByRole("button", { name: /preview/i })).toBeDisabled();
+    } else {
+      await expect(documentNode).toHaveCount(0);
+    }
+    await page.reload();
     await expect(groundedAnswer.locator('[data-testid^="citation-"]')).toHaveCount(0);
   });
 });

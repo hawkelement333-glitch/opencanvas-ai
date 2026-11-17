@@ -47,9 +47,11 @@ from opencanvas_api.api.dependencies import (
     get_session,
 )
 from opencanvas_api.api.errors import ApiError
+from opencanvas_api.api.schemas import DraftArtifactSave, NodeOut
 from opencanvas_api.api.serialization import utc
 from opencanvas_api.core.config import Settings, get_settings
 from opencanvas_api.services.agents.contracts import ExecutionStatus, contract_digest
+from opencanvas_api.services.agents.draft_artifacts import save_draft_artifact
 from opencanvas_api.services.agents.execution import (
     CancellationRequest,
     ControlledExecutionLifecycle,
@@ -423,6 +425,23 @@ async def run_grounded_draft(
     except ControlledDraftError as exc:
         raise ApiError(exc.status_code, exc.code, exc.message) from exc
     return _draft_out(result)
+
+
+@router.post("/{execution_id}/artifact", response_model=NodeOut)
+async def save_grounded_draft_artifact(
+    workspace_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    payload: DraftArtifactSave,
+    principal: MutatingPrincipalDep,
+    session: SessionDep,
+) -> NodeOut:
+    return await save_draft_artifact(
+        session,
+        user_id=principal.user_id,
+        workspace_id=workspace_id,
+        execution_id=execution_id,
+        payload=payload,
+    )
 
 
 @router.post("/{execution_id}/cancel", response_model=AgentExecutionCancelOut)

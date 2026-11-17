@@ -89,6 +89,21 @@ export const canvasSchema = z.object({
   updatedAt: timestampSchema,
 });
 
+export const draftProvenanceSchema = z.object({
+  executionId: z.string().uuid(),
+  responseId: z.string().uuid(),
+  traceId: z.string().uuid(),
+  originalText: z.string().max(100_000),
+  edited: z.boolean(),
+  insufficientEvidence: z.boolean(),
+  citations: z.array(citationSchema).max(100),
+});
+
+export const saveDraftArtifactInputSchema = z.object({
+  canvasId: z.string().uuid(),
+  position: pointSchema,
+});
+
 export const canvasNodeSchema = z.object({
   id: z.string().min(1),
   canvasId: z.string().min(1),
@@ -101,6 +116,7 @@ export const canvasNodeSchema = z.object({
   revision: z.number().int().nonnegative(),
   document: documentMetadataSchema.nullable().optional(),
   citations: z.array(citationSchema).max(100).optional(),
+  draftProvenance: draftProvenanceSchema.nullable().optional(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
 });

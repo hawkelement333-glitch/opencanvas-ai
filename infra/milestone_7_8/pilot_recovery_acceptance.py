@@ -293,8 +293,14 @@ def reconcile_recovery(plan: dict, records: list[dict]) -> dict:
     )
     require(restored["nativeProvisioningState"] == "Succeeded", "restore is not terminal")
     require(
-        restored["sourceSchema"] in {"20260726_0028", "20260726_0029"}
-        and restored["targetSchema"] == "20260726_0029",
+        (
+            restored["sourceSchema"] in {"20260726_0028", "20260726_0029"}
+            and restored["targetSchema"] == "20260726_0029"
+        )
+        or (
+            restored["sourceSchema"] == "20261116_0030"
+            and restored["targetSchema"] == "20261116_0030"
+        ),
         "unsupported schema compatibility path",
     )
     if restored["sourceSchema"].endswith("0028"):
@@ -378,7 +384,8 @@ def collect_recovery(plan: dict, manifest: dict, directory: Path) -> dict:
     intent retains the exact submitted PUT body and request time. The snapshot
     is the last acknowledged quiescent marker: its rows must survive verbatim.
     Historical 0028 compatibility remains separately credited local evidence;
-    this current-release managed chain restores 0029 without schema fabrication.
+    this current-release managed chain restores 0030 without schema fabrication.
+    Historical 0028-to-0029 compatibility remains a separate credited path.
     """
     raw: dict[str, dict] = {}
     hashes: dict[str, str] = {}
@@ -560,7 +567,7 @@ def collect_recovery(plan: dict, manifest: dict, directory: Path) -> dict:
         state = receipt["snapshot"]
         require(
             set(state["tables"]) == expected_tables
-            and state["schemaRevision"] == "20260726_0029"
+            and state["schemaRevision"] == "20261116_0030"
             and state["identity"]["tls"] is True
             and state["identity"]["privileged"] is False,
             "complete current-release scoped snapshot required",
@@ -695,7 +702,7 @@ def collect_recovery(plan: dict, manifest: dict, directory: Path) -> dict:
         )
         require(
             result["runtimeReport"]["dialect"] == "postgresql"
-            and result["runtimeReport"]["schema_revision"] == "20260726_0029"
+            and result["runtimeReport"]["schema_revision"] == "20261116_0030"
             and bool(result["runtimeReport"]["database_user"])
             and result["tablesChecked"] > 0,
             "native restored role report missing",

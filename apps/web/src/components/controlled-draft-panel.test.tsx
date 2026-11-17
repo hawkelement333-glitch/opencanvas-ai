@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -31,7 +31,10 @@ const result: ControlledDraft = {
   duplicate: false,
 };
 
-function setup(onRun = vi.fn().mockResolvedValue(result)) {
+function setup(
+  onRun = vi.fn().mockResolvedValue(result),
+  onSave = vi.fn().mockResolvedValue(selected[0]),
+) {
   const onPrepare = vi
     .fn()
     .mockResolvedValue({ executionId: result.executionId, status: "ready", duplicate: false });
@@ -49,12 +52,13 @@ function setup(onRun = vi.fn().mockResolvedValue(result)) {
       onPrepare,
       onRun,
       onCancel,
+      onSave,
       onOpenCitation: vi.fn(),
       onClearSelection: vi.fn(),
       getTraceUrl: (id) => `/trace/${id}`,
     }),
   );
-  return { onPrepare, onRun, onCancel };
+  return { onPrepare, onRun, onCancel, onSave };
 }
 
 describe("ControlledDraftPanel", () => {
@@ -90,6 +94,66 @@ describe("ControlledDraftPanel", () => {
     await user.click(screen.getByRole("button", { name: "Cancel controlled draft" }));
     expect(onCancel).toHaveBeenCalledWith(result.executionId, expect.any(String));
     expect(await screen.findByText(/Controlled draft cancelled/i)).toBeInTheDocument();
-    resolve(result);
+    await act(async () => resolve(result));
+  });
+});
+
+describe("Explicit draft artifact save", () => {
+  it("never saves on generation and saves only the returned execution after explicit action", async () => {
+    const user = userEvent.setup();
+    const { onSave } = setup();
+    await user.type(screen.getByTestId("controlled-draft-input"), "Summarize evidence");
+    await user.click(screen.getByTestId("start-controlled-draft"));
+    const save = await screen.findByRole("button", { name: "Save as editable canvas artifact" });
+    expect(onSave).not.toHaveBeenCalled();
+    await user.click(save);
+    expect(onSave).toHaveBeenCalledExactlyOnceWith(result.executionId);
+    expect(await screen.findByText("Saved as an editable canvas artifact")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Saved to canvas" })).toBeDisabled();
+    expect(screen.getByText(result.text)).toBeInTheDocument();
+  });
+
+  it("blocks repeated save and generation while the save is pending", async () => {
+    const user = userEvent.setup();
+    let finish!: (value: CanvasNode) => void;
+    const onSave = vi.fn().mockImplementation(
+      () =>
+        new Promise<CanvasNode>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { onPrepare } = setup(undefined, onSave);
+    await user.type(screen.getByTestId("controlled-draft-input"), "Summarize evidence");
+    await user.click(screen.getByTestId("start-controlled-draft"));
+    await user.click(
+      await screen.findByRole("button", { name: "Save as editable canvas artifact" }),
+    );
+    const pending = screen.getByRole("button", { name: "Saving to canvas�" });
+    expect(pending).toBeDisabled();
+    expect(screen.getByTestId("controlled-draft-input")).toBeDisabled();
+    await user.click(pending);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onPrepare).toHaveBeenCalledTimes(1);
+    finish(selected[0]!);
+    expect(await screen.findByText("Saved as an editable canvas artifact")).toBeInTheDocument();
+  });
+
+  it("retains the original result and retries the same execution after an uncertain save", async () => {
+    const user = userEvent.setup();
+    const onSave = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("uncertain"))
+      .mockResolvedValue(selected[0]);
+    setup(undefined, onSave);
+    await user.type(screen.getByTestId("controlled-draft-input"), "Summarize evidence");
+    await user.click(screen.getByTestId("start-controlled-draft"));
+    await user.click(
+      await screen.findByRole("button", { name: "Save as editable canvas artifact" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be confirmed");
+    expect(screen.getByText(result.text)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save as editable canvas artifact" }));
+    expect(await screen.findByText("Saved as an editable canvas artifact")).toBeInTheDocument();
+    expect(onSave.mock.calls).toEqual([[result.executionId], [result.executionId]]);
   });
 });

@@ -130,3 +130,15 @@ deadline, retry, recovery, or stale-result defect was found.
 9. SolarPlexus Agent Ecosystem
 
 This audit stops before Milestone 5 implementation.
+
+
+## Later explicit-save contract decision (Milestone 7.8)
+
+The user selected an explicit save-as-editable-artifact action on November16,
+2026. This reconciles the original editable persistent canvas requirement with
+this milestone's historical read-only generation boundary: generation still
+creates no canvas node; a separate authorized action creates an editable
+derivative while preserving original response, citation evidence and Trace.
+The historical tests/results above remain unchanged. Current implementation,
+validation and release limits are in the
+[7.8 editable release checkpoint](MILESTONE_7_8_EDITABLE_AI_RELEASE_CHECKPOINT.md).

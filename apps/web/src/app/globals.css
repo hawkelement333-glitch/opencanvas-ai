@@ -4193,3 +4193,23 @@ textarea:focus-visible {
     animation: none;
   }
 }
+
+.canvas-node__provenance {
+  max-height: 45%;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.canvas-node__provenance summary {
+  cursor: pointer;
+  color: var(--violet);
+}
+
+.canvas-node__provenance [data-testid="draft-original-text"] {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.canvas-node__provenance .canvas-node__citations {
+  max-height: none;
+}

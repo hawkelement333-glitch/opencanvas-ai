@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CanvasEdge, CanvasNode } from "./contracts";
 import {
+  admitSavedDraftArtifact,
   removeDocumentCitations,
   removeResponseCitationEdges,
   selectedCanvasNodes,
@@ -111,5 +112,97 @@ describe("React Flow adapters", () => {
     expect(removeResponseCitationEdges([cite, generated], "answer").map((edge) => edge.id)).toEqual(
       ["generated"],
     );
+  });
+});
+
+describe("saved draft citation availability", () => {
+  it("removes deleted-source navigation without mutating original evidence or edited content", () => {
+    const citation = {
+      id: "citation-a",
+      sourceId: "chunk-a",
+      documentId: "document-a",
+      documentTitle: "A.pdf",
+      chunkId: "chunk-a",
+      chunkIndex: 0,
+      startOffset: 0,
+      endOffset: 6,
+      pageNumber: 1,
+      heading: null,
+      excerpt: "Fact A",
+      claim: "Claim A",
+      ordinal: 1,
+    };
+    const original = {
+      executionId: "exec",
+      responseId: "response",
+      traceId: "trace",
+      originalText: "Original text",
+      edited: true,
+      insufficientEvidence: false,
+      citations: [citation],
+    };
+    const flowNode = toFlowNode({
+      ...domainNode("answer"),
+      type: "ai_response",
+      text: "User edit",
+      draftProvenance: original,
+    });
+    const [cleaned] = removeDocumentCitations([flowNode], new Set(["document-a"]));
+    expect(cleaned?.data.node.text).toBe("User edit");
+    expect(cleaned?.data.node.draftProvenance).toEqual({ ...original, citations: [] });
+    expect(original.citations).toEqual([citation]);
+  });
+});
+
+describe("explicit artifact admission preserves concurrent local work", () => {
+  it("keeps newer text, local additions and edges, and excludes links to deleted nodes", () => {
+    const local = toFlowNode({ ...domainNode("source"), text: "Newer unsaved text" });
+    const newlyAdded = toFlowNode(domainNode("added-during-save"));
+    const localEdge = toFlowEdge({
+      ...domainEdge("local", "default"),
+      sourceNodeId: "source",
+      targetNodeId: "added-during-save",
+      label: "New local edge",
+    });
+    const created = { ...domainNode("saved"), type: "ai_response" as const };
+    const generated = {
+      ...domainEdge("generated", "generated_from"),
+      sourceNodeId: "source",
+      targetNodeId: "saved",
+    };
+    const deletedSourceEdge = {
+      ...generated,
+      id: "deleted-source-edge",
+      sourceNodeId: "deleted-during-save",
+    };
+    const unrelatedSnapshotEdge = {
+      ...generated,
+      id: "unrelated",
+      sourceNodeId: "source",
+      targetNodeId: "added-during-save",
+    };
+    const merged = admitSavedDraftArtifact([local, newlyAdded], [localEdge], created, [
+      generated,
+      deletedSourceEdge,
+      unrelatedSnapshotEdge,
+    ]);
+    expect(merged.nodes.map((node) => node.id)).toEqual(["source", "added-during-save", "saved"]);
+    expect(merged.nodes[0]?.data.node.text).toBe("Newer unsaved text");
+    expect(merged.nodes.filter((node) => node.selected).map((node) => node.id)).toEqual(["saved"]);
+    expect(merged.edges.map((edge) => edge.id)).toEqual(["local", "generated"]);
+    expect(merged.edges[0]).toBe(localEdge);
+  });
+
+  it("duplicate save cannot overwrite edits or restore user-removed artifact edges", () => {
+    const edited = toFlowNode({ ...domainNode("saved"), text: "User edit in flight" });
+    const merged = admitSavedDraftArtifact(
+      [edited],
+      [],
+      { ...domainNode("saved"), text: "Older snapshot" },
+      [{ ...domainEdge("old-edge", "generated_from"), targetNodeId: "saved" }],
+    );
+    expect(merged.nodes).toHaveLength(1);
+    expect(merged.nodes[0]?.data.node.text).toBe("User edit in flight");
+    expect(merged.edges).toEqual([]);
   });
 });

@@ -512,3 +512,25 @@ def test_all_catalog_native_pairs_require_metric_semantics_and_authorized_integr
     documents["integrity-authorized-closure"]["operatorPrincipalId"] = "unauthorized"
     with pytest.raises(ValueError, match="operator not authorized"):
         validate_alerts(evidence)
+
+
+def test_selected_full_closure_window_preserves_historical_pilot_window(tmp_path):
+    closure = tmp_path / "closure"
+    pilot = tmp_path / "pilot"
+    closure.mkdir()
+    pilot.mkdir()
+    selected = prepare(closure, "rc-window", "m78-window", 50, full_closure=True)
+    historical = prepare(pilot, "rc-window", "m78-window", 50)
+    assert selected["relativeWindowHours"] == {
+        "provisionBy": 2,
+        "readyBy": 2,
+        "stopProof": 10,
+        "cleanupBy": 12,
+    }
+    assert historical["relativeWindowHours"] == {
+        "provisionBy": 2,
+        "stopProof": 8,
+        "cleanupBy": 10,
+    }
+    assert selected["managedAcceptance"] == "unproved"
+    assert selected["closedCampaigns"] == ["PostgreSQL", "M78-D-001", "M78-D-002"]

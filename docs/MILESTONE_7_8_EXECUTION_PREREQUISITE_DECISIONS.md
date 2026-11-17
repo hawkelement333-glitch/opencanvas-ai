@@ -6,7 +6,22 @@ D001 and D002 remain closed; full 7.8 remains incomplete. This updates the
 [execution proposal](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md) and
 [finite ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md), preserving prior history.
 
-## Decision sheet
+## Current disposition
+
+The user selected explicit editable derivatives, admission6/lock concurrency13,
+and Firewall/VM not-applicable to the final ACA topology. The encrypted local
+key was generated and the user explicitly trusted public-key SHA-256
+`856f48ad36a3f8787619c96b857cbad0e7583e768f76ec4ff653092f572ec789`
+with the documented key-only policy. These decisions are no longer requested.
+See the [implemented release checkpoint](MILESTONE_7_8_EDITABLE_AI_RELEASE_CHECKPOINT.md)
+for current local evidence and signatures. Provider/operator/private-route and
+exact cleanup authority inputs remain required. The
+[longer-window recommendation](MILESTONE_7_8_WINDOW_ACCESS_PROPOSAL.md) replaces
+the nominal tight-window proposal below. The user selected +2/+10/+12 for
+preparation; separate spending approval remains required. Earlier descriptions below are the reviewed
+pre-decision state, retained for history; they do not override the new choices.
+
+## Reviewed decision sheet (historical checkpoint)
 
 | Decision/input | Recommendation | Exact unresolved input and consequence |
 |---|---|---|

@@ -11,7 +11,8 @@ import {
   type ReactNode,
 } from "react";
 
-import type { Citation } from "@/lib/contracts";
+import { getTraceUrl } from "@/lib/api-client";
+import type { CanvasNode, Citation } from "@/lib/contracts";
 import type { CanvasFlowNode, NodeHandlers } from "@/lib/flow";
 import { citationRole, nodeRole } from "@/lib/universe";
 
@@ -90,6 +91,42 @@ export function ResponseCitations({
   );
 }
 
+export function DraftArtifactProvenance({
+  provenance,
+  onOpenCitation,
+}: {
+  provenance: NonNullable<CanvasNode["draftProvenance"]>;
+  onOpenCitation: (citation: Citation) => void;
+}) {
+  return (
+    <section
+      className="canvas-node__citations canvas-node__provenance nodrag nopan nowheel"
+      aria-label="Saved draft provenance"
+    >
+      <p>
+        {provenance.edited
+          ? "User-edited content � original evidence unchanged"
+          : "Saved AI draft � editable copy"}
+      </p>
+      <details data-testid="draft-provenance">
+        <summary onPointerDown={(event) => event.stopPropagation()}>Original AI evidence</summary>
+        <p>Original citations support the original response, not subsequent edits.</p>
+        {provenance.insufficientEvidence && <p>Original response: insufficient evidence</p>}
+        <p data-testid="draft-original-text">{provenance.originalText}</p>
+        <a
+          href={getTraceUrl(provenance.traceId)}
+          target="_blank"
+          rel="noreferrer"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          Inspect original Trace
+        </a>
+        <ResponseCitations citations={provenance.citations} onOpen={onOpenCitation} />
+      </details>
+    </section>
+  );
+}
+
 export const CanvasNodeCard = memo(function CanvasNodeCard({
   id,
   data,
@@ -100,6 +137,7 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({
   const isAI = node.type === "ai_response";
   const citations = node.citations ?? [];
   const role = nodeRole(node);
+  const provenance = node.draftProvenance;
 
   const changeTitle = (event: ChangeEvent<HTMLInputElement>) => {
     actions.onTitleChange(id, event.target.value);
@@ -199,7 +237,13 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({
       />
       <div className="canvas-node__role" title={role.description}>
         <span>{role.level.replace("_", " ")}</span>
-        <span>{isAI ? `${citations.length} citations` : "Selectable context"}</span>
+        <span>
+          {provenance
+            ? "Editable derivative"
+            : isAI
+              ? `${citations.length} citations`
+              : "Selectable context"}
+        </span>
       </div>
       <textarea
         className="canvas-node__editor nodrag nopan nowheel"
@@ -221,7 +265,11 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({
         data-testid={`node-text-${id}`}
       />
 
-      {isAI && <ResponseCitations citations={citations} onOpen={actions.onOpenCitation} />}
+      {provenance ? (
+        <DraftArtifactProvenance provenance={provenance} onOpenCitation={actions.onOpenCitation} />
+      ) : (
+        isAI && <ResponseCitations citations={citations} onOpen={actions.onOpenCitation} />
+      )}
 
       {pending && (
         <span className="canvas-node__pending" role="status">
