@@ -992,6 +992,10 @@ def command_plan(
             ),
             *automation_region_commands,
             *controller_commands,
+            *(
+                ("az", "provider", "show", "--namespace", namespace, "--output", "json")
+                for namespace in required_pilot_regional_providers(config)
+            ),
         )
     if operation in {"cost-gate", "billable-start", "dispose", "finalize"}:
         return ()
@@ -5075,6 +5079,12 @@ def start_direct_cleanup(
     )
 
 
+def required_pilot_regional_providers(config: CampaignConfig) -> tuple[str, ...]:
+    if config.target_region == "canadacentral" and config.maximum_hours == 10:
+        return ("Microsoft.EventHub", "Microsoft.KeyVault")
+    return ()
+
+
 def validate_campaign_provider_quotas(postgres: object, container_apps: object) -> None:
     """Require the named regional quotas for the fixed HA campaign topology."""
     for response, requirements, unit_required in (
@@ -5190,7 +5200,8 @@ def validate_operation_results(
             raise CampaignError("Azure campaign correlation differs")
     elif operation == "capacity-check":
         validate_bound_controller_authority(controller_authority_evidence, runtime, config)
-        if len(results) != 26:
+        pilot_providers = required_pilot_regional_providers(config)
+        if len(results) != 26 + len(pilot_providers):
             raise CampaignError(
                 "provider, quota, region, SKU, or name proof is incomplete"
             )
@@ -5201,6 +5212,14 @@ def validate_operation_results(
             for provider in providers
         ):
             raise CampaignError("required Azure provider is not registered")
+        for namespace, result in zip(pilot_providers, results[26:], strict=True):
+            provider = _json_result(result)
+            if (
+                not isinstance(provider, dict)
+                or provider.get("namespace") != namespace
+                or provider.get("registrationState") != "Registered"
+            ):
+                raise CampaignError(f"required Azure provider is not registered: {namespace}")
         skus = _json_result(results[8])
         postgres_quota = _json_result(results[9])
         app_quota = _json_result(results[10])

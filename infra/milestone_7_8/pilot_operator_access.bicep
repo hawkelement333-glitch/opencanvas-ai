@@ -1,7 +1,7 @@
 // Selected temporary access option. Deployment still needs separate approval.
 targetScope = 'resourceGroup'
 
-@allowed(['eastus'])
+@allowed(['eastus', 'canadacentral'])
 param location string = 'eastus'
 @minLength(10)
 @maxLength(10)

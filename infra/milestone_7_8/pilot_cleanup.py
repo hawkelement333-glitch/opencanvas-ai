@@ -100,7 +100,9 @@ def validate_window(runtime_path: Path, runtime: dict, config: CampaignConfig) -
         != (CAMPAIGN, GENERATION, TARGET)
         or value["targetResourceGroup"] != TARGET
         or runtime["resourceGroupName"] != TARGET
-        or config.target_region != "eastus"
+        or config.target_region not in {"eastus", "canadacentral"}
+        or config.postgres_region != config.target_region
+        or value.get("targetRegion", "eastus") != config.target_region
         or config.maximum_hours != 10
         or config.authorized_ceiling_usd != "50.00"
         or config.cleanup_deadline_utc != expected["stopProofBy"]
@@ -116,12 +118,28 @@ def validate_window(runtime_path: Path, runtime: dict, config: CampaignConfig) -
 def validate_review(package: Path, approval: dict) -> dict:
     review_path = package / "review-package.json"
     review = read(review_path)
+    schema = review.get("schema")
+    if schema == "m78-full-closure-regional-v1":
+        pricing = read(package / "regional-pricing.json")
+        forecast = review.get("forecastUsd")
+        region_valid = (
+            type(forecast) in {int, float}
+            and 0 < forecast <= 50
+            and forecast == pricing.get("forecastUsd")
+            and review.get("targetRegion") == "canadacentral"
+            and review.get("redisRegion") == "eastus"
+            and "regional-pricing.json" in review["files"]
+        )
+    else:
+        region_valid = (
+            schema == "m78-full-closure-replacement-v1"
+            and review.get("forecastUsd") == 36.6423
+        )
     if (
         approval.get("approved") is not True
         or approval.get("reviewPackageSha256") != file_hash(review_path)
         or approval.get("sourceHead") != review["sourceCommit"]
-        or review.get("schema") != "m78-full-closure-replacement-v1"
-        or review.get("forecastUsd") != 36.6423
+        or not region_valid
         or review.get("incrementalCeilingUsd") != 50
         or review.get("proposedCumulativeCeilingUsd") != 400.89
         or any(
@@ -255,6 +273,7 @@ def validate_live(runtime_path: Path, runtime: dict, config: CampaignConfig) -> 
     source, script_hash = local_source_binding()
     if (
         source != review["sourceCommit"]
+        or config.target_region != review.get("targetRegion", "eastus")
         or runtime["sourceHead"] != source
         or runtime["cleanupScriptSha256"] != script_hash
         or window(approval["approvedAt"])["approvedAt"] != value["approvedAt"]
@@ -389,6 +408,8 @@ def materialize(
         bindingName=binding_name(deadline),
     )
     config_model = CampaignConfig.from_document(config, allow_expired=simulation)
+    if config_model.target_region != review.get("targetRegion", "eastus"):
+        raise CampaignError("campaign region differs from the sealed review")
     initial = read(template / "ledger.json")
     directory.mkdir(parents=True, exist_ok=False)
     for name in (
@@ -424,6 +445,7 @@ def materialize(
             **values,
             "simulation": simulation,
             "targetResourceGroup": TARGET,
+            "targetRegion": config_model.target_region,
             "packageDirectory": str(package),
             "cleanupExecutorObjectId": read(package / "cleanup-plan.json")[
                 "executorObjectId"
@@ -543,6 +565,14 @@ def stage_parameters(package: Path, directory: Path, stage: str, native: dict) -
     )
     output["contentVersion"] = "1.0.0.0"
     parameters = output["parameters"]
+    review = read(package / "review-package.json")
+    if (
+        parameters.get("location", {}).get("value") != cfg.target_region
+        or cfg.target_region != review.get("targetRegion", "eastus")
+        or parameters.get("redisLocation", parameters["location"]).get("value")
+        != review.get("redisRegion", cfg.target_region)
+    ):
+        raise CampaignError("deployment locations differ from the bound campaign")
     tags = read(directory / "campaign.parameters.json")["parameters"]["lifecycleTags"][
         "value"
     ]
@@ -580,6 +610,7 @@ def fallback_plan(runtime_path: Path, runtime: dict, config: CampaignConfig) -> 
     value = validate_window(runtime_path, runtime, config)
     return {
         "targetResourceGroup": TARGET,
+        "targetRegion": config.target_region,
         "earliestUtc": value["automationBindingExpiresAt"],
         "expiresAtUtc": value["operatorCleanupExpiresAt"],
         "executorObjectId": value["cleanupExecutorObjectId"],
@@ -613,7 +644,8 @@ def fallback_decision(
     target_id = f"/subscriptions/{runtime['subscriptionId']}/resourceGroups/{TARGET}"
     if (
         str(group.get("id", "")).casefold() != target_id.casefold()
-        or group.get("location") != "eastus"
+        or group.get("location") != config.target_region
+        or plan["targetRegion"] != config.target_region
         or plan["targetResourceGroup"] != TARGET
     ):
         raise CampaignError("fallback target readback differs")

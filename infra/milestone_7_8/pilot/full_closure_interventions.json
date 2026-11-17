@@ -3,7 +3,7 @@
   "status": "prepared-not-authorized-not-executed",
   "targetResourceGroupName": "rg-m78-a712b8c940-target",
   "suffix": "a712b8c940",
-  "location": "eastus",
+  "location": "${targetRegion}",
   "scopeGuards": [
     "targetResourceGroupId must equal /subscriptions/<approved UUID>/resourceGroups/rg-m78-a712b8c940-target.",
     "All resource substitutions come from exact source-bound Bicep names or specified native GET response paths; no subscription-wide discovery.",

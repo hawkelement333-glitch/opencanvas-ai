@@ -264,7 +264,8 @@ az group exists --name $rg
 az group delete --name $rg --yes --no-wait
 az group wait --name $rg --deleted --timeout 1800
 # Exact previously approved vault only, using the authorized existing principal:
-az keyvault purge --name kv-m78p-a712b8c940 --location eastus
+$campaign = Get-Content -LiteralPath "$bound/campaign.json" -Raw | ConvertFrom-Json
+az keyvault purge --name kv-m78p-a712b8c940 --location $campaign.targetRegion
 ```
 
 A wait timeout is not failed deletion; inspect the exact existing job/group.

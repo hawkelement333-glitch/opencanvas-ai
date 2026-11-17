@@ -1,8 +1,10 @@
 // Isolated, approval-bound pilot validation. This template does not run a proof.
 targetScope = 'resourceGroup'
 
-@allowed(['eastus'])
+@allowed(['eastus', 'canadacentral'])
 param location string = 'eastus'
+@allowed(['eastus', 'canadacentral'])
+param redisLocation string = location
 @minLength(10)
 @maxLength(10)
 param suffix string
@@ -110,7 +112,7 @@ resource administrator 'Microsoft.DBforPostgreSQL/flexibleServers/administrators
 // Same accepted HA/TLS/Entra Redis shape; no D002 acceptance is repeated here.
 resource redis 'Microsoft.Cache/redisEnterprise@2026-05-01-preview' = {
   name: 'redis-${prefix}'
-  location: location
+  location: redisLocation
   tags: lifecycleTags
   sku: { name: 'Balanced_B0' }
   properties: { minimumTlsVersion: '1.2', highAvailability: 'Enabled', publicNetworkAccess: 'Disabled' }

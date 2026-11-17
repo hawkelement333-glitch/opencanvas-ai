@@ -1,7 +1,7 @@
 // Only the isolated pilot validation destination. No historical campaign adoption.
 targetScope = 'resourceGroup'
 
-@allowed(['eastus'])
+@allowed(['eastus', 'canadacentral'])
 param location string = 'eastus'
 @minLength(10)
 @maxLength(10)
