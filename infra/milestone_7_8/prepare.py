@@ -17,6 +17,7 @@ from infra.milestone_7_8.automation_region import (
 )
 from infra.milestone_7_8.campaign import (
     CAMPAIGN_PATTERN,
+    CAMPAIGN_PROOF_WINDOWS,
     GENERATION_PATTERN,
     CampaignConfig,
     CampaignError,
@@ -102,7 +103,7 @@ def main() -> int:
         description="Create one immutable untracked M7.8 runtime bundle"
     )
     parser.add_argument("--authorized-ceiling-usd", choices=("50.00", "56.51"), default="50.00")
-    parser.add_argument("--maximum-hours", type=int, choices=(4, 8), default=4)
+    parser.add_argument("--maximum-hours", type=int, choices=CAMPAIGN_PROOF_WINDOWS, default=4)
     parser.add_argument("--cost-fields", type=Path)
     parser.add_argument("--campaign-id", required=True)
     parser.add_argument("--generation-id", required=True)

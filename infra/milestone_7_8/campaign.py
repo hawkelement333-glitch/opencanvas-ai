@@ -21,6 +21,7 @@ from infra.milestone_7_8.azure_cli import (
 )
 
 HARD_CEILING: Final = Decimal("50.00")
+CAMPAIGN_PROOF_WINDOWS: Final = (4, 8, 10)
 DEFAULT_ESTIMATE: Final = Decimal("25.6832")
 CAMPAIGN_PATTERN: Final = re.compile(r"^[a-z][a-z0-9-]{7,47}$")
 GENERATION_PATTERN: Final = re.compile(r"^g[1-9][0-9]{0,5}-[a-f0-9]{12}$")
@@ -266,7 +267,7 @@ class CampaignConfig:
     def validate(self, *, allow_expired: bool = False) -> None:
         if self.authorized_ceiling_usd not in {"50.00", "56.51"}:
             raise CampaignError("campaign cost ceiling is not a recorded approved limit")
-        if type(self.maximum_hours) is not int or self.maximum_hours not in {4, 8}:
+        if type(self.maximum_hours) is not int or self.maximum_hours not in CAMPAIGN_PROOF_WINDOWS:
             raise CampaignError("campaign maximum hours is not a recorded approved window")
         if CAMPAIGN_PATTERN.fullmatch(self.campaign_id) is None:
             raise CampaignError("campaign identity is malformed")

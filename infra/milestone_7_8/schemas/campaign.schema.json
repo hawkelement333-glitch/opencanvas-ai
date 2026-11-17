@@ -34,7 +34,7 @@
   },
   "properties": {
     "authorizedCeilingUsd": { "enum": ["50.00", "56.51"] },
-    "maximumHours": { "enum": [4, 8] },
+    "maximumHours": { "enum": [4, 8, 10] },
     "campaignId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{7,47}$" },
     "generationId": {
       "type": "string",

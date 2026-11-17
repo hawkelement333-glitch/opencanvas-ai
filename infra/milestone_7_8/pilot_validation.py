@@ -315,6 +315,8 @@ def admit_runtime_bindings(plan: dict, readbacks: dict, *, plan_sha256: str) -> 
         "gatewayResourceId": "2025-01-01",
         "managedEnvironmentResourceId": "2025-01-01",
     }
+    if plan.get("frontendResourceId"):
+        versions["frontendResourceId"] = "2025-01-01"
     scope = plan["targetResourceGroupId"]
     for key, api_version in versions.items():
         expected = plan.get(key, "")
@@ -347,10 +349,13 @@ def admit_runtime_bindings(plan: dict, readbacks: dict, *, plan_sha256: str) -> 
     if re.fullmatch(r"[a-z0-9.-]+\.azurecontainerapps\.io", domain) is None:
         raise ValueError("unexpected provider environment domain")
     result = dict(plan)
-    for key, result_key in (
-        ("applicationResourceId", "apiBaseUrl"),
-        ("gatewayResourceId", "gatewayUrl"),
-    ):
+    applications = [
+        ("applicationResourceId", "apiBaseUrl", "imageDigest"),
+        ("gatewayResourceId", "gatewayUrl", "imageDigest"),
+    ]
+    if "frontendResourceId" in admitted:
+        applications.append(("frontendResourceId", "frontendOrigin", "frontendImageDigest"))
+    for key, result_key, image_key in applications:
         properties = admitted[key]["properties"]
         environment_id = properties.get(
             "environmentId", properties.get("managedEnvironmentId", "")
@@ -363,7 +368,7 @@ def admit_runtime_bindings(plan: dict, readbacks: dict, *, plan_sha256: str) -> 
             raise ValueError("application FQDN is not provider-bound")
         containers = properties["template"]["containers"]
         if not containers or any(
-            not str(item.get("image", "")).endswith("@" + plan["imageDigest"])
+            not str(item.get("image", "")).endswith("@" + plan[image_key])
             for item in containers
         ):
             raise ValueError("application image differs from approved digest")
@@ -416,6 +421,13 @@ def admit_runtime_bindings(plan: dict, readbacks: dict, *, plan_sha256: str) -> 
     if re.fullmatch(r"eh-m78p-[a-f0-9]{10}", namespace) is None:
         raise ValueError("alert namespace mismatch")
     result["eventHubNamespace"] = namespace + ".servicebus.windows.net"
+    if "frontendOrigin" in result and "passwordResetProof" in plan:
+        expected_origin = plan["passwordResetProof"].get("appOrigin")
+        if expected_origin not in {"${admittedFrontendOrigin}", result["frontendOrigin"]}:
+            raise ValueError("password-reset frontend origin differs from native readback")
+        result["passwordResetProof"] = {
+            **plan["passwordResetProof"], "appOrigin": result["frontendOrigin"],
+        }
     return result
 
 

@@ -5,7 +5,7 @@ import json
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
 
@@ -288,6 +288,13 @@ def load_execution_authorization(
         raise CampaignError("Azure execution authorization expiry is malformed")
     parsed_expiry = parse_utc(expires)
     authority_expiry = parse_utc(runtime["cleanupAuthorityExpiresUtc"])
+    if (
+        "pilotCleanupWindowFile" in runtime
+        and config.maximum_hours == 10
+        and operation in {"cleanup-wait", "cleanup-disarm"}
+        and set(operations) <= {"cleanup-wait", "cleanup-disarm"}
+    ):
+        authority_expiry += timedelta(hours=1)
     observed_now = (now or datetime.now(UTC)).astimezone(UTC)
     if parsed_expiry <= observed_now or parsed_expiry > authority_expiry:
         raise CampaignError("Azure execution authorization is expired or overbroad")

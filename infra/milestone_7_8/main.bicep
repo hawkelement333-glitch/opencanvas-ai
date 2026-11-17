@@ -51,7 +51,7 @@ param evidenceIdentityName string
 param cleanupIdentityName string
 param cleanupDeadlineUtc string
 
-@allowed([4, 8])
+@allowed([4, 8, 10])
 param maximumHours int = 4
 
 @allowed([5000, 5651])

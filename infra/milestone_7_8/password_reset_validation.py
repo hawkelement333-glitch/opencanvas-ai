@@ -240,9 +240,12 @@ async def run(args: argparse.Namespace) -> dict:
         json.loads(args.runtime_readbacks.read_text()),
         plan_sha256=digest(args.bindings),
     )
+    plan = runtime
     require(
-        plan.get("passwordResetProof", {}).get("ttlMinutes") == 30,
-        "unchanged 30-minute application reset contract required",
+        plan.get("passwordResetProof", {}).get("ttlMinutes") == 30
+        and plan.get("frontendOrigin") is not None
+        and plan["passwordResetProof"].get("appOrigin") == plan["frontendOrigin"],
+        "native frontend origin and unchanged 30-minute reset contract required",
     )
     host = urlparse(runtime["apiBaseUrl"]).hostname
     require(host is not None, "private application endpoint required")
@@ -258,6 +261,12 @@ async def run(args: argparse.Namespace) -> dict:
         api = Api(client, journal, args.execution_id)
         if args.operation == "password-reset-request":
             return journal.finish(await request_reset(api, plan))
+        require(
+            args.request_receipt is not None and args.inbox_receipt is not None
+            and args.raw_message is not None
+            and (args.operation != "password-reset-expiry" or args.confirmed_receipt is not None),
+            "confirmation or expiry requires the bound native inbox and request receipts",
+        )
         request = json.loads(args.request_receipt.read_text())
         require(
             request.get("operation") == "password-reset-request"

@@ -277,7 +277,7 @@ def load_runtime(path: Path) -> dict[str, str]:
         not isinstance(value, dict)
         or not RUNTIME_FIELDS <= set(value) <= RUNTIME_FIELDS | {
             "controllerBootstrapScriptSha256", "deadlineRenewalEvidenceFile",
-            "deadlineRenewalEvidenceSha256",
+            "deadlineRenewalEvidenceSha256", "pilotCleanupWindowFile",
         }
         or not all(isinstance(item, str) and item for item in value.values())
     ):
@@ -386,6 +386,15 @@ def load_bound_fresh_controller_admission(
         return resolved
 
     try:
+        campaign_id, generation_id = config.campaign_id, config.generation_id
+        if "pilotCleanupWindowFile" in runtime:
+            from infra.milestone_7_8.pilot_cleanup import validate_window
+
+            validate_window(runtime_path, runtime, config)
+            origin = validate_authority_evidence(
+                load_bound_controller_authority(runtime_path, runtime, config)
+            )
+            campaign_id, generation_id = origin.campaign_id, origin.generation_id
         binding = load_validated_admission(
             runtime_path=sibling("freshControllerAdmissionRuntimeFile"),
             authorization_path=sibling("freshControllerAdmissionAuthorizationFile"),
@@ -394,8 +403,8 @@ def load_bound_fresh_controller_admission(
             tenant_id=_load_fresh_scope_tenant(
                 sibling("freshControllerAdmissionRuntimeFile")
             ),
-            campaign_id=config.campaign_id,
-            generation_id=config.generation_id,
+            campaign_id=campaign_id,
+            generation_id=generation_id,
             region=config.cleanup_region,
             controller_resource_group_name=runtime["cleanupResourceGroupName"],
             automation_account_name=runtime["automationAccountName"],
@@ -452,8 +461,11 @@ def validate_bound_controller_authority(
         != bootstrap_script_hash(cast(dict[str, object], value))
         or anchor.controller_authorized_until_utc != runtime["controllerAuthorizedUntilUtc"]
         or anchor.runbook_name != runtime["runbookName"]
-        or anchor.campaign_id != config.campaign_id
-        or anchor.generation_id != config.generation_id
+        or (
+            "pilotCleanupWindowFile" not in runtime
+            and (anchor.campaign_id, anchor.generation_id)
+            != (config.campaign_id, config.generation_id)
+        )
         or sanitize(anchor.tenant_id, domain="tenant") != config.tenant_correlation
     ):
         raise CampaignError("controller authority evidence binding differs")
@@ -605,6 +617,12 @@ def validate_prepared_bundle(
         "registryName": f"acrm78{suffix}",
         "logAnalyticsWorkspaceName": f"law-m78-{suffix}",
     }
+    if "pilotCleanupWindowFile" in runtime:
+        expected_runtime.update(
+            postgresServerName=f"pg-m78o-{suffix}",
+            registryName=f"crm78o{suffix}",
+            logAnalyticsWorkspaceName=f"law-m78o-{suffix}",
+        )
     if any(runtime.get(key) != expected for key, expected in expected_runtime.items()):
         raise CampaignError("operator runtime generation name differs")
     if runtime["controllerBindingSha256"] != controller_binding_sha256(
@@ -1024,6 +1042,11 @@ def command_plan(
                 (
                     "mobius.fresh-controller-admission-sha256="
                     + config.fresh_controller_admission_evidence_sha256
+                ),
+                *(
+                    ("mobius.fresh-controller-admission-version="
+                     + runtime["freshControllerAdmissionEvidenceVersion"],)
+                    if "pilotCleanupWindowFile" in runtime else ()
                 ),
                 "mobius.owner=managed-postgresql-evidence",
                 f"mobius.expiry={config.cleanup_deadline_utc}",
@@ -5336,6 +5359,12 @@ def main() -> int:
             config = CampaignConfig.from_json(args.config, allow_expired=True)
             runtime = load_runtime(args.runtime)
             validate_prepared_bundle(args.runtime, runtime, config)
+            if "pilotCleanupWindowFile" in runtime:
+                from infra.milestone_7_8.pilot_cleanup import validate_operator_invocation
+
+                validate_operator_invocation(
+                    args.runtime, runtime, config, args.ledger, args.operation, args.execute
+                )
             ledger = load_ledger(args.ledger, config)
         from infra.milestone_7_8.campaign_deadline_renewal import validate_ledger_binding
 
@@ -5434,6 +5463,10 @@ def main() -> int:
         required_authorizations = required_execution_authorizations(
             args.operation, Phase(ledger.phase)
         )
+        if "pilotCleanupWindowFile" in runtime and args.operation in {
+            "cleanup-wait", "cleanup-disarm",
+        }:
+            required_authorizations = frozenset({args.operation})
         if args.execute and required_authorizations:
             if args.authorization is None:
                 raise CampaignError(
@@ -5444,8 +5477,10 @@ def main() -> int:
                     args.authorization, config=config, runtime=runtime,
                     operation=authorized_operation,
                 )
-        if not cleanup_only and parse_utc(config.cleanup_deadline_utc) <= datetime.now(
-            UTC
+        if (
+            (args.execute or "pilotCleanupWindowFile" not in runtime)
+            and not cleanup_only
+            and parse_utc(config.cleanup_deadline_utc) <= datetime.now(UTC)
         ):
             if args.execute and ORDER.index(Phase(ledger.phase)) >= ORDER.index(
                 Phase.SCOPE_CREATED
@@ -5623,6 +5658,12 @@ def main() -> int:
         if args.operation in {"bootstrap", "migrate", "evidence"}:
             commands = tuple(
                 (*command, "--subscription", runtime["subscriptionId"]) for command in commands
+            )
+        if "pilotCleanupWindowFile" in runtime:
+            commands = tuple(
+                (*command, "--subscription", runtime["subscriptionId"])
+                if command[0] == "az" and "--subscription" not in command else command
+                for command in commands
             )
         if not args.execute:
             display_commands = tuple(
