@@ -4,9 +4,11 @@ Current pilot follow-up: [local preparation and corrected candidate](MILESTONE_7
 pass their stated local checks. The secure website/worker handoff and native
 retrieval-head timestamp corrections are release-integration fixes, not reopened
 PostgreSQL/object/Redis campaigns. Pilot controlled drafts and 900/20 scanning
-are explicitly approved. The [approved regional attempt](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#approved-regional-attempt-stopped-at-cleanup-admission)
-stopped at cleanup scheduling before any workload dispatch. All 48 cleanup
-counters are zero. Milestone 7.8 remains incomplete and billing is unsettled.
+are explicitly approved. The [whole-minute successor](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#whole-minute-successor-native-execution-and-terminal-cleanup)
+passed native schedule/binding admission and the separately approved vault
+correction. Two Azure Monitor rules failed with unknown function percentileif.
+New proof stopped, all 48 cleanup counters are zero, and the controller is
+preserved. Milestone 7.8 remains incomplete and billing is unsettled.
 
 Date: 2026-08-27
 

@@ -210,3 +210,110 @@ exceed the remaining allowance, stop before paid dispatch and reconcile.
 Billing remains unsettled.
 [Azure Automation pricing](https://azure.microsoft.com/en-us/pricing/details/automation/)
 [Azure Cost Management Query](https://learn.microsoft.com/en-us/rest/api/cost-management/query/usage?view=rest-cost-management-2025-03-01)
+
+## Whole-minute successor native execution and terminal cleanup
+
+The user approved successor review SHA-256
+`71f5361b92b3530d0978d8b38e8b305270c8c9679d5231cc476f33f2da036444`
+at source `34e913adef538f9b594d8f911adc4dd6a32ba4f1`. The approval receipt
+was 2026-11-17 15:54:07 UTC, recorded separately from execution start at
+15:55:00 UTC. The CST gates were 11:55 a.m. readiness, 7:55 p.m. proof stop,
+8:55 p.m. Automation expiry and 9:55 p.m. verified cleanup, all November 17.
+
+The $39.4128 forecast and $49.75 successor allowance remained inside the
+existing $50 combined allowance with $0.25 prior-charge reserve. The cumulative
+ceiling remained $400.89. Fresh pre-execution scoped ActualCost queries returned
+no posted rows. The terminal query was throttled. Billing remains unsettled,
+with charges for provisioned resources still awaiting reconciliation.
+
+All five endorsements, package hashes, source, provider receipts, short-path
+source staging, controller renewal, live capacity and cost admission passed.
+Real cleanup-arm and cleanup-verify passed. The native schedule returned
+2026-11-18 01:55:00 UTC, matching proof stop exactly. Its exact job binding
+passed validation before any workload deployment. The schedule receipt hash
+is `cc4b25c8039792e01836e9d5b0a1d96a93bc1c12d0a5209607685102f4829e2a`.
+This supplies native evidence for the minute-start scheduling repair.
+
+The temporary restricted member, dedicated VPN application, service principal
+and exact operator assignment were created. The local script encountered the
+opaque Graph assignment ID and reordered application tags. Retained successful
+responses were reconciled, and these writes were not repeated. No VPN profile
+was generated or imported. The account owner confirmed the temporary browser
+window was closed or unused.
+
+### Vault correction and preservation of successful resources
+
+The root deployment `m78p-a712b8c940-root-foundation` started. Its nested
+`m78p-a712b8c940-foundation` completed, and East US Redis reached Succeeded
+with HA enabled and public access disabled. These configuration observations
+do not close any application assertions or reopen the closed component proofs.
+
+The root vault operation failed with BadRequest because the submitted
+`enablePurgeProtection: false` property is rejected by the Key Vault API.
+The vault and its deleted-vault record were absent. The user separately
+approved correction review
+`9bdac3a7110224bbbaf0fa820124b3e771c9850cda9f551b8c009f6a87f78ec7`,
+omitting only that property without adding cost or time authority.
+A targeted six-resource projection preserved successful resources and passed
+Provider validation and what-if. Deployment
+`m78p-a712b8c940-vault-correction` succeeded. At 16:20:15 UTC, native readback
+verified the private RBAC-enabled vault, seven-day soft delete, purge-compatible
+state and Approved exact private endpoint. The retained Bicep compile matches
+the approved corrected template after normalization of generated hashes and
+dependency ordering. The source now omits the rejected property.
+
+### Exact unresolved alert blocker
+
+The independent observability deployment
+`m78p-a712b8c940-observability` failed. Azure returned BadRequest with
+`Unknown function: 'percentileif'` for both required scheduled query rules,
+`m78p-a712b8c940-api-latency-v1` and
+`m78p-a712b8c940-database-saturation-v1`.
+Fourteen other scheduled query rule creation operations succeeded.
+Rule creation supplies configuration evidence only. Alert behavior, application
+core, delivery, capacity and recovery remained unproved. No signed image was
+published, application job executed, model call made or test email sent.
+The failed operations receipt hash is
+`16a2f3123916c253f2a7361583bd90d15de463135625eae74061c45620a0c812`.
+
+New proof stopped at 16:22:37 UTC. The original root deployment was canceled
+after recording its state and failed operations. The existing schedule and
+binding remained exact. The normal runbook path dispatched the cleanup.
+The next focused correction is in the two percentile expressions in
+`infra/milestone_7_8/pilot_alerts.py`. Preserve the catalog thresholds,
+population filters, evaluation timing and native alert requirements.
+Validate the affected queries and rules in a separately approved continuation
+before relying on those destination assertions. This record adds no spending
+authority and does not create another campaign.
+
+### Verified terminal disposition
+
+Cleanup Automation ARM job name
+`16947125-05bd-47e1-b6eb-079e438166b7`, with returned jobId
+`4d6457af-85bb-4041-ac6f-d0e5a0742d0f`, reached Completed.
+Azure confirmed target group absence at 17:03:52 UTC. Cleanup-wait and
+cleanup-disarm passed, and the terminal inventory completed at 17:04:29 UTC.
+All 48 counters are zero, including the managed environment infrastructure
+group, target grants, campaign schedule and binding, exact tenant objects and
+assignment, client/temporary browser disposition and the revoked successor
+Gmail credential. Five subscription-level custom role definitions were removed
+only after native readback proved their exact retained IDs and sole assignable
+scope to the absent campaign group. The reusable controller, identity,
+permanent Reader and published runbook passed preservation readback.
+
+The operator purged only the exact Canada Central vault after matching its
+deleted-vault record to the recorded campaign vault. Native readback verified
+its absence. The successful group deletion was reconciled throughout its
+network-resource wait. No repeated deletion or provisioning was dispatched.
+
+The protected run directory is
+`.runtime/milestone_7_8/full-closure-prerequisites/run-71f5361b/`.
+The terminal receipt SHA-256 is
+`2f55ae448ec6719dc4ee641a8943d3ae2726921a7b1fea32aa128efbbf1ac98d`.
+The full residue receipt SHA-256 is
+`b1f83863c20938bde33d548b3868750aaf195ebfd1f4d59d299dcd800a82f1d7`.
+The exact approved packages, original failure receipts, signatures and raw
+private evidence remain outside Git. The underlying operator ledger is
+cleanup-disarmed. Milestone 7.8 remains incomplete, with zero new managed
+assertions accepted by this attempt. PostgreSQL, M78-D-001 and M78-D-002
+remain closed.

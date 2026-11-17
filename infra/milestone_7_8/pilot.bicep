@@ -142,7 +142,6 @@ resource vault 'Microsoft.KeyVault/vaults@2026-02-01' = {
     accessPolicies: []
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
-    enablePurgeProtection: false
     publicNetworkAccess: 'Disabled'
     networkAcls: { bypass: 'None', defaultAction: 'Deny', ipRules: [], virtualNetworkRules: [] }
   }
