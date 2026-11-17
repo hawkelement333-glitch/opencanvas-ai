@@ -23,8 +23,11 @@ cannot populate these dashboard/alert results.
 The compiler preserves each catalog's literal lookback, including 1,440-minute
 backup/forecast windows. Rolling windows end at evaluation time, so an actual
 latest provider observation can be evaluated without manufacturing historical
-samples or waiting a whole day. Native evaluation uses a one-minute cadence;
-the revised forecast must account for it. Outbox terminal failure fires on one
+samples or waiting a whole day. Native evaluation uses a five-minute cadence:
+the previous one-minute proposal is unsupported for these `union` queries.
+Native stateful resolution requires three clear evaluation periods at this
+cadence, adding fifteen minutes after the unchanged catalog recovery condition.
+See the [timing decision](MILESTONE_7_8_EXECUTION_PREREQUISITE_DECISIONS.md#timing-and-cost). Outbox terminal failure fires on one
 terminal observation; backlog still requires two breached windows.
 Evidence-integrity rules disable automatic mitigation. An authorized
 investigation and native alert closure are required; the monitor never repairs.

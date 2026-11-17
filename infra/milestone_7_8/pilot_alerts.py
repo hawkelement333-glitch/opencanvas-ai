@@ -270,7 +270,9 @@ def compile_catalog(
                 "id": alert["id"],
                 "enabled": full_closure or alert["id"] != "outbox-backlog-v1",
                 "evaluationWindowMinutes": alert["evaluationWindowMinutes"],
-                "evaluationFrequency": "PT1M",
+                # Azure one-minute optimization does not support these union queries.
+                # This cadence leaves the catalog lookback/hysteresis unchanged.
+                "evaluationFrequency": "PT5M",
                 "autoMitigate": alert["id"] != "evidence-integrity-v1",
                 "recoveryMode": "authorized-investigation"
                 if alert["id"] == "evidence-integrity-v1"

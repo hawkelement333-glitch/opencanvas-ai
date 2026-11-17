@@ -11,6 +11,19 @@ criteria, credited evidence, completed local work and managed gaps. The
 [validator interfaces](MILESTONE_7_8_FULL_CLOSURE_VALIDATORS.md) define accepted,
 failed and unproved outcomes. PostgreSQL, D001 and D002 remain closed.
 
+## Current prerequisite decision checkpoint
+
+The [decision sheet](MILESTONE_7_8_EXECUTION_PREREQUISITE_DECISIONS.md) supersedes
+unresolved recommendations and timing/cost estimates in the reviewed
+`ea9dcb0c02bf87c41bbcb0b21fab0dc25feb9303` checkpoint. The old private final
+package, SHA-256 `1f658e1393a1ce86d60573d1b13db84a9e68c086be64cc7f2db8d4d7e5eeb746`,
+is retained as unapproved history; it must not be executed. The current compiler
+uses supported five-minute evaluation, with catalog windows unchanged. Neither
+recommendations nor blank input forms constitute chosen bindings. This campaign
+is **not executable** until the product/signing/input decisions are resolved,
+the resulting artifacts and timed commands are frozen, and separate spending
+and cleanup approval is recorded.
+
 ## Scope and artifact binding
 
 Reuse the previously prepared, never-provisioned East US target
@@ -81,8 +94,8 @@ local preparation.
    category receipts or explicitly decide their applicability to the final
    architecture. This environment contains neither; its other category rows do
    not close those two historical gaps.
-5. **API admission ceiling:** choose the intended maximum in-flight requests per
-   API replica for this proof. The existing ratio-valued saturation signal has no
+5. **API admission ceiling:** recommend six in-flight requests per API replica
+   for this proof; user selection remains pending. The existing ratio-valued saturation signal has no
    legitimate denominator today. Optional admission/counting is implemented; no
    limit is selected or inferred from CPU, test concurrency or invited-user count.
    `apiRequestConcurrencyLimit=0` in preparation means unresolved/disabled, not
@@ -234,10 +247,10 @@ The retained public meter prices and quantities are in the
 |---|---:|
 | Retained temporary scope, conservative10-hour allocation | 25.5678 |
 | Two independent0.25CPU/0.5GiB activity services, active10hours | 0.5400 |
-| All16 alerts at1-minute cadence instead of5-minute | 0.3288 |
+| All16 alerts at supported5-minute cadence (included in retained scope) | 0.0000 |
 | Embeddings increased from1M to160M worst-case token allowance | 3.1800 |
 | Existing second job overlapping the proof job, at most40minutes | 0.0360 |
-| **Revised temporary forecast** | **29.6526** |
+| **Current proposed temporary forecast** | **29.3238** |
 
 Total ACA allocation is3.25CPU/6.5GiB including sequential probes. Existing
 allowances remain:200 model attempts at15k input/1600 output (including reasoning
@@ -256,17 +269,22 @@ capacity operation reservations must fit these allocations; stop or revise the
 proposal before approval if they do not. No provider retry is a fresh allowance.
 The ceiling includes headroom; it does not guarantee Azure stops billing at it.
 
-For comparison only, adding the two permanent services and corrected alert
-cadence to the same previously priced topology changes its active fixed monthly
-illustration from$490.0444 to$553.4644, idle arithmetic floor from$365.8714 to
-$401.6974, and example usage-inclusive total to$638.1964. These are **not ongoing
-hosting approval**, new topology research, predicted charges or a safe cohort.
+The preceding $29.6526 forecast included $0.3288 for unsupported one-minute
+rules. Removing that increment yields $29.3238; no other meter or resource
+quantity changes. Historical monthly illustrations are not current hosting
+proposals and are not recalculated here. Ongoing hosting remains a separate
+decision. The final forecast must be rebound if the product decision changes
+scope or if timed reservations exceed existing limits.
 
 ## Window and verified cleanup
 
 Relative to separate recorded approval: begin provisioning by+2hours; stop new
 proof and scheduled cleanup at+8hours; cleanup authority ends+10hours. Record
-absoluteUTC deadlines before first paid operation. Long alert windows may run
+absoluteUTC deadlines before first paid operation. Feasibility requires the
+stronger operational gate of services/core/destination ready by+2hours. The
+[decision sheet](MILESTONE_7_8_EXECUTION_PREREQUISITE_DECISIONS.md#timing-and-cost)
+allocates index, capacity, restore and export time and identifies native
+observations whose completion cannot be guaranteed within that window. Long alert windows may run
 in parallel with compatible workload/reset-expiry observations. Reserve restore
 and cleanup time; failure to observe a rule before cutoff is unproved, not a
 reason to extend the deadline silently.
@@ -304,8 +322,12 @@ The private `package/capacity-final/` preparation binds 24 exact stages: four
 synthetic accounts, 11 workspaces, 21 canvases and 45 documents totaling
 9,176,064 bytes; 6,262 reserved HTTP requests, 12 logical model calls and at
 most 36 SDK attempts. The global bounds remain 10,000 HTTP requests, 200 model
-attempts and 160 million embedding tokens. Test concurrency is capped at eight;
-this is independent of the unresolved production API admission ceiling.
+attempts and 160 million embedding tokens. This retained plan caps concurrency at eight. The separate unselected
+prerequisite variant proposes thirteen only for the existing sixteen-write
+row-lock stage, against six admitted requests per each of two replicas.
+All other stages remain capped at eight. Timed stages and their separate
+hard suballocations are described in the decision sheet; the old 24-stage
+plan alone does not sustain the required alert windows.
 
 `capacity-07.json` runs an exact core canvas row lock under API identity for
 130 seconds, 16 real production writes while held, guaranteed rollback and two
@@ -339,8 +361,8 @@ Provider unavailability is unproved; a local forecast cannot replace native
 evidence. The [native Forecast API contract](https://learn.microsoft.com/en-us/rest/api/cost-management/forecast/usage?view=rest-cost-management-2025-03-01)
 defines these request fields.
 
-The bounded second-job overlap adds $0.0360 (2,400 seconds at 0.5CPU/1GiB)
-to the retained $29.6166 calculation, yielding **$29.6526 USD**. This is part
+The bounded second-job overlap remains $0.0360 (2,400 seconds at 0.5CPU/1GiB).
+The supported five-minute cadence yields **$29.3238 USD** total. This is part
 of the same proposed $50 incremental/$400.89 cumulative ceilings, not a new
 authorization or a claim of settled cost.
 

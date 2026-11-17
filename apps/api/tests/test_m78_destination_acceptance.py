@@ -91,6 +91,8 @@ def test_full_catalog_preserves_daily_windows_and_manual_integrity_recovery():
         release="rc-test", deployment="m78-test", ceiling=50, full_closure=True
     )
     assert len(catalog["alerts"]) == 16 and all(x["enabled"] for x in catalog["alerts"])
+    # Provider one-minute optimization rejects union; use supported cadence.
+    assert all(x["evaluationFrequency"] == "PT5M" for x in catalog["alerts"])
     assert all(
         'Service in ("mobius-api", "mobius-worker", "mobius-outbox")' in x["query"]
         for x in catalog["alerts"]

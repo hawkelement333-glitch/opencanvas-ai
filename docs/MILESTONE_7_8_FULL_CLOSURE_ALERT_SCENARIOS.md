@@ -66,8 +66,14 @@ configuration intervention authorizes an image build.
 `W` below is the unchanged catalog evaluation window. Counts are counts of
 actual adjacent evaluation windows, not arbitrary polling attempts. Nominal
 allocations allow complete windows; native observation timestamps and KQL
-states determine acceptance. Add destination ingestion, one-minute evaluation
-cadence and native delivery latency within the package's hard stop time.
+states determine acceptance. Add destination ingestion, five-minute evaluation
+alignment and native delivery latency within the package's hard stop time.
+Native stateful resolution additionally requires three clear evaluation periods
+(fifteen minutes) after the catalog recovery condition; the table's existing
+nominal stimulus/recovery times exclude that additional native delay. Integrity
+still requires authorized investigation and manual closure. The
+[prerequisite timing plan](MILESTONE_7_8_EXECUTION_PREREQUISITE_DECISIONS.md#timing-and-cost)
+supersedes the previous one-minute proposal without changing catalog semantics.
 An early missing-data alarm is never relabeled a measured threshold breach.
 
 | Existing alert / producer | Actual stimulus and recovery operation | Existing timing and required receipt contents | Limitation / approval condition |

@@ -14,6 +14,7 @@ import math
 import os
 import re
 import time
+import uuid
 from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -797,6 +798,7 @@ async def run_bound_phase(
         "SECONDARY_CANVAS": fixture["foreign"]["canvasId"],
         "EXECUTION_ID": args.execution_id,
     }
+    substitutions.update(core_recovery_document_slots(fixture))
     additional = None
     credentials = None
     if getattr(args, "capacity_fixture", None) is not None:
@@ -1138,6 +1140,28 @@ async def run_bound_phase(
     ).hexdigest()
     result["settingsMatchedNativeReadback"] = True
     result["actorsObserved"] = len({op.actor_id for op in operations})
+    return result
+
+
+def core_recovery_document_slots(fixture: dict[str, Any]) -> dict[str, str]:
+    """Resolve only existing documents from the admitted core receipt, never operator IDs."""
+    result = {}
+    seen = {fixture["primary"]["documentId"]}
+    for key in ("queued", "deletion"):
+        if key not in fixture:
+            continue  # A requested absent slot is rejected by resolve_templates.
+        document = fixture[key]
+        value = document.get("documentId")
+        require(isinstance(value, str), "core document ID absent")
+        require(str(uuid.UUID(value)) == value, "noncanonical core document ID")
+        require(value not in seen, "core recovery document must be distinct")
+        for field in ("workspaceId", "canvasId", "userId"):
+            require(
+                field not in document or document[field] == fixture[field],
+                "core recovery document scope differs",
+            )
+        seen.add(value)
+        result[key.upper() + "_DOCUMENT"] = value
     return result
 
 
