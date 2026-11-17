@@ -1,5 +1,11 @@
 # Milestone 7.8 pilot release candidate
 
+> Current follow-up: the [full-closure local ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md)
+> and [revised execution proposal](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md) supersede
+> this historical pilot preparation for the new candidate. Its evidence and
+> limitations remain history; its proposed budget is not execution authority.
+> Full7.8 remains incomplete, closed campaigns stay closed, billing is unsettled.
+
 Prepared 2026-11-16 CST; corrected local build completed 2026-11-17 00:24 UTC
 (2026-11-16 18:24 CST). Branch:
 `milestone-7-8-production-readiness-audit-local`. Starting source checkpoint:

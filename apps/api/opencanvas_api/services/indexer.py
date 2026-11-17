@@ -56,6 +56,11 @@ from opencanvas_api.services.documents.errors import DocumentServiceError
 from opencanvas_api.services.documents.extraction import ExtractedDocument, extract_document
 from opencanvas_api.services.documents.storage import DocumentStorage
 from opencanvas_api.services.domain_events import CreateDomainEvent, DomainEventService
+from opencanvas_api.services.operational_observations import (
+    after_commit_metric,
+    measured_operation,
+    metric,
+)
 from opencanvas_api.services.trace import (
     CompleteTraceInput,
     FailTraceInput,
@@ -302,6 +307,7 @@ class IngestionService:
             if existing.request_digest != request_digest:
                 raise IndexerConflictError("The idempotency key was reused for another request.")
             view = await self._view(existing, principal=principal)
+            metric("mobius.indexer.deduplication", 1, "indexer")
             return IngestionView(
                 view.request,
                 view.transition,
@@ -520,6 +526,7 @@ class IngestionService:
             )
         )
         await self.session.flush()
+        after_commit_metric(self.session, "mobius.indexer.cancellations", 1, "indexer")
         return IngestionView(view.request, canceled, view.revision, view.publication)
 
     async def list_revisions(
@@ -559,6 +566,7 @@ class IngestionService:
             ).all()
         )
 
+    @measured_operation("indexer", "build")
     async def build(self, request_id: uuid.UUID) -> IndexRevision | None:
         request = await self.session.get(IngestionRequest, request_id)
         if request is None:
@@ -877,8 +885,11 @@ class IngestionService:
         )
         await _run_hook(self.hooks.after_revision)
         await self.session.flush()
+        if deduplication_kind != "none":
+            after_commit_metric(self.session, "mobius.indexer.deduplication", 1, "indexer")
         return revision
 
+    @measured_operation("indexer", "publish")
     async def publish(
         self, request_id: uuid.UUID, revision_id: uuid.UUID
     ) -> IndexPublication | None:
@@ -1140,6 +1151,7 @@ class IngestionService:
         )
         await _run_hook(self.hooks.after_publication)
         await self.session.flush()
+        after_commit_metric(self.session, "mobius.indexer.throughput", 1, "indexer")
         return publication
 
     async def record_failure(self, request_id: uuid.UUID, error: Exception) -> None:

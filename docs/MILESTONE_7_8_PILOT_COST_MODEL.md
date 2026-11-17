@@ -1,5 +1,11 @@
 # Milestone 7.8 pilot cost model
 
+> Current follow-up: the [full-closure local ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md)
+> and [revised execution proposal](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md) supersede
+> this historical pilot preparation for the new candidate. Its evidence and
+> limitations remain history; its proposed budget is not execution authority.
+> Full7.8 remains incomplete, closed campaigns stay closed, billing is unsettled.
+
 Prepared 2026-11-16 from current public Azure Retail Prices responses for East US
 and official OpenAI model pricing. This is preparation only. No resource,
 provider request or new spending was authorized or executed. Billing remains

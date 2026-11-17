@@ -230,9 +230,9 @@ resource alerts 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = [for alert
     enabled: alert.enabled
     severity: alert.severity
     scopes: [workspace.id]
-    evaluationFrequency: 'PT5M'
+    evaluationFrequency: alert.evaluationFrequency
     windowSize: 'P2D'
-    autoMitigate: true
+    autoMitigate: alert.autoMitigate
     checkWorkspaceAlertsStorageConfigured: false
     skipQueryValidation: false
     criteria: { allOf: [{

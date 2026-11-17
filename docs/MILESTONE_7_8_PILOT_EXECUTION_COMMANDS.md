@@ -1,5 +1,11 @@
 # Pilot managed-validation command sequence
 
+> Current follow-up: the [full-closure local ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md)
+> and [revised execution proposal](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md) supersede
+> this historical pilot preparation for the new candidate. Its evidence and
+> limitations remain history; its proposed budget is not execution authority.
+> Full7.8 remains incomplete, closed campaigns stay closed, billing is unsettled.
+
 Prepared 2026-11-16. **Not execution authority.** This is the command companion
 to the [single approval package](MILESTONE_7_8_PILOT_MANAGED_VALIDATION_PACKAGE.md).
 It uses East US target `rg-m78-a712b8c940-target`, suffix `a712b8c940`, release

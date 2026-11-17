@@ -39,6 +39,7 @@ from opencanvas_api.services.object_ingestion import (
     ObjectReconciler,
     TrustedScanResult,
 )
+from opencanvas_api.services.operational_observations import metric
 
 BLOB_RESULT_TAG: Final = "Malware Scanning scan result"
 BLOB_SCAN_TIME_TAG: Final = "Malware Scanning scan time UTC"
@@ -772,6 +773,7 @@ class PrivateScannerResultBridgeConsumer:
                 observed_at=now,
             )
         except (DocumentStorageError, ScannerBridgeEvidenceError):
+            metric("mobius.scanner.unavailable", 1, "scanner", "unavailable")
             self._defer(now)
             return False
         decision = correlate_scan_evidence(

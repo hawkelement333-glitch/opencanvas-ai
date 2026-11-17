@@ -36,7 +36,9 @@ from tests.test_indexer import _register_canvas_resource
 from tests.test_object_ingestion import _settings
 
 
-@pytest.mark.parametrize("outcome", ["clean", "timeout", "lease_conflict", "revoked"])
+@pytest.mark.parametrize(
+    "outcome", ["clean", "timeout", "lease_conflict", "revoked", "observational_read_failure"]
+)
 async def test_pilot_secure_document_card_deadline_worker_and_retrieval(
     app: FastAPI,
     client: httpx.AsyncClient,
@@ -53,6 +55,15 @@ async def test_pilot_secure_document_card_deadline_worker_and_retrieval(
         malware_scan_timeout_seconds=900,
         scanner_result_bridge_retry_max_seconds=20,
     )
+    if outcome == "observational_read_failure":
+        from opencanvas_api.services import operational_observations
+
+        async def unavailable_observer(*args, **kwargs):
+            raise RuntimeError("local observational read failure")
+
+        monkeypatch.setattr(
+            operational_observations, "observe_workspace_state", unavailable_observer
+        )
     app.dependency_overrides[get_settings] = lambda: settings
     if hasattr(app.state, "versioned_object_storage"):
         del app.state.versioned_object_storage

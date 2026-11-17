@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import inspect
 from starlette.responses import Response
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from opencanvas_api import __version__
 from opencanvas_api.api.errors import ApiError
@@ -24,9 +25,60 @@ from opencanvas_api.services.observability import (
     classify_http_outcome,
     safe_route_template,
 )
+from opencanvas_api.services.operational_observations import bind_operational_telemetry
 from opencanvas_api.services.rate_limits import build_shared_rate_limit_service
 
 logger = structlog.get_logger("opencanvas_api")
+
+
+class ApiRequestAdmission:
+    """An optional process-local request ceiling, held through response completion.
+
+    There is no await between checking/incrementing the counter on the ASGI
+    event loop. This is separate from the authoritative shared user limiter.
+    Liveness/readiness keep their existing independent dependency checks.
+    """
+
+    def __init__(self, app: ASGIApp, *, limit: int | None, api_prefix: str) -> None:
+        self.app, self.limit, self.active = app, limit, 0
+        self.health_paths = {
+            api_prefix + "/health/live",
+            api_prefix + "/health/ready",
+            api_prefix + "/health/worker",
+        }
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or self.limit is None or scope["path"] in self.health_paths:
+            await self.app(scope, receive, send)
+            return
+        telemetry: OperationalTelemetry = scope["app"].state.observability
+
+        def observe(outcome: str) -> None:
+            assert self.limit is not None
+            telemetry.record_metric(
+                "mobius.api.saturation",
+                self.active / self.limit,
+                labels={"component": "api", "outcome": outcome},
+            )
+
+        if self.active >= self.limit:
+            observe("unavailable")
+            await JSONResponse(
+                status_code=503,
+                content={
+                    "code": "api_capacity_exhausted",
+                    "detail": "The service is at its configured request capacity.",
+                },
+                headers={"Retry-After": "1"},
+            )(scope, receive, send)
+            return
+        self.active += 1
+        observe("success")
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            self.active -= 1
+            observe("success")
 
 
 @asynccontextmanager
@@ -78,6 +130,11 @@ def create_app() -> FastAPI:
     )
     application.state.observability = build_observability(settings)
     application.state.shared_rate_limiter = build_shared_rate_limit_service(settings)
+    application.add_middleware(
+        ApiRequestAdmission,
+        limit=settings.api_request_concurrency_limit,
+        api_prefix=settings.api_prefix,
+    )
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -145,9 +202,11 @@ def create_app() -> FastAPI:
                         headers={settings.correlation_header_name: request_id},
                     )
                 elif parsed_content_length is not None:
-                    response = await call_next(request)
+                    with bind_operational_telemetry(telemetry):
+                        response = await call_next(request)
             else:
-                response = await call_next(request)
+                with bind_operational_telemetry(telemetry):
+                    response = await call_next(request)
         except Exception:
             span.end(outcome="server_error", failure_class="unhandled_exception")
             raise

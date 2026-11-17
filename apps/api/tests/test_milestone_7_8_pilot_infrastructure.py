@@ -142,9 +142,22 @@ def test_common_runtime_environment_names_are_typed_settings(compiled: dict) -> 
     from opencanvas_api.core.config import Settings
 
     runtime = nested(compiled, "runtime")["properties"]["template"]
-    for item in runtime["variables"]["common"] + runtime["variables"]["secretEnvironment"]:
+    for item in runtime["variables"]["commonBase"] + runtime["variables"]["secretEnvironment"]:
         name = item["name"]
         if name in {"OPENAI_API_KEY", "PGSSLROOTCERT", "OPENCANVAS_TELEMETRY_AUTH_TOKEN"}:
             continue
         assert name.startswith("OPENCANVAS_")
         assert name.removeprefix("OPENCANVAS_").lower() in Settings.model_fields, name
+
+
+def test_optional_api_limit_and_migration_proof_preserve_explicit_authority(compiled: dict) -> None:
+    runtime = nested(compiled, "runtime")["properties"]["template"]
+    assert compiled["parameters"]["apiRequestConcurrencyLimit"]["defaultValue"] == 0
+    assert "OPENCANVAS_API_REQUEST_CONCURRENCY_LIMIT" in runtime["variables"]["common"]
+    assert "migration" in compiled["parameters"]["proofRole"]["allowedValues"]
+    job = resource(runtime, "Microsoft.App/jobs")
+    secrets = job["properties"]["configuration"]["secrets"]
+    assert "not(equals(parameters('proofRole'), 'migration'))" in secrets
+    env = job["properties"]["template"]["containers"][0]["env"]
+    assert "if(equals(parameters('proofRole'), 'migration'), parameters('proofEnvironment')" in env
+    assert compiled["parameters"]["openaiModel"]["allowedValues"] == ["gpt-5.6-terra"]

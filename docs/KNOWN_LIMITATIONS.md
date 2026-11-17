@@ -143,3 +143,11 @@ The local audit evidence in the
 [pre-expiry continuation handoff](MILESTONE_7_8_PRE_EXPIRY_MAXIMUM_SAFE_PROGRESS_HANDOFF.md)
 remains historical. Billing is unsettled; forecasts and ceilings are not actual
 settled charges. Milestone 8 has not begun.
+
+Current local full-closure implementation is recorded in the
+[finite ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md): production telemetry,
+separate activity-v1 transport, exact destination/recovery/capacity validators,
+and revised immutable API/frontend artifacts. Their local passes do not close
+managed observations, trusted signatures or the original editable-AI conflict.
+The [revised temporary proposal](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md)
+requires separate execution authority and does not authorize ongoing hosting.

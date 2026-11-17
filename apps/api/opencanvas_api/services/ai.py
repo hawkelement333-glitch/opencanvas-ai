@@ -285,7 +285,14 @@ class OpenAIResponsesProvider:
 class ObservedAIProvider:
     """Operational wrapper that never submits prompts, context, or results."""
 
-    def __init__(self, provider: AIProvider, telemetry: OperationalTelemetry) -> None:
+    def __init__(
+        self,
+        provider: AIProvider,
+        telemetry: OperationalTelemetry,
+        *,
+        input_cost_per_million: float = 0,
+        output_cost_per_million: float = 0,
+    ) -> None:
         self._provider = provider
         self._telemetry = telemetry
         self.name = provider.name
@@ -294,6 +301,10 @@ class ObservedAIProvider:
         self.mock = provider.mock
         self._max_output_tokens = getattr(provider, "_max_output_tokens", MAX_OUTPUT_TOKENS)
         self._timeout_seconds = getattr(provider, "_timeout_seconds", None)
+        # Existing server-owned tariffs estimate observed usage; zero defaults
+        # mean unconfigured, not a claim that a real provider was free.
+        self._input_cost = input_cost_per_million
+        self._output_cost = output_cost_per_million
 
     async def generate(self, instruction: str, context: ContextBundle) -> AIResult:
         started = time.perf_counter()
@@ -308,6 +319,8 @@ class ObservedAIProvider:
             span=span,
             outcome="success",
             usage=result.total_tokens,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
         )
         return result
 
@@ -333,6 +346,8 @@ class ObservedAIProvider:
             span=span,
             outcome="success",
             usage=result.total_tokens,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
         )
         return result
 
@@ -350,6 +365,8 @@ class ObservedAIProvider:
         span: SpanHandle,
         outcome: str,
         usage: int | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
     ) -> None:
         duration_ms = (time.perf_counter() - started) * 1_000
         labels = {"component": "provider", "outcome": outcome}
@@ -361,6 +378,20 @@ class ObservedAIProvider:
         )
         if usage is not None:
             self._telemetry.record_metric("mobius.provider.usage", usage, labels=labels)
+        if (
+            not self.mock
+            and input_tokens is not None
+            and output_tokens is not None
+            and input_tokens >= 0
+            and output_tokens >= 0
+            and self._input_cost > 0
+            and self._output_cost > 0
+        ):
+            self._telemetry.record_metric(
+                "mobius.provider.cost",
+                (input_tokens * self._input_cost + output_tokens * self._output_cost) / 1_000_000,
+                labels=labels,
+            )
         self._telemetry.emit_log(
             event_name="provider.call.completed",
             severity=Severity.INFO if outcome == "success" else Severity.WARNING,
@@ -435,4 +466,13 @@ def build_ai_provider(
             max_output_tokens=settings.ai_max_output_tokens,
             configuration_version=settings.ai_provider_configuration_version,
         )
-    return ObservedAIProvider(provider, telemetry) if telemetry is not None else provider
+    return (
+        ObservedAIProvider(
+            provider,
+            telemetry,
+            input_cost_per_million=settings.estimated_input_cost_per_million_tokens,
+            output_cost_per_million=settings.estimated_output_cost_per_million_tokens,
+        )
+        if telemetry is not None
+        else provider
+    )

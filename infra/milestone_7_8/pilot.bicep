@@ -9,6 +9,9 @@ param suffix string
 param lifecycleTags object
 @allowed(['foundation', 'jobs', 'application'])
 param stage string = 'foundation'
+param enableExternalDelivery bool = false
+@minValue(0)
+param apiRequestConcurrencyLimit int = 0
 param storageDataScannerResourceId string = ''
 param bootstrapPrincipalId string = ''
 param catalog object
@@ -24,11 +27,12 @@ param release string
 param smtpHost string
 param smtpPort int = 587
 param smtpFromAddress string
+@allowed(['gpt-5.6-terra'])
 param openaiModel string
 param embeddingModel string = 'text-embedding-3-small'
 @secure()
 param applicationSecrets object = {}
-@allowed(['evidence', 'api', 'worker'])
+@allowed(['evidence', 'api', 'worker', 'migration'])
 param proofRole string = 'evidence'
 param proofDatabaseHost string = ''
 param proofCommand array = []
@@ -133,10 +137,13 @@ var commonSecretNames = ['openai-api-key', 'opencanvas-smtp-username', 'opencanv
 var secretReaders = concat(
   map(commonSecretNames, name => { key: name, role: 'api' }),
   map(commonSecretNames, name => { key: name, role: 'worker' }),
-  map(['opencanvas-pilot-email', 'opencanvas-pilot-password', 'opencanvas-telemetry-token', 'opencanvas-smtp-username', 'opencanvas-smtp-password'], name => { key: name, role: 'evidence' }),
+  map(['opencanvas-pilot-email', 'opencanvas-pilot-password', 'opencanvas-pilot-secondary-email', 'opencanvas-pilot-secondary-password', 'opencanvas-telemetry-token', 'opencanvas-smtp-username', 'opencanvas-smtp-password'], name => { key: name, role: 'evidence' }),
   [{ key: 'opencanvas-telemetry-token', role: 'gateway' }],
   map(['api', 'worker'], reader => { key: 'opencanvas-pilot-email', role: reader }),
-  map(['api', 'worker'], reader => { key: 'opencanvas-pilot-password', role: reader })
+  map(['api', 'worker'], reader => { key: 'opencanvas-pilot-password', role: reader }),
+  map(['api', 'worker'], reader => { key: 'opencanvas-pilot-secondary-email', role: reader }),
+  map(['api', 'worker'], reader => { key: 'opencanvas-pilot-secondary-password', role: reader }),
+  enableExternalDelivery ? [{ key: 'opencanvas-outbox-delivery-secret', role: 'worker' }] : []
 )
 resource secretScopes 'Microsoft.KeyVault/vaults/secrets@2026-02-01' existing = [for item in secretReaders: { parent: vault, name: item.key }]
 resource secretReadGrants 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (item, index) in secretReaders: if (jobsEnabled) {
@@ -194,6 +201,8 @@ module runtime './pilot_runtime.bicep' = if (jobsEnabled) {
     prefix: prefix
     lifecycleTags: lifecycleTags
     applicationEnabled: appEnabled
+    enableExternalDelivery: enableExternalDelivery
+    apiRequestConcurrencyLimit: apiRequestConcurrencyLimit
     environmentId: foundation.outputs.managedEnvironmentId
     environmentDomain: foundation.outputs.managedEnvironmentDefaultDomain
     environmentStaticIp: foundation.outputs.managedEnvironmentStaticIp
@@ -252,7 +261,7 @@ resource artifacts 'Microsoft.Storage/storageAccounts/blobServices/containers@20
   properties: { publicAccess: 'None' }
   dependsOn: [foundation]
 }
-resource artifactGrants 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for role in ['bootstrap', 'evidence', 'api', 'worker'] : {
+resource artifactGrants 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for role in concat(['bootstrap', 'evidence', 'api', 'worker'], (enableExternalDelivery || proofRole == 'migration') ? ['migration'] : []) : {
   scope: artifacts
   name: guid(artifacts.id, role, 'pilot-artifact')
   properties: {
@@ -268,7 +277,7 @@ resource proofEvidence 'Microsoft.Storage/storageAccounts/blobServices/container
   properties: { publicAccess: 'None' }
   dependsOn: [foundation]
 }
-resource evidenceExportGrants 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for role in ['evidence', 'api', 'worker']: {
+resource evidenceExportGrants 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for role in concat(['evidence', 'api', 'worker'], (enableExternalDelivery || proofRole == 'migration') ? ['migration'] : []): {
   scope: proofEvidence
   name: guid(proofEvidence.id, role, 'pilot-export')
   properties: {

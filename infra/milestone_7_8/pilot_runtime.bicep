@@ -4,6 +4,9 @@ param location string
 param prefix string
 param lifecycleTags object
 param applicationEnabled bool
+param enableExternalDelivery bool = false
+@minValue(0)
+param apiRequestConcurrencyLimit int = 0
 param environmentId string
 param environmentDomain string
 param environmentStaticIp string
@@ -69,7 +72,7 @@ var secretEnvironment = [
   { name: 'OPENCANVAS_TELEMETRY_PSEUDONYMIZATION_SECRET', secretRef: 'opencanvas-telemetry-pseudonymization-secret' }
   { name: 'OPENCANVAS_OBSERVABILITY_OPERATOR_USER_IDS', secretRef: 'opencanvas-observability-operator-user-ids' }
 ]
-var common = [
+var commonBase = [
   { name: 'OPENCANVAS_APP_MODE', value: 'staging' }
   { name: 'OPENCANVAS_APP_URL', value: appUrl }
   { name: 'OPENCANVAS_CORS_ORIGINS', value: string([appUrl]) }
@@ -82,6 +85,8 @@ var common = [
   { name: 'OPENCANVAS_SMTP_STARTTLS', value: 'true' }
   { name: 'OPENCANVAS_AI_PROVIDER', value: 'openai' }
   { name: 'OPENCANVAS_OPENAI_MODEL', value: openaiModel }
+  { name: 'OPENCANVAS_ESTIMATED_INPUT_COST_PER_MILLION_TOKENS', value: '2.0' }
+  { name: 'OPENCANVAS_ESTIMATED_OUTPUT_COST_PER_MILLION_TOKENS', value: '12.0' }
   { name: 'OPENCANVAS_EMBEDDING_PROVIDER', value: 'openai' }
   { name: 'OPENCANVAS_OPENAI_EMBEDDING_MODEL', value: embeddingModel }
   { name: 'OPENCANVAS_DATABASE_AUTH_MODE', value: 'entra' }
@@ -117,23 +122,27 @@ var common = [
   { name: 'OPENCANVAS_TELEMETRY_RELEASE', value: release }
   { name: 'OPENCANVAS_TELEMETRY_DEPLOYMENT', value: prefix }
 ]
-var serviceSpecs = [
-  { role: 'api', service: 'mobius-api', cpu: json('0.5'), memory: '1Gi', replicas: 2, command: ['uvicorn', 'opencanvas_api.main:app', '--host', '0.0.0.0', '--port', '8000'] }
-  { role: 'worker', service: 'mobius-worker', cpu: json('0.5'), memory: '1Gi', replicas: 1, command: ['python', '-m', 'scripts.worker'] }
-]
+var common = concat(commonBase, apiRequestConcurrencyLimit > 0 ? [{ name: 'OPENCANVAS_API_REQUEST_CONCURRENCY_LIMIT', value: string(apiRequestConcurrencyLimit) }] : [])
+var serviceSpecs = concat([
+  { role: 'api', identityRole: 'api', service: 'mobius-api', cpu: json('0.5'), memory: '1Gi', replicas: 2, command: ['uvicorn', 'opencanvas_api.main:app', '--host', '0.0.0.0', '--port', '8000'] }
+  { role: 'worker', identityRole: 'worker', service: 'mobius-worker', cpu: json('0.5'), memory: '1Gi', replicas: 1, command: ['python', '-m', 'scripts.worker'] }
+], enableExternalDelivery ? [
+  { role: 'outbox', identityRole: 'worker', service: 'mobius-outbox', cpu: json('0.25'), memory: '0.5Gi', replicas: 1, command: ['python', '-m', 'scripts.outbox_worker'] }
+  { role: 'activity', identityRole: 'worker', service: 'mobius-activity', cpu: json('0.25'), memory: '0.5Gi', replicas: 1, command: ['python', '-m', 'scripts.activity_receiver'] }
+] : [])
 resource services 'Microsoft.App/containerApps@2025-01-01' = [for spec in serviceSpecs: if (applicationEnabled) {
   name: 'ca-${prefix}-${spec.role}'
   location: location
   tags: lifecycleTags
-  identity: { type: 'UserAssigned', userAssignedIdentities: { '${identities[spec.role].id}': {} } }
+  identity: { type: 'UserAssigned', userAssignedIdentities: { '${identities[spec.identityRole].id}': {} } }
   properties: {
     managedEnvironmentId: environmentId
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
-      ingress: spec.role == 'api' ? { external: true, targetPort: 8000, transport: 'http', allowInsecure: false } : null
-      registries: [{ server: registryServer, identity: identities[spec.role].id }]
-      secrets: [for name in secretNames: { name: name, keyVaultUrl: '${vaultUri}secrets/${name}', identity: identities[spec.role].id }]
+      ingress: spec.role == 'api' ? { external: true, targetPort: 8000, transport: 'http', allowInsecure: false } : spec.role == 'activity' ? { external: false, targetPort: 8011, transport: 'http', allowInsecure: false } : null
+      registries: [{ server: registryServer, identity: identities[spec.identityRole].id }]
+      secrets: concat(map(secretNames, name => { name: name, keyVaultUrl: '${vaultUri}secrets/${name}', identity: identities[spec.identityRole].id }), contains(['outbox', 'activity'], spec.role) ? [{ name: 'outbox-delivery-secret', keyVaultUrl: '${vaultUri}secrets/opencanvas-outbox-delivery-secret', identity: identities.worker.id }] : [])
     }
     template: {
       scale: { minReplicas: spec.replicas, maxReplicas: spec.replicas }
@@ -142,13 +151,13 @@ resource services 'Microsoft.App/containerApps@2025-01-01' = [for spec in servic
         image: '${registryServer}/opencanvas-api@${apiImageDigest}'
         command: spec.command
         resources: { cpu: spec.cpu, memory: spec.memory }
-        env: concat(common, secretEnvironment, [
-          { name: 'OPENCANVAS_DATABASE_URL', value: 'postgresql+asyncpg://${identities[spec.role].name}@${postgresHost}:5432/opencanvas' }
-          { name: 'OPENCANVAS_DATABASE_ROLE', value: spec.role }
-          { name: 'OPENCANVAS_DATABASE_MANAGED_IDENTITY_CLIENT_ID', value: identities[spec.role].clientId }
-          { name: 'OPENCANVAS_AZURE_MANAGED_IDENTITY_CLIENT_ID', value: identities[spec.role].clientId }
-          { name: 'OPENCANVAS_SHARED_RATE_LIMIT_IDENTITY_CLIENT_ID', value: identities[spec.role].clientId }
-          { name: 'OPENCANVAS_SHARED_RATE_LIMIT_REDIS_USERNAME', value: identities[spec.role].principalId }
+        env: concat(common, secretEnvironment, contains(['outbox', 'activity'], spec.role) ? [{ name: 'OPENCANVAS_OUTBOX_RECEIVER_URL', value: 'https://ca-${prefix}-activity.internal.${environmentDomain}/v1/activity-deliveries' }, { name: 'OPENCANVAS_OUTBOX_DELIVERY_SECRET', secretRef: 'outbox-delivery-secret' }] : [], [
+          { name: 'OPENCANVAS_DATABASE_URL', value: 'postgresql+asyncpg://${identities[spec.identityRole].name}@${postgresHost}:5432/opencanvas' }
+          { name: 'OPENCANVAS_DATABASE_ROLE', value: spec.identityRole }
+          { name: 'OPENCANVAS_DATABASE_MANAGED_IDENTITY_CLIENT_ID', value: identities[spec.identityRole].clientId }
+          { name: 'OPENCANVAS_AZURE_MANAGED_IDENTITY_CLIENT_ID', value: identities[spec.identityRole].clientId }
+          { name: 'OPENCANVAS_SHARED_RATE_LIMIT_IDENTITY_CLIENT_ID', value: identities[spec.identityRole].clientId }
+          { name: 'OPENCANVAS_SHARED_RATE_LIMIT_REDIS_USERNAME', value: identities[spec.identityRole].principalId }
           { name: 'OPENCANVAS_TELEMETRY_SERVICE_NAME', value: spec.service }
         ])
       }]
@@ -205,7 +214,7 @@ resource frontend 'Microsoft.App/containerApps@2025-01-01' = if (applicationEnab
     }
     template: {
       scale: { minReplicas: 1, maxReplicas: 1 }
-      containers: [{ name: 'frontend', image: '${registryServer}/opencanvas-web@${frontendImageDigest}', resources: { cpu: json('0.5'), memory: '1Gi' }, env: [{ name: 'NODE_ENV', value: 'production' }] }]
+      containers: [{ name: 'frontend', image: '${registryServer}/opencanvas-web@${frontendImageDigest}', resources: { cpu: json('0.5'), memory: '1Gi' }, env: [{ name: 'NODE_ENV', value: 'production' }, { name: 'OPENCANVAS_PUBLIC_API_URL', value: '${apiUrl}/api/v1' }] }]
     }
   }
 }
@@ -244,13 +253,15 @@ resource jobs 'Microsoft.App/jobs@2025-01-01' = [for spec in jobSpecs: {
       replicaTimeout: spec.timeout
       manualTriggerConfig: { parallelism: 1, replicaCompletionCount: 1 }
       registries: [{ server: registryServer, identity: identities[spec.identityRole].id }]
-      secrets: spec.role == 'evidence' ? concat(proofRole == 'evidence' ? [] : map(secretNames, secret => { name: secret, keyVaultUrl: '${vaultUri}secrets/${secret}', identity: identities[proofRole].id }), [
+      secrets: spec.role == 'evidence' && proofRole != 'migration' ? concat(proofRole == 'evidence' ? [] : map(secretNames, secret => { name: secret, keyVaultUrl: '${vaultUri}secrets/${secret}', identity: identities[proofRole].id }), [
         { name: 'pilot-email', keyVaultUrl: '${vaultUri}secrets/opencanvas-pilot-email', identity: identities[proofRole].id }
         { name: 'pilot-password', keyVaultUrl: '${vaultUri}secrets/opencanvas-pilot-password', identity: identities[proofRole].id }
+        { name: 'pilot-secondary-email', keyVaultUrl: '${vaultUri}secrets/opencanvas-pilot-secondary-email', identity: identities[proofRole].id }
+        { name: 'pilot-secondary-password', keyVaultUrl: '${vaultUri}secrets/opencanvas-pilot-secondary-password', identity: identities[proofRole].id }
         { name: 'telemetry-token', keyVaultUrl: '${vaultUri}secrets/opencanvas-telemetry-token', identity: identities[proofRole].id }
         { name: 'smtp-username', keyVaultUrl: '${vaultUri}secrets/opencanvas-smtp-username', identity: identities[proofRole].id }
         { name: 'smtp-password', keyVaultUrl: '${vaultUri}secrets/opencanvas-smtp-password', identity: identities[proofRole].id }
-      ]) : []
+      ], enableExternalDelivery && proofRole == 'worker' ? [{ name: 'outbox-delivery-secret', keyVaultUrl: '${vaultUri}secrets/opencanvas-outbox-delivery-secret', identity: identities.worker.id }] : []) : []
     }
     template: {
       containers: [{
@@ -274,20 +285,22 @@ resource jobs 'Microsoft.App/jobs@2025-01-01' = [for spec in jobSpecs: {
           { name: 'OPENCANVAS_CAMPAIGN_ID', value: campaignId }
           { name: 'OPENCANVAS_CAMPAIGN_GENERATION_ID', value: generationId }
           { name: 'OPENCANVAS_DATABASE_CURRENT_PRINCIPAL_ID', value: identities[spec.identityRole].principalId }
-        ], spec.role == 'evidence' ? concat([
+        ], spec.role == 'evidence' ? (proofRole == 'migration' ? proofEnvironment : concat([
           { name: 'M78_PILOT_API_URL', value: '${apiUrl}/api/v1' }
           { name: 'M78_PILOT_FRONTEND_URL', value: appUrl }
           { name: 'OPENCANVAS_PILOT_EMAIL', secretRef: 'pilot-email' }
           { name: 'OPENCANVAS_PILOT_PASSWORD', secretRef: 'pilot-password' }
+          { name: 'OPENCANVAS_PILOT_SECONDARY_EMAIL', secretRef: 'pilot-secondary-email' }
+          { name: 'OPENCANVAS_PILOT_SECONDARY_PASSWORD', secretRef: 'pilot-secondary-password' }
           { name: 'OPENCANVAS_TELEMETRY_GATEWAY_TOKEN', secretRef: 'telemetry-token' }
           { name: 'OPENCANVAS_SMTP_USERNAME', secretRef: 'smtp-username' }
           { name: 'OPENCANVAS_SMTP_PASSWORD', secretRef: 'smtp-password' }
-        ], proofRole == 'evidence' ? [] : [
+        ], enableExternalDelivery && proofRole == 'worker' ? [{ name: 'OPENCANVAS_OUTBOX_RECEIVER_URL', value: 'https://ca-${prefix}-activity.internal.${environmentDomain}/v1/activity-deliveries' }, { name: 'OPENCANVAS_OUTBOX_DELIVERY_SECRET', secretRef: 'outbox-delivery-secret' }] : [], proofRole == 'evidence' ? [] : [
           { name: 'OPENCANVAS_TELEMETRY_SERVICE_NAME', value: proofRole == 'worker' ? 'mobius-worker' : 'mobius-api' }
           { name: 'OPENCANVAS_SHARED_RATE_LIMIT_IDENTITY_CLIENT_ID', value: identities[proofRole].clientId }
           { name: 'OPENCANVAS_SHARED_RATE_LIMIT_REDIS_USERNAME', value: identities[proofRole].principalId }
           { name: 'OPENCANVAS_PROCESSING_JOB_DEADLINE_SECONDS', value: '28800' }
-        ], proofRole == 'evidence' ? [] : filter(common, item => !contains(['OPENCANVAS_APP_MODE', 'OPENCANVAS_DATABASE_AUTH_MODE', 'OPENCANVAS_DATABASE_TLS_MODE', 'PGSSLROOTCERT', 'OPENCANVAS_SMTP_USERNAME', 'OPENCANVAS_SMTP_PASSWORD'], item.name)), proofRole == 'evidence' ? [] : filter(secretEnvironment, item => !contains(['OPENCANVAS_SMTP_USERNAME', 'OPENCANVAS_SMTP_PASSWORD'], item.name)), proofEnvironment) : spec.role == 'artifact' ? artifactEnvironment : [])
+        ], proofRole == 'evidence' ? [] : filter(common, item => !contains(['OPENCANVAS_APP_MODE', 'OPENCANVAS_DATABASE_AUTH_MODE', 'OPENCANVAS_DATABASE_TLS_MODE', 'PGSSLROOTCERT', 'OPENCANVAS_SMTP_USERNAME', 'OPENCANVAS_SMTP_PASSWORD'], item.name)), proofRole == 'evidence' ? [] : filter(secretEnvironment, item => !contains(['OPENCANVAS_SMTP_USERNAME', 'OPENCANVAS_SMTP_PASSWORD'], item.name)), proofEnvironment)) : spec.role == 'artifact' ? artifactEnvironment : [])
       }]
     }
   }

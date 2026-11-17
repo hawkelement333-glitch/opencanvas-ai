@@ -270,6 +270,8 @@ WORKER_INSERT_TABLES: Final = frozenset(
     {
         "document_chunks",
         "document_embeddings",
+        "domain_activity_entries",
+        "domain_event_delivery_attempts",
         "domain_event_outbox",
         "domain_event_provenance",
         "domain_events",
@@ -388,7 +390,10 @@ async def _runtime_function_oids(connection: AsyncConnection, role: DatabaseRole
 
 
 async def require_runtime_function_privileges(
-    connection: AsyncConnection, role: DatabaseRole, *, principal: str,
+    connection: AsyncConnection,
+    role: DatabaseRole,
+    *,
+    principal: str,
     managed: bool = False,
 ) -> dict[str, object]:
     expected = await _runtime_function_oids(connection, role)
@@ -408,9 +413,7 @@ async def require_runtime_function_privileges(
     )
     if provider and not expected <= provider.keys():
         raise RuntimeError("required routines are absent from the Azure vector baseline")
-    if observed != (set(provider) if provider else expected) or any(
-        grant for _, _, grant in rows
-    ):
+    if observed != (set(provider) if provider else expected) or any(grant for _, _, grant in rows):
         raise RuntimeError("runtime routine grants differ from the exact matrix")
     return {
         "functionObjectsChecked": len(rows),
@@ -420,26 +423,36 @@ async def require_runtime_function_privileges(
         "providerPublicVectorExtensionVersion": extension_version,
         "providerPublicVectorInventorySha256": hashlib.sha256(
             b"m7.8/azure-public-vector-inventory/v1\0"
-            + json.dumps({
-                "extension": "vector",
-                "schema": "public",
-                "version": extension_version,
-                "extensionOwner": "azuresu",
-                "routineOwner": "azuresu",
-                "publicGrantor": "azuresu",
-                "publicExecute": True,
-                "publicGrantOption": False,
-                "routineSignatures": sorted(provider.values()),
-            }, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest() if provider else None,
+            + json.dumps(
+                {
+                    "extension": "vector",
+                    "schema": "public",
+                    "version": extension_version,
+                    "extensionOwner": "azuresu",
+                    "routineOwner": "azuresu",
+                    "publicGrantor": "azuresu",
+                    "publicExecute": True,
+                    "publicGrantOption": False,
+                    "routineSignatures": sorted(provider.values()),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        if provider
+        else None,
     }
 
 
 async def _azure_vector_routines(
-    connection: AsyncConnection, principal: str,
+    connection: AsyncConnection,
+    principal: str,
 ) -> tuple[dict[int, str], str | None]:
     """Allow only the observed provider-owned vector extension's public baseline."""
-    rows = (await connection.execute(text("""
+    rows = (
+        await connection.execute(
+            text(
+                """
         SELECT q.oid, q.routine, e.extversion,
             q.owner='azuresu' AS provider_owner,
             e.extowner=a.oid AS provider_extension,
@@ -457,7 +470,9 @@ async def _azure_vector_routines(
                 AND NOT pg_catalog.pg_has_role(r.oid,a.oid,'MEMBER') AND NOT EXISTS (
                 SELECT 1 FROM pg_catalog.pg_roles admin WHERE admin.rolname='azure_pg_admin'
                 AND pg_catalog.pg_has_role(r.oid,admin.oid,'MEMBER'))) AS restricted
-        FROM (""" + _PUBLIC_ROUTINES + """) q
+        FROM ("""
+                + _PUBLIC_ROUTINES
+                + """) q
         JOIN pg_catalog.pg_proc p ON p.oid=q.oid
         CROSS JOIN pg_catalog.pg_roles r
         LEFT JOIN pg_catalog.pg_roles a ON a.rolname='azuresu'
@@ -465,7 +480,11 @@ async def _azure_vector_routines(
             SELECT n.oid FROM pg_catalog.pg_namespace n WHERE n.nspname='public')
         WHERE q.is_vector AND r.rolname=:principal
         ORDER BY q.routine
-    """), {"principal": principal})).all()
+    """
+            ),
+            {"principal": principal},
+        )
+    ).all()
     if not any(row.provider_extension or row.provider_owner for row in rows):
         return {}, None
     if len(rows) != _AZURE_VECTOR_ROUTINE_COUNT or any(
@@ -479,17 +498,26 @@ async def _azure_vector_routines(
 
 
 async def public_function_restrictions(
-    connection: AsyncConnection, *, principal: str, managed: bool = False,
+    connection: AsyncConnection,
+    *,
+    principal: str,
+    managed: bool = False,
 ) -> dict[str, int]:
     """Count PUBLIC execution outside the exact validated provider vector baseline."""
     provider, _ = await _azure_vector_routines(connection, principal) if managed else ({}, None)
-    public_oids = set((await connection.execute(text("""
+    public_oids = set(
+        (
+            await connection.execute(
+                text("""
         SELECT p.oid FROM pg_catalog.pg_proc AS p
         JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace
         CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(
             p.proacl, pg_catalog.acldefault('f', p.proowner))) AS acl
         WHERE n.nspname = 'public' AND acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
-    """))).scalars())
+    """)
+            )
+        ).scalars()
+    )
     return {
         "publicFunctionExecute": len(public_oids),
         "providerPublicVectorRoutineCount": len(provider),
@@ -498,23 +526,29 @@ async def public_function_restrictions(
 
 
 async def configure_vector_runtime_functions(
-    connection: AsyncConnection, *, api_principal: str, worker_principal: str,
+    connection: AsyncConnection,
+    *,
+    api_principal: str,
+    worker_principal: str,
     managed: bool = False,
 ) -> None:
     provider, _ = await _azure_vector_routines(connection, api_principal) if managed else ({}, None)
     if provider:
-        for role, principal in ((DatabaseRole.API, api_principal),
-                                (DatabaseRole.WORKER, worker_principal)):
+        for role, principal in (
+            (DatabaseRole.API, api_principal),
+            (DatabaseRole.WORKER, worker_principal),
+        ):
             await require_runtime_function_privileges(
-                connection, role, principal=principal, managed=True,
+                connection,
+                role,
+                principal=principal,
+                managed=True,
             )
         return
     # For an installer-owned extension, control the exact runtime routine ACLs.
     for role in RUNTIME_FUNCTION_PRIVILEGES:
         await _runtime_function_oids(connection, role)
-    routines = (
-        await connection.execute(text(_PUBLIC_ROUTINES + " ORDER BY routine"))
-    ).all()
+    routines = (await connection.execute(text(_PUBLIC_ROUTINES + " ORDER BY routine"))).all()
     api = quote_identifier(api_principal)
     worker = quote_identifier(worker_principal)
     for row in routines:
@@ -537,7 +571,10 @@ def _table_grant(operation: TableOperation, tables: Sequence[str], principal: st
 
 
 def runtime_privilege_statements(
-    *, api_principal: str, worker_principal: str, migration_principal: str,
+    *,
+    api_principal: str,
+    worker_principal: str,
+    migration_principal: str,
     application_routines: Sequence[str],
 ) -> tuple[str, ...]:
     principals = {

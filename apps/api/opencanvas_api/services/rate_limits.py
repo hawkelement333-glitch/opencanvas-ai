@@ -15,6 +15,7 @@ import httpx
 from redis.asyncio import Redis
 
 from opencanvas_api.core.config import AppMode, Settings
+from opencanvas_api.services.operational_observations import metric
 
 _SAFE_NAME = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _TOKEN_AUDIENCE = "https://redis.azure.com"
@@ -459,6 +460,9 @@ class SharedRateLimitService:
     ) -> RateLimitDecision:
         if not _SAFE_NAME.fullmatch(operation):
             raise ValueError("Rate-limit operation is invalid.")
+        if cost < 1 or not dimensions:
+            self.metrics.bypass_attempts += 1
+            metric("mobius.limiter.bypass", 1, "limiter", "denied")
         if not 1 <= cost <= 1_000_000:
             raise ValueError("Rate-limit cost is invalid.")
         if not dimensions:
@@ -509,6 +513,7 @@ class SharedRateLimitService:
             self.metrics.denied += 1
             if store_decision.remaining == 0:
                 self.metrics.saturation += 1
+                metric("mobius.limiter.saturation", 1, "limiter", "denied")
         return RateLimitDecision(
             allowed=store_decision.allowed,
             retry_after_seconds=max(1, math.ceil(store_decision.retry_after_ms / 1_000)),

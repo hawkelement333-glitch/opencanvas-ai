@@ -1,5 +1,11 @@
 # Core-feature Mobius pilot preparation
 
+> Current follow-up: the [full-closure local ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md)
+> and [revised execution proposal](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md) supersede
+> this historical pilot preparation for the new candidate. Its evidence and
+> limitations remain history; its proposed budget is not execution authority.
+> Full7.8 remains incomplete, closed campaigns stay closed, billing is unsettled.
+
 Prepared 2026-11-16 CST from `5a6e6b5f3a043ff539caf7a1dbddb3fccf899f37` on
 `milestone-7-8-production-readiness-audit-local`. PostgreSQL, M78-D-001 and
 M78-D-002 stay accepted and closed. **Milestone 7.8 remains incomplete; this is

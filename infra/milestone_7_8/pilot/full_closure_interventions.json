@@ -1,0 +1,1485 @@
+{
+  "schema": "m78-full-closure-intervention-commands-v1",
+  "status": "prepared-not-authorized-not-executed",
+  "targetResourceGroupName": "rg-m78-a712b8c940-target",
+  "suffix": "a712b8c940",
+  "location": "eastus",
+  "scopeGuards": [
+    "targetResourceGroupId must equal /subscriptions/<approved UUID>/resourceGroups/rg-m78-a712b8c940-target.",
+    "All resource substitutions come from exact source-bound Bicep names or specified native GET response paths; no subscription-wide discovery.",
+    "Record native HTTP status/body/request and operation ID, exact before hashes and derived600/1200s restoration deadlines before mutation.",
+    "Restore at intervention deadline or global stopProof deadline, whichever is earlier. Cleanup authority does not authorize new proof.",
+    "Never overwrite an existing intent/output; reconcile uncertain operation readback before retry.",
+    "No secrets/tokens/rawruntime files in Git. CLI help alone was consulted locally; no Azure requests executed.",
+    "Retain failed attempts and all completed campaign closures; no PostgreSQL acceptance rerun."
+  ],
+  "resources": {
+    "api": "${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-api",
+    "worker": "${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-worker",
+    "gateway": "${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-gateway",
+    "receiver": "${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-activity",
+    "dispatcher": "${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-outbox",
+    "evidenceJob": "${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-evidence",
+    "sourceDatabase": "${targetResourceGroupId}/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-m78o-a712b8c940",
+    "workspace": "${targetResourceGroupId}/providers/Microsoft.OperationalInsights/workspaces/law-m78o-a712b8c940",
+    "redisDatabase": "${targetResourceGroupId}/providers/Microsoft.Cache/redisEnterprise/redis-m78p-a712b8c940/databases/default",
+    "redisApiAcl": "${targetResourceGroupId}/providers/Microsoft.Cache/redisEnterprise/redis-m78p-a712b8c940/databases/default/accessPolicyAssignments/m78a712b8c940api",
+    "blobEndpoint": "${targetResourceGroupId}/providers/Microsoft.Network/privateEndpoints/pe-m78o-a712b8c940-blob",
+    "redisEndpoint": "${targetResourceGroupId}/providers/Microsoft.Network/privateEndpoints/pe-m78p-a712b8c940-redis",
+    "foundationDeployment": "${targetResourceGroupId}/providers/Microsoft.Resources/deployments/m78p-a712b8c940-foundation",
+    "cleanContainer": "${targetResourceGroupId}/providers/Microsoft.Storage/storageAccounts/stm78oa712b8c940/blobServices/default/containers/clean",
+    "quarantineContainer": "${targetResourceGroupId}/providers/Microsoft.Storage/storageAccounts/stm78oa712b8c940/blobServices/default/containers/quarantine",
+    "helperJob": "${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration"
+  },
+  "discovery": [
+    {
+      "argv": [
+        "az",
+        "rest",
+        "--method",
+        "GET",
+        "--url",
+        "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.Resources/deployments/m78p-a712b8c940-foundation?api-version=2022-09-01",
+        "--output-file",
+        "${evidenceRoot}/native/foundation.json",
+        "--only-show-errors"
+      ],
+      "expectedHttpStatus": [
+        200
+      ]
+    },
+    {
+      "argv": [
+        "az",
+        "rest",
+        "--method",
+        "GET",
+        "--url",
+        "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.Network/privateEndpoints/pe-m78o-a712b8c940-blob?api-version=2024-10-01",
+        "--output-file",
+        "${evidenceRoot}/native/blob-endpoint.json",
+        "--only-show-errors"
+      ],
+      "expectedHttpStatus": [
+        200
+      ]
+    },
+    {
+      "argv": [
+        "az",
+        "rest",
+        "--method",
+        "GET",
+        "--url",
+        "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.Network/privateEndpoints/pe-m78p-a712b8c940-redis?api-version=2024-10-01",
+        "--output-file",
+        "${evidenceRoot}/native/redis-endpoint.json",
+        "--only-show-errors"
+      ],
+      "expectedHttpStatus": [
+        200
+      ]
+    },
+    {
+      "argv": [
+        "az",
+        "rest",
+        "--method",
+        "GET",
+        "--url",
+        "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.Cache/redisEnterprise/redis-m78p-a712b8c940/databases/default?api-version=2026-05-01-preview",
+        "--output-file",
+        "${evidenceRoot}/native/redis-database.json",
+        "--only-show-errors"
+      ],
+      "expectedHttpStatus": [
+        200
+      ]
+    }
+  ],
+  "privateIpDerivation": {
+    "source": "Only each exact named privateEndpoint GET properties.networkInterfaces[].id; GET those exact same-group Microsoft.Network/networkInterfaces IDs @2024-05-01 and read properties.ipConfigurations[].properties.privateIPAddress.",
+    "guards": "One expected endpoint/resource/group binding, approved subnet, private IP only. No guessed IP, unrestricted NIC enumeration or DNS override except the bounded receiver TCP-delay probe.",
+    "ports": {
+      "blob": 443,
+      "redis": 10000,
+      "receiver": 443
+    },
+    "use": "Receipt correlation/private-route verification; these alternatives do not mutate network rules."
+  },
+  "nsgFaults": {
+    "enabled": false,
+    "reason": "pilot.bicep composes managed_objects.bicep, which defines no NSG on its existing subnet. The closed Redis campaign NSG is not reusable here. No NSG/Firewall/VM is created."
+  },
+  "nativeInterventions": [
+    {
+      "id": "gateway-stop",
+      "resourceId": "${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-gateway",
+      "maximumFaultSeconds": 600,
+      "before": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-gateway?api-version=2025-01-01",
+            "--output-file",
+            "${evidenceRoot}/gateway/before.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "apply": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "POST",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-gateway/stop?api-version=2025-07-01",
+            "--output-file",
+            "${evidenceRoot}/gateway/stop-response.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200,
+            201,
+            202,
+            204
+          ]
+        },
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-gateway?api-version=2025-01-01",
+            "--output-file",
+            "${evidenceRoot}/gateway/stopped-readback.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "applyCondition": "Native runningStatus=Stopped; reconcile 202/async operation before invoking probes.",
+      "restore": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "POST",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-gateway/start?api-version=2025-07-01",
+            "--output-file",
+            "${evidenceRoot}/gateway/start-response.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200,
+            201,
+            202,
+            204
+          ]
+        },
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-gateway?api-version=2025-01-01",
+            "--output-file",
+            "${evidenceRoot}/gateway/restored-readback.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "restoreCondition": "Same resource, image digest, identities and configuration; Running plus actual application/worker success, not ARM start alone."
+    },
+    {
+      "id": "worker-stop",
+      "resourceId": "${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-worker",
+      "maximumFaultSeconds": 600,
+      "before": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-worker?api-version=2025-01-01",
+            "--output-file",
+            "${evidenceRoot}/worker/before.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "apply": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "POST",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-worker/stop?api-version=2025-07-01",
+            "--output-file",
+            "${evidenceRoot}/worker/stop-response.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200,
+            201,
+            202,
+            204
+          ]
+        },
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-worker?api-version=2025-01-01",
+            "--output-file",
+            "${evidenceRoot}/worker/stopped-readback.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "applyCondition": "Native runningStatus=Stopped; reconcile 202/async operation before invoking probes.",
+      "restore": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "POST",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-worker/start?api-version=2025-07-01",
+            "--output-file",
+            "${evidenceRoot}/worker/start-response.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200,
+            201,
+            202,
+            204
+          ]
+        },
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-worker?api-version=2025-01-01",
+            "--output-file",
+            "${evidenceRoot}/worker/restored-readback.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "restoreCondition": "Same resource, image digest, identities and configuration; Running plus actual application/worker success, not ARM start alone."
+    },
+    {
+      "id": "receiver-stop",
+      "resourceId": "${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-activity",
+      "maximumFaultSeconds": 600,
+      "before": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-activity?api-version=2025-01-01",
+            "--output-file",
+            "${evidenceRoot}/receiver/before.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "apply": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "POST",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-activity/stop?api-version=2025-07-01",
+            "--output-file",
+            "${evidenceRoot}/receiver/stop-response.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200,
+            201,
+            202,
+            204
+          ]
+        },
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-activity?api-version=2025-01-01",
+            "--output-file",
+            "${evidenceRoot}/receiver/stopped-readback.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "applyCondition": "Native runningStatus=Stopped; reconcile 202/async operation before invoking probes.",
+      "restore": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "POST",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-activity/start?api-version=2025-07-01",
+            "--output-file",
+            "${evidenceRoot}/receiver/start-response.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200,
+            201,
+            202,
+            204
+          ]
+        },
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-activity?api-version=2025-01-01",
+            "--output-file",
+            "${evidenceRoot}/receiver/restored-readback.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "restoreCondition": "Same resource, image digest, identities and configuration; Running plus actual application/worker success, not ARM start alone."
+    },
+    {
+      "id": "storage-read-denial",
+      "resourceId": "${foundation.serviceStorageRoleAssignmentIds[1]}",
+      "deriveOnlyFrom": "${targetResourceGroupId}/providers/Microsoft.Resources/deployments/m78p-a712b8c940-foundation.properties.outputs.serviceStorageRoleAssignmentIds.value[1]",
+      "expectedScope": "${targetResourceGroupId}/providers/Microsoft.Storage/storageAccounts/stm78oa712b8c940/blobServices/default/containers/clean",
+      "expectedPrincipalResourceName": "id-m78o-a712b8c940-api",
+      "expectedRoleDefinitionIndex": 1,
+      "maximumFaultSeconds": 600,
+      "before": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${foundation.serviceStorageRoleAssignmentIds[1]}?api-version=2022-04-01",
+            "--output-file",
+            "${evidenceRoot}/storage-read-denial/before.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "scopeGuards": [
+        "Exact assignment ID must equal bound foundation output and live container-scoped assignment.",
+        "GET principalId must equal exact named identity principal readback; roleDefinitionId equals matching foundation customRoleDefinitionIds output.",
+        "Condition must be absent/null. No controller/bootstrap/probe/grant outside this exact assignment may be changed."
+      ],
+      "apply": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "DELETE",
+            "--url",
+            "https://management.azure.com${foundation.serviceStorageRoleAssignmentIds[1]}?api-version=2022-04-01",
+            "--output-file",
+            "${evidenceRoot}/storage-read-denial/delete-response.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200,
+            201,
+            202,
+            204
+          ]
+        }
+      ],
+      "applyCondition": "Capture native 404 readback and actual application storage/scanner denial; cached authorization success does not prove the fault.",
+      "restoreBody": {
+        "properties": {
+          "principalId": "${capturedBefore.properties.principalId}",
+          "principalType": "${capturedBefore.properties.principalType}",
+          "roleDefinitionId": "${capturedBefore.properties.roleDefinitionId}"
+        }
+      },
+      "restore": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "PUT",
+            "--url",
+            "https://management.azure.com${foundation.serviceStorageRoleAssignmentIds[1]}?api-version=2022-04-01",
+            "--body",
+            "@${evidenceRoot}/storage-read-denial/restore-body.json",
+            "--output-file",
+            "${evidenceRoot}/storage-read-denial/restore-response.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200,
+            201,
+            202,
+            204
+          ]
+        },
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${foundation.serviceStorageRoleAssignmentIds[1]}?api-version=2022-04-01",
+            "--output-file",
+            "${evidenceRoot}/storage-read-denial/restored-readback.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "restoreCondition": "Same exact ID/principal/type/role/scope and actual new successful operation. Reconcile timeout/readback before retrying PUT.",
+      "propagationRule": "Restore at deadline regardless of whether denial arrived. Propagation failure is unproved and gives no extra authority."
+    },
+    {
+      "id": "scanner-blob-read-denial",
+      "resourceId": "${foundation.serviceStorageRoleAssignmentIds[2]}",
+      "deriveOnlyFrom": "${targetResourceGroupId}/providers/Microsoft.Resources/deployments/m78p-a712b8c940-foundation.properties.outputs.serviceStorageRoleAssignmentIds.value[2]",
+      "expectedScope": "${targetResourceGroupId}/providers/Microsoft.Storage/storageAccounts/stm78oa712b8c940/blobServices/default/containers/quarantine",
+      "expectedPrincipalResourceName": "id-m78o-a712b8c940-worker",
+      "expectedRoleDefinitionIndex": 2,
+      "maximumFaultSeconds": 600,
+      "before": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${foundation.serviceStorageRoleAssignmentIds[2]}?api-version=2022-04-01",
+            "--output-file",
+            "${evidenceRoot}/scanner-blob-read-denial/before.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "scopeGuards": [
+        "Exact assignment ID must equal bound foundation output and live container-scoped assignment.",
+        "GET principalId must equal exact named identity principal readback; roleDefinitionId equals matching foundation customRoleDefinitionIds output.",
+        "Condition must be absent/null. No controller/bootstrap/probe/grant outside this exact assignment may be changed."
+      ],
+      "apply": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "DELETE",
+            "--url",
+            "https://management.azure.com${foundation.serviceStorageRoleAssignmentIds[2]}?api-version=2022-04-01",
+            "--output-file",
+            "${evidenceRoot}/scanner-blob-read-denial/delete-response.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200,
+            201,
+            202,
+            204
+          ]
+        }
+      ],
+      "applyCondition": "Capture native 404 readback and actual application storage/scanner denial; cached authorization success does not prove the fault.",
+      "restoreBody": {
+        "properties": {
+          "principalId": "${capturedBefore.properties.principalId}",
+          "principalType": "${capturedBefore.properties.principalType}",
+          "roleDefinitionId": "${capturedBefore.properties.roleDefinitionId}"
+        }
+      },
+      "restore": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "PUT",
+            "--url",
+            "https://management.azure.com${foundation.serviceStorageRoleAssignmentIds[2]}?api-version=2022-04-01",
+            "--body",
+            "@${evidenceRoot}/scanner-blob-read-denial/restore-body.json",
+            "--output-file",
+            "${evidenceRoot}/scanner-blob-read-denial/restore-response.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200,
+            201,
+            202,
+            204
+          ]
+        },
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${foundation.serviceStorageRoleAssignmentIds[2]}?api-version=2022-04-01",
+            "--output-file",
+            "${evidenceRoot}/scanner-blob-read-denial/restored-readback.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "restoreCondition": "Same exact ID/principal/type/role/scope and actual new successful operation. Reconcile timeout/readback before retrying PUT.",
+      "propagationRule": "Restore at deadline regardless of whether denial arrived. Propagation failure is unproved and gives no extra authority."
+    },
+    {
+      "id": "redis-api-acl-denial",
+      "resourceId": "${targetResourceGroupId}/providers/Microsoft.Cache/redisEnterprise/redis-m78p-a712b8c940/databases/default/accessPolicyAssignments/m78a712b8c940api",
+      "maximumFaultSeconds": 600,
+      "before": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.Cache/redisEnterprise/redis-m78p-a712b8c940/databases/default/accessPolicyAssignments/m78a712b8c940api?api-version=2026-05-01-preview",
+            "--output-file",
+            "${evidenceRoot}/redis-acl/before.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "scopeGuards": [
+        "Exact name m78a712b8c940api only; user.objectId matches existing API identity native principal.",
+        "Original accessString equals +ping +eval +time +hmget +hset +pexpire ~m78p-a712b8c940:rl:v1:{limits}:*; database port10000 and encrypted protocol unchanged."
+      ],
+      "apply": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "DELETE",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.Cache/redisEnterprise/redis-m78p-a712b8c940/databases/default/accessPolicyAssignments/m78a712b8c940api?api-version=2026-05-01-preview",
+            "--output-file",
+            "${evidenceRoot}/redis-acl/delete-response.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200,
+            201,
+            202,
+            204
+          ]
+        }
+      ],
+      "restoreBody": {
+        "properties": {
+          "accessString": "${capturedBefore.properties.accessString}",
+          "user": {
+            "objectId": "${capturedBefore.properties.user.objectId}"
+          }
+        }
+      },
+      "restore": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "PUT",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.Cache/redisEnterprise/redis-m78p-a712b8c940/databases/default/accessPolicyAssignments/m78a712b8c940api?api-version=2026-05-01-preview",
+            "--body",
+            "@${evidenceRoot}/redis-acl/restore-body.json",
+            "--output-file",
+            "${evidenceRoot}/redis-acl/restore-response.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200,
+            201,
+            202,
+            204
+          ]
+        },
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.Cache/redisEnterprise/redis-m78p-a712b8c940/databases/default/accessPolicyAssignments/m78a712b8c940api?api-version=2026-05-01-preview",
+            "--output-file",
+            "${evidenceRoot}/redis-acl/restored-readback.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "acceptance": "Actual fail-closed limiter decisions and fresh healthy decisions after identical ACL restoration. Existing connections/cached permissions can make denial unproved. D002 is not reopened."
+    },
+    {
+      "id": "provider-credential-reference",
+      "resourceId": "${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-api",
+      "maximumFaultSeconds": 1200,
+      "before": [
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-api?api-version=2025-01-01",
+            "--output-file",
+            "${evidenceRoot}/provider/before.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "scopeGuards": [
+        "Container api has OPENAI_API_KEY secretRef=openai-api-key; no literal credential accepted.",
+        "App-local marker secret m78-provider-denied must not exist; fail/restore revision suffixes must not already exist.",
+        "Capture exact original template, image, resources, replicas and secret references; do not read/copy actual Key Vault secret values."
+      ],
+      "apply": [
+        {
+          "argv": [
+            "az",
+            "containerapp",
+            "secret",
+            "set",
+            "--name",
+            "ca-m78p-a712b8c940-api",
+            "--resource-group",
+            "rg-m78-a712b8c940-target",
+            "--secrets",
+            "m78-provider-denied=m78-deliberate-noncredential-proof-marker",
+            "--output",
+            "none",
+            "--only-show-errors"
+          ]
+        },
+        {
+          "argv": [
+            "az",
+            "containerapp",
+            "update",
+            "--name",
+            "ca-m78p-a712b8c940-api",
+            "--resource-group",
+            "rg-m78-a712b8c940-target",
+            "--container-name",
+            "api",
+            "--set-env-vars",
+            "OPENAI_API_KEY=secretref:m78-provider-denied",
+            "--revision-suffix",
+            "m78-provider-denied",
+            "--output",
+            "none",
+            "--only-show-errors"
+          ]
+        },
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-api?api-version=2025-01-01",
+            "--output-file",
+            "${evidenceRoot}/provider/fault-revision.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "markerClassification": "Public negative-test marker; not another application secret or provider credential. App-local configuration entry only, no new Key Vault secret/ARM workload resource.",
+      "faultRequests": "Exactly two approved grounded draft attempts in different10m catalog windows, each new recorded idempotency key. Actual provider rejection required; unchanged threshold >=5percent.",
+      "restore": [
+        {
+          "argv": [
+            "az",
+            "containerapp",
+            "update",
+            "--name",
+            "ca-m78p-a712b8c940-api",
+            "--resource-group",
+            "rg-m78-a712b8c940-target",
+            "--container-name",
+            "api",
+            "--set-env-vars",
+            "OPENAI_API_KEY=secretref:openai-api-key",
+            "--revision-suffix",
+            "m78-provider-restored",
+            "--output",
+            "none",
+            "--only-show-errors"
+          ]
+        },
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-api?api-version=2025-01-01",
+            "--output-file",
+            "${evidenceRoot}/provider/restored-revision.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        },
+        {
+          "argv": [
+            "az",
+            "containerapp",
+            "secret",
+            "remove",
+            "--name",
+            "ca-m78p-a712b8c940-api",
+            "--resource-group",
+            "rg-m78-a712b8c940-target",
+            "--secret-names",
+            "m78-provider-denied",
+            "--output",
+            "none",
+            "--only-show-errors"
+          ]
+        },
+        {
+          "argv": [
+            "az",
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/containerApps/ca-m78p-a712b8c940-api?api-version=2025-01-01",
+            "--output-file",
+            "${evidenceRoot}/provider/marker-absent.json",
+            "--only-show-errors"
+          ],
+          "expectedHttpStatus": [
+            200
+          ]
+        }
+      ],
+      "acceptance": "Native ready restored revision with original provider reference/image/settings; marker absent; real healthy grounded calls in three10m recovery windows. Historical failed revision retained; no history rewrite.",
+      "bounds": "Restore by1200s from first marker/config mutation, even if two breach windows not demonstrated. Healthy recovery afterward within proof deadline. No increase in provider request/token budget."
+    },
+    {
+      "id": "queue-worker-select-denial",
+      "resourceId": "${targetResourceGroupId}/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-m78o-a712b8c940",
+      "maximumFaultSeconds": 600,
+      "jobRole": "migration",
+      "additionalJobAllocation": {
+        "cpu": 0.5,
+        "memoryGiB": 1
+      },
+      "concurrentCapacityPhase": "queue-unavailable",
+      "scopeGuards": [
+        "Exact source PostgreSQL host and opencanvas DB; exact migration current_user owns public.document_processing_jobs.",
+        "Capture direct migration-issued worker SELECT ACL before mutation; no active scoped worker effects at start."
+      ],
+      "planBinding": {
+        "migrationPrincipal": "id-m78p-a712b8c940-migration",
+        "workerPrincipal": "id-m78o-a712b8c940-worker",
+        "holdSeconds": 120,
+        "restoreFromSameBoundCampaign": true
+      },
+      "apply": [
+        {
+          "argv": [
+            "python",
+            "-m",
+            "infra.milestone_7_8.queue_grant_intervention",
+            "queue-grant-outage",
+            "--bundle",
+            "/tmp/m78-proof/package",
+            "--authorization",
+            "/tmp/m78-proof/approval.json",
+            "--bindings",
+            "/tmp/m78-proof/bindings.json",
+            "--runtime-readbacks",
+            "/tmp/m78-proof/native-resource-readbacks.json",
+            "--fixture",
+            "/tmp/m78-proof/core.json",
+            "--execution-id",
+            "${CONTAINER_APP_JOB_EXECUTION_NAME}",
+            "--output",
+            "/tmp/m78-evidence/${operation}.json",
+            "--execute"
+          ]
+        }
+      ],
+      "automaticRestore": "Finally reconciles exact captured SELECT grant, preserving grant option and unrelated grants; no INSERT/UPDATE/DELETE/role changes.",
+      "recoveryCommand": {
+        "argv": [
+          "python",
+          "-m",
+          "infra.milestone_7_8.queue_grant_intervention",
+          "queue-grant-restore",
+          "--bundle",
+          "/tmp/m78-proof/package",
+          "--authorization",
+          "/tmp/m78-proof/approval.json",
+          "--bindings",
+          "/tmp/m78-proof/bindings.json",
+          "--runtime-readbacks",
+          "/tmp/m78-proof/native-resource-readbacks.json",
+          "--fixture",
+          "/tmp/m78-proof/core.json",
+          "--execution-id",
+          "${CONTAINER_APP_JOB_EXECUTION_NAME}",
+          "--output",
+          "/tmp/m78-evidence/${operation}.json",
+          "--execute",
+          "--before",
+          "/tmp/m78-proof/queue-grant-before.json",
+          "--before-sha256",
+          "${capturedNativeBeforeSha256}"
+        ]
+      },
+      "acceptance": "Helper never accepts queue behavior alone: independent actual worker42501, scoped effects unchanged/newrowsqueued, and real fresh worker readiness/poll after restoration required. This is worker queue-access failure, not a claim that PostgreSQL or all queue writers were down.",
+      "recoveryAuthority": "Operation authorized only inside current proof window; automatic restore reserves at least30s and never starts without that margin. After process loss reconcile captured bytes and execute exact restore while authority remains; otherwise use already authorized campaign cleanup or explicit recovery authority, never start a new proof.",
+      "jobResourceId": "${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration",
+      "preparation": "helperJobProtocol; migration identity; restore original template after exact SELECT grant restore and terminal execution."
+    },
+    {
+      "id": "measured-row-lock-pressure",
+      "resourceId": "${targetResourceGroupId}/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-m78o-a712b8c940",
+      "jobRole": "api",
+      "maximumFaultSeconds": 600,
+      "additionalJobAllocation": null,
+      "implementation": "capacity_validation.scoped_row_lock inside the same capacity job",
+      "stageFields": {
+        "rowLock": {
+          "faultSource": "postgresql-exact-core-canvas-row",
+          "target": {
+            "canvasId": "${PRIMARY_CANVAS}",
+            "workspaceId": "${PRIMARY_WORKSPACE}",
+            "ownerId": "${PRIMARY_USER}"
+          },
+          "holdSeconds": 600,
+          "recoveryOperations": "${sourceBoundRecoveryOperations}"
+        }
+      },
+      "apply": {
+        "argv": [
+          "python",
+          "-m",
+          "infra.milestone_7_8.pilot_application_probe",
+          "capacity",
+          "--bundle",
+          "/tmp/m78-proof/package",
+          "--authorization",
+          "/tmp/m78-proof/approval.json",
+          "--bindings",
+          "/tmp/m78-proof/bindings.json",
+          "--runtime-readbacks",
+          "/tmp/m78-proof/native-resource-readbacks.json",
+          "--fixture",
+          "/tmp/m78-proof/core.json",
+          "--execution-id",
+          "${CONTAINER_APP_JOB_EXECUTION_NAME}",
+          "--output",
+          "/tmp/m78-evidence/${operation}.json",
+          "--execute",
+          "--capacity-stage",
+          "${exactCapacityStageIndex}",
+          "--capacity-operations",
+          "/tmp/m78-proof/${exactOperationsFile}",
+          "--capacity-budget",
+          "/tmp/m78-proof/prior-capacity-budget.json",
+          "--before",
+          "/tmp/m78-proof/prior-capacity-receipt.json"
+        ]
+      },
+      "acceptance": "Exact existing core canvas lock only; actual concurrent HTTP writes/reads under selected admission limit, native pg_blocking_pids/wait observations, actual pool/latency/utilization, finally rollback and fresh successful recovery writes. No synthetic metric or sleep substituted for server measurements.",
+      "requestBounds": "Original globally carried request budget and concurrency cap. Recovery operations are separate source-bound intents. If thresholds not reached, leave corresponding alerts unproved."
+    }
+  ],
+  "transportProbes": [
+    {
+      "id": "activity-delivery-network-delay",
+      "argv": [
+        "python",
+        "-m",
+        "infra.milestone_7_8.activity_delivery_validation",
+        "activity-delivery-network-delay",
+        "--bundle",
+        "/tmp/m78-proof/package",
+        "--authorization",
+        "/tmp/m78-proof/approval.json",
+        "--bindings",
+        "/tmp/m78-proof/bindings.json",
+        "--runtime-readbacks",
+        "/tmp/m78-proof/native-resource-readbacks.json",
+        "--fixture",
+        "/tmp/m78-proof/core.json",
+        "--execution-id",
+        "${CONTAINER_APP_JOB_EXECUTION_NAME}",
+        "--output",
+        "/tmp/m78-evidence/${operation}.json",
+        "--execute"
+      ],
+      "receiverState": "Running",
+      "dispatcherState": "Stopped",
+      "concurrentCapacityPhase": "network-delay",
+      "jobRole": "worker",
+      "maximumOperationSeconds": 120,
+      "additionalJobAllocation": {
+        "cpu": 0.5,
+        "memoryGiB": 1
+      },
+      "requiredCorrelation": "Actual job starts/ends, workload request times, source/image, affected event IDs, native intervention and post-restoration read/write/effect reconciliation. Overlap must be measured, not inferred.",
+      "jobResourceId": "${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration",
+      "preparation": "helperJobProtocol; worker identity only; restore original migration template after terminal execution."
+    },
+    {
+      "id": "activity-delivery-partial-response",
+      "argv": [
+        "python",
+        "-m",
+        "infra.milestone_7_8.activity_delivery_validation",
+        "activity-delivery-partial-response",
+        "--bundle",
+        "/tmp/m78-proof/package",
+        "--authorization",
+        "/tmp/m78-proof/approval.json",
+        "--bindings",
+        "/tmp/m78-proof/bindings.json",
+        "--runtime-readbacks",
+        "/tmp/m78-proof/native-resource-readbacks.json",
+        "--fixture",
+        "/tmp/m78-proof/core.json",
+        "--execution-id",
+        "${CONTAINER_APP_JOB_EXECUTION_NAME}",
+        "--output",
+        "/tmp/m78-evidence/${operation}.json",
+        "--execute"
+      ],
+      "receiverState": "Running",
+      "dispatcherState": "Stopped",
+      "concurrentCapacityPhase": "partial-response",
+      "jobRole": "worker",
+      "maximumOperationSeconds": 120,
+      "additionalJobAllocation": {
+        "cpu": 0.5,
+        "memoryGiB": 1
+      },
+      "requiredCorrelation": "Actual job starts/ends, workload request times, source/image, affected event IDs, native intervention and post-restoration read/write/effect reconciliation. Overlap must be measured, not inferred.",
+      "jobResourceId": "${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration",
+      "preparation": "helperJobProtocol; worker identity only; restore original migration template after terminal execution."
+    },
+    {
+      "id": "activity-delivery-retry-load",
+      "argv": [
+        "python",
+        "-m",
+        "infra.milestone_7_8.activity_delivery_validation",
+        "activity-delivery-retry-load",
+        "--bundle",
+        "/tmp/m78-proof/package",
+        "--authorization",
+        "/tmp/m78-proof/approval.json",
+        "--bindings",
+        "/tmp/m78-proof/bindings.json",
+        "--runtime-readbacks",
+        "/tmp/m78-proof/native-resource-readbacks.json",
+        "--fixture",
+        "/tmp/m78-proof/core.json",
+        "--execution-id",
+        "${CONTAINER_APP_JOB_EXECUTION_NAME}",
+        "--output",
+        "/tmp/m78-evidence/${operation}.json",
+        "--execute"
+      ],
+      "receiverState": "Stopped",
+      "dispatcherState": "Stopped",
+      "concurrentCapacityPhase": "retry-storm",
+      "jobRole": "worker",
+      "maximumOperationSeconds": 120,
+      "additionalJobAllocation": {
+        "cpu": 0.5,
+        "memoryGiB": 1
+      },
+      "requiredCorrelation": "Actual job starts/ends, workload request times, source/image, affected event IDs, native intervention and post-restoration read/write/effect reconciliation. Overlap must be measured, not inferred.",
+      "jobResourceId": "${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration",
+      "preparation": "helperJobProtocol; worker identity only; restore original migration template after terminal execution."
+    },
+    {
+      "id": "activity-delivery-lost-ack",
+      "argv": [
+        "python",
+        "-m",
+        "infra.milestone_7_8.activity_delivery_validation",
+        "activity-delivery-lost-ack",
+        "--bundle",
+        "/tmp/m78-proof/package",
+        "--authorization",
+        "/tmp/m78-proof/approval.json",
+        "--bindings",
+        "/tmp/m78-proof/bindings.json",
+        "--runtime-readbacks",
+        "/tmp/m78-proof/native-resource-readbacks.json",
+        "--fixture",
+        "/tmp/m78-proof/core.json",
+        "--execution-id",
+        "${CONTAINER_APP_JOB_EXECUTION_NAME}",
+        "--output",
+        "/tmp/m78-evidence/${operation}.json",
+        "--execute"
+      ],
+      "receiverState": "Running",
+      "dispatcherState": "Stopped",
+      "concurrentCapacityPhase": "ambiguous-commit",
+      "jobRole": "worker",
+      "maximumOperationSeconds": 120,
+      "additionalJobAllocation": {
+        "cpu": 0.5,
+        "memoryGiB": 1
+      },
+      "requiredCorrelation": "Actual job starts/ends, workload request times, source/image, affected event IDs, native intervention and post-restoration read/write/effect reconciliation. Overlap must be measured, not inferred.",
+      "jobResourceId": "${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration",
+      "preparation": "helperJobProtocol; worker identity only; restore original migration template after terminal execution."
+    }
+  ],
+  "selectedCapacityFaults": {
+    "network-delay": [
+      "activity-delivery-network-delay"
+    ],
+    "partial-response": [
+      "activity-delivery-partial-response"
+    ],
+    "provider-failure": [
+      "provider-credential-reference"
+    ],
+    "worker-loss": [
+      "worker-stop"
+    ],
+    "queue-unavailable": [
+      "queue-worker-select-denial"
+    ],
+    "object-store-unavailable": [
+      "storage-read-denial"
+    ],
+    "retry-storm": [
+      "receiver-stop",
+      "activity-delivery-retry-load"
+    ],
+    "ambiguous-commit": [
+      "activity-delivery-lost-ack"
+    ]
+  },
+  "allCatalogAlertPaths": {
+    "api-latency-v1": [
+      "measured-row-lock-pressure"
+    ],
+    "readiness-v1": [
+      "gateway-stop",
+      "redis-api-acl-denial"
+    ],
+    "database-saturation-v1": [
+      "measured-row-lock-pressure"
+    ],
+    "storage-outage-v1": [
+      "storage-read-denial"
+    ],
+    "scanner-outage-v1": [
+      "scanner-blob-read-denial"
+    ],
+    "queue-backlog-v1": [
+      "worker-stop"
+    ],
+    "worker-stale-v1": [
+      "worker-stop"
+    ],
+    "limiter-outage-v1": [
+      "redis-api-acl-denial"
+    ],
+    "indexer-freshness-v1": [
+      "natural-core-publication-age-then-reindex"
+    ],
+    "provider-degradation-v1": [
+      "provider-credential-reference"
+    ],
+    "outbox-backlog-v1": [
+      "receiver-stop"
+    ],
+    "evidence-integrity-v1": [
+      "worker-stop",
+      "authorized-native-alert-closure"
+    ],
+    "telemetry-loss-v1": [
+      "gateway-stop"
+    ],
+    "backup-freshness-v1": [
+      "initial-missing-then-native-backup-observation"
+    ],
+    "capacity-v1": [
+      "bounded-capacity-load"
+    ],
+    "cost-v1": [
+      "initial-missing-then-native-forecast-observation"
+    ]
+  },
+  "readOnlyProviderCollection": {
+    "backup": {
+      "method": "GET",
+      "url": "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-m78o-a712b8c940/backups?api-version=2025-08-01"
+    },
+    "forecast": {
+      "method": "POST",
+      "url": "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.CostManagement/forecast?api-version=2025-03-01",
+      "bodyFile": "${sourceBoundForecastRequestFile}"
+    },
+    "observer": "pilot_validation provider-observation; byte-bound complete native observations only; missing/unsupported data is unproved, never zero. Forecasts are not settled charges."
+  },
+  "executionOrdering": [
+    "Index freshness firing and two15m recovery windows on small core workspace BEFORE45-document capacity profile; all then-active heads refresh before300s; preserve160M embedding-token cap.",
+    "Capacity pressure/recovery can span45m+45m with unchanged targets; no individual rowlock or native denial exceeds600s.",
+    "Each transport or migration intervention runs concurrently only with its exact failure-under-load capacity stage, with actual timestamps proving overlap; no blanket wave.",
+    "After faults restore exact resources/grants/references, run source-bound recovery operations, reconcile effects and collect native telemetry before any subsequent stage.",
+    "Run authorized integrity investigation/nativeClosed separately; missing-data branch is not corruption proof.",
+    "Terminal outbox rows remain historical; use a separate existing pending event for restored success. Combined transport sequence13 existingevents,14 with separate alert terminal stimulus."
+  ],
+  "overlapMetering": {
+    "capacityJob": {
+      "cpu": 0.5,
+      "memoryGiB": 1
+    },
+    "interventionJob": {
+      "cpu": 0.5,
+      "memoryGiB": 1,
+      "existingResource": "${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration"
+    },
+    "queueHoldSeconds": 120,
+    "queueJobMaximumSeconds": 660,
+    "transportMaximumSecondsEach": 120,
+    "transportOperations": 4,
+    "incrementalOverlapForecastUsd": 0.036,
+    "combinedPeakCpu": 3.75,
+    "combinedPeakMemoryGiB": 7.5,
+    "note": "Only actual overlap adds cost. Ten bounded activity executions (nine operations plus post-retry recovery) at120s each plus queue660s =1860s; remaining540s is aggregate restoration/export headroom. Count every actual concurrent helper second, including retries, against2400s; no fresh allowance per operation. One helper at most. Rowlock stays inside capacity job.",
+    "maximumAggregateAdditionalHelperSeconds": 2400,
+    "activityExecutions": 10
+  },
+  "limitsNotAcceptance": [
+    "RBAC/ACL propagation may prevent observed denial within600s; restore regardless and retain unproved.",
+    "Native forecast/backup support and operator closure are prerequisites; no synthetic substitutions.",
+    "Threshold alerts remain unproved when actual bounded load misses them.",
+    "Opaque TCP delay is real client-boundary network delay; partial response is client truncation of real ACK; retry storm is3-event bounded concurrency, no population extrapolation.",
+    "All8 fault labels require exact mixed-load and recovery evidence; local fixtures alone close none."
+  ],
+  "localCliHelpVerified": [
+    "az rest --method --url --body @file --output-file",
+    "az containerapp update --container-name --set-env-vars --revision-suffix",
+    "az containerapp secret set --secrets",
+    "az containerapp secret remove --secret-names"
+  ],
+  "documentation": "docs/MILESTONE_7_8_FULL_CLOSURE_ALERT_SCENARIOS.md",
+  "helperJobProtocol": {
+    "scope": "Reuse exact existing migration job after initial migrations; no new job. Evidence job remains API-bound during concurrent load. Mutate identity/config/template only between terminal executions.",
+    "planBindings": {
+      "helperJobResourceId": "${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration",
+      "queueGrantJobResourceId": "${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration",
+      "activityDeliveryJobResourceId": "${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration"
+    },
+    "nativeAdmission": [
+      "Capture exact original job GET, complete executions list and selected worker/migration identity GET. Fail if any execution is nonterminal, unknown or pagination uncollected.",
+      "Original sole migration identity, configuration, registry identity and template are captured before mutation. Original secrets must be empty. Never recapture mutated helper as original.",
+      "Verify selected identity native artifact-read/evidence-container-write grants, worker dedicated Key Vault secret grants and PG role. No export claim before these grants are verified.",
+      "Bind packed module/arguments, staged exact artifact version and image digest. Runtime admission checks exact job resource/environment/identity/image/source verifier. Actual execution GET independently matches template/image/command/time.",
+      "Hold identity unchanged until execution is terminal; do not assume job identity changes are snapshotted for running executions."
+    ],
+    "capture": [
+      {
+        "argv": [
+          "az",
+          "rest",
+          "--method",
+          "GET",
+          "--url",
+          "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration?api-version=2025-01-01",
+          "--output-file",
+          "${evidenceRoot}/helper/${operation}/before.json",
+          "--only-show-errors"
+        ]
+      },
+      {
+        "argv": [
+          "az",
+          "rest",
+          "--method",
+          "GET",
+          "--url",
+          "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration/executions?api-version=2025-01-01",
+          "--output-file",
+          "${evidenceRoot}/helper/${operation}/executions-before.json",
+          "--only-show-errors"
+        ]
+      },
+      {
+        "argv": [
+          "az",
+          "rest",
+          "--method",
+          "GET",
+          "--url",
+          "https://management.azure.com${exactHelperIdentityId}?api-version=2023-01-31",
+          "--output-file",
+          "${evidenceRoot}/helper/${operation}/identity.json",
+          "--only-show-errors"
+        ]
+      }
+    ],
+    "prepare": {
+      "argv": [
+        "python",
+        "-m",
+        "infra.milestone_7_8.pilot.helper_job_patch",
+        "--before",
+        "${evidenceRoot}/helper/${operation}/before.json",
+        "--identity",
+        "${evidenceRoot}/helper/${operation}/identity.json",
+        "--packed",
+        "${exactVersionBoundPackedParameters}",
+        "--plan",
+        "${plannedBindingsFile}",
+        "--role",
+        "${migrationOrWorker}",
+        "--output",
+        "${evidenceRoot}/helper/${operation}/patch.json"
+      ],
+      "outputs": [
+        "patch.json",
+        "patch.apply.json",
+        "patch.restore.json"
+      ],
+      "allowedModules": {
+        "migration": "infra.milestone_7_8.queue_grant_intervention",
+        "worker": "infra.milestone_7_8.activity_delivery_validation"
+      },
+      "preparedOnly": "No Azure calls; rejects unbound resource/image/identity/loader/allocation/role or arbitrary environment override."
+    },
+    "apply": [
+      {
+        "argv": [
+          "az",
+          "rest",
+          "--method",
+          "PATCH",
+          "--url",
+          "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration?api-version=2025-01-01",
+          "--body",
+          "@${evidenceRoot}/helper/${operation}/patch.apply.json",
+          "--output-file",
+          "${evidenceRoot}/helper/${operation}/apply-response.json",
+          "--only-show-errors"
+        ]
+      },
+      {
+        "argv": [
+          "az",
+          "rest",
+          "--method",
+          "GET",
+          "--url",
+          "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration?api-version=2025-01-01",
+          "--output-file",
+          "${evidenceRoot}/helper/${operation}/configured-readback.json",
+          "--only-show-errors"
+        ]
+      }
+    ],
+    "applyReconciliation": "Record intent first; reconcile provisioning status and exact configured state before start. Native preflight job readback binds environment/role/image/command. Actual execution GET and loader independently bind final artifact hash/version; avoid recursive artifact hashes.",
+    "start": [
+      {
+        "argv": [
+          "az",
+          "rest",
+          "--method",
+          "POST",
+          "--url",
+          "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration/start?api-version=2025-01-01",
+          "--output-file",
+          "${evidenceRoot}/helper/${operation}/start-response.json",
+          "--only-show-errors"
+        ]
+      }
+    ],
+    "execution": {
+      "argv": [
+        "az",
+        "rest",
+        "--method",
+        "GET",
+        "--url",
+        "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration/executions/${actualExecutionName}?api-version=2025-01-01",
+        "--output-file",
+        "${evidenceRoot}/helper/${operation}/execution.json",
+        "--only-show-errors"
+      ]
+    },
+    "boundedCompletion": "Record returned execution once. Uncertain start requires exact job execution list/template/time/source reconciliation before retry. No blind duplicate. Stop exact active execution on deadline; restore within aggregate/time authority. No new proof after stopProof.",
+    "stopExactExecution": {
+      "argv": [
+        "az",
+        "rest",
+        "--method",
+        "POST",
+        "--url",
+        "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration/executions/${actualExecutionName}/stop?api-version=2025-01-01",
+        "--output-file",
+        "${evidenceRoot}/helper/${operation}/stop-response.json",
+        "--only-show-errors"
+      ]
+    },
+    "restoreOrder": [
+      "For queue helper independently restore/reconcile exact SELECT grant first; after process loss, queue-grant-restore requires remaining recovery authority and aggregate time.",
+      "Wait for terminal execution before restoring original identity/config/template/registry and empty secrets. Capture history; never change live execution identity.",
+      "Verify restored exact mutable state before next helper operation or cleanup acceptance. Restore failure remains blocker; no new campaign."
+    ],
+    "restore": [
+      {
+        "argv": [
+          "az",
+          "rest",
+          "--method",
+          "PATCH",
+          "--url",
+          "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration?api-version=2025-01-01",
+          "--body",
+          "@${evidenceRoot}/helper/${operation}/patch.restore.json",
+          "--output-file",
+          "${evidenceRoot}/helper/${operation}/restore-response.json",
+          "--only-show-errors"
+        ]
+      },
+      {
+        "argv": [
+          "az",
+          "rest",
+          "--method",
+          "GET",
+          "--url",
+          "https://management.azure.com${targetResourceGroupId}/providers/Microsoft.App/jobs/caj-m78p-a712b8c940-migration?api-version=2025-01-01",
+          "--output-file",
+          "${evidenceRoot}/helper/${operation}/restored-readback.json",
+          "--only-show-errors"
+        ]
+      }
+    ],
+    "verifyRestore": {
+      "argv": [
+        "python",
+        "-c",
+        "import json,sys; from infra.milestone_7_8.pilot.helper_job_patch import verify_restored; verify_restored(json.load(open(sys.argv[1])),json.load(open(sys.argv[2])))",
+        "${evidenceRoot}/helper/${operation}/before.json",
+        "${evidenceRoot}/helper/${operation}/restored-readback.json"
+      ]
+    },
+    "privateData": "Native snapshots and prepared bodies stay under .runtime outside Git; only dedicated Key Vault references are constructed, never secret values."
+  }
+}

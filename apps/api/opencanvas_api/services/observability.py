@@ -645,6 +645,11 @@ class OperationalTelemetry:
         self._flush_lock = asyncio.Lock()
         self._scheduled_flush: asyncio.Task[bool] | None = None
         self._consecutive_failures = 0
+        # Export outcomes travel with the next application batch. A fixed reserve
+        # prevents self-observation from scheduling exports or keeping drain alive.
+        self._export_observations: deque[OperationalSignal] = deque()
+        self._export_observation_limit = 32
+        self._observed_loss_total = 0
         self.counters = TelemetryCounters()
         self._logger = structlog.get_logger("opencanvas_api.operational")
 
@@ -881,13 +886,17 @@ class OperationalTelemetry:
         if not self.enabled or not self._buffer:
             return True
         async with self._flush_lock:
+            observations = list(self._export_observations)
             batch = [
-                self._buffer.popleft() for _ in range(min(self._batch_size, len(self._buffer)))
+                self._buffer.popleft()
+                for _ in range(min(self._batch_size, len(self._buffer), 512 - len(observations)))
             ]
+            if not batch:
+                return True
             for attempt in range(self._retry_limit + 1):
                 try:
                     await asyncio.wait_for(
-                        self._sink.export(batch),
+                        self._sink.export([*observations, *batch]),
                         timeout=self._export_timeout_seconds,
                     )
                 except TimeoutError:
@@ -899,7 +908,28 @@ class OperationalTelemetry:
                     self.counters.exported += len(batch)
                     self.counters.last_success_monotonic = time.monotonic()
                     self._consecutive_failures = 0
+                    # No other flush can change this reserve while the lock is
+                    # held; failed retries can append newer observations.
+                    observed_ids = {id(signal) for signal in observations}
+                    self._export_observations = deque(
+                        signal
+                        for signal in self._export_observations
+                        if id(signal) not in observed_ids
+                    )
+                    self._observe_export_outcome(healthy=True)
                     return True
+                self._append_export_observation(
+                    self._signal(
+                        kind=SignalKind.APPLICATION_LOG,
+                        name="telemetry.export.failed",
+                        component="telemetry",
+                        payload={
+                            "severity": "warning",
+                            "operation": "export",
+                            "outcome": "unavailable",
+                        },
+                    )
+                )
                 if attempt < self._retry_limit:
                     await asyncio.sleep(min(0.05 * (2**attempt), 0.25))
             self._consecutive_failures += 1
@@ -909,7 +939,42 @@ class OperationalTelemetry:
                 self._buffer.appendleft(signal)
             dropped = len(batch) - len(retained)
             self.counters.dropped += dropped
+            self._observe_export_outcome(healthy=False)
             return False
+
+    def _append_export_observation(self, signal: OperationalSignal) -> None:
+        if len(self._export_observations) == self._export_observation_limit:
+            self._export_observations.popleft()
+            self.counters.dropped += 1
+        self._export_observations.append(signal)
+
+    def _observe_export_outcome(self, *, healthy: bool) -> None:
+        total = self.counters.dropped + self.counters.rejected
+        measurements = (
+            ("mobius.telemetry.export_health", int(healthy)),
+            ("mobius.telemetry.buffer", len(self._buffer)),
+            ("mobius.telemetry.dropped", total - self._observed_loss_total),
+        )
+        self._observed_loss_total = total
+        for name, value in measurements:
+            definition = METRIC_CATALOG[name]
+            self._append_export_observation(
+                self._signal(
+                    kind=SignalKind.METRIC,
+                    name=name,
+                    component="telemetry",
+                    payload={
+                        "catalog_version": SIGNAL_CATALOG_VERSION,
+                        "type": definition.metric_type.value,
+                        "unit": definition.unit,
+                        "value": value,
+                        "labels": {
+                            "component": "telemetry",
+                            "outcome": "success" if healthy else "unavailable",
+                        },
+                    },
+                )
+            )
 
     def schedule_flush(self) -> None:
         if (

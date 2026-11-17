@@ -14,17 +14,24 @@ ROOT = Path(__file__).resolve().parents[3]
 MODULES = (
     "infra.milestone_7_8.pilot_validation",
     "infra.milestone_7_8.pilot_application_probe",
+    "infra.milestone_7_8.password_reset_validation",
+    "infra.milestone_7_8.activity_delivery_validation",
+    "infra.milestone_7_8.queue_grant_intervention",
 )
 SOURCE_VERIFIER = 'import hashlib,os; s=os.environ["M78_EXECUTION_SOURCE"]; assert hashlib.sha256(s.encode()).hexdigest()==os.environ["M78_EXECUTION_SHA256"],"source binding mismatch"; exec(compile(s,"<bound-pilot-artifact-transport>","exec"))'
 
 
 def archive(entries: dict[str, bytes], *, compressed: bool = False) -> bytes:
+    # One lossless dictionary spans reviewed source files. The final wheel
+    # artifact remains the exact original stored ZIP and retains its own hash.
+    if compressed:
+        entries = {"source-entries.zip": archive(entries)}
     target = io.BytesIO()
     with zipfile.ZipFile(target, "w") as output:
         for name, data in sorted(entries.items()):
             info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
             info.compress_type = (
-                zipfile.ZIP_DEFLATED if compressed else zipfile.ZIP_STORED
+                zipfile.ZIP_LZMA if compressed else zipfile.ZIP_STORED
             )
             output.writestr(info, data)
     return target.getvalue()

@@ -188,6 +188,8 @@ class Settings(BaseSettings):
     )
 
     job_provider: Literal["inline", "database"] = "inline"
+    outbox_receiver_url: str | None = Field(default=None, max_length=2048)
+    outbox_delivery_secret: SecretStr | None = None
     worker_poll_interval_seconds: float = Field(default=1.0, ge=0.1, le=60.0)
     worker_heartbeat_seconds: int = Field(default=15, ge=5, le=300)
     worker_stale_after_seconds: int = Field(default=120, ge=30, le=3_600)
@@ -262,6 +264,8 @@ class Settings(BaseSettings):
     document_relevance_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
 
     request_max_body_bytes: int = Field(default=30 * 1024 * 1024, ge=1_024)
+    # Optional per-process admission budget. No cohort/capacity target is inferred.
+    api_request_concurrency_limit: int | None = Field(default=None, ge=1)
     question_max_characters: int = Field(default=8_000, ge=100, le=50_000)
     requests_per_user_per_minute: int = Field(default=120, ge=1, le=10_000)
     requests_per_workspace_per_minute: int = Field(default=300, ge=1, le=10_000)
@@ -320,6 +324,37 @@ class Settings(BaseSettings):
     telemetry_dropped_signal_alert_count: int = Field(default=1, ge=1, le=1_000_000)
     observability_operator_user_ids: list[uuid.UUID] = Field(default_factory=list)
     correlation_header_name: str = "X-Request-ID"
+
+    @model_validator(mode="after")
+    def validate_outbox_delivery(self) -> Settings:
+        if self.outbox_delivery_secret is not None and (
+            len(self.outbox_delivery_secret.get_secret_value().encode("utf-8")) < 32
+            or any(
+                ord(character) < 33 or ord(character) > 126
+                for character in self.outbox_delivery_secret.get_secret_value()
+            )
+        ):
+            raise ValueError("Outbox delivery requires an independent secret of at least 32 bytes")
+        if self.outbox_receiver_url is not None:
+            parsed = urlparse(self.outbox_receiver_url)
+            local_test = (
+                self.app_mode is AppMode.TEST
+                or (self.app_mode is None and self.environment == "test")
+            ) and parsed.hostname in {"127.0.0.1", "::1", "localhost"}
+            if (
+                self.outbox_delivery_secret is None
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.query
+                or parsed.fragment
+                or parsed.path != "/v1/activity-deliveries"
+                or (parsed.scheme != "https" and not (local_test and parsed.scheme == "http"))
+            ):
+                raise ValueError(
+                    "Outbox receiver requires its exact private TLS endpoint and secret"
+                )
+        return self
 
     @field_validator(
         "openai_api_key",

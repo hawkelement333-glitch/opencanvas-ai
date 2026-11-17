@@ -18,6 +18,7 @@ import httpx
 
 from opencanvas_api.core.config import Settings
 from opencanvas_api.services.documents.errors import DocumentStorageError
+from opencanvas_api.services.operational_observations import measured_operation
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +110,7 @@ class LocalDocumentStorage:
     def __init__(self, root: Path) -> None:
         self.root = root.expanduser().resolve()
 
+    @measured_operation("storage", "store")
     async def store(self, document_id: uuid.UUID, extension: str, content: bytes) -> StoredFile:
         document_directory = self.root / document_id.hex
         await asyncio.to_thread(document_directory.mkdir, parents=True, exist_ok=True)
@@ -126,6 +128,7 @@ class LocalDocumentStorage:
             raise DocumentStorageError("The document could not be stored safely.") from exc
         return StoredFile(storage_key=key, byte_size=len(content))
 
+    @measured_operation("storage", "read")
     async def read(self, storage_key: str) -> bytes:
         source = self._resolve_key(storage_key)
         try:
@@ -134,6 +137,7 @@ class LocalDocumentStorage:
         except OSError as exc:
             raise DocumentStorageError("The stored document is unavailable.") from exc
 
+    @measured_operation("storage", "delete")
     async def delete(self, storage_key: str) -> None:
         target = self._resolve_key(storage_key)
         try:
@@ -144,6 +148,7 @@ class LocalDocumentStorage:
         except OSError as exc:
             raise DocumentStorageError("The stored document could not be removed.") from exc
 
+    @measured_operation("storage", "healthcheck")
     async def healthcheck(self) -> None:
         try:
             await asyncio.to_thread(self.root.mkdir, parents=True, exist_ok=True)
@@ -167,11 +172,13 @@ class MemoryDocumentStorage:
     name: str = "memory"
     _objects: dict[str, bytes] = field(default_factory=dict)
 
+    @measured_operation("storage", "store")
     async def store(self, document_id: uuid.UUID, extension: str, content: bytes) -> StoredFile:
         key = f"{document_id.hex}/{uuid.uuid4().hex}{extension.lower()}"
         self._objects[key] = bytes(content)
         return StoredFile(key, len(content))
 
+    @measured_operation("storage", "read")
     async def read(self, storage_key: str) -> bytes:
         _validate_key(storage_key)
         try:
@@ -179,10 +186,12 @@ class MemoryDocumentStorage:
         except KeyError as exc:
             raise DocumentStorageError("The stored document is unavailable.") from exc
 
+    @measured_operation("storage", "delete")
     async def delete(self, storage_key: str) -> None:
         _validate_key(storage_key)
         self._objects.pop(storage_key, None)
 
+    @measured_operation("storage", "healthcheck")
     async def healthcheck(self) -> None:
         return None
 
@@ -192,6 +201,7 @@ class MemoryVersionedObjectStorage:
     name: str = "memory"
     _objects: dict[tuple[str, str], bytes] = field(default_factory=dict)
 
+    @measured_operation("storage", "put_immutable")
     async def put_immutable(
         self,
         *,
@@ -236,6 +246,7 @@ class MemoryVersionedObjectStorage:
             content_sha256=digest,
         )
 
+    @measured_operation("storage", "read_version")
     async def read_version(
         self,
         *,
@@ -248,6 +259,7 @@ class MemoryVersionedObjectStorage:
         except KeyError as exc:
             raise DocumentStorageError("The immutable object version is unavailable.") from exc
 
+    @measured_operation("storage", "copy_immutable")
     async def copy_immutable(
         self,
         *,
@@ -268,6 +280,7 @@ class MemoryVersionedObjectStorage:
             expected_sha256=source.content_sha256,
         )
 
+    @measured_operation("storage", "delete_version")
     async def delete_version(
         self,
         *,
@@ -277,6 +290,7 @@ class MemoryVersionedObjectStorage:
         _validate_key(physical_key)
         self._objects.pop((physical_key, provider_version_id), None)
 
+    @measured_operation("storage", "healthcheck")
     async def healthcheck(self) -> None:
         return None
 
@@ -289,6 +303,7 @@ class LocalVersionedObjectStorage:
     def __init__(self, root: Path) -> None:
         self.root = root.expanduser().resolve()
 
+    @measured_operation("storage", "put_immutable")
     async def put_immutable(
         self,
         *,
@@ -344,6 +359,7 @@ class LocalVersionedObjectStorage:
             content_sha256=digest,
         )
 
+    @measured_operation("storage", "read_version")
     async def read_version(
         self,
         *,
@@ -358,6 +374,7 @@ class LocalVersionedObjectStorage:
         except OSError as exc:
             raise DocumentStorageError("The immutable object version is unavailable.") from exc
 
+    @measured_operation("storage", "copy_immutable")
     async def copy_immutable(
         self,
         *,
@@ -378,6 +395,7 @@ class LocalVersionedObjectStorage:
             expected_sha256=source.content_sha256,
         )
 
+    @measured_operation("storage", "delete_version")
     async def delete_version(
         self,
         *,
@@ -391,6 +409,7 @@ class LocalVersionedObjectStorage:
         except OSError as exc:
             raise DocumentStorageError("The object version could not be removed.") from exc
 
+    @measured_operation("storage", "healthcheck")
     async def healthcheck(self) -> None:
         try:
             await asyncio.to_thread(self.root.mkdir, parents=True, exist_ok=True)
@@ -493,6 +512,7 @@ class AzureBlobVersionedObjectStorage:
             raise DocumentStorageError("An Azure storage container name is invalid.")
         self.token_provider = token_provider
 
+    @measured_operation("storage", "put_immutable")
     async def put_immutable(
         self,
         *,
@@ -550,6 +570,7 @@ class AzureBlobVersionedObjectStorage:
             content_sha256=digest,
         )
 
+    @measured_operation("storage", "read_version")
     async def read_version(
         self,
         *,
@@ -568,6 +589,7 @@ class AzureBlobVersionedObjectStorage:
 
         return self._object_url(physical_key)
 
+    @measured_operation("storage", "read_version_properties")
     async def read_version_properties(
         self,
         *,
@@ -599,6 +621,7 @@ class AzureBlobVersionedObjectStorage:
             raise DocumentStorageError("The scanned Azure object version is no longer current.")
         return version_id, etag
 
+    @measured_operation("storage", "read_version_tags_xml")
     async def read_version_tags_xml(
         self,
         *,
@@ -624,6 +647,7 @@ class AzureBlobVersionedObjectStorage:
             response_etag=response.headers.get("etag"),
         )
 
+    @measured_operation("storage", "version_exists")
     async def version_exists(
         self,
         *,
@@ -640,6 +664,7 @@ class AzureBlobVersionedObjectStorage:
         )
         return response.status_code != 404
 
+    @measured_operation("storage", "version_residue_exists")
     async def version_residue_exists(
         self,
         *,
@@ -684,6 +709,7 @@ class AzureBlobVersionedObjectStorage:
                 return True
         return False
 
+    @measured_operation("storage", "copy_immutable")
     async def copy_immutable(
         self,
         *,
@@ -714,6 +740,7 @@ class AzureBlobVersionedObjectStorage:
             expected_sha256=source.content_sha256,
         )
 
+    @measured_operation("storage", "delete_version")
     async def delete_version(
         self,
         *,
@@ -786,6 +813,7 @@ class AzureBlobVersionedObjectStorage:
         ):
             raise DocumentStorageError("The Azure object version soft deletion is unproved.")
 
+    @measured_operation("storage", "permanently_delete_version")
     async def permanently_delete_version(
         self,
         *,
@@ -802,6 +830,7 @@ class AzureBlobVersionedObjectStorage:
         if response.headers.get("x-ms-delete-type-permanent") != "true":
             raise DocumentStorageError("The Azure proof version permanent deletion is unproved.")
 
+    @measured_operation("storage", "healthcheck")
     async def healthcheck(self) -> None:
         container = self.containers["quarantine"]
         url = (
@@ -889,18 +918,22 @@ class AzureDocumentStorage:
     def __init__(self, versioned: AzureBlobVersionedObjectStorage) -> None:
         self.versioned = versioned
 
+    @measured_operation("storage", "store")
     async def store(self, document_id: uuid.UUID, extension: str, content: bytes) -> StoredFile:
         del document_id, extension, content
         raise DocumentStorageError("Azure uploads require a secure upload session.")
 
+    @measured_operation("storage", "read")
     async def read(self, storage_key: str) -> bytes:
         response = await self.versioned._request("GET", storage_key)
         return response.content
 
+    @measured_operation("storage", "delete")
     async def delete(self, storage_key: str) -> None:
         del storage_key
         raise DocumentStorageError("Azure object deletion requires an exact version request.")
 
+    @measured_operation("storage", "healthcheck")
     async def healthcheck(self) -> None:
         await self.versioned.healthcheck()
 
@@ -932,6 +965,7 @@ class S3DocumentStorage:
         self.endpoint = (endpoint or f"https://s3.{region}.amazonaws.com").rstrip("/")
         self.force_path_style = force_path_style or endpoint is not None
 
+    @measured_operation("storage", "store")
     async def store(self, document_id: uuid.UUID, extension: str, content: bytes) -> StoredFile:
         key = "/".join(
             part
@@ -941,14 +975,17 @@ class S3DocumentStorage:
         await self._request("PUT", key, content)
         return StoredFile(storage_key=key, byte_size=len(content))
 
+    @measured_operation("storage", "read")
     async def read(self, storage_key: str) -> bytes:
         _validate_key(storage_key)
         return await self._request("GET", storage_key)
 
+    @measured_operation("storage", "delete")
     async def delete(self, storage_key: str) -> None:
         _validate_key(storage_key)
         await self._request("DELETE", storage_key)
 
+    @measured_operation("storage", "healthcheck")
     async def healthcheck(self) -> None:
         await self._request("HEAD", "")
 

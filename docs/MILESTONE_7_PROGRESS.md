@@ -1,14 +1,13 @@
 # Milestone 7 Production Hardening Progress
 
-Current pilot follow-up: [local preparation and corrected candidate](MILESTONE_7_8_PILOT_PREPARATION.md)
-pass their stated local checks. The secure website/worker handoff and native
-retrieval-head timestamp corrections are release-integration fixes, not reopened
-PostgreSQL/object/Redis campaigns. Pilot controlled drafts and 900/20 scanning
-are explicitly approved. The [managed package](MILESTONE_7_8_PILOT_MANAGED_VALIDATION_PACKAGE.md)
-awaits the listed external inputs and separate spending authority; 7.8 remains
-incomplete and billing unsettled.
+Current full-closure follow-up: [implemented local work and finite ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md)
+record measured telemetry, independent activity-v1 delivery, destination/recovery/
+capacity validators and revised API/frontend artifacts. These are local results,
+not new managed acceptance. The [revised execution proposal](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md)
+awaits its consolidated external decisions and separate spending authority.
+PostgreSQL/D001/D002 remain closed; 7.8 remains incomplete and billing unsettled.
 
-Current status reconciled 2026-11-16: checkpoints 7.1–7.7 complete;
+Current status reconciled 2026-11-17 UTC: checkpoints 7.1–7.7 complete;
 **PostgreSQL, M78-D-001 and M78-D-002 complete with verified cleanup;
 7.8 incomplete** for the specific assertions and artifact mappings in the
 [remaining-evidence reconciliation](MILESTONE_7_8_REMAINING_EVIDENCE_RECONCILIATION.md#requirement-by-requirement-disposition).

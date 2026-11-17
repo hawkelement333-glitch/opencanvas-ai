@@ -14,6 +14,7 @@ import json
 import os
 import time
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,12 +34,16 @@ OPERATIONS = (
     "account",
     "core",
     "workload",
+    "capacity",
+    "integrity",
+    "telemetry-queue",
     "restore-snapshot",
     "restore-verify",
     "restore-fixture",
     "restore-fence",
     "restore-role",
     "restore-resume",
+    "restore-rollback",
 )
 FIXTURE = b"Observatory calibration note. The calibration code is NOVA-731. The telescope aperture is 6.5 meters.\n"
 QUESTION = (
@@ -151,11 +156,21 @@ class Api:
             content=content,
             headers={"X-CSRF-Token": self.csrf, **(headers or {})},
         )
+        response_id = None
+        if not secret and response.status_code in (200, 201):
+            try:
+                body = response.json()
+                if isinstance(body, dict) and isinstance(body.get("id"), str):
+                    response_id = str(uuid.UUID(body["id"]))
+            except (ValueError, TypeError):
+                pass
         # No cookies, credentials, upload capability or response body in step logs.
         write_new(
             intent.with_name(intent.stem + "-result.json"),
             {
                 "status": response.status_code,
+                "receivedAtUtc": datetime.now(UTC).isoformat(),
+                "responseId": response_id,
                 "elapsedMs": (time.monotonic() - started) * 1000,
                 "responseBytes": len(response.content),
                 "responseSha256": None
@@ -175,14 +190,22 @@ class Api:
             else response.content
         )
 
-    async def signin(self) -> dict:
+    async def signin(self, *, secondary: bool = False) -> dict:
         result = await self.request(
             "POST",
             "/api/v1/auth/signin",
             secret=True,
             data={
-                "email": os.environ["OPENCANVAS_PILOT_EMAIL"],
-                "password": os.environ["OPENCANVAS_PILOT_PASSWORD"],
+                "email": os.environ[
+                    "OPENCANVAS_PILOT_SECONDARY_EMAIL"
+                    if secondary
+                    else "OPENCANVAS_PILOT_EMAIL"
+                ],
+                "password": os.environ[
+                    "OPENCANVAS_PILOT_SECONDARY_PASSWORD"
+                    if secondary
+                    else "OPENCANVAS_PILOT_PASSWORD"
+                ],
             },
         )
         self.csrf = result["csrfToken"]
@@ -418,6 +441,27 @@ async def core(api: Api) -> dict:
         await api.ground(fixture),
         await api.ground(fixture, refusal=True),
     )
+    secondary = await api.signin(secondary=True)
+    foreign = await api.request(
+        "POST",
+        "/api/v1/canvases",
+        statuses=(201,),
+        data={
+            "name": "Isolated negative-scope fixture",
+            "idempotencyKey": f"{api.execution}:foreign-canvas",
+        },
+    )
+    require(
+        secondary["id"] != user["id"]
+        and foreign["workspaceId"] != canvas["workspaceId"],
+        "independent scope fixture required",
+    )
+    fixture["foreign"] = {
+        "userId": secondary["id"],
+        "canvasId": foreign["id"],
+        "workspaceId": foreign["workspaceId"],
+    }
+    await api.signin()
     # These independent clean fixtures are preserved for the paused-worker PITR exercise.
     fixture["queued"] = await api.clean_upload(fixture, "queued-recovery")
     fixture["deletion"] = await api.clean_upload(fixture, "deletion-recovery")
@@ -543,6 +587,25 @@ SNAPSHOT_TABLES = (
     "durable_job_requests",
     "document_processing_jobs",
     "durable_job_outcomes",
+    "canvases",
+    "trace_events",
+    "object_ingestion_audit_events",
+    "indexer_audit_events",
+    "durable_job_audit_events",
+    "collaboration_audit_events",
+    "index_revisions",
+    "index_revision_chunks",
+    "ingestion_requests",
+    "ingestion_request_transitions",
+)
+RELATED_TABLES = (
+    "nodes",
+    "edges",
+    "canvas_document_nodes",
+    "documents",
+    "document_versions",
+    "document_files",
+    "domain_event_delivery_attempts",
 )
 MUTABLE_TABLES = {"retrieval_heads", "domain_event_outbox", "document_processing_jobs"}
 
@@ -614,17 +677,33 @@ async def snapshot(db: Any, fixture: dict) -> dict:
             await connection.execute(text("SELECT version_num FROM alembic_version"))
         ).scalar_one()
         require(str(revision).endswith("0029"), "current release schema 0029 required")
-        for name in SNAPSHOT_TABLES:
+        for name in (*SNAPSHOT_TABLES, *RELATED_TABLES):
             table = Base.metadata.tables[name]
-            require("workspace_id" in table.c, "snapshot table lacks explicit scope")
-            rows = (
-                (
-                    await connection.execute(
-                        select(table)
-                        .where(table.c.workspace_id == workspace)
-                        .limit(2049)
+            if "workspace_id" in table.c:
+                scoped = table.c.workspace_id == workspace
+            elif "canvas_id" in table.c:
+                scoped = table.c.canvas_id.in_(
+                    select(Base.metadata.tables["canvases"].c.id).where(
+                        Base.metadata.tables["canvases"].c.workspace_id == workspace
                     )
                 )
+            elif "document_id" in table.c:
+                documents = Base.metadata.tables["documents"]
+                canvases = Base.metadata.tables["canvases"]
+                scoped = table.c.document_id.in_(
+                    select(documents.c.id)
+                    .join(canvases, documents.c.canvas_id == canvases.c.id)
+                    .where(canvases.c.workspace_id == workspace)
+                )
+            elif name == "domain_event_delivery_attempts":
+                outbox = Base.metadata.tables["domain_event_outbox"]
+                scoped = table.c.outbox_id.in_(
+                    select(outbox.c.outbox_id).where(outbox.c.workspace_id == workspace)
+                )
+            else:
+                raise ValueError("snapshot table lacks explicit scope")
+            rows = (
+                (await connection.execute(select(table).where(scoped).limit(2049)))
                 .mappings()
                 .all()
             )
@@ -815,6 +894,9 @@ async def restore_fixture(db: Any, settings: Any, fixture: dict, api: Api) -> di
             "reasonCode": "pilot_restore_proof",
         },
     )
+    # The queued-job transaction committed before this API mutation. Capture
+    # acknowledgement of the final fixture write; subsequent SQL only reads it.
+    latest_acknowledged_mutation_at = datetime.now(UTC).isoformat()
     require(
         deletion["objectState"] == "deletion_requested", "deletion not durably queued"
     )
@@ -842,6 +924,7 @@ async def restore_fixture(db: Any, settings: Any, fixture: dict, api: Api) -> di
             "lease": json.loads(canonical(asdict(lease))),
             "deletionRequestId": deletion_id,
             "deletionObjectVersionId": version_id,
+            "latestAcknowledgedMutationAt": latest_acknowledged_mutation_at,
             "capturedAt": datetime.now(UTC).isoformat(),
             "eligibilityAfter": lease.expires_at.isoformat(),
         },
@@ -994,7 +1077,7 @@ async def restore_fence(
         "restoredWorkerResume": "unproved",
         "resumeJobId": str(lease.job_run_id),
         "outcomeTable": DurableJobOutcome.__tablename__,
-        "managedAcceptance": "listed fences only; worker resumption still requires restore-verify",
+        "managedAcceptance": "listed fences only; worker resumption still requires restore-resume",
     }
 
 
@@ -1082,8 +1165,13 @@ async def restored_resume(
             and str(active[0].document_id) == fixture["queued"]["documentId"],
             "only exact restored job may resume",
         )
+    from opencanvas_api.services.operational_observations import current_telemetry
+
     worker = DocumentWorker(
-        settings=settings, sessions=db.sessions, worker_id="pilot-restored-resume"
+        settings=settings,
+        sessions=db.sessions,
+        worker_id="pilot-restored-resume",
+        telemetry=current_telemetry(),
     )
     journal.step("restored-worker-resume-intent", {"jobId": str(job_id)})
     require(await worker.run_once(), "restored worker did not claim eligible work")
@@ -1105,6 +1193,49 @@ async def restored_resume(
     }
 
 
+@asynccontextmanager
+async def production_operation_telemetry(settings: Any, plan: dict):
+    """Bind actual production service emissions; this probe is not an API request.
+
+    Successful operations require export acknowledgement before a success receipt.
+    On operation failure, attempt export/close without replacing the primary error.
+    Native destination evidence is still required independently of this flush.
+    """
+    from opencanvas_api.services.observability import build_observability
+    from opencanvas_api.services.operational_observations import (
+        bind_operational_telemetry,
+    )
+
+    require(
+        settings.telemetry_enabled
+        and settings.telemetry_exporter == "http"
+        and settings.telemetry_release == plan["release"]
+        and settings.telemetry_deployment == plan["deployment"]
+        and settings.telemetry_service_name in {"mobius-api", "mobius-worker"},
+        "bound authenticated production telemetry required for operational probe",
+    )
+    telemetry = build_observability(settings)
+    try:
+        with bind_operational_telemetry(telemetry):
+            yield telemetry
+    except BaseException:
+        try:
+            try:
+                await telemetry.flush()
+            finally:
+                await telemetry.close()
+        except Exception:
+            pass
+        raise
+    else:
+        try:
+            require(
+                await telemetry.flush(), "production operation export not acknowledged"
+            )
+        finally:
+            await telemetry.close()
+
+
 async def run(args: argparse.Namespace) -> dict:
     import httpx
 
@@ -1121,7 +1252,7 @@ async def run(args: argparse.Namespace) -> dict:
         json.loads(args.runtime_readbacks.read_text()),
         plan_sha256=digest(args.bindings),
     )
-    if args.operation == "restore-verify":
+    if args.operation in {"restore-verify", "restore-rollback"}:
         records = json.loads(args.runtime_readbacks.read_text())["resources"]
         body = next(
             row["response"]["body"]
@@ -1136,13 +1267,17 @@ async def run(args: argparse.Namespace) -> dict:
             if entry["name"] == "OPENCANVAS_DATABASE_URL"
         ]
         expected_host = (
-            plan["restoredDatabaseResourceId"].rsplit("/", 1)[-1]
+            plan[
+                "restoredDatabaseResourceId"
+                if args.operation == "restore-verify"
+                else "databaseResourceId"
+            ].rsplit("/", 1)[-1]
             + ".postgres.database.azure.com"
         )
         require(
             bool(database_urls)
             and all(expected_host in value for value in database_urls),
-            "restored API must bind restored server before replay",
+            "API must bind the exact restored/original server before recovery or rollback",
         )
     parsed = urlparse(runtime["apiBaseUrl"])
     require(
@@ -1169,12 +1304,49 @@ async def run(args: argparse.Namespace) -> dict:
                     "displayName": "M78 synthetic pilot operator",
                 },
             )
+            secondary = await api.request(
+                "POST",
+                "/api/v1/auth/signup",
+                secret=True,
+                statuses=(201,),
+                data={
+                    "email": os.environ["OPENCANVAS_PILOT_SECONDARY_EMAIL"],
+                    "password": os.environ["OPENCANVAS_PILOT_SECONDARY_PASSWORD"],
+                    "displayName": "M78 negative scope user",
+                },
+            )
             return journal.finish(
-                {"accountCreated": True, "userId": user["user"]["id"]}
+                {
+                    "accountCreated": True,
+                    "userId": user["user"]["id"],
+                    "secondaryUserId": secondary["user"]["id"],
+                }
             )
         if args.operation == "core":
             return journal.finish(await core(api))
         fixture = fixture_from(args.fixture, plan)
+        if args.operation == "capacity":
+            from infra.milestone_7_8.capacity_validation import run_bound_phase
+
+            from opencanvas_api.core.config import Settings
+
+            async with production_operation_telemetry(Settings(), plan):
+                result = await run_bound_phase(
+                    api,
+                    fixture,
+                    plan,
+                    json.loads(args.runtime_readbacks.read_text()),
+                    args,
+                    deadline,
+                )
+            result["operationalTelemetry"] = {
+                "sourceKind": "source-bound-production-service-probe",
+                "service": "mobius-api",
+                "operation": "capacity",
+                "exportAcknowledged": True,
+                "nativeDestinationAcceptance": "unproved",
+            }
+            return journal.finish(result)
         if args.operation == "workload":
             stages = plan.get("applicationProofStages")
             if not isinstance(stages, list):
@@ -1193,9 +1365,11 @@ async def run(args: argparse.Namespace) -> dict:
                 )
             )
         worker = args.operation in {
+            "telemetry-queue",
             "restore-fixture",
             "restore-fence",
             "restore-resume",
+            "restore-rollback",
         } or (
             args.operation == "restore-role"
             and os.environ.get("OPENCANVAS_DATABASE_ROLE") == "worker"
@@ -1206,93 +1380,181 @@ async def run(args: argparse.Namespace) -> dict:
             "restore-role",
             "restore-resume",
         }
-        if args.operation in {"restore-fixture", "restore-fence", "restore-resume"}:
+        if args.operation == "telemetry-queue":
+            require(
+                plan.get("operationalQueueProof")
+                == {"maxAttempts": 1, "clock": "actual"},
+                "exact bounded operational queue proof not approved",
+            )
+            admit_paused_worker(plan, json.loads(args.worker_readback.read_text()))
+        if args.operation in {
+            "restore-fixture",
+            "restore-fence",
+            "restore-resume",
+            "restore-rollback",
+        }:
             require(
                 plan.get("workerRecoveryOperations")
-                == ["restore-fixture", "restore-fence", "restore-resume"],
+                == [
+                    "restore-fixture",
+                    "restore-fence",
+                    "restore-resume",
+                    "restore-rollback",
+                ],
                 "worker recovery capabilities not approved",
             )
             admit_paused_worker(plan, json.loads(args.worker_readback.read_text()))
         db, settings = database(plan, restored=restored, worker=worker)
         try:
-            if args.operation == "restore-role":
-                result = await restored_role(db, settings, plan)
-            elif args.operation == "restore-resume":
-                result = await restored_resume(
-                    db, settings, fixture, json.loads(args.before.read_text()), journal
-                )
-            elif args.operation == "restore-fixture":
-                result = await restore_fixture(db, settings, fixture, api)
-            elif args.operation == "restore-fence":
-                retained = json.loads(args.before.read_text())
-                require(
-                    retained.get("imageDigest") == plan["imageDigest"]
-                    and retained.get("operation") == "restore-fixture",
-                    "exact nonterminal receipt required",
-                )
-                result = await restore_fence(db, settings, fixture, retained, journal)
-            else:
-                state = await snapshot(db, fixture)
-                result = {"snapshot": state}
-                if restored:
-                    before = json.loads(args.before.read_text())
-                    result["assertions"] = compare_snapshots(before["snapshot"], state)
-                    await api.signin()
-                    for creation in fixture["creationRequests"]:
-                        replay = await api.request(
-                            "POST",
-                            creation["path"],
-                            data=creation["payload"],
-                            statuses=(200, 201),
+            async with production_operation_telemetry(settings, plan):
+                if args.operation == "integrity":
+                    from opencanvas_api.services.evidence_observer import (
+                        observe_evidence_integrity,
+                    )
+
+                    previous = None
+                    if args.before is not None:
+                        baseline = json.loads(args.before.read_text())
+                        require(
+                            baseline.get("sourceCommit") == plan["sourceCommit"]
+                            and baseline.get("imageDigest") == plan["imageDigest"],
+                            "integrity baseline release differs",
+                        )
+                        previous = baseline["integrity"]
+                    async with db.sessions() as session:
+                        result = {
+                            "integrity": await observe_evidence_integrity(
+                                session,
+                                uuid.UUID(fixture["workspaceId"]),
+                                previous=previous,
+                            )
+                        }
+                        await session.rollback()
+                    result["managedAcceptance"] = (
+                        "observation only; unknown categories and investigation closure remain explicit"
+                    )
+                elif args.operation == "telemetry-queue":
+                    from infra.milestone_7_8.operational_service_probe import (
+                        queue_transitions,
+                    )
+
+                    result = await queue_transitions(db, settings, fixture, journal)
+                elif args.operation == "restore-role":
+                    result = await restored_role(db, settings, plan)
+                elif args.operation == "restore-resume":
+                    result = await restored_resume(
+                        db,
+                        settings,
+                        fixture,
+                        json.loads(args.before.read_text()),
+                        journal,
+                    )
+                elif args.operation == "restore-rollback":
+                    from infra.milestone_7_8.pilot_recovery_acceptance import (
+                        reconcile_original_after_restore,
+                    )
+
+                    retained = json.loads(args.before.read_text())
+                    require(
+                        retained.get("sourceCommit") == plan["sourceCommit"]
+                        and retained.get("imageDigest") == plan["imageDigest"]
+                        and retained.get("operation") == "restore-fixture",
+                        "exact nonterminal receipt required for original-target rollback",
+                    )
+                    result = await reconcile_original_after_restore(
+                        db, settings, fixture, retained, api, journal
+                    )
+                elif args.operation == "restore-fixture":
+                    result = await restore_fixture(db, settings, fixture, api)
+                elif args.operation == "restore-fence":
+                    retained = json.loads(args.before.read_text())
+                    require(
+                        retained.get("imageDigest") == plan["imageDigest"]
+                        and retained.get("operation") == "restore-fixture",
+                        "exact nonterminal receipt required",
+                    )
+                    result = await restore_fence(
+                        db, settings, fixture, retained, journal
+                    )
+                else:
+                    state = await snapshot(db, fixture)
+                    result = {"snapshot": state}
+                    if restored:
+                        before = json.loads(args.before.read_text())
+                        result["assertions"] = compare_snapshots(
+                            before["snapshot"], state
+                        )
+                        await api.signin()
+                        for creation in fixture["creationRequests"]:
+                            replay = await api.request(
+                                "POST",
+                                creation["path"],
+                                data=creation["payload"],
+                                statuses=(200, 201),
+                            )
+                            require(
+                                replay["id"] == creation["id"],
+                                "restored creation replay changed result",
+                            )
+                        repeated = await snapshot(db, fixture)
+                        require(
+                            repeated["tables"] == state["tables"],
+                            "replay changed graph, source, lifecycle, publication or evidence",
+                        )
+                        from sqlalchemy import text
+                        from sqlalchemy.exc import DBAPIError
+
+                        async with db.engine.connect() as connection:
+                            try:
+                                await connection.execute(
+                                    text(
+                                        "UPDATE legacy_creation_request_identities SET request_digest=request_digest WHERE workspace_id=:workspace"
+                                    ),
+                                    {"workspace": uuid.UUID(fixture["workspaceId"])},
+                                )
+                            except DBAPIError as error:
+                                require(
+                                    getattr(error.orig, "sqlstate", None)
+                                    in {"42501", "55000"},
+                                    "unexpected append-only rejection",
+                                )
+                                await connection.rollback()
+                            else:
+                                await connection.rollback()
+                                raise ValueError(
+                                    "restored runtime allowed identity mutation"
+                                )
+                        result["assertions"]["R1AppendOnlyAndReplay"] = "accepted"
+                        result["assertions"]["R1CreationReplay"] = "accepted"
+                        restored_file = await api.request(
+                            "GET",
+                            f"/api/v1/documents/{fixture['primary']['documentId']}/file",
                         )
                         require(
-                            replay["id"] == creation["id"],
-                            "restored creation replay changed result",
+                            hashlib.sha256(restored_file).hexdigest()
+                            == fixture["primary"]["contentSha256"],
+                            "restored exact provider file changed",
                         )
-                    repeated = await snapshot(db, fixture)
-                    require(
-                        repeated["tables"]["legacy_creation_request_identities"]
-                        == state["tables"]["legacy_creation_request_identities"],
-                        "replay duplicated identity evidence",
-                    )
-                    from sqlalchemy import text
-                    from sqlalchemy.exc import DBAPIError
+                        result["restoredGrounded"] = await api.ground(fixture)
+                        result["assertions"]["R4RestoredServing"] = "accepted"
+                        from infra.milestone_7_8.pilot_recovery_acceptance import (
+                            verify_scope_denial,
+                            verify_stale_publication,
+                        )
 
-                    async with db.engine.connect() as connection:
-                        try:
-                            await connection.execute(
-                                text(
-                                    "UPDATE legacy_creation_request_identities SET request_digest=request_digest WHERE workspace_id=:workspace"
-                                ),
-                                {"workspace": uuid.UUID(fixture["workspaceId"])},
-                            )
-                        except DBAPIError as error:
-                            require(
-                                getattr(error.orig, "sqlstate", None)
-                                in {"42501", "55000"},
-                                "unexpected append-only rejection",
-                            )
-                            await connection.rollback()
-                        else:
-                            await connection.rollback()
-                            raise ValueError(
-                                "restored runtime allowed identity mutation"
-                            )
-                    result["assertions"]["R1AppendOnlyAndReplay"] = "accepted"
-                    result["assertions"]["R1CreationReplay"] = "accepted"
-                    restored_file = await api.request(
-                        "GET",
-                        f"/api/v1/documents/{fixture['primary']['documentId']}/file",
-                    )
-                    require(
-                        hashlib.sha256(restored_file).hexdigest()
-                        == fixture["primary"]["contentSha256"],
-                        "restored exact provider file changed",
-                    )
-                    result["restoredGrounded"] = await api.ground(fixture)
-                    result["assertions"]["R4RestoredServingAndNoStaleReuse"] = (
-                        "accepted"
-                    )
+                        result["scopeDenial"] = await verify_scope_denial(api, fixture)
+                        result["stalePublication"] = await verify_stale_publication(
+                            db, settings, fixture, journal
+                        )
+                        result["assertions"]["R2RestoredScopeDenial"] = "accepted"
+                        result["assertions"]["R4StaleResultAndPublication"] = "accepted"
+            result["operationalTelemetry"] = {
+                "sourceKind": "source-bound-production-service-probe",
+                "service": settings.telemetry_service_name,
+                "operation": args.operation,
+                "exportAcknowledged": True,
+                "nativeDestinationAcceptance": "unproved",
+            }
             return journal.finish(result)
         finally:
             await db.dispose()
@@ -1307,6 +1569,11 @@ def main() -> int:
         parser.add_argument("--" + name, type=Path)
     parser.add_argument("--execution-id", required=True)
     parser.add_argument("--workload-stage", type=int, default=0)
+    parser.add_argument("--capacity-stage", type=int, default=0)
+    parser.add_argument("--capacity-operations", type=Path)
+    parser.add_argument("--capacity-budget", type=Path)
+    parser.add_argument("--capacity-fixture", type=Path)
+    parser.add_argument("--capacity-accounts", type=Path)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     try:

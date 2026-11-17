@@ -948,3 +948,34 @@ changed API build inputs require a future source-bound release artifact; the
 retained image and its historical scan remain accepted for their exact bytes.
 PostgreSQL, D001 and D002 remain closed. This checkpoint does not close 7.8 or
 assert deployment readiness; billing remains unsettled.
+
+## Full-closure local implementation checkpoint — 2026-11-17 UTC
+
+The [finite existing-criterion ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md)
+records local completion and exact remaining native observations for D003–D007.
+D003 now has actual production emission sites and explicit destination validators;
+D004 has the user-selected independent activity-v1 receiver/dispatcher and native
+password-reset validator; D005 has current-release scoped recovery orchestration
+and seeded0028→0029 compatibility evidence; D006 has finite workload fixtures and
+new source-bound API/frontend artifact checks. These debts remain open for their
+managed assertions and signing/control decisions, not missing generic headings.
+PG/D001/D002 stay closed. Historical failures and billing limits are preserved.
+
+The frontend Alpine artifact's eight HIGH findings caused a Dockerfile-only
+correction to a pinned supported Node24 base, its exact security update and
+removal of unused runtime package managers. The corrected artifact has zero
+Critical/High findings. A later focused alert-path review demonstrated absent
+export-health/buffer emission: measured bounded export observations now accompany
+subsequent application batches without recursion. Retained prior candidate scans
+remain valid for those bytes; changed source requires the revised candidate.
+The [one proposed execution package](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md)
+is preparation only. Billing remains unsettled; no new allowance is implied.
+
+The focused outgoing delivery review also proved a specific expired-claim race:
+a receiver could wait for a row lock past lease expiry while retaining the
+pre-wait validation timestamp. Post-lock clock sampling and pre-commit expiry
+revalidation now reject that claim without effect/ACK; five real local
+PostgreSQL cases passed. This is a current-release outbox correction, not
+new evidence against the closed PostgreSQL, object or Redis campaigns. The
+final API binding is recorded in the finite closure ledger; prior candidate
+artifacts remain retained as superseded history.

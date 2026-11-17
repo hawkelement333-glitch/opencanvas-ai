@@ -1373,8 +1373,11 @@ class DomainEventService:
 class DomainEventOutboxService:
     """Internal-only claim, fencing, retry, delivery, and projection boundary."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self, session: AsyncSession, *, clock: Callable[[], datetime] = lambda: datetime.now(UTC)
+    ) -> None:
         self.session = session
+        self.clock = clock
 
     async def claim_one(
         self,
@@ -1382,10 +1385,11 @@ class DomainEventOutboxService:
         owner_id: str,
         now: datetime | None = None,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        outbox_id: uuid.UUID | None = None,
     ) -> OutboxClaim | None:
         if not owner_id.strip() or len(owner_id) > 128 or not 1 <= lease_seconds <= 300:
             raise DomainEventValidationError("Outbox claim parameters are invalid.")
-        current = _aware_utc(now or datetime.now(UTC))
+        current = _aware_utc(now or self.clock())
         eligible = and_(
             DomainEventOutbox.eligible_at <= current,
             DomainEventOutbox.attempt_count < DomainEventOutbox.max_attempts,
@@ -1399,7 +1403,9 @@ class DomainEventOutboxService:
         )
         statement: Select[tuple[DomainEventOutbox]] = (
             select(DomainEventOutbox)
-            .where(eligible)
+            .where(
+                eligible, *([] if outbox_id is None else [DomainEventOutbox.outbox_id == outbox_id])
+            )
             .order_by(DomainEventOutbox.eligible_at, DomainEventOutbox.outbox_id)
             .limit(1)
             .with_for_update(skip_locked=True)
@@ -1407,6 +1413,9 @@ class DomainEventOutboxService:
         candidate = await self.session.scalar(statement)
         if candidate is None:
             return None
+        # A pool acquisition or row-lock wait must not consume the newly issued
+        # lease before the claim is actually owned. Explicit now is a fixture override.
+        current = _aware_utc(now or self.clock())
         generation = candidate.lease_generation + 1
         expires_at = current + timedelta(seconds=lease_seconds)
         try:
@@ -1447,8 +1456,8 @@ class DomainEventOutboxService:
         )
 
     async def complete(self, claim: OutboxClaim, *, now: datetime | None = None) -> None:
-        current = _aware_utc(now or datetime.now(UTC))
-        outbox = await self._owned_claim(claim, current)
+        outbox = await self._owned_claim(claim, now)
+        current = _aware_utc(now or self.clock())
         self.session.add(
             DomainEventDeliveryAttempt(
                 attempt_id=uuid.uuid5(claim.event_id, f"attempt:{claim.generation}"),
@@ -1474,8 +1483,8 @@ class DomainEventOutboxService:
         retryable: bool,
         now: datetime | None = None,
     ) -> DeliveryState:
-        current = _aware_utc(now or datetime.now(UTC))
-        outbox = await self._owned_claim(claim, current)
+        outbox = await self._owned_claim(claim, now)
+        current = _aware_utc(now or self.clock())
         safe_classification = _failure_classification(failure_classification)
         should_retry = retryable and outbox.attempt_count < outbox.max_attempts
         outcome: Literal["retry_scheduled", "terminal_failure"]
@@ -1552,29 +1561,112 @@ class DomainEventOutboxService:
         now: datetime | None = None,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
     ) -> OutboxClaim | None:
-        current = _aware_utc(now or datetime.now(UTC))
         async with self.session.begin_nested():
             claim = await self.claim_one(
                 owner_id=owner_id,
-                now=current,
+                now=now,
                 lease_seconds=lease_seconds,
             )
             if claim is None:
                 return None
             await self.project_activity(claim)
-            await self.complete(claim, now=current)
+            await self.complete(claim, now=now)
         return claim
 
-    async def _owned_claim(self, claim: OutboxClaim, current: datetime) -> DomainEventOutbox:
-        outbox = await self.session.get(DomainEventOutbox, claim.outbox_id)
+    async def validate_claim(self, claim: OutboxClaim, *, now: datetime | None = None) -> None:
+        """Lock and validate the current claim before its transactional consumer effect."""
+        await self._owned_claim(claim, now)
+
+    async def expire_exhausted(
+        self, *, now: datetime | None = None, outbox_id: uuid.UUID | None = None
+    ) -> DeliveryState | None:
+        """Terminally reconcile one abandoned final attempt; never create another attempt."""
+        current = _aware_utc(now or self.clock())
+        row = await self.session.scalar(
+            select(DomainEventOutbox)
+            .where(
+                DomainEventOutbox.delivery_state == "delivering",
+                DomainEventOutbox.attempt_count >= DomainEventOutbox.max_attempts,
+                DomainEventOutbox.lease_expires_at <= current,
+                *([] if outbox_id is None else [DomainEventOutbox.outbox_id == outbox_id]),
+            )
+            .order_by(DomainEventOutbox.outbox_id)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
+        )
+        if row is None:
+            return None
+        # The final effect may have committed before the dispatcher died. Reconcile
+        # the established deterministic consumer before recording failure.
+        activity = await self.session.scalar(
+            select(DomainActivityEntry).where(DomainActivityEntry.event_id == row.event_id)
+        )
+        event = await self.session.get(DomainEventRecord, row.event_id)
+        exact = (
+            activity is not None
+            and event is not None
+            and (
+                activity.activity_id == uuid.uuid5(row.event_id, ACTIVITY_PROJECTION_VERSION)
+                and activity.projection_version == ACTIVITY_PROJECTION_VERSION
+                and all(
+                    getattr(activity, key) == getattr(event, key)
+                    for key in (
+                        "event_id",
+                        "user_id",
+                        "workspace_id",
+                        "canvas_id",
+                        "sequence",
+                        "event_type",
+                        "subject_kind",
+                        "subject_id",
+                        "actor_user_id",
+                        "trace_id",
+                        "occurred_at",
+                    )
+                )
+            )
+        )
+        self.session.add(
+            DomainEventDeliveryAttempt(
+                attempt_id=uuid.uuid5(row.event_id, f"attempt:{row.lease_generation}"),
+                outbox_id=row.outbox_id,
+                event_id=row.event_id,
+                lease_generation=row.lease_generation,
+                attempt_number=row.attempt_count,
+                outcome="delivered" if exact else "terminal_failure",
+                failure_classification=None if exact else "consumer_rejected",
+                recorded_at=current,
+            )
+        )
+        row.delivery_state = "delivered" if exact else "terminal_failure"
+        row.completed_at = current if exact else None
+        row.terminal_at = None if exact else current
+        row.failure_classification = None if exact else "consumer_rejected"
+        self._clear_lease(row)
+        await self.session.flush()
+        return cast(DeliveryState, row.delivery_state)
+
+    async def _owned_claim(self, claim: OutboxClaim, now: datetime | None) -> DomainEventOutbox:
+        outbox = await self.session.scalar(
+            select(DomainEventOutbox)
+            .where(DomainEventOutbox.outbox_id == claim.outbox_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        # Sample only after acquiring the fence: another transaction can have
+        # held this row until beyond the lease deadline without changing its generation.
+        current = _aware_utc(now or self.clock())
         if (
             outbox is None
             or outbox.event_id != claim.event_id
             or outbox.delivery_state != "delivering"
             or outbox.lease_owner_id != claim.owner_id
             or outbox.lease_generation != claim.generation
+            or outbox.attempt_count != claim.attempt_number
             or outbox.lease_expires_at is None
             or _aware_utc(outbox.lease_expires_at) <= current
+            or _aware_utc(outbox.lease_expires_at) != _aware_utc(claim.lease_expires_at)
         ):
             raise OutboxOwnershipError()
         return outbox

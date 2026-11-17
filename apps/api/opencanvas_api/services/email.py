@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import smtplib
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
 from urllib.parse import quote
 
 from opencanvas_api.core.config import Settings
@@ -19,6 +20,8 @@ async def deliver_password_reset(*, settings: Settings, recipient: str, raw_toke
         raise EmailDeliveryError("Password reset delivery is not configured.")
     reset_url = f"{settings.app_url}/reset-password?token={quote(raw_token, safe='')}"
     message = EmailMessage()
+    message["Message-ID"] = make_msgid(domain=settings.smtp_from_address.rsplit("@", 1)[-1])
+    message["Date"] = formatdate(usegmt=True)
     message["Subject"] = "Reset your SolarPlexus Mobius password"
     message["From"] = settings.smtp_from_address
     message["To"] = recipient

@@ -1038,7 +1038,7 @@ change the scope or claims of Internal Checkpoint 7.
 
 ### 7.8 completion checklist reconciliation — 2026-11-15
 
-**7.8 is incomplete. Current reconciliation: 2026-11-16.** PostgreSQL,
+**7.8 is incomplete. Current reconciliation: 2026-11-17 UTC.** PostgreSQL,
 M78-D-001 and M78-D-002 are complete and closed, including verified cleanup.
 The [remaining-evidence matrix](MILESTONE_7_8_REMAINING_EVIDENCE_RECONCILIATION.md#requirement-by-requirement-disposition)
 distinguishes directly inspected receipts, historical accepted results and
@@ -1050,8 +1050,13 @@ focused corrections and verified local cleanup; the legacy editable-AI contract
 conflict remains for full 7.8; the pilot decision is now read-only controlled drafts.
 The [pilot preparation](MILESTONE_7_8_PILOT_PREPARATION.md) records approved
 900/20 settings, passing secure browser/worker integration and the corrected
-API candidate with zero Critical/High findings. Trusted signing, frontend
-origin/artifact and the [bounded managed observations](MILESTONE_7_8_PILOT_MANAGED_VALIDATION_PACKAGE.md) remain open; no deployment is declared ready.
+API candidate with zero Critical/High findings. The subsequent
+[full-closure ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md) records production
+telemetry, separate activity-v1 delivery, destination/recovery/capacity validators
+and revised API/frontend artifacts. Frontend runtime-origin binding is locally
+resolved. Trusted signing, exact managed observations and the editable-AI
+criterion remain open; the [revised package](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md)
+requires separate spending authority. No deployment is declared ready.
 The
 [campaign handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15)
 contains acceptance, execution, source/image and receipt-hash evidence.
@@ -1078,7 +1083,7 @@ existing requirements are:
 | [Exact audit](#exact-audit), observability; [Required final scenarios](#required-final-scenarios), private-content exclusion; register M78-D-003/D-007 | Local redaction/exporter/alert checks remain credited. D001 directly proves native scanner Log Analytics delivery; it does not prove infrastructure category rows or the application logs/metrics/spans destination, dashboards/alert delivery and recovery, retention, access/revocation and destination privacy. Reconcile shared observations once; do not rerun unchanged local suites. |
 | [Exact audit](#exact-audit), durable workers; register M78-D-004 | Preserve 7.4 durability, PG failover/replay and D001 deletion/rollback/replay proof. Locate production worker polling/wake-up, operational telemetry and external delivery/acknowledgment receipts; only an uncovered provider-path assertion warrants additional execution. No new broker is required. |
 | [Required final scenarios](#required-final-scenarios), managed backup/PITR/object restore/rollback; register M78-D-005 | Preserve successful 7.6 managed PITR/full restore/portable recovery/failback and current PG/object proofs. Locate native 7.6 results and map current 0029/roles/runtime/worker/object changes to consistent DB/object/index/queue/outbox recovery and rollback. Conditional affected proof only if retained evidence cannot close that delta; production deployment is excluded. |
-| [Exact audit](#exact-audit), capacity/security; [Required final scenarios](#required-final-scenarios), ceilings and recovery; register M78-D-006 | Retained image build/scan remains accepted; original unsigned provenance and retrospective SBOM are now verified. All 74 dependency alerts were mapped and corrected for this branch. Seven archived 7.7 payloads and the original full-chain validator result are recovered. Remaining items are application-wide workload limits, signed provenance/release controls and a future API artifact reflecting demonstrated grounded-draft/local-compatibility corrections; no image was rebuilt here. |
+| [Exact audit](#exact-audit), capacity/security; [Required final scenarios](#required-final-scenarios), ceilings and recovery; register M78-D-006 | Retained image build/scan remains accepted; original unsigned provenance and retrospective SBOM are now verified. All 74 dependency alerts were mapped and corrected for this branch. Seven archived 7.7 payloads and the original full-chain validator result are recovered. Remaining items are application-wide workload limits, signed provenance/release controls and current-release managed controls. Revised API/frontend artifact and focused local implementation evidence are recorded in the [finite closure ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md); they do not close managed workload acceptance. |
 | [Final validation](#final-validation) and [Documentation, commit, and exit](#documentation-commit-and-exit) | All 14 identified historical PostgreSQL skips have passing local results, and the corrected frontend dependency build passes. The two original browser scenarios were executed: their legacy editable-AI expectations conflict with the current controlled-draft UI. Current core-flow validation is separately recorded in the local report. Resolve that explicit contract decision and the remaining provider/release gates before a full completion record; no blanket rerun is required. |
 
 The [existing debt register](MILESTONE_7_8_DEFECT_REGISTER.md#evidence-debts-routed-to-later-audit-surfaces)

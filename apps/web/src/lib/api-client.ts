@@ -1,3 +1,4 @@
+import { browserApiUrl } from "./runtime-api";
 import { z, type ZodType } from "zod";
 
 import {
@@ -115,7 +116,7 @@ function csrfHeaders(method: string | undefined): Record<string, string> {
 }
 
 function getApiBaseUrl(): string {
-  return (process.env.NEXT_PUBLIC_API_URL ?? DEFAULT_API_URL).replace(/\/$/, "");
+  return browserApiUrl(process.env.NEXT_PUBLIC_API_URL ?? DEFAULT_API_URL);
 }
 
 export class APIError extends Error {

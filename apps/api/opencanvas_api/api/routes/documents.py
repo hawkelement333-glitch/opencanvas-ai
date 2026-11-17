@@ -88,6 +88,7 @@ from opencanvas_api.services.object_ingestion import (
     UploadLifecycleService,
     UploadSessionView,
 )
+from opencanvas_api.services.operational_observations import emit_document_boundary
 
 router = APIRouter()
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -328,6 +329,7 @@ async def initiate_secure_upload(
         if isinstance(exc, ObjectIngestionError):
             raise _ingestion_error(exc) from exc
         raise _service_error(exc) from exc
+    emit_document_boundary(view.session.document_id, view.session.workspace_id)
     return _secure_upload_out(view, api_prefix=settings.api_prefix, document=document, node=node)
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import time
 import uuid
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -41,6 +42,7 @@ from opencanvas_api.services.domain_events import (
     DomainEventService,
     RecordedDomainEvent,
 )
+from opencanvas_api.services.operational_observations import after_commit_metric, metric
 from opencanvas_api.services.trace import RecordTraceEventInput, TraceService
 
 ACTIVE_STATES = frozenset(
@@ -383,7 +385,7 @@ class DurableJobService:
         now: datetime | None = None,
     ) -> JobLease | None:
         current = _aware(now or datetime.now(UTC))
-        claim_started = datetime.now(UTC)
+        claim_started = time.perf_counter()
         if not worker_id.strip() or len(worker_id) > 120:
             raise DurableJobValidationError("Worker identity is invalid.")
         global_active = await self.session.scalar(
@@ -524,9 +526,9 @@ class DurableJobService:
                 attempt_number=attempt_number,
             )
             self.metrics.claims += 1
-            self.metrics.claim_latency_ms_total += (
-                datetime.now(UTC) - claim_started
-            ).total_seconds() * 1_000
+            claim_ms = (time.perf_counter() - claim_started) * 1_000
+            self.metrics.claim_latency_ms_total += claim_ms
+            metric("mobius.queue.claim_duration", claim_ms, "queue")
             return JobLease(
                 job_run_id=candidate.id,
                 attempt_id=attempt_id,
@@ -572,6 +574,7 @@ class DurableJobService:
         )
         if updated is None:
             self.metrics.lease_losses += 1
+            metric("mobius.queue.lease_loss", 1, "queue", "denied")
             raise DurableJobConflictError("Lease is no longer current.")
         return replace(lease, expires_at=expires_at)
 
@@ -741,6 +744,7 @@ class DurableJobService:
                 attempt_number=lease.attempt_number,
             )
             self.metrics.retries += 1
+            after_commit_metric(self.session, "mobius.queue.retries", 1, "queue")
         else:
             await self._dead_letter(
                 job,
@@ -813,6 +817,7 @@ class DurableJobService:
             )
         )
         self.metrics.cancellations += 1
+        after_commit_metric(self.session, "mobius.queue.cancellations", 1, "queue")
         await self.session.flush()
         return _view(job)
 
@@ -914,6 +919,7 @@ class DurableJobService:
                 recovered += 1
                 self.metrics.lease_losses += 1
                 self.metrics.recovered_leases += 1
+                after_commit_metric(self.session, "mobius.queue.lease_loss", 1, "queue")
                 continue
             if decision is None:
                 self.session.add(
@@ -982,6 +988,8 @@ class DurableJobService:
             recovered += 1
             self.metrics.lease_losses += 1
             self.metrics.recovered_leases += 1
+            after_commit_metric(self.session, "mobius.queue.lease_loss", 1, "queue")
+            after_commit_metric(self.session, "mobius.queue.retries", 1, "queue")
         await self.session.flush()
         return recovered
 
@@ -1266,6 +1274,7 @@ class DurableJobService:
             now=current,
         )
         self.metrics.replays += 1
+        after_commit_metric(self.session, "mobius.queue.replays", 1, "queue")
         await self.session.flush()
         return job
 
@@ -1364,6 +1373,7 @@ class DurableJobService:
         job.completed_at = now
         self._clear_lease(job)
         self.metrics.dead_letters += 1
+        after_commit_metric(self.session, "mobius.queue.dead_letters", 1, "queue")
 
     async def _terminalize_without_lease(
         self,
@@ -1445,6 +1455,7 @@ class DurableJobService:
         )
         if job is None:
             self.metrics.stale_results_suppressed += 1
+            metric("mobius.queue.stale_suppression", 1, "queue", "denied")
             raise DurableJobConflictError("Stale, expired, or canceled lease.")
         return job
 

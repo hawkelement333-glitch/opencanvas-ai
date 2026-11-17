@@ -39,6 +39,19 @@ def checked_zip(raw: bytes, expected: str) -> dict[str, bytes]:
     return result
 
 
+def checked_source_zip(raw: bytes, expected: str) -> dict[str, bytes]:
+    """Unwrap exactly one source layer without weakening either ZIP bound."""
+    wrapper = checked_zip(raw, expected)
+    if set(wrapper) != {"source-entries.zip"}:
+        raise ValueError("exact solid source wrapper required")
+    inner = wrapper["source-entries.zip"]
+    # The verified outer digest binds these exact inner bytes transitively.
+    entries = checked_zip(inner, hashlib.sha256(inner).hexdigest())
+    if "source-entries.zip" in entries:
+        raise ValueError("recursive source wrapper rejected")
+    return entries
+
+
 def artifact_url() -> str:
     host = os.environ["M78_PILOT_STORAGE_HOST"]
     suffix = os.environ["M78_PILOT_SUFFIX"]
@@ -80,7 +93,7 @@ def stage_artifact() -> None:
     if any(len(chunk) > 32768 for chunk in chunks) or sum(map(len, chunks)) > 240000:
         raise ValueError("source chunks exceed reviewed transport bound")
     source = base64.b64decode("".join(chunks), validate=True)
-    entries = checked_zip(source, os.environ["M78_PILOT_SOURCE_ZIP_SHA256"])
+    entries = checked_source_zip(source, os.environ["M78_PILOT_SOURCE_ZIP_SHA256"])
     wheels = json.loads(entries["wheel-manifest.json"])["wheels"]
     if len(wheels) != 8:
         raise ValueError("exact wheel inventory required")
@@ -176,6 +189,9 @@ def load_probe() -> None:
     if module not in {
         "infra.milestone_7_8.pilot_validation",
         "infra.milestone_7_8.pilot_application_probe",
+        "infra.milestone_7_8.password_reset_validation",
+        "infra.milestone_7_8.activity_delivery_validation",
+        "infra.milestone_7_8.queue_grant_intervention",
     }:
         raise ValueError("unapproved probe module")
     sys.argv = [

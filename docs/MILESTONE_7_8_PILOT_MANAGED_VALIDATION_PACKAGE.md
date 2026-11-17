@@ -1,5 +1,11 @@
 # Milestone 7.8 bounded pilot managed-validation package
 
+> Current follow-up: the [full-closure local ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md)
+> and [revised execution proposal](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md) supersede
+> this historical pilot preparation for the new candidate. Its evidence and
+> limitations remain history; its proposed budget is not execution authority.
+> Full7.8 remains incomplete, closed campaigns stay closed, billing is unsettled.
+
 Prepared locally for separate spending approval. **No Azure operation, paid
 provider call, managed execution or deployment has occurred under this package.**
 PostgreSQL, M78-D-001 and M78-D-002 remain closed. Billing is unsettled. The

@@ -48,6 +48,7 @@ from opencanvas_api.services.documents.validation import (
     validate_upload_contract,
 )
 from opencanvas_api.services.domain_events import CreateDomainEvent, DomainEventService
+from opencanvas_api.services.operational_observations import after_commit_metric
 from opencanvas_api.services.trace import (
     CompleteTraceInput,
     StartTraceInput,
@@ -1643,6 +1644,15 @@ class MalwareScanService:
                 },
             )
         )
+        after_commit_metric(self.session, "mobius.scanner.throughput", 1, "scanner")
+        after_commit_metric(
+            self.session,
+            "mobius.scanner.duration",
+            max(0.0, (now - _aware_utc(request.requested_at)).total_seconds() * 1000),
+            "scanner",
+        )
+        if result.outcome != "clean":
+            after_commit_metric(self.session, "mobius.scanner.quarantine", 1, "scanner", "denied")
         return UploadSessionView(
             upload,
             await lifecycle._latest_upload_transition(upload.session_id),
@@ -2003,6 +2013,12 @@ class ObjectReconciler:
                 document.error_message = "Secure content validation timed out."
             if document_version is not None:
                 document_version.status = "rejected"
+            after_commit_metric(
+                self.session, "mobius.scanner.unavailable", 1, "scanner", "unavailable"
+            )
+            after_commit_metric(
+                self.session, "mobius.scanner.quarantine", 1, "scanner", "unavailable"
+            )
             expired += 1
         return expired
 

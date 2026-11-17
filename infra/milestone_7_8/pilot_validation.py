@@ -24,17 +24,36 @@ from typing import Any
 from infra.milestone_7_8.pilot_alerts import ROOT, compile_catalog
 
 VERSION = "m78-pilot-destination-probe-v1"
-OPERATIONS = ("query", "telemetry", "alerts", "smtp")
+OPERATIONS = ("query", "telemetry", "alerts", "smtp", "provider-observation")
+DELIVERY_OPERATIONS = (
+    "password-reset-request",
+    "password-reset-confirm",
+    "password-reset-expiry",
+    "activity-delivery-happy",
+    "activity-delivery-lost-ack",
+    "activity-delivery-stale",
+    "activity-delivery-outage",
+    "activity-delivery-final-recovery",
+    "activity-delivery-delay",
+    "activity-delivery-partial-response",
+    "activity-delivery-retry-load",
+    "activity-delivery-network-delay",
+)
+INTERVENTION_OPERATIONS = ("queue-grant-outage", "queue-grant-restore")
 APPLICATION_OPERATIONS = (
     "account",
     "core",
     "workload",
+    "capacity",
+    "integrity",
+    "telemetry-queue",
     "restore-snapshot",
     "restore-verify",
     "restore-fixture",
     "restore-fence",
     "restore-role",
     "restore-resume",
+    "restore-rollback",
 )
 TABLES = {
     "application_log": "MobiusApplication_CL",
@@ -64,9 +83,19 @@ def utc(value: str) -> datetime:
 
 
 def prepare(
-    output: Path, release: str, deployment: str, ceiling: float
+    output: Path,
+    release: str,
+    deployment: str,
+    ceiling: float,
+    *,
+    full_closure: bool = False,
 ) -> dict[str, Any]:
-    catalog = compile_catalog(release=release, deployment=deployment, ceiling=ceiling)
+    catalog = compile_catalog(
+        release=release,
+        deployment=deployment,
+        ceiling=ceiling,
+        full_closure=full_closure,
+    )
     paths = [
         "infra/milestone_7_8/pilot_validation.py",
         "infra/milestone_7_8/pilot_alerts.py",
@@ -86,6 +115,29 @@ def prepare(
         "docs/observability/dashboards-v1.json",
         "docs/observability/signals-v1.json",
     ]
+    closure_paths = [
+        "infra/milestone_7_8/destination_acceptance.py",
+        "infra/milestone_7_8/capacity_validation.py",
+        "infra/milestone_7_8/capacity_fixtures.py",
+        "infra/milestone_7_8/pilot_recovery_acceptance.py",
+        "infra/milestone_7_8/password_reset_validation.py",
+        "infra/milestone_7_8/activity_delivery_validation.py",
+        "infra/milestone_7_8/queue_grant_intervention.py",
+        "infra/milestone_7_8/operational_service_probe.py",
+        "infra/milestone_7_8/pilot/full_closure_interventions.json",
+        "infra/milestone_7_8/pilot/helper_job_patch.py",
+        "apps/api/scripts/operational_observer.py",
+        "apps/api/opencanvas_api/services/operational_observations.py",
+        "apps/api/opencanvas_api/services/evidence_observer.py",
+        "apps/api/opencanvas_api/services/outbox_dispatcher.py",
+        "apps/api/scripts/activity_receiver.py",
+        "apps/api/scripts/outbox_worker.py",
+        "docs/MILESTONE_7_8_FULL_CLOSURE_VALIDATORS.md",
+    ]
+    if full_closure:
+        if any(not (ROOT / path).is_file() for path in closure_paths):
+            raise ValueError("full closure source/validator package is incomplete")
+        paths.extend(closure_paths)
     application_probe = "infra/milestone_7_8/pilot_application_probe.py"
     if (ROOT / application_probe).exists():
         paths.append(application_probe)
@@ -97,7 +149,15 @@ def prepare(
         "sourceBindings": {path: digest(ROOT / path) for path in paths},
         "catalogSha256": digest(output / "catalog.json"),
         "relativeWindowHours": {"provisionBy": 2, "stopProof": 8, "cleanupBy": 10},
-        "operations": list((*OPERATIONS, *APPLICATION_OPERATIONS)),
+        "operations": list(
+            (
+                *OPERATIONS,
+                *APPLICATION_OPERATIONS,
+                *(DELIVERY_OPERATIONS if full_closure else ()),
+                *(INTERVENTION_OPERATIONS if full_closure else ()),
+            )
+        ),
+        "fullClosure": full_closure,
         "managedAcceptance": "unproved",
         "closedCampaigns": ["PostgreSQL", "M78-D-001", "M78-D-002"],
         "requirements": [
@@ -206,6 +266,26 @@ def _private_host(host: str) -> list[str]:
     ):
         raise ValueError("private destination DNS not proved")
     return addresses
+
+
+def provider_requests_for_approval(bindings: dict, approval: dict) -> list[dict]:
+    """Resolve only approved UTC calendar-day slots for the temporary forecast.
+
+    Native Daily forecast rows cover complete days, not an asserted hourly bill.
+    Other request fields remain byte-equivalent to the source-bound plan.
+    """
+    start = utc(approval["approvedAt"])
+    end = start + timedelta(hours=bindings["relativeWindowHours"]["cleanupBy"])
+    slots = {
+        "${APPROVAL_DAY_UTC}": start.strftime("%Y-%m-%dT00:00:00+00:00"),
+        "${CLEANUP_DAY_UTC}": end.strftime("%Y-%m-%dT23:59:59+00:00"),
+    }
+    raw = json.dumps(bindings.get("providerObservationRequests", []), sort_keys=True)
+    for marker, value in slots.items():
+        raw = raw.replace(marker, value)
+    if "${" in raw:
+        raise ValueError("unknown provider request binding slot")
+    return json.loads(raw)
 
 
 def admit_runtime_bindings(plan: dict, readbacks: dict, *, plan_sha256: str) -> dict:
@@ -673,6 +753,9 @@ def main() -> int:
     parser.add_argument("--execution-id")
     parser.add_argument("--query-file", type=Path)
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--full-closure", action="store_true")
+    parser.add_argument("--provider-readback", type=Path)
+    parser.add_argument("--provider-binding", type=Path)
     args = parser.parse_args()
     if args.operation == "prepare":
         if (
@@ -684,7 +767,13 @@ def main() -> int:
             parser.error(
                 "prepare requires release, deployment, ceiling and no --execute"
             )
-        prepare(args.bundle, args.release, args.deployment, args.ceiling)
+        prepare(
+            args.bundle,
+            args.release,
+            args.deployment,
+            args.ceiling,
+            full_closure=args.full_closure,
+        )
         print(
             json.dumps(
                 {
@@ -746,6 +835,39 @@ def main() -> int:
             ):
                 raise ValueError("query is not part of the approved execution package")
             result = asyncio.run(query(bindings, kql))
+        elif args.operation == "provider-observation":
+            if args.provider_readback is None or args.provider_binding is None:
+                raise ValueError("exact provider readback and binding required")
+            provider_binding = json.loads(args.provider_binding.read_text())
+            native = json.loads(args.provider_readback.read_text())
+            if (
+                provider_binding.get("release") != bindings["release"]
+                or provider_binding.get("deployment") != bindings["deployment"]
+                or set(provider_binding.get("resourceIds", []))
+                != set(bindings.get("providerObservationResourceIds", []))
+                or not provider_binding.get("resourceIds")
+                or native.get("resourceId") not in provider_binding["resourceIds"]
+            ):
+                raise ValueError(
+                    "provider observation scope differs from approved plan"
+                )
+            if native["native"]["request"] not in provider_requests_for_approval(
+                bindings, json.loads(args.authorization.read_text())
+            ):
+                raise ValueError("provider observation request not authorized")
+            from scripts.operational_observer import observe
+
+            result = asyncio.run(
+                observe(
+                    argparse.Namespace(
+                        bindings=args.provider_binding,
+                        bindings_sha256=digest(args.provider_binding),
+                        readback=args.provider_readback,
+                        readback_sha256=digest(args.provider_readback),
+                        emit=True,
+                    )
+                )
+            )
         elif args.operation == "telemetry":
             result = asyncio.run(telemetry(bindings, deadline))
         elif args.operation == "alerts":

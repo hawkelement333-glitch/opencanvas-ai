@@ -348,6 +348,12 @@ class DocumentWorker:
         )
 
     async def run_once(self) -> bool:
+        from opencanvas_api.services.operational_observations import bind_operational_telemetry
+
+        with bind_operational_telemetry(self.telemetry):
+            return await self._run_once()
+
+    async def _run_once(self) -> bool:
         async with self.sessions() as session:
             await self._heartbeat(session, "ready")
             if self.object_storage is not None:
@@ -382,6 +388,7 @@ class DocumentWorker:
                 "worker.execution",
                 component="worker",
                 links=(
+                    self.telemetry.span_link("document", document_id, scope=(workspace_id,)),
                     self.telemetry.span_link(
                         "durable_job",
                         lease.job_run_id,
@@ -435,6 +442,23 @@ class DocumentWorker:
                 ).complete(lease, result_id=result_id, publication_id=publication_id)
                 await self._heartbeat(session, "ready")
                 await session.commit()
+                from opencanvas_api.services.operational_observations import observe_workspace_state
+
+                try:
+                    await observe_workspace_state(session, workspace_id, settings=self.settings)
+                except Exception:
+                    # An observational read cannot turn a committed outcome into a retry.
+                    await session.rollback()
+                    if self.telemetry is not None:
+                        self.telemetry.emit_log(
+                            event_name="integrity.check.completed",
+                            component="event",
+                            severity=Severity.WARNING,
+                            fields={
+                                "operation": "workspace_reference_integrity",
+                                "outcome": "unavailable",
+                            },
+                        )
             if span is not None:
                 span.end(outcome="success")
         except DocumentProcessingError as exc:

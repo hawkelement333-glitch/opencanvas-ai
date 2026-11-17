@@ -24,6 +24,7 @@ def sample_query(release: str, deployment: str) -> str:
     return (
         f'{TABLES}\n| where Release == "{bound(release)}" '
         f'and Deployment == "{bound(deployment)}"\n'
+        '| where Service in ("mobius-api", "mobius-worker", "mobius-outbox")\n'
         "| summarize arg_max(TimeGenerated, *) by SignalId\n"
         "| extend V=todouble(Payload.value), Outcome=tostring(Payload.labels.outcome)\n"
     )
@@ -161,10 +162,10 @@ SPECS = {
 
 def alert_query(alert: dict, *, release: str, deployment: str, ceiling: float) -> str:
     aggregation, breach, recovery, firing_windows, recovery_windows = SPECS[alert["id"]]
-    # Daily freshness/forecast rules use the latest observations immediately;
-    # they do not require a full day to elapse before diagnosing a stale backup.
+    # Preserve literal catalog lookbacks. Rolling windows end at evaluation time;
+    # latest-value daily rules do not require a fabricated full day of samples.
     minutes = int(alert["evaluationWindowMinutes"])
-    bucket = min(minutes, 15) if minutes == 1440 else minutes
+    bucket = minutes
     # Each row's Presence counts the rule's own signal(s), not unrelated healthy
     # traffic. Missing-data breaches therefore cannot become healthy zeros.
     names = re.findall(r"Name=='([^']+)'", aggregation)
@@ -174,30 +175,33 @@ def alert_query(alert: dict, *, release: str, deployment: str, ceiling: float) -
     hold = "true" if alert["missingData"] == "hold" else "false"
     return (
         f"let COST_CEILING={float(ceiling)};\n"
-        f"let Start=bin(ago(2d),{bucket}m); let End=bin(now(),{bucket}m)-{bucket}m;\n"
+        f"let End=now(); let Start=End-2d;\n"
         "let Observed=("
         + sample_query(release, deployment)
-        + f"| where TimeGenerated>=Start and TimeGenerated<End+{bucket}m\n"
+        + f"| where TimeGenerated>=Start and TimeGenerated<End\n"
         "| order by TimeGenerated asc\n"
-        f"| summarize {aggregation} by Window=bin(TimeGenerated,{bucket}m));\n"
-        f"range Window from Start to End step {bucket}m\n"
+        f"| summarize {aggregation} by Window=bin_at(TimeGenerated,{bucket}m,End));\n"
+        f"range Window from Start to (End-{bucket}m) step {bucket}m\n"
         "| join kind=leftouter Observed on Window\n"
         f"| extend Missing=isnull(Presence) or Presence==0\n"
         f"| extend Breach=iff(Missing,{missing},coalesce({breach},false)), "
-        f"Healthy=iff(Missing,false,coalesce({recovery},false)), Hold=Missing and {hold}\n"
+        f"Healthy=iff(Missing,false,coalesce({recovery},false)), Hold=Missing and {hold}, "
+        f"ForceFire={'coalesce(T>0,false)' if alert['id'] == 'outbox-backlog-v1' else 'false'}\n"
         "| order by Window asc\n| serialize\n"
         "| scan declare (Firing:bool=false, Bad:long=0, Good:long=0) with (\n"
         " step s: true =>\n"
         " Bad=iff(Hold,s.Bad,iff(Breach,s.Bad+1,0)),\n"
         " Good=iff(Hold,s.Good,iff(Healthy,s.Good+1,0)),\n"
-        f" Firing=iff(Hold,s.Firing,iff(Breach and s.Bad+1>={firing_windows},true,"
-        f"iff(Healthy and s.Good+1>={recovery_windows},false,s.Firing)));\n"
+        f" Firing=iff(ForceFire,true,iff(Hold,s.Firing,iff(Breach and s.Bad+1>={firing_windows},true,"
+        f"iff(Healthy and s.Good+1>={recovery_windows},false,s.Firing))));\n"
         ")\n| top 1 by Window desc\n| where Firing\n"
         f'| project TimeGenerated=Window, AlertId="{alert["id"]}", Firing\n'
     )
 
 
-def compile_catalog(*, release: str, deployment: str, ceiling: float) -> dict:
+def compile_catalog(
+    *, release: str, deployment: str, ceiling: float, full_closure: bool = False
+) -> dict:
     if not 0 < ceiling <= 1000:
         raise ValueError("operating ceiling must be explicit and bounded")
     dashboards = json.loads(
@@ -258,16 +262,24 @@ def compile_catalog(*, release: str, deployment: str, ceiling: float) -> dict:
             }
         )
     for alert in alerts["alerts"]:
+        query = alert_query(
+            alert, release=release, deployment=deployment, ceiling=ceiling
+        )
         result["alerts"].append(
             {
                 "id": alert["id"],
-                "enabled": alert["id"] != "outbox-backlog-v1",
+                "enabled": full_closure or alert["id"] != "outbox-backlog-v1",
+                "evaluationWindowMinutes": alert["evaluationWindowMinutes"],
+                "evaluationFrequency": "PT1M",
+                "autoMitigate": alert["id"] != "evidence-integrity-v1",
+                "recoveryMode": "authorized-investigation"
+                if alert["id"] == "evidence-integrity-v1"
+                else "catalog-hysteresis",
                 "severity": {"critical": 0, "high": 1, "warning": 2}[alert["severity"]],
                 "description": f"{alert['query']}; recovery: {alert['recoveryRule']}; "
                 f"runbook: {alert['runbook']}",
-                "query": alert_query(
-                    alert, release=release, deployment=deployment, ceiling=ceiling
-                ),
+                "query": query,
+                "observationQuery": query.rsplit("\n| top 1", 1)[0],
             }
         )
     return result
