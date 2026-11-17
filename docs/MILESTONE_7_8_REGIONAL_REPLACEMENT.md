@@ -453,3 +453,38 @@ tenant/subscription identifiers or private endpoints.
 | `terminal-cost-summary.json` | `f2ac54b48a1d8dec265902a45e89eb1abe36a37cd33007b1e65b0d21c4ebd3a6` |
 | `terminal-cost-native-response.json` | `49eb58f0f576089ce619b53ad467264b2050a5274201c727416629a65fc59f5a` |
 | `terminal-results.json` | `00d38aedbd1099b86311c2d46c2dffd16b7e884c12edd97a042d60419e768919` |
+
+## Bootstrap successor preparation
+
+The compiled pilot job supplies the provisioning role to the existing normal
+bootstrap command. Before dispatch, the activation driver checks the exact
+signed API digest, command, role and empty execution inventory. Only the
+specific known pre-I/O failure can qualify for the role-only recovery path.
+The exact sole terminal execution, native console and current job must agree.
+An ambiguous start, later-stage failure, template drift or incomplete
+inventory stops that path. The existing database retry validator is unchanged.
+
+The retained API image ran the shipped bootstrap entry point against isolated
+PostgreSQL 17, starting with an empty schema owned by azure_pg_admin. The
+wrong role stopped before client initialization. The corrected normal path
+installed vector, set the migration schema owner, provisioned four
+nonprivileged roles and verified schema privileges and evidence monitoring.
+The local fixture supplies Entra mappings and substitutes local authentication
+and transport. Native Entra, TLS, migration and application acceptance remain
+open. The pre-I/O recovery validator consumed the retained native failure
+and rejected six conflicting or incomplete variants.
+
+The scoped ActualCost refresh returned 36 target rows totaling $0.8227223512
+and one shared-controller row showing $0. The target ID was reused on the
+same UTC day, so the query does not allocate charges by attempt. Billing
+remains unsettled. Retain the previous $9 exposure reserve and add $10 for
+the bootstrap attempt, whose bound resource lifetime finished within two
+hours. At retained rates, the same conservative dependency allowance plus
+three maximum-duration bootstrap jobs estimates $9.0414. Use the posted
+total as reconciliation evidence, without deducting it from this reserve.
+
+The successor forecast is $39.4128, or $49.2660 with 25% contingency, against
+a proposed $49.75 execution ceiling. The $19 exposure reserve brings the
+combined proposal to $68.75 and cumulative ceiling to $419.64. The requested
+increase is $10 over the last approved cumulative ceiling. Any execution
+requires separate approval of the sealed package and fresh deadlines.
