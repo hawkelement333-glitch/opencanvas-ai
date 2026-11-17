@@ -1,17 +1,22 @@
 # Milestone 7.8 finite closure ledger
 
-Current local checkpoint, 2026-11-17 UTC. **Milestone 7.8 remains incomplete.**
-PostgreSQL, M78-D-001 and M78-D-002 remain closed. Their accepted assertions,
-failed-attempt history, finalized ledgers and verified cleanup are unchanged.
-No new managed acceptance, Azure mutation, paid provider request, publication or
-website deployment is claimed by this local implementation checkpoint.
+Current result, 2026-11-17 UTC: **Milestone 7.8 remains incomplete.**
+PostgreSQL, M78-D-001 and M78-D-002 remain closed with their acceptance,
+failed-attempt history, finalized ledgers and verified cleanup preserved.
 
-This ledger supersedes current preparation gaps in the earlier pilot proposal;
-those proposals and their failed attempts remain historical evidence. The
+The [alert-repair execution result](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#alert-repair-execution-result)
+credits native creation of the two corrected alert rules, exact signed registry
+digests and cleanup admission. It stopped before application proof at a bootstrap
+role mismatch and then a guarded-retry owner check. All 48 cleanup counters are
+zero, controller preserved, Gmail credential revoked and operator ledger
+cleanup-disarmed. Five focused control-plane correction checks pass. No new
+full-area application acceptance is claimed; required firing/recovery remains
+unproved. Billing is **unsettled** and no additional execution is authorized.
+
+The local preparation records below preserve their historical boundary. The
 [original reconciliation](MILESTONE_7_8_REMAINING_EVIDENCE_RECONCILIATION.md)
-contains the credited historical receipt bindings. The
-[full-closure package](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md) is a new
-proposal, not the old pilot spending allowance. Billing remains **unsettled**.
+retains historical receipt credit. The [full-closure package](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md)
+and later approved regional packages do not authorize an automatic successor.
 
 ## Selected decisions and local release update
 
@@ -50,7 +55,7 @@ the +2/+10/+12 window is unchanged.
 | D005 R3 nonterminal reconstruction/fencing/resumption; same recovery mapping | PG failover and D001 exact deletion ambiguity/rollback | Exact captured lease rejection, provider success/DB rollback, absence reconciliation, one deletion transition and actual restored-worker outcome; original rollback reconciliation prepared | Actual ordered managed fixture→quiescence→restore→fence→resume→original rollback; no duplicate durable effect; source kept and all writers bounded/stopped. |
 | D005 R4 joint state and rollback/RPO/RTO; [recovery runbook](PRODUCTION_RECOVERY_RUNBOOK.md) | Historical 7.6 recovery; D001 exact object bytes/version and provenance | Full scoped DB/object/scanner/event/outbox/activity/index hash comparison; real stale/canceled publication rejection and file checksum/scope checks. Native/probe chain reconciler preserves exact operation/receipt bindings | Native PITR request/terminal server, exact restore point and acknowledged write marker, restored roles/serving, rollback to reconciled original; measure interval/RTO without inventing an RPO objective or zero-loss guarantee. |
 | D006 all workload dimensions and stress/spike/failure recovery; [architecture 15.1–15.2](MILESTONE_7_ARCHITECTURE.md#151-workload-model) | 7.7 health soak, PG peak31/p95 592.26ms/failover45.05s, D001/D002 component failures | Four synthetic accounts, 11 workspaces, 21 canvases, 45 documents/9,176,064 bytes; 24 stages/6,262 reserved HTTP requests; ramp/spike, real scoped 130-second row-lock pressure, actual operation effects, bounded failure/recovery and persistent global reservations | Actual profile/data sizes, application-wide admission/rejection and saturation bound, each still-uncovered failure combination and post-failure recovery with operational correlations. A budget cap without observed saturation is a lower tested envelope, not a supported maximum or safe cohort. Admission6 per replica and13 only in lock stages are selected configurations to validate; unchanged catalog thresholds remain. |
-| D006 immutable minimal images, inventory and critical/high gate; [architecture 15.3](MILESTONE_7_ARCHITECTURE.md#153-infrastructure-security) | Old retained image acceptance remains closed | Revised API and frontend artifacts built only after source corrections; zero critical/high findings, nonroot/read-only/network-none checks, exact OCI graph and independent inventory. Frontend Alpine failure retained; pinned security-corrected runtime passes. | Native deployment must use exact current API5/web3 verified digests. Local detached signatures verified under the explicitly trusted key-only policy; no registry publication performed. |
+| D006 immutable minimal images, inventory and critical/high gate; [architecture 15.3](MILESTONE_7_ARCHITECTURE.md#153-infrastructure-security) | Old retained image acceptance remains closed | Revised API and frontend artifacts built only after source corrections; zero critical/high findings, nonroot/read-only/network-none checks, exact OCI graph and independent inventory. Frontend Alpine failure retained; pinned security-corrected runtime passes. | Native deployment must use exact current API5/web3 verified digests. Local detached signatures verified under the explicitly trusted key-only policy. Both indexes were published and verified in the cleaned campaign; API bootstrap jobs used the retained API digest. API/frontend application acceptance remains unproved. |
 | D006 trusted signed provenance; same architecture | Verified unsigned BuildKit provenance and inventories; historical 74 dependency alerts mapped/corrected | Current API5/web3 provenance, release bindings and combined endorsement signed and verified, including tamper rejection under explicitly trusted key-only policy | Local signed-release portion satisfied; actual native deployment of exact digests remains required. No authenticated CI or transparency-log assurance is claimed. |
 | D006 remaining security controls; same architecture | Existing scoped role/network/secret/bounds designs and retained focused tests | Narrow receiver secret/role bindings, private ingress, runtime frontend endpoint configuration; focused outgoing checks | Exact deployed private ingress/egress/identities, secret access, privileged-access expiry/logging, protected restore, and remaining license/control dispositions. No blanket repository audit or automatic new security campaign. |
 | D007 configured infrastructure categories/retention; [debt row](MILESTONE_7_8_DEFECT_REGISTER.md#evidence-debts-routed-to-later-audit-surfaces) | Historical private metrics and D001 scanner rows | Existing PostgreSQL/Blob/registry/Key Vault diagnostic bindings reused | Actual category rows/native query/retention. Historical Firewall/VM category evidence remains unlocated/unproved. User explicitly classified those categories not applicable to the final ACA topology; private networking, egress and deployed-resource category evidence remain mandatory. |

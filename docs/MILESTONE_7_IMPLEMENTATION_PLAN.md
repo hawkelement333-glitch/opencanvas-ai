@@ -1055,9 +1055,14 @@ API candidate with zero Critical/High findings. The subsequent
 [full-closure ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md) records production
 telemetry, separate activity-v1 delivery, destination/recovery/capacity validators
 and revised API/frontend artifacts. Frontend runtime-origin binding is locally
-resolved. Local signed release endorsement is verified; exact managed observations
-and provider/operator inputs remain open; the [revised package](MILESTONE_7_8_FULL_CLOSURE_EXECUTION_PACKAGE.md)
-requires separate spending authority. No deployment is declared ready.
+resolved. Local signed release endorsement is verified. The later approved
+[alert-repair execution](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#alert-repair-execution-result)
+accepted both native corrected alert creations and verified all 48 cleanup
+counters, but stopped at bootstrap before application proof. Its control-plane
+bootstrap-role and native VPN namespace corrections pass five focused checks;
+managed normal-bootstrap success and the remaining existing application criteria
+are unproved. Provider/operator inputs were bound privately for that completed
+attempt. No deployment readiness, automatic successor or full 7.8 closure is claimed.
 The
 [campaign handoff](MILESTONE_7_8_MANAGED_POSTGRESQL_EVIDENCE_CAMPAIGN_HANDOFF.md#completed-campaign--2026-11-15)
 contains acceptance, execution, source/image and receipt-hash evidence.

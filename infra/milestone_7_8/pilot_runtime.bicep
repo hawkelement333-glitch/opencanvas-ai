@@ -235,7 +235,7 @@ var manifest = string({
 })
 var jobSpecs = [
   { role: 'artifact', identityRole: 'bootstrap', command: artifactCommand, databaseRole: 'migration', timeout: 600 }
-  { role: 'bootstrap', identityRole: 'bootstrap', command: ['python', '-m', 'scripts.bootstrap_postgres'], databaseRole: 'migration', timeout: 1800 }
+  { role: 'bootstrap', identityRole: 'bootstrap', command: ['python', '-m', 'scripts.bootstrap_postgres'], databaseRole: 'provisioning', timeout: 1800 }
   { role: 'migration', identityRole: 'migration', command: ['python', '-m', 'scripts.migrate_and_grant'], databaseRole: 'migration', timeout: 1800 }
   { role: 'evidence', identityRole: proofRole, command: proofCommand, databaseRole: proofRole == 'evidence' ? 'observability' : proofRole, timeout: 7200 }
 ]

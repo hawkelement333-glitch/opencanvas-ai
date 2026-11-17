@@ -320,6 +320,8 @@ remain closed.
 
 ## Percentile alert repair and successor proposal
 
+This section preserves the pre-execution proposal. The [execution result](#alert-repair-execution-result) below supersedes its pending native-creation and cleanup status.
+
 The local compiler now uses the supported percentile aggregate with an iff
 expression that passes through only the rule's signal values and supplies
 real(null) for other signals. The API rule selects mobius.api.duration.
@@ -382,3 +384,72 @@ It is bound only in protected files, checked for format and difference from
 the revoked predecessor, and awaits actual provider acceptance. Its cleanup
 requires owner revocation and absence confirmation. The old packages and
 terminal receipts remain immutable.
+
+
+## Alert repair execution result
+
+**Milestone 7.8 remains incomplete.** The November 17 execution of approved
+package `d129f0c9810a3b7da589a066c846702e366f40e3a55a4c52dadfadb8192b8daa`,
+source `d2c3285053603a80060dd1c9129c52a92129eef8`, stopped at bootstrap admission.
+PostgreSQL, M78-D-001 and M78-D-002 remain closed. Their acceptance and cleanup
+are unchanged. No application proof was started by this attempt.
+
+The approval receipt is `2026-11-17T18:00:59Z`; the first strictly subsequent
+whole-minute start is `2026-11-17T18:01:00Z`. The unchanged deadlines were
+readiness `2026-11-17T20:01:00Z`, proof stop/scheduled cleanup
+`2026-11-18T04:01:00Z`, Automation expiry `2026-11-18T05:01:00Z`, and operator
+cleanup verification `2026-11-18T06:01:00Z`. There was no extension.
+
+| Existing observation / operation | Actual result |
+|---|---|
+| Cleanup admission | Exact native schedule and binding accepted before billable provisioning; controller renewal preserved published content, identity and permanent Reader authority. |
+| Repaired alert creation | **Accepted:** `api-latency-v1` and `database-saturation-v1` were created successfully and exact native query/criteria readback matched, with `skipQueryValidation=false`. Catalog thresholds, timing and recovery requirements were preserved. This closes the demonstrated query-creation failure; it does not accept firing/recovery. |
+| Retained signed images | API index `sha256:9ec275f46b587fde50aaf7e04f4ed93f30edac4efd45da9452790e5be91f1d12` and frontend index `sha256:1ee742b604d406ad8cc4c3c53001853ad58a033b68f4d613251ea7fc088fdb3a` published and verified. Five retained endorsements reverified under the approved key-only policy. Exact-IP ACR access restored to private within its 20-minute bound. No image build. API image used by the bootstrap jobs; frontend application deployment remains unproved. |
+| Foundation / jobs | Native root foundation and jobs deployments succeeded. Migration and application deployment were not started. |
+| Normal bootstrap | **Failed:** `caj-m78p-a712b8c940-bootstrap-89iuxe9`, stage `configuration`, `RuntimeError`. Bicep supplied `OPENCANVAS_DATABASE_ROLE=migration`; the existing script requires `provisioning`. Failure occurred before database-client initialization. |
+| Guarded retry | **Failed:** `caj-m78p-a712b8c940-bootstrap-69rtnif`, stage `retry-inspection`. The operator selected the existing guarded retry after the role correction; its validator rejects initial schema owner `azure_pg_admin`. No validator was relaxed. |
+| Catalog diagnosis | `caj-m78p-a712b8c940-bootstrap-qsmh9q0` succeeded as a **read-only diagnostic**. It found zero application roles, relations, functions, revisions, other bound bootstrap/migration sessions and migration locks. This is not application acceptance. The normal bootstrap already transfers initial schema ownership; a fresh normal execution needs the provisioning-role correction, not a weakened retry validator. Managed success of that corrected normal path remains unproved. Cleanup had begun and this attempt was not reopened. |
+| Private access | Native gateway/profile generation succeeded. The downloaded profile uses the native DataContract XML namespace. The local adapter originally rejected that layout; the focused correction preserves the namespace, server trust, identity/gateway checks, private DNS and split route. No VPN client connection profile was saved or connected; the unused forms were cancelled and the native connection list was empty. Private browser/query/export acceptance remains unproved. |
+| Application and destination acceptance | **Unproved:** all 16 required alert firing/recovery pairs, actual required API/worker/outbox signals, 13 dashboard renders, privacy/rejection/outage/access/retention, delivery/password reset, recovery, capacity, remaining infrastructure categories and real-stack editable-AI observations. No SMTP message, model request, embedding token or ordinary application HTTP request was used. Prior evidence stays credited. |
+| Cleanup | **Verified:** Automation ARM job `38640cf9-db05-455b-9967-42729b1c9387` completed; returned jobId `1a4fe8d5-ef64-4d5e-9dbb-930d2e2574fe` is recorded separately. Exact target absence observed at `2026-11-17T19:24:59.229923Z`; all **48 counters zero** at `2026-11-17T19:27:39.018129Z`. Canada Central named vault purged, managed infrastructure group absent, five scoped role definitions removed, exact schedule/binding/grants disarmed, temporary tenant objects purged, VPN route/NRPT/profile absent, and owner confirmed Gmail credential removal and closed/unused restricted-user window. Controller preserved. The initial CLI wait timeout was reconciled by native job/group readback, without another deletion dispatch. Operator ledger is `cleanup-disarmed`; the legacy PostgreSQL finalizer was not used for this broader 48-counter campaign. |
+
+The local checkpoint corrects only the bootstrap role and native profile
+namespace handling, with three new regression tests and two affected legacy
+profile regressions passing, plus focused lint and Bicep compilation. The applied
+bytes match that evidence. Normal bootstrap keeps its original command and
+separate bootstrap identity; migration retains its migration role/identity.
+The retry validator and signed API/frontend build inputs are unchanged. No
+whole application suite, image rebuild or completed component campaign ran.
+
+The terminal scoped ActualCost query succeeded with complete pagination and
+**no posted rows**. This does not establish zero charges. Billing remains
+**unsettled**. Approved forecast $39.4128, successor ceiling $49.75, prior
+reserve $9, combined allowance $58.75 and cumulative ceiling $409.64 remain
+as approved. No fresh campaign allowance or successor execution is implied.
+Any future package must reconcile this exposure and obtain its own execution
+approval; do not automatically restart or reset deadlines.
+
+Private evidence remains outside Git in
+`.runtime/milestone_7_8/full-closure-prerequisites/run-d129f0c9/`; the exact
+operator bundle is `.runtime/milestone_7_8/c9s/`. The approved sealed package,
+prior failures, local image archives, encrypted release key and five protected
+stashes are preserved. These sanitized references disclose no credentials,
+tenant/subscription identifiers or private endpoints.
+
+| Receipt relative to the private evidence root | SHA-256 |
+|---|---|
+| `verified-full-residue.json` | `a975113ecae64fae6a7d8a50dfe957cab679e8a5d395a9f1238a9f9e9a4bc706` |
+| `corrected-alert-native-admission/accepted.json` | `e431cfdba412bd21cd9ad94036099aaeda077fc9b1611da9b2dae29f5c6db849` |
+| `signed-publication/private-network-restored.json` | `b25fe53fbb3cb8d39b6af6f059de632054e98945b0f15598442b53858644d67c` |
+| `native-admission-readbacks/cleanup-protection-accepted.json` | `0686237672da906807b72f51ba1589331332064cde4512191ff377dcb72ac53a` |
+| `bootstrap-reconciliation/configuration-diagnosis.json` | `fceee6b65de0b0831293df6a1889cbdff556dabff6ca451fdd0788ee1ebbefe9` |
+| `activation/bootstrap-terminal.json` | `1b26481a23a81d80b405492329d7869297eeb61537d2a2e22fe2de989ae44e81` |
+| `bootstrap-reconciliation/retry/terminal.json` | `5e83281a56f0a6d76bcab002ba2736694bec898ef14d205098e3f8d671b0f22a` |
+| `bootstrap-reconciliation/catalog-diagnostic/catalog-result.json` | `c5e01f4c6f61f60bad8f3f478b35e89651ea8efa0a751a31ed085b557722c615` |
+| `bootstrap-reconciliation/catalog-diagnostic/terminal.json` | `fe735357e9981a272267b1c6b5ec8b766d5aac520f9f13583c307c78ed82c6e3` |
+| `local-control-validation/accepted-v2.json` | `fccb78529a25ed18ab96b7c59b8edd82e95e3bdfa75b8649ba63de89d65c4a9f` |
+| `local-control-validation/applied-byte-check.json` | `9acb556e64be85ddc3fe3888e597a03ffe4f0f6d71ad93e0efcfeb86f9a0ffa0` |
+| `owner-terminal-access-receipt.json` | `7afa15848db0e6e3fac0324b648a45ad139766f16ef6a3c900b545cf4a1b8a8c` |
+| `terminal-cost-summary.json` | `f2ac54b48a1d8dec265902a45e89eb1abe36a37cd33007b1e65b0d21c4ebd3a6` |
+| `terminal-cost-native-response.json` | `49eb58f0f576089ce619b53ad467264b2050a5274201c727416629a65fc59f5a` |
+| `terminal-results.json` | `00d38aedbd1099b86311c2d46c2dffd16b7e884c12edd97a042d60419e768919` |

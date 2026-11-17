@@ -246,6 +246,14 @@ def configure_client_profile(
     ):
         raise ValueError("exact private service DNS suffixes required")
     root = ET.fromstring(raw)
+    native_namespace = "http://schemas.datacontract.org/2004/07/"
+    namespace = ""
+    if root.tag == "{" + native_namespace + "}AzVpnProfile":
+        namespace = native_namespace
+        for node in root.iter():
+            if not node.tag.startswith("{" + namespace + "}"):
+                raise ValueError("mixed native profile schema namespaces")
+            node.tag = node.tag.split("}", 1)[1]
     if root.tag != "AzVpnProfile":
         raise ValueError("native Azure VPN profile required")
     aad = root.find("clientauth/aad")
@@ -281,6 +289,9 @@ def configure_client_profile(
     route = ET.SubElement(ET.SubElement(config, "includeroutes"), "route")
     ET.SubElement(route, "destination").text = "10.79.0.0"
     ET.SubElement(route, "mask").text = "16"
+    if namespace:
+        for node in root.iter():
+            node.tag = "{" + namespace + "}" + node.tag
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 

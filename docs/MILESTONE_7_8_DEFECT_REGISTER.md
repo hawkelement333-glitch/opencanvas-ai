@@ -1,18 +1,16 @@
 # Milestone 7.8 Defect Register
 
-Current pilot follow-up: [local preparation and corrected candidate](MILESTONE_7_8_PILOT_PREPARATION.md)
-pass their stated local checks. The secure website/worker handoff and native
-retrieval-head timestamp corrections are release-integration fixes, not reopened
-PostgreSQL/object/Redis campaigns. Pilot controlled drafts and 900/20 scanning
-are explicitly approved. The [whole-minute successor](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#whole-minute-successor-native-execution-and-terminal-cleanup)
-passed native schedule/binding admission and the separately approved vault
-correction. Two Azure Monitor rules failed with unknown function percentileif.
-The [local percentile repair](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#percentile-alert-repair-and-successor-proposal)
-now passes semantic analysis while preserving its catalog criteria. Managed
-rule creation and firing/recovery remain unproved. The predecessor's 48
-cleanup counters are zero and the controller is preserved. The successor
-requires separate execution and spending approval. Milestone 7.8 remains
-incomplete and billing is unsettled.
+Current full-closure result: the [alert-repair execution](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#alert-repair-execution-result)
+accepted native creation/readback of both corrected alert rules with unchanged
+catalog criteria. Firing/recovery and application assertions remain unproved.
+Normal bootstrap failed before database I/O because the prepared job supplied
+migration instead of provisioning; that control-plane role is now corrected
+locally. Its guarded retry rejected the empty native schema owner; the retained
+validator is unchanged. The native VPN XML namespace parser is also corrected.
+Five focused checks pass. All 48 campaign cleanup counters are verified zero,
+controller preserved, and the temporary Gmail credential revoked by its owner.
+Milestone 7.8 remains incomplete; billing is unsettled. PostgreSQL, M78-D-001
+and M78-D-002 stay closed. Historical proposals and failed attempts remain below.
 
 Date: 2026-08-27
 
