@@ -40,3 +40,44 @@ the correction before an execution decision on the new package.
 
 Milestone 7.8 managed acceptance remains open. PostgreSQL, M78-D-001 and
 M78-D-002 remain closed.
+
+## Replacement execution stopped at native East US capacity admission
+
+On November 17, 2026 CST, the user approved replacement package SHA-256
+`e61d33694ed703279b910377d0dab69308329b44c929496ee7502985df9407fe` at source
+`51764bca61c0c72b50fd03e5e75f8eaae8d5e087`. The initial recorded clock reading
+after approval was 12:10:40 a.m. CST. The new readiness, proof-stop, Automation
+expiry and operator cleanup deadlines were 2:10:40 a.m., 10:10:40 a.m.,
+11:10:40 a.m. and 12:10:40 p.m. CST, respectively.
+
+The existing controller completed its deadline-only renewal through
+11:10:40 a.m. CST. Reconciliation verified the preserved controller and
+allowed the replacement binder to produce the campaign config, runtime and
+ledger. Real operator preflight and subscription/tenant correlation passed.
+`capacity-check` then stopped with `required PostgreSQL SKU is unavailable`.
+The focused native `postgres flexible-server list-skus --location eastus`
+response returned zero supported server editions and reported that provisioning
+is restricted in this region for the bound subscription. The native response
+advises choosing a different region or seeking a service and subscription
+limits exception. The restriction is regional for this subscription, so an
+East US SKU substitution does not resolve the observed gate.
+
+The ledger ended at `correlated`, with zero resource generations, no billable
+start recorded and zero managed assertions. Exact readback confirmed absence
+of the approved target group, target Automation schedule and target job binding.
+The controller deadline renewal was the only cloud change from this attempt.
+Billing remains unsettled. PostgreSQL, M78-D-001 and M78-D-002 remain closed.
+
+Retained private evidence under
+`.runtime/milestone_7_8/full-closure-prerequisites/run-e61d3369/` includes
+`terminal-preflight.json`, `eastus-postgresql-skus.json`,
+`bound/ledger.json` and
+`renew/reconciliation/02-completed-authority-evidence.json`. The SKU response
+receipt SHA-256 is `094b085545501a8b513c1bf2eba5ba1268eee2facd875931ab23c245022ba72b`.
+The reconciled controller evidence SHA-256 is
+`9d09430112c7a22ae04c0c3a7920b2ef64c180f7347b6cf9e42e9820a21099f6`.
+
+To continue in East US, establish that the subscription restriction has been
+lifted, then revalidate the exact approved SKU. A regional change requires
+a revised scope, pricing and package decision. Managed Milestone 7.8 evidence
+remains open.
