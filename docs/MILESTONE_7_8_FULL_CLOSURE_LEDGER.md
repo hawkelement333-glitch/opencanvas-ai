@@ -4,6 +4,11 @@ Current result, 2026-11-18 UTC: **Milestone 7.8 remains incomplete.**
 PostgreSQL, M78-D-001 and M78-D-002 remain closed with their acceptance,
 failed-attempt history, finalized ledgers and verified cleanup preserved.
 
+The [signup recovery execution](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#signup-recovery-execution-result) accepted both synthetic signups after private API readiness.
+The first core upload did not establish clean promotion within its unchanged
+scan deadline. Core and destination acceptance remain unproved, and all 48
+cleanup counters are verified zero. The reusable controller is preserved.
+
 The [bootstrap successor execution](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#bootstrap-successor-execution-result) credits exact normal bootstrap and migration, deployment
 of both signed image digests, private operator routing and native creation of
 both corrected alert rules. Signup timed out with an unknown write outcome. Core

@@ -605,3 +605,65 @@ be attributed to one attempt and is included in the exposure reconciliation.
 Propose an execution ceiling of **$56.51**, a combined ceiling of **$87.51**
 and a cumulative ceiling of **$438.40**. Billing remains unsettled.
 [Azure Retail Prices API](https://learn.microsoft.com/en-us/rest/api/cost-management/retail-prices/azure-retail-prices)
+
+## Signup recovery execution result
+
+**Milestone 7.8 remains incomplete.** Approved package
+`719a34d30cfd2f746d461526559480069509eaebfa0d7dbbd2a86f228aa3f831` ran from source
+`06a22b6e2a3eb316097bcf9aeea54f1c70f24ce0`. PostgreSQL, M78-D-001 and M78-D-002 remain closed.
+The predecessor's timed-out signup remains an unknown write outcome.
+
+Approval was recorded at `2026-11-18T04:32:17Z` and the first eligible
+whole minute was `2026-11-18T04:33:00Z`. The sealed gates were
+private API readiness `2026-11-18T06:33:00Z`, core/destination readiness
+`2026-11-18T07:33:00Z`, proof stop and scheduled cleanup
+`2026-11-18T15:33:00Z`, Automation expiry `2026-11-18T16:33:00Z`
+and operator cleanup `2026-11-18T17:33:00Z`.
+The run stopped early after its first upload failed to establish timely clean
+promotion. The original deadlines were preserved.
+
+| Observation | Native result and limits |
+|---|---|
+| Admission and cleanup protection | **Accepted.** Controller renewal, target provider/quota checks, and native schedule and exact binding readback passed before billable foundation. |
+| Signed release and scaffold | **Accepted.** Both signed image digests verified in the private registry. The temporary exact-IP exception closed within its bound. The native foundation, both corrected scheduled-query rule creations and application deployment succeeded. Alert firing and recovery remain unproved. |
+| Bootstrap and migration | **Accepted.** `caj-m78p-a712b8c940-bootstrap-1gb9dhy` and `caj-m78p-a712b8c940-migration-ctwpby1` succeeded through their normal paths. |
+| Private operator route and readiness | **Accepted.** Fresh restricted-user sign-in, verified split-route VPN, private DNS, TLS and native session health. The initial configuration included the approved deny-all operator value. Private API readiness returned 200 on the first check at +60m48s, before signup. |
+| Account proof | **Accepted.** `caj-m78p-a712b8c940-evidence-sjnkddp` exported readiness 200 and two signup 201 responses for distinct synthetic identities. No signup retry or recovery dispatch was needed. |
+| Artifact transport | The first native upload succeeded. The preview ACA CLI wrapped the exact JSON receipt in an unescaped CRI log field. The fallback query referenced a table that native evaluation did not resolve. The operator reconciled the exact uploaded version against the successful execution, local bytes and both receipt hashes. The original evidence loader verified it before account proof. The core staging driver attempted the same archive again and that execution failed. The operator reused the byte-identical version already accepted by the loader for core, without sending another upload. |
+| First core execution | **Failed.** `caj-m78p-a712b8c940-evidence-dtwpway` recorded sign-in and matching replay identities for a canvas, two notes and one edge. Upload session creation, content and completion succeeded. The subsequent quarantine search returned 409. The recorded body digest exactly matches `documents_not_ready`, the API response that blocks retrieval of a document still processing. The sealed probe expected 200 or 400 at this point and stopped. |
+| Exact-version scan follow-up | **Unproved clean promotion.** The same upload was still pending at 892.6s after completion, just before its unchanged 900-second deadline. Defender returned one exact-version “No threats found” row. The destination reported 43 distinct worker `mobius.scanner.unavailable` signals. The retained evidence does not identify which native read prevented dual-source agreement. A local draft accepts only the exact 409 code and rejects an unrelated conflict. The unchanged timing and dual-source requirements ruled out dispatching that continuation on this fixture. |
+| Later application and destination proof | **Unproved.** The accepted account and acknowledged core effects are retained. Complete core, destination readiness and downstream acceptance remain open. No grounded model proof or test email was dispatched. |
+| Cleanup | **Verified.** Exact Automation job `14b2901a-7754-4ebf-a04a-15536e109124` completed and the target group was absent. Vault and tenant purge, VPN removal, owner credential revocation and absence of all six native campaign roles were verified. All **48 residue counters are zero**, ledger phase `cleanup-disarmed`, reusable controller preserved. |
+
+Billing remains **unsettled**. The scoped cost query was throttled, leaving the posted total unverified. The USD 40.8177 forecast, USD 56.51 execution ceiling, USD 31 prior reserve, USD 87.51 combined ceiling and USD 438.40 cumulative ceiling remain the recorded bounds.
+
+Private evidence is retained under `.runtime/milestone_7_8/full-closure-prerequisites/run-719a34d3/`
+and the bound bundle under `.runtime/milestone_7_8/css/`. The failed receipts and
+approved package remain intact.
+
+| Receipt relative to the private run | SHA-256 |
+|---|---|
+| `approval-deadlines.json` | `a222a2171b4f54419a00ce87027b737459b3008c5797a8244fe6255e0f00c664` |
+| `native-admission-readbacks/cleanup-protection-accepted.json` | `f075186ef6b434a10de8006649699ef5ea413754c647f41eda92033fea11d7ff` |
+| `corrected-alert-native-admission/accepted.json` | `4bb8c02a1503ac1d792cf85f9ca7d2b0b9003ac4e1755a836dcc003988382551` |
+| `signed-publication/private-network-restored.json` | `285bf470946d47be415306dfcb819c7483a87ec1110955977eecd6df3c416fb0` |
+| `bootstrap-migration-accepted.json` | `e8b0720aab09ae2b56667040fa4096d5a57cc5f78476c156903e1b2eab7f7481` |
+| `vpn/private-route-admission/accepted.json` | `adc0ae10b1c1bbd95f7556ca427783029ea4309cc99ec026f74ecd737718513b` |
+| `proof-account/private-api-ready.json` | `bb88c215d889dfa214505885b79a14927d19ba07713b842d3779f46677422e59` |
+| `proof-account/artifact-version-binding.json` | `44aa16a3f0f10be9213e171817421c061107525d5f53de6e2fbf27948c7f71f9` |
+| `proof-account/accepted.json` | `382e07708d526cfbdec18aae6c9b00b59c9397a48b90aa8abf05f1d83ce5c076` |
+| `proof-account/export/export-manifest.json` | `b0ae0647f8333ddcd2f9ddae8f09d3c42c2813f57b6cf4b44c6ad2103e07a320` |
+| `proof-core/artifact-version-binding.json` | `affcc59271b21c1ddace5fa32ac5ac723e8ff0353197847e1a3b4f18d3b574ba` |
+| `proof-core/export/export-manifest.json` | `c57f4cddd26e4cf5f3ee3b177414deb776ddff8f0e5dc3a4abc1c09bab2f868e` |
+| `proof-core/export/core.json` | `af715c54c1209993d9da984d2cb7cab083c05d72e66ce2257e4d0bd3fef83dbc` |
+| `proof-core/retained-quarantine-contract.json` | `c9e9a6c6645b3781f4a99806c1f41bbf1b35509b0c3633eade1512ffc32bdde4` |
+| `proof-core/last-in-bounds-upload-observation.json` | `735269f61847e3af3c4f226d8c1e796680cdb87f3a73902a248a6b7aac2b2c4b` |
+| `proof-core/native-defender-exact-version-observation.json` | `9a6dc5ce6dd6650c5df0d7e924dac3f685424977aaa4035e8be179e82c1fb70c` |
+| `proof-core/native-scan-bridge-metric-readback.json` | `f12c4f1d11027ad0c8dff8ed12051889a461e23eb116e013cab27ae3038746e5` |
+| `core-correction/focused-local-validation.json` | `b593d6621db277baea78622d0cff3869d85ec0eaff4be60c54f4afa7449a5563` |
+| `stop-proof-intent.json` | `c07e3a12775864c0195e7621806846f18a5eff446dc3f4b43537c46d3bab4b72` |
+| `azure-cleanup-terminal.json` | `a88884525d19c0f0ccca8f2da15a00ff16cf5cd2cea3f2ee66dcba6572371311` |
+| `owner-terminal-access-receipt.json` | `b5d509bb2a779ed6defa0ba257f1f856aae64bb217c54da4111cc7ea644690ce` |
+| `verified-full-residue.json` | `41eeb1b60381de2635044688261c7da8146bc092976fca977eca1c7a2b81410e` |
+| `terminal-cost-summary.json` | `92cc1697fbfe956a94ac43920cf6184fd34d4b8b9c31a3a4d26d5024c95523a4` |
+| `terminal-results.json` | `7fde79d4d2ec4f375c819e19ce67f9c0b20ee6a93674299c3460c8fd3a56bb5a` |

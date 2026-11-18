@@ -10,6 +10,11 @@ The [completed managed object/scanner continuation](MILESTONE_7_8_MANAGED_OBJECT
 and ledger finalized. Its approved 900-second/20-second amendment applied only
 to new requests in that proof; prior 300-second failures remain historical failures.
 
+The [signup recovery execution](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#signup-recovery-execution-result) accepted both synthetic signups after private API readiness.
+The first core upload did not establish clean promotion within its unchanged
+scan deadline. Core and destination acceptance remain unproved, and all 48
+cleanup counters are verified zero. The reusable controller is preserved.
+
 The [bootstrap successor execution](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#bootstrap-successor-execution-result) verified normal bootstrap, migration,
 exact signed-image deployment, private routing and both corrected native alert
 rules. Core and destination evidence missed readiness, so 7.8 is still
