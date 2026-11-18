@@ -139,11 +139,11 @@ before query dispatch. The operator preserved that receipt and submitted the
 same read-only KQL on one line. The native query returned 16 worker rows
 (14 metrics and two application logs) and zero API rows.
 
-The [destination rule](../infra/milestone_7_8/pilot/core_proof_operator.py#L866)
+The [destination rule](../infra/milestone_7_8/pilot/core_proof_operator.py)
 raises `CampaignError("destination privacy or integrity failure")` if the
 native `SignalId` cannot be reproduced from the returned row or repeats an
 already-seen ID. A reconstruction mismatch triggered the rule at
-18:29:16 UTC. The [operator exception handler](../infra/milestone_7_8/pilot/core_proof_operator.py#L960)
+18:29:16 UTC. The [operator exception handler](../infra/milestone_7_8/pilot/core_proof_operator.py)
 recorded `unreconciled-operation` and invoked cleanup. Offline replay
 reproduced 13 IDs with the existing UTC timestamp normalization and the
 remaining three after restoring an integral metric value from integer to
@@ -232,6 +232,116 @@ executor, active or newly observed jobs, a paginated read, and an uncertain
 delete. Private rehearsal receipt `.runtime/milestone_7_8/sq4/rehearsal.json`
 has SHA-256
 `7430c856a72674b111ed31505e69e8fea0d633f82240376a2323b0d137ad3ab6`.
+
+## API telemetry emission and destination hold
+
+The first `POST /api/v1/auth/signup` in the accepted account execution started
+at 18:27:12.047320 UTC on November 18 and returned HTTP 201 at
+18:27:12.577661 UTC. The versioned account export binds both step receipts.
+The API was on the ready revision `ca-m78p-a712b8c940-api--yq7t2cf` with two
+replicas and the signed API image listed above. The request journal does not
+identify the serving replica or retain the response `traceparent`.
+
+| Point in the path | API | Worker |
+| --- | --- | --- |
+| Source binding | Native revision template shows `mobius-api`, app mode `staging`, release `rc-dd3f882613d8`, and deployment `m78p-a712b8c940`. | All 16 verified native rows carry `mobius-worker` and the same environment, release, and deployment. The shared deployed template sets its exporter the same way. |
+| Production emission | [API middleware](../apps/api/opencanvas_api/main.py) emits `api.request.completed`, request count and duration, and a sampled span, then calls `schedule_flush()`. The native API template does not override the default 64-signal batch size. The prior API lifespan had no time-based flush while serving. | The [worker polling loop](../apps/api/opencanvas_api/services/jobs.py) repeatedly emits queue metrics and state changes and schedules exports. Its admitted rows also include database and capacity measurements. |
+| Export and destination | Native templates show the enabled HTTPS exporter, TLS verification, a five-second attempt timeout, and the vault-backed auth reference. The private gateway allows the exact API tuple and forwards validated rows through the DCR to Log Analytics. The receipts contain no API replica buffer observation or API-to-gateway response for this request. | The gateway allows the exact worker tuple. The worker rows establish that the private path through the gateway and workspace worked for that source in this window. |
+| Query | The 18:29:16.736093 UTC read covers the request's timestamp. It starts at 17:15:00 UTC and filters the shared release, deployment and both service names. Each service has its own 16-row limit after deduplication. The native read found zero API rows. | It returned 16 worker rows timestamped 18:29:03.269036–18:29:05.380538 UTC. All 16 retain credit under full SignalId validation. |
+
+The earliest demonstrated defect is at the API buffer-to-export boundary.
+A quiet API replica can hold completion rows indefinitely below 64 signals,
+while the worker crosses that threshold by polling. A local single-request
+test timed out before any export while the API was still running. The receipts
+do not show whether either managed API replica reached the threshold, whether
+it obtained a gateway response, or whether its rows arrived after the last
+query. They therefore support a concrete batching defect and leave the
+historical attribution open.
+
+The API now schedules a bounded partial flush every five seconds while
+serving. Full batches still flush on demand. The timer shares the existing
+single in-flight export, buffer bounds, retries, timeout and shutdown drain.
+The private API console records the trace ID and gateway response status for
+the newest liveness completion in a batch. It carries no payload, header or
+credential. The local regression sends one HTTP request through the actual
+middleware and exporter and validates the exported rows using the gateway's
+schema, source and digest code. A mocked gateway returns 503 and then 202
+under the existing retry policy. Both results correlate to the exact trace.
+
+The operator saves `destination-readiness/unproved.json` after verified
+worker-only evidence and binds it to the native receipt hash, destination
+plan, window and deployment. At the core cutoff it revalidates that evidence
+and native cleanup protection before returning
+`destination-dependent-checks-held-independent-checks-may-continue`. An
+independent core action remained admissible in the same deployment within
+its original cutoff in the local test. A read-only follow-up timeout preserves
+the last verified worker sample. A corrupt row takes `unreconciled-operation`
+and an altered saved receipt takes `privacy-or-integrity-failure`; both
+exercise the existing early cleanup dispatch with a fake subprocess.
+`scheduled-proof-stop` still takes precedence at the cutoff and uses the
+existing schedule. The replay of all 16 native rows is recorded privately in
+`.runtime/milestone_7_8/destination-emission-rehearsal.json`, SHA-256
+`e8a7c0b3a55e797a07073d9c9c506f16a4873c52acbd54c53d190ee8eebba5c8`.
+
+### Proposed managed check for separate approval
+
+Use the existing private Canada Central foundation and East US HA Redis
+dependency with the preserved controller. Bind the corrected API candidate,
+source and new endorsements before approval. The API and HTTP exporter
+source changes affect the canonical API build inputs. Keep the retained
+frontend artifact and its endorsements, the two accepted signups, the
+historical worker rows, and the 48 verified cleanup counters. For the live
+check use one private `GET /api/v1/health/live` and a fresh worker poll as the
+control. The proposed check needs no signup, file upload, provider call,
+fault injection, restore, or email.
+
+1. Verify the approved private route and native API and gateway revision,
+   runtime bindings, and cleanup protection. Capture the liveness HTTP
+   status, UTC interval and server-returned `traceparent`. Read the private
+   console for the serving API replica's exact `api.request.completed` and
+   `telemetry_liveness_delivery` for that trace. Retain only the bounded
+   trace, source fields and delivery status in the proof.
+2. For at most 20 minutes and within the core cutoff, use at most 12
+   read-only workspace queries. Look in `MobiusApplication_CL` for
+   `Name == "api.request.completed"` and an exact
+   `tostring(todynamic(Payload).trace_id)` match. Compare time, all four
+   source fields and the complete SignalId under the existing validator.
+   Reuse the production query for the worker control. Keep duplicate and
+   privacy checks in force. A trace match under different bindings is
+   diagnostic evidence of a routing or configuration mismatch.
+3. Missing emission leaves the request-to-emitter boundary unproved. An
+   emission without a delivery witness leaves replica scheduling or
+   transport unproved. A delivery witness without an HTTP status narrows
+   the gap to the attempted transport. A 401/413/422 records rejection at
+   the HTTP hop. A 503 records unavailability at that hop; use native
+   gateway evidence to distinguish ingress and destination failures. A 202 with the gateway in
+   Azure Logs mode proves the gateway received a 204 from the DCR. If the
+   bound row then remains absent, retain the first-seen time or last
+   negative query to narrow the gap to delivery after acknowledgment, query
+   visibility or filtering. Credit the API only when the exact row validates.
+
+The retained full-foundation price model gives a conservative scope estimate
+of **$40.8177** through the outer cleanup bound and **$51.0221** with its 25%
+contingency. The proposed replacement execution ceiling is **$56.51**. Target
+absence took under two hours in the latest attempt. Two hours at the retained
+peak rate plus fixed allowances estimates **$10.462003** in unsettled exposure.
+Reserve **$11** on top of the prior **$42** reserve. That yields a proposed
+**$460.40 cumulative ceiling**, replacing the old execution allowance.
+The historical posted target aggregate spans multiple runs. Billing remains
+unsettled.
+
+Use the first whole UTC minute strictly after the separate approval. The
+private services are due by +2h, and the targeted result is due by +3h.
+Request early cleanup once the check concludes. Scheduled cleanup still
+triggers at +11h, Automation expires at +12h, and operator verification is
+due at +13h. Before paid provisioning, require native schedule and exact
+binding readback and resolve the recorded Automation quota blocker. If
+Automation rejects an early cleanup dispatch with the same monthly-quota
+429 and native inventory confirms no job, use the existing exact-target
+fallback only with its separate timed approval. Verify all 48 counters,
+the named vault purge and campaign disarm while preserving the controller.
+This is a proposal pending a fresh signed API candidate and separate
+execution and cleanup approval. The password reset flow is outside its scope.
 
 The signed release artifacts and prior 48 zero-residue observations were
 reused. The offline checks add no managed acceptance or Azure spending.

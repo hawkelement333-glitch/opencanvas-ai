@@ -402,14 +402,19 @@ def test_destination_gate_verifies_azure_integral_float_and_still_rejects_tamper
     context.run = tmp_path / "valid"
     context.run.mkdir()
     context.bound = tmp_path / "bound"
-    context.window = {"executionStartAt": (now - timedelta(minutes=5)).isoformat()}
+    context.window = {
+        "executionStartAt": (now - timedelta(minutes=5)).isoformat(),
+        "automationBindingExpiresAt": (now + timedelta(hours=3)).isoformat(),
+    }
+    clock = [now]
     context.policy = ProofOperator(
         context.run,
         {
             "coreReadyBy": (now + timedelta(hours=1)).isoformat(),
             "stopProofBy": (now + timedelta(hours=2)).isoformat(),
         },
-        {},
+        {"release": "r", "deployment": "d", "campaignId": "same-campaign"},
+        clock=lambda: clock[0],
     )
     context.admit = lambda: None
     sources = [
@@ -425,7 +430,7 @@ def test_destination_gate_verifies_azure_integral_float_and_still_rejects_tamper
             "productionSources": sources,
         },
     )
-    context.get = lambda *args: {"properties": {"customerId": str(uuid4())}}
+    context.get = lambda *args, **kwargs: {"properties": {"customerId": str(uuid4())}}
     native = destination_rows(
         {
             "resource": {"schema": "mobius-operational-v1"},
@@ -455,12 +460,22 @@ def test_destination_gate_verifies_azure_integral_float_and_still_rejects_tamper
         row["TimeGenerated"] = row["TimeGenerated"].replace("+00:00", "Z")
         row["Payload"] = json.dumps(row["Payload"] | {"value": 3})
     rows = native
+    followup_unavailable = False
 
     def query(folder, label, args, **_kwargs):
         assert args[:3] == ("monitor", "log-analytics", "query")
         for arg in args:
             _validate_argument(arg)
-        write_new(folder / (label + ".native.json"), {"rows": len(rows)})
+        if followup_unavailable and label == "production-rows-01":
+            write_new(
+                folder / (label + ".native.json"),
+                {"atUtc": clock[0].isoformat(), "status": "timed-out"},
+            )
+            raise operator.NativeFailure("offline read timeout")
+        write_new(
+            folder / (label + ".native.json"),
+            {"atUtc": clock[0].isoformat(), "exitCode": 0, "stdout": json.dumps(rows)},
+        )
         return rows
 
     context.call = query
@@ -472,11 +487,61 @@ def test_destination_gate_verifies_azure_integral_float_and_still_rejects_tamper
     context.run = tmp_path / "missing-api"
     context.policy.run = context.run
     rows = [native[1]]
+    followup_unavailable = True
     monkeypatch.setattr(operator.time, "sleep", lambda _: None)
     assert operator.operate(context, "destination-readiness") == "destination-readiness-unproved"
     assert not (context.run / "destination-readiness/accepted.json").exists()
+    hold_path = context.run / "destination-readiness/unproved.json"
+    hold = read(hold_path)
+    assert hold["deployment"] == context.policy.deployment
+    assert hold["rows"] == 1
+    assert hold["nativeReadback"] == "production-rows-00.native.json"
 
-    # A changed value, a duplicate ID, and a wrong source each keep the hard stop.
+    independent = []
+
+    def core(ctx, phase, resume):
+        assert phase == "core" and resume is None
+        assert ctx.remaining(ctx.policy.core_by) > 0
+        independent.append((ctx.run, ctx.policy.deployment))
+        return "accepted"
+
+    cleanup = []
+
+    def execute(args, **kwargs):
+        cleanup.append(args)
+        return subprocess.CompletedProcess(args, 0, "offline cleanup receipt", "")
+
+    monkeypatch.setattr(operator, "dispatch_proof", core)
+    monkeypatch.setattr(subprocess, "run", execute)
+    assert operator.operate(context, "core") == "accepted"
+    assert independent == [(context.run, hold["deployment"])]
+    clock[0] = context.policy.core_by
+    assert (
+        operator.operate(context, "gate")
+        == "destination-dependent-checks-held-independent-checks-may-continue"
+    )
+    assert not cleanup
+    assert not (context.run / "stop-proof-intent.json").exists()
+    clock[0] = context.policy.stop_by
+    assert operator.operate(context, "gate") == "scheduled-cleanup-due"
+    assert read(context.run / "stop-proof-intent.json")["reason"] == "scheduled-proof-stop"
+    assert read(context.run / "proof-cleanup-dispatch-intent.json")["kind"] == "scheduled"
+    assert not cleanup
+
+    # The hold's copied native receipt must remain intact at the gate.
+    clock[0] = now
+    context.run = tmp_path / "changed-hold"
+    context.run.mkdir()
+    context.policy.run = context.run
+    assert operator.operate(context, "destination-readiness") == "destination-readiness-unproved"
+    witness = context.run / "destination-readiness" / hold["nativeReadback"]
+    witness.write_text("{}", encoding="utf-8")
+    clock[0] = context.policy.core_by
+    assert operator.operate(context, "gate") == "early-cleanup-dispatched"
+    assert read(context.run / "stop-proof-intent.json")["reason"] == "privacy-or-integrity-failure"
+
+    clock[0] = now
+    followup_unavailable = False
     for name, bad in (
         (
             "changed",
@@ -484,12 +549,23 @@ def test_destination_gate_verifies_azure_integral_float_and_still_rejects_tamper
         ),
         ("duplicate", native[0]),
         ("source", native[1] | {"Release": "another-release"}),
+        ("late", native[1] | {"TimeGenerated": (now + timedelta(minutes=1)).isoformat()}),
+        (
+            "privacy",
+            native[1] | {"Payload": json.dumps(json.loads(native[1]["Payload"]) | {"body": "x"})},
+        ),
     ):
         context.run = tmp_path / name
         context.run.mkdir()
         context.policy.run = context.run
         rows = [native[0], bad]
-        context.cleanup = lambda reason: context.policy.stop(reason).name
-        assert operator.operate(context, "destination-readiness") == "stop-proof-intent.json"
+        assert operator.operate(context, "destination-readiness") == "early-cleanup-dispatched"
         assert read(context.run / "stop-proof-intent.json")["reason"] == "unreconciled-operation"
         assert not (context.run / "destination-readiness/accepted.json").exists()
+        assert not (context.run / "destination-readiness/unproved.json").exists()
+    assert len(cleanup) == 6
+    assert all(
+        args[1:4] == ["-m", "infra.milestone_7_8.operator", "cleanup"]
+        and str(context.bound / "operator-approval.json") in args
+        for args in cleanup
+    )

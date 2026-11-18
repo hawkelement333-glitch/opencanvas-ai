@@ -533,17 +533,40 @@ class HttpTelemetrySink:
         self._endpoint = endpoint
 
     async def export(self, signals: Sequence[OperationalSignal]) -> None:
-        response = await self._client.post(
-            self._endpoint,
-            content=json.dumps(
-                {
-                    "resource": {"schema": SCHEMA_VERSION},
-                    "signals": [signal.as_dict() for signal in signals],
-                },
-                separators=(",", ":"),
+        # One safe console witness for a controlled liveness request, outside
+        # the exported stream so it also exists when the gateway is unavailable.
+        probe_trace = next(
+            (
+                trace
+                for signal in reversed(signals)
+                if signal.name == "api.request.completed"
+                and signal.payload.get("route") == "/health/live"
+                and isinstance(trace := signal.payload.get("trace_id"), str)
+                and re.fullmatch(r"[0-9a-f]{32}", trace)
             ),
+            None,
         )
-        response.raise_for_status()
+        gateway_status = None
+        try:
+            response = await self._client.post(
+                self._endpoint,
+                content=json.dumps(
+                    {
+                        "resource": {"schema": SCHEMA_VERSION},
+                        "signals": [signal.as_dict() for signal in signals],
+                    },
+                    separators=(",", ":"),
+                ),
+            )
+            gateway_status = response.status_code
+            response.raise_for_status()
+        finally:
+            if probe_trace:
+                structlog.get_logger("opencanvas_api.operational").info(
+                    "telemetry_liveness_delivery",
+                    trace_id=probe_trace,
+                    gateway_status=gateway_status,
+                )
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -976,10 +999,11 @@ class OperationalTelemetry:
                 )
             )
 
-    def schedule_flush(self) -> None:
+    def schedule_flush(self, *, partial: bool = False) -> None:
         if (
             not self.enabled
-            or len(self._buffer) < self._batch_size
+            or not self._buffer
+            or (not partial and len(self._buffer) < self._batch_size)
             or (self._scheduled_flush is not None and not self._scheduled_flush.done())
         ):
             return

@@ -1,7 +1,8 @@
+import asyncio
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 import structlog
 from fastapi import FastAPI, Request
@@ -29,6 +30,13 @@ from opencanvas_api.services.operational_observations import bind_operational_te
 from opencanvas_api.services.rate_limits import build_shared_rate_limit_service
 
 logger = structlog.get_logger("opencanvas_api")
+API_TELEMETRY_FLUSH_INTERVAL_SECONDS = 5
+
+
+async def _flush_partial_telemetry(telemetry: OperationalTelemetry) -> None:
+    while True:
+        await asyncio.sleep(API_TELEMETRY_FLUSH_INTERVAL_SECONDS)
+        telemetry.schedule_flush(partial=True)
 
 
 class ApiRequestAdmission:
@@ -91,6 +99,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     if rate_limiter is None:
         rate_limiter = build_shared_rate_limit_service(settings)
         application.state.shared_rate_limiter = rate_limiter
+    flush_timer: asyncio.Task[None] | None = None
     try:
         try:
             await validate_database_runtime(
@@ -110,8 +119,14 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             and not await rate_limiter.health()
         ):
             raise RuntimeError("The managed shared rate limiter is not ready.")
+        if telemetry.enabled:
+            flush_timer = asyncio.create_task(_flush_partial_telemetry(telemetry))
         yield
     finally:
+        if flush_timer is not None:
+            flush_timer.cancel()
+            with suppress(asyncio.CancelledError):
+                await flush_timer
         await telemetry.close()
         await rate_limiter.close()
         await database.dispose()

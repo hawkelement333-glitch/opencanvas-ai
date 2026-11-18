@@ -779,22 +779,69 @@ def dispatch_proof(context, phase, resume_path=None):
     return status
 
 
-def destination_readiness(context):
+def validate_destination_sample(values, plan, begin, end):
     from infra.milestone_7_8.destination_acceptance import rows, validate_signal_row
 
+    if isinstance(values, dict):
+        values = rows(values)
+    if not isinstance(values, list) or len(values) > 32:
+        raise CampaignError("bounded native destination rows required")
+    observed = set()
+    ids = set()
+    for row in values:
+        if not isinstance(row, dict) or not isinstance(row.get("TimeGenerated"), str):
+            raise CampaignError("native destination row has no valid timestamp")
+        stamp = parse_utc(row["TimeGenerated"])
+        if not begin <= stamp <= end:
+            raise CampaignError("destination row out of time bounds")
+        try:
+            signal = validate_signal_row(row, plan["productionSources"], stamp, ids)
+        except ValueError as error:
+            raise CampaignError("destination privacy or integrity failure") from error
+        observed.add(signal["service"])
+    return observed, len(values)
+
+
+def require_destination_hold(context):
+    path = context.run / "destination-readiness"
+    hold = read(path / "unproved.json")
+    plan_path = context.package / "destination-plan.bound.json"
+    label = hold["nativeReadback"]
+    if (
+        hold["deployment"] != context.policy.deployment
+        or hold["executionStartAt"] != context.window["executionStartAt"]
+        or hold["planSha256"] != file_hash(plan_path)
+        or not re.fullmatch(r"production-rows-(0[0-9]|1[01])\.native\.json", label)
+    ):
+        raise CampaignError("destination hold differs from the bound deployment")
+    witness = path / label
+    if hold["nativeReadbackSha256"] != file_hash(witness):
+        raise CampaignError("destination hold native evidence digest differs")
+    result = read(witness)
+    if result.get("exitCode") != 0 or not isinstance(result.get("atUtc"), str):
+        raise CampaignError("destination hold native result is invalid")
+    delivered = parse_utc(result["atUtc"])
+    begin = parse_utc(hold["executionStartAt"])
+    if not begin <= delivered <= context.policy.clock():
+        raise CampaignError("destination hold native result is invalid")
+    observed, count = validate_destination_sample(
+        json.loads(result["stdout"]), read(plan_path), begin, delivered
+    )
+    if observed != {"mobius-worker"} or count != hold["rows"]:
+        raise CampaignError("destination hold must show verified worker-only evidence")
+
+
+def destination_readiness(context):
     path = context.run / "destination-readiness"
     path.mkdir(exist_ok=False)
-    plan = read(context.package / "destination-plan.bound.json")
-    workspace_body = context.get(
-        path, "workspace", plan["workspaceResourceId"], "2023-09-01"
-    )
-    workspace = str(uuid.UUID(workspace_body["properties"]["customerId"]))
-    begin = context.window["executionStartAt"]
+    plan_path = context.package / "destination-plan.bound.json"
+    plan = read(plan_path)
+    begin = parse_utc(context.window["executionStartAt"])
     release, deployment = plan["release"], plan["deployment"]
     if not all(re.fullmatch(r"[a-z0-9-]+", v) for v in (release, deployment)):
         raise CampaignError("invalid destination release binding")
     # The Azure CLI launcher rejects control characters in arguments.
-    start = utc(parse_utc(begin))
+    start = utc(begin)
     query = (
         "union MobiusApplication_CL, MobiusMetric_CL, MobiusSpan_CL "
         f"| where TimeGenerated >= datetime({start}) "
@@ -810,42 +857,45 @@ def destination_readiness(context):
         cutoff = context.policy.stop_by
     else:
         cutoff = context.policy.core_by
+    if context.policy.clock() >= cutoff:
+        return "destination-readiness-unproved"
+    workspace_body = context.get(
+        path, "workspace", plan["workspaceResourceId"], "2023-09-01", cutoff=cutoff
+    )
+    workspace = str(uuid.UUID(workspace_body["properties"]["customerId"]))
+    worker_sample = None
     for index in range(12):
+        if context.policy.clock() >= cutoff:
+            break
         label = f"production-rows-{index:02}"
-        values = context.call(
-            path,
-            label,
-            (
-                "monitor",
-                "log-analytics",
-                "query",
-                "--workspace",
-                workspace,
-                "--analytics-query",
-                query,
-                "--timespan",
-                "PT12H",
-            ),
-            timeout=35,
-            cutoff=cutoff,
+        try:
+            values = context.call(
+                path,
+                label,
+                (
+                    "monitor",
+                    "log-analytics",
+                    "query",
+                    "--workspace",
+                    workspace,
+                    "--analytics-query",
+                    query,
+                    "--timespan",
+                    "PT12H",
+                ),
+                timeout=35,
+                cutoff=cutoff,
+            )
+        except NativeFailure:
+            if worker_sample is None:
+                raise
+            # This command only reads. Retain the verified sample even if a
+            # follow-up read cannot supply stronger evidence.
+            break
+        observed, count = validate_destination_sample(
+            values, plan, begin, context.policy.clock()
         )
-        if isinstance(values, dict):
-            values = rows(values)
-        if not isinstance(values, list) or len(values) > 32:
-            raise CampaignError("bounded native destination rows required")
-        observed = set()
-        ids = set()
-        for row in values:
-            stamp = parse_utc(row["TimeGenerated"])
-            if not parse_utc(begin) <= stamp <= datetime.now(UTC):
-                raise CampaignError("destination row out of time bounds")
-            try:
-                signal = validate_signal_row(row, plan["productionSources"], stamp, ids)
-            except ValueError as error:
-                raise CampaignError(
-                    "destination privacy or integrity failure"
-                ) from error
-            observed.add(signal["service"])
+        receipt = path / (label + ".native.json")
         if observed == {"mobius-api", "mobius-worker"}:
             context.remaining(cutoff)
             write_new(
@@ -853,14 +903,32 @@ def destination_readiness(context):
                 {
                     "readinessOnly": True,
                     "productionSources": sorted(observed),
-                    "rows": len(values),
-                    "nativeReadbackSha256": file_hash(path / (label + ".native.json")),
+                    "rows": count,
+                    "nativeReadbackSha256": file_hash(receipt),
                     "deployment": context.policy.deployment,
                     "atUtc": utc(datetime.now(UTC)),
                 },
             )
             return "destination-readiness-observed"
-        time.sleep(min(15, context.remaining(cutoff)))
+        if observed == {"mobius-worker"}:
+            worker_sample = (receipt, count)
+        if index < 11:
+            remaining = (cutoff - context.policy.clock()).total_seconds()
+            if remaining > 0:
+                time.sleep(min(15, remaining))
+    if worker_sample is not None:
+        receipt, count = worker_sample
+        write_new(
+            path / "unproved.json",
+            {
+                "deployment": context.policy.deployment,
+                "executionStartAt": context.window["executionStartAt"],
+                "planSha256": file_hash(plan_path),
+                "nativeReadback": receipt.name,
+                "nativeReadbackSha256": file_hash(receipt),
+                "rows": count,
+            },
+        )
     return "destination-readiness-unproved"
 
 
@@ -884,6 +952,16 @@ def operate(context, action, *, stop_reason=None):
             and (context.run / "destination-readiness/accepted.json").is_file()
         ):
             return "acceptance-gate-admitted"
+        if (context.run / "destination-readiness/unproved.json").is_file():
+            try:
+                require_destination_hold(context)
+            except (ValueError, TypeError, OSError, KeyError, CampaignError):
+                return context.cleanup("privacy-or-integrity-failure")
+            try:
+                context.admit()
+            except (ValueError, OSError, KeyError, CampaignError):
+                return context.cleanup("cleanup-protection-lost")
+            return "destination-dependent-checks-held-independent-checks-may-continue"
         if (context.run / "scanner-hold.json").is_file():
             context.policy.require_hold()
             return "dependent-checks-held-independent-checks-may-continue"
