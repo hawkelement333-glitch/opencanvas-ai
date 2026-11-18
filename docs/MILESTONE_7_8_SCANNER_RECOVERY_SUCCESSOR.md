@@ -114,3 +114,83 @@ The review package and its execution instructions are private. Live admission,
 the worker diagnostic and any corrective write remain unproved by local
 rehearsal. A new Gmail credential is deferred to execution preparation after
 the package is reviewed.
+
+## Approved execution result
+
+The successor ran on November 18, 2026 UTC under review
+`814f87aea2d9ac5a72cf9c60ac55826d85771b294a188305e7650b8c4cbbf8aa` and
+source `8ffc7f5ca971db100e5a40cfcd49b5a595c4bc3f`. Native schedule and
+binding readbacks passed before workload provisioning. Both signed indexes
+matched in the registry, and the exact-IP exception was closed. Bootstrap
+`caj-m78p-a712b8c940-bootstrap-s6s2p8w`, migration
+`caj-m78p-a712b8c940-migration-8prh1dj`, application activation, and the exact
+creation readback for both corrected alert rules passed. The approved private
+route, DNS and TLS passed. Private API readiness returned HTTP 200 at
+18:25:39 UTC, before the initial synthetic signup POST. Both synthetic
+accounts were accepted in `caj-m78p-a712b8c940-evidence-w724v3i`. During
+setup, a changed consumed Entra input blocked activation before dispatch.
+Restoring the original bytes passed complete revalidation without recreating
+the native user or repeating the foundation.
+
+### Stop and recovery disposition
+
+The independent destination query first hit the local CLI ban on line breaks
+before query dispatch. The operator preserved that receipt and submitted the
+same read-only KQL on one line. The native query returned 16 worker rows
+(14 metrics and two application logs) and zero API rows.
+
+The [destination rule](../infra/milestone_7_8/pilot/core_proof_operator.py#L866)
+raises `CampaignError("destination privacy or integrity failure")` if the
+native `SignalId` cannot be reproduced from the returned row or repeats an
+already-seen ID. A reconstruction mismatch triggered the rule at
+18:29:16 UTC. The [operator exception handler](../infra/milestone_7_8/pilot/core_proof_operator.py#L960)
+recorded `unreconciled-operation` and invoked cleanup. Offline replay
+reproduced 13 IDs with the existing UTC timestamp normalization and the
+remaining three after restoring an integral metric value from integer to
+float. The native response had erased that JSON distinction, which the signed
+gateway's canonical hash preserves. This explains the validator failure.
+Destination readiness remains unproved because the read supplied no API rows.
+
+The in-place path admits an exact terminal, exported
+`scanner-paused` receipt for the unchanged deployment. A fresh upload also
+requires verification of the approved scanner grant correction. The
+destination ID failure met neither condition. Azure confirmed core execution
+`caj-m78p-a712b8c940-evidence-6392297` stopped at 18:31:42 UTC. Its local
+watcher encountered the already-written hard-failure marker after observing
+the stop. The run produced no accepted scanner decision, and the prior
+900-second result stays in the record. No second scanner upload or test
+email was dispatched.
+
+### Verified cleanup
+
+Azure Automation rejected the first cleanup dispatch with HTTP 429 because
+the free subscription's monthly job execution time quota was exhausted.
+Native reconciliation found no new cleanup job. Under the user's separate
+cleanup-only timing approval, the existing fallback verified the exact
+subscription, executor, and campaign ownership before requesting deletion
+of `rg-m78-a712b8c940-target`. Azure confirmed group absence at 19:08:38 UTC.
+The named Canada Central vault purge was verified at 19:09:03 UTC. The
+operator disarmed only this campaign's binding and schedule, leaving the
+reusable controller intact.
+
+All 48 cleanup counters were zero at 19:09:37 UTC, including the six
+campaign-scoped custom roles. The temporary directory objects and VPN client
+profile were removed, and the owner confirmed the restricted window was
+closed and the temporary Gmail app password revoked. The bound operator
+ledger is `cleanup-disarmed`. Billing remains unsettled. The $56.51 execution
+ceiling and $449.40 cumulative ceiling describe approved bounds.
+
+Private evidence stays in
+`.runtime/milestone_7_8/full-closure-prerequisites/run-814f87ae/`.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| `proof-account/accepted.json` | `e743b71375b063d0950f182c518417bfafadfaaaa17d65a0d6839fc7bdde159d` |
+| `destination-readiness/production-rows-00.native.json` | `12152fe04820075f815a5f01be90e3947411683091a9e1f1ac54bfaec6784ee4` |
+| `destination-signalid-offline-diagnostic.json` | `c496dbd36975634be54a6a80eaaa43316bcb516673659b53fd00c71ceababccb` |
+| `core-hard-stop/terminal.json` | `6de579097d559498bed4eb2d07f5b735b9c30131593d8d45e204dcc64604e75b` |
+| `azure-cleanup-terminal.json` | `443629c1cba9a290d3d2e1869a031d475bdb2dcfcb87399b18b15945a2cf1071` |
+| `early-named-vault/terminal.json` | `4d4e6fdf5e680ba2ec8d65a197b2664f6047ae9f6a0e1c6247ed965e6aea2b1c` |
+| `verified-full-residue.json` | `ff01d643969c676bedd05d32b973a679dada942861ce3dd2477b0f01847a02da` |
+
+Milestone 7.8 remains incomplete. PostgreSQL, D001, and D002 remain closed.
