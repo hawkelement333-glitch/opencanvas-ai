@@ -6,9 +6,8 @@ created and read back under unchanged criteria. An initial signup timed out.
 API readiness recovered after the approved staging allowlist correction,
 but the read-only signup reconciliation did not establish that retry was
 safe. With core and destination readiness unproved, the campaign stopped
-at the readiness deadline. The controller was preserved and 46 of 48
-cleanup counters were verified zero. Gmail credential revocation and
-restricted browser-window closure await owner confirmation.
+at the readiness deadline. All 48 cleanup counters are verified zero. The reusable
+controller is preserved.
 PostgreSQL, M78-D-001 and M78-D-002 remain closed. Milestone 7.8 remains
 incomplete and billing remains unsettled. The earlier
 [alert-repair execution](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#alert-repair-execution-result)

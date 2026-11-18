@@ -13,9 +13,8 @@ to new requests in that proof; prior 300-second failures remain historical failu
 The [bootstrap successor execution](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#bootstrap-successor-execution-result) verified normal bootstrap, migration,
 exact signed-image deployment, private routing and both corrected native alert
 rules. Core and destination evidence missed readiness, so 7.8 is still
-incomplete. The controller was preserved and 46 of 48 cleanup counters were
-verified zero. Gmail credential revocation and restricted browser-window
-closure await owner confirmation.
+incomplete. All 48 campaign cleanup counters are verified zero. The reusable
+controller is preserved.
 
 Date: 2026-07-27
 
