@@ -84,9 +84,66 @@ class Evidence:
         return json.loads(self.raw(name))
 
 
-def validate_signals(evidence: Evidence) -> dict:
+def validate_signal_row(
+    row: dict,
+    expected_sources: list[dict[str, str]],
+    stamp: datetime,
+    seen_ids: set[str],
+) -> dict:
+    """Reproduce the signed gateway's digest from one native destination row."""
     from scripts.telemetry_destination import DestinationError, destination_rows
 
+    payload = row["Payload"]
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    signal = {
+        "schema_version": "mobius-operational-v1",
+        "kind": row["Kind"],
+        "name": row["Name"],
+        "timestamp": row["TimeGenerated"],
+        "component": row["Component"],
+        "payload": payload,
+        **{
+            key: row[key.title()]
+            for key in ("service", "environment", "release", "deployment")
+        },
+    }
+    signal_id = row["SignalId"]
+
+    def matches(candidate: dict) -> bool:
+        timestamps = dict.fromkeys((signal["timestamp"], stamp.isoformat()))
+        return any(
+            destination_rows(
+                {
+                    "resource": {"schema": "mobius-operational-v1"},
+                    "signals": [candidate | {"timestamp": timestamp}],
+                },
+                expected_sources,
+                now=stamp,
+            )[0]["SignalId"]
+            == signal_id
+            for timestamp in timestamps
+        )
+
+    try:
+        valid = matches(signal)
+        if not valid and signal["kind"] == "metric":
+            value = payload["value"]
+            # Azure may read back an integral float as an integer. Reconstruct
+            # only this metric value, within the IEEE-754 safe integer range.
+            if type(value) is int and abs(value) < 2**53:
+                valid = matches(signal | {"payload": payload | {"value": float(value)}})
+    except DestinationError as error:
+        raise ValueError(
+            "native destination signal violates privacy/schema/source contract"
+        ) from error
+    require(valid, "native signal content/identity differs")
+    require(signal_id not in seen_ids, "query did not deduplicate native delivery")
+    seen_ids.add(signal_id)
+    return signal
+
+
+def validate_signals(evidence: Evidence) -> dict:
     native = rows(evidence.read("production-signals"))
     if not native:
         raise MissingEvidence("no production destination signals")
@@ -103,57 +160,14 @@ def validate_signals(evidence: Evidence) -> dict:
     spans = []
     signal_ids = set()
     for row in native:
-        payload = row["Payload"]
-        if isinstance(payload, str):
-            payload = json.loads(payload)
-        signal = {
-            "schema_version": "mobius-operational-v1",
-            "kind": row["Kind"],
-            "name": row["Name"],
-            "timestamp": row["TimeGenerated"],
-            "component": row["Component"],
-            "payload": payload,
-        }
-        signal.update(
-            {
-                key: row[key.title()]
-                for key in ("service", "environment", "release", "deployment")
-            }
-        )
-        stamp = utc(signal["timestamp"])
+        stamp = utc(row["TimeGenerated"])
         require(
             utc(evidence.manifest["startedAt"])
             <= stamp
             <= utc(evidence.manifest["completedAt"]),
             "signal outside actual observation window",
         )
-        try:
-            reconstructed = destination_rows(
-                {"resource": {"schema": "mobius-operational-v1"}, "signals": [signal]},
-                expected_sources,
-                now=stamp,
-            )[0]
-        except DestinationError as error:
-            raise ValueError(
-                "native destination signal violates privacy/schema/source contract"
-            ) from error
-        # Azure datetime columns may render UTC as Z instead of the producer's
-        # ISO +00:00. Permit only that lossless timestamp representation change.
-        normalized = {**signal, "timestamp": stamp.isoformat()}
-        normalized_id = destination_rows(
-            {"resource": {"schema": "mobius-operational-v1"}, "signals": [normalized]},
-            expected_sources,
-            now=stamp,
-        )[0]["SignalId"]
-        require(
-            row["SignalId"] in {reconstructed["SignalId"], normalized_id},
-            "native signal content/identity differs",
-        )
-        require(
-            row["SignalId"] not in signal_ids,
-            "query did not deduplicate native delivery",
-        )
-        signal_ids.add(row["SignalId"])
+        signal = validate_signal_row(row, expected_sources, stamp, signal_ids)
         seen.add((signal["service"], signal["kind"], signal["name"]))
         if signal["kind"] == "span":
             spans.append(signal)

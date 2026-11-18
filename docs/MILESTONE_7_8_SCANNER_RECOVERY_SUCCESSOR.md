@@ -194,3 +194,44 @@ Private evidence stays in
 | `verified-full-residue.json` | `ff01d643969c676bedd05d32b973a679dada942861ce3dd2477b0f01847a02da` |
 
 Milestone 7.8 remains incomplete. PostgreSQL, D001, and D002 remain closed.
+
+## Local destination and cleanup rehearsal
+
+The readiness gate and final destination validator share the signed gateway's
+SHA-256 reconstruction. When Azure returns an integer for an integral float,
+the verifier tries the float representation only for a metric's numeric
+`Payload.value` inside the IEEE-754 safe integer range. The complete digest
+must still match. The existing source, privacy, schema, time window,
+deduplication, and API-plus-worker requirements still apply. The readiness
+query uses one line so it passes the existing Windows CLI argument check.
+
+The retained native receipt from the approved run replayed with 16 of 16
+matching IDs. The gate returned `destination-readiness-unproved` because the
+receipt has zero API rows. A local two-source fixture passed the same gate.
+Changed content, wrong sources, and duplicate IDs still entered the
+hard-stop path in local checks.
+
+The existing `pilot_cleanup fallback-plan --execute` command also accepts
+`--quota-approval <private receipt>` for the early cleanup-only path. Use it
+after a separate timing approval for the exact review and target. The
+receipt binds `approved`, `approvedAt`, `reviewPackageSha256`,
+`targetResourceGroup`, `automationBinding`, `cleanupDeadlineUtc`,
+`stopProofSha256`, and `quotaResponseSha256`. Keep it in the private
+`run-<review hash prefix>` directory. The operator checks the exact native
+runbook dispatch and monthly execution-quota rejection, the original
+deadline, current subscription and executor, and target ownership. It
+requires a complete native job inventory before deletion. An earlier delete
+intent requires reconciliation before another dispatch. Ordinary fallback
+still starts at Automation expiry.
+
+The local rehearsal substituted a fake Azure transport and replayed the
+actual quota, subscription, ownership and job-inventory receipts. It admitted
+one exact simulated deletion. Focused tests covered the normal expiry path,
+unrelated throttling, missing consent, altered receipts, wrong scope or
+executor, active or newly observed jobs, a paginated read, and an uncertain
+delete. Private rehearsal receipt `.runtime/milestone_7_8/sq4/rehearsal.json`
+has SHA-256
+`7430c856a72674b111ed31505e69e8fea0d633f82240376a2323b0d137ad3ab6`.
+
+The signed release artifacts and prior 48 zero-residue observations were
+reused. The offline checks add no managed acceptance or Azure spending.

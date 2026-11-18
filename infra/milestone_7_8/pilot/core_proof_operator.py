@@ -780,8 +780,7 @@ def dispatch_proof(context, phase, resume_path=None):
 
 
 def destination_readiness(context):
-    from infra.milestone_7_8.destination_acceptance import rows
-    from scripts.telemetry_destination import destination_rows
+    from infra.milestone_7_8.destination_acceptance import rows, validate_signal_row
 
     path = context.run / "destination-readiness"
     path.mkdir(exist_ok=False)
@@ -794,15 +793,18 @@ def destination_readiness(context):
     release, deployment = plan["release"], plan["deployment"]
     if not all(re.fullmatch(r"[a-z0-9-]+", v) for v in (release, deployment)):
         raise CampaignError("invalid destination release binding")
-    query = f"""
-union MobiusApplication_CL, MobiusMetric_CL, MobiusSpan_CL
-| where TimeGenerated >= datetime({begin})
-| where Release == "{release}" and Deployment == "{deployment}"
-| where Service in ("mobius-api", "mobius-worker")
-| summarize arg_max(TimeGenerated, *) by SignalId
-| partition by Service (top 16 by TimeGenerated desc)
-| project TimeGenerated, SignalId, Service, Environment, Release, Deployment, Kind, Name, Component, Payload
-"""
+    # The Azure CLI launcher rejects control characters in arguments.
+    start = utc(parse_utc(begin))
+    query = (
+        "union MobiusApplication_CL, MobiusMetric_CL, MobiusSpan_CL "
+        f"| where TimeGenerated >= datetime({start}) "
+        f'| where Release == "{release}" and Deployment == "{deployment}" '
+        '| where Service in ("mobius-api", "mobius-worker") '
+        "| summarize arg_max(TimeGenerated, *) by SignalId "
+        "| partition by Service (top 16 by TimeGenerated desc) "
+        "| project TimeGenerated, SignalId, Service, Environment, Release, Deployment, "
+        "Kind, Name, Component, Payload"
+    )
     if (context.run / "scanner-hold.json").exists():
         context.policy.require_hold()
         cutoff = context.policy.stop_by
@@ -837,36 +839,13 @@ union MobiusApplication_CL, MobiusMetric_CL, MobiusSpan_CL
             stamp = parse_utc(row["TimeGenerated"])
             if not parse_utc(begin) <= stamp <= datetime.now(UTC):
                 raise CampaignError("destination row out of time bounds")
-            native = {
-                "schema_version": "mobius-operational-v1",
-                "kind": row["Kind"],
-                "name": row["Name"],
-                "timestamp": row["TimeGenerated"],
-                "component": row["Component"],
-                "payload": json.loads(row["Payload"])
-                if isinstance(row["Payload"], str)
-                else row["Payload"],
-                **{
-                    key: row[key.title()]
-                    for key in ("service", "environment", "release", "deployment")
-                },
-            }
-            expected = plan["productionSources"]
-            ids_for_row = {
-                destination_rows(
-                    {
-                        "resource": {"schema": "mobius-operational-v1"},
-                        "signals": [signal],
-                    },
-                    expected,
-                    now=stamp,
-                )[0]["SignalId"]
-                for signal in (native, native | {"timestamp": stamp.isoformat()})
-            }
-            if row["SignalId"] not in ids_for_row or row["SignalId"] in ids:
-                raise CampaignError("destination privacy or integrity failure")
-            ids.add(row["SignalId"])
-            observed.add(row["Service"])
+            try:
+                signal = validate_signal_row(row, plan["productionSources"], stamp, ids)
+            except ValueError as error:
+                raise CampaignError(
+                    "destination privacy or integrity failure"
+                ) from error
+            observed.add(signal["service"])
         if observed == {"mobius-api", "mobius-worker"}:
             context.remaining(cutoff)
             write_new(

@@ -21,6 +21,7 @@ from infra.milestone_7_8.campaign import (
     SubprocessRunner,
     load_ledger,
     parse_utc,
+    sanitize,
     save_ledger,
     utc,
 )
@@ -809,10 +810,85 @@ def fallback_decision(
     return "delete"
 
 
-def execute_fallback(runtime_path: Path, runtime: dict, config: CampaignConfig) -> str:
+def quota_fallback_stop(
+    approval_path: Path,
+    runtime_path: Path,
+    runtime: dict,
+    config: CampaignConfig,
+    window_record: dict,
+    now: datetime,
+) -> datetime:
+    """Bind an early fallback to this run's stop, quota rejection and separate consent."""
+    from infra.milestone_7_8.operator import command_plan, pilot_cleanup_journal
+
+    approval = read(approval_path)
+    bound = read(runtime_path.parent / "replacement-approval.json")
+    review_sha = bound["reviewPackageSha256"]
+    package = Path(window_record["packageDirectory"]).resolve()
+    run = package.parent / ("run-" + review_sha[:8])
+    if (
+        approval_path.resolve().parent != run
+        or file_hash(package / "review-package.json") != review_sha
+        or approval.get("approved") is not True
+        or approval.get("reviewPackageSha256") != review_sha
+        or approval.get("targetResourceGroup") != config.target_resource_group
+        or approval.get("automationBinding") != runtime["bindingName"]
+        or approval.get("cleanupDeadlineUtc")
+        != window_record["operatorCleanupExpiresAt"]
+    ):
+        raise CampaignError("separate exact quota fallback approval required")
+    stop_path = run / "stop-proof-intent.json"
+    stop = read(stop_path)
+    stopped_at = parse_utc(stop["atUtc"])
+    if (
+        approval.get("stopProofSha256") != file_hash(stop_path)
+        or stop["scheduledCleanupAtUtc"] != window_record["stopProofBy"]
+        or not parse_utc(window_record["executionStartAt"])
+        <= stopped_at
+        <= parse_utc(approval["approvedAt"])
+        <= now
+    ):
+        raise CampaignError("quota fallback does not bind the recorded proof stop")
+    journal = pilot_cleanup_journal(runtime)
+    if journal is None:
+        raise CampaignError("quota fallback requires the bound cleanup journal")
+    (command,) = command_plan("cleanup", config, runtime)
+    if read(journal / "runbook-intent.json") != {
+        "command": [*command, "--subscription", runtime["subscriptionId"]]
+    }:
+        raise CampaignError("quota fallback must bind the exact runbook dispatch")
+    response_path = journal / "runbook-response.json"
+    response = read(response_path)
+    stderr = response.get("stderr", "")
+    if (
+        approval.get("quotaResponseSha256") != file_hash(response_path)
+        or type(response.get("exitCode")) is not int
+        or response["exitCode"] != 1
+        or not isinstance(stderr, str)
+        or "Code: 429" not in stderr.splitlines()
+        or "The maximum monthly job execution time limit for free subs has been reached."
+        not in stderr
+    ):
+        raise CampaignError("Automation execution quota rejection is unverified")
+    return stopped_at
+
+
+def execute_fallback(
+    runtime_path: Path,
+    runtime: dict,
+    config: CampaignConfig,
+    *,
+    quota_approval: Path | None = None,
+) -> str:
     value = validate_live(runtime_path, runtime, config)
     plan = fallback_plan(runtime_path, runtime, config)
-    if datetime.now(UTC) < parse_utc(plan["earliestUtc"]):
+    now = datetime.now(UTC)
+    stopped_at = None
+    if quota_approval is not None:
+        stopped_at = quota_fallback_stop(
+            quota_approval, runtime_path, runtime, config, value, now
+        )
+    elif now < parse_utc(plan["earliestUtc"]):
         raise CampaignError("Automation binding has not expired")
     directory = runtime_path.resolve().parent
     ledger_path = directory / "ledger.json"
@@ -841,13 +917,25 @@ def execute_fallback(runtime_path: Path, runtime: dict, config: CampaignConfig) 
         return json.loads(result["stdout"])
 
     sub = runtime["subscriptionId"]
-    signed_in = document(("az", "ad", "signed-in-user", "show", "--output", "json"))
+    scope = ("--subscription", sub, "--output", "json")
+    account_info = document(("az", "account", "show", *scope))
+    if (
+        account_info.get("id") != sub
+        or account_info.get("state") != "Enabled"
+        or sanitize(sub, domain="subscription") != config.subscription_correlation
+        or sanitize(account_info.get("tenantId", ""), domain="tenant")
+        != config.tenant_correlation
+    ):
+        raise CampaignError("fallback subscription or tenant differs")
+    signed_in = document(("az", "ad", "signed-in-user", "show", *scope))
     if signed_in.get("id") != plan["executorObjectId"]:
         raise CampaignError("fallback requires the approved current executor")
-    scope = ("--subscription", sub, "--output", "json")
-    if document(("az", "group", "exists", "--name", TARGET, *scope)) is False:
+    exists = document(("az", "group", "exists", "--name", TARGET, *scope))
+    if exists is False:
         record_cleanup()
         return "target-absent"
+    if exists is not True:
+        raise CampaignError("fallback target presence is unresolved")
     group = document(("az", "group", "show", "--name", TARGET, *scope))
     account = (
         f"/subscriptions/{sub}/resourceGroups/{config.cleanup_resource_group}"
@@ -868,16 +956,31 @@ def execute_fallback(runtime_path: Path, runtime: dict, config: CampaignConfig) 
     if decision == "wait":
         record_cleanup()
         return "target-deletion-in-progress"
+    if stopped_at is not None:
+        for job in jobs["value"]:
+            props = job["properties"]
+            if props["runbook"]["name"] == runtime["runbookName"] and (
+                not props.get("creationTime")
+                or parse_utc(props["creationTime"]) >= stopped_at.replace(microsecond=0)
+            ):
+                raise CampaignError(
+                    "Automation job outcome requires reconciliation after quota rejection"
+                )
     record_cleanup()
     intent = directory / "fallback-delete-intent.json"
-    write_new(
-        intent,
-        {
-            "atUtc": utc(datetime.now(UTC)),
-            "target": group["id"],
-            "binding": plan["controllerBinding"],
-        },
-    )
+    record = {
+        "atUtc": utc(datetime.now(UTC)),
+        "target": group["id"],
+        "binding": plan["controllerBinding"],
+    }
+    if quota_approval is not None:
+        record["quotaApprovalSha256"] = file_hash(quota_approval)
+    try:
+        write_new(intent, record)
+    except FileExistsError as error:
+        raise CampaignError(
+            "previous fallback deletion requires native reconciliation"
+        ) from error
     result = run(tuple(plan["delete"]))
     write_new(directory / "fallback-delete-response.json", result)
     if result.get("exitCode") != 0:
@@ -896,6 +999,11 @@ def main() -> None:
     fallback.add_argument("--runtime", required=True, type=Path)
     fallback.add_argument("--config", required=True, type=Path)
     fallback.add_argument("--execute", action="store_true")
+    fallback.add_argument(
+        "--quota-approval",
+        type=Path,
+        help="Separate approval for an early fallback after verified Automation quota rejection",
+    )
     arm = steps.add_parser("stage-parameters")
     for option in ("package", "directory", "native-values", "output"):
         arm.add_argument("--" + option, type=Path, required=True)
@@ -942,8 +1050,13 @@ def main() -> None:
         rt = load_runtime(args.runtime)
         validate_prepared_bundle(args.runtime, rt, cfg)
         if args.execute:
-            print(json.dumps({"status": execute_fallback(args.runtime, rt, cfg)}))
+            result = execute_fallback(
+                args.runtime, rt, cfg, quota_approval=args.quota_approval
+            )
+            print(json.dumps({"status": result}))
         else:
+            if args.quota_approval is not None:
+                fallback.error("--quota-approval requires --execute")
             output = fallback_plan(args.runtime, rt, cfg)
             print(
                 json.dumps(

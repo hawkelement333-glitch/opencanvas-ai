@@ -3344,3 +3344,208 @@ def test_historical_subscription_retirement_schema_is_closed_and_non_authorizing
     assert "retained-account-absent" not in serialized
     assert "subscriptionId" not in serialized
     assert "/subscriptions/" not in serialized
+
+@pytest.mark.parametrize(
+    ("scenario", "expected"),
+    [
+        ("approved", "target-deletion-dispatched"),
+        ("ordinary-expired", "target-deletion-dispatched"),
+        ("already-deleting", "target-deletion-in-progress"),
+        ("missing-approval", "Automation binding has not expired"),
+        ("generic-throttle", "quota rejection is unverified"),
+        ("changed-response", "quota rejection is unverified"),
+        ("wrong-binding", "separate exact quota fallback approval required"),
+        ("wrong-subscription", "subscription or tenant differs"),
+        ("wrong-executor", "approved current executor"),
+        ("wrong-ownership", "scope readback differs"),
+        ("partial-jobs", "Automation job collection is incomplete"),
+        ("running-job", "reconcile existing controller job before fallback"),
+        ("job-after-stop", "requires reconciliation after quota rejection"),
+        ("unknown-delete", "deletion outcome requires native reconciliation"),
+    ],
+)
+def test_quota_cleanup_fallback_with_native_operations_disabled(
+    tmp_path,
+    monkeypatch,
+    scenario,
+    expected,
+):
+    from infra.milestone_7_8 import pilot_cleanup
+    from infra.milestone_7_8.campaign import load_ledger, sanitize, save_ledger, utc
+    from infra.milestone_7_8.operator import command_plan
+
+    runtime = _runtime()
+    sub, tenant, executor = runtime["subscriptionId"], "test-tenant", "test-executor"
+    config = _config(
+        campaign_id=pilot_cleanup.CAMPAIGN,
+        generation_id=pilot_cleanup.GENERATION,
+        target_resource_group=pilot_cleanup.TARGET,
+        subscription_correlation=sanitize(sub, domain="subscription"),
+        tenant_correlation=sanitize(tenant, domain="tenant"),
+    )
+    bound = tmp_path / "bound"
+    runtime["resourceGroupName"] = config.target_resource_group
+    runtime["pilotCleanupWindowFile"] = str(bound / "window.json")
+    package = tmp_path / "package"
+    review_path = package / "review-package.json"
+    pilot_cleanup.write_new(review_path, {"fixture": "no cloud authority"})
+    review = pilot_cleanup.file_hash(review_path)
+    run = tmp_path / ("run-" + review[:8])
+    window_record = {
+        "packageDirectory": str(package),
+        "executionStartAt": utc(NOW),
+        "stopProofBy": config.cleanup_deadline_utc,
+        "cleanupExecutorObjectId": executor,
+        "automationBindingExpiresAt": utc(NOW + timedelta(hours=5)),
+        "operatorCleanupExpiresAt": utc(NOW + timedelta(hours=6)),
+    }
+    runtime_path = bound / "runtime.json"
+    pilot_cleanup.write_new(bound / "replacement-approval.json", {"reviewPackageSha256": review})
+    ledger_path = bound / "ledger.json"
+    ledger = load_ledger(ledger_path, config)
+    for phase in ORDER[1 : ORDER.index(Phase.BILLABLE_STARTED) + 1]:
+        if phase is Phase.CLEANUP_ARMED:
+            ledger.record_cleanup_arm_evidence("e" * 64)
+        ledger.transition(phase, NOW)
+    save_ledger(ledger_path, ledger)
+    stop = run / "stop-proof-intent.json"
+    pilot_cleanup.write_new(
+        stop,
+        {
+            "atUtc": utc(NOW + timedelta(minutes=30)),
+            "scheduledCleanupAtUtc": window_record["stopProofBy"],
+        },
+    )
+    (start,) = command_plan("cleanup", config, runtime)
+    journal = bound / "cleanup-journal"
+    pilot_cleanup.write_new(
+        journal / "runbook-intent.json", {"command": [*start, "--subscription", sub]}
+    )
+    response = journal / "runbook-response.json"
+    quota_message = "The maximum monthly job execution time limit for free subs has been reached."
+    pilot_cleanup.write_new(
+        response,
+        {
+            "exitCode": 1,
+            "stdout": "",
+            "stderr": "Code: 429\n"
+            + ("ordinary rate limit" if scenario == "generic-throttle" else quota_message),
+        },
+    )
+    approval = run / "fallback-consent.json"
+    pilot_cleanup.write_new(
+        approval,
+        {
+            "approved": True,
+            "reviewPackageSha256": review,
+            "targetResourceGroup": config.target_resource_group,
+            "automationBinding": "another-binding"
+            if scenario == "wrong-binding"
+            else runtime["bindingName"],
+            "approvedAt": utc(NOW + timedelta(minutes=31)),
+            "cleanupDeadlineUtc": window_record["operatorCleanupExpiresAt"],
+            "stopProofSha256": pilot_cleanup.file_hash(stop),
+            "quotaResponseSha256": pilot_cleanup.file_hash(response),
+        },
+    )
+    if scenario == "changed-response":
+        response.write_text(response.read_text(encoding="utf-8") + " ", encoding="utf-8")
+
+    fixed = (
+        NOW + timedelta(hours=5, minutes=10)
+        if scenario == "ordinary-expired"
+        else NOW + timedelta(minutes=40)
+    )
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed
+
+    monkeypatch.setattr(pilot_cleanup, "datetime", Clock)
+    monkeypatch.setattr(pilot_cleanup, "validate_live", lambda *args: window_record)
+    monkeypatch.setattr(pilot_cleanup, "validate_window", lambda *args: window_record)
+    planned = pilot_cleanup.fallback_plan(runtime_path, runtime, config)
+    (create,) = command_plan("scope-create", config, runtime)
+    tags = dict(
+        item.split("=", 1)
+        for item in create[create.index("--tags") + 1 :]
+        if item.startswith("mobius.")
+    )
+    if scenario == "wrong-ownership":
+        tags["mobius.campaign"] = "unrelated"
+    group = {
+        "id": f"/subscriptions/{sub}/resourceGroups/{config.target_resource_group}",
+        "name": config.target_resource_group,
+        "location": config.target_region,
+        "properties": {
+            "provisioningState": "Deleting" if scenario == "already-deleting" else "Succeeded"
+        },
+        "tags": tags,
+    }
+    jobs = {"value": []}
+    if scenario == "partial-jobs":
+        jobs["nextLink"] = "omitted page"
+    if scenario in {"running-job", "job-after-stop"}:
+        jobs["value"] = [
+            {
+                "properties": {
+                    "runbook": {"name": runtime["runbookName"]},
+                    "creationTime": utc(NOW + timedelta(minutes=32)),
+                    "status": "Running" if scenario == "running-job" else "Completed",
+                }
+            }
+        ]
+    calls = []
+
+    def no_cloud(command):
+        calls.append(command)
+        assert command[command.index("--subscription") + 1] == sub
+        if command == tuple(planned["delete"]):
+            return {
+                "exitCode": 1 if scenario == "unknown-delete" else 0,
+                "stdout": "",
+                "stderr": "",
+            }
+        prefix = command[:3]
+        native = {
+            ("az", "account", "show"): {
+                "id": "wrong" if scenario == "wrong-subscription" else sub,
+                "state": "Enabled",
+                "tenantId": tenant,
+            },
+            ("az", "ad", "signed-in-user"): {
+                "id": "wrong" if scenario == "wrong-executor" else executor
+            },
+            ("az", "group", "exists"): True,
+            ("az", "group", "show"): group,
+            ("az", "rest", "--method"): jobs,
+        }
+        return {"exitCode": 0, "stdout": json.dumps(native[prefix]), "stderr": ""}
+
+    monkeypatch.setattr(
+        pilot_cleanup,
+        "SubprocessRunner",
+        lambda **kwargs: type("FixtureTransport", (), {"run": staticmethod(no_cloud)})(),
+    )
+    quota_approval = None if scenario in {"missing-approval", "ordinary-expired"} else approval
+
+    def execute():
+        return pilot_cleanup.execute_fallback(
+            runtime_path, runtime, config, quota_approval=quota_approval
+        )
+
+    if expected.startswith("target-"):
+        assert execute() == expected
+        assert load_ledger(ledger_path, config).phase == Phase.CLEANING
+    else:
+        with pytest.raises(CampaignError, match=expected):
+            execute()
+    deleted = calls.count(tuple(planned["delete"]))
+    assert deleted == (scenario in {"approved", "ordinary-expired", "unknown-delete"})
+    if scenario == "unknown-delete":
+        with pytest.raises(
+            CampaignError, match="previous fallback deletion requires native reconciliation"
+        ):
+            execute()
+        assert calls.count(tuple(planned["delete"])) == 1

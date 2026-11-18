@@ -387,3 +387,109 @@ def test_unchanged_exact_scanner_role_permissions_are_required():
     )
     with pytest.raises(CampaignError, match="does not match the sealed narrow role"):
         exact_role(supplied, "/synthetic", "scanner-role")
+
+def test_destination_gate_verifies_azure_integral_float_and_still_rejects_tampering(
+    tmp_path,
+    monkeypatch,
+):
+    from infra.milestone_7_8.azure_cli import _validate_argument
+
+    from scripts.telemetry_destination import destination_rows
+
+    now = datetime.now(UTC)
+    context = operator.Campaign.__new__(operator.Campaign)
+    context.package = tmp_path / "package"
+    context.run = tmp_path / "valid"
+    context.run.mkdir()
+    context.bound = tmp_path / "bound"
+    context.window = {"executionStartAt": (now - timedelta(minutes=5)).isoformat()}
+    context.policy = ProofOperator(
+        context.run,
+        {
+            "coreReadyBy": (now + timedelta(hours=1)).isoformat(),
+            "stopProofBy": (now + timedelta(hours=2)).isoformat(),
+        },
+        {},
+    )
+    context.admit = lambda: None
+    sources = [
+        {"service": service, "environment": "staging", "release": "r", "deployment": "d"}
+        for service in ("mobius-api", "mobius-worker")
+    ]
+    write_new(
+        context.package / "destination-plan.bound.json",
+        {
+            "workspaceResourceId": "fixture",
+            "release": "r",
+            "deployment": "d",
+            "productionSources": sources,
+        },
+    )
+    context.get = lambda *args: {"properties": {"customerId": str(uuid4())}}
+    native = destination_rows(
+        {
+            "resource": {"schema": "mobius-operational-v1"},
+            "signals": [
+                {
+                    **source,
+                    "schema_version": "mobius-operational-v1",
+                    "kind": "metric",
+                    "name": "mobius.queue.depth",
+                    "component": "queue",
+                    "timestamp": now.isoformat(),
+                    "payload": {
+                        "catalog_version": "mobius-signals-v1",
+                        "type": "gauge",
+                        "unit": "job",
+                        "value": 3.0,
+                        "labels": {"component": "queue", "outcome": "success"},
+                    },
+                }
+                for source in sources
+            ],
+        },
+        sources,
+        now=now,
+    )
+    for row in native:
+        row["TimeGenerated"] = row["TimeGenerated"].replace("+00:00", "Z")
+        row["Payload"] = json.dumps(row["Payload"] | {"value": 3})
+    rows = native
+
+    def query(folder, label, args, **_kwargs):
+        assert args[:3] == ("monitor", "log-analytics", "query")
+        for arg in args:
+            _validate_argument(arg)
+        write_new(folder / (label + ".native.json"), {"rows": len(rows)})
+        return rows
+
+    context.call = query
+    assert operator.operate(context, "destination-readiness") == "destination-readiness-observed"
+    assert read(context.run / "destination-readiness/accepted.json")["rows"] == 2
+
+    # A one-source native read is valid evidence but cannot satisfy the gate.
+    (tmp_path / "missing-api").mkdir()
+    context.run = tmp_path / "missing-api"
+    context.policy.run = context.run
+    rows = [native[1]]
+    monkeypatch.setattr(operator.time, "sleep", lambda _: None)
+    assert operator.operate(context, "destination-readiness") == "destination-readiness-unproved"
+    assert not (context.run / "destination-readiness/accepted.json").exists()
+
+    # A changed value, a duplicate ID, and a wrong source each keep the hard stop.
+    for name, bad in (
+        (
+            "changed",
+            native[1] | {"Payload": json.dumps(json.loads(native[1]["Payload"]) | {"value": 4})},
+        ),
+        ("duplicate", native[0]),
+        ("source", native[1] | {"Release": "another-release"}),
+    ):
+        context.run = tmp_path / name
+        context.run.mkdir()
+        context.policy.run = context.run
+        rows = [native[0], bad]
+        context.cleanup = lambda reason: context.policy.stop(reason).name
+        assert operator.operate(context, "destination-readiness") == "stop-proof-intent.json"
+        assert read(context.run / "stop-proof-intent.json")["reason"] == "unreconciled-operation"
+        assert not (context.run / "destination-readiness/accepted.json").exists()

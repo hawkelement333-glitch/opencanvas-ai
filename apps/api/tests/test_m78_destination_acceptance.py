@@ -256,8 +256,36 @@ def test_api_worker_native_signal_privacy_and_trace_continuity():
             [s["service"], "span", "http.server.request"] for s in sources
         ],
     }
-    fixture = LocalFixtureEvidence(plan, {"production-signals": native_rows(native)})
-    assert validate_signals(fixture)["traceContinuity"] == "accepted"
+    metric = destination_rows(
+        {
+            "resource": {"schema": "mobius-operational-v1"},
+            "signals": [
+                {
+                    **sources[1],
+                    "schema_version": "mobius-operational-v1",
+                    "kind": "metric",
+                    "name": "mobius.queue.depth",
+                    "component": "queue",
+                    "timestamp": "2026-11-16T00:01:00+00:00",
+                    "payload": {
+                        "catalog_version": "mobius-signals-v1",
+                        "type": "gauge",
+                        "unit": "job",
+                        "value": 3.0,
+                        "labels": {"component": "queue", "outcome": "success"},
+                    },
+                }
+            ],
+        },
+        sources,
+        now=datetime(2026, 11, 16, 0, 1, tzinfo=UTC),
+    )[0]
+    metric["TimeGenerated"] = stamp
+    metric["Payload"]["value"] = 3
+    fixture = LocalFixtureEvidence(plan, {"production-signals": native_rows([*native, metric])})
+    result = validate_signals(fixture)
+    assert result["signals"] == 3
+    assert result["traceContinuity"] == "accepted"
     bad = copy.deepcopy(signals)
     bad[1]["payload"]["trace_id"] = "b" * 32
     fixture.documents["production-signals"] = native_rows(
