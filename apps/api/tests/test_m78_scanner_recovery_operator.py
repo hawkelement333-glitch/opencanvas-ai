@@ -569,3 +569,148 @@ def test_destination_gate_verifies_azure_integral_float_and_still_rejects_tamper
         and str(context.bound / "operator-approval.json") in args
         for args in cleanup
     )
+
+
+@pytest.mark.parametrize("outcome", ["accepted", "missing", "tampered"])
+def test_telemetry_first_routes_same_deployment_without_teardown(tmp_path, monkeypatch, outcome):
+    from scripts.telemetry_destination import destination_rows
+
+    from infra.milestone_7_8.pilot import telemetry_first
+
+    now = datetime.now(UTC)
+    trace = "a" * 32
+    span = "b" * 16
+    ctx = operator.Campaign.__new__(operator.Campaign)
+    ctx.run = tmp_path / "run"
+    ctx.package = tmp_path / "package"
+    ctx.run.mkdir()
+    ctx.telemetry_first = True
+    ctx.policy = ProofOperator(
+        ctx.run,
+        {
+            "coreReadyBy": (now + timedelta(hours=1)).isoformat(),
+            "stopProofBy": (now + timedelta(hours=2)).isoformat(),
+        },
+        {"release": "rc-test", "deployment": "same-deployment"},
+        clock=lambda: now,
+    )
+    ctx.plan = {"applicationResourceId": "/fixture/api", "workspaceResourceId": "/fixture/log"}
+    ctx.rg = "fixture"
+    write_new(ctx.package / "planned-bindings.json", ctx.plan)
+    source = {"service": "mobius-api", "environment": "staging", **ctx.policy.deployment}
+    write_new(ctx.package / "destination-plan.bound.json", {"productionSources": [source]})
+    ctx.admit = lambda: None
+    ctx.remaining = lambda cutoff: 100
+
+    def native_readbacks(folder, cutoff):
+        values = (
+            (
+                "applicationResourceId",
+                {
+                    "latestReadyRevisionName": "api--fixture",
+                    "latestRevisionName": "api--fixture",
+                    "configuration": {"activeRevisionsMode": "Single"},
+                },
+            ),
+            ("workspaceResourceId", {"customerId": str(uuid4())}),
+        )
+        return {
+            "resources": [
+                {
+                    "request": {"resourceId": ctx.plan[key]},
+                    "response": {"body": {"properties": properties}},
+                }
+                for key, properties in values
+            ]
+        }
+
+    ctx.native_readbacks = native_readbacks
+    monkeypatch.setattr(
+        telemetry_first, "admit_runtime_bindings", lambda *a, **kw: {"apiBaseUrl": "https://fake"}
+    )
+    monkeypatch.setattr(telemetry_first.time, "sleep", lambda *_: None)
+    calls = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            assert kwargs == {
+                "base_url": "https://fake", "follow_redirects": False, "trust_env": False
+            }
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def get(self, url, *, timeout):
+            calls.append(url)
+            return httpx.Response(200, headers={"traceparent": f"00-{trace}-{span}-00"})
+
+    monkeypatch.setattr(telemetry_first.httpx, "Client", Client)
+    valid = destination_rows(
+        {
+            "resource": {"schema": "mobius-operational-v1"},
+            "signals": [
+                {
+                    **source,
+                    "schema_version": "mobius-operational-v1",
+                    "kind": "application_log",
+                    "name": "api.request.completed",
+                    "component": "api",
+                    "timestamp": now.isoformat(),
+                    "payload": {
+                        "severity": "info", "status_code": "200", "method": "GET",
+                        "route": "/health/live", "trace_id": trace, "span_id": span,
+                    },
+                }
+            ],
+        },
+        [source],
+        now=now,
+    )
+    if outcome == "tampered":
+        valid[0]["SignalId"] = "0" * 64
+
+    def query(folder, label, args, **kwargs):
+        if args[:3] == ("containerapp", "replica", "list"):
+            return [{"name": "api--fixture-replica"}]
+        if args[:3] == ("containerapp", "logs", "show"):
+            return f"telemetry_liveness_delivery gateway_status=202 trace_id={trace}"
+        assert args[:3] == ("monitor", "log-analytics", "query") and trace in args[-3]
+        rows = [] if outcome == "missing" else valid
+        write_new(folder / (label + ".native.json"), {"stdout": json.dumps(rows)})
+        return rows
+
+    ctx.call = query
+
+    def proof(context, action, resume):
+        assert context.run == ctx.run and action == "core" and not resume
+        write_new(context.run / "proof-core/accepted.json", {"fixture": True})
+        return "accepted"
+
+    monkeypatch.setattr(operator, "dispatch_proof", proof)
+    ctx.cleanup = lambda reason: ctx.policy.stop(reason).name
+    assert operator.operate(ctx, "core") == "telemetry-first-required"
+    first = operator.operate(ctx, "telemetry-first")
+    assert calls == ["/api/v1/health/live"]
+    if outcome == "tampered":
+        assert first == "stop-proof-intent.json"
+        assert read(ctx.run / first)["reason"] == "unreconciled-operation"
+        return
+    with pytest.raises(CampaignError, match="already has a receipt or intent"):
+        operator.operate(ctx, "telemetry-first")
+    assert operator.operate(ctx, "core") == "accepted"
+    assert not (ctx.run / "stop-proof-intent.json").exists()
+    if outcome == "accepted":
+        assert first == "telemetry-admitted-continue-core-and-independent-stages"
+        assert operator.operate(ctx, "gate") == "shared-run-admitted"
+    else:
+        assert first == "api-destination-held-continue-core-and-independent-stages"
+        assert (
+            read(ctx.run / "telemetry-first/result.json")["lastObservedBoundary"]
+            == "gateway-acknowledged-row-not-observed"
+        )
+        assert operator.operate(ctx, "gate") == (
+            "api-destination-held-continue-core-fixture-independent-stages"
+        )

@@ -3349,6 +3349,9 @@ def test_historical_subscription_retirement_schema_is_closed_and_non_authorizing
     ("scenario", "expected"),
     [
         ("approved", "target-deletion-dispatched"),
+        ("execution-approved", "target-deletion-dispatched"),
+        ("execution-unapproved", "does not cover early quota fallback"),
+        ("execution-generic-throttle", "quota rejection is unverified"),
         ("ordinary-expired", "target-deletion-dispatched"),
         ("already-deleting", "target-deletion-in-progress"),
         ("missing-approval", "Automation binding has not expired"),
@@ -3400,7 +3403,14 @@ def test_quota_cleanup_fallback_with_native_operations_disabled(
         "operatorCleanupExpiresAt": utc(NOW + timedelta(hours=6)),
     }
     runtime_path = bound / "runtime.json"
-    pilot_cleanup.write_new(bound / "replacement-approval.json", {"reviewPackageSha256": review})
+    execution_quota = scenario.startswith("execution-")
+    pilot_cleanup.write_new(
+        bound / "replacement-approval.json",
+        {
+            "reviewPackageSha256": review,
+            "approveExactQuotaFallback": execution_quota and scenario != "execution-unapproved",
+        },
+    )
     ledger_path = bound / "ledger.json"
     ledger = load_ledger(ledger_path, config)
     for phase in ORDER[1 : ORDER.index(Phase.BILLABLE_STARTED) + 1]:
@@ -3429,7 +3439,7 @@ def test_quota_cleanup_fallback_with_native_operations_disabled(
             "exitCode": 1,
             "stdout": "",
             "stderr": "Code: 429\n"
-            + ("ordinary rate limit" if scenario == "generic-throttle" else quota_message),
+            + ("ordinary rate limit" if scenario.endswith("generic-throttle") else quota_message),
         },
     )
     approval = run / "fallback-consent.json"
@@ -3465,6 +3475,10 @@ def test_quota_cleanup_fallback_with_native_operations_disabled(
     monkeypatch.setattr(pilot_cleanup, "datetime", Clock)
     monkeypatch.setattr(pilot_cleanup, "validate_live", lambda *args: window_record)
     monkeypatch.setattr(pilot_cleanup, "validate_window", lambda *args: window_record)
+    if execution_quota:
+        monkeypatch.setattr(
+            pilot_cleanup, "validate_review", lambda *args: {"telemetryFirstPolicy": "fixture"}
+        )
     planned = pilot_cleanup.fallback_plan(runtime_path, runtime, config)
     (create,) = command_plan("scope-create", config, runtime)
     tags = dict(
@@ -3528,11 +3542,16 @@ def test_quota_cleanup_fallback_with_native_operations_disabled(
         "SubprocessRunner",
         lambda **kwargs: type("FixtureTransport", (), {"run": staticmethod(no_cloud)})(),
     )
-    quota_approval = None if scenario in {"missing-approval", "ordinary-expired"} else approval
+    quota_approval = (
+        None
+        if execution_quota or scenario in {"missing-approval", "ordinary-expired"}
+        else approval
+    )
 
     def execute():
         return pilot_cleanup.execute_fallback(
-            runtime_path, runtime, config, quota_approval=quota_approval
+            runtime_path, runtime, config, quota_approval=quota_approval,
+            use_execution_quota_approval=execution_quota,
         )
 
     if expected.startswith("target-"):
@@ -3542,7 +3561,13 @@ def test_quota_cleanup_fallback_with_native_operations_disabled(
         with pytest.raises(CampaignError, match=expected):
             execute()
     deleted = calls.count(tuple(planned["delete"]))
-    assert deleted == (scenario in {"approved", "ordinary-expired", "unknown-delete"})
+    assert deleted == (
+        scenario in {"approved", "execution-approved", "ordinary-expired", "unknown-delete"}
+    )
+    if scenario == "execution-approved":
+        recorded = pilot_cleanup.read(bound / "fallback-delete-intent.json")
+        assert recorded["stopProofSha256"] == pilot_cleanup.file_hash(stop)
+        assert recorded["quotaResponseSha256"] == pilot_cleanup.file_hash(response)
     if scenario == "unknown-delete":
         with pytest.raises(
             CampaignError, match="previous fallback deletion requires native reconciliation"

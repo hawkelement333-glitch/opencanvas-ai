@@ -216,6 +216,7 @@ def validate_review(package: Path, approval: dict) -> dict:
     ):
         raise CampaignError("exact replacement review approval required")
     scanner_policy = review.get("scannerRecoveryPolicy")
+    telemetry_policy = review.get("telemetryFirstPolicy")
     if scanner_policy is not None:
         from infra.milestone_7_8.pilot.scanner_hold import POLICY
 
@@ -227,6 +228,18 @@ def validate_review(package: Path, approval: dict) -> dict:
             "infra/milestone_7_8/pilot/scanner_operator.py",
             "infra/milestone_7_8/pilot_cleanup.py",
         }
+        if telemetry_policy is not None:
+            from infra.milestone_7_8.pilot import telemetry_first
+
+            expected_sources.add("infra/milestone_7_8/pilot/telemetry_first.py")
+            if (
+                telemetry_policy != telemetry_first.POLICY
+                or read(package / "telemetry-first-policy.json") != telemetry_first.POLICY
+                or "telemetry-first-policy.json" not in review["files"]
+                or approval.get("approveExactQuotaFallback") is not True
+            ):
+                raise CampaignError("exact telemetry-first and quota fallback approval required")
+            telemetry_first.validate_release(package)
         if (
             review["schema"] != SIGNUP_REVIEW_SCHEMA
             or scanner_policy != POLICY
@@ -236,6 +249,8 @@ def validate_review(package: Path, approval: dict) -> dict:
             or any(file_hash(ROOT / name) != sha for name, sha in source_bindings.items())
         ):
             raise CampaignError("exact scanner hold policy and operator source required")
+    elif telemetry_policy is not None:
+        raise CampaignError("telemetry-first requires the bound scanner recovery policy")
     approved_window(review, approval)
     return review
 
@@ -262,7 +277,7 @@ def prepare_renewal(package: Path, approval: dict, output: Path) -> None:
     from infra.milestone_7_8.controller_renewal import build_plan
 
     review = validate_review(package, approval)
-    if review["schema"] == SIGNUP_REVIEW_SCHEMA:
+    if review["schema"] == SIGNUP_REVIEW_SCHEMA and "telemetryFirstPolicy" not in review:
         successor_smtp_password(package, approval)
     times = approved_window(review, approval)
     if (
@@ -731,7 +746,15 @@ def stage_parameters(package: Path, directory: Path, stage: str, native: dict) -
                 "opencanvas-observability-operator-user-ids"
             ) != json.dumps([STAGING_OPERATOR_DENY_ALL], separators=(",", ":")):
                 raise CampaignError("approved initial staging allowlist is missing")
-            if read(directory / "window.json")["simulation"] is False:
+            if "telemetryFirstPolicy" in review:
+                secrets = parameters["applicationSecrets"]["value"]
+                if (
+                    parameters["smtpHost"]["value"] != "disabled.mail.invalid"
+                    or secrets.get("opencanvas-smtp-username") != "unused@example.invalid"
+                    or secrets.get("opencanvas-smtp-password") != "unused-no-mail"
+                ):
+                    raise CampaignError("telemetry-first package requires inert mail settings")
+            elif read(directory / "window.json")["simulation"] is False:
                 approval = read(directory / "replacement-approval.json")
                 parameters["applicationSecrets"]["value"]["opencanvas-smtp-password"] = (
                     successor_smtp_password(package, approval)
@@ -811,42 +834,57 @@ def fallback_decision(
 
 
 def quota_fallback_stop(
-    approval_path: Path,
+    approval_path: Path | None,
     runtime_path: Path,
     runtime: dict,
     config: CampaignConfig,
     window_record: dict,
     now: datetime,
-) -> datetime:
-    """Bind an early fallback to this run's stop, quota rejection and separate consent."""
+) -> tuple[datetime, dict[str, str]]:
+    """Bind early fallback to this run's proof stop, quota rejection and approval."""
     from infra.milestone_7_8.operator import command_plan, pilot_cleanup_journal
 
-    approval = read(approval_path)
-    bound = read(runtime_path.parent / "replacement-approval.json")
+    bound_path = runtime_path.parent / "replacement-approval.json"
+    bound = read(bound_path)
     review_sha = bound["reviewPackageSha256"]
     package = Path(window_record["packageDirectory"]).resolve()
     run = package.parent / ("run-" + review_sha[:8])
-    if (
-        approval_path.resolve().parent != run
-        or file_hash(package / "review-package.json") != review_sha
-        or approval.get("approved") is not True
-        or approval.get("reviewPackageSha256") != review_sha
-        or approval.get("targetResourceGroup") != config.target_resource_group
-        or approval.get("automationBinding") != runtime["bindingName"]
-        or approval.get("cleanupDeadlineUtc")
-        != window_record["operatorCleanupExpiresAt"]
-    ):
-        raise CampaignError("separate exact quota fallback approval required")
+    if file_hash(package / "review-package.json") != review_sha:
+        raise CampaignError("quota fallback review differs from the bound runtime")
+    if approval_path is None:
+        review = validate_review(package, bound)
+        if (
+            "telemetryFirstPolicy" not in review
+            or bound.get("approveExactQuotaFallback") is not True
+        ):
+            raise CampaignError("this execution approval does not cover early quota fallback")
+        approval = None
+    else:
+        approval = read(approval_path)
+        if (
+            approval_path.resolve().parent != run
+            or approval.get("approved") is not True
+            or approval.get("reviewPackageSha256") != review_sha
+            or approval.get("targetResourceGroup") != config.target_resource_group
+            or approval.get("automationBinding") != runtime["bindingName"]
+            or approval.get("cleanupDeadlineUtc")
+            != window_record["operatorCleanupExpiresAt"]
+        ):
+            raise CampaignError("separate exact quota fallback approval required")
     stop_path = run / "stop-proof-intent.json"
     stop = read(stop_path)
     stopped_at = parse_utc(stop["atUtc"])
     if (
-        approval.get("stopProofSha256") != file_hash(stop_path)
-        or stop["scheduledCleanupAtUtc"] != window_record["stopProofBy"]
+        stop["scheduledCleanupAtUtc"] != window_record["stopProofBy"]
         or not parse_utc(window_record["executionStartAt"])
         <= stopped_at
-        <= parse_utc(approval["approvedAt"])
         <= now
+        or (
+            approval is not None and (
+                approval.get("stopProofSha256") != file_hash(stop_path)
+                or not stopped_at <= parse_utc(approval["approvedAt"]) <= now
+            )
+        )
     ):
         raise CampaignError("quota fallback does not bind the recorded proof stop")
     journal = pilot_cleanup_journal(runtime)
@@ -861,7 +899,7 @@ def quota_fallback_stop(
     response = read(response_path)
     stderr = response.get("stderr", "")
     if (
-        approval.get("quotaResponseSha256") != file_hash(response_path)
+        (approval is not None and approval.get("quotaResponseSha256") != file_hash(response_path))
         or type(response.get("exitCode")) is not int
         or response["exitCode"] != 1
         or not isinstance(stderr, str)
@@ -870,7 +908,11 @@ def quota_fallback_stop(
         not in stderr
     ):
         raise CampaignError("Automation execution quota rejection is unverified")
-    return stopped_at
+    return stopped_at, {
+        "quotaApprovalSha256": file_hash(approval_path or bound_path),
+        "stopProofSha256": file_hash(stop_path),
+        "quotaResponseSha256": file_hash(response_path),
+    }
 
 
 def execute_fallback(
@@ -879,13 +921,17 @@ def execute_fallback(
     config: CampaignConfig,
     *,
     quota_approval: Path | None = None,
+    use_execution_quota_approval: bool = False,
 ) -> str:
     value = validate_live(runtime_path, runtime, config)
     plan = fallback_plan(runtime_path, runtime, config)
     now = datetime.now(UTC)
     stopped_at = None
-    if quota_approval is not None:
-        stopped_at = quota_fallback_stop(
+    quota_binding = {}
+    if quota_approval is not None and use_execution_quota_approval:
+        raise CampaignError("select exactly one early fallback authority")
+    if quota_approval is not None or use_execution_quota_approval:
+        stopped_at, quota_binding = quota_fallback_stop(
             quota_approval, runtime_path, runtime, config, value, now
         )
     elif now < parse_utc(plan["earliestUtc"]):
@@ -972,9 +1018,8 @@ def execute_fallback(
         "atUtc": utc(datetime.now(UTC)),
         "target": group["id"],
         "binding": plan["controllerBinding"],
+        **quota_binding,
     }
-    if quota_approval is not None:
-        record["quotaApprovalSha256"] = file_hash(quota_approval)
     try:
         write_new(intent, record)
     except FileExistsError as error:
@@ -1004,6 +1049,7 @@ def main() -> None:
         type=Path,
         help="Separate approval for an early fallback after verified Automation quota rejection",
     )
+    fallback.add_argument("--use-execution-quota-approval", action="store_true")
     arm = steps.add_parser("stage-parameters")
     for option in ("package", "directory", "native-values", "output"):
         arm.add_argument("--" + option, type=Path, required=True)
@@ -1051,12 +1097,13 @@ def main() -> None:
         validate_prepared_bundle(args.runtime, rt, cfg)
         if args.execute:
             result = execute_fallback(
-                args.runtime, rt, cfg, quota_approval=args.quota_approval
+                args.runtime, rt, cfg, quota_approval=args.quota_approval,
+                use_execution_quota_approval=args.use_execution_quota_approval,
             )
             print(json.dumps({"status": result}))
         else:
-            if args.quota_approval is not None:
-                fallback.error("--quota-approval requires --execute")
+            if args.quota_approval is not None or args.use_execution_quota_approval:
+                fallback.error("early fallback authorization options require --execute")
             output = fallback_plan(args.runtime, rt, cfg)
             print(
                 json.dumps(

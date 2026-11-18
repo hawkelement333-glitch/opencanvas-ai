@@ -19,6 +19,7 @@ import httpx
 
 from infra.milestone_7_8.azure_cli import AzureCliLauncher
 from infra.milestone_7_8.campaign import CampaignConfig, CampaignError, parse_utc, utc
+from infra.milestone_7_8.pilot import telemetry_first
 from infra.milestone_7_8.pilot.pack_execution import pack
 from infra.milestone_7_8.pilot.scanner_hold import POLICY, ProofOperator
 from infra.milestone_7_8.pilot.scanner_operator import (
@@ -79,6 +80,7 @@ class Campaign:
             for k in ("sourceCommit", "imageDigest", "release", "deployment")
         }
         self.model = model
+        self.telemetry_first = review.get("telemetryFirstPolicy") == telemetry_first.POLICY
         self.policy = ProofOperator(
             self.run,
             self.window,
@@ -855,6 +857,8 @@ def destination_readiness(context):
     if (context.run / "scanner-hold.json").exists():
         context.policy.require_hold()
         cutoff = context.policy.stop_by
+    elif getattr(context, "telemetry_first", False):
+        cutoff = context.policy.stop_by
     else:
         cutoff = context.policy.core_by
     if context.policy.clock() >= cutoff:
@@ -939,7 +943,10 @@ def operate(context, action, *, stop_reason=None):
         return context.cleanup("scheduled-proof-stop")
     if (context.run / "stop-proof-intent.json").exists():
         raise CampaignError("proof already stopped; reconcile the exact cleanup path")
-    if action == "gate":
+    telemetry_first_enabled = getattr(context, "telemetry_first", False)
+    if not telemetry_first_enabled and action == "telemetry-first":
+        raise CampaignError("telemetry-first requires its separately approved package")
+    if action == "gate" and not telemetry_first_enabled:
         if context.policy.clock() < context.policy.core_by:
             raise CampaignError(
                 "evaluate the core and destination gate at its bound cutoff"
@@ -970,6 +977,17 @@ def operate(context, action, *, stop_reason=None):
         context.admit()
     except (ValueError, OSError, KeyError, CampaignError):
         return context.cleanup("cleanup-protection-lost")
+    if telemetry_first_enabled and action != "telemetry-first":
+        try:
+            next_stage = telemetry_first.route(context)
+        except (ValueError, TypeError, OSError, KeyError, CampaignError):
+            return context.cleanup("privacy-or-integrity-failure")
+        if next_stage == "telemetry-first-required":
+            if context.policy.clock() >= context.policy.core_by:
+                return context.cleanup("readiness-missed-without-scanner-hold")
+            return next_stage
+        if action == "gate":
+            return next_stage
     if action in {"diagnose", "repair", "core-retry"}:
         context.policy.require_hold()
     if action == "repair":
@@ -978,6 +996,7 @@ def operate(context, action, *, stop_reason=None):
         "diagnose": "scanner-diagnostic",
         "repair": "scanner-repair",
         "destination-readiness": "destination-readiness",
+        "telemetry-first": "telemetry-first",
         "account": "proof-account",
         "account-recovery": "proof-account-recovery",
         "core": "proof-core",
@@ -995,6 +1014,8 @@ def operate(context, action, *, stop_reason=None):
             return collect_and_repair(context, repair=action == "repair")
         if action == "destination-readiness":
             return destination_readiness(context)
+        if action == "telemetry-first":
+            return telemetry_first.run(context, validate_destination_sample, NativeFailure)
         status = dispatch_proof(context, action, resume_path)
         if status == "scanner-paused":
             return "scanner-paused-run-diagnose-and-destination-readiness"
@@ -1010,7 +1031,7 @@ def operate(context, action, *, stop_reason=None):
             )
             or (
                 action == "destination-readiness"
-                and (context.run / "scanner-hold.json").exists()
+                and (telemetry_first_enabled or (context.run / "scanner-hold.json").exists())
             )
         ):
             return "read-unproved-independent-operations-remain-available"
@@ -1037,6 +1058,7 @@ def main():
             "repair",
             "core-retry",
             "destination-readiness",
+            "telemetry-first",
             "gate",
             "stop",
         ),
