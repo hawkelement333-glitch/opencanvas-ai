@@ -122,9 +122,9 @@ def stage_artifact() -> None:
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w") as output:
         for name, data in sorted(entries.items()):
-            output.writestr(
-                zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0)), data
-            )
+            info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+            info.create_system = 3
+            output.writestr(info, data)
     raw = stream.getvalue()
     expected = os.environ["M78_PILOT_ARTIFACT_SHA256"]
     checked_zip(raw, expected)

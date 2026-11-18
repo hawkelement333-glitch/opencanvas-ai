@@ -289,10 +289,50 @@ def configure_client_profile(
     route = ET.SubElement(ET.SubElement(config, "includeroutes"), "route")
     ET.SubElement(route, "destination").text = "10.79.0.0"
     ET.SubElement(route, "mask").text = "16"
-    if namespace:
-        for node in root.iter():
-            node.tag = "{" + namespace + "}" + node.tag
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    if not namespace:
+        return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+    # The Windows importer rejected a whole-document reserialization of the
+    # native DataContract profile. Preserve its declaration and native markup.
+    # Patch only the two allowed sections and verify the complete parsed shape.
+    source = raw.decode("utf-8-sig")
+    config_xml = ET.tostring(config, encoding="unicode")
+    updated, count = re.subn(
+        r'<clientconfig(?:\s+i:nil="true")?\s*/>|<clientconfig(?:\s[^>]*)?>.*?</clientconfig>',
+        lambda _: config_xml,
+        source,
+        flags=re.DOTALL,
+    )
+    if count != 1:
+        raise ValueError("exact native client configuration section required")
+    if "<applicationid>" in updated:
+        updated, count = re.subn(
+            r"<applicationid>[^<]*</applicationid>",
+            f"<applicationid>{MICROSOFT_CLIENT}</applicationid>",
+            updated,
+        )
+    else:
+        count = updated.count("</aad>")
+        updated = updated.replace(
+            "</aad>", f"<applicationid>{MICROSOFT_CLIENT}</applicationid></aad>"
+        )
+    if count != 1:
+        raise ValueError("exact native client application binding required")
+    # Compare semantic XML while accepting insignificant indentation changes.
+    proposed = ET.fromstring(updated)
+    for node in proposed.iter():
+        if not node.tag.startswith("{" + namespace + "}"):
+            raise ValueError("mixed native profile schema namespaces")
+        node.tag = node.tag.split("}", 1)[1]
+    for tree in (proposed, root):
+        for node in tree.iter():
+            if node.text is not None and not node.text.strip():
+                node.text = None
+            if node.tail is not None and not node.tail.strip():
+                node.tail = None
+    if ET.tostring(proposed) != ET.tostring(root):
+        raise ValueError("native profile markup changed outside bound fields")
+    return (b"\xef\xbb\xbf" if raw.startswith(b"\xef\xbb\xbf") else b"") + updated.encode("utf-8")
 
 
 def validate_cleanup(counters: dict[str, int]) -> None:

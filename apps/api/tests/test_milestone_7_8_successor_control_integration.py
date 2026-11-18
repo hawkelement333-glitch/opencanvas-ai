@@ -28,12 +28,14 @@ def native_profile():
 
 
 def test_native_datacontract_namespace_and_server_trust_are_preserved():
-    original = ET.fromstring(native_profile())
-    configured = ET.fromstring(
-        configure_client_profile(
-            native_profile(), TENANT, AUDIENCE, "fixture.vpn.azure.com", [".blob.core.windows.net"]
-        )
+    native = b'<?xml version="1.0" encoding="utf-8"?>\r\n' + native_profile()
+    original = ET.fromstring(native)
+    configured_bytes = configure_client_profile(
+        native, TENANT, AUDIENCE, "fixture.vpn.azure.com", [".blob.core.windows.net"]
     )
+    # The Windows importer requires the native DataContract serialization.
+    assert configured_bytes.split(b"<clientauth>", 1)[0] == native.split(b"<clientauth>", 1)[0]
+    configured = ET.fromstring(configured_bytes)
 
     def path(value):
         return "/".join("{" + NATIVE + "}" + part for part in value.split("/"))

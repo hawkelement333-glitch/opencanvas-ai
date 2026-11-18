@@ -10,6 +10,13 @@ The [completed managed object/scanner continuation](MILESTONE_7_8_MANAGED_OBJECT
 and ledger finalized. Its approved 900-second/20-second amendment applied only
 to new requests in that proof; prior 300-second failures remain historical failures.
 
+The [bootstrap successor execution](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#bootstrap-successor-execution-result) verified normal bootstrap, migration,
+exact signed-image deployment, private routing and both corrected native alert
+rules. Core and destination evidence missed readiness, so 7.8 is still
+incomplete. The controller was preserved and 46 of 48 cleanup counters were
+verified zero. Gmail credential revocation and restricted browser-window
+closure await owner confirmation.
+
 Date: 2026-07-27
 
 Historical entry status verified 2026-08-13: checkpoints 7.1–7.7 are complete and

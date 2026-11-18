@@ -488,3 +488,72 @@ a proposed $49.75 execution ceiling. The $19 exposure reserve brings the
 combined proposal to $68.75 and cumulative ceiling to $419.64. The requested
 increase is $10 over the last approved cumulative ceiling. Any execution
 requires separate approval of the sealed package and fresh deadlines.
+
+## Bootstrap successor execution result
+
+**Milestone 7.8 remains incomplete.** Package
+`15305be1354ee6898baa400e88b4c09275e7c7f1a9c36d450e41ce1af6dfc13f`
+used source `73023ec797dc883b073b11411e736a27c360f467`. PostgreSQL,
+M78-D-001 and M78-D-002 remain closed. Earlier failed attempts and accepted
+observations remain in the record.
+
+Approval was recorded at `2026-11-17T23:41:41Z` and execution started at the
+first strictly subsequent whole minute, `2026-11-17T23:42:00Z`. The sealed
+deadlines were readiness `2026-11-18T01:42:00Z`, proof stop and scheduled
+cleanup `09:42:00Z`, Automation expiry `10:42:00Z` and operator cleanup
+`11:42:00Z` on November 18. Core and destination readiness were unproved at
+the first deadline. The operator stopped new proof and invoked early cleanup
+under the existing authority. No deadline was extended.
+
+| Existing observation or operation | Native result and limits |
+|---|---|
+| Cleanup admission and foundation | **Accepted.** The exact schedule and runbook binding were read back and armed before workload provisioning. The native foundation, jobs and application deployments succeeded. The private Canada Central vault passed the purge-compatible readback. |
+| Corrected alert creation | **Accepted.** Exact native readback matched `api-latency-v1` and `database-saturation-v1` queries and criteria with `skipQueryValidation=false`. The 16 firing/recovery pairs remain unproved. |
+| Signed images | The retained API and frontend indexes were published and verified. Native API and frontend resource readbacks matched both sealed indexes in the private environment. Five detached endorsements were reverified. The bounded ACR exception was closed and the registry returned to private access. No images were rebuilt. |
+| Normal bootstrap and migration | **Accepted.** `caj-m78p-a712b8c940-bootstrap-491oyxk` completed with the provisioning role. `caj-m78p-a712b8c940-migration-52kfosq` completed with the migration role. The guarded bootstrap retry was unused. |
+| Private operator route and initial application readback | **Accepted for connectivity.** The native VPN client connected after the native XML layout was preserved. The exact split route and 12 DNS suffix bindings were observed, with private TLS to API, frontend, storage and Log Analytics. The frontend returned HTTP 200 with HTML and the API returned HTTP 200 for the staging runtime. Restricted-user sign-in and MFA were owner-confirmed. Workbooks, query revoke/restore and destination export remain unproved. |
+| Application account artifact | The initial archive exceeded the unchanged 2,000,000-byte limit before job dispatch. A lossless compact representation of the native bindings fit. `caj-m78p-a712b8c940-artifact-v06ewvl` then failed the reconstructed ZIP hash check before Blob PUT because Windows and Linux supplied different ZIP platform metadata. With deterministic metadata, `caj-m78p-a712b8c940-artifact-v1riik8` staged successfully, with exact version and hash retained. |
+| Account signup and API readiness | **Signup failed.** `caj-m78p-a712b8c940-evidence-qpfnqo1` timed out on the initial signup POST. Native console and replica observations tied startup failure to an empty operator allowlist in the staging configuration. An explicitly approved change supplied one reserved UUID outside the generated user ID space, with no operator grant. The new vault secret version was read back, affected revisions refreshed and private API readiness returned HTTP 200. |
+| Signup reconciliation | The first job-start override was rejected before execution because it included `volumes: null`. Omitting that field allowed one read-only execution, `caj-m78p-a712b8c940-migration-sw49nqc`. The operator's query counted all rows, including the migration's known seed ID, and returned one. That count did not establish the identity of the row or absence of a signup effect. The retry guard held. A corrected filtered observation and signup retry were never dispatched. |
+| Remaining application proof | **Unproved.** No accepted account or core receipt. Destination signals/privacy, dashboards, alert delivery/recovery, worker and external delivery, password reset, restore and rollback, capacity/faults, remaining infrastructure diagnostics and the real-stack editable-AI scenarios remain open. No email or model request was sent, and no embedding usage was incurred. See the [finite closure ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md#existing-criteria-and-disposition) for exact remaining observations. |
+| Cleanup | The exact Automation ARM job `823f3b34-8777-44fd-9f3f-a430920b8e9f` completed and its target group was verified absent. The operator ledger is `cleanup-disarmed`. The Canada Central vault and the temporary Entra objects were purged. The managed infrastructure group, five scoped roles, schedule and binding, and campaign VPN profile, routes, DNS policy and import files are absent. The reusable controller was preserved. **46 of 48 cleanup counters are verified zero.** Gmail credential revocation and closure of the restricted Entra browser window await owner confirmation. Both counters are explicitly unverified. |
+
+The checkpoint stabilizes ZIP metadata across Windows and Linux in the host
+packer and runtime reconstructor. It preserves native VPN XML serialization
+outside the bound DNS, split-route and client identity fields. Five focused
+tests and lint passed, including paired archive staging and resolved VPN
+namespace and trust cases. These are local controls. A future package would
+need to stage bounded compact bindings, validate the initial operator
+allowlist against the signed runtime and reconcile signup against the exact
+migration seed before authorizing a retry. No timeout or assertion was relaxed.
+
+Billing remains **unsettled**. The complete scoped ActualCost read returned 43 posted rows and a target-scope total of $0.878883172874073911 USD. The exact target ID was reused, so the query cannot allocate this total to the successor attempt. The $39.4128 forecast, $49.75 execution ceiling, $19 prior exposure reserve, $68.75 combined ceiling and $419.64 cumulative ceiling remain as approved. No additional execution or allowance is implied.
+
+Private evidence and the unchanged approved package remain outside Git under
+`.runtime/milestone_7_8/full-closure-prerequisites/`. Run evidence is in
+`run-15305be1/`, with the exact operator bundle in
+`.runtime/milestone_7_8/cbs/`. The retained signatures, image archives,
+controller and all five protected stashes are preserved.
+
+| Receipt relative to the private run directory | SHA-256 |
+|---|---|
+| `azure-cleanup-terminal.json` | `220b955d691e8c6e3a223b62e4b5acd51fb9eb34c55a960a185bead006e11851` |
+| `bootstrap-migration-accepted.json` | `4e286cf069fa156797c96b8d1a93765b4139abfad7805b4b500ee63251e242ce` |
+| `corrected-alert-native-admission/accepted.json` | `5499d828a17a216a0e0ca79051b36fa2df7131cfd0289c645689cdc7ab69bc22` |
+| `native-admission-readbacks/cleanup-protection-accepted.json` | `e340e9476b3be417871f4531c9406ff86f2d853f430fa78c7adbe8370d87121b` |
+| `native-image-deployment-readback.json` | `06ce29cd3d0a0291e24fb0bf500f5e7cfd7eaea80cfacad3e78183662cb997cd` |
+| `operator-list-reconciliation/correction-review.json` | `d4a26ed34c50b75050e24beb659f94bfee4c2a604bd5d2cf1b41c9b8c306c535` |
+| `operator-list-reconciliation/native-ready.json` | `37da7b9d73932a40661e187adb9cd9c846ee0151c2fbc189624dc89ec8337353` |
+| `operator-list-reconciliation/native-user-count.json` | `35dca123fbbe60bdc3d937d4c77bc3945f0d05c2be4aed21198c067fd2e0573e` |
+| `operator-list-reconciliation/signup-count-correction-review.json` | `67ab600db9f6c75769d7774f1a03da4a8b0597e5864e0a6361b5271672a3dc3d` |
+| `private-frontend-readback.json` | `77f8135eb94188d71cc650bbbfc19a07ea455dec24eb7ac8bd9a8c6eae014637` |
+| `proof-account-linuxzip/artifact-version-binding.json` | `a482e56680dfdcd23bbe464cbdff9f93fe7c5b67196621843da4be1eb9e588df` |
+| `proof-account-linuxzip/failure-export/export-manifest.json` | `44c44fe7f70aceb5b521ef706fd2527b54de52b04143a2efeb1ee22c0d9aca5e` |
+| `proof-account/artifact-terminal.json` | `48588d9d015aa7f59d1c72e206609cf0acf58eb6eda2b789e53b8a3d9d8700f8` |
+| `proof-account/minified-pack-measure.json` | `383ebaad8e22d94d0e293204cf9aeb30fd1a9a627949213e0a802b5a66b6d78f` |
+| `signed-publication/private-network-restored.json` | `9885de42538820a7901512a5680457d4e4a655b232b1e33fc612e9d0ccfe32ef` |
+| `stop-proof-intent.json` | `ad7f6e890a1bd1553ab09385430a4db1e9250f73f6d2040659fa571c5291433c` |
+| `terminal-cost-summary.json` | `91f52058e1218606aacc156c00868c4db1cf414d4a1e8f852e6ceb892e6e97b7` |
+| `verified-residue-owner-pending.json` | `b5d514620742a048ca7e376dfa1ce7d5eeb32db346cb81a7eb963c6fb532f77b` |
+| `vpn/private-route-admission/accepted.json` | `33b0d6d2748630d1e4b21b7edc615f612459ba1541f878a29054dddcb780235a` |
+| `terminal-results.json` | `acdf5ca22024f2c877b1cdb9ff6e8ebab8c6a1e4dc0b33a968f40f628a548855` |

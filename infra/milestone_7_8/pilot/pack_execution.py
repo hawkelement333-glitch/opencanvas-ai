@@ -30,6 +30,8 @@ def archive(entries: dict[str, bytes], *, compressed: bool = False) -> bytes:
     with zipfile.ZipFile(target, "w") as output:
         for name, data in sorted(entries.items()):
             info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+            # Match the Linux Container Apps runtime ZIP platform metadata.
+            info.create_system = 3
             info.compress_type = (
                 zipfile.ZIP_LZMA if compressed else zipfile.ZIP_STORED
             )
