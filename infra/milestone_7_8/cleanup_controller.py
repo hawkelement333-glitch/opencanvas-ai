@@ -290,7 +290,7 @@ def load_execution_authorization(
     authority_expiry = parse_utc(runtime["cleanupAuthorityExpiresUtc"])
     if (
         "pilotCleanupWindowFile" in runtime
-        and config.maximum_hours == 10
+        and config.maximum_hours in {10, 11}
         and operation in {"cleanup-wait", "cleanup-disarm"}
         and set(operations) <= {"cleanup-wait", "cleanup-disarm"}
     ):

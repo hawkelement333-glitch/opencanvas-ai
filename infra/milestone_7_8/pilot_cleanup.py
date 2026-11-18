@@ -41,7 +41,9 @@ CAMPAIGN = f"m78-full-closure-{SUFFIX}"
 GENERATION = f"g1-{SUFFIX}00"
 MINUTE_REVIEW_SCHEMA = "m78-full-closure-regional-minute-v1"
 ALERT_REPAIR_REVIEW_SCHEMA = "m78-full-closure-alert-repair-v1"
-MINUTE_REVIEW_SCHEMAS = {MINUTE_REVIEW_SCHEMA, ALERT_REPAIR_REVIEW_SCHEMA}
+SIGNUP_REVIEW_SCHEMA = "m78-full-closure-signup-recovery-v1"
+MINUTE_REVIEW_SCHEMAS = {MINUTE_REVIEW_SCHEMA, ALERT_REPAIR_REVIEW_SCHEMA, SIGNUP_REVIEW_SCHEMA}
+RESERVE_REVIEW_SCHEMAS = {ALERT_REPAIR_REVIEW_SCHEMA, SIGNUP_REVIEW_SCHEMA}
 MINUTE_START_RULE = "first-whole-utc-minute-after-approval"
 OPERATIONS = (
     "preflight",
@@ -70,7 +72,10 @@ def file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def window(approved_at: str, execution_start_at: str | None = None) -> dict[str, str]:
+def window(
+    approved_at: str, execution_start_at: str | None = None, *,
+    signup_recovery: bool = False,
+) -> dict[str, str]:
     receipt = parse_utc(approved_at)
     start = receipt
     values = {"approvedAt": utc(receipt)}
@@ -81,15 +86,18 @@ def window(approved_at: str, execution_start_at: str | None = None) -> dict[str,
         values["executionStartAt"] = execution_start_at
     elif receipt.microsecond:
         raise CampaignError("approval timestamp must resolve to whole seconds")
+    stop = 11 if signup_recovery else 10
     values.update({
         key: utc(start + timedelta(hours=hours))
         for key, hours in (
             ("readyBy", 2),
-            ("stopProofBy", 10),
-            ("automationBindingExpiresAt", 11),
-            ("operatorCleanupExpiresAt", 12),
+            ("stopProofBy", stop),
+            ("automationBindingExpiresAt", stop + 1),
+            ("operatorCleanupExpiresAt", stop + 2),
         )
     })
+    if signup_recovery:
+        values["coreReadyBy"] = utc(start + timedelta(hours=3))
     return values
 
 
@@ -103,7 +111,10 @@ def approved_window(review: dict, approval: dict) -> dict[str, str]:
             raise CampaignError("explicit whole-minute execution start required")
     elif execution_start_at is not None:
         raise CampaignError("unexpected execution start for historical review")
-    return window(approval["approvedAt"], execution_start_at)
+    return window(
+        approval["approvedAt"], execution_start_at,
+        signup_recovery=review["schema"] == SIGNUP_REVIEW_SCHEMA,
+    )
 
 
 def binding_name(deadline: str) -> str:
@@ -117,9 +128,12 @@ def validate_window(runtime_path: Path, runtime: dict, config: CampaignConfig) -
     if path != runtime_path.resolve().with_name("window.json"):
         raise CampaignError("pilot cleanup window escaped its bound runtime")
     value = read(path)
-    expected = window(value["approvedAt"], value.get("executionStartAt"))
+    signup_recovery = config.maximum_hours == 11
+    expected = window(
+        value["approvedAt"], value.get("executionStartAt"), signup_recovery=signup_recovery,
+    )
     if any(value.get(k) != v for k, v in expected.items()):
-        raise CampaignError("pilot cleanup deadlines must be +2/+10/+11/+12")
+        raise CampaignError("pilot cleanup deadlines differ from the recorded window")
     if (
         (config.campaign_id, config.generation_id, config.target_resource_group)
         != (CAMPAIGN, GENERATION, TARGET)
@@ -128,8 +142,8 @@ def validate_window(runtime_path: Path, runtime: dict, config: CampaignConfig) -
         or config.target_region not in {"eastus", "canadacentral"}
         or config.postgres_region != config.target_region
         or value.get("targetRegion", "eastus") != config.target_region
-        or config.maximum_hours != 10
-        or config.authorized_ceiling_usd != "50.00"
+        or config.maximum_hours not in {10, 11}
+        or config.authorized_ceiling_usd != ("56.51" if signup_recovery else "50.00")
         or config.cleanup_deadline_utc != expected["stopProofBy"]
         or runtime["cleanupAuthorityExpiresUtc"]
         != expected["automationBindingExpiresAt"]
@@ -149,7 +163,7 @@ def validate_review(package: Path, approval: dict) -> dict:
         forecast = review.get("forecastUsd")
         region_valid = (
             type(forecast) in {int, float}
-            and 0 < forecast <= 50
+            and 0 < forecast <= (56.51 if schema == SIGNUP_REVIEW_SCHEMA else 50)
             and forecast == pricing.get("forecastUsd")
             and review.get("targetRegion") == "canadacentral"
             and review.get("redisRegion") == "eastus"
@@ -165,7 +179,7 @@ def validate_review(package: Path, approval: dict) -> dict:
             and review.get("forecastUsd") == 36.6423
         )
     cumulative_valid = review.get("proposedCumulativeCeilingUsd") == 400.89
-    if schema == ALERT_REPAIR_REVIEW_SCHEMA:
+    if schema in RESERVE_REVIEW_SCHEMAS:
         reconciliation = read(package / "cost-reconciliation.json")
         try:
             reserve = Decimal(str(review["priorAttemptReserveUsd"]))
@@ -174,7 +188,7 @@ def validate_review(package: Path, approval: dict) -> dict:
             cumulative = Decimal("350.89") + combined
             cumulative_valid = (
                 reserve.is_finite()
-                and allowance == Decimal("49.75")
+                and allowance == Decimal("56.51" if schema == SIGNUP_REVIEW_SCHEMA else "49.75")
                 and reserve > 0
                 and combined == Decimal(str(review["combinedCeilingUsd"]))
                 and cumulative == Decimal(str(review["proposedCumulativeCeilingUsd"]))
@@ -193,7 +207,7 @@ def validate_review(package: Path, approval: dict) -> dict:
         or approval.get("reviewPackageSha256") != file_hash(review_path)
         or approval.get("sourceHead") != review["sourceCommit"]
         or not region_valid
-        or review.get("incrementalCeilingUsd") != 50
+        or review.get("incrementalCeilingUsd") != (56.51 if schema == SIGNUP_REVIEW_SCHEMA else 50)
         or not cumulative_valid
         or any(
             file_hash(package / name) != sha for name, sha in review["files"].items()
@@ -204,10 +218,25 @@ def validate_review(package: Path, approval: dict) -> dict:
     return review
 
 
+def successor_smtp_password(package: Path, approval: dict) -> str:
+    path = package.parent / "smtp-signup-successor.private.json"
+    if not path.is_file() or file_hash(path) != approval.get("smtpCredentialSha256"):
+        raise CampaignError("replacement Gmail credential must be supplied and privately bound")
+    value = read(path)
+    if set(value) != {"password"} or not isinstance(value["password"], str):
+        raise CampaignError("replacement Gmail credential file is malformed")
+    password = value["password"].replace(" ", "")
+    if len(password) != 16 or not password.isascii() or not password.isalpha():
+        raise CampaignError("replacement Gmail app password must be 16 ASCII letters")
+    return password
+
+
 def prepare_renewal(package: Path, approval: dict, output: Path) -> None:
     from infra.milestone_7_8.controller_renewal import build_plan
 
     review = validate_review(package, approval)
+    if review["schema"] == SIGNUP_REVIEW_SCHEMA:
+        successor_smtp_password(package, approval)
     times = approved_window(review, approval)
     if (
         not parse_utc(times.get("executionStartAt", times["approvedAt"]))
@@ -430,10 +459,15 @@ def materialize(
             raise CampaignError(
                 "offline rehearsal requires the exact retained controller"
             )
-        start = parse_utc(controller.controller_authorized_until_utc) - timedelta(hours=11)
+        signup_recovery = review["schema"] == SIGNUP_REVIEW_SCHEMA
+        start = parse_utc(controller.controller_authorized_until_utc) - timedelta(
+            hours=12 if signup_recovery else 11
+        )
         if review["schema"] in MINUTE_REVIEW_SCHEMAS:
             start = start.replace(second=0, microsecond=0)
-            values = window(utc(start - timedelta(seconds=1)), utc(start))
+            values = window(
+                utc(start - timedelta(seconds=1)), utc(start), signup_recovery=signup_recovery,
+            )
         else:
             values = window(utc(start))
     else:
@@ -475,7 +509,7 @@ def materialize(
         bindingName=binding_name(deadline),
     )
     config_model = CampaignConfig.from_document(config, allow_expired=simulation)
-    if review["schema"] == ALERT_REPAIR_REVIEW_SCHEMA and (
+    if review["schema"] in RESERVE_REVIEW_SCHEMAS and (
         Decimal(config_model.conservative_estimate_usd)
         > Decimal(str(review["successorExecutionAllowanceUsd"]))
     ):
@@ -551,8 +585,8 @@ def materialize(
             "cleanupDeadlineUtc": deadline,
             "expiresAtUtc": values["automationBindingExpiresAt"],
             "allowedOperations": list(OPERATIONS),
-            "authorizedCeilingUsd": "50.00",
-            "maximumHours": 10,
+            "authorizedCeilingUsd": config_model.authorized_ceiling_usd,
+            "maximumHours": config_model.maximum_hours,
         }
         write_new(
             directory / "operator-approval.json",
@@ -663,6 +697,18 @@ def stage_parameters(package: Path, directory: Path, stage: str, native: dict) -
                 "parameters"
             ]
         )
+        if review.get("schema") == SIGNUP_REVIEW_SCHEMA:
+            from infra.milestone_7_8.signup_reconcile import STAGING_OPERATOR_DENY_ALL
+
+            if parameters["applicationSecrets"]["value"].get(
+                "opencanvas-observability-operator-user-ids"
+            ) != json.dumps([STAGING_OPERATOR_DENY_ALL], separators=(",", ":")):
+                raise CampaignError("approved initial staging allowlist is missing")
+            if read(directory / "window.json")["simulation"] is False:
+                approval = read(directory / "replacement-approval.json")
+                parameters["applicationSecrets"]["value"]["opencanvas-smtp-password"] = (
+                    successor_smtp_password(package, approval)
+                )
     template = read(package / "compiled/pilot.json")
     declarations = template["parameters"]
     if set(parameters) - set(declarations) or any(

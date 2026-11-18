@@ -21,7 +21,7 @@ from infra.milestone_7_8.azure_cli import (
 )
 
 HARD_CEILING: Final = Decimal("50.00")
-CAMPAIGN_PROOF_WINDOWS: Final = (4, 8, 10)
+CAMPAIGN_PROOF_WINDOWS: Final = (4, 8, 10, 11)
 DEFAULT_ESTIMATE: Final = Decimal("25.6832")
 CAMPAIGN_PATTERN: Final = re.compile(r"^[a-z][a-z0-9-]{7,47}$")
 GENERATION_PATTERN: Final = re.compile(r"^g[1-9][0-9]{0,5}-[a-f0-9]{12}$")
@@ -269,6 +269,14 @@ class CampaignConfig:
             raise CampaignError("campaign cost ceiling is not a recorded approved limit")
         if type(self.maximum_hours) is not int or self.maximum_hours not in CAMPAIGN_PROOF_WINDOWS:
             raise CampaignError("campaign maximum hours is not a recorded approved window")
+        if self.maximum_hours == 11 and (
+            self.campaign_id != "m78-full-closure-a712b8c940"
+            or self.generation_id != "g1-a712b8c94000"
+            or self.target_resource_group != "rg-m78-a712b8c940-target"
+            or self.target_region != "canadacentral"
+            or self.authorized_ceiling_usd != "56.51"
+        ):
+            raise CampaignError("extended signup-recovery window requires its exact campaign and ceiling")
         if CAMPAIGN_PATTERN.fullmatch(self.campaign_id) is None:
             raise CampaignError("campaign identity is malformed")
         if GENERATION_PATTERN.fullmatch(self.generation_id) is None:

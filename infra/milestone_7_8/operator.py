@@ -5190,7 +5190,7 @@ def start_direct_cleanup(
 
 
 def required_pilot_regional_providers(config: CampaignConfig) -> tuple[str, ...]:
-    if config.target_region == "canadacentral" and config.maximum_hours == 10:
+    if config.target_region == "canadacentral" and config.maximum_hours in {10, 11}:
         return ("Microsoft.EventHub", "Microsoft.KeyVault")
     return ()
 

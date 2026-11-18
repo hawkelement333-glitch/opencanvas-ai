@@ -513,7 +513,7 @@ under the existing authority. No deadline was extended.
 | Normal bootstrap and migration | **Accepted.** `caj-m78p-a712b8c940-bootstrap-491oyxk` completed with the provisioning role. `caj-m78p-a712b8c940-migration-52kfosq` completed with the migration role. The guarded bootstrap retry was unused. |
 | Private operator route and initial application readback | **Accepted for connectivity.** The native VPN client connected after the native XML layout was preserved. The exact split route and 12 DNS suffix bindings were observed, with private TLS to API, frontend, storage and Log Analytics. The frontend returned HTTP 200 with HTML and the API returned HTTP 200 for the staging runtime. Restricted-user sign-in and MFA were owner-confirmed. Workbooks, query revoke/restore and destination export remain unproved. |
 | Application account artifact | The initial archive exceeded the unchanged 2,000,000-byte limit before job dispatch. A lossless compact representation of the native bindings fit. `caj-m78p-a712b8c940-artifact-v06ewvl` then failed the reconstructed ZIP hash check before Blob PUT because Windows and Linux supplied different ZIP platform metadata. With deterministic metadata, `caj-m78p-a712b8c940-artifact-v1riik8` staged successfully, with exact version and hash retained. |
-| Account signup and API readiness | **Signup failed.** `caj-m78p-a712b8c940-evidence-qpfnqo1` timed out on the initial signup POST. Native console and replica observations tied startup failure to an empty operator allowlist in the staging configuration. An explicitly approved change supplied one reserved UUID outside the generated user ID space, with no operator grant. The new vault secret version was read back, affected revisions refreshed and private API readiness returned HTTP 200. |
+| Account signup and API readiness | **Signup outcome unknown.** `caj-m78p-a712b8c940-evidence-qpfnqo1` timed out on the initial signup POST. Native console and replica observations tied startup failure to an empty operator allowlist in the staging configuration. An explicitly approved change supplied one reserved UUID outside the generated user ID space, with no operator grant. The new vault secret version was read back, affected revisions refreshed and private API readiness returned HTTP 200. |
 | Signup reconciliation | The first job-start override was rejected before execution because it included `volumes: null`. Omitting that field allowed one read-only execution, `caj-m78p-a712b8c940-migration-sw49nqc`. The operator's query counted all rows, including the migration's known seed ID, and returned one. That count did not establish the identity of the row or absence of a signup effect. The retry guard held. A corrected filtered observation and signup retry were never dispatched. |
 | Remaining application proof | **Unproved.** No accepted account or core receipt. Destination signals/privacy, dashboards, alert delivery/recovery, worker and external delivery, password reset, restore and rollback, capacity/faults, remaining infrastructure diagnostics and the real-stack editable-AI scenarios remain open. No email or model request was sent, and no embedding usage was incurred. See the [finite closure ledger](MILESTONE_7_8_FULL_CLOSURE_LEDGER.md#existing-criteria-and-disposition) for exact remaining observations. |
 | Cleanup | The exact Automation ARM job `823f3b34-8777-44fd-9f3f-a430920b8e9f` completed and its target group was verified absent. The operator ledger is `cleanup-disarmed`. The Canada Central vault and the temporary Entra objects were purged. The managed infrastructure group, five scoped roles, schedule and binding, and campaign VPN profile, routes, DNS policy and import files are absent. The reusable controller was preserved. **All 48 cleanup counters are verified zero.** The final two counters were closed by the owner confirming that the restricted Entra window was closed and that the campaign Gmail app password was revoked and absent. |
@@ -560,3 +560,48 @@ controller and all five protected stashes are preserved.
 | `owner-terminal-access-receipt.json` | `ad7d9490e2f0ac9b5886af959d255dec3a3d40823a815dc291042a88ea368fcd` |
 | `verified-full-residue.json` | `03800163293644dfc1702a2b657d8c014f2ecf2bda5e98d98f272bab01504b50` |
 | `terminal-results-cleanup-complete.json` | `85bab905a547062209540bc0606eb5ff75c71925b36bbbb80ea4ec2bd009859d` |
+
+## Prepared signup recovery successor
+
+The successor stages the approved deny-all operator allowlist from the first
+deployment. The account probe must receive HTTP 200 and the expected service
+and readiness fields from the bound private API before issuing a signup.
+The signed API and frontend images are reused. Accepted bootstrap, migration,
+VPN and corrected alert creation remain credited. A fresh isolated target
+still needs its normal startup and private route readbacks.
+
+After a new signup POST times out, preserve its intent and verify that the
+exact evidence execution is terminal. The scoped recovery stops the isolated
+API and worker with the dispatcher paused. The retained migration job reads
+one consistent, read-only PostgreSQL snapshot. It checks the migration seed
+and exact bound primary and secondary account identities, plus the committed
+session, workspace, membership and owner transition, authority, audit and
+trace records, domain event, provenance and outbox row. A partial or
+contradictory record, an unexpected identity or an unfenced writer blocks
+continuation. When the snapshot has only the migration seed and the writers
+are fenced, the absent signup may be retried. A complete existing account is
+reused through sign-in and exact ID comparison. A complete primary and absent
+secondary permit sign-in to the primary and creation only of the secondary.
+The old POST remains unknown because its original database was cleaned up.
+
+The prior run admitted bootstrap and migration at +43m56s, application
+activation at +48m31s, private VPN at +48m50s, and private API readiness at
++78m09s. The old +120m gate then left under 42 minutes. The three sequential
+core scans may consume up to 45 minutes before account, indexing, provider
+and export work. The proposed gate keeps infrastructure and private readiness
+at +2h and moves core and destination readiness to +3h. It shifts the later
+proof phases one hour, preserving their durations and the two-hour cleanup
+window. New proof stops at +11h, Automation expires at +12h and operator
+cleanup is due at +13h. These are bounds for a new approval. A missed gate
+still triggers cleanup.
+
+At the retained November 17 retail rates, the extra hour adds **$1.4049**.
+The new forecast is **$40.8177** or **$51.0221** with 25% contingency. Three
+hours of peak occupancy and retained data/operation caps estimate
+**$11.8669** for the last attempt, which deleted its Azure group at +150m31s.
+Adding a **$12** reserve to the carried **$19** leaves **$31** for unsettled
+prior exposure. The **$0.878883** posted against the reused target cannot
+be attributed to one attempt and is included in the exposure reconciliation.
+Propose an execution ceiling of **$56.51**, a combined ceiling of **$87.51**
+and a cumulative ceiling of **$438.40**. Billing remains unsettled.
+[Azure Retail Prices API](https://learn.microsoft.com/en-us/rest/api/cost-management/retail-prices/azure-retail-prices)

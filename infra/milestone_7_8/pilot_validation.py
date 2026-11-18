@@ -106,6 +106,7 @@ def prepare(
         "infra/milestone_7_8/managed_objects.bicep",
         "infra/milestone_7_8/pilot/artifact_transport.py",
         "infra/milestone_7_8/pilot/pack_execution.py",
+        "infra/milestone_7_8/signup_reconcile.py",
         "apps/api/scripts/telemetry_gateway.py",
         "apps/api/scripts/telemetry_destination.py",
         "docs/MILESTONE_7_8_PILOT_MANAGED_VALIDATION_PACKAGE.md",
@@ -224,6 +225,8 @@ def authorize(
             raise ValueError("bound source changed after preparation")
     start = utc(approval["approvedAt"])
     deadline = start + timedelta(hours=manifest["relativeWindowHours"]["stopProof"])
+    if operation in {"account", "core"} and manifest["relativeWindowHours"].get("readyBy") == 3:
+        deadline = min(deadline, start + timedelta(hours=3))
     if not start <= current < deadline:
         raise ValueError("proof authority is not current")
     if approval.get("targetResourceGroupId") != bindings.get("targetResourceGroupId"):

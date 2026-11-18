@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gzip
 import hashlib
 import json
 import os
@@ -29,6 +30,7 @@ from infra.milestone_7_8.pilot_validation import (
     utc,
     write_new,
 )
+from infra.milestone_7_8.signup_reconcile import SLOTS, account_actions
 
 OPERATIONS = (
     "account",
@@ -1352,6 +1354,62 @@ async def production_operation_telemetry(settings: Any, plan: dict):
             await telemetry.close()
 
 
+async def run_account(api: Api, reconciliation: dict | None) -> dict:
+    actions = dict.fromkeys(SLOTS, "signup")
+    if reconciliation is not None:
+        require(reconciliation["snapshot"].get("seedMatched") is True, "exact migration seed required")
+        slots = reconciliation["snapshot"]["slots"]
+        actions = account_actions(
+            slots, writers_quiesced=(
+                reconciliation.get("writersQuiesced") is True
+                and reconciliation["snapshot"].get("otherDatabaseClients") == 0
+            ),
+        )
+        require("hold" not in actions.values(), "signup state is ambiguous")
+    readiness = await api.request("GET", "/api/v1/health/ready")
+    require(
+        readiness.get("status") == "ready" and readiness.get("service") == "opencanvas-api",
+        "exact private API readiness required before account requests",
+    )
+    ids = {}
+    for slot, display_name in SLOTS.items():
+        action = actions[slot]
+        api.journal.step("account-intent", {"slot": slot, "action": action})
+        if action == "resume":
+            user = await api.signin(secondary=slot == "secondary")
+            require(user["id"] == slots[slot]["userId"], "sign-in did not confirm the observed account")
+        else:
+            prefix = "OPENCANVAS_PILOT_" if slot == "primary" else "OPENCANVAS_PILOT_SECONDARY_"
+            response = await api.request(
+                "POST", "/api/v1/auth/signup", secret=True, statuses=(201,),
+                data={
+                    "email": os.environ[prefix + "EMAIL"],
+                    "password": os.environ[prefix + "PASSWORD"],
+                    "displayName": display_name,
+                },
+            )
+            user = response["user"]
+        ids[slot] = str(uuid.UUID(user["id"]))
+        api.journal.step("account-result", {"slot": slot, "action": action, "userId": ids[slot]})
+    require(ids["primary"] != ids["secondary"], "account identities must be distinct")
+    return {
+        "accountCreated": all(action != "resume" for action in actions.values()),
+        "accountsReady": True,
+        "accountActions": actions,
+        "userId": ids["primary"],
+        "secondaryUserId": ids["secondary"],
+    }
+
+
+def read_runtime_evidence(path: Path) -> dict:
+    if path.suffix != ".gz":
+        return json.loads(path.read_text(encoding="utf-8"))
+    with gzip.open(path, "rb") as stream:
+        data = stream.read(250_001)
+    require(len(data) <= 250_000, "expanded native readbacks exceed their review bound")
+    return json.loads(data)
+
+
 async def run(args: argparse.Namespace) -> dict:
     import httpx
 
@@ -1363,13 +1421,10 @@ async def run(args: argparse.Namespace) -> dict:
         and args.execution_id == os.environ.get("CONTAINER_APP_JOB_EXECUTION_NAME"),
         "exact actual ACA job execution required",
     )
-    runtime = admit_runtime_bindings(
-        plan,
-        json.loads(args.runtime_readbacks.read_text()),
-        plan_sha256=digest(args.bindings),
-    )
+    readbacks = read_runtime_evidence(args.runtime_readbacks)
+    runtime = admit_runtime_bindings(plan, readbacks, plan_sha256=digest(args.bindings))
     if args.operation in {"restore-verify", "restore-rollback"}:
-        records = json.loads(args.runtime_readbacks.read_text())["resources"]
+        records = readbacks["resources"]
         body = next(
             row["response"]["body"]
             for row in records
@@ -1400,6 +1455,17 @@ async def run(args: argparse.Namespace) -> dict:
         parsed.scheme == "https" and bool(parsed.hostname), "private HTTPS API required"
     )
     _private_host(parsed.hostname)
+    reconciliation = None
+    if getattr(args, "account_reconciliation", None) is not None:
+        require(args.operation == "account", "signup reconciliation is account-only")
+        reconciliation = json.loads(args.account_reconciliation.read_text(encoding="utf-8"))
+        require(
+            reconciliation["bindingsSha256"] == digest(args.bindings)
+            and reconciliation["authorizationSha256"] == digest(args.authorization)
+            and reconciliation["priorExecution"] != args.execution_id
+            and reconciliation["snapshot"]["attempt"] == reconciliation["priorExecution"],
+            "signup reconciliation must bind the current authority and prior execution",
+        )
     journal = Journal(args.output, args.execution_id, args.operation, plan, deadline)
     async with httpx.AsyncClient(
         base_url=runtime["apiBaseUrl"],
@@ -1409,35 +1475,7 @@ async def run(args: argparse.Namespace) -> dict:
     ) as client:
         api = Api(client, journal, args.execution_id)
         if args.operation == "account":
-            user = await api.request(
-                "POST",
-                "/api/v1/auth/signup",
-                secret=True,
-                statuses=(201,),
-                data={
-                    "email": os.environ["OPENCANVAS_PILOT_EMAIL"],
-                    "password": os.environ["OPENCANVAS_PILOT_PASSWORD"],
-                    "displayName": "M78 synthetic pilot operator",
-                },
-            )
-            secondary = await api.request(
-                "POST",
-                "/api/v1/auth/signup",
-                secret=True,
-                statuses=(201,),
-                data={
-                    "email": os.environ["OPENCANVAS_PILOT_SECONDARY_EMAIL"],
-                    "password": os.environ["OPENCANVAS_PILOT_SECONDARY_PASSWORD"],
-                    "displayName": "M78 negative scope user",
-                },
-            )
-            return journal.finish(
-                {
-                    "accountCreated": True,
-                    "userId": user["user"]["id"],
-                    "secondaryUserId": secondary["user"]["id"],
-                }
-            )
+            return journal.finish(await run_account(api, reconciliation))
         if args.operation == "core":
             return journal.finish(await core(api))
         fixture = fixture_from(args.fixture, plan)
@@ -1451,7 +1489,7 @@ async def run(args: argparse.Namespace) -> dict:
                     api,
                     fixture,
                     plan,
-                    json.loads(args.runtime_readbacks.read_text()),
+                    readbacks,
                     args,
                     deadline,
                 )
@@ -1683,6 +1721,7 @@ def main() -> int:
         parser.add_argument("--" + name, type=Path, required=True)
     for name in ("fixture", "before", "worker-readback"):
         parser.add_argument("--" + name, type=Path)
+    parser.add_argument("--account-reconciliation", type=Path)
     parser.add_argument("--execution-id", required=True)
     parser.add_argument("--workload-stage", type=int, default=0)
     parser.add_argument("--capacity-stage", type=int, default=0)
