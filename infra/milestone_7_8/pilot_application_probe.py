@@ -17,7 +17,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -53,6 +53,18 @@ QUESTION = (
 )
 UNSUPPORTED = "What is the orbital velocity of Neptune's moon Proteus?"
 SCHEMA = "m78-pilot-application-v1"
+SCAN_SECONDS = 900
+UPLOAD_STAGES = ("primary", "queued-recovery", "deletion-recovery")
+
+
+class ScannerDeadline(ValueError):
+    """A known upload expired without accepted clean promotion."""
+
+    def __init__(self, upload: dict) -> None:
+        super().__init__(
+            "production scanner/promotion did not complete within 900 seconds"
+        )
+        self.upload = upload
 
 
 def canonical(value: Any) -> bytes:
@@ -130,25 +142,32 @@ class Api:
         headers: dict | None = None,
         statuses: tuple[int, ...] = (200,),
         secret: bool = False,
+        conflict_code: str | None = None,
+        scanner_poll: bool = False,
     ) -> Any:
         require(
             path.startswith("/api/v1/") and "//" not in path and "?" not in path,
             "API path is not an exact relative endpoint",
         )
         self.journal.check_time()
-        intent = self.journal.step(
-            "http-intent",
-            {
-                "method": method,
-                "path": path,
-                "requestSha256": None
-                if secret
-                else sha(data)
-                if data is not None
-                else hashlib.sha256(content).hexdigest()
-                if content is not None
-                else None,
-            },
+        require(not scanner_poll or method == "GET", "scanner poll must be read-only")
+        intent = (
+            None
+            if scanner_poll
+            else self.journal.step(
+                "http-intent",
+                {
+                    "method": method,
+                    "path": path,
+                    "requestSha256": None
+                    if secret
+                    else sha(data)
+                    if data is not None
+                    else hashlib.sha256(content).hexdigest()
+                    if content is not None
+                    else None,
+                },
+            )
         )
         started = time.monotonic()
         response = await self.client.request(
@@ -167,23 +186,38 @@ class Api:
             except (ValueError, TypeError):
                 pass
         # No cookies, credentials, upload capability or response body in step logs.
-        write_new(
-            intent.with_name(intent.stem + "-result.json"),
-            {
-                "status": response.status_code,
-                "receivedAtUtc": datetime.now(UTC).isoformat(),
-                "responseId": response_id,
-                "elapsedMs": (time.monotonic() - started) * 1000,
-                "responseBytes": len(response.content),
-                "responseSha256": None
-                if secret
-                else hashlib.sha256(response.content).hexdigest(),
-            },
-        )
+        facts = {
+            "status": response.status_code,
+            "receivedAtUtc": datetime.now(UTC).isoformat(),
+            "responseId": response_id,
+            "elapsedMs": (time.monotonic() - started) * 1000,
+            "responseBytes": len(response.content),
+            "responseSha256": None
+            if secret
+            else hashlib.sha256(response.content).hexdigest(),
+        }
+        if scanner_poll:
+            # Keep every read without hundreds of tiny Blob exports. A failed
+            # write or uncertain HTTP mutation still uses its exclusive intent.
+            with (self.journal.directory / "scanner-polls.jsonl").open(
+                "a", encoding="utf-8"
+            ) as sink:
+                sink.write(
+                    json.dumps({"path": path, **facts}, separators=(",", ":")) + "\n"
+                )
+        else:
+            write_new(intent.with_name(intent.stem + "-result.json"), facts)
         require(
             response.status_code in statuses,
             f"{method} {path}: unexpected HTTP {response.status_code}",
         )
+        if response.status_code == 409:
+            require(
+                conflict_code is not None
+                and isinstance(response.json(), dict)
+                and response.json().get("code") == conflict_code,
+                "unrelated HTTP 409 during quarantine search",
+            )
         if not response.content:
             return None
         return (
@@ -251,29 +285,72 @@ class Api:
         )
         state = await self.request("POST", session_path + "/complete")
         started = time.monotonic()
+        scan_start = datetime.now(UTC)
+        deadline = min(
+            scan_start + timedelta(seconds=SCAN_SECONDS), utc(state["scanDeadlineAt"])
+        )
+        seconds = max(0, (deadline - scan_start).total_seconds())
+        stop = started + seconds
+        upload = {
+            "sessionId": str(uuid.UUID(result["sessionId"])),
+            "documentId": str(uuid.UUID(result["documentId"])),
+            "objectVersionId": str(uuid.UUID(state["objectVersionId"])),
+            "scanDeadlineAt": deadline.isoformat(),
+            "contentSha256": hashlib.sha256(FIXTURE).hexdigest(),
+            "suffix": suffix,
+        }
+        self.journal.step("scanner-upload-bound", upload)
+        checked_quarantine = False
         while state.get("scanOutcome") is None or state.get("objectState") != "clean":
             require(
-                time.monotonic() - started <= 900,
-                "production scanner/promotion did not complete within 900 seconds",
+                state["objectVersionId"] == upload["objectVersionId"],
+                "scan object changed",
             )
+            remaining = stop - time.monotonic()
+            if remaining <= 0 or state.get("scanOutcome") == "timeout":
+                if (state.get("scanOutcome"), state.get("objectState")) in {
+                    (None, "scan_pending"),
+                    ("timeout", "rejected"),
+                } and datetime.now(UTC) >= deadline:
+                    raise ScannerDeadline(upload)
+                raise ValueError("unexpected scanner lifecycle or decision deadline")
             require(
                 state.get("scanOutcome")
-                not in {"infected", "suspicious", "unsupported", "timeout", "error"},
+                not in {"infected", "suspicious", "unsupported", "error"},
                 "scanner rejected the clean fixture",
             )
-            search = await self.request(
-                "POST",
-                f"/api/v1/canvases/{fixture['canvasId']}/documents/search",
-                data={"query": QUESTION, "documentIds": [result["documentId"]]},
-                statuses=(200, 400),
-            )
-            require(not search.get("matches"), "quarantined source entered retrieval")
-            await asyncio.sleep(5)
-            state = await self.request("GET", session_path)
+            if (
+                not checked_quarantine
+                and state.get("scanOutcome") is None
+                and state.get("objectState") == "scan_pending"
+            ):
+                search = await self.request(
+                    "POST",
+                    f"/api/v1/canvases/{fixture['canvasId']}/documents/search",
+                    data={"query": QUESTION, "documentIds": [result["documentId"]]},
+                    statuses=(200, 409),
+                    conflict_code="documents_not_ready",
+                )
+                require(
+                    isinstance(search, dict) and not search.get("matches"),
+                    "quarantined source entered retrieval",
+                )
+                checked_quarantine = True
+            await asyncio.sleep(max(0, min(10, stop - time.monotonic())))
+            state = await self.request("GET", session_path, scanner_poll=True)
+        require(
+            time.monotonic() <= stop
+            and state["objectVersionId"] == upload["objectVersionId"],
+            "clean release outside the window or bound version",
+        )
+        require(checked_quarantine, "quarantine denial missing before clean release")
         require(state["scanOutcome"] == "clean", "clean native result missing")
+        scan_elapsed = time.monotonic() - started
         while True:
-            doc = await self.request("GET", f"/api/v1/documents/{result['documentId']}")
-            if doc["status"] == "ready":
+            doc = await self.request(
+                "GET", f"/api/v1/documents/{result['documentId']}", scanner_poll=True
+            )
+            if doc["status"] == "ready" and time.monotonic() - started <= 1200:
                 break
             require(
                 time.monotonic() - started <= 1200,
@@ -306,7 +383,8 @@ class Api:
             "nodeId": nodes[0]["id"],
             "sessionPath": session_path,
             "contentSha256": hashlib.sha256(FIXTURE).hexdigest(),
-            "scanElapsedSeconds": time.monotonic() - started,
+            "scanElapsedSeconds": scan_elapsed,
+            "publishedElapsedSeconds": time.monotonic() - started,
         }
 
     async def ground(
@@ -436,7 +514,7 @@ async def save_editable_artifact(api: Api, fixture: dict, generated: dict) -> di
     }
 
 
-async def core(api: Api) -> dict:
+async def prepare_core(api: Api) -> dict:
     user = await api.signin()
     payload: dict[str, Any] = {
         "name": "Isolated managed pilot proof",
@@ -487,10 +565,13 @@ async def core(api: Api) -> dict:
     fixture["creationRequests"].append(
         {"path": path, "payload": payload, "id": edge["id"]}
     )
-    fixture["primary"] = await api.clean_upload(fixture, "primary")
+    return fixture
+
+
+async def verify_primary(api: Api, fixture: dict) -> dict:
     search = await api.request(
         "POST",
-        f"/api/v1/canvases/{canvas['id']}/documents/search",
+        f"/api/v1/canvases/{fixture['canvasId']}/documents/search",
         data={"query": QUESTION, "documentIds": [fixture["primary"]["documentId"]]},
     )
     require(
@@ -505,14 +586,14 @@ async def core(api: Api) -> dict:
         "served exact file checksum changed",
     )
     before_generation = await api.request(
-        "GET", f"/api/v1/canvases/{canvas['id']}/snapshot"
+        "GET", f"/api/v1/canvases/{fixture['canvasId']}/snapshot"
     )
     positive, negative = (
         await api.ground(fixture),
         await api.ground(fixture, refusal=True),
     )
     after_generation = await api.request(
-        "GET", f"/api/v1/canvases/{canvas['id']}/snapshot"
+        "GET", f"/api/v1/canvases/{fixture['canvasId']}/snapshot"
     )
     require(
         {n["id"] for n in before_generation["nodes"]}
@@ -534,8 +615,8 @@ async def core(api: Api) -> dict:
         },
     )
     require(
-        secondary["id"] != user["id"]
-        and foreign["workspaceId"] != canvas["workspaceId"],
+        secondary["id"] != fixture["userId"]
+        and foreign["workspaceId"] != fixture["workspaceId"],
         "independent scope fixture required",
     )
     fixture["foreign"] = {
@@ -544,17 +625,48 @@ async def core(api: Api) -> dict:
         "workspaceId": foreign["workspaceId"],
     }
     await api.signin()
-    # These independent clean fixtures are preserved for the paused-worker PITR exercise.
-    fixture["queued"] = await api.clean_upload(fixture, "queued-recovery")
-    fixture["deletion"] = await api.clean_upload(fixture, "deletion-recovery")
+    return {"positive": positive, "refusal": negative, "editableArtifact": artifact}
+
+
+async def core(api: Api, resume: dict | None = None) -> dict:
+    if resume is None:
+        fixture, primary, start = await prepare_core(api), None, 0
+    else:
+        fixture, primary = resume["fixture"], resume["primaryProof"]
+        start = UPLOAD_STAGES.index(resume["upload"]["suffix"])
+        require(
+            str((await api.signin())["id"]) == fixture["userId"],
+            "scanner continuation requires the same fixture owner",
+        )
+    keys = ("primary", "queued", "deletion")
+    for stage in range(start, len(UPLOAD_STAGES)):
+        suffix = UPLOAD_STAGES[stage]
+        retry = resume is not None and stage == start
+        try:
+            fixture[keys[stage]] = await api.clean_upload(
+                fixture, f"{suffix}-corrected" if retry else suffix
+            )
+            if retry:
+                require(
+                    fixture[keys[stage]]["documentId"]
+                    != resume["upload"]["documentId"],
+                    "verified correction requires a fresh upload",
+                )
+        except ScannerDeadline as error:
+            return {
+                "status": "scanner-retry-exhausted" if resume else "scanner-paused",
+                "fixture": fixture,
+                "upload": error.upload,
+                "primaryProof": primary,
+                "providerCalls": 2 if primary else 0,
+                "managedAcceptance": "unproved",
+            }
+        if stage == 0:
+            primary = await verify_primary(api, fixture)
+    require(primary is not None, "primary proof missing")
     return {
         "fixture": fixture,
-        "core": {
-            "status": "accepted",
-            "positive": positive,
-            "refusal": negative,
-            "editableArtifact": artifact,
-        },
+        "core": {"status": "accepted", **primary},
         "providerCalls": 2,
         "managedAcceptance": "only listed core observations accepted",
     }
@@ -1477,7 +1589,29 @@ async def run(args: argparse.Namespace) -> dict:
         if args.operation == "account":
             return journal.finish(await run_account(api, reconciliation))
         if args.operation == "core":
-            return journal.finish(await core(api))
+            resume = None
+            if getattr(args, "scanner_resume", None) is not None:
+                resume = read_runtime_evidence(args.scanner_resume)
+                require(
+                    plan.get("scannerRecoveryPolicy") == "one-fresh-upload-v1"
+                    and resume["status"] == "scanner-paused"
+                    and resume["executionId"] != args.execution_id
+                    and all(
+                        resume[key] == plan[key]
+                        for key in (
+                            "sourceCommit",
+                            "imageDigest",
+                            "release",
+                            "deployment",
+                        )
+                    ),
+                    "scanner continuation differs from the exact paused release",
+                )
+            return journal.finish(await core(api, resume))
+        require(
+            getattr(args, "scanner_resume", None) is None,
+            "scanner continuation is core-only",
+        )
         fixture = fixture_from(args.fixture, plan)
         if args.operation == "capacity":
             from infra.milestone_7_8.capacity_validation import run_bound_phase
@@ -1722,6 +1856,7 @@ def main() -> int:
     for name in ("fixture", "before", "worker-readback"):
         parser.add_argument("--" + name, type=Path)
     parser.add_argument("--account-reconciliation", type=Path)
+    parser.add_argument("--scanner-resume", type=Path)
     parser.add_argument("--execution-id", required=True)
     parser.add_argument("--workload-stage", type=int, default=0)
     parser.add_argument("--capacity-stage", type=int, default=0)

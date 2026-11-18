@@ -214,12 +214,38 @@ def validate_review(package: Path, approval: dict) -> dict:
         )
     ):
         raise CampaignError("exact replacement review approval required")
+    scanner_policy = review.get("scannerRecoveryPolicy")
+    if scanner_policy is not None:
+        from infra.milestone_7_8.pilot.scanner_hold import POLICY
+
+        source_bindings = review.get("operatorSourceBindings")
+        expected_sources = {
+            "infra/milestone_7_8/pilot/core_proof_operator.py",
+            "infra/milestone_7_8/pilot/scanner_hold.py",
+            "infra/milestone_7_8/pilot/scanner_read_diagnostic.py",
+            "infra/milestone_7_8/pilot/scanner_operator.py",
+            "infra/milestone_7_8/pilot_cleanup.py",
+        }
+        if (
+            review["schema"] != SIGNUP_REVIEW_SCHEMA
+            or scanner_policy != POLICY
+            or read(package / "scanner-recovery-policy.json") != POLICY
+            or not isinstance(source_bindings, dict)
+            or set(source_bindings) != expected_sources
+            or any(file_hash(ROOT / name) != sha for name, sha in source_bindings.items())
+        ):
+            raise CampaignError("exact scanner hold policy and operator source required")
     approved_window(review, approval)
     return review
 
 
 def successor_smtp_password(package: Path, approval: dict) -> str:
-    path = package.parent / "smtp-signup-successor.private.json"
+    review = read(package / "review-package.json")
+    filename = (
+        "smtp-scanner-successor.private.json" if review.get("scannerRecoveryPolicy")
+        else "smtp-signup-successor.private.json"
+    )
+    path = package.parent / filename
     if not path.is_file() or file_hash(path) != approval.get("smtpCredentialSha256"):
         raise CampaignError("replacement Gmail credential must be supplied and privately bound")
     value = read(path)
