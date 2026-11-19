@@ -1,5 +1,15 @@
 # Milestone 7.8 Defect Register
 
+The [approved private staging execution](MILESTONE_7_8_PRIVATE_STAGING_PACKAGE.md#approved-staging-execution)
+accepted the one-request API telemetry correlation, a fresh worker control,
+and the five native retention settings. D003 and D007 gained partial native
+evidence. The same deployment held core-dependent work after its exact
+900-second scanner deadline. The worker diagnostic transport failed before
+the dual reads, and the approved repair condition was absent. D003–D007 and
+managed editable-AI proof remain incomplete. All 48 cleanup counters are
+verified zero, the named vault was purged, and the reusable controller was
+preserved. Billing remains unsettled.
+
 The [signup recovery execution](MILESTONE_7_8_REGIONAL_REPLACEMENT.md#signup-recovery-execution-result) accepted both synthetic signups after private API readiness.
 The first core upload did not establish clean promotion within its unchanged
 scan deadline. Core and destination acceptance remain unproved, and all 48

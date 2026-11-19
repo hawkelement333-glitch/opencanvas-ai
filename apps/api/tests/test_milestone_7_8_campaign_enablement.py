@@ -3514,7 +3514,10 @@ def test_quota_cleanup_fallback_with_native_operations_disabled(
 
     def no_cloud(command):
         calls.append(command)
-        assert command[command.index("--subscription") + 1] == sub
+        if command[:4] == ("az", "ad", "signed-in-user", "show"):
+            assert command == ("az", "ad", "signed-in-user", "show", "--output", "json")
+        else:
+            assert command[command.index("--subscription") + 1] == sub
         if command == tuple(planned["delete"]):
             return {
                 "exitCode": 1 if scenario == "unknown-delete" else 0,

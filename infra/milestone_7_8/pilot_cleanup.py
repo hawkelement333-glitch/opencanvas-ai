@@ -982,7 +982,8 @@ def execute_fallback(
         != config.tenant_correlation
     ):
         raise CampaignError("fallback subscription or tenant differs")
-    signed_in = document(("az", "ad", "signed-in-user", "show", *scope))
+    # Microsoft Graph uses the signed-in tenant. This command rejects --subscription.
+    signed_in = document(("az", "ad", "signed-in-user", "show", "--output", "json"))
     if signed_in.get("id") != plan["executorObjectId"]:
         raise CampaignError("fallback requires the approved current executor")
     exists = document(("az", "group", "exists", "--name", TARGET, *scope))

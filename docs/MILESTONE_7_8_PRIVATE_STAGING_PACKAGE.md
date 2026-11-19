@@ -113,3 +113,95 @@ native job readback confirming no job. The ordinary fallback after +12h
 remains available. Verify the named Canada Central vault purge and all 48
 residue counters, disarm only the campaign schedule and binding, and preserve
 the reusable controller and prior evidence.
+
+## Approved staging execution
+
+The private synthetic run used review SHA-256
+`51a21bf2b9284bfe54d0106dc74b7a9664ca30e5673b89fb94ef147b8a15a703`,
+source `e38944c03dfb7528bfadd77b73c981b5dcd01645`, and exception SHA-256
+`c2b3ab28d92d8202285a0e0f4c07c9a6df9904a6e71d2bebfd7e6d7501dea0ef`.
+The UTC clock sample recorded on receiving approval was
+`2026-11-19T02:41:34.595213Z`. The whole-minute start was 02:42 UTC on
+November 19. The approved readiness, telemetry/core, proof stop, Automation
+expiry, and operator cleanup/exception cutoffs were 04:42, 05:42, 13:42,
+14:42, and 15:42 UTC, respectively. The operator verified the native cleanup
+schedule and binding before paid foundation deployment. Both exact OCI
+indexes were verified in the private registry, and the temporary IP opening
+was restored within the 20-minute allowance. The API ran unsigned under the
+staging exception. The signed frontend, historical scan receipts, and
+production release gate were preserved.
+
+Foundation, private DNS/TLS and the native VPN session were accepted.
+Bootstrap execution `caj-m78p-a712b8c940-bootstrap-kzd51mc` and migration
+execution `caj-m78p-a712b8c940-migration-2w4ympm` succeeded. Both corrected
+alert rules were created and read back with native query validation enabled.
+The first local alert checker compared against the previous-release catalog.
+Read-only reconciliation showed that the sealed ARM parameters, the
+submitted parameters, and both native queries agree for the current release.
+The prior release label was the only catalog difference. The original
+checker failure is retained.
+
+| Area | Managed result and remaining evidence |
+| --- | --- |
+| Telemetry first, D003 | The single private liveness request at 03:43:03 UTC on `ca-m78p-a712b8c940-api--1rkle5y` returned HTTP 200. The exact API destination row, trace-correlated gateway 202, and fresh worker poll passed. A separate readiness sample validated 32 API/worker rows. The existing retention validator accepted five native table settings and the 30-day purge flag. |
+| Remaining D003 | All 13 workbook configurations matched the submitted native catalog. Actual renders, full source/signal coverage and trace continuity, alert firing and recovery, exporter outage, and access revocation remain unproved. The independent transport probe `caj-m78p-a712b8c940-evidence-fk3cary` returned `ValueError` and `failed_or_unknown`. The exact-source reconciliation query found zero rows for that attempt. There was no replay. The approved local panel and alert query files still filter on the previous release, so they cannot establish current-release destination observations. |
+| Core and D004 | Synthetic signup execution `caj-m78p-a712b8c940-evidence-qhnt1t5` passed. Core execution `caj-m78p-a712b8c940-evidence-tq8j7u3` passed the quarantine conflict check and paused on the first upload at the 900-second boundary. The worker diagnostic failed before reading either source because Azure's container exec WebSocket handshake returned HTTP 404. The exact scanner-table grant was present. An administrator observed one candidate clean row ingested around 499 seconds after scanning and before the deadline. Exact object/version agreement by the worker remains unproved. The approved repair condition was absent, so no fresh upload occurred. Native worker publication and the activity delivery sequence still require the accepted core fixture. |
+| D005, capacity and editable AI | Restore, capacity, and managed browser/provider assertions stayed held because the current core fixture was unproved. The historical migration, recovery, and component proof credits remain. No paid model requests were made. |
+| D006 production controls | The exact private staging images and route were proved. The production exact-image scan, signatures for the corrected API, and seven frontend notice dispositions remain release requirements. No email delivery or production signing was in scope. |
+| D007 | Native rows were observed for both registry categories, Blob read/write, Key Vault AuditEvent, and the gateway, route and P2S diagnostic categories. PostgreSQL log and Blob delete rows remain unproved. One native backup entry was retained. Cost Management returned `FailedDependency` because only two training points were available. |
+
+The run continued independent destination and infrastructure observations on
+the same deployment after the scanner hold. It stopped when the sealed
+repair was unavailable and remaining proof lacked its required inputs.
+PostgreSQL, D001, D002, both historical accepted signups, and prior cleanup
+remain closed. Milestone 7.8 remains incomplete.
+
+### Private evidence bindings
+
+Evidence is retained locally under the ignored execution journal
+`run-51a21bf2`. The checkpoint uses the following sanitized receipt hashes.
+
+| Receipt relative to the private journal | SHA-256 |
+| --- | --- |
+| `telemetry-first/result.json` | `53f91a9fa42150aee685bd7c170a8a19803dcbfaa296d170707740f80b49f5f3` |
+| `proof-account/accepted.json` | `7f1326e44c52a11479a8462875903146b1e4d9b7f67ce7eaed72436051c9d97b` |
+| `proof-core/export/core.json` | `fec0a67c25a934c68da606b23d46acee22ba97b0eca41173e198fcdb2588dd58` |
+| `scanner-administrator-diagnostic/summary.json` | `fb9ab1e9aa40fb6fd7ab15fae65f84279301b9890e369659f9fb46e4143a3e40` |
+| `destination-readiness/accepted.json` | `6f9ab6aabc9f70fb39992dd2e7271ac6fc41f39313f8d4e976719a51bfa3e07a` |
+| `native-destination-retention/accepted.json` | `ee6b0f85fc7e215a67bdb79c1e3964b6b47cec33d28a842299850303ed91493d` |
+| `proof-destination-transport-compact/transport-summary.json` | `7bb3a0a87ec873c8d235716619c547d105896a01d31d4c268f1492d794329f11` |
+| `native-workbook-configuration/summary.json` | `dfb24eb770ba6368013f87b870ebad42db99d2be813f806959af30fe2b1080d5` |
+| `native-infrastructure-diagnostics/dedicated-native-rows-summary.json` | `a612a0096d910c42d135378141663fd92a78a15c5efeb4c90a39e32f0f6618dc` |
+| `quota-fallback-admitted-before-native-delete.json` | `a281cd7d07bdbf966afa477bddb82515364ce8d8d9a3eb57d2cd3c5f06f90c9c` |
+
+### Verified cleanup
+
+Automation declined the exact cleanup dispatch with its monthly execution quota
+HTTP 429. A complete native inventory showed no current cleanup job. The
+approved direct fallback verified the subscription, executor, target ownership
+and absence of a cleanup job before deleting only the campaign resource group.
+The signed-in-user CLI read initially rejected `--subscription`. The operator
+rechecked that tenant-scoped lookup without the flag while preserving the
+subscription and executor checks, then submitted one exact deletion request.
+The tracked fallback now uses the tenant-scoped CLI form. All 17 focused
+fallback cases passed with native mutations disabled.
+
+Azure confirmed target absence at 04:48:03 UTC. Only the campaign schedule and
+binding were disarmed. The named Canada Central vault purge and the managed
+infrastructure group absence were verified. One surviving role was returned
+under its canonical subscription-form ID. The retained role GUID, name,
+permissions and sole campaign assignable scope matched the deployment alias.
+The operator deleted that exact role and verified all six campaign custom
+roles absent. The scoped Entra objects, VPN profile, route, resolver and
+temporary profile copy are absent. No mail credential was issued.
+
+All **48 of 48 counters were zero** at 04:50:01 UTC, with the ledger at
+`cleanup-disarmed` and the reusable controller preserved. Terminal receipt
+`verified-full-residue.json` SHA-256
+`b5dd40d2fe1e3b3a93b93bfc97c9ab226ddad96a82fd967c4054cd7e35e1d245`.
+Native target-absence receipt `azure-cleanup-terminal.json` SHA-256
+`a5f87dcb581a87c1eea26ac6a288f98ed6f07b6e89a01534dfd73665cdc7c434`.
+
+The campaign forecast was **$40.8177 USD**, the replacement execution ceiling
+was **$56.51**, and the cumulative ceiling was **$460.40**. Those figures
+remain a forecast and ceilings. Billing remains **unsettled**.

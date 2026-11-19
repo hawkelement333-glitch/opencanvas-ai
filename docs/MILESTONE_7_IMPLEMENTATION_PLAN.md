@@ -1049,8 +1049,13 @@ change the scope or claims of Internal Checkpoint 7.
 
 ### 7.8 completion checklist reconciliation — 2026-11-15
 
-**7.8 is incomplete. Current reconciliation: 2026-11-17 UTC.** PostgreSQL,
+**7.8 is incomplete. Current reconciliation: 2026-11-19 UTC.** PostgreSQL,
 M78-D-001 and M78-D-002 are complete and closed, including verified cleanup.
+The [private staging execution](MILESTONE_7_8_PRIVATE_STAGING_PACKAGE.md#approved-staging-execution)
+accepted the exact API telemetry row, correlated gateway acknowledgment,
+fresh worker poll, and five-table configured retention. The core scanner
+hold kept dependent proof open while independent native checks continued.
+The named-vault purge and all 48 cleanup counters are verified.
 The [remaining-evidence matrix](MILESTONE_7_8_REMAINING_EVIDENCE_RECONCILIATION.md#requirement-by-requirement-disposition)
 distinguishes directly inspected receipts, historical accepted results and
 unlocated artifacts. An open heading does not require repeating completed work. The subsequent
