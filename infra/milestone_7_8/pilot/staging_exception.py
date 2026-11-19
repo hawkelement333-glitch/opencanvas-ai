@@ -7,6 +7,7 @@ from pathlib import Path
 from infra.milestone_7_8.campaign import CampaignError
 from infra.milestone_7_8.pilot.telemetry_first import RELEASE_KEY_SHA256
 from infra.milestone_7_8.pilot_cleanup import file_hash, read
+from infra.milestone_7_8.pilot_validation import SCANNER_OBSERVATION
 
 API = "sha256:e0e6518e8f54c6151e598c6b591923dfade3e35c7b10a18dc0fc38bc22cc3c62"
 FRONTEND = "sha256:1ee742b604d406ad8cc4c3c53001853ad58a033b68f4d613251ea7fc088fdb3a"
@@ -39,10 +40,19 @@ POLICY = {
     "exceptionExpiresAfterHours": 13,
     "productionRelease": False,
 }
+PRIOR_REVIEW = "51a21bf2b9284bfe54d0106dc74b7a9664ca30e5673b89fb94ef147b8a15a703"
+SUCCESSOR_POLICY = {
+    **POLICY,
+    "schema": "m78-private-synthetic-staging-exception-v2",
+    "supersedesExpiredReview": PRIOR_REVIEW,
+    "approvedExecutions": 1,
+    "scannerObservation": SCANNER_OBSERVATION,
+}
 
 
 def validate_staging_admission(package: Path, review: dict, approval: dict) -> None:
     policy_path = package / "staging-exception.json"
+    policy = review.get("stagingException")
     required = {
         "compiled/pilot.json",
         "staging-exception.json",
@@ -61,9 +71,9 @@ def validate_staging_admission(package: Path, review: dict, approval: dict) -> N
         "signing/retained-signature-verification-receipt.json",
     }
     if (
-        review.get("stagingException") != POLICY
+        policy not in (POLICY, SUCCESSOR_POLICY)
         or not required <= review["files"].keys()
-        or read(policy_path) != POLICY
+        or read(policy_path) != policy
         or review["files"].get(policy_path.name) != file_hash(policy_path)
         or approval.get("approveStagingExceptionSha256") != file_hash(policy_path)
         or review.get("targetResourceGroup") != POLICY["target"]
@@ -77,6 +87,14 @@ def validate_staging_admission(package: Path, review: dict, approval: dict) -> N
     ):
         raise CampaignError("staging exception scope or exact approval differs")
     plan = read(package / "planned-bindings.json")
+    if policy == SUCCESSOR_POLICY and (
+        not {"successor-scope.json", "local-verification.json"} <= review["files"].keys()
+        or review.get("supersedesReviewSha256") != PRIOR_REVIEW
+        or plan.get("scannerObservation") != SCANNER_OBSERVATION
+        or read(package / "successor-scope.json").get("scannerObservation") != SCANNER_OBSERVATION
+        or review.get("boundRuntimeDirectory") != ".runtime/milestone_7_8/psv2"
+    ):
+        raise CampaignError("staging successor observation or execution scope differs")
     arm = read(package / "parameters.bound.json")["parameters"]
     images = read(package / "release-bindings.json")
     api, frontend = images["api"], images["frontend"]

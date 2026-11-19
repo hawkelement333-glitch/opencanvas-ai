@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
+
+from infra.milestone_7_8 import pilot_validation
 from infra.milestone_7_8.pilot_alerts import compile_catalog
 from infra.milestone_7_8.pilot_validation import VERSION, authorize, digest, prepare, write_new
 
@@ -11,7 +15,10 @@ from infra.milestone_7_8.pilot_validation import VERSION, authorize, digest, pre
 def package(tmp_path):
     bundle = tmp_path / "package"
     prepare(bundle, "rc-123", "m78-0123456789", 40)
-    scope = "/subscriptions/12345678-1234-1234-1234-123456789012/resourceGroups/rg-m78-0123456789-target"
+    scope = (
+        "/subscriptions/12345678-1234-1234-1234-123456789012"
+        "/resourceGroups/rg-m78-0123456789-target"
+    )
     bindings = {
         "targetResourceGroupId": scope,
         "release": "rc-123",
@@ -110,6 +117,96 @@ def test_catalog_boundaries_reject_query_injection_and_missing_ceiling() -> None
     for release, ceiling in [('bad" | take 1', 40), ("rc-123", 0), ("rc-123", float("inf"))]:
         with pytest.raises(ValueError):
             compile_catalog(release=release, deployment="m78-0123456789", ceiling=ceiling)
+
+
+def test_authorize_rejects_a_hashed_but_stale_verification_catalog(tmp_path):
+    bundle, authority, plan, start = package(tmp_path)
+    catalog = json.loads((bundle / "catalog.json").read_bytes())
+    catalog["release"] = "previous"
+    (bundle / "catalog.json").write_text(json.dumps(catalog))
+    manifest_path = bundle / "manifest.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    manifest["catalogSha256"] = digest(bundle / "catalog.json")
+    manifest_path.write_text(json.dumps(manifest))
+    approval = json.loads(authority.read_bytes())
+    approval["packageSha256"] = digest(manifest_path)
+    authority.write_text(json.dumps(approval))
+    with pytest.raises(ValueError, match="catalog differs"):
+        authorize(bundle, authority, plan, "query", start)
+
+
+@pytest.mark.parametrize(
+    "scenario", ["success", "wrong-ids", "partial-result", "gateway-503", "public-dns"]
+)
+async def test_transport_attributes_failure_and_requires_exact_ids(monkeypatch, scenario):
+    source = {
+        "service": "mobius-evidence", "environment": "staging",
+        "release": "rc-fixture", "deployment": "m78p-fixture",
+    }
+    bindings = source | {
+        "probeTelemetrySource": source,
+        "gatewayUrl": "https://private.invalid/v1/signals",
+    }
+    requests = []
+    queries = []
+
+    def host(_):
+        if scenario == "public-dns":
+            raise ValueError("private destination DNS not proved")
+        return ["10.0.0.1"]
+
+    def gateway(request):
+        assert request.url == bindings["gatewayUrl"]
+        saw_auth = "authorization" in request.headers
+        poisoned = "prompt" in json.loads(request.content)["signals"][0]["payload"]
+        requests.append((saw_auth, poisoned))
+        if not saw_auth:
+            return httpx.Response(401)
+        if poisoned:
+            return httpx.Response(422)
+        return httpx.Response(503 if scenario == "gateway-503" else 202)
+
+    async def query(plan, kql):
+        queries.append(kql)
+        ids = re.findall(r'"([a-f0-9]{64})"', kql)
+        assert len(ids) == 4
+        if scenario == "wrong-ids":
+            ids[-1] = "0" * 64
+        table = {"columns": [{"name": "SignalId"}], "rows": [[value] for value in ids]}
+        result = {"tables": [table]}
+        if scenario == "partial-result":
+            result["error"] = {"code": "PartialError"}
+        return {"status": 200, "result": result}
+
+    client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: client(
+        transport=httpx.MockTransport(gateway), **kw
+    ))
+    monkeypatch.setattr(pilot_validation, "_private_host", host)
+    monkeypatch.setattr(pilot_validation, "query", query)
+    monkeypatch.setenv("OPENCANVAS_TELEMETRY_GATEWAY_TOKEN", "synthetic-test-token")
+    deadline = datetime.now(UTC) + timedelta(minutes=1)
+    if scenario == "success":
+        result = await pilot_validation.telemetry(bindings, deadline)
+        assert result["classification"] == "transport-fixture-only"
+        assert len(result["expectedRows"]) == 4
+    else:
+        with pytest.raises(pilot_validation.TransportError) as error:
+            await pilot_validation.telemetry(bindings, deadline)
+        expected = {
+            "wrong-ids": ("destination-query", "unexpected-signal-id-result", 200),
+            "partial-result": ("destination-query", "unexpected-signal-id-result", 200),
+            "gateway-503": ("gateway-valid-batch", "unexpected-http-status", 503),
+            "public-dns": ("gateway-dns", "private-resolution-unproved", None),
+        }[scenario]
+        assert error.value.diagnostic == (
+            dict(zip(("stage", "code", "httpStatus"), expected, strict=True))
+            if expected[2] is not None else {"stage": expected[0], "code": expected[1]}
+        )
+    assert requests == ([] if scenario == "public-dns" else [
+        (False, False), (True, True), (True, False),
+    ])
+    assert len(queries) == (0 if scenario in {"public-dns", "gateway-503"} else 1)
 
 
 @pytest.mark.parametrize(

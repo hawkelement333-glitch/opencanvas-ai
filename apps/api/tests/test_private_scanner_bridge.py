@@ -1568,7 +1568,8 @@ async def test_managed_identity_adapter_refuses_unrelated_token_audiences() -> N
 
 
 def test_production_worker_entry_point_invokes_private_pull_consumer_first() -> None:
-    source = inspect.getsource(DocumentWorker.run_once)
+    assert "await self._run_once()" in inspect.getsource(DocumentWorker.run_once)
+    source = inspect.getsource(DocumentWorker._run_once)
     assert "self.scanner_bridge.consume_once(session)" in source
     assert source.index("self.scanner_bridge.consume_once(session)") < source.index(
         "service.claim_one"

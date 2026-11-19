@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import httpx
 import pytest
 from fastapi import FastAPI
 from sqlalchemy import func, select
 
+from infra.milestone_7_8.pilot.scanner_read_diagnostic import observe
 from opencanvas_api.core.config import get_settings
 from opencanvas_api.db.models import (
     CanvasDocumentNode,
@@ -19,11 +23,17 @@ from opencanvas_api.db.models import (
     DurableJobOutcome,
     IndexPublication,
     MalwareScanRequest,
+    MalwareScanResult,
+    ObjectPromotion,
     RetrievalHead,
     StorageObjectVersion,
     WorkspaceAuthorityVersion,
 )
 from opencanvas_api.db.session import Database
+from opencanvas_api.services.documents.storage import (
+    AzureBlobVersionedObjectStorage,
+    MemoryVersionedObjectStorage,
+)
 from opencanvas_api.services.durable_jobs import DurableJobConflictError, DurableJobService
 from opencanvas_api.services.jobs import DocumentWorker
 from opencanvas_api.services.object_ingestion import (
@@ -31,13 +41,22 @@ from opencanvas_api.services.object_ingestion import (
     TrustedScanResult,
     scanner_result_signature,
 )
+from opencanvas_api.services.scanner_bridge import (
+    BlobScanEvidence,
+    LogAnalyticsScanEvidence,
+    PrivateScannerResultBridgeConsumer,
+)
 from tests.test_canvas_api import _create_canvas
 from tests.test_indexer import _register_canvas_resource
 from tests.test_object_ingestion import _settings
 
 
 @pytest.mark.parametrize(
-    "outcome", ["clean", "timeout", "lease_conflict", "revoked", "observational_read_failure"]
+    "outcome",
+    [
+        "clean", "timeout", "lease_conflict", "revoked",
+        "observational_read_failure", "wrong-version",
+    ],
 )
 async def test_pilot_secure_document_card_deadline_worker_and_retrieval(
     app: FastAPI,
@@ -67,6 +86,16 @@ async def test_pilot_secure_document_card_deadline_worker_and_retrieval(
     app.dependency_overrides[get_settings] = lambda: settings
     if hasattr(app.state, "versioned_object_storage"):
         del app.state.versioned_object_storage
+    if outcome == "wrong-version":
+        class FixtureStorage(MemoryVersionedObjectStorage):
+            async def put_immutable(self, **kwargs):
+                stored = await super().put_immutable(**kwargs)
+                return replace(stored, provider_name="azure", etag='"0x8DEFACED"')
+
+            def object_url(self, key):
+                return "https://fixture.blob.core.windows.net/" + key
+
+        app.state.versioned_object_storage = FixtureStorage()
     canvas = await _create_canvas(client, api_prefix, "Pilot secure document")
     workspace_id, canvas_id = uuid.UUID(canvas["workspaceId"]), uuid.UUID(canvas["id"])
     await _register_canvas_resource(database, workspace_id=workspace_id, canvas_id=canvas_id)
@@ -127,6 +156,55 @@ async def test_pilot_secure_document_card_deadline_worker_and_retrieval(
         )
         version = await session.get(StorageObjectVersion, uuid.UUID(upload["objectVersionId"]))
         assert request is not None and version is not None
+        if outcome == "wrong-version":
+            now = datetime.now(UTC)
+            assert request.timeout_seconds == 900 and now < deadline
+            uri = "https://fixture.blob.core.windows.net/" + version.physical_key
+            row_etag = '"0x8DEFADED"'
+
+            async def tags(selected, *, observed_at):
+                assert selected.object_version_id == version.object_version_id
+                return BlobScanEvidence(
+                    "fixture", uri, version.provider_version_id, version.etag,
+                    "No threats found", now, now.isoformat(), "a" * 64,
+                )
+
+            async def logs(**inputs):
+                assert inputs["etag"] == version.etag
+                return (LogAnalyticsScanEvidence(
+                    "fixture", uri, row_etag, "No Threat Found", str(uuid.uuid4()),
+                    now, now.isoformat(), now, "b" * 64,
+                ),)
+
+            bridge = PrivateScannerResultBridgeConsumer(
+                storage=cast(AzureBlobVersionedObjectStorage, app.state.versioned_object_storage),
+                settings=settings,
+                blob_reader=SimpleNamespace(read=tags, hostname="fixture.blob.core.windows.net"),
+                log_reader=SimpleNamespace(read=logs),
+                clock=lambda: now,
+            )
+            timing = SimpleNamespace(
+                requested_at=deadline - timedelta(seconds=900), deadline_at=deadline,
+                policy_version=request.policy_version,
+            )
+            diagnostic = await observe(bridge, version, timing, now, clock=lambda: now)
+            assert diagnostic["blob"] == {"status": "read", "versionBound": True}
+            assert diagnostic["logAnalytics"] == {
+                "status": "read", "rows": 1, "exactRows": 0, "versionBound": False,
+            }
+            assert diagnostic["correlation"] == {
+                "status": "unproved", "code": "scanner-correlation-etag-mismatch",
+            }
+            assert await bridge.consume_once(session) is False
+            await session.commit()
+            assert await session.scalar(select(func.count()).select_from(MalwareScanResult)) == 0
+            assert await session.scalar(select(func.count()).select_from(ObjectPromotion)) == 0
+            row_etag = version.etag
+            exact = await observe(bridge, version, timing, now, clock=lambda: now)
+            late = await observe(bridge, version, timing, deadline, clock=lambda: deadline)
+            assert exact["correlation"] == {"status": "agreed", "verdict": "clean"}
+            assert late["correlation"] == {"status": "late-agreement", "verdict": "clean"}
+            assert late["requestExpired"] is True
         if outcome == "timeout":
             assert (
                 await ObjectReconciler(session, settings=settings).expire_scan_requests(
@@ -135,6 +213,12 @@ async def test_pilot_secure_document_card_deadline_worker_and_retrieval(
                 == 1
             )
             await session.commit()
+    if outcome == "wrong-version":
+        still_pending = await client.get(f"{scope}/{upload['sessionId']}")
+        assert still_pending.json()["objectState"] == "scan_pending"
+        assert still_pending.json()["scanOutcome"] is None
+        assert (await client.get(f"{scope}/{upload['sessionId']}/file")).status_code == 404
+        return
     if outcome == "timeout":
         timed = await client.get(f"{scope}/{upload['sessionId']}")
         assert timed.json()["safeReasonCode"] == "scan_timeout"

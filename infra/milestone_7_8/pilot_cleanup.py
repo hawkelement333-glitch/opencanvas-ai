@@ -201,6 +201,19 @@ def validate_review(package: Path, approval: dict) -> dict:
                 == review["costReconciliationSha256"]
                 and "cost-reconciliation.json" in review["files"]
             )
+            if (review.get("stagingException") or {}).get("schema") == (
+                "m78-private-synthetic-staging-exception-v2"
+            ):
+                # Preserve the entire previous ceiling while the ledger is unsettled.
+                prior_ceiling = Decimal(reconciliation["priorAuthorizedCumulativeUsd"])
+                cumulative_valid = (
+                    cumulative_valid
+                    and prior_ceiling == Decimal("460.40")
+                    and Decimal(str(review["increaseOverLastApprovalUsd"])) == allowance
+                    and cumulative == prior_ceiling + allowance
+                    and reconciliation["billing"] == "unsettled"
+                    and reconciliation["actualChargesUsd"] is None
+                )
         except (InvalidOperation, KeyError, TypeError, ValueError):
             cumulative_valid = False
     if (

@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -26,9 +26,16 @@ from infra.milestone_7_8.pilot.scanner_operator import (
     ARM,
     DiagnosticUnavailable,
     collect_and_repair,
+    collect_pending,
+    console_markers,
 )
 from infra.milestone_7_8.pilot_cleanup import file_hash, read, validate_live, write_new
-from infra.milestone_7_8.pilot_validation import _private_host, admit_runtime_bindings
+from infra.milestone_7_8.pilot_validation import (
+    SCANNER_OBSERVATION,
+    SCANNER_PENDING_MARKER,
+    _private_host,
+    admit_runtime_bindings,
+)
 
 STATES = {"Succeeded", "Failed", "Stopped", "Degraded", "Canceled"}
 ACTUAL_VERSIONS = {
@@ -465,6 +472,64 @@ def wait_private_api(context, path, endpoint):
     raise CampaignError("private readiness missed before first signup")
 
 
+def pending_observation(text, execution, plan, now, core_by):
+    markers = console_markers(text, SCANNER_PENDING_MARKER)
+    if not markers:
+        return None
+    if len(markers) != 1 or not isinstance(markers[0], dict):
+        raise CampaignError("duplicate or invalid primary scanner marker")
+    marker = markers[0]
+    upload = marker["upload"]
+    stamp = parse_utc(marker["pendingAt"])
+    deadline = parse_utc(upload["scanDeadlineAt"])
+    server_deadline = parse_utc(upload["serverScanDeadlineAt"])
+    checksum = upload["contentSha256"]
+    if (
+        marker["executionId"] != execution
+        or marker["binding"] != {
+            key: plan[key] for key in ("imageDigest", "sourceCommit", "release", "deployment")
+        }
+        or upload["suffix"] != SCANNER_OBSERVATION["fixture"]
+        or not re.fullmatch(r"[a-f0-9]{64}", checksum)
+        or any(str(uuid.UUID(upload[key])) != upload[key]
+               for key in ("sessionId", "documentId", "objectVersionId"))
+        or not stamp <= now or not stamp < deadline <= server_deadline
+        or server_deadline - stamp > timedelta(seconds=405)
+    ):
+        raise CampaignError("primary scanner marker differs from the exact active execution")
+    minimum = timedelta(seconds=SCANNER_OBSERVATION["minimumDispatchSecondsRemaining"])
+    return marker if now + minimum < min(deadline, core_by) else None
+
+
+def observe_while_core_runs(context, path, execution, native_args, index, cutoff):
+    if (context.run / "scanner-in-window").exists():
+        return
+    now = context.policy.clock()
+    if now + timedelta(seconds=270) >= cutoff:
+        return
+    try:
+        logs = context.call(
+            path, f"pending-console-{index:04d}",
+            ("containerapp", "job", "logs", "show", *native_args,
+             "--execution", execution, "--container", "evidence",
+             "--tail", "60", "--follow", "false", "--format", "json"),
+            as_json=False, cutoff=cutoff, timeout=12,
+        )
+    except NativeFailure:
+        # Log availability is not authorization to substitute a fixture or replay the upload.
+        return
+    marker = pending_observation(logs, execution, context.plan, context.policy.clock(), cutoff)
+    if marker is None:
+        return
+    try:
+        collect_pending(context, marker)
+    except (DiagnosticUnavailable, NativeFailure) as error:
+        # A failed read or a missing console can coexist with normal proof.
+        # Uncertain dispatch or restore is a CampaignError and reaches the hard stop.
+        write_new(context.run / "scanner-in-window/unproved.json",
+                  {"reason": str(error), "atUtc": utc(context.policy.clock())})
+
+
 def dispatch_proof(context, phase, resume_path=None):
     operation = (
         "account"
@@ -474,7 +539,13 @@ def dispatch_proof(context, phase, resume_path=None):
         else phase
     )
     policy, plan = context.policy, context.plan
+    module = "infra.milestone_7_8.pilot_application_probe"
     cutoff = policy.core_by
+    if phase == "transport":
+        operation = "telemetry"
+        module = "infra.milestone_7_8.pilot_validation"
+        policy.check(seconds_needed=1500)
+        cutoff = min(policy.stop_by, policy.clock() + timedelta(minutes=25))
     path = context.run / ("proof-" + phase)
     path.mkdir(exist_ok=False)
     if phase in {"core", "core-retry"}:
@@ -557,7 +628,7 @@ def dispatch_proof(context, phase, resume_path=None):
         package,
         context.bound / "approval.json",
         package / "planned-bindings.json",
-        "infra.milestone_7_8.pilot_application_probe",
+        module,
         args,
         packed,
         package / "wheel-manifest.json",
@@ -677,6 +748,12 @@ def dispatch_proof(context, phase, resume_path=None):
             if state in STATES:
                 write_new(path / (role + "-terminal.json"), terminal)
                 return execution, state
+            if (
+                role == "evidence" and phase == "core"
+                and plan.get("scannerObservation") == SCANNER_OBSERVATION
+                and index % 2 == 0
+            ):
+                observe_while_core_runs(context, path, execution, native_args, index, cutoff)
             time.sleep(min(8, context.remaining(cutoff)))
 
     prior = read(carry / "artifact-version-binding.json") if carry else {}
@@ -738,6 +815,24 @@ def dispatch_proof(context, phase, resume_path=None):
     )
     exported = read_export(context, path, proof, operation, cutoff)
     payload = read(exported)
+    if phase == "transport":
+        if payload["executionId"] != proof or payload["operation"] != "telemetry":
+            raise CampaignError("transport receipt belongs to another execution")
+        fixture = payload["result"]
+        accepted = (
+            state == "Succeeded"
+            and fixture.get("classification") == "transport-fixture-only"
+            and fixture.get("unauthenticatedStatus") == 401
+            and fixture.get("forbiddenContentStatus") == 422
+            and fixture.get("destination", {}).get("status") == 200
+            and len(fixture.get("expectedRows", ())) == 4
+        )
+        write_new(path / "transport-summary.json", {
+            "execution": proof, "resultSha256": file_hash(exported),
+            "transportFixtureAccepted": accepted, "terminalState": state,
+            "fullD003Accepted": False,
+        })
+        return "transport-fixture-accepted" if accepted else "transport-unproved"
     if (
         phase == "account"
         and state == "Failed"
@@ -763,6 +858,17 @@ def dispatch_proof(context, phase, resume_path=None):
         )
         return "signup-reconciliation-required"
     status = proof_disposition(payload, plan, proof, operation, state)
+    marker_path = context.run / "scanner-in-window/pending-marker.json"
+    if phase == "core" and marker_path.exists():
+        captured = read(marker_path)["upload"]
+        primary = payload.get("fixture", {}).get("primary")
+        if primary is None and payload.get("upload", {}).get("suffix") == "primary":
+            primary = payload["upload"]
+        if primary is None or any(
+            primary[key] != captured[key]
+            for key in ("sessionId", "documentId", "objectVersionId", "contentSha256")
+        ):
+            raise CampaignError("exported primary upload differs from the in-window marker")
     if status == "scanner-paused" and phase == "core":
         policy.hold(path, exported, proof)
     if status == "accepted":
@@ -831,6 +937,71 @@ def require_destination_hold(context):
     )
     if observed != {"mobius-worker"} or count != hold["rows"]:
         raise CampaignError("destination hold must show verified worker-only evidence")
+
+
+def observe_infrastructure(context):
+    from infra.milestone_7_8.destination_acceptance import rows
+
+    plan = context.plan
+    directory = context.run / "successor-native-categories"
+    directory.mkdir(exist_ok=False)
+    workspace = context.get(directory, "workspace", plan["workspaceResourceId"], "2023-09-01")
+    if workspace["id"].casefold() != plan["workspaceResourceId"].casefold():
+        raise CampaignError("infrastructure query workspace differs")
+    customer = str(uuid.UUID(workspace["properties"]["customerId"]))
+    begin = parse_utc(context.window["executionStartAt"])
+    end = context.policy.clock()
+    sql = plan["databaseResourceId"]
+    blob = plan["targetResourceGroupId"] + (
+        "/providers/Microsoft.Storage/storageAccounts/stm78oa712b8c940/blobServices/default"
+    )
+    results = {}
+    for name, resource, category in (
+        ("postgresql-logs", sql, "PostgreSQLLogs"),
+        ("blob-delete", blob, "StorageDelete"),
+    ):
+        setting = (
+            resource + "/providers/Microsoft.Insights/diagnosticSettings/pilot-category-proof"
+        )
+        native = context.get(directory, name + "-setting", setting, "2021-05-01-preview")
+        props = native["properties"]
+        if (
+            native["id"].casefold() != setting.casefold()
+            or props["workspaceId"].casefold() != plan["workspaceResourceId"].casefold()
+            or props.get("logAnalyticsDestinationType") != "Dedicated"
+            or not any(
+                log.get("category") == category and log.get("enabled") is True
+                for log in props["logs"]
+            )
+        ):
+            raise CampaignError("native diagnostic setting or destination differs")
+        query = context.package / "queries" / (name + ".kql")
+        if file_hash(query) != plan["queryFiles"][name]:
+            raise CampaignError("native category query does not match the package")
+        request = directory / (name + "-query.json")
+        write_new(request, {"query": query.read_text(), "timespan": f"{utc(begin)}/{utc(end)}"})
+        reply = context.call(
+            directory, name + "-query",
+            ("rest", "--method", "post", "--url",
+             f"https://api.loganalytics.io/v1/workspaces/{customer}/query",
+             "--resource", "https://api.loganalytics.io/", "--body", "@" + str(request)),
+            allow_failure=True,
+        )
+        query_succeeded = reply is not None and "error" not in reply
+        found = rows({"status": 200, "result": reply}) if query_succeeded else []
+        if len(found) > 1 or any(
+            record.get("Category") != category or type(record.get("Count")) is not int
+            or record["Count"] <= 0
+            or not begin <= parse_utc(record["First"]) <= parse_utc(record["Last"]) <= end
+            for record in found
+        ):
+            raise CampaignError("native category rows are outside the exact source or window")
+        results[name] = {
+            "category": category, "querySucceeded": query_succeeded,
+            "observed": bool(found), "rows": found,
+        }
+    write_new(directory / "summary.json", {"observations": results, "fullD007Accepted": False})
+    return "native-categories-observed-or-unproved"
 
 
 def destination_readiness(context):
@@ -943,6 +1114,14 @@ def operate(context, action, *, stop_reason=None):
         return context.cleanup("scheduled-proof-stop")
     if (context.run / "stop-proof-intent.json").exists():
         raise CampaignError("proof already stopped; reconcile the exact cleanup path")
+    if action in {"repair", "core-retry"} and getattr(context, "plan", {}).get(
+        "scannerObservation"
+    ) == SCANNER_OBSERVATION:
+        raise CampaignError("successor scope allows one primary upload diagnostic and no retry")
+    if action in {"transport", "infrastructure"} and getattr(context, "plan", {}).get(
+        "scannerObservation"
+    ) != SCANNER_OBSERVATION:
+        raise CampaignError("independent operator action requires the sealed successor")
     telemetry_first_enabled = getattr(context, "telemetry_first", False)
     if not telemetry_first_enabled and action == "telemetry-first":
         raise CampaignError("telemetry-first requires its separately approved package")
@@ -1001,28 +1180,36 @@ def operate(context, action, *, stop_reason=None):
         "account-recovery": "proof-account-recovery",
         "core": "proof-core",
         "core-retry": "proof-core-retry",
+        "transport": "proof-transport",
+        "infrastructure": "successor-native-categories",
     }.get(action)
     if previously_recorded and (context.run / previously_recorded).exists():
         raise CampaignError("this stage already has a receipt or intent; reconcile it")
-    if action == "core-retry":
-        # Admission errors issue no new writes and leave diagnosis/independent work available.
-        resume_path = context.policy.resume()
-    else:
-        resume_path = None
+    # Admission errors issue no new writes and leave independent work available.
+    resume_path = context.policy.resume() if action == "core-retry" else None
     try:
         if action in {"diagnose", "repair"}:
             return collect_and_repair(context, repair=action == "repair")
         if action == "destination-readiness":
             return destination_readiness(context)
+        if action == "infrastructure":
+            return observe_infrastructure(context)
         if action == "telemetry-first":
             return telemetry_first.run(context, validate_destination_sample, NativeFailure)
         status = dispatch_proof(context, action, resume_path)
         if status == "scanner-paused":
+            if getattr(context, "plan", {}).get("scannerObservation") == SCANNER_OBSERVATION:
+                hold = context.policy.require_hold()
+                if (
+                    (context.run / "scanner-in-window/worker-read-start-intent.json").exists()
+                    or hold["upload"]["suffix"] != "primary"
+                ):
+                    return "scanner-paused-independent-operations-remain-available"
             return "scanner-paused-run-diagnose-and-destination-readiness"
         return status
     except (ValueError, OSError, KeyError, CampaignError) as error:
         if isinstance(error, (NativeFailure, DiagnosticUnavailable)) and (
-            action == "diagnose"
+            action in {"diagnose", "infrastructure"}
             or (
                 action == "repair"
                 and not (
@@ -1057,6 +1244,8 @@ def main():
             "diagnose",
             "repair",
             "core-retry",
+            "transport",
+            "infrastructure",
             "destination-readiness",
             "telemetry-first",
             "gate",

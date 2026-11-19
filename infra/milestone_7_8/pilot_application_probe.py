@@ -23,6 +23,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from infra.milestone_7_8.pilot_validation import (
+    SCANNER_OBSERVATION,
+    SCANNER_PENDING_MARKER,
     _private_host,
     admit_runtime_bindings,
     authorize,
@@ -92,6 +94,9 @@ class Journal:
         deadline: datetime,
     ) -> None:
         self.output, self.deadline = output, deadline
+        self.observe_primary_scan = (
+            operation == "core" and bindings.get("scannerObservation") == SCANNER_OBSERVATION
+        )
         self.directory = output.with_suffix(".steps")
         self.sequence = 0
         self.header = {
@@ -301,6 +306,7 @@ class Api:
         }
         self.journal.step("scanner-upload-bound", upload)
         checked_quarantine = False
+        scanner_marker_sent = False
         while state.get("scanOutcome") is None or state.get("objectState") != "clean":
             require(
                 state["objectVersionId"] == upload["objectVersionId"],
@@ -336,6 +342,31 @@ class Api:
                     "quarantined source entered retrieval",
                 )
                 checked_quarantine = True
+            if (
+                self.journal.observe_primary_scan
+                and suffix == SCANNER_OBSERVATION["fixture"]
+                and not scanner_marker_sent
+                and checked_quarantine
+                and state.get("scanOutcome") is None
+                and state.get("objectState") == "scan_pending"
+                and SCANNER_OBSERVATION["minimumDispatchSecondsRemaining"] <= remaining
+                <= SCANNER_OBSERVATION["publishWhenSecondsRemaining"]
+            ):
+                marker = {
+                    "executionId": self.execution,
+                    "binding": {
+                        key: self.journal.header[key]
+                        for key in ("imageDigest", "sourceCommit", "release", "deployment")
+                    },
+                    "pendingAt": datetime.now(UTC).isoformat(),
+                    "upload": upload | {"serverScanDeadlineAt": state["scanDeadlineAt"]},
+                }
+                self.journal.step("scanner-observation-pending", marker)
+                print(
+                    SCANNER_PENDING_MARKER + json.dumps(marker, separators=(",", ":")),
+                    flush=True,
+                )
+                scanner_marker_sent = True
             await asyncio.sleep(max(0, min(10, stop - time.monotonic())))
             state = await self.request("GET", session_path, scanner_poll=True)
         require(

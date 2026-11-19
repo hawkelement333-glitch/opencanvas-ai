@@ -205,3 +205,105 @@ Native target-absence receipt `azure-cleanup-terminal.json` SHA-256
 The campaign forecast was **$40.8177 USD**, the replacement execution ceiling
 was **$56.51**, and the cumulative ceiling was **$460.40**. Those figures
 remain a forecast and ceilings. Billing remains **unsettled**.
+
+## Local continuation from 53cfa007
+
+The staging and D001 receipt hashes were checked against the retained records.
+D001's continuation job used its worker identity for both scanner provider
+reads and its API database role for the fixture and consumption. Its journal
+binds the exact Blob and Log Analytics evidence for both versions before their
+900-second deadlines. The staging worker ran the normal worker entry point
+with a worker database role and its own worker identity. Its declared storage
+account and workspace, Entra authentication, verified PostgreSQL TLS, private
+pull, 900-second decision window and 20-second retry cap matched the staging
+plan. Both paths use version-conditioned Blob properties and tags. Their
+Log Analytics query matches the storage account, canonical object URI and
+normalized ETag. Source differences add operational telemetry without changing
+those read predicates.
+
+| Staging boundary | Retained evidence |
+| --- | --- |
+| Production Blob read | The upload was still quarantined at the deadline. Exact-version properties, tag response and Blob verdict are unproved. |
+| Production Log Analytics read | The scoped scanner-table assignment was present. The administrator's account and URI-prefix query returned one clean candidate ingested before expiry. That query projected no ETag, and the receipt establishes neither the worker's query outcome nor an exact-version row. The production worker reaches this query only after its Blob evidence read succeeds. |
+| Operator diagnostic | The container exec handshake returned 404 with empty stdout. The diagnostic reached neither source. The exact timeout cause remains unknown. A separate local regression found the old diagnostic raised an attribute error when reporting disagreement. It now records the correlation failure code. |
+
+The operator's `diagnose` action now uses one manual execution of the already
+bound idle migration helper, temporarily scoped to the worker identity alone.
+It reuses the active worker's exact API image, private environment and read
+configuration. The probe uses a PostgreSQL read-only transaction to bind the
+session, document, quarantine version and checksum, rolls back, then records
+both independent provider reads. The receipt distinguishes failure, an exact
+match, a successful read without a match, and a dual-source disagreement. It
+contains bounded reason codes and reports agreement observed after expiry as
+late. The operator verifies the exact execution and restores the helper's
+captured configuration, template and identity after the execution is
+terminal. Uncertain dispatch requires native reconciliation before restoration.
+The diagnostic has no acceptance or promotion path. Production quarantine,
+the 900-second decision deadline and the two-source requirement still apply.
+
+Local rehearsal used the retained worker settings, simulated native job and
+data-plane boundaries, and the production correlation and enforcement logic.
+A clean Log Analytics row with a different ETag left the upload at
+`scan_pending`, with no scan result or promotion and an HTTP 404 on file
+access. Exact and late agreement cases also passed. Actual private identity
+authentication and the job console receipt still require live observation.
+
+The retained transport archive and its exact runtime projection reached the
+gateway in a local ASGI rehearsal and produced HTTP 401, 422 and 202 in order.
+The original live receipt has only `ValueError` and `failed_or_unknown`, and
+the exact-source reconciliation found zero rows. The intent establishes
+that package authorization and native binding checks had passed. The failure
+receipt followed the intent by about 0.83 seconds, before an ordinary
+destination polling wait could finish. The failing boundary within the
+transport probe remains unknown. The old probe accepted a query response with the
+expected row count and a wrong SignalId. The probe now verifies the complete
+ID set, rejects partial responses and records a sanitized stage, reason and
+available HTTP status on failure. The original managed result stands.
+
+The offline `prepare-verification-queries` operation exported 62 verification
+queries bound to `rc-c1d0bb1b919c` from the sealed ARM catalog and reviewed
+query files. It preserves the original release-mismatched files and exports
+fresh query hashes, including corrections for two previously stale query
+authorization hashes. The two deployed alert queries equaled the sealed and
+submitted definitions. Their thresholds, windows and cadence were preserved.
+The local exports are under `.runtime/milestone_7_8/local-53cfa007/verification`.
+The original approval and any future execution approval have distinct source
+and query bindings.
+
+The focused scanner, destination, transport and operator suites passed 242
+checks. The broader run found three failures in the unchanged infrastructure
+suite covering the region list, the compiled common environment expression,
+and the vault purge-protection property. No managed acceptance was added.
+
+Carry forward the accepted single-request API telemetry proof, 32 API and
+worker rows, five retention settings, 13 workbook configurations, observed
+registry, Blob read/write, Key Vault and VPN categories, and all 48 zero
+cleanup counters. Workbook renders, destination transport, PostgreSQL log
+rows and Blob delete rows remain open. PostgreSQL, D001, D002 and accepted
+signups stay closed. The historical receipts and five stashes are preserved.
+The changes are in operator tooling, tests and this record. The API image
+inputs and frontend runtime sources are unchanged. The frontend's broad
+Docker build context would include changed repository files on a rebuild.
+Reuse the exact retained API and signed frontend OCI indexes.
+
+The smallest new managed observation would be an execution-bound receipt for
+the two reads under the worker identity on the exact version of one synthetic
+upload. The current diagnostic action can run immediately after a scanner
+hold. Its result describes the reads at that time and cannot establish what
+was visible before expiry. The earlier staging resources were cleaned up.
+
+With separate approval, use one private deployment with cleanup protection
+and the two retained digests. Admit one same-deployment synthetic core attempt
+with its required account fixture. The existing core entry point starts with
+one primary upload under the 900-second deadline. It admits its two grounding
+scenarios and the queued-recovery and deletion-recovery uploads only after
+the primary scan and publication succeed. At the first scanner hold, run
+one `diagnose` execution and verify helper restoration. The retained grant
+and unknown cause give no basis for an RBAC write or a repair retry. On that
+deployment, independent work can cover one
+bounded transport fixture, actual workbook renders, eligible native alert
+observations using the corrected queries, and missing PostgreSQL log and Blob
+delete rows from authorized operations. The accepted telemetry and cleanup
+evidence carries forward for the original execution. Delivery, restore,
+capacity and editable-AI checks require an accepted core fixture. Any new
+deployment needs its own terminal cleanup verification.

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gzip
 import hashlib
 import ipaddress
 import json
@@ -21,9 +22,16 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
-from infra.milestone_7_8.pilot_alerts import ROOT, compile_catalog
+from infra.milestone_7_8.pilot_alerts import ROOT, bound, compile_catalog
 
 VERSION = "m78-pilot-destination-probe-v1"
+SCANNER_PENDING_MARKER = "M78-SCANNER-PENDING:"
+SCANNER_OBSERVATION = {
+    "fixture": "primary",
+    "maximumExecutions": 1,
+    "publishWhenSecondsRemaining": 400,
+    "minimumDispatchSecondsRemaining": 270,
+}
 OPERATIONS = ("query", "telemetry", "alerts", "smtp", "provider-observation")
 DELIVERY_OPERATIONS = (
     "password-reset-request",
@@ -62,6 +70,14 @@ TABLES = {
     "span": "MobiusSpan_CL",
     "incident": "MobiusIncident_CL",
 }
+
+
+class TransportError(ValueError):
+    def __init__(self, stage: str, code: str, status: int | None = None) -> None:
+        super().__init__(code)
+        self.diagnostic = {"stage": stage, "code": code}
+        if status is not None:
+            self.diagnostic["httpStatus"] = status
 
 
 def digest(path: Path) -> str:
@@ -190,6 +206,115 @@ def prepare(
     return manifest
 
 
+def prepare_verification_queries(bundle: Path, output: Path) -> dict:
+    """Export the sealed deployment catalog and its matching local KQL without I/O to Azure."""
+    output = output.resolve()
+    review_path = bundle / "review-package.json"
+    review = json.loads(review_path.read_bytes())
+    sources = {}
+    for name in (
+        "manifest.json", "planned-bindings.json", "destination-plan.bound.json",
+        "catalog.json", "parameters.bound.json",
+    ):
+        path = bundle / name
+        if digest(path) != review["files"][name]:
+            raise ValueError("verification source differs from the sealed package")
+        sources[name] = json.loads(path.read_bytes())
+    manifest = sources["manifest.json"]
+    plan = sources["planned-bindings.json"]
+    destination = sources["destination-plan.bound.json"]
+    arm = sources["parameters.bound.json"]["parameters"]
+    previous = sources["catalog.json"]
+    current = arm["catalog"]["value"]
+    release, deployment = bound(plan["release"]), bound(plan["deployment"])
+    if (
+        any(record["release"] != release for record in (manifest, destination, current))
+        or any(record["deployment"] != deployment for record in (
+            manifest, destination, previous, current,
+        ))
+        or arm["release"]["value"] != release
+        or manifest["catalogSha256"] != review["files"]["catalog.json"]
+    ):
+        raise ValueError("verification release/deployment bindings disagree")
+
+    old_filter = f'Release == "{bound(previous["release"])}" and Deployment == "{deployment}"'
+    new_filter = f'Release == "{release}" and Deployment == "{deployment}"'
+
+    def replace_filter(query: str) -> str:
+        if query.count(old_filter) != 1:
+            raise ValueError("one exact catalog release predicate required")
+        return query.replace(old_filter, new_filter, 1)
+
+    def queries(catalog: dict) -> dict[str, str]:
+        return {
+            **{
+                f"catalog-workbooks-{i}-workbook-items-{j}-content-query.kql":
+                panel["content"]["query"]
+                for i, workbook in enumerate(catalog["workbooks"])
+                for j, panel in enumerate(workbook["workbook"]["items"])
+            },
+            **{
+                f"catalog-alerts-{i}-{field}.kql": alert[field]
+                for i, alert in enumerate(catalog["alerts"])
+                for field in ("query", "observationQuery")
+            },
+        }
+
+    # A full comparison also guards alert thresholds, cadence, and recovery windows.
+    old_queries = queries(previous)
+    current_queries = queries(current)
+    if (
+        {name: replace_filter(query) for name, query in old_queries.items()} != current_queries
+        or json.loads(json.dumps(previous).replace(previous["release"], release)) != current
+    ):
+        raise ValueError("the sealed catalogs differ beyond the release binding")
+
+    prior_unbound_queries = []
+    output_queries = {}
+    for name in sorted(review["files"]):
+        if not name.startswith("queries/") or not name.endswith(".kql"):
+            continue
+        path = bundle / name
+        sha = digest(path)
+        if sha != review["files"][name]:
+            raise ValueError("verification query differs from the sealed package")
+        data = path.read_bytes()
+        text = path.read_text(encoding="utf-8")
+        if hashlib.sha256(text.encode()).hexdigest() not in plan["approvedQueryHashes"]:
+            prior_unbound_queries.append(name)
+        if path.name in current_queries:
+            if text.strip() != old_queries[path.name].strip():
+                raise ValueError("sealed query differs from its catalog entry")
+            data = data.replace(old_filter.encode(), new_filter.encode(), 1)
+        elif old_filter.encode() in data:
+            data = replace_filter(data.decode("utf-8")).encode("utf-8")
+        output_queries[name] = data
+    if not all(f"queries/{name}" in output_queries for name in current_queries):
+        raise ValueError("sealed verification query inventory differs")
+
+    output.mkdir(parents=True, exist_ok=False)
+    (output / "queries").mkdir()
+    for name, data in output_queries.items():
+        with (output / name).open("xb") as stream:
+            stream.write(data)
+    write_new(output / "catalog.json", current)
+    receipt = {
+        "release": release,
+        "deployment": deployment,
+        "sourceReviewSha256": digest(review_path),
+        "catalogSha256": digest(output / "catalog.json"),
+        "querySha256": {name: digest(output / name) for name in output_queries},
+        "approvedQueryHashes": sorted({
+            hashlib.sha256((output / name).read_text(encoding="utf-8").encode()).hexdigest()
+            for name in output_queries
+        }),
+        "priorQueryAuthorizationMismatches": prior_unbound_queries,
+        "classification": "local-verification-inputs",
+    }
+    write_new(output / "verification-queries.json", receipt)
+    return receipt
+
+
 def authorize(
     bundle: Path,
     approval_path: Path,
@@ -220,6 +345,9 @@ def authorize(
         raise ValueError("operation not authorized")
     if digest(bundle / "catalog.json") != manifest["catalogSha256"]:
         raise ValueError("catalog changed after preparation")
+    catalog = json.loads((bundle / "catalog.json").read_bytes())
+    if any(catalog.get(key) != manifest[key] for key in ("release", "deployment")):
+        raise ValueError("verification catalog differs from the package release/deployment")
     for path, expected in manifest["sourceBindings"].items():
         if digest(ROOT / path) != expected:
             raise ValueError("bound source changed after preparation")
@@ -496,15 +624,17 @@ async def query(bindings: dict, kql: str) -> dict:
 
 
 async def telemetry(bindings: dict, deadline: datetime) -> dict:
+    from urllib.parse import urlparse
+
     import httpx
     from pydantic import SecretStr
+    from scripts.telemetry_destination import destination_rows
+
     from opencanvas_api.services.observability import (
         InMemoryTelemetrySink,
-        Severity,
         OperationalTelemetry,
+        Severity,
     )
-    from scripts.telemetry_destination import destination_rows
-    from urllib.parse import urlparse
 
     source = bindings["probeTelemetrySource"]
     if (
@@ -521,7 +651,10 @@ async def telemetry(bindings: dict, deadline: datetime) -> dict:
         or parsed.fragment
     ):
         raise ValueError("verified TLS gateway required")
-    addresses = _private_host(parsed.hostname)
+    try:
+        addresses = _private_host(parsed.hostname)
+    except (ValueError, OSError) as error:
+        raise TransportError("gateway-dns", "private-resolution-unproved") from error
     sink = InMemoryTelemetrySink()
     telemetry_client = OperationalTelemetry(
         service=source["service"],
@@ -581,37 +714,55 @@ async def telemetry(bindings: dict, deadline: datetime) -> dict:
     async with httpx.AsyncClient(
         timeout=6, follow_redirects=False, trust_env=False
     ) as client:
-        negative = await client.post(endpoint, json=payload)
-        if negative.status_code != 401:
-            raise ValueError("unauthenticated gateway accepted request")
         # Native application schema sanitizer refuses content; the destination
         # also independently rejects a malicious authenticated producer.
         poisoned = json.loads(json.dumps(payload))
         poisoned["signals"][0]["payload"]["prompt"] = "M78_SYNTHETIC_PRIVATE_SENTINEL"
-        rejected = await client.post(endpoint, json=poisoned, headers=headers)
-        if rejected.status_code != 422:
-            raise ValueError("destination did not reject forbidden content")
-        response = await client.post(endpoint, json=payload, headers=headers)
-        if response.status_code != 202:
-            raise ValueError(
-                "destination did not acknowledge valid operational signals"
-            )
-    ids = [row["SignalId"] for row in expected]
-    id_list = ",".join(f'"{value}"' for value in ids)
+        for stage, body, auth, status in (
+            ("gateway-unauthenticated", payload, {}, 401),
+            ("gateway-forbidden-content", poisoned, headers, 422),
+            ("gateway-valid-batch", payload, headers, 202),
+        ):
+            try:
+                response = await client.post(endpoint, json=body, headers=auth)
+            except httpx.HTTPError as error:
+                raise TransportError(stage, "http-outcome-unproved") from error
+            if response.status_code != status:
+                raise TransportError(stage, "unexpected-http-status", response.status_code)
+    ids = {row["SignalId"] for row in expected}
+    id_list = ",".join(f'"{value}"' for value in sorted(ids))
     kql = (
         "union MobiusApplication_CL,MobiusSecurity_CL,MobiusMetric_CL,MobiusSpan_CL\n"
-        f"| where SignalId in ({id_list})\n| summarize arg_max(TimeGenerated,*) by SignalId"
+        f"| where SignalId in ({id_list})\n| summarize by SignalId"
     )
     stop = min(deadline, datetime.now(UTC) + timedelta(minutes=10))
     attempts = []
     while datetime.now(UTC) < stop:
-        observed = await query(bindings, kql)
+        try:
+            observed = await query(bindings, kql)
+        except (KeyError, ValueError, OSError, httpx.HTTPError) as error:
+            raise TransportError("destination-query", "query-outcome-unproved") from error
         attempts.append(
             {"at": datetime.now(UTC).isoformat(), "status": observed["status"]}
         )
         if observed["status"] == 200:
-            tables = observed["result"].get("tables", [])
-            if tables and len(tables[0]["rows"]) == len(ids):
+            try:
+                native_result = observed["result"]
+                if "error" in native_result:
+                    raise ValueError("partial query result")
+                (table,) = native_result["tables"]
+                records = table["rows"]
+                (column,) = table["columns"]
+                if column["name"] != "SignalId" or not isinstance(records, list):
+                    raise ValueError("invalid result shape")
+                observed_ids = {signal_id for (signal_id,) in records}
+                if len(records) != len(observed_ids) or not observed_ids <= ids:
+                    raise ValueError("invalid signal IDs")
+            except (KeyError, TypeError, ValueError) as error:
+                raise TransportError(
+                    "destination-query", "unexpected-signal-id-result", 200
+                ) from error
+            if observed_ids == ids:
                 return {
                     "classification": "transport-fixture-only",
                     "privateAddresses": addresses,
@@ -622,9 +773,9 @@ async def telemetry(bindings: dict, deadline: datetime) -> dict:
                     "forbiddenContentStatus": 422,
                 }
         elif observed["status"] in (401, 403):
-            raise ValueError("operator query permission denied")
+            raise TransportError("destination-query", "operator-query-denied", observed["status"])
         await asyncio.sleep(min(10, max(0, (stop - datetime.now(UTC)).total_seconds())))
-    raise ValueError("destination rows not observed before bounded deadline")
+    raise TransportError("destination-query", "exact-signals-missing-at-deadline")
 
 
 async def receive_alerts(bindings: dict, deadline: datetime, output: Path) -> dict:
@@ -763,7 +914,9 @@ def smtp_probe(bindings: dict, execution_id: str) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("prepare", *OPERATIONS))
+    parser.add_argument(
+        "operation", choices=("prepare", "prepare-verification-queries", *OPERATIONS)
+    )
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--release")
     parser.add_argument("--deployment")
@@ -779,6 +932,11 @@ def main() -> int:
     parser.add_argument("--provider-readback", type=Path)
     parser.add_argument("--provider-binding", type=Path)
     args = parser.parse_args()
+    if args.operation == "prepare-verification-queries":
+        if args.execute or args.output is None:
+            parser.error("prepare-verification-queries requires --output and no --execute")
+        prepare_verification_queries(args.bundle, args.output)
+        return 0
     if args.operation == "prepare":
         if (
             not args.release
@@ -824,9 +982,16 @@ def main() -> int:
     )
     if args.runtime_readbacks is None:
         parser.error("live observation requires exact --runtime-readbacks")
+    if args.runtime_readbacks.suffix == ".gz":
+        with gzip.open(args.runtime_readbacks, "rb") as source:
+            readback_bytes = source.read(250_001)
+        if len(readback_bytes) > 250_000:
+            raise ValueError("runtime readback exceeds the artifact bound")
+    else:
+        readback_bytes = args.runtime_readbacks.read_bytes()
     bindings = admit_runtime_bindings(
         bindings,
-        json.loads(args.runtime_readbacks.read_text()),
+        json.loads(readback_bytes),
         plan_sha256=digest(args.bindings),
     )
     bindings["approvedAt"] = json.loads(args.authorization.read_text())["approvedAt"]
@@ -906,6 +1071,8 @@ def main() -> int:
             "accepted": False,
             "nextAction": "reconcile exact intent and provider outcome before retry",
         }
+        if isinstance(exc, TransportError):
+            result["transportDiagnostic"] = exc.diagnostic
     write_new(
         args.output,
         {

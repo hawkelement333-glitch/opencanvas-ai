@@ -54,8 +54,10 @@ def test_foundation_reuses_private_dependencies_without_replaying_closed_jobs(
     assert inputs["applicationDatabaseName"]["value"] == "opencanvas"
     assert inputs["pilotDestinationPrivacy"]["value"] is True
     assert compiled["parameters"]["stage"]["defaultValue"] == "foundation"
-    assert compiled["parameters"]["location"]["allowedValues"] == ["eastus"]
+    assert compiled["parameters"]["location"]["allowedValues"] == ["eastus", "canadacentral"]
     redis = resource(compiled, "Microsoft.Cache/redisEnterprise")
+    assert redis["location"] == "[parameters('redisLocation')]"
+    assert compiled["parameters"]["redisLocation"]["allowedValues"] == ["eastus", "canadacentral"]
     assert redis["sku"]["name"] == "Balanced_B0"
     assert redis["properties"]["highAvailability"] == "Enabled"
     assert redis["properties"]["publicNetworkAccess"] == "Disabled"
@@ -82,7 +84,8 @@ def test_application_uses_exact_candidate_and_scanner_policy_without_public_ingr
     compiled: dict,
 ) -> None:
     runtime = nested(compiled, "runtime")["properties"]["template"]
-    common = {item["name"]: item["value"] for item in runtime["variables"]["common"]}
+    common = {item["name"]: item["value"] for item in runtime["variables"]["commonBase"]}
+    assert "variables('commonBase')" in runtime["variables"]["common"]
     assert common["OPENCANVAS_APP_MODE"] == "staging"
     assert common["OPENCANVAS_AUTH_TEST_BYPASS"] == "false"
     assert common["OPENCANVAS_MALWARE_SCAN_TIMEOUT_SECONDS"] == "900"
@@ -135,7 +138,7 @@ def test_jobs_are_manual_and_secrets_are_bound_to_individual_consumers(compiled:
     assert len(grants) == 1 and "Microsoft.KeyVault/vaults/secrets" in grants[0]["scope"]
     vault = resource(compiled, "Microsoft.KeyVault/vaults")["properties"]
     assert vault["publicNetworkAccess"] == "Disabled"
-    assert vault["enableSoftDelete"] is True and vault["enablePurgeProtection"] is False
+    assert vault["enableSoftDelete"] is True and vault.get("enablePurgeProtection", False) is False
 
 
 def test_common_runtime_environment_names_are_typed_settings(compiled: dict) -> None:

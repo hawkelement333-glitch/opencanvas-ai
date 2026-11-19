@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import subprocess
 import sys
@@ -10,14 +11,20 @@ from uuid import uuid4
 
 import httpx
 import pytest
+
 from infra.milestone_7_8 import pilot_application_probe as probe
 from infra.milestone_7_8.campaign import CampaignError
 from infra.milestone_7_8.pilot import core_proof_operator as operator
 from infra.milestone_7_8.pilot.scanner_hold import POLICY, ProofOperator
-from infra.milestone_7_8.pilot.scanner_operator import worker_command, worker_result
+from infra.milestone_7_8.pilot.scanner_operator import (
+    DiagnosticUnavailable,
+    read_worker_job,
+    worker_command,
+    worker_result,
+)
 from infra.milestone_7_8.pilot.scanner_read_diagnostic import observe
 from infra.milestone_7_8.pilot_cleanup import file_hash, read, write_new
-
+from infra.milestone_7_8.pilot_validation import SCANNER_OBSERVATION, SCANNER_PENDING_MARKER
 from opencanvas_api.services.documents.errors import DocumentStorageError
 from opencanvas_api.services.scanner_bridge import ScannerBridgeEvidenceError
 
@@ -31,7 +38,7 @@ from opencanvas_api.services.scanner_bridge import ScannerBridgeEvidenceError
     ],
 )
 async def test_exact_quarantine_conflict_then_real_promotion_contract(
-    tmp_path, monkeypatch, conflict, outcome
+    tmp_path, monkeypatch, capsys, conflict, outcome
 ):
     now = datetime.now(UTC)
     clock = [0.0]
@@ -99,6 +106,7 @@ async def test_exact_quarantine_conflict_then_real_promotion_contract(
             "sourceCommit": "b" * 40,
             "release": "fixture",
             "deployment": "fixture",
+            "scannerObservation": SCANNER_OBSERVATION,
         },
         now + timedelta(hours=1),
     )
@@ -111,10 +119,26 @@ async def test_exact_quarantine_conflict_then_real_promotion_contract(
             assert len((journal.directory / "scanner-polls.jsonl").read_text().splitlines()) == 2
         elif outcome == "expired":
             with pytest.raises(probe.ScannerDeadline) as error:
-                await api.clean_upload(fixture, "first")
+                await api.clean_upload(fixture, "primary")
             assert error.value.upload["objectVersionId"] == version
             assert clock[0] == 899
             assert error.value.upload["scanDeadlineAt"] == pending["scanDeadlineAt"]
+            console = capsys.readouterr().out
+            assert console.count(SCANNER_PENDING_MARKER) == 1
+            marker = operator.pending_observation(
+                console, "execution", journal.header, now + timedelta(seconds=530),
+                now + timedelta(hours=1),
+            )
+            assert marker["upload"]["objectVersionId"] == version
+            assert operator.pending_observation(
+                console, "execution", journal.header, now + timedelta(seconds=650),
+                now + timedelta(hours=1),
+            ) is None
+            with pytest.raises(CampaignError, match="exact active execution"):
+                operator.pending_observation(
+                    console, "other-execution", journal.header, now + timedelta(seconds=530),
+                    now + timedelta(hours=1),
+                )
         else:
             with pytest.raises(ValueError, match="unrelated HTTP 409"):
                 await api.clean_upload(fixture, "first")
@@ -141,38 +165,173 @@ async def test_both_native_reads_have_separate_failure_reasons():
     )
     result = await observe(
         bridge,
-        SimpleNamespace(physical_key="fixture", etag="etag"),
+        SimpleNamespace(physical_key="fixture", etag="etag", provider_version_id="version"),
         SimpleNamespace(requested_at=now, deadline_at=now),
         now,
     )
     assert result["blob"] == {
         "status": "failed",
+        "versionBound": None,
         "code": "scanner-blob-tags-http-status",
         "httpStatus": 403,
     }
     assert result["logAnalytics"] == {
         "status": "failed",
+        "versionBound": None,
         "code": "scanner-log-query-authorization-unavailable",
     }
     assert result["requestExpired"] and result["correlation"]["status"] == "unproved"
+    assert {window["window"] for window in result["timing"].values()} == {"post-deadline"}
     assert "raw sensitive message" not in str(result)
 
 
-def test_worker_exec_argument_is_consumable_without_provider(tmp_path):
-    import shlex
-
+def test_worker_job_command_and_console_are_execution_bound(tmp_path):
     source = tmp_path / "fixture.py"
     source.write_text(
         "import json\ndef main(inputs): print('M78-SCANNER-READ:' + json.dumps(inputs))\n"
     )
-    inputs = {"challenge": "local", "objectVersionId": str(uuid4())}
-    parsed = shlex.split(worker_command(inputs, source))
+    inputs = {"challenge": "local", "objectVersionId": str(uuid4()), "executionId": "job-abc"}
+    command = worker_command(inputs, source)
     result = subprocess.run(
-        [sys.executable, *parsed[1:]], check=True, capture_output=True, text=True
+        [sys.executable, *command[1:]], check=True, capture_output=True, text=True
     )
-    assert worker_result(result.stdout, inputs) == inputs
-    with pytest.raises(CampaignError, match="not reconciled"):
-        worker_result(result.stdout, inputs | {"challenge": "different"})
+    wrapped = json.dumps({"TimeStamp": "2026-11-19T04:05:00Z", "Log": "F " + result.stdout.strip()})
+    assert worker_result(wrapped, inputs, "job-abc") == inputs
+    assert worker_result(result.stdout, inputs, "job-abc") == inputs
+    with pytest.raises(DiagnosticUnavailable, match="not reconciled"):
+        worker_result(wrapped, inputs | {"challenge": "different"}, "job-abc")
+    with pytest.raises(DiagnosticUnavailable, match="not reconciled"):
+        worker_result(wrapped, inputs, "job-other")
+
+
+@pytest.mark.parametrize("scenario", ["success", "busy", "late", "start-unknown", "failed"])
+def test_read_worker_job_restores_after_terminal_execution(tmp_path, scenario):
+    scope = "/subscriptions/fixture/resourceGroups/rg-m78-0123456789-target"
+    deployment = "m78p-0123456789"
+    name = f"caj-{deployment}-migration"
+    job_id = f"{scope}/providers/Microsoft.App/jobs/{name}"
+    migration = {"role": "migration", "id": scope + "/migration"}
+    worker = {"role": "worker", "id": scope + "/worker"}
+    foundation = {"identityBindings": [migration, worker]}
+    plan = {
+        "targetResourceGroupId": scope, "deployment": deployment,
+        "helperJobResourceId": job_id, "managedEnvironmentResourceId": scope + "/environment",
+    }
+    registry = "fixture.azurecr.io"
+    image = f"{registry}/opencanvas-api@sha256:" + "0" * 64
+    inputs = {
+        "challenge": "test", "objectVersionId": str(uuid4()), "clientId": str(uuid4()),
+        "workspaceId": str(uuid4()), "databaseUrl": "postgresql+asyncpg://worker@fixture:5432/db",
+        "storageUrl": "https://fixture.blob.core.windows.net/",
+    }
+    original = {
+        "id": job_id,
+        "identity": {"type": "UserAssigned", "userAssignedIdentities": {migration["id"]: {}}},
+        "properties": {
+            "environmentId": plan["managedEnvironmentResourceId"],
+            "provisioningState": "Succeeded",
+            "configuration": {
+                "triggerType": "Manual", "replicaTimeout": 1800, "replicaRetryLimit": 0,
+                "manualTriggerConfig": {"parallelism": 1, "replicaCompletionCount": 1},
+                "registries": [{"server": registry, "identity": migration["id"]}],
+            },
+            "template": {"containers": [{
+                "name": "migration", "image": image,
+                "command": ["python", "-m", "scripts.migrate_and_grant"],
+                "resources": {"cpu": 0.5, "memory": "1Gi"},
+            }]},
+        },
+    }
+    settings = {
+        "DATABASE_URL": inputs["databaseUrl"], "DATABASE_ROLE": "worker",
+        "DATABASE_AUTH_MODE": "entra", "DATABASE_TLS_MODE": "verify-full",
+        "DATABASE_MANAGED_IDENTITY_CLIENT_ID": inputs["clientId"],
+        "AZURE_MANAGED_IDENTITY_CLIENT_ID": inputs["clientId"], "STORAGE_PROVIDER": "azure",
+        "AZURE_STORAGE_ACCOUNT_URL": inputs["storageUrl"], "OBJECT_INGESTION_MODE": "trusted",
+        "AZURE_LOG_ANALYTICS_WORKSPACE_ID": inputs["workspaceId"],
+        "SCANNER_RESULT_BRIDGE_MODE": "private_pull", "MALWARE_SCAN_TIMEOUT_SECONDS": "900",
+        "SCANNER_RESULT_BRIDGE_RETRY_MAX_SECONDS": "20",
+    }
+    container = {
+        "image": image, "env": [
+            *({"name": "OPENCANVAS_" + key, "value": value} for key, value in settings.items()),
+            {"name": "PGSSLROOTCERT", "value": "/etc/ssl/certs/ca-certificates.crt"},
+            {"name": "OPENCANVAS_OPENAI_API_KEY", "secretRef": "excluded"},
+        ],
+    }
+    current = copy.deepcopy(original)
+    events = []
+    execution = name + "-abc"
+
+    def get(root, label, rid, version):
+        assert root == tmp_path and version == "2025-01-01"
+        if rid == job_id + "/executions":
+            return {"value": [{"properties": {"status": "Running"}}] if scenario == "busy" else []}
+        if rid == job_id:
+            return copy.deepcopy(current)
+        assert rid == f"{job_id}/executions/{execution}"
+        return {
+            "id": rid, "properties": {
+                "status": "Failed" if scenario == "failed" else "Succeeded",
+                "template": copy.deepcopy(current["properties"]["template"]),
+            },
+        }
+
+    def call(root, label, args, **kwargs):
+        events.append(label)
+        if args[:3] == ("rest", "--method", "patch"):
+            payload = read(tmp_path / args[-1][1:])
+            current.update(identity=payload["identity"])
+            current["properties"].update(payload["properties"])
+        elif args[:3] == ("containerapp", "job", "start"):
+            assert set(current["identity"]["userAssignedIdentities"]) == {worker["id"]}
+            conf = current["properties"]["configuration"]
+            assert conf["registries"] == [{"server": registry, "identity": worker["id"]}]
+            assert conf["replicaTimeout"] == 90 and conf["replicaRetryLimit"] == 0
+            (spec,) = current["properties"]["template"]["containers"]
+            assert spec["image"] == image and spec["command"][:2] == ["python", "-c"]
+            assert all(set(row) == {"value", "name"} for row in spec["env"])
+            if scenario == "start-unknown":
+                raise OSError("simulated ambiguous dispatch")
+            return {"name": execution}
+        else:
+            assert args[:4] == ("containerapp", "job", "logs", "show")
+            assert execution in args and current == original and kwargs == {"as_json": False}
+            return "M78-SCANNER-READ:" + json.dumps(inputs | {"executionId": execution})
+
+    now = datetime.now(UTC)
+    context = SimpleNamespace(
+        plan=plan, runtime={"resourceGroupName": scope.rsplit("/", 1)[-1]},
+        policy=SimpleNamespace(
+            check=lambda **kwargs: None, clock=lambda: now, core_by=now + timedelta(hours=1)
+        ),
+        get=get, call=call,
+    )
+    if scenario == "success":
+        assert read_worker_job(context, tmp_path, "read", container, foundation, worker, inputs)[
+            "executionId"
+        ] == execution
+        assert events == ["read-apply", "read-start", "read-restore", "read-console"]
+    elif scenario == "busy":
+        with pytest.raises(DiagnosticUnavailable, match="idle inventory"):
+            read_worker_job(context, tmp_path, "read", container, foundation, worker, inputs)
+        assert events == []
+    elif scenario == "late":
+        with pytest.raises(DiagnosticUnavailable, match="before the scan deadline"):
+            read_worker_job(
+                context, tmp_path, "read", container, foundation, worker, inputs,
+                scan_cutoff=now + timedelta(seconds=134),
+            )
+        assert events == ["read-apply", "read-restore"]
+        assert not (tmp_path / "read-start-intent.json").exists()
+    elif scenario == "start-unknown":
+        with pytest.raises(CampaignError, match="before restore"):
+            read_worker_job(context, tmp_path, "read", container, foundation, worker, inputs)
+        assert events == ["read-apply", "read-start"]
+    else:
+        with pytest.raises(DiagnosticUnavailable, match="successful execution"):
+            read_worker_job(context, tmp_path, "read", container, foundation, worker, inputs)
+        assert events == ["read-apply", "read-start", "read-restore"]
 
 
 def test_recoverable_path_same_deployment_then_scheduled_hard_stop(tmp_path, monkeypatch):
@@ -392,9 +551,9 @@ def test_destination_gate_verifies_azure_integral_float_and_still_rejects_tamper
     tmp_path,
     monkeypatch,
 ):
-    from infra.milestone_7_8.azure_cli import _validate_argument
-
     from scripts.telemetry_destination import destination_rows
+
+    from infra.milestone_7_8.azure_cli import _validate_argument
 
     now = datetime.now(UTC)
     context = operator.Campaign.__new__(operator.Campaign)
