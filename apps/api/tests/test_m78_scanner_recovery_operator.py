@@ -571,7 +571,7 @@ def test_destination_gate_verifies_azure_integral_float_and_still_rejects_tamper
     )
 
 
-@pytest.mark.parametrize("outcome", ["accepted", "missing", "tampered"])
+@pytest.mark.parametrize("outcome", ["accepted", "missing", "no-control", "no-ack", "tampered"])
 def test_telemetry_first_routes_same_deployment_without_teardown(tmp_path, monkeypatch, outcome):
     from scripts.telemetry_destination import destination_rows
 
@@ -598,7 +598,8 @@ def test_telemetry_first_routes_same_deployment_without_teardown(tmp_path, monke
     ctx.rg = "fixture"
     write_new(ctx.package / "planned-bindings.json", ctx.plan)
     source = {"service": "mobius-api", "environment": "staging", **ctx.policy.deployment}
-    write_new(ctx.package / "destination-plan.bound.json", {"productionSources": [source]})
+    worker = source | {"service": "mobius-worker"}
+    write_new(ctx.package / "destination-plan.bound.json", {"productionSources": [source, worker]})
     ctx.admit = lambda: None
     ctx.remaining = lambda cutoff: 100
 
@@ -663,10 +664,22 @@ def test_telemetry_first_routes_same_deployment_without_teardown(tmp_path, monke
                         "severity": "info", "status_code": "200", "method": "GET",
                         "route": "/health/live", "trace_id": trace, "span_id": span,
                     },
-                }
+                },
+                {
+                    **worker,
+                    "schema_version": "mobius-operational-v1",
+                    "kind": "application_log",
+                    "name": "worker.state.changed",
+                    "component": "worker",
+                    "timestamp": now.isoformat(),
+                    "payload": {
+                        "severity": "info", "operation": "worker_poll",
+                        "state": "healthy", "outcome": "success",
+                    },
+                },
             ],
         },
-        [source],
+        [source, worker],
         now=now,
     )
     if outcome == "tampered":
@@ -676,9 +689,13 @@ def test_telemetry_first_routes_same_deployment_without_teardown(tmp_path, monke
         if args[:3] == ("containerapp", "replica", "list"):
             return [{"name": "api--fixture-replica"}]
         if args[:3] == ("containerapp", "logs", "show"):
-            return f"telemetry_liveness_delivery gateway_status=202 trace_id={trace}"
+            status = 503 if outcome == "no-ack" else 202
+            return f"telemetry_liveness_delivery gateway_status={status} trace_id={trace}"
         assert args[:3] == ("monitor", "log-analytics", "query") and trace in args[-3]
-        rows = [] if outcome == "missing" else valid
+        rows = {
+            "missing": valid[1:],
+            "no-control": valid[:1],
+        }.get(outcome, valid)
         write_new(folder / (label + ".native.json"), {"stdout": json.dumps(rows)})
         return rows
 
@@ -704,13 +721,16 @@ def test_telemetry_first_routes_same_deployment_without_teardown(tmp_path, monke
     assert not (ctx.run / "stop-proof-intent.json").exists()
     if outcome == "accepted":
         assert first == "telemetry-admitted-continue-core-and-independent-stages"
+        assert "workerPoll" in read(ctx.run / "telemetry-first/result.json")
         assert operator.operate(ctx, "gate") == "shared-run-admitted"
     else:
         assert first == "api-destination-held-continue-core-and-independent-stages"
-        assert (
-            read(ctx.run / "telemetry-first/result.json")["lastObservedBoundary"]
-            == "gateway-acknowledged-row-not-observed"
+        receipt = read(ctx.run / "telemetry-first/result.json")
+        expected = (
+            "gateway-acknowledged-row-not-observed" if outcome == "missing"
+            else "exact-api-row-confirmed"
         )
+        assert receipt["lastObservedBoundary"] == expected
         assert operator.operate(ctx, "gate") == (
             "api-destination-held-continue-core-fixture-independent-stages"
         )

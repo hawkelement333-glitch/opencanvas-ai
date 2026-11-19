@@ -217,6 +217,9 @@ def validate_review(package: Path, approval: dict) -> dict:
         raise CampaignError("exact replacement review approval required")
     scanner_policy = review.get("scannerRecoveryPolicy")
     telemetry_policy = review.get("telemetryFirstPolicy")
+    staging_exception = review.get("stagingException")
+    if staging_exception is not None and (scanner_policy is None or telemetry_policy is None):
+        raise CampaignError("staging exception requires both proof policies")
     if scanner_policy is not None:
         from infra.milestone_7_8.pilot.scanner_hold import POLICY
 
@@ -239,7 +242,13 @@ def validate_review(package: Path, approval: dict) -> dict:
                 or approval.get("approveExactQuotaFallback") is not True
             ):
                 raise CampaignError("exact telemetry-first and quota fallback approval required")
-            telemetry_first.validate_release(package)
+            if staging_exception is None:
+                telemetry_first.validate_release(package)
+            else:
+                from infra.milestone_7_8.pilot.staging_exception import validate_staging_admission
+
+                expected_sources.add("infra/milestone_7_8/pilot/staging_exception.py")
+                validate_staging_admission(package, review, approval)
         if (
             review["schema"] != SIGNUP_REVIEW_SCHEMA
             or scanner_policy != POLICY

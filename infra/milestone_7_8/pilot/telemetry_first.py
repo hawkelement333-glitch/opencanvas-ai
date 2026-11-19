@@ -15,11 +15,12 @@ from infra.milestone_7_8.pilot_cleanup import file_hash, read, write_new
 from infra.milestone_7_8.pilot_validation import admit_runtime_bindings
 
 POLICY = {
-    "schema": "m78-telemetry-first-v1",
+    "schema": "m78-telemetry-first-v2",
     "request": "/api/v1/health/live",
     "requestLimit": 1,
     "queryLimit": 12,
     "seconds": 1200,
+    "workerControl": "fresh-worker-poll-in-same-destination",
     "missing": "hold-api-destination-dependent-stages",
     "emailLimit": 0,
     "earlyFallback": "exact-native-automation-monthly-quota-429",
@@ -89,13 +90,18 @@ def decision(context):
         or result["state"] not in {"accepted", "unproved"}
     ):
         raise CampaignError("telemetry-first receipt differs from the bound deployment")
-    if result["state"] == "accepted":
-        name = result["query"]
-        if (
-            not re.fullmatch(r"trace-(0[0-9]|1[01])\.native\.json", name)
-            or file_hash(path / name) != result["querySha256"]
-        ):
-            raise CampaignError("telemetry-first accepted row evidence differs")
+    for key in ("apiRow", "workerPoll"):
+        if key in result:
+            name = result[key]["query"]
+            if (
+                not re.fullmatch(r"trace-(0[0-9]|1[01])\.native\.json", name)
+                or file_hash(path / name) != result[key]["sha256"]
+            ):
+                raise CampaignError("telemetry-first row evidence differs")
+    if result["state"] == "accepted" and not (
+        "apiRow" in result and "workerPoll" in result and "202" in result["gatewayStatuses"]
+    ):
+        raise CampaignError("telemetry-first acceptance is missing a required witness")
     return result
 
 
@@ -221,7 +227,7 @@ def run(context, validate_sample, native_failure):
     write_new(path / "native-bindings.json", readbacks)
     begin = clock()
     write_new(path / "request-intent.json", {"path": POLICY["request"], "atUtc": utc(begin)})
-    response_status, trace = None, None
+    response_status, trace, span = None, None, None
     with httpx.Client(
         base_url=admitted["apiBaseUrl"], follow_redirects=False, trust_env=False
     ) as client:
@@ -230,7 +236,7 @@ def run(context, validate_sample, native_failure):
             response_status = response.status_code
             header = TRACE.fullmatch(response.headers.get("traceparent", ""))
             if response_status == 200 and header and int(header[1], 16) and int(header[2], 16):
-                trace = header[1]
+                trace, span = header[1], header[2]
         except httpx.RequestError:
             pass
     write_new(
@@ -238,6 +244,7 @@ def run(context, validate_sample, native_failure):
         {
             "status": response_status,
             "traceId": trace,
+            "spanId": span,
             "startedAt": utc(begin),
             "finishedAt": utc(clock()),
             "revision": revision,
@@ -250,7 +257,12 @@ def run(context, validate_sample, native_failure):
         "state": "unproved",
     }
     if trace:
+        from infra.milestone_7_8.destination_acceptance import rows
+
         destination = read(context.package / "destination-plan.bound.json")
+        release, deployment = (context.policy.deployment[k] for k in ("release", "deployment"))
+        if not all(re.fullmatch(r"[a-z0-9-]+", v) for v in (release, deployment)):
+            raise CampaignError("invalid telemetry-first release binding")
         workspace_values = next(
             row["response"]["body"]["properties"]
             for row in app
@@ -260,9 +272,13 @@ def run(context, validate_sample, native_failure):
         query = (
             "MobiusApplication_CL "
             f"| where TimeGenerated >= datetime({utc(begin)}) "
-            '| where Name == "api.request.completed" '
-            f'and tostring(todynamic(Payload).trace_id) == "{trace}" '
-            "| summarize arg_max(TimeGenerated, *) by SignalId | take 2 "
+            f'| where Release == "{release}" and Deployment == "{deployment}" '
+            '| where (Service == "mobius-api" and Name == "api.request.completed" '
+            f'and tostring(todynamic(Payload).trace_id) == "{trace}") '
+            'or (Service == "mobius-worker" and Name == "worker.state.changed" '
+            'and tostring(todynamic(Payload).operation) == "worker_poll") '
+            "| summarize arg_max(TimeGenerated, *) by SignalId "
+            "| partition by Service (top 2 by TimeGenerated desc) "
             "| project TimeGenerated, SignalId, Service, Environment, Release, Deployment, "
             "Kind, Name, Component, Payload"
         )
@@ -291,29 +307,54 @@ def run(context, validate_sample, native_failure):
                 )
             except native_failure:
                 break
-            observed, count = validate_sample(values, destination, begin, clock())
-            if count:
-                if not isinstance(values, list) or observed != {"mobius-api"} or count != 1:
-                    raise CampaignError("exact API liveness row differs")
-                row = values[0]
+            if isinstance(values, dict):
+                values = rows(values)
+            validate_sample(values, destination, begin, clock())
+            api_rows = [row for row in values if row["Service"] == "mobius-api"]
+            worker_rows = [row for row in values if row["Service"] == "mobius-worker"]
+            if (
+                len(api_rows) > 1
+                or len(worker_rows) > 2
+                or len(values) != len(api_rows) + len(worker_rows)
+            ):
+                raise CampaignError("unexpected or ambiguous telemetry-first destination rows")
+            name = f"{label}.native.json"
+            witness = {"query": name, "sha256": file_hash(path / name)}
+            for row in api_rows + worker_rows:
                 fields = row["Payload"]
                 if isinstance(fields, str):
                     fields = json.loads(fields)
-                if (
-                    row["Name"] != "api.request.completed"
-                    or fields.get("trace_id") != trace
-                    or fields.get("route") != "/health/live"
-                    or fields.get("method") != "GET"
-                    or fields.get("status_code") != "200"
-                ):
-                    raise CampaignError("API liveness row does not bind the exact operation")
-                name = f"{label}.native.json"
-                result.update(state="accepted", query=name, querySha256=file_hash(path / name))
+                if row["Service"] == "mobius-api":
+                    if row["Name"] != "api.request.completed" or any(
+                        fields.get(k) != v
+                        for k, v in {
+                            "trace_id": trace,
+                            "span_id": span,
+                            "route": "/health/live",
+                            "method": "GET",
+                            "status_code": "200",
+                        }.items()
+                    ):
+                        raise CampaignError("API liveness row does not bind the exact operation")
+                    result["apiRow"] = witness
+                else:
+                    if (
+                        row["Name"] != "worker.state.changed"
+                        or fields.get("operation") != "worker_poll"
+                        or fields.get("state") != "healthy"
+                        or fields.get("outcome") != "success"
+                    ):
+                        raise CampaignError("worker control does not bind a healthy fresh poll")
+                    result["workerPoll"] = witness
+            if "apiRow" in result and "workerPoll" in result:
                 break
             if index + 1 < POLICY["queryLimit"]:
                 time.sleep(max(0, min(90, (cutoff - clock()).total_seconds() - 75)))
-    if result["state"] == "unproved":
-        point, statuses = diagnose(context, path, revision, trace, cutoff, native_failure)
-        result.update(lastObservedBoundary=point, gatewayStatuses=statuses)
+    point, statuses = diagnose(context, path, revision, trace, cutoff, native_failure)
+    if "apiRow" in result:
+        point = "exact-api-row-confirmed"
+        if "workerPoll" in result and "202" in statuses:
+            result["state"] = "accepted"
+    result.update(lastObservedBoundary=point, gatewayStatuses=statuses)
     write_new(path / "result.json", result)
     return route(context)
