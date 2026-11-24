@@ -28,6 +28,75 @@ def save(path, data):
     return path
 
 
+@pytest.mark.parametrize("case,expected", [
+    ("exact", "accepted"), ("altered", "integrity-failure"), ("skipped-fraction", "integrity-failure"),
+    ("no-fraction", "unproved"), ("partial", "unproved"),
+])
+def test_metric_readiness_through_staging_entry_point(tmp_path, monkeypatch, case, expected):
+    from scripts.telemetry_destination import destination_rows
+    from infra.milestone_7_8.destination_acceptance import METRIC_VALUE_PROJECTION
+    from infra.milestone_7_8.pilot import core_proof_operator as operator
+
+    now = datetime(2026, 11, 24, tzinfo=UTC)
+    package = tmp_path / consolidated.PACKAGE_ID
+    review = save(package / "review-package.json", {"packageId": consolidated.PACKAGE_ID})
+    run = tmp_path / ("run-" + file_hash(review)[:8])
+    run.mkdir()
+    query = package / "queries/production-signals.kql"
+    query.parent.mkdir()
+    query.write_text("MobiusMetric_CL " + METRIC_VALUE_PROJECTION, encoding="utf-8")
+    source = {"service": "mobius-worker", "environment": "staging", "release": "r", "deployment": "d"}
+    plan = {"requireNativeMetricReadiness": True, "queryFiles": {"production-signals": file_hash(query)}}
+    save(package / "planned-bindings.json", plan)
+    save(package / "destination-plan.bound.json", {"workspaceResourceId": "/fixture/ws", "productionSources": [source]})
+    signal = source | {"schema_version": "mobius-operational-v1", "kind": "metric", "name": "mobius.queue.depth",
+        "timestamp": now.isoformat(), "component": "queue", "payload": {"catalog_version": "mobius-signals-v1",
+            "type": "gauge", "unit": "job", "labels": {"component": "queue", "outcome": "success"},
+            "value": 1.0 if case == "no-fraction" else 0.125}}
+    row, = destination_rows({"resource": {"schema": "mobius-operational-v1"}, "signals": [signal]}, [source], now=now)
+    row.update(NativePayloadType="dictionary", NativeMetricValueType="double",
+               NativeMetricExponent=None, NativeMetricSignificand=None)
+    if case in ("exact", "altered"):
+        row["Payload"] = {key: value for key, value in row["Payload"].items() if key != "value"}
+        row.update(NativeMetricExponent=-57, NativeMetricSignificand=2**(54 if case == "exact" else 55))
+    result = {"tables": [{"columns": [{"name": name} for name in row], "rows": [list(row.values())]}]}
+    if case == "partial":
+        result["error"] = {"code": "PartialError"}
+    window = {"executionStartAt": utc(now - timedelta(minutes=5)), "readyBy": utc(now + timedelta(minutes=30))}
+    context = SimpleNamespace(package=package, run=run, plan=plan, window=window, telemetry_first=True,
+        policy=SimpleNamespace(clock=lambda: now, stop_by=now + timedelta(hours=2)), admit=lambda: None,
+        get=lambda *a, **kw: {"id": "/fixture/ws", "properties": {"customerId": PRIMARY}})
+    def query_native(folder, label, command, **kwargs):
+        assert json.loads((folder / "request.json").read_text())["query"] == query.read_text()
+        assert "https://api.loganalytics.io/v1/workspaces/" + PRIMARY + "/query" in command
+        save(folder / (label + ".native.json"), {"exitCode": 0, "stdout": json.dumps(result)})
+        return result
+    context.call = query_native
+    def stop(reason):
+        save(run / "stop-proof-intent.json", {"reason": reason})
+        return reason
+    context.cleanup = stop
+    monkeypatch.setattr(operator.telemetry_first, "run", lambda *a: "liveness")
+    actual = operator.operate(context, "telemetry-first")
+    assert actual == ("privacy-or-integrity-failure" if expected == "integrity-failure" else "liveness")
+    summary = json.loads((run / "native-metric-readiness/summary.json").read_text())
+    assert summary["status"] == expected
+    if expected == "accepted":
+        consolidated.guard_dispatch(package, ["account"], {})
+        native = run / "native-metric-readiness/result.native.json"
+        save(native, {"exitCode": 1})
+        with pytest.raises(CampaignError):
+            consolidated.guard_dispatch(package, ["account"], {})
+    else:
+        with pytest.raises(CampaignError):
+            consolidated.guard_dispatch(package, ["account"], {})
+        if expected == "integrity-failure":
+            with pytest.raises(CampaignError, match="proof has stopped"):
+                consolidated.guard_dispatch(package, ["query"], {})
+        else:
+            consolidated.guard_dispatch(package, ["query"], {})
+
+
 def evidence(run, operation, payload):
     folder = run / ("proof-" + operation)
     receipt = save(folder / "export" / (operation + ".json"), PLAN | payload | {
@@ -36,6 +105,28 @@ def evidence(run, operation, payload):
     save(folder / "evidence-execution.json", {"execution": operation + "-1"})
     save(folder / "evidence-terminal.json", {"name": operation + "-1", "properties": {"status": "Succeeded"}})
     return receipt
+
+
+def test_windows_vpn_client_admission_uses_the_exact_installed_profile():
+    from infra.milestone_7_8.pilot.windows_vpn_profile import verify
+
+    xml = ("<AzVpnProfile><name>fixture</name><clientauth><aad><audience>current</audience>"
+           "<issuer>issuer</issuer><tenant>tenant</tenant></aad></clientauth>"
+           "<serverlist><ServerEntry><fqdn>current.test</fqdn></ServerEntry></serverlist>"
+           "<clientconfig><dnsservers><dnsserver>10.0.0.1</dnsserver></dnsservers>"
+           "<dnssuffixes><dnssuffix>.internal.test</dnssuffix></dnssuffixes>"
+           "<includeroutes><route><destination>10.0.0.0</destination><mask>16</mask></route>"
+           "</includeroutes></clientconfig></AzVpnProfile>")
+    def phonebook(document):
+        blob = document.encode("utf-16-le").hex()
+        return ("[other]\r\nThirdPartyProfileInfo=00\r\n[fixture]\r\nThirdPartyProfileInfo="
+                + blob[:80] + "\r\nThirdPartyProfileInfo=" + blob[80:] + "\r\n").encode("utf-16")
+    assert verify(phonebook(xml), xml.encode())["installedEntries"] == 1
+    with pytest.raises(CampaignError, match="audience, servers"):
+        verify(phonebook(xml.replace("current", "stale")), xml.encode())
+    with pytest.raises(CampaignError, match="unexpected number"):
+        verify(phonebook(xml), xml.encode(), absent=True)
+    assert verify(b"", xml.encode(), absent=True)["installedEntries"] == 0
 
 
 @pytest.mark.parametrize("changes", [

@@ -11,16 +11,16 @@ from decimal import Decimal
 from pathlib import Path
 
 from infra.milestone_7_8.campaign import CampaignConfig, CampaignError
-from infra.milestone_7_8.destination_acceptance import METRIC_VALUE_PROJECTION
+from infra.milestone_7_8.destination_acceptance import METRIC_VALUE_PROJECTION, V5_METRIC_VALUE_PROJECTION
 from infra.milestone_7_8.pilot import consolidated as scope, staging_exception as staging
 from infra.milestone_7_8.pilot.integrity_windows import POINTS, signal_query
 from infra.milestone_7_8.pilot.prepare_core_staging import CONTROLLER, price_footprint
-from infra.milestone_7_8.pilot.prepare_staging_successor import PARENT, git, retained_images, write_json
+from infra.milestone_7_8.pilot.prepare_staging_successor import PARENT, git, replace_once, retained_images, write_json
 from infra.milestone_7_8.pilot_cleanup import file_hash, read, validate_review, write_new
 from infra.milestone_7_8.pilot_validation import ROOT, SCANNER_OBSERVATION
 
 REGIONAL = PARENT / "private-staging-v2/regional-pricing.json"
-PREVIOUS = PARENT / scope.V4_ID
+PREVIOUS = PARENT / scope.V5_ID
 PRIOR = PARENT / ("run-" + scope.PREDECESSOR[:8])
 RUNBOOK = "docs/MILESTONE_7_8_CONSOLIDATED_STAGING.md"
 FINAL = PARENT / scope.PACKAGE_ID
@@ -32,7 +32,8 @@ def costing(out: Path, retail_path: Path, remaining: dict) -> dict:
     rows, footprint = price_footprint(retail, read(REGIONAL), datetime.now(UTC))
     pg = sum(Decimal(r["costUsd"]) for r in rows if r["meter"] in {"pgVcore", "pgStorage", "pgBackup"})
     restore = (pg * 6 / 13).quantize(CENTI_MILL)
-    text = 200 * (15000 * Decimal("2.50") + 1600 * Decimal("12")) / 1_000_000
+    input_rate = Decimal("2.00")
+    text = 200 * (15000 * input_rate + 1600 * Decimal("12")) / 1_000_000
     embedding = 160_000_000 * Decimal("0.02") / 1_000_000
     forecast = footprint + restore + text + embedding
     conservative = forecast * Decimal("1.25")
@@ -46,7 +47,7 @@ def costing(out: Path, retail_path: Path, remaining: dict) -> dict:
               "proposedCumulativeCeilingUsd": prior + ceiling}
     if (any(Decimal(remaining["pricing"][key]) != value for key, value in totals.items())
             or remaining["pricing"]["pricingReceiptSha256"] != file_hash(retail_path)
-            or prior != Decimal("629.93") or conservative > ceiling):
+            or prior != Decimal("686.44") or conservative > ceiling):
         raise CampaignError("the complete footprint and funding reconciliation need fresh review")
     budget = {"forecastUsd": float(forecast), "priorAttemptReserveUsd": float(reserve),
               "combinedCeilingUsd": float(reserve + ceiling), "proposedCumulativeCeilingUsd": float(prior + ceiling),
@@ -58,7 +59,7 @@ def costing(out: Path, retail_path: Path, remaining: dict) -> dict:
         "currentRetailSha256": meter_hash, "pricedHours": 13, "rows": rows, "billing": "unsettled",
         "componentsUsd": {key: str(value) for key, value in totals.items()}, "azureHelperAndControllerReserveUsd": "0.26",
         "isolatedRestoreHours": 6, "textAttemptsIncludingRetries": 200, "inputTokensPerAttempt": 15000,
-        "maximumInputUsdPerMillion": "2.50", "outputTokensPerAttempt": 1600, "outputUsdPerMillion": "12",
+        "maximumInputUsdPerMillion": str(input_rate), "outputTokensPerAttempt": 1600, "outputUsdPerMillion": "12",
         "embeddingTokens": 160000000, "embeddingUsdPerMillion": "0.02", "sourceUrls": remaining["pricing"]["referenceUrls"],
     })
     prior_cost = {"priorAuthorizedCumulativeUsd": str(prior), "billing": "unsettled", "actualChargesUsd": None,
@@ -94,14 +95,14 @@ def prepare(verification_path: Path, retail_path: Path, remaining_path: Path, te
     source = git("rev-parse", "HEAD")
     verification = read(verification_path)
     if (git("status", "--porcelain") or git("branch", "--show-current") != "milestone-7-8-production-readiness-audit-local"
-            or git("merge-base", source, "cbf5d676") != git("rev-parse", "cbf5d676")
+            or git("merge-base", source, "94175f9b") != git("rev-parse", "94175f9b")
             or verification["sourceCommit"] != source or verification["failed"] != 0 or verification["passed"] < 1
             or file_hash(verification_path.parent / verification["log"]) != verification["logSha256"]):
         raise CampaignError("current clean source and its focused rehearsal receipt are required")
     if (file_hash(PREVIOUS / "review-package.json") != scope.PREDECESSOR
             or file_hash(PRIOR / "verified-full-residue.json") != scope.CLEANUP
-            or file_hash(PRIOR / "monitoring-reconciled/events-and-integrity.json") != scope.LAST_MONITORING
-            or file_hash(template) != staging.QUERY_REPAIR_POLICY["compiledScannerTemplateSha256"]
+            or file_hash(PRIOR / "local-reconciliation/monitoring.json") != scope.LAST_MONITORING
+            or file_hash(template) != staging.METRIC_READBACK_POLICY["compiledScannerTemplateSha256"]
             or FINAL.exists() or (ROOT / scope.BOUND).exists()):
         raise CampaignError("predecessors, historical receipts or unused target paths differ")
     cleanup = read(PRIOR / "verified-full-residue.json")
@@ -114,12 +115,14 @@ def prepare(verification_path: Path, retail_path: Path, remaining_path: Path, te
     identity = {"sourceCommit": source, "accountFixture": scope.FIXTURE, "consolidatedScope": scope.MODE}
     out = Path(tempfile.mkdtemp(prefix="consolidated-seal-", dir=PARENT))
     for name in review["files"]:
-        reviewed_copy(PREVIOUS, review, name, out)
+        if name != "kql-semantics.json":
+            reviewed_copy(PREVIOUS, review, name, out)
 
     def update(name, values):
         write_json(out / name, read(out / name) | values)
 
-    for name in ("compiled-template-review.json", "private-replay.json", "kql-semantics.json"):
+    for name in ("compiled-template-review.json", "private-replay.json", "local-engine-proof.json",
+                 "emulator-terminal.json"):
         evidence = verification_path.parent / name
         if file_hash(evidence) != verification["rehearsalEvidenceSha256"][name]:
             raise CampaignError("local staging rehearsal evidence differs")
@@ -127,7 +130,7 @@ def prepare(verification_path: Path, retail_path: Path, remaining_path: Path, te
     for name, original in {
         "controller-prior-authority.json": CONTROLLER,
         "prior-cleanup.json": "verified-full-residue.json",
-        "prior-monitoring.json": "monitoring-reconciled/events-and-integrity.json",
+        "prior-monitoring.json": "local-reconciliation/monitoring.json",
     }.items():
         shutil.copyfile(PRIOR / original, out / name)
     shutil.copyfile(template, out / "compiled/pilot.json")
@@ -147,11 +150,16 @@ def prepare(verification_path: Path, retail_path: Path, remaining_path: Path, te
     query = out / "queries/integrity-source-rows.kql"
     query.write_bytes(signal_query(primary["release"], primary["deployment"]).encode())
     metric_query = out / "queries/production-signals.kql"
-    metric_query.write_bytes((metric_query.read_text(encoding="utf-8").rstrip() + "\n"
-                              + METRIC_VALUE_PROJECTION + "\n").encode())
-    semantic = read(out / "kql-semantics.json")
-    if semantic["diagnosticCount"] or semantic["querySha256"] != file_hash(metric_query):
-        raise CampaignError("packaged metric query differs from the local language check")
+    original = metric_query.read_text(encoding="utf-8")
+    engine = read(out / "local-engine-proof.json")
+    terminal = read(out / "emulator-terminal.json")
+    if (engine["originalQuerySha256"] != file_hash(metric_query)
+            or terminal["engineProofSha256"] != file_hash(out / "local-engine-proof.json")
+            or terminal["remainingTestContainers"] != 0 or terminal["releasedLoopbackPort"] is not True):
+        raise CampaignError("the engine rehearsal must bind the previous query and local teardown")
+    metric_query.write_bytes(replace_once(original, V5_METRIC_VALUE_PROJECTION, METRIC_VALUE_PROJECTION).encode())
+    if engine["querySha256"] != file_hash(metric_query):
+        raise CampaignError("packaged query differs from the query executed by the local engine")
     queries = primary["queryFiles"] | {"integrity-source-rows": file_hash(query),
                                        "production-signals": file_hash(metric_query)}
     approved_queries = set()
@@ -168,6 +176,7 @@ def prepare(verification_path: Path, retail_path: Path, remaining_path: Path, te
         plan.update(identity | budget | {
             "sourceCommitStatus": "committed-consolidated-operator-source", "scannerObservation": SCANNER_OBSERVATION,
             "verifyWorkerQueryBeforeUpload": True,
+            "requireNativeMetricReadiness": True,
             "previousAttemptReserveUsd": budget["priorAttemptReserveUsd"], "enabledOperations": operations,
             "credentialParameterFile": primary["credentialParameterFile"].replace(PREVIOUS.name, FINAL.name),
             "credentialParameterFileSha256": file_hash(out / "credentials/application-secrets.parameters.json"),
@@ -180,10 +189,23 @@ def prepare(verification_path: Path, retail_path: Path, remaining_path: Path, te
     update("destination-plan.bound.json", {"sourceCommit": source})
     update("candidate-gate.json", {"sourceCommit": source, "operatorSource": source})
     for path in (out / "execute").glob("*.py"):
-        script = path.read_text(encoding="utf-8").replace(PREVIOUS.name, FINAL.name).replace(scope.V4_BOUND, scope.BOUND)
+        script = path.read_text(encoding="utf-8").replace(PREVIOUS.name, FINAL.name).replace(scope.V5_BOUND, scope.BOUND)
+        if path.name == "prepare_vpn_profile.py":
+            script = replace_once(script, 'out/"m78p-a712b8c940-successor-azurevpn.xml"',
+                                  'out/("m78-" + run.name.removeprefix("run-") + ".xml")')
+        elif path.name == "admit_private_route.py":
+            script = replace_once(script, 'out=run/"vpn/private-route-admission"',
+                'from infra.milestone_7_8.pilot.windows_vpn_profile import observe\n'
+                'installed=observe(Path(__file__).resolve().parent.parent)\nout=run/"vpn/private-route-admission"')
+            script = replace_once(script, 'def ps(label,command):',
+                                  'write_new(out/"installed-profile.json",installed)\ndef ps(label,command):')
+        elif path.name == "verify_full_residue.py":
+            script = replace_once(script, '    client=read(run/"vpn/client-terminal-v2.json")',
+                '    from infra.milestone_7_8.pilot.windows_vpn_profile import observe\n'
+                '    observe(pkg, absent=True)\n    client=read(run/"vpn/client-terminal-v2.json")')
         compile(script, str(path), "exec")
         path.write_bytes(script.encode())
-    foundation = (out / "FOUNDATION.md").read_text(encoding="utf-8").replace(scope.V4_BOUND, scope.BOUND).replace(PREVIOUS.name, FINAL.name)
+    foundation = (out / "FOUNDATION.md").read_text(encoding="utf-8").replace(scope.V5_BOUND, scope.BOUND).replace(PREVIOUS.name, FINAL.name)
     (out / "FOUNDATION.md").write_bytes(foundation.encode())
     shutil.copyfile(ROOT / RUNBOOK, out / "EXECUTION.md")
     (out / "APPROVAL.md").write_bytes(("Private staging requires one fresh approval binding this review, source, "
@@ -205,7 +227,7 @@ def prepare(verification_path: Path, retail_path: Path, remaining_path: Path, te
         "maximumDiagnosticExecutions": 1, "retry": False, "requiresCore": scope.DEPENDENTS,
         "independent": remaining["independentWhileCoreHeld"], "integrityCapturePoints": list(POINTS),
         "operatorRuntime": scope.BOUND, "cleanupCounters": 48, "cleanupFallback": remaining["cleanup"]})
-    write_json(out / "staging-exception.json", staging.QUERY_REPAIR_POLICY)
+    write_json(out / "staging-exception.json", staging.METRIC_READBACK_POLICY)
     manifest = read(out / "manifest.json")
     update("manifest.json", identity | {"operations": scope.OPERATIONS, "compiledTemplateSha256": file_hash(template),
             "sourceBindings": {name: file_hash(ROOT / name) for name in manifest["sourceBindings"]}})
@@ -215,8 +237,8 @@ def prepare(verification_path: Path, retail_path: Path, remaining_path: Path, te
     review.pop("newCumulativeAllowanceUsd", None)
     review.update(budget | {"sourceCommit": source, "packageId": scope.PACKAGE_ID, "status": "sealed-awaiting-separate-approval",
         "approved": False, "boundRuntimeDirectory": scope.BOUND, "supersedesReviewSha256": scope.PREDECESSOR,
-        "stagingException": staging.QUERY_REPAIR_POLICY, "modelAttemptsIncludingRetries": 200, "embeddingTokens": 160000000,
-        "operatorSourceBindings": {name: file_hash(ROOT / name) for name in set(review["operatorSourceBindings"]) | scope.OPERATOR_FILES},
+        "stagingException": staging.METRIC_READBACK_POLICY, "modelAttemptsIncludingRetries": 200, "embeddingTokens": 160000000,
+        "operatorSourceBindings": {name: file_hash(ROOT / name) for name in set(review["operatorSourceBindings"]) | scope.V6_OPERATOR_FILES},
         "candidateGateSha256": file_hash(out / "candidate-gate.json"),
         "priorCostReconciliationSha256": file_hash(out / "prior-cost-reconciliation.json"),
         "costReconciliationSha256": file_hash(out / "cost-reconciliation.json"),
@@ -235,9 +257,9 @@ def prepare(verification_path: Path, retail_path: Path, remaining_path: Path, te
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verification", required=True, type=Path)
-    parser.add_argument("--retail", type=Path, default=PARENT / "core-staging-preparation/retail-current.json")
-    parser.add_argument("--remaining", type=Path, default=PARENT / "consolidated-v5-preparation/remaining-plan.json")
-    parser.add_argument("--template", type=Path, default=PARENT / "consolidated-v5-preparation/candidate-pilot.json")
+    parser.add_argument("--retail", type=Path, default=PARENT / "consolidated-v6-preparation/retail-current.json")
+    parser.add_argument("--remaining", type=Path, default=PARENT / "consolidated-v6-preparation/remaining-plan.json")
+    parser.add_argument("--template", type=Path, default=PREVIOUS / "compiled/pilot.json")
     args = parser.parse_args()
     result = prepare(args.verification, args.retail, args.remaining, args.template)
     print(json.dumps({"package": result.name, "reviewSha256": file_hash(result / "review-package.json"),

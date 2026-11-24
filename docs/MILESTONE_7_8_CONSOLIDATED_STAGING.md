@@ -7,8 +7,8 @@ One approval covers one isolated deployment in Canada Central with the bound Red
 Set the package and the live runtime once from the repository root.
 
 ```powershell
-$package = ".runtime/milestone_7_8/full-closure-prerequisites/private-staging-v5"
-$bound = ".runtime/milestone_7_8/psv5"
+$package = ".runtime/milestone_7_8/full-closure-prerequisites/private-staging-v6"
+$bound = ".runtime/milestone_7_8/psv6"
 $py = ".venv/Scripts/python.exe"
 ```
 
@@ -17,6 +17,8 @@ Record the actual approval UTC timestamp, its exact review SHA and commit, exact
 Use the packaged native access, publication, foundation, VPN and activation operators. Confirm provider registration, the bound digests, the two corrected alert rules, private DNS and TLS, and the fresh operator sign-in. Private readiness is due by +2h and Core and destination admission by +3h. Capture admitted IDs privately. Keep the production worker active.
 
 ## Core and same-deployment observations
+
+Import the XML named for this run. Before connecting, run `& $py -m infra.milestone_7_8.pilot.windows_vpn_profile --package $package`. This reads Azure VPN Client's installed phonebook entry and compares its audience, tenant, issuer, gateway hostname, routes and DNS with the gateway-verified XML. The route admission repeats that check. At teardown, verify the exact entry is absent with the same command and `--absent`. Use the owner observation and Windows route and DNS readbacks for the terminal client receipt.
 
 Use these normal operator entry points with the exact live paths. Run each proof action once and preserve the result before selecting the next. The integrity capture is a read-only host command with separate native receipts for the workspace query and the alert evaluations. Start the readiness capture alongside admitted work so it cannot delay Core. Retain each capture result even when one source fails.
 
@@ -31,7 +33,7 @@ Use these normal operator entry points with the exact live paths. Run each proof
 
 The single account job signs up two distinct users. Core signs in the second user and creates the independent workspace and canvas for ownership and restore-denial checks. Capture the original idle migration helper, wait for its worker-identity update to reach Succeeded, and verify the native overlay before starting Core. The initial upload has its original server cutoff of 900 seconds. Dispatch the single diagnostic promptly on the pending marker while at least 135 seconds remain. Read Blob properties and tags and query Log Analytics independently. Retain each source's timestamps, version and ETag. The probe distinguishes a managed-identity token failure from a returned workspace HTTP status. Only exact in-window agreement can release the upload. Date any later evidence. Reconcile outstanding helper operations before restoring and verify the original configuration, template and identity by native readback. An uncertain write, unresolved restoration or safety failure takes the teardown path. Record deletion separately.
 
-Before upload, read back the assigned worker principal, the workspace scope and the exact scanner role. Its three actions read workspace metadata, run a query, and read the StorageMalwareScanningResults table. Run the bound production-signals query early during readiness and retain the native result. For fractional metric values it returns the stored significand and binary exponent as integers. Reconstruct the exact value and require the original gateway SignalId, source and privacy checks. Any unresolved content or identity mismatch stops proof immediately. Preserve both the native response and the failing row identities. The prior run's 57 mismatches remain open.
+Before upload, read back the assigned worker principal, workspace scope and exact scanner role. Its three actions read workspace metadata, run a query and read the StorageMalwareScanningResults table. The telemetry-first entry point now runs the sealed production-signals query during readiness. It retains the native payload and metric types alongside the binary exponent and significand for positive fractional values. It checks every returned row against the original gateway SignalId and privacy contract. A content or identity failure stops proof. Account and Core require a complete bounded result with at least one exact fractional witness. A missing observation leaves eligible independent work available. Keep the original 57 v4 and 17 v5 failed rows in their respective runs.
 
 On progress, the full Core job runs its existing two provider-backed generation checks and the queued and deletion document fixtures. Each upload has its own original 900-second deadline. There is one primary attempt and at most one diagnostic across the deployment. The package grants no scanner re-upload or account retries. A scanner hold keeps the dependent stages queued.
 

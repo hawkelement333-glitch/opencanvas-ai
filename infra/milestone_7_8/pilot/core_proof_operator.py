@@ -1048,7 +1048,7 @@ def observe_infrastructure(context):
 
 
 def destination_readiness(context):
-    from infra.milestone_7_8.destination_acceptance import METRIC_VALUE_PROJECTION
+    from infra.milestone_7_8.destination_acceptance import METRIC_VALUE_PROJECTION, V5_METRIC_VALUE_PROJECTION
 
     path = context.run / "destination-readiness"
     path.mkdir(exist_ok=False)
@@ -1060,6 +1060,8 @@ def destination_readiness(context):
         raise CampaignError("invalid destination release binding")
     # The Azure CLI launcher rejects control characters in arguments.
     start = utc(begin)
+    projection = (METRIC_VALUE_PROJECTION if getattr(context, "plan", {}).get("requireNativeMetricReadiness")
+                  else V5_METRIC_VALUE_PROJECTION)
     query = (
         "union MobiusApplication_CL, MobiusMetric_CL, MobiusSpan_CL "
         f"| where TimeGenerated >= datetime({start}) "
@@ -1068,7 +1070,7 @@ def destination_readiness(context):
         "| summarize arg_max(TimeGenerated, *) by SignalId "
         "| partition by Service (top 16 by TimeGenerated desc) "
         "| project TimeGenerated, SignalId, Service, Environment, Release, Deployment, "
-        "Kind, Name, Component, Payload " + METRIC_VALUE_PROJECTION
+        "Kind, Name, Component, Payload " + projection
     )
     if (context.run / "scanner-hold.json").exists():
         context.policy.require_hold()
@@ -1221,6 +1223,10 @@ def operate(context, action, *, stop_reason=None):
             return next_stage
     if action in {"diagnose", "repair", "core-retry"}:
         context.policy.require_hold()
+    if action in {"account", "core"} and getattr(context, "plan", {}).get("requireNativeMetricReadiness"):
+        metric_report = context.run / "native-metric-readiness/summary.json"
+        if not metric_report.exists() or read(metric_report).get("status") == "unproved":
+            return "native-metric-readiness-unproved-independent-checks-remain-available"
     if action == "repair":
         context.policy.check(dependent=True, seconds_needed=1500)
     previously_recorded = {
@@ -1247,6 +1253,24 @@ def operate(context, action, *, stop_reason=None):
         if action == "infrastructure":
             return observe_infrastructure(context)
         if action == "telemetry-first":
+            if getattr(context, "plan", {}).get("requireNativeMetricReadiness"):
+                from infra.milestone_7_8.pilot import native_metric_readiness
+
+                folder = context.run / "native-metric-readiness"
+                if folder.exists():
+                    status = read(folder / "summary.json")["status"]
+                    if status == "accepted":
+                        native_metric_readiness.require_accepted(context.package, context.run)
+                else:
+                    try:
+                        status = native_metric_readiness.capture(context)
+                    except NativeFailure as error:
+                        status = "unproved"
+                        write_new(folder / "summary.json", {"status": status, "error": str(error)})
+                if status == "integrity-failure":
+                    return context.cleanup("privacy-or-integrity-failure")
+                if status not in ("accepted", "unproved"):
+                    raise CampaignError("unknown native metric evidence state")
             return telemetry_first.run(context, validate_destination_sample, NativeFailure)
         status = dispatch_proof(context, action, resume_path)
         if status == "scanner-paused":

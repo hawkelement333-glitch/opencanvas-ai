@@ -73,10 +73,15 @@ CONSOLIDATED_POLICY = {
 QUERY_REPAIR_POLICY = {
     **CONSOLIDATED_POLICY,
     "schema": "m78-private-synthetic-staging-exception-v5",
-    "supersedesExpiredReview": consolidated.PREDECESSOR,
+    "supersedesExpiredReview": consolidated.V5_PREDECESSOR,
     "compiledScannerTemplateSha256": "f2ffba69ccf6eab20a062cdcc96a77648e3e1c7486bcd4dbb54af25dfee196f8",
 }
 
+METRIC_READBACK_POLICY = {
+    **QUERY_REPAIR_POLICY,
+    "schema": "m78-private-synthetic-staging-exception-v6",
+    "supersedesExpiredReview": consolidated.PREDECESSOR,
+}
 
 def validate_staging_admission(package: Path, review: dict, approval: dict) -> None:
     policy_path = package / "staging-exception.json"
@@ -99,7 +104,8 @@ def validate_staging_admission(package: Path, review: dict, approval: dict) -> N
         "signing/retained-signature-verification-receipt.json",
     }
     if (
-        policy not in (POLICY, SUCCESSOR_POLICY, CORE_POLICY, CONSOLIDATED_POLICY, QUERY_REPAIR_POLICY)
+        policy not in (POLICY, SUCCESSOR_POLICY, CORE_POLICY, CONSOLIDATED_POLICY, QUERY_REPAIR_POLICY,
+                       METRIC_READBACK_POLICY)
         or not required <= review["files"].keys()
         or read(policy_path) != policy
         or review["files"].get(policy_path.name) != file_hash(policy_path)
@@ -123,8 +129,10 @@ def validate_staging_admission(package: Path, review: dict, approval: dict) -> N
         or review.get("boundRuntimeDirectory") != ".runtime/milestone_7_8/psv2"
     ):
         raise CampaignError("staging successor observation or execution scope differs")
-    if policy in (CONSOLIDATED_POLICY, QUERY_REPAIR_POLICY):
-        if (policy == QUERY_REPAIR_POLICY) != (review.get("packageId") == consolidated.PACKAGE_ID):
+    if policy in (CONSOLIDATED_POLICY, QUERY_REPAIR_POLICY, METRIC_READBACK_POLICY):
+        expected_policy = {consolidated.V4_ID: CONSOLIDATED_POLICY, consolidated.V5_ID: QUERY_REPAIR_POLICY,
+                           consolidated.PACKAGE_ID: METRIC_READBACK_POLICY}.get(review.get("packageId"))
+        if policy != expected_policy:
             raise CampaignError("staging exception does not match this package")
         consolidated.validate_package(package, review)
     if policy == CORE_POLICY:

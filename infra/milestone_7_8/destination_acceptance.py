@@ -89,15 +89,31 @@ class Evidence:
 # positive nonintegral doubles, transfer the stored binary value as two native
 # integers. A power two bits below log2 leaves room for rounding near a power
 # boundary. Clamping at the smallest normal power also covers subnormal values.
-METRIC_VALUE_PROJECTION = (
-    '| extend M78Value = iff(Kind == "metric" and gettype(Payload.value) == "real", '
-    'todouble(Payload.value), real(null)) '
+_METRIC_ENCODING = (
     '| extend M78Scale = iff(M78Value > 0 and M78Value != bin(M78Value, 1.0), '
     'max_of(long(-1022), tolong(log2(M78Value)) - long(2)), long(null)) '
     '| extend NativeMetricExponent = M78Scale - 52, '
     'NativeMetricSignificand = tolong((M78Value / pow(2.0, M78Scale)) * 4503599627370496.0) '
+)
+
+# Preserve the exact query used by the closed v5 package.
+V5_METRIC_VALUE_PROJECTION = (
+    '| extend M78Value = iff(Kind == "metric" and gettype(Payload.value) == "real", '
+    'todouble(Payload.value), real(null)) ' + _METRIC_ENCODING +
     '| extend Payload = iff(isnotnull(M78Scale), bag_remove_keys(Payload, dynamic(["value"])), Payload) '
     '| project-away M78Value, M78Scale'
+)
+
+# Kusto reports "double" for a real inside dynamic and "real" for a scalar.
+# Compare like types and retain the native storage shape for each observed row.
+METRIC_VALUE_PROJECTION = (
+    '| extend NativePayloadType = gettype(Payload) '
+    '| extend M78Payload = iff(NativePayloadType == "string", parse_json(tostring(Payload)), Payload) '
+    '| extend NativeMetricValueType = gettype(M78Payload.value) '
+    '| extend M78Value = iff(Kind == "metric" and NativeMetricValueType == gettype(dynamic(0.5)), '
+    'todouble(M78Payload.value), real(null)) ' + _METRIC_ENCODING +
+    '| extend Payload = iff(isnotnull(M78Scale), bag_remove_keys(M78Payload, dynamic(["value"])), M78Payload) '
+    '| project-away M78Value, M78Scale, M78Payload'
 )
 
 
@@ -105,13 +121,23 @@ def native_payload(row: dict) -> dict:
     payload = row["Payload"]
     if isinstance(payload, str):
         payload = json.loads(payload)
+    require(isinstance(payload, dict), "native signal payload must be an object")
     require(("NativeMetricExponent" in row) == ("NativeMetricSignificand" in row),
             "incomplete native metric encoding")
     exponent, significand = row.get("NativeMetricExponent"), row.get("NativeMetricSignificand")
+    typed = "NativePayloadType" in row
+    require(typed == ("NativeMetricValueType" in row), "incomplete native type evidence")
+    if typed:
+        require(row["NativePayloadType"] in ("dictionary", "string")
+                and "NativeMetricExponent" in row, "invalid native payload type evidence")
     if exponent is None and significand is None:
+        value = payload.get("value")
+        if typed and row["Kind"] == "metric" and type(value) is float and value > 0:
+            require(value.is_integer(), "fractional native metric lacks its exact encoding")
         return payload
     require(
         row["Kind"] == "metric" and isinstance(payload, dict) and "value" not in payload
+        and (not typed or row["NativeMetricValueType"] in ("double", "real"))
         and type(exponent) is int and -1074 <= exponent <= 0
         and type(significand) is int and 0 < significand < 2**56
         and int(float(significand)) == significand,

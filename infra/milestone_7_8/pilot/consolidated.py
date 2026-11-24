@@ -13,15 +13,20 @@ from infra.milestone_7_8.pilot_validation import (
     APPLICATION_OPERATIONS, DELIVERY_OPERATIONS, INTERVENTION_OPERATIONS, SCANNER_OBSERVATION,
 )
 
-PACKAGE_ID = "private-staging-v5"
-BOUND = ".runtime/milestone_7_8/psv5"
-PREDECESSOR = "c82665416a05a4d3427e88fc62c8cf04836cf96b108f41765e12a125224965e0"
+PACKAGE_ID = "private-staging-v6"
+BOUND = ".runtime/milestone_7_8/psv6"
+PREDECESSOR = "e8c548adf697d66f63e4a5d70690988d2771f759239f5c53f35b8388ad4fdbbc"
+V5_ID = "private-staging-v5"
+V5_BOUND = ".runtime/milestone_7_8/psv5"
+V5_PREDECESSOR = "c82665416a05a4d3427e88fc62c8cf04836cf96b108f41765e12a125224965e0"
 V4_ID = "private-staging-v4"
 V4_BOUND = ".runtime/milestone_7_8/psv4"
 V4_PREDECESSOR = "f5797e580aee7c35b823bb33ea3b2c77e45988c32db88f65f7c1e95d6c9a74d0"
 V3_CLEANUP = "e555cb4cba133922e410a27846b6bb3e2247031cf87850a6fd777e1e751b7493"
-CLEANUP = "4b8b2ff1cfa0963b0b178a48ec16d8c76a7a63d3981352673ab3a0544390f63f"
-LAST_MONITORING = "bd48370ed54ecc9f2a25af668dd537711b2669e100c1abf149ead30217a9c1bb"
+V4_CLEANUP = "4b8b2ff1cfa0963b0b178a48ec16d8c76a7a63d3981352673ab3a0544390f63f"
+V4_MONITORING = "bd48370ed54ecc9f2a25af668dd537711b2669e100c1abf149ead30217a9c1bb"
+CLEANUP = "c46c32515158f097f6ac0c6b8825212bc20d3f08447293dedf787f45386110cd"
+LAST_MONITORING = "242642afeac55698e4e2abbab1b84d41e3c6d61a359dce8645ecf9d0fae6a2a9"
 MONITORING = "c4a8414b2d525403c94b058bb8f685cc5f25257a176420f96f375f89f26dbb53"
 MODE = "consolidated-full-core-v1"
 INDEPENDENT = ("query", "telemetry", "alerts", "provider-observation")
@@ -43,20 +48,25 @@ OPERATOR_FILES = {
     "infra/milestone_7_8/pilot_application_probe.py",
     "infra/milestone_7_8/pilot_validation.py",
 }
+V6_OPERATOR_FILES = OPERATOR_FILES | {"infra/milestone_7_8/pilot/native_metric_readiness.py",
+                                      "infra/milestone_7_8/pilot/windows_vpn_profile.py",
+                                      "infra/milestone_7_8/destination_acceptance.py"}
 
 
 def validate_package(package: Path, review: dict) -> None:
     from infra.milestone_7_8.pilot.integrity_windows import POINTS, signal_query
-    from infra.milestone_7_8.destination_acceptance import METRIC_VALUE_PROJECTION
+    from infra.milestone_7_8.destination_acceptance import METRIC_VALUE_PROJECTION, V5_METRIC_VALUE_PROJECTION
 
     plan = read(package / "planned-bindings.json")
     scope = read(package / "successor-scope.json")
     manifest = read(package / "manifest.json")
     index = read(package / "index-bindings.json")
-    current = review.get("packageId") == PACKAGE_ID
-    expected = (PACKAGE_ID, BOUND, PREDECESSOR, CLEANUP) if current else (
-        V4_ID, V4_BOUND, V4_PREDECESSOR, V3_CLEANUP
-    )
+    package_id = review.get("packageId")
+    expected = {
+        PACKAGE_ID: (PACKAGE_ID, BOUND, PREDECESSOR, CLEANUP),
+        V5_ID: (V5_ID, V5_BOUND, V5_PREDECESSOR, V4_CLEANUP),
+        V4_ID: (V4_ID, V4_BOUND, V4_PREDECESSOR, V3_CLEANUP),
+    }.get(package_id)
     if (
         (review.get("packageId"), review.get("boundRuntimeDirectory"),
          review.get("supersedesReviewSha256"), scope.get("priorCleanupSha256")) != expected
@@ -77,15 +87,26 @@ def validate_package(package: Path, review: dict) -> None:
         or review.get("modelAttemptsIncludingRetries") != 200 or review.get("embeddingTokens") != 160_000_000
     ):
         raise CampaignError("consolidated scope, accounts or Core dependencies differ")
-    if current:
+    if package_id in (V5_ID, PACKAGE_ID):
         metric_query = package / "queries/production-signals.kql"
+        current = package_id == PACKAGE_ID
+        projection = METRIC_VALUE_PROJECTION if current else V5_METRIC_VALUE_PROJECTION
         if (plan.get("verifyWorkerQueryBeforeUpload") is not True or index.get("verifyWorkerQueryBeforeUpload") is not True
-                or file_hash(package / "prior-cleanup.json") != CLEANUP
-                or file_hash(package / "prior-monitoring.json") != LAST_MONITORING
-                or not metric_query.read_text(encoding="utf-8").rstrip().endswith(METRIC_VALUE_PROJECTION)
+                or file_hash(package / "prior-cleanup.json") != expected[3]
+                or file_hash(package / "prior-monitoring.json") != (LAST_MONITORING if current else V4_MONITORING)
+                or not metric_query.read_text(encoding="utf-8").rstrip().endswith(projection)
                 or plan["queryFiles"].get("production-signals") != file_hash(metric_query)
                 or manifest["compiledTemplateSha256"] != file_hash(package / "compiled/pilot.json")):
             raise CampaignError("predecessor evidence, scanner template or exact metric query differs")
+        if current:
+            rehearsal = read(package / "local-engine-proof.json")
+            if (any(p.get("requireNativeMetricReadiness") is not True for p in (plan, index))
+                    or rehearsal.get("querySha256") != file_hash(metric_query)
+                    or rehearsal.get("originalQuerySha256") != "6a07d502ab5d47c8caa3e40ea157fd7a1b9813c63978345a1485beb35fb35bc7"
+                    or rehearsal.get("evidenceClass") != "local-emulator-only"
+                    or rehearsal.get("bitExactFractionalInputs") != 7 or rehearsal.get("tamperingRejected") != 2
+                    or rehearsal.get("validExactIdentities") != 10 or rehearsal.get("managedRowsReclassified") != 0):
+                raise CampaignError("local engine evidence or native readiness gate differs")
     query = package / "queries/integrity-source-rows.kql"
     if (query.read_text(encoding="utf-8") != signal_query(plan["release"], plan["deployment"])
             or plan["queryFiles"].get("integrity-source-rows") != file_hash(query)
@@ -194,6 +215,10 @@ def guard_dispatch(package: Path, arguments: list[str], inputs: dict[str, str]) 
     run = package.parent / ("run-" + file_hash(review)[:8])
     if (run / "stop-proof-intent.json").exists():
         raise CampaignError("proof has stopped")
+    if operation in {"account", "core"} and read(review).get("packageId") == PACKAGE_ID:
+        from infra.milestone_7_8.pilot.native_metric_readiness import require_accepted
+
+        require_accepted(package, run)
     if operation == "account" or operation in INDEPENDENT:
         return
     plan = read(package / "planned-bindings.json")

@@ -78,7 +78,7 @@ The approved private staging run used its separately recorded deadlines.
 | D007 configured infrastructure categories/retention; [debt row](MILESTONE_7_8_DEFECT_REGISTER.md#evidence-debts-routed-to-later-audit-surfaces) | Historical private metrics and D001 scanner rows. The staging run observed both registry categories, Blob read/write, Key Vault AuditEvent, and three VPN gateway categories. | Existing PostgreSQL/Blob/registry/Key Vault diagnostic bindings reused | PostgreSQL log and Blob delete rows remain unproved. Preserve the native retention and category bindings. Historical Firewall/VM category evidence remains unlocated/unproved. User explicitly classified those categories not applicable to the final ACA topology; private networking, egress and deployed-resource category evidence remain mandatory. |
 | Two original real-stack editable-AI scenarios; [local browser boundary](MILESTONE_7_8_LOCAL_GAP_COMPLETION.md#local-browser-environment-and-contract-boundary) | Actual graph/upload/controlled-draft local flows; unchanged regressions credited | Runtime public API endpoint binding removes frontend build-time-hostname dependency; 12 affected web tests/types/production build and native container smoke | User selected explicit save/edit/reload with immutable original evidence; affected local browser/API tests now pass. Native provider/browser observations on the signed selected release remain required; historical failures are retained. |
 | Final results, limits and milestone exit; [plan exit](MILESTONE_7_IMPLEMENTATION_PLAN.md#documentation-commit-and-exit) | Prior accepted results and historical warnings/failures retained | This finite ledger and exact local receipts | Consolidate accepted managed observations, cleanup, limits, RPO/RTO, control dispositions and completion document only after preceding evidence/decisions. No Milestone8 start. |
-| D008 billing disclosure; defect register | Through private staging v4, cumulative authorized exposure was $629.93. Its forecast was $41.5821 and its execution ceiling was $56.51. | Earlier forecasts and ceilings retain their dated scope. | Settled charges require a subsequent provider billing event. |
+| D008 billing disclosure; defect register | Through private staging v5, cumulative authorized exposure was $686.44. Its forecast was $41.5821 and its execution ceiling was $56.51. | Earlier forecasts and ceilings retain their dated scope. | Settled charges require a subsequent provider billing event. |
 
 ## Release bindings
 
@@ -233,6 +233,27 @@ The following SHA-256 hashes identify the retained private receipts for `run-c82
 | Alert instances and source windows | `bd48370ed54ecc9f2a25af668dd537711b2669e100c1abf149ead30217a9c1bb` |
 | Restricted reader terminal outcome | `3aaafd9697db88e7d2b6d4ee513e6ef9d3975fbbb16b89b7408014a6e5b782a8` |
 | Verified teardown | `4b8b2ff1cfa0963b0b178a48ec16d8c76a7a63d3981352673ab3a0544390f63f` |
+
+### November 24 private staging v5
+
+Run `run-e8c548ad` used source `94175f9ba017cbf88076300fae32ce3a26978083`. Azure verified the exact cleanup binding before provisioning. Both retained images reached the private registry. The installed Windows VPN profile initially had the v4 audience, gateway hostname and deployment-specific DNS suffix. The tenant and issuer matched v5. The directory had zero service principals for the old audience and one enabled principal for the v5 audience. A uniquely named XML import corrected the installed entry. Private route, DNS and TLS admission passed at 16:58:07 UTC.
+
+At 16:58:29 UTC the production telemetry query returned 3,915 rows below its cap. The gateway identity check accepted 3,898 and rejected 17 database pool acquisition metrics, 12 worker and five outbox. The two precision columns were null for all 1,316 positive fractional metrics. Proof stopped at 16:58:30 UTC, before the account fixture or primary upload. V5 therefore has no scanner cutoff, Blob scan read, scanner Log Analytics response, version or ETag comparison, or diagnostic helper change or restoration. Core and its four dependent stages remain open.
+
+All 13 workbook configurations matched. V5 added 13 observed native alert firings across five rules. Evidence integrity fired nine times. Database saturation, queue backlog, storage outage and worker stale each fired once. No recovery transition was captured. All nine complete matching integrity ranges had zero underlying signal rows. The ten historical indeterminate ranges and the manual integrity closure retain their prior dispositions. The November 19 actual workbook views, 14 chart-visible panels, two approved signups, prior exact Blob evidence, telemetry, retention, infrastructure, PostgreSQL, D001 and D002 retain their original credit.
+
+Automation returned a fresh monthly-quota HTTP 429. The native inventory accounted for 25 jobs and zero matching starts. The exact-target fallback removed the resource group at 17:26:46 UTC. The verifier confirmed the named Canada Central vault purge, removal of the schedule and binding, all 48 integer counters at zero, and preservation of the controller at 17:29:19 UTC. Windows had zero named client entries, staging routes and staging DNS policies. All 25 linked native cleanup receipts verified.
+
+Microsoft's local Kusto engine ran the sealed query verbatim. A fractional number inside a dynamic object had runtime type `double`. The v5 predicate compared it to `real`, the type of a scalar real. The corrected query compares against a dynamic fractional literal and reports both native types. Ten valid synthetic gateway identities matched, including seven bit-exact fractional values across object and JSON-text inputs. Both tampered controls failed. Loading 17 original rejected rows and 17 passing controls with their returned values and original IDs reproduced the same 17 failures with both queries. The v5 receipt omitted the native runtime types and the source doubles. The point at which those live values changed remains unknown. The local test container, anonymous volumes and newly downloaded image reference were removed.
+
+| V5 private receipt | SHA-256 |
+| --- | --- |
+| Signal integrity stop | `626aa5012337d4b6741a643b10573881e9349fe7b1478bb8c9038274799f9042` |
+| Full native receipt replay | `fd1dbf1a5f1fa3069a550be9c4600b9a3c59f555126e4bdf8621454671002821` |
+| Alert instances and source windows | `242642afeac55698e4e2abbab1b84d41e3c6d61a359dce8645ecf9d0fae6a2a9` |
+| Verified installed profile and gateway | `1d40a3d11c732ac86e0af9f34f6241615e8300da1b40539794bbcc5080fdc180` |
+| Local Kusto execution | `f26f8885c0f57e9c602178d9117d733a43190a76f86d593049fb8ad6f2da3c0a` |
+| Verified teardown | `c46c32515158f097f6ac0c6b8825212bc20d3f08447293dedf787f45386110cd` |
 
 ## Final local checkpoint additions
 
