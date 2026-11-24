@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from infra.milestone_7_8.campaign import CampaignError, parse_utc
+from infra.milestone_7_8.campaign import CampaignConfig, CampaignError, parse_utc
 from infra.milestone_7_8.pilot import staging_exception as staging
 from infra.milestone_7_8.pilot.prepare_staging_successor import PARENT, git, retained_images, write_json
 from infra.milestone_7_8.pilot_cleanup import file_hash, read, validate_review, write_new
@@ -164,7 +164,18 @@ def prepare(retail_path: Path, verification_path: Path) -> Path:
         "nextExecutionConservativeUsd": str(conservative), "rateSnapshot": retail["fetchedAtUtc"],
         "currentRetailSha256": price_hash, "priorCleanupTerminalSha256": TERMINAL_SHA,
     })
-    update("cleanup/campaign.template.json", {"conservativeEstimateUsd": str(conservative)})
+    update("cleanup/campaign.template.json", {
+        "conservativeEstimateUsd": str(conservative),
+        "resourceItems": [{
+            "name": "selected-core-scanner-retail-footprint",
+            "pricedAtUtc": retail["fetchedAtUtc"], "hours": 13,
+            "hourlyUsd": "0", "fixedUsd": str(forecast),
+        }],
+    })
+    CampaignConfig.from_document(
+        read(out / "cleanup/campaign.template.json") | {"cleanupDeadlineUtc": "2030-01-01T11:01:00Z"},
+        allow_expired=True,
+    )
     update("cleanup/ledger.json", {"conservative_estimate_usd": str(conservative)})
     plan = read(out / "planned-bindings.json")
     plan.update(budget | {
