@@ -201,14 +201,17 @@ def validate_review(package: Path, approval: dict) -> dict:
                 == review["costReconciliationSha256"]
                 and "cost-reconciliation.json" in review["files"]
             )
-            if (review.get("stagingException") or {}).get("schema") == (
-                "m78-private-synthetic-staging-exception-v2"
-            ):
+            exception_schema = (review.get("stagingException") or {}).get("schema")
+            prior_by_exception = {
+                "m78-private-synthetic-staging-exception-v2": Decimal("460.40"),
+                "m78-private-synthetic-staging-exception-v3": Decimal("516.91"),
+            }
+            if exception_schema in prior_by_exception:
                 # Preserve the entire previous ceiling while the ledger is unsettled.
                 prior_ceiling = Decimal(reconciliation["priorAuthorizedCumulativeUsd"])
                 cumulative_valid = (
                     cumulative_valid
-                    and prior_ceiling == Decimal("460.40")
+                    and prior_ceiling == prior_by_exception[exception_schema]
                     and Decimal(str(review["increaseOverLastApprovalUsd"])) == allowance
                     and cumulative == prior_ceiling + allowance
                     and reconciliation["billing"] == "unsettled"

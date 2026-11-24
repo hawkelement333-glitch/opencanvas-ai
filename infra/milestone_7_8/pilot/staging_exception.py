@@ -7,7 +7,7 @@ from pathlib import Path
 from infra.milestone_7_8.campaign import CampaignError
 from infra.milestone_7_8.pilot.telemetry_first import RELEASE_KEY_SHA256
 from infra.milestone_7_8.pilot_cleanup import file_hash, read
-from infra.milestone_7_8.pilot_validation import SCANNER_OBSERVATION
+from infra.milestone_7_8.pilot_validation import CORE_DIAGNOSTIC_SCOPE, SCANNER_OBSERVATION
 
 API = "sha256:e0e6518e8f54c6151e598c6b591923dfade3e35c7b10a18dc0fc38bc22cc3c62"
 FRONTEND = "sha256:1ee742b604d406ad8cc4c3c53001853ad58a033b68f4d613251ea7fc088fdb3a"
@@ -48,6 +48,18 @@ SUCCESSOR_POLICY = {
     "approvedExecutions": 1,
     "scannerObservation": SCANNER_OBSERVATION,
 }
+CORE_PREDECESSOR = "0b0335d2025b87c276a2e114b309010e16f965929aca1de8178ea71a846645c1"
+CORE_BOUND = ".runtime/milestone_7_8/psv3"
+CORE_OPERATIONS = ["account", "core"]
+INERT_MODEL_KEY = "unused-no-model-credential"
+CORE_POLICY = {
+    **SUCCESSOR_POLICY,
+    "schema": "m78-private-synthetic-staging-exception-v3",
+    "supersedesExpiredReview": CORE_PREDECESSOR,
+    "coreDiagnosticScope": CORE_DIAGNOSTIC_SCOPE,
+    "modelAttemptsIncludingRetries": 0,
+    "embeddingTokens": 0,
+}
 
 
 def validate_staging_admission(package: Path, review: dict, approval: dict) -> None:
@@ -71,7 +83,7 @@ def validate_staging_admission(package: Path, review: dict, approval: dict) -> N
         "signing/retained-signature-verification-receipt.json",
     }
     if (
-        policy not in (POLICY, SUCCESSOR_POLICY)
+        policy not in (POLICY, SUCCESSOR_POLICY, CORE_POLICY)
         or not required <= review["files"].keys()
         or read(policy_path) != policy
         or review["files"].get(policy_path.name) != file_hash(policy_path)
@@ -95,6 +107,27 @@ def validate_staging_admission(package: Path, review: dict, approval: dict) -> N
         or review.get("boundRuntimeDirectory") != ".runtime/milestone_7_8/psv2"
     ):
         raise CampaignError("staging successor observation or execution scope differs")
+    if policy == CORE_POLICY:
+        scope = read(package / "successor-scope.json")
+        credential_path = "credentials/application-secrets.parameters.json"
+        secrets = read(package / credential_path)["parameters"]["applicationSecrets"]["value"]
+        if (
+            not {"successor-scope.json", "local-verification.json", credential_path,
+                 "current-retail-rates.json", "carried-acceptance.json"} <= review["files"].keys()
+            or review.get("supersedesReviewSha256") != CORE_PREDECESSOR
+            or review.get("boundRuntimeDirectory") != CORE_BOUND
+            or any(candidate.get("coreDiagnosticScope") != CORE_DIAGNOSTIC_SCOPE
+                   or candidate.get("scannerObservation") != SCANNER_OBSERVATION
+                   for candidate in (plan, scope))
+            or plan["enabledOperations"] != CORE_OPERATIONS
+            or read(package / "manifest.json")["operations"] != CORE_OPERATIONS
+            or read(package / "approval.unapproved.json")["operations"] != CORE_OPERATIONS
+            or any(read(package / f"{kind}-approval.unapproved.json")["operations"]
+                   for kind in ("index", "capacity"))
+            or any(review.get(key) != 0 for key in ("modelAttemptsIncludingRetries", "embeddingTokens"))
+            or secrets.get("openai-api-key") != INERT_MODEL_KEY
+        ):
+            raise CampaignError("Core-only staging admission differs from the sealed scope")
     arm = read(package / "parameters.bound.json")["parameters"]
     images = read(package / "release-bindings.json")
     api, frontend = images["api"], images["frontend"]

@@ -26,11 +26,12 @@ from infra.milestone_7_8.pilot_alerts import ROOT, bound, compile_catalog
 
 VERSION = "m78-pilot-destination-probe-v1"
 SCANNER_PENDING_MARKER = "M78-SCANNER-PENDING:"
+CORE_DIAGNOSTIC_SCOPE = "one-primary-scanner-diagnostic-v1"
 SCANNER_OBSERVATION = {
     "fixture": "primary",
     "maximumExecutions": 1,
-    "publishWhenSecondsRemaining": 400,
-    "minimumDispatchSecondsRemaining": 270,
+    "publishWhenSecondsRemaining": 900,
+    "minimumDispatchSecondsRemaining": 135,
 }
 OPERATIONS = ("query", "telemetry", "alerts", "smtp", "provider-observation")
 DELIVERY_OPERATIONS = (

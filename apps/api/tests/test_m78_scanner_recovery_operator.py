@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -24,7 +26,9 @@ from infra.milestone_7_8.pilot.scanner_operator import (
 )
 from infra.milestone_7_8.pilot.scanner_read_diagnostic import observe
 from infra.milestone_7_8.pilot_cleanup import file_hash, read, write_new
-from infra.milestone_7_8.pilot_validation import SCANNER_OBSERVATION, SCANNER_PENDING_MARKER
+from infra.milestone_7_8.pilot_validation import (
+    CORE_DIAGNOSTIC_SCOPE, SCANNER_OBSERVATION, SCANNER_PENDING_MARKER,
+)
 from opencanvas_api.services.documents.errors import DocumentStorageError
 from opencanvas_api.services.scanner_bridge import ScannerBridgeEvidenceError
 
@@ -130,8 +134,9 @@ async def test_exact_quarantine_conflict_then_real_promotion_contract(
                 now + timedelta(hours=1),
             )
             assert marker["upload"]["objectVersionId"] == version
+            assert marker["pendingAt"] == now.isoformat()
             assert operator.pending_observation(
-                console, "execution", journal.header, now + timedelta(seconds=650),
+                console, "execution", journal.header, now + timedelta(seconds=800),
                 now + timedelta(hours=1),
             ) is None
             with pytest.raises(CampaignError, match="exact active execution"):
@@ -144,18 +149,32 @@ async def test_exact_quarantine_conflict_then_real_promotion_contract(
                 await api.clean_upload(fixture, "first")
 
 
-async def test_both_native_reads_have_separate_failure_reasons():
+@pytest.mark.parametrize("failed_source", ["blob", "logAnalytics", "both"])
+async def test_both_native_reads_have_separate_failure_reasons(failed_source):
+    now = datetime.now(UTC)
+    uri = "https://fixture.blob.core.windows.net/fixture"
+    etag = "0x8DEFADED"
+
     async def tags(*_, **_kw):
+        if failed_source == "logAnalytics":
+            return SimpleNamespace(
+                etag=etag, provider_version_id="version", object_uri=uri, account_name="fixture",
+                scan_result="clean", scan_finished_at=now,
+            )
         try:
             raise DocumentStorageError("raw sensitive message", provider_status_code=403)
         except DocumentStorageError as error:
             raise ScannerBridgeEvidenceError("scanner-blob-tags-http-status") from error
 
     async def logs(**kw):
-        assert kw["etag"] == "etag"
+        assert kw["etag"] == etag
+        if failed_source == "blob":
+            return [SimpleNamespace(
+                etag=etag, object_uri=uri, account_name="fixture", scan_result="clean",
+                scan_finished_at=now, time_generated=now, evidence_sha256="a" * 64,
+            )]
         raise ScannerBridgeEvidenceError("scanner-log-query-authorization-unavailable")
 
-    now = datetime.now(UTC)
     bridge = SimpleNamespace(
         blob_reader=SimpleNamespace(read=tags, hostname="fixture.blob.core.windows.net"),
         log_reader=SimpleNamespace(read=logs),
@@ -165,35 +184,82 @@ async def test_both_native_reads_have_separate_failure_reasons():
     )
     result = await observe(
         bridge,
-        SimpleNamespace(physical_key="fixture", etag="etag", provider_version_id="version"),
+        SimpleNamespace(physical_key="fixture", etag=etag, provider_version_id="version"),
         SimpleNamespace(requested_at=now, deadline_at=now),
         now,
     )
-    assert result["blob"] == {
+    assert result["blob"] == ({
+        "status": "read", "versionBound": True,
+    } if failed_source == "logAnalytics" else {
         "status": "failed",
         "versionBound": None,
         "code": "scanner-blob-tags-http-status",
         "httpStatus": 403,
-    }
-    assert result["logAnalytics"] == {
+    })
+    assert result["logAnalytics"] == ({
+        "status": "read", "versionBound": True, "exactRows": 1, "rows": 1,
+    } if failed_source == "blob" else {
         "status": "failed",
         "versionBound": None,
         "code": "scanner-log-query-authorization-unavailable",
-    }
+    })
     assert result["requestExpired"] and result["correlation"]["status"] == "unproved"
     assert {window["window"] for window in result["timing"].values()} == {"post-deadline"}
     assert "raw sensitive message" not in str(result)
 
 
-def test_worker_job_command_and_console_are_execution_bound(tmp_path):
+async def test_core_diagnostic_only_runs_one_upload_and_has_no_model_path():
+    calls = []
+
+    async def signin():
+        calls.append("signin")
+
+    async def request(method, path, **_kwargs):
+        calls.append((method, path))
+        return {"id": "canvas", "workspaceId": "workspace"}
+
+    async def clean_upload(fixture, suffix, *, scan_only):
+        assert fixture == {"canvasId": "canvas", "workspaceId": "workspace"}
+        calls.append((suffix, scan_only))
+        return {"suffix": suffix, "scanOutcome": "clean"}
+
+    payload = await probe.scanner_diagnostic_core(SimpleNamespace(
+        execution="execution", signin=signin, request=request, clean_upload=clean_upload,
+    ))
+    assert calls == ["signin", ("POST", "/api/v1/canvases"), ("primary", True)]
+    assert payload["providerCalls"] == 0
+    binding = dict.fromkeys(("sourceCommit", "imageDigest", "release", "deployment"), "fixture")
+    plan = binding | {"coreDiagnosticScope": CORE_DIAGNOSTIC_SCOPE}
+    export = payload | binding | {"operation": "core", "executionId": "execution", "finishedAt": "fixture"}
+    assert operator.proof_disposition(export, plan, "execution", "core", "Succeeded") == (
+        "scanner-diagnostic-completed"
+    )
+    with pytest.raises(CampaignError, match="differs from the sealed scope"):
+        operator.proof_disposition(export | {"providerCalls": 1}, plan, "execution", "core", "Succeeded")
+
+
+@pytest.mark.parametrize("action", ["diagnose", "core-retry", "account-recovery", "transport", "telemetry-first"])
+def test_core_diagnostic_stage_excludes_other_proof_actions(tmp_path, action):
+    now = datetime.now(UTC)
+    context = SimpleNamespace(
+        run=tmp_path, policy=SimpleNamespace(clock=lambda: now, stop_by=now + timedelta(hours=1)),
+        plan={"coreDiagnosticScope": CORE_DIAGNOSTIC_SCOPE},
+    )
+    with pytest.raises(CampaignError, match="only admits account, core and cleanup"):
+        operator.operate(context, action)
+
+
+@pytest.mark.parametrize("deferred", [False, True])
+def test_worker_job_command_and_console_are_execution_bound(tmp_path, deferred):
     source = tmp_path / "fixture.py"
     source.write_text(
-        "import json\ndef main(inputs): print('M78-SCANNER-READ:' + json.dumps(inputs))\n"
+        "import json, os\ndef main(inputs): print('M78-SCANNER-READ:' + json.dumps(inputs))\n"
     )
     inputs = {"challenge": "local", "objectVersionId": str(uuid4()), "executionId": "job-abc"}
-    command = worker_command(inputs, source)
+    command = worker_command({} if deferred else inputs, source, deferred=deferred)
     result = subprocess.run(
-        [sys.executable, *command[1:]], check=True, capture_output=True, text=True
+        [sys.executable, *command[1:]], check=True, capture_output=True, text=True,
+        env=os.environ | {"M78_SCANNER_UPLOAD": json.dumps(inputs)} if deferred else None,
     )
     wrapped = json.dumps({"TimeStamp": "2026-11-19T04:05:00Z", "Log": "F " + result.stdout.strip()})
     assert worker_result(wrapped, inputs, "job-abc") == inputs
@@ -204,14 +270,15 @@ def test_worker_job_command_and_console_are_execution_bound(tmp_path):
         worker_result(wrapped, inputs, "job-other")
 
 
-@pytest.mark.parametrize("scenario", ["success", "busy", "late", "start-unknown", "failed"])
-def test_read_worker_job_restores_after_terminal_execution(tmp_path, scenario):
+@pytest.fixture
+def scanner_helper():
     scope = "/subscriptions/fixture/resourceGroups/rg-m78-0123456789-target"
     deployment = "m78p-0123456789"
     name = f"caj-{deployment}-migration"
     job_id = f"{scope}/providers/Microsoft.App/jobs/{name}"
-    migration = {"role": "migration", "id": scope + "/migration"}
-    worker = {"role": "worker", "id": scope + "/worker"}
+    identities = scope + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/"
+    migration = {"role": "migration", "id": identities + "migration"}
+    worker = {"role": "worker", "id": identities + "worker", "name": "worker", "clientId": str(uuid4())}
     foundation = {"identityBindings": [migration, worker]}
     plan = {
         "targetResourceGroupId": scope, "deployment": deployment,
@@ -220,8 +287,8 @@ def test_read_worker_job_restores_after_terminal_execution(tmp_path, scenario):
     registry = "fixture.azurecr.io"
     image = f"{registry}/opencanvas-api@sha256:" + "0" * 64
     inputs = {
-        "challenge": "test", "objectVersionId": str(uuid4()), "clientId": str(uuid4()),
-        "workspaceId": str(uuid4()), "databaseUrl": "postgresql+asyncpg://worker@fixture:5432/db",
+        "challenge": "test", "objectVersionId": str(uuid4()), "clientId": worker["clientId"],
+        "workspaceId": str(uuid4()), "databaseUrl": "postgresql+asyncpg://worker@fixture:5432/opencanvas",
         "storageUrl": "https://fixture.blob.core.windows.net/",
     }
     original = {
@@ -259,11 +326,22 @@ def test_read_worker_job_restores_after_terminal_execution(tmp_path, scenario):
             {"name": "OPENCANVAS_OPENAI_API_KEY", "secretRef": "excluded"},
         ],
     }
+    return plan, foundation, worker, inputs, original, container
+
+
+@pytest.mark.parametrize("scenario", ["success", "busy", "late", "start-unknown", "failed"])
+def test_read_worker_job_restores_after_terminal_execution(tmp_path, scenario, scanner_helper):
+    plan, foundation, worker, inputs, original, container = scanner_helper
+    scope, job_id = plan["targetResourceGroupId"], plan["helperJobResourceId"]
+    registry = container["image"].split("/", 1)[0]
+    image = container["image"]
+    name = job_id.rsplit("/", 1)[-1]
     current = copy.deepcopy(original)
     events = []
     execution = name + "-abc"
+    execution_template = None
 
-    def get(root, label, rid, version):
+    def get(root, label, rid, version, *, cutoff):
         assert root == tmp_path and version == "2025-01-01"
         if rid == job_id + "/executions":
             return {"value": [{"properties": {"status": "Running"}}] if scenario == "busy" else []}
@@ -273,15 +351,21 @@ def test_read_worker_job_restores_after_terminal_execution(tmp_path, scenario):
         return {
             "id": rid, "properties": {
                 "status": "Failed" if scenario == "failed" else "Succeeded",
-                "template": copy.deepcopy(current["properties"]["template"]),
+                "template": copy.deepcopy(execution_template),
             },
         }
 
     def call(root, label, args, **kwargs):
+        nonlocal execution_template
         events.append(label)
         if args[:3] == ("rest", "--method", "patch"):
             payload = read(tmp_path / args[-1][1:])
-            current.update(identity=payload["identity"])
+            identities = current["identity"]["userAssignedIdentities"]
+            for key, value in payload["identity"]["userAssignedIdentities"].items():
+                if value is None:
+                    identities.pop(key)
+                else:
+                    identities[key] = value
             current["properties"].update(payload["properties"])
         elif args[:3] == ("containerapp", "job", "start"):
             assert set(current["identity"]["userAssignedIdentities"]) == {worker["id"]}
@@ -290,20 +374,22 @@ def test_read_worker_job_restores_after_terminal_execution(tmp_path, scenario):
             assert conf["replicaTimeout"] == 90 and conf["replicaRetryLimit"] == 0
             (spec,) = current["properties"]["template"]["containers"]
             assert spec["image"] == image and spec["command"][:2] == ["python", "-c"]
-            assert all(set(row) == {"value", "name"} for row in spec["env"])
+            execution_template = read(Path(args[-1]))
+            assert all(set(row) == {"value", "name"} for row in execution_template["containers"][0]["env"])
             if scenario == "start-unknown":
                 raise OSError("simulated ambiguous dispatch")
             return {"name": execution}
         else:
             assert args[:4] == ("containerapp", "job", "logs", "show")
-            assert execution in args and current == original and kwargs == {"as_json": False}
+            assert execution in args and kwargs["as_json"] is False
             return "M78-SCANNER-READ:" + json.dumps(inputs | {"executionId": execution})
 
     now = datetime.now(UTC)
     context = SimpleNamespace(
         plan=plan, runtime={"resourceGroupName": scope.rsplit("/", 1)[-1]},
         policy=SimpleNamespace(
-            check=lambda **kwargs: None, clock=lambda: now, core_by=now + timedelta(hours=1)
+            check=lambda **kwargs: None, clock=lambda: now, core_by=now + timedelta(hours=1),
+            stop_by=now + timedelta(hours=2),
         ),
         get=get, call=call,
     )
@@ -311,7 +397,8 @@ def test_read_worker_job_restores_after_terminal_execution(tmp_path, scenario):
         assert read_worker_job(context, tmp_path, "read", container, foundation, worker, inputs)[
             "executionId"
         ] == execution
-        assert events == ["read-apply", "read-start", "read-restore", "read-console"]
+        assert events == ["read-apply", "read-start", "read-console", "read-restore"]
+        assert current == original
     elif scenario == "busy":
         with pytest.raises(DiagnosticUnavailable, match="idle inventory"):
             read_worker_job(context, tmp_path, "read", container, foundation, worker, inputs)
@@ -332,6 +419,197 @@ def test_read_worker_job_restores_after_terminal_execution(tmp_path, scenario):
         with pytest.raises(DiagnosticUnavailable, match="successful execution"):
             read_worker_job(context, tmp_path, "read", container, foundation, worker, inputs)
         assert events == ["read-apply", "read-start", "read-restore"]
+
+
+@pytest.mark.parametrize("scenario", ["success", "apply-busy", "restore-busy", "restore-mismatch"])
+def test_staging_cli_core_reconciles_asynchronous_helper(
+    tmp_path, monkeypatch, scanner_helper, scenario, capsys
+):
+    plan, foundation, worker, settings, original, worker_container = scanner_helper
+    scope, helper = plan["targetResourceGroupId"], plan["helperJobResourceId"]
+    run = tmp_path / "run"
+    package, bound = tmp_path / "package", tmp_path / "bound"
+    for directory in (run, package, bound, run / "proof-account", run / "activation"):
+        directory.mkdir()
+    plan.update(
+        workspaceResourceId=scope + "/providers/Microsoft.OperationalInsights/workspaces/fixture",
+        workerResourceId=scope + "/providers/Microsoft.App/containerApps/worker",
+        imageDigest=worker_container["image"].split("@")[1], release="fixture",
+        sourceCommit="a" * 40, scannerObservation=SCANNER_OBSERVATION,
+    )
+    foundation.update(postgresHost="fixture", storageUrl=settings["storageUrl"])
+    activation = {"properties": {"outputs": {"foundationBindings": {"value": foundation}}}}
+    write_new(run / "activation/application-terminal.json", activation)
+    write_new(run / "proof-account/accepted.json", {"operation": "account"})
+    write_new(run / "proof-account/native-resource-readbacks.json", {})
+    write_new(run / "proof-account/artifact-version-binding.json", {
+        "artifactSha256": "a" * 64, "versionId": "fixture", "nativeArtifactExecution": "fixture",
+    })
+    write_new(package / "planned-bindings.json", plan)
+    monkeypatch.setattr(operator, "admit_runtime_bindings", lambda *_a, **_kw: {})
+    monkeypatch.setattr(operator, "pack", lambda *_a: write_new(_a[5], {
+        "artifactSha256": "a" * 64, "proofCommand": ["python", "-c", "proof"], "proofEnvironment": [],
+    }))
+    now = datetime.now(UTC)
+    elapsed = [0.0]
+    clock = lambda: now + timedelta(seconds=elapsed[0])
+    monkeypatch.setattr(operator.time, "sleep", lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds))
+    policy = ProofOperator(run, {
+        "coreReadyBy": (now + timedelta(hours=1)).isoformat(),
+        "stopProofBy": (now + timedelta(hours=2)).isoformat(),
+    }, {}, clock=clock)
+    events = []
+    current = copy.deepcopy(original)
+    pending_patch = None
+    operation = None
+    polls = 0
+    start_inputs = None
+    helper_template = None
+    proof_template = None
+    marker = None
+    rg = scope.rsplit("/", 1)[-1]
+    helper_execution = helper.rsplit("/", 1)[-1] + "-abc"
+    proof_execution = f"caj-{plan['deployment']}-evidence-abc"
+    worker_body = {
+        "id": plan["workerResourceId"],
+        "identity": {"type": "UserAssigned", "userAssignedIdentities": {worker["id"]: {}}},
+        "properties": {
+            "latestReadyRevisionName": "worker-fixture", "latestRevisionName": "worker-fixture",
+            "managedEnvironmentId": plan["managedEnvironmentResourceId"],
+            "provisioningState": "Succeeded", "configuration": {"activeRevisionsMode": "Single"},
+            "template": {"containers": [
+                worker_container | {"name": "worker", "command": ["python", "-m", "scripts.worker"]}
+            ]},
+        },
+    }
+
+    def get(_root, label, rid, _version, *, cutoff):
+        nonlocal polls, pending_patch
+        assert clock() < cutoff
+        if rid == plan["workerResourceId"]:
+            return worker_body
+        if rid == plan["workspaceResourceId"]:
+            return {"id": rid, "properties": {"customerId": settings["workspaceId"]}}
+        if rid == helper + "/executions":
+            return {"value": []}
+        if rid == helper + "/executions/" + helper_execution:
+            return {"id": rid, "properties": {"status": "Succeeded", "template": helper_template}}
+        if rid == helper:
+            if pending_patch is not None:
+                assert cutoff <= policy.stop_by - timedelta(minutes=5)
+                polls += 1
+                if polls <= 3 or scenario == operation + "-busy":
+                    events.append(operation + "-InProgress")
+                    return current | {
+                        "properties": current["properties"] | {"provisioningState": "InProgress"}
+                    }
+                for key, value in pending_patch["identity"]["userAssignedIdentities"].items():
+                    identities = current["identity"]["userAssignedIdentities"]
+                    if value is None:
+                        del identities[key]
+                    else:
+                        identities[key] = value
+                current["properties"].update(pending_patch["properties"])
+                if operation == "restore" and scenario == "restore-mismatch":
+                    current["properties"]["configuration"]["replicaTimeout"] = 999
+                pending_patch = None
+                events.append(operation + "-Succeeded")
+            return copy.deepcopy(current)
+        assert label.startswith("evidence-template")
+        return {"properties": {"template": proof_template or {"containers": [{
+            "name": "evidence", "image": worker_container["image"], "env": [],
+        }]}}}
+
+    def call(root, label, args, **kw):
+        nonlocal pending_patch, operation, polls, start_inputs, helper_template, proof_template, marker
+        if label in {"worker-read-apply", "worker-read-restore"}:
+            assert pending_patch is None, "competing native write during InProgress"
+            pending_patch = read(Path(args[-1][1:]))
+            operation = label.removeprefix("worker-read-")
+            polls = 0
+            events.append(operation)
+        elif label == "evidence-execution-list":
+            return []
+        elif label == "evidence-patch":
+            proof_template = read(Path(args[-1][1:]))["properties"]["template"]
+        elif label == "evidence-start":
+            assert events == ["apply", *["apply-InProgress"] * 3, "apply-Succeeded"]
+            assert set(current["identity"]["userAssignedIdentities"]) == {worker["id"]}
+            events.append("upload")
+            cutoff = (clock() + timedelta(seconds=900)).isoformat()
+            marker = {
+                "executionId": proof_execution, "pendingAt": clock().isoformat(),
+                "binding": {key: plan[key] for key in ("release", "sourceCommit", "deployment", "imageDigest")},
+                "upload": {
+                    **{key: str(uuid4()) for key in ("sessionId", "documentId", "objectVersionId")},
+                    "suffix": "primary", "contentSha256": "b" * 64,
+                    "scanDeadlineAt": cutoff, "serverScanDeadlineAt": cutoff,
+                },
+            }
+            return {"name": proof_execution}
+        elif label == "evidence-poll-0000":
+            return {"properties": {"status": "Running"}}
+        elif label == "evidence-poll-0001":
+            return {"properties": {"status": "Succeeded"}}
+        elif label == "pending-console-0001":
+            return SCANNER_PENDING_MARKER + json.dumps(marker)
+        elif label == "worker-read-start":
+            assert events[-1] == "upload"
+            assert args[-2] == "--yaml" and pending_patch is None
+            helper_template = read(Path(args[-1]))
+            env = {item["name"]: item["value"] for item in helper_template["containers"][0]["env"]}
+            start_inputs = json.loads(env["M78_SCANNER_UPLOAD"])
+            assert start_inputs["scanDeadlineAt"] == marker["upload"]["scanDeadlineAt"]
+            assert start_inputs["objectVersionId"] == marker["upload"]["objectVersionId"]
+            assert "M78_SCANNER_UPLOAD" not in {
+                entry["name"] for entry in current["properties"]["template"]["containers"][0]["env"]
+            }
+            events.append("diagnostic")
+            return {"name": helper_execution}
+        elif label == "worker-read-console":
+            events.append("results")
+            return "M78-SCANNER-READ:" + json.dumps(start_inputs | {"executionId": helper_execution})
+        else:
+            pytest.fail("unexpected native operation " + label)
+        return {}
+
+    context = SimpleNamespace(
+        run=run, package=package, bound=bound, policy=policy, plan=plan, scope=scope, rg=rg,
+        runtime={"resourceGroupName": rg}, admit=lambda: None, get=get, call=call,
+        remaining=lambda cutoff: (cutoff - clock()).total_seconds(),
+        cleanup=lambda reason: events.append(reason) or "cleanup-requested",
+    )
+    export = tmp_path / "core.json"
+    def read_export(*_args):
+        write_new(export, {"operation": "core", "upload": marker["upload"]})
+        return export
+
+    monkeypatch.setattr(operator, "read_export", read_export)
+    monkeypatch.setattr(operator, "proof_disposition", lambda *_args: "accepted")
+    monkeypatch.setattr(operator, "Campaign", lambda *_args: context)
+    monkeypatch.setattr(sys, "argv", [
+        "core_proof_operator", "core", "--package", str(package), "--bound", str(bound), "--execute",
+    ])
+    operator.main()
+    receipt = read(run / "scanner-in-window/worker-read-restoration.json")
+    if scenario == "success":
+        assert events[-6:] == [
+            "results", "restore", *["restore-InProgress"] * 3, "restore-Succeeded",
+        ]
+        assert receipt["verified"] and current == original
+        assert capsys.readouterr().out == "accepted\n"
+    else:
+        assert not receipt["verified"] and events[-1] == "unreconciled-operation"
+        assert capsys.readouterr().out == "cleanup-requested\n"
+        if scenario == "apply-busy":
+            assert "upload" not in events and "restore" not in events
+            assert receipt["lastProvisioningState"] == "InProgress"
+        elif scenario == "restore-busy":
+            assert events.count("restore") == 1 and receipt["lastProvisioningState"] == "InProgress"
+        else:
+            assert receipt["lastProvisioningState"] == "Succeeded"
+            assert receipt["differencesFromOriginal"] == ["configuration"]
+        assert (run / "scanner-in-window/worker-read.json").exists() == (scenario != "apply-busy")
 
 
 def test_recoverable_path_same_deployment_then_scheduled_hard_stop(tmp_path, monkeypatch):

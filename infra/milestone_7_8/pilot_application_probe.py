@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from infra.milestone_7_8.pilot_validation import (
+    CORE_DIAGNOSTIC_SCOPE,
     SCANNER_OBSERVATION,
     SCANNER_PENDING_MARKER,
     _private_host,
@@ -252,7 +253,7 @@ class Api:
         self.csrf = result["csrfToken"]
         return result["user"]
 
-    async def clean_upload(self, fixture: dict, suffix: str) -> dict:
+    async def clean_upload(self, fixture: dict, suffix: str, *, scan_only: bool = False) -> dict:
         path = f"/api/v1/workspaces/{fixture['workspaceId']}/canvases/{fixture['canvasId']}/upload-sessions"
         result = await self.request(
             "POST",
@@ -377,6 +378,8 @@ class Api:
         require(checked_quarantine, "quarantine denial missing before clean release")
         require(state["scanOutcome"] == "clean", "clean native result missing")
         scan_elapsed = time.monotonic() - started
+        if scan_only:
+            return upload | {"scanOutcome": "clean", "scanElapsedSeconds": scan_elapsed}
         while True:
             doc = await self.request(
                 "GET", f"/api/v1/documents/{result['documentId']}", scanner_poll=True
@@ -657,6 +660,25 @@ async def verify_primary(api: Api, fixture: dict) -> dict:
     }
     await api.signin()
     return {"positive": positive, "refusal": negative, "editableArtifact": artifact}
+
+
+async def scanner_diagnostic_core(api: Api) -> dict:
+    await api.signin()
+    canvas = await api.request(
+        "POST", "/api/v1/canvases", statuses=(200, 201),
+        data={"name": "Synthetic scanner proof", "idempotencyKey": f"{api.execution}:canvas"},
+    )
+    fixture = {"canvasId": canvas["id"], "workspaceId": canvas["workspaceId"]}
+    try:
+        upload = await api.clean_upload(fixture, "primary", scan_only=True)
+        status = "scanner-diagnostic-completed"
+    except ScannerDeadline as error:
+        upload = error.upload
+        status = "scanner-diagnostic-deadline"
+    return {
+        "status": status, "upload": upload, "providerCalls": 0,
+        "managedAcceptance": "scanner-diagnostic-only",
+    }
 
 
 async def core(api: Api, resume: dict | None = None) -> dict:
@@ -1497,9 +1519,11 @@ async def production_operation_telemetry(settings: Any, plan: dict):
             await telemetry.close()
 
 
-async def run_account(api: Api, reconciliation: dict | None) -> dict:
-    actions = dict.fromkeys(SLOTS, "signup")
+async def run_account(api: Api, reconciliation: dict | None, *, primary_only=False) -> dict:
+    slots_to_create = {"primary": SLOTS["primary"]} if primary_only else SLOTS
+    actions = dict.fromkeys(slots_to_create, "signup")
     if reconciliation is not None:
+        require(not primary_only, "scanner diagnostic account replay is excluded")
         require(reconciliation["snapshot"].get("seedMatched") is True, "exact migration seed required")
         slots = reconciliation["snapshot"]["slots"]
         actions = account_actions(
@@ -1515,7 +1539,7 @@ async def run_account(api: Api, reconciliation: dict | None) -> dict:
         "exact private API readiness required before account requests",
     )
     ids = {}
-    for slot, display_name in SLOTS.items():
+    for slot, display_name in slots_to_create.items():
         action = actions[slot]
         api.journal.step("account-intent", {"slot": slot, "action": action})
         if action == "resume":
@@ -1534,13 +1558,14 @@ async def run_account(api: Api, reconciliation: dict | None) -> dict:
             user = response["user"]
         ids[slot] = str(uuid.UUID(user["id"]))
         api.journal.step("account-result", {"slot": slot, "action": action, "userId": ids[slot]})
-    require(ids["primary"] != ids["secondary"], "account identities must be distinct")
+    if not primary_only:
+        require(ids["primary"] != ids["secondary"], "account identities must be distinct")
     return {
         "accountCreated": all(action != "resume" for action in actions.values()),
         "accountsReady": True,
         "accountActions": actions,
         "userId": ids["primary"],
-        "secondaryUserId": ids["secondary"],
+        **({"secondaryUserId": ids["secondary"]} if not primary_only else {}),
     }
 
 
@@ -1610,6 +1635,7 @@ async def run(args: argparse.Namespace) -> dict:
             "signup reconciliation must bind the current authority and prior execution",
         )
     journal = Journal(args.output, args.execution_id, args.operation, plan, deadline)
+    scanner_only = plan.get("coreDiagnosticScope") == CORE_DIAGNOSTIC_SCOPE
     async with httpx.AsyncClient(
         base_url=runtime["apiBaseUrl"],
         timeout=45,
@@ -1618,8 +1644,11 @@ async def run(args: argparse.Namespace) -> dict:
     ) as client:
         api = Api(client, journal, args.execution_id)
         if args.operation == "account":
-            return journal.finish(await run_account(api, reconciliation))
+            return journal.finish(await run_account(api, reconciliation, primary_only=scanner_only))
         if args.operation == "core":
+            if scanner_only:
+                require(getattr(args, "scanner_resume", None) is None, "scanner diagnostic replay is excluded")
+                return journal.finish(await scanner_diagnostic_core(api))
             resume = None
             if getattr(args, "scanner_resume", None) is not None:
                 resume = read_runtime_evidence(args.scanner_resume)

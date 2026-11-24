@@ -10,13 +10,15 @@ import re
 import time
 import uuid
 import zlib
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 
-from infra.milestone_7_8.campaign import CampaignError, parse_utc
+from infra.milestone_7_8.campaign import CampaignError, parse_utc, utc
 from infra.milestone_7_8.pilot.scanner_hold import POLICY
 from infra.milestone_7_8.pilot.scanner_read_diagnostic import MARKER, PROBE_TIMEOUT
 from infra.milestone_7_8.pilot_cleanup import file_hash, read, write_new
+from infra.milestone_7_8.pilot_validation import SCANNER_OBSERVATION
 
 ARM = "https://management.azure.com"
 AUTH = "/providers/Microsoft.Authorization/"
@@ -28,6 +30,10 @@ SCANNER_ROLE_ACTIONS = {
 BICEP_NAMESPACE = uuid.UUID("11fb06fb-712d-4ddd-98c7-e71bbd588830")
 JOB_API = "2025-01-01"
 TERMINAL = {"Succeeded", "Failed", "Stopped", "Degraded", "Canceled"}
+UPDATE_TERMINAL = {"Succeeded", "Failed", "Canceled"}
+RECONCILE_SECONDS = 120
+CLEANUP_RESERVE_SECONDS = 300
+UPLOAD_ENV = "M78_SCANNER_UPLOAD"
 READ_SETTINGS = {
     "PGSSLROOTCERT",
     "OPENCANVAS_DATABASE_URL",
@@ -57,9 +63,12 @@ class DiagnosticUnavailable(CampaignError):
     pass
 
 
-def worker_command(inputs: dict, source: Path) -> list[str]:
+def worker_command(inputs: dict, source: Path, *, deferred=False) -> list[str]:
     # No secret, account credential, Blob path or token is passed to the CLI.
-    raw = source.read_bytes() + b"\nmain(" + repr(inputs).encode() + b")\n"
+    call = repr(inputs)
+    if deferred:
+        call += f" | json.loads(os.environ[{UPLOAD_ENV!r}])"
+    raw = source.read_bytes() + b"\nmain(" + call.encode() + b")\n"
     packed = base64.b64encode(zlib.compress(raw, level=9)).decode()
     expected = hashlib.sha256(raw).hexdigest()
     return [
@@ -132,7 +141,10 @@ def job_state(job: dict) -> dict:
 
 def job_binding(state: dict) -> tuple[set[str], dict]:
     ids = {key.casefold() for key in state["identity"]["userAssignedIdentities"]}
-    config = state["properties"]["configuration"]
+    config = dict(state["properties"]["configuration"])
+    # ARM omitted this empty optional setting in the terminal November readback.
+    if config.get("identitySettings") in (None, []):
+        config.pop("identitySettings", None)
     return ids, config | {
         "registries": [
             row | {"identity": row["identity"].casefold()} for row in config["registries"]
@@ -197,7 +209,9 @@ def prepare_worker_job(original, container, plan, foundation, worker, inputs):
         or any(values.get(key) != value for key, value in expected.items())
     ):
         raise CampaignError("worker scanner settings differ")
-    command = worker_command(inputs, Path(__file__).with_name("scanner_read_diagnostic.py"))
+    command = worker_command(
+        inputs, Path(__file__).with_name("scanner_read_diagnostic.py"), deferred=True
+    )
     apply = copy.deepcopy(before)
     apply["identity"]["userAssignedIdentities"] = {worker["id"]: {}}
     apply["properties"]["configuration"].update(
@@ -215,128 +229,226 @@ def prepare_worker_job(original, container, plan, foundation, worker, inputs):
     return job_id, before, apply
 
 
-def read_worker_job(
-    context, root, label, container, foundation, worker, inputs, *, scan_cutoff=None
+@contextmanager
+def prepared_worker_job(
+    context, root, label, container, foundation, worker, settings, *, ready_by
 ):
-    context.policy.check(seconds_needed=210)
+    policy = context.policy
+    policy.check(seconds_needed=CLEANUP_RESERVE_SECONDS + 210)
+    hard_cutoff = policy.stop_by - timedelta(seconds=CLEANUP_RESERVE_SECONDS)
+    ready_by = min(ready_by, hard_cutoff)
     plan = context.plan
     job_id = plan["targetResourceGroupId"] + (
         "/providers/Microsoft.App/jobs/caj-" + plan["deployment"] + "-migration"
     )
-    history = context.get(root, label + "-history", job_id + "/executions", JOB_API)
+    history = context.get(
+        root, label + "-history", job_id + "/executions", JOB_API, cutoff=ready_by
+    )
     if history.get("nextLink") or any(
         row["properties"]["status"] not in TERMINAL for row in history["value"]
     ):
         raise DiagnosticUnavailable("scanner helper needs a complete idle inventory")
-    original = context.get(root, label + "-original", job_id, JOB_API)
+    original = context.get(root, label + "-original", job_id, JOB_API, cutoff=ready_by)
     _, before, apply = prepare_worker_job(
-        original, container, plan, foundation, worker, inputs
+        original, container, plan, foundation, worker, settings
     )
     (desired,) = apply["properties"]["template"]["containers"]
 
-    def matches_template(template):
+    def matches_template(template, expected):
         (deployed,) = template["containers"]
         return (
             not template.get("initContainers")
             and not template.get("volumes")
             and not deployed.get("args")
-            and all(deployed.get(key) == desired[key] for key in ("name", "image", "command"))
+            and all(deployed.get(key) == expected[key] for key in ("name", "image", "command"))
             and sorted(deployed["env"], key=lambda entry: entry["name"])
-            == sorted(desired["env"], key=lambda entry: entry["name"])
+            == sorted(expected["env"], key=lambda entry: entry["name"])
             and all(
                 deployed["resources"].get(key) == value
-                for key, value in desired["resources"].items()
+                for key, value in expected["resources"].items()
             )
         )
 
-    def patch(stage, payload):
+    def patch(stage, wanted, current, cutoff):
+        payload = copy.deepcopy(wanted)
+        target_ids = payload["identity"]["userAssignedIdentities"]
+        target_keys = {key.casefold() for key in target_ids}
+        # ARM merges the identity dictionary. Explicitly remove the previous identity.
+        target_ids.update({
+            key: None for key in current["identity"]["userAssignedIdentities"]
+            if key.casefold() not in target_keys
+        })
         body = root / (label + "-" + stage + ".json")
         write_new(body, payload)
+        write_new(root / (label + "-" + stage + "-intent.json"), {
+            "resourceId": job_id, "bodySha256": file_hash(body), "atUtc": utc(policy.clock()),
+        })
         context.call(
             root, label + "-" + stage,
             ("rest", "--method", "patch", "--url", f"{ARM}{job_id}?api-version={JOB_API}",
              "--body", "@" + str(body.resolve())),
+            cutoff=cutoff, timeout=40,
         )
 
-    def capture(stage):
-        actual = context.get(root, label + "-" + stage, job_id, JOB_API)
-        if (
-            actual["id"].casefold() != job_id.casefold()
-            or actual["properties"]["environmentId"] != plan["managedEnvironmentResourceId"]
-            or actual["properties"]["provisioningState"] != "Succeeded"
-        ):
-            raise CampaignError("scanner helper native scope or provisioning is unproved")
-        return job_state(actual)
+    def differences(actual, expected):
+        ids, config = job_binding(actual)
+        wanted_ids, wanted_config = job_binding(expected)
+        return [
+            key for key, equal in (
+                ("identity", ids == wanted_ids),
+                ("configuration", config == wanted_config),
+                ("template", actual["properties"]["template"] == expected["properties"]["template"]),
+            ) if not equal
+        ]
 
-    dispatch_attempted = terminal = False
-    try:
-        patch("apply", apply)
-        actual = capture("applied")
-        # The provider can fill defaults on the replacement container.
-        if (
-            job_binding(actual) != job_binding(apply)
-            or not matches_template(actual["properties"]["template"])
-        ):
-            raise CampaignError("scanner helper template or identity readback differs")
-        context.policy.check(seconds_needed=135)
-        if scan_cutoff is not None and (
-            context.policy.clock() + timedelta(seconds=135)
-            >= min(scan_cutoff, context.policy.core_by)
+    last = ("Succeeded", before, label + "-original.native.json")
+
+    def wait_for_update(stage, cutoff, previous, *, expected=None):
+        nonlocal last
+        saw_update = False
+        for attempt in range(25):
+            if policy.clock() >= cutoff:
+                break
+            entry = f"{label}-{stage}-{attempt:02}"
+            actual = context.get(root, entry, job_id, JOB_API, cutoff=cutoff)
+            props = actual["properties"]
+            if (actual["id"].casefold() != job_id.casefold()
+                    or props["environmentId"] != plan["managedEnvironmentResourceId"]):
+                raise CampaignError("scanner helper native scope differs")
+            state = props["provisioningState"]
+            last = (state, None, entry + ".native.json")
+            try:
+                observed = job_state(actual)
+                job_binding(observed)
+            except (CampaignError, KeyError, TypeError):
+                if state in UPDATE_TERMINAL:
+                    raise
+                observed = None
+            last = (state, observed, entry + ".native.json")
+            # A successful read of the old configuration can precede the update.
+            if state in UPDATE_TERMINAL and (
+                state != "Succeeded" or saw_update or differences(observed, previous)
+                or (expected is not None and not differences(observed, expected))
+            ):
+                return state, observed
+            saw_update = state not in UPDATE_TERMINAL
+            time.sleep(max(0, min(5, (cutoff - policy.clock()).total_seconds())))
+        raise CampaignError("scanner helper update did not settle before its deadline")
+
+    name = job_id.rsplit("/", 1)[-1]
+    native_args = ("--name", name, "--resource-group", context.runtime["resourceGroupName"])
+    execution_pending = False
+
+    def observe(inputs, *, scan_cutoff=None):
+        nonlocal execution_pending
+        started_at = policy.clock()
+        end = min(hard_cutoff, started_at + timedelta(seconds=120))
+        minimum = timedelta(seconds=SCANNER_OBSERVATION["minimumDispatchSecondsRemaining"])
+        if scan_cutoff is not None and started_at + minimum >= min(
+            scan_cutoff, policy.core_by, hard_cutoff
         ):
             raise DiagnosticUnavailable("insufficient time for the read before the scan deadline")
-        name = job_id.rsplit("/", 1)[-1]
-        native_args = ("--name", name, "--resource-group", context.runtime["resourceGroupName"])
-        write_new(root / (label + "-start-intent.json"), {"jobResourceId": job_id})
-        dispatch_attempted = True
-        start = context.call(root, label + "-start", ("containerapp", "job", "start", *native_args))
-        execution = start["name"].rsplit("/", 1)[-1]
+        target = copy.deepcopy(desired)
+        target["env"].append({"name": UPLOAD_ENV, "value": json.dumps(inputs, separators=(",", ":"))})
+        body = root / (label + "-execution.yaml")
+        write_new(body, {"containers": [target]})
+        write_new(root / (label + "-start-intent.json"), {
+            "jobResourceId": job_id, "templateSha256": file_hash(body), "atUtc": utc(started_at),
+        })
+        execution_pending = True
+        start = context.call(
+            root, label + "-start", ("containerapp", "job", "start", *native_args,
+                                     "--yaml", str(body.resolve())),
+            cutoff=end, timeout=40,
+        )
+        execution = start.get("name", "").rsplit("/", 1)[-1]
         if not re.fullmatch(re.escape(name) + r"-[a-z0-9]+", execution):
             raise CampaignError("scanner helper execution is unbound")
         execution_id = job_id + "/executions/" + execution
-        end = time.monotonic() + 120
         for attempt in range(25):
-            run = context.get(root, f"{label}-execution-{attempt}", execution_id, JOB_API)
+            run = context.get(
+                root, f"{label}-execution-{attempt}", execution_id, JOB_API, cutoff=end
+            )
             if run["id"].casefold() != execution_id.casefold():
                 raise CampaignError("scanner helper execution readback differs")
             state = run["properties"]["status"]
             if state in TERMINAL:
-                terminal = True
+                execution_pending = False
                 break
-            if time.monotonic() >= end:
+            if policy.clock() >= end:
                 break
-            time.sleep(5)
-    except Exception as error:
-        if dispatch_attempted and not terminal:
-            raise CampaignError(
-                "scanner helper execution must be reconciled before restore"
-            ) from error
-        raise
+            time.sleep(max(0, min(5, (end - policy.clock()).total_seconds())))
+        if execution_pending:
+            raise CampaignError("scanner helper execution must be reconciled before restore")
+        if state != "Succeeded":
+            raise DiagnosticUnavailable("scanner helper did not produce a successful execution")
+        if not matches_template(run["properties"]["template"], target):
+            raise CampaignError("scanner helper execution command or read settings differ")
+        logs = context.call(
+            root, label + "-console",
+            ("containerapp", "job", "logs", "show", *native_args, "--execution", execution,
+             "--container", "migration", "--tail", "40", "--follow", "false", "--format", "json"),
+            as_json=False, cutoff=hard_cutoff, timeout=15,
+        )
+        result = worker_result(logs, inputs, execution)
+        write_new(root / (label + ".json"), result)
+        return result
+
+    apply_by = min(hard_cutoff, policy.clock() + timedelta(seconds=RECONCILE_SECONDS))
+    applied = None
+    restored = False
+    restore_error = None
+    try:
+        patch("apply", apply, before, min(ready_by, apply_by))
+        state, applied = wait_for_update("applied", min(ready_by, apply_by), before)
+        if (state != "Succeeded" or job_binding(applied) != job_binding(apply)
+                or not matches_template(applied["properties"]["template"], desired)):
+            raise CampaignError("scanner helper template or identity readback differs")
+        yield observe
     finally:
-        if terminal or not dispatch_attempted:
+        if (root / (label + "-apply-intent.json")).exists():
             try:
-                patch("restore", before)
-                restored = capture("restored")
-                if (
-                    job_binding(restored) != job_binding(before)
-                    or restored["properties"]["template"] != before["properties"]["template"]
-                ):
+                if applied is None:
+                    _, applied = wait_for_update("apply-reconcile", apply_by, before)
+                if execution_pending:
+                    raise CampaignError("scanner helper execution must be reconciled before restore")
+                restore_by = min(
+                    hard_cutoff, policy.clock() + timedelta(seconds=RECONCILE_SECONDS)
+                )
+                if policy.clock() >= restore_by:
+                    raise CampaignError("scanner helper restore would enter the cleanup reserve")
+                # Even a failed restore call may have submitted a native write.
+                try:
+                    patch("restore", before, applied, restore_by)
+                except (CampaignError, OSError, ValueError):
+                    if not (root / (label + "-restore-intent.json")).exists():
+                        raise
+                state, actual = wait_for_update("restored", restore_by, applied, expected=before)
+                restored = state == "Succeeded" and not differences(actual, before)
+                if not restored:
                     raise CampaignError("scanner helper original state differs")
-            except Exception as error:
-                raise CampaignError("scanner helper restore needs native reconciliation") from error
-    if not terminal:
-        raise CampaignError("scanner helper execution must be reconciled before restore")
-    if state != "Succeeded":
-        raise DiagnosticUnavailable("scanner helper did not produce a successful execution")
-    if not matches_template(run["properties"]["template"]):
-        raise CampaignError("scanner helper execution command or read settings differ")
-    # Read only the named execution's own console after restoring the helper.
-    logs = context.call(
-        root, label + "-console",
-        ("containerapp", "job", "logs", "show", *native_args, "--execution", execution,
-         "--container", "migration", "--tail", "40", "--follow", "false", "--format", "json"),
-        as_json=False,
-    )
-    return worker_result(logs, inputs, execution)
+            except (CampaignError, OSError, ValueError, KeyError, TypeError) as error:
+                restore_error = str(error)
+                raise CampaignError(f"scanner helper restoration unverified: {restore_error}") from error
+            finally:
+                state, actual, receipt = last
+                write_new(root / (label + "-restoration.json"), {
+                    "verified": restored, "lastProvisioningState": state,
+                    "lastNativeReadback": receipt,
+                    "differencesFromOriginal": differences(actual, before) if actual is not None else None,
+                    "executionPendingOrUnknown": execution_pending,
+                    "unresolvedReason": restore_error, "atUtc": utc(policy.clock()),
+                })
+
+
+def read_worker_job(context, root, label, container, foundation, worker, inputs, *, scan_cutoff=None):
+    settings = {key: inputs[key] for key in ("clientId", "databaseUrl", "workspaceId", "storageUrl")}
+    dynamic = {key: value for key, value in inputs.items() if key not in settings}
+    with prepared_worker_job(
+        context, root, label, container, foundation, worker, settings,
+        ready_by=context.policy.core_by if scan_cutoff else context.policy.stop_by,
+    ) as observe:
+        return observe(dynamic, scan_cutoff=scan_cutoff)
 
 
 def exact_role(definition: dict, scope: str, expected_name: str) -> str:
@@ -371,7 +483,7 @@ def exact_assignment(
     )
 
 
-def worker_observer(context, root, upload):
+def worker_bindings(context, root, *, cutoff=None):
     plan = context.plan
     application = read(context.run / "activation/application-terminal.json")
     foundation = application["properties"]["outputs"]["foundationBindings"]["value"]
@@ -384,7 +496,7 @@ def worker_observer(context, root, upload):
     for rid in (worker["id"], workspace, app_id):
         if not rid.casefold().startswith(scope.casefold() + "/providers/"):
             raise CampaignError("worker diagnostic escaped the approved scope")
-    worker_arm = context.get(root, "worker-arm", app_id, "2025-01-01")
+    worker_arm = context.get(root, "worker-arm", app_id, "2025-01-01", cutoff=cutoff)
     identity_ids = list(worker_arm["identity"]["userAssignedIdentities"])
     properties = worker_arm["properties"]
     revision = properties["latestReadyRevisionName"]
@@ -406,40 +518,43 @@ def worker_observer(context, root, upload):
         or not container["image"].endswith("@" + plan["imageDigest"])
     ):
         raise CampaignError("worker image differs")
-    workspace_body = context.get(root, "workspace-arm", workspace, "2023-09-01")
+    workspace_body = context.get(root, "workspace-arm", workspace, "2023-09-01", cutoff=cutoff)
     if workspace_body["id"].casefold() != workspace.casefold():
         raise CampaignError("scanner workspace readback differs")
     customer = workspace_body["properties"]["customerId"]
-    common = {
-        key: upload[key]
-        for key in ("sessionId", "documentId", "objectVersionId", "contentSha256")
-    }
-    common.update(
+    settings = dict(
         clientId=worker["clientId"],
         databaseUrl=f"postgresql+asyncpg://{worker['name']}@{foundation['postgresHost']}:5432/opencanvas",
         workspaceId=customer,
         storageUrl=foundation["storageUrl"],
     )
-    if "serverScanDeadlineAt" in upload:
-        common["serverScanDeadlineAt"] = upload["serverScanDeadlineAt"]
-
-    def observe(label, *, scan_cutoff=None):
-        inputs = common | {"challenge": uuid.uuid4().hex}
-        args = (context, root, label, container, foundation, worker, inputs)
-        evidence = read_worker_job(*args, scan_cutoff=scan_cutoff)
-        write_new(root / (label + ".json"), evidence)
-        return evidence
-
-    return worker, workspace, observe
+    return worker, workspace, container, foundation, settings
 
 
-def collect_pending(context, marker):
+def upload_inputs(upload):
+    return {
+        key: upload[key]
+        for key in ("sessionId", "documentId", "objectVersionId", "contentSha256", "scanDeadlineAt")
+    } | {"challenge": uuid.uuid4().hex}
+
+
+@contextmanager
+def prepared_pending(context, cutoff):
     root = context.run / "scanner-in-window"
     root.mkdir(exist_ok=False)
+    worker, _, container, foundation, settings = worker_bindings(context, root, cutoff=cutoff)
+    with prepared_worker_job(
+        context, root, "worker-read", container, foundation, worker, settings, ready_by=cutoff,
+    ) as observe:
+        yield observe
+
+
+def collect_pending(context, marker, observe):
+    root = context.run / "scanner-in-window"
     write_new(root / "pending-marker.json", marker)
     upload = marker["upload"]
-    _, _, observe = worker_observer(context, root, upload)
-    return observe("worker-read", scan_cutoff=parse_utc(upload["scanDeadlineAt"]))
+    inputs = upload_inputs(upload) | {"serverScanDeadlineAt": upload["serverScanDeadlineAt"]}
+    return observe(inputs, scan_cutoff=parse_utc(upload["scanDeadlineAt"]))
 
 
 def collect_and_repair(context, *, repair: bool) -> str:
@@ -456,7 +571,14 @@ def collect_and_repair(context, *, repair: bool) -> str:
         if hold["upload"]["suffix"] != "primary":
             raise DiagnosticUnavailable("diagnostic scope is the first primary upload")
         write_new(root / "timing.json", {"classification": "post-deadline"})
-    worker, workspace, observe = worker_observer(context, root, hold["upload"])
+    worker, workspace, container, foundation, settings = worker_bindings(context, root)
+
+    def observe(label):
+        return read_worker_job(
+            context, root, label, container, foundation, worker,
+            settings | upload_inputs(hold["upload"]),
+        )
+
     scope = context.plan["targetResourceGroupId"]
     before = observe("worker-read")
     if not repair:

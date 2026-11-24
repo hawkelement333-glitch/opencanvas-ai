@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 import uuid
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -28,9 +29,11 @@ from infra.milestone_7_8.pilot.scanner_operator import (
     collect_and_repair,
     collect_pending,
     console_markers,
+    prepared_pending,
 )
 from infra.milestone_7_8.pilot_cleanup import file_hash, read, validate_live, write_new
 from infra.milestone_7_8.pilot_validation import (
+    CORE_DIAGNOSTIC_SCOPE,
     SCANNER_OBSERVATION,
     SCANNER_PENDING_MARKER,
     _private_host,
@@ -72,6 +75,8 @@ class Campaign:
         ):
             raise CampaignError("operator package or scanner policy differs")
         self.plan = read(self.package / "planned-bindings.json")
+        if self.plan.get("scannerObservation") not in (None, SCANNER_OBSERVATION):
+            raise CampaignError("scanner observation package must be resealed for this runner")
         self.scope = self.plan["targetResourceGroupId"]
         self.rg, self.sub = (
             self.runtime["resourceGroupName"],
@@ -335,6 +340,18 @@ def proof_disposition(payload, plan, execution, operation, native_state):
     if not payload.get("finishedAt"):
         raise CampaignError("terminal proof evidence is missing")
     if operation == "core":
+        if plan.get("coreDiagnosticScope") == CORE_DIAGNOSTIC_SCOPE:
+            status = payload.get("status")
+            upload = payload.get("upload", {})
+            if (
+                status not in {"scanner-diagnostic-completed", "scanner-diagnostic-deadline"}
+                or payload.get("providerCalls") != 0
+                or payload.get("managedAcceptance") != "scanner-diagnostic-only"
+                or upload.get("suffix") != "primary"
+                or (status == "scanner-diagnostic-completed" and upload.get("scanOutcome") != "clean")
+            ):
+                raise CampaignError("scanner diagnostic export differs from the sealed scope")
+            return status
         if (
             payload.get("status") in {"scanner-paused", "scanner-retry-exhausted"}
             and payload.get("managedAcceptance") == "unproved"
@@ -494,18 +511,18 @@ def pending_observation(text, execution, plan, now, core_by):
         or any(str(uuid.UUID(upload[key])) != upload[key]
                for key in ("sessionId", "documentId", "objectVersionId"))
         or not stamp <= now or not stamp < deadline <= server_deadline
-        or server_deadline - stamp > timedelta(seconds=405)
+        or deadline - stamp > timedelta(seconds=SCANNER_OBSERVATION["publishWhenSecondsRemaining"])
     ):
         raise CampaignError("primary scanner marker differs from the exact active execution")
     minimum = timedelta(seconds=SCANNER_OBSERVATION["minimumDispatchSecondsRemaining"])
     return marker if now + minimum < min(deadline, core_by) else None
 
 
-def observe_while_core_runs(context, path, execution, native_args, index, cutoff):
-    if (context.run / "scanner-in-window").exists():
+def observe_while_core_runs(context, path, execution, native_args, index, cutoff, observe):
+    if (context.run / "scanner-in-window/pending-marker.json").exists():
         return
     now = context.policy.clock()
-    if now + timedelta(seconds=270) >= cutoff:
+    if now + timedelta(seconds=SCANNER_OBSERVATION["minimumDispatchSecondsRemaining"]) >= cutoff:
         return
     try:
         logs = context.call(
@@ -522,7 +539,7 @@ def observe_while_core_runs(context, path, execution, native_args, index, cutoff
     if marker is None:
         return
     try:
-        collect_pending(context, marker)
+        collect_pending(context, marker, observe)
     except (DiagnosticUnavailable, NativeFailure) as error:
         # A failed read or a missing console can coexist with normal proof.
         # Uncertain dispatch or restore is a CampaignError and reaches the hard stop.
@@ -645,7 +662,7 @@ def dispatch_proof(context, phase, resume_path=None):
         {"name": "M78_PILOT_SUFFIX", "value": prefix},
     ]
 
-    def job(role, command, env):
+    def job(role, command, env, observe=None):
         name = "caj-m78p-" + prefix + "-" + role
         rid = context.scope + "/providers/Microsoft.App/jobs/" + name
         native_args = ("--resource-group", context.rg, "--name", name)
@@ -745,15 +762,11 @@ def dispatch_proof(context, phase, resume_path=None):
             )
             index += 1
             state = terminal["properties"]["status"]
+            if observe is not None:
+                observe_while_core_runs(context, path, execution, native_args, index, cutoff, observe)
             if state in STATES:
                 write_new(path / (role + "-terminal.json"), terminal)
                 return execution, state
-            if (
-                role == "evidence" and phase == "core"
-                and plan.get("scannerObservation") == SCANNER_OBSERVATION
-                and index % 2 == 0
-            ):
-                observe_while_core_runs(context, path, execution, native_args, index, cutoff)
             time.sleep(min(8, context.remaining(cutoff)))
 
     prior = read(carry / "artifact-version-binding.json") if carry else {}
@@ -804,15 +817,22 @@ def dispatch_proof(context, phase, resume_path=None):
             "nativeArtifactExecution": artifact,
         }
     write_new(path / "artifact-version-binding.json", version)
-    proof, state = job(
-        "evidence",
-        transport["proofCommand"],
-        transport["proofEnvironment"]
-        + shared
-        + [
-            {"name": "M78_PILOT_ARTIFACT_VERSION_ID", "value": version["versionId"]},
-        ],
+    preparation = (
+        prepared_pending(context, cutoff)
+        if phase == "core" and plan.get("scannerObservation") == SCANNER_OBSERVATION
+        else nullcontext()
     )
+    with preparation as observe:
+        if observe is not None:
+            policy.check(dependent=True, seconds_needed=1200)
+        proof, state = job(
+            "evidence",
+            transport["proofCommand"],
+            transport["proofEnvironment"]
+            + shared
+            + [{"name": "M78_PILOT_ARTIFACT_VERSION_ID", "value": version["versionId"]}],
+            observe,
+        )
     exported = read_export(context, path, proof, operation, cutoff)
     payload = read(exported)
     if phase == "transport":
@@ -869,6 +889,11 @@ def dispatch_proof(context, phase, resume_path=None):
             for key in ("sessionId", "documentId", "objectVersionId", "contentSha256")
         ):
             raise CampaignError("exported primary upload differs from the in-window marker")
+        if (
+            plan.get("coreDiagnosticScope") == CORE_DIAGNOSTIC_SCOPE
+            and primary["scanDeadlineAt"] != captured["scanDeadlineAt"]
+        ):
+            raise CampaignError("exported diagnostic cutoff differs from the upload marker")
     if status == "scanner-paused" and phase == "core":
         policy.hold(path, exported, proof)
     if status == "accepted":
@@ -1114,6 +1139,9 @@ def operate(context, action, *, stop_reason=None):
         return context.cleanup("scheduled-proof-stop")
     if (context.run / "stop-proof-intent.json").exists():
         raise CampaignError("proof already stopped; reconcile the exact cleanup path")
+    scanner_only = getattr(context, "plan", {}).get("coreDiagnosticScope") == CORE_DIAGNOSTIC_SCOPE
+    if scanner_only and action not in {"account", "core"}:
+        raise CampaignError("the scanner diagnostic package only admits account, core and cleanup")
     if action in {"repair", "core-retry"} and getattr(context, "plan", {}).get(
         "scannerObservation"
     ) == SCANNER_OBSERVATION:
@@ -1156,7 +1184,7 @@ def operate(context, action, *, stop_reason=None):
         context.admit()
     except (ValueError, OSError, KeyError, CampaignError):
         return context.cleanup("cleanup-protection-lost")
-    if telemetry_first_enabled and action != "telemetry-first":
+    if telemetry_first_enabled and action != "telemetry-first" and not scanner_only:
         try:
             next_stage = telemetry_first.route(context)
         except (ValueError, TypeError, OSError, KeyError, CampaignError):

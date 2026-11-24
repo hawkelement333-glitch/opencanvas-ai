@@ -11,11 +11,13 @@ new deployment. Billing remains unsettled.
 ## Scanner observation during core
 
 Use the sealed `core` route on the deployment's synthetic account fixture.
-The production worker continues independently. When the same primary version
-is still `scan_pending` with about 400 seconds remaining, the core evidence
-job emits one execution-bound marker. The operator reads only that job's
-console and dispatches the migration helper only if at least 270 seconds
-remain at admission. It rechecks the remaining time before starting the job.
+Before starting the upload job, capture the migration helper's original
+configuration, apply the worker-identity overlay, and wait for Azure to report
+`Succeeded`. Read back the intended identity, registry, configuration and
+template before admitting the upload. When the primary version first passes
+the quarantine check, the evidence job emits one execution-bound marker.
+Pass its exact upload IDs and original cutoff in the diagnostic execution
+template. Start only if more than 135 seconds remain at admission.
 The database read uses the worker role in a read-only transaction. It
 revalidates the exact session, document ID, version, checksum, original
 deadline and pending state before reading storage and Log Analytics.
@@ -24,11 +26,13 @@ The migration helper and worker are separate resources in the same private
 environment. The helper must be idle, use one replica, and have a verified
 migration template and identity before its exact, temporary worker-identity
 overlay. The worker app continues with its own identity and configuration.
-The helper uses read operations, takes no scan-row lock, and verifies the
-original configuration, template and migration identity after terminal state.
-An uncertain start or restoration invokes the existing hard-stop and cleanup
-path. Native job startup, IAM, console delivery and provider timing remain
-observations for the actual run.
+The helper takes no scan-row lock. Wait for any outstanding native update and
+diagnostic execution to settle before restoring the original configuration.
+Verify the original configuration, template and migration identity with a
+terminal native readback. Preserve five minutes before the proof hard stop
+for cleanup. An unresolved update, execution or restoration is recorded with
+the last native state and any differences from the original, and uses the
+existing cleanup path. Deletion evidence does not verify restoration.
 
 The receipt records request and cutoff times, each read's start and finish
 relative to both, version and normalized ETag hashes, Blob tag identity and
@@ -41,7 +45,8 @@ later holds, one `diagnose` action may collect a receipt labeled post-deadline,
 provided the start-intent journal confirms no in-window dispatch was attempted.
 Once a start has been attempted, there is no second diagnostic or upload retry
 under this approval. Any individual read that finishes after expiry is late
-evidence for that source.
+evidence for that source. The diagnostic records agreement only when both
+timed reads match the exact upload inside the original evidence window.
 
 ## Infrastructure baseline comparison
 

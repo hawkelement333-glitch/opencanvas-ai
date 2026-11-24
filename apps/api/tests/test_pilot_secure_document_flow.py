@@ -203,7 +203,9 @@ async def test_pilot_secure_document_card_deadline_worker_and_retrieval(
             exact = await observe(bridge, version, timing, now, clock=lambda: now)
             late = await observe(bridge, version, timing, deadline, clock=lambda: deadline)
             assert exact["correlation"] == {"status": "agreed", "verdict": "clean"}
-            assert late["correlation"] == {"status": "late-agreement", "verdict": "clean"}
+            assert late["correlation"] == {
+                "status": "unproved", "code": "scanner-evidence-outside-window",
+            }
             assert late["requestExpired"] is True
         if outcome == "timeout":
             assert (

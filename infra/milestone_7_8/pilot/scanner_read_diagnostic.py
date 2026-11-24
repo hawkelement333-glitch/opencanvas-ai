@@ -20,9 +20,10 @@ MARKER = "M78-SCANNER-READ:"
 SAFE_CODE = re.compile(r"[a-z][a-z0-9-]{0,95}")
 SOURCE_TIMEOUT = 45
 PROBE_TIMEOUT = 70
+DB_BIND_TIMEOUT = PROBE_TIMEOUT - SOURCE_TIMEOUT - 5
 
 
-async def observe(bridge, version, request, now, *, clock=lambda: datetime.now(UTC)):
+async def observe(bridge, version, request, now, *, cutoff=None, clock=lambda: datetime.now(UTC)):
     from opencanvas_api.services.documents.errors import DocumentStorageError
     from opencanvas_api.services.scanner_bridge import (
         AzureBlobScanEvidenceClient,
@@ -36,13 +37,18 @@ async def observe(bridge, version, request, now, *, clock=lambda: datetime.now(U
     def fingerprint(value):
         return hashlib.sha256(value.encode()).hexdigest()
 
+    cutoff = min(cutoff or request.deadline_at, request.deadline_at)
+
     def timed(start, finish):
+        window = "post-deadline" if finish >= cutoff else "in-window"
+        if not request.requested_at <= start <= finish:
+            window = "outside-window"
         return {
             "startedAt": start.isoformat(),
             "finishedAt": finish.isoformat(),
             "startSecondsAfterRequest": (start - request.requested_at).total_seconds(),
-            "finishSecondsBeforeCutoff": (request.deadline_at - finish).total_seconds(),
-            "window": "in-window" if finish < request.deadline_at else "post-deadline",
+            "finishSecondsBeforeCutoff": (cutoff - finish).total_seconds(),
+            "window": window,
         }
 
     def failure(error):
@@ -164,22 +170,26 @@ async def observe(bridge, version, request, now, *, clock=lambda: datetime.now(U
 
     (blob, blob_result), (logs, log_result) = await asyncio.gather(read_blob(), read_logs())
     finished = clock()
-    expired = finished >= request.deadline_at
+    expired = finished >= cutoff
     correlation = {"status": "unproved", "code": "scanner-source-evidence-unavailable"}
-    if blob is not None and logs is not None:
+    if blob is not None and logs is not None and any(
+        value["window"] != "in-window" for value in timings.values()
+    ):
+        correlation["code"] = "scanner-evidence-outside-window"
+    elif blob is not None and logs is not None:
         result = diagnose_scan_evidence(
             version=version,
             request=request,
             blob=blob,
             logs=logs,
-            observed_at=finished,
+            observed_at=max(datetime.fromisoformat(row["finishedAt"]) for row in timings.values()),
             maximum_age=timedelta(
                 seconds=bridge.settings.malware_scan_result_max_age_seconds
             ),
         )
         correlation = (
             {
-                "status": "late-agreement" if expired else "agreed",
+                "status": "agreed",
                 "verdict": result.decision.verdict,
             }
             if result.decision
@@ -210,7 +220,9 @@ async def observe(bridge, version, request, now, *, clock=lambda: datetime.now(U
         "timing": timings,
         "requestedAt": request.requested_at.isoformat(),
         "scanDeadlineAt": request.deadline_at.isoformat(),
+        "evidenceCutoffAt": cutoff.isoformat(),
         "expectedProviderVersionSha256": fingerprint(version.provider_version_id),
+        "expectedEtagSha256": fingerprint(_normalize_azure_etag(version.etag)),
         "blobProperties": properties,
         "blobTags": tags,
         "logQuerySha256": log_analytics_query_sha256(
@@ -265,7 +277,7 @@ async def read_worker(inputs):
         return {"status": "configuration-mismatch"}
     db = Database.from_settings(settings, expected_role=DatabaseRole.WORKER)
     try:
-        async with db.sessions() as session:
+        async with asyncio.timeout(DB_BIND_TIMEOUT), db.sessions() as session:
             await session.execute(text("SET TRANSACTION READ ONLY"))
             row = (
                 await session.execute(
@@ -300,6 +312,9 @@ async def read_worker(inputs):
                 or request.deadline_at - request.requested_at != timedelta(seconds=900)
             ):
                 return {"status": "scan-window-mismatch"}
+            cutoff = datetime.fromisoformat(inputs["scanDeadlineAt"].replace("Z", "+00:00"))
+            if not request.requested_at < cutoff <= request.deadline_at:
+                return {"status": "scan-window-mismatch"}
             incoming = inputs.get("serverScanDeadlineAt")
             if incoming is not None:
                 if datetime.fromisoformat(incoming.replace("Z", "+00:00")) != request.deadline_at:
@@ -315,7 +330,7 @@ async def read_worker(inputs):
                 )
                 if current != "scan_pending":
                     return {"status": "primary-no-longer-pending"}
-                if datetime.now(UTC) >= request.deadline_at:
+                if datetime.now(UTC) >= cutoff:
                     return {"status": "probe-started-after-deadline", "requestExpired": True}
             values = SimpleNamespace(
                 **{
@@ -347,13 +362,13 @@ async def read_worker(inputs):
             )
             await session.rollback()
     finally:
-        await db.dispose()
+        await asyncio.wait_for(db.dispose(), timeout=3)
     bridge = build_private_scanner_result_bridge(settings)
     if bridge is None:
         return {"status": "configuration-mismatch"}
     return {
         "status": "observed",
-        **await observe(bridge, values, timing, datetime.now(UTC)),
+        **await observe(bridge, values, timing, datetime.now(UTC), cutoff=cutoff),
     }
 
 
