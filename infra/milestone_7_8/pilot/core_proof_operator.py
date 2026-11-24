@@ -363,6 +363,24 @@ def proof_disposition(payload, plan, execution, operation, native_state):
             != "only listed core observations accepted"
         ):
             raise CampaignError("core evidence incomplete")
+    elif plan.get("coreDiagnosticScope") == CORE_DIAGNOSTIC_SCOPE:
+        user_id = payload.get("userId")
+        try:
+            exact_primary_id = isinstance(user_id, str) and str(uuid.UUID(user_id)) == user_id
+        except ValueError:
+            exact_primary_id = False
+        if (
+            payload.get("accountsReady") is not True
+            or payload.get("accountCreated") is not True
+            or payload.get("accountActions") != {"primary": "signup"}
+            or "secondaryUserId" in payload
+            or not exact_primary_id
+        ):
+            raise CampaignError("account evidence incomplete")
+    elif "consolidatedScope" in plan:
+        from infra.milestone_7_8.pilot.consolidated import require_two_signups
+
+        require_two_signups(payload)
     elif (
         payload.get("accountsReady") is not True
         or set(payload.get("accountActions", {})) != {"primary", "secondary"}
@@ -890,7 +908,7 @@ def dispatch_proof(context, phase, resume_path=None):
         ):
             raise CampaignError("exported primary upload differs from the in-window marker")
         if (
-            plan.get("coreDiagnosticScope") == CORE_DIAGNOSTIC_SCOPE
+            (plan.get("coreDiagnosticScope") == CORE_DIAGNOSTIC_SCOPE or "consolidatedScope" in plan)
             and primary["scanDeadlineAt"] != captured["scanDeadlineAt"]
         ):
             raise CampaignError("exported diagnostic cutoff differs from the upload marker")
@@ -1140,6 +1158,10 @@ def operate(context, action, *, stop_reason=None):
     if (context.run / "stop-proof-intent.json").exists():
         raise CampaignError("proof already stopped; reconcile the exact cleanup path")
     scanner_only = getattr(context, "plan", {}).get("coreDiagnosticScope") == CORE_DIAGNOSTIC_SCOPE
+    if "consolidatedScope" in getattr(context, "plan", {}) and action in {
+        "account-recovery", "diagnose", "repair", "core-retry"
+    }:
+        raise CampaignError("consolidated staging permits one account job and one in-window diagnostic")
     if scanner_only and action not in {"account", "core"}:
         raise CampaignError("the scanner diagnostic package only admits account, core and cleanup")
     if action in {"repair", "core-retry"} and getattr(context, "plan", {}).get(

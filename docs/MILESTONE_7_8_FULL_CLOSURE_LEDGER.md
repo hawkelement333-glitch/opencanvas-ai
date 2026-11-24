@@ -57,8 +57,8 @@ The approved private staging run used its separately recorded deadlines.
 | D001 upload, scanner, promotion, exact-version deletion/recovery; [defect register](MILESTONE_7_8_DEFECT_REGISTER.md#evidence-debts-routed-to-later-audit-surfaces) | 24 assertions; 19 zero counters; six initial upload assertions retained | Closed; no rerun | None. New combined application traffic observes actual current integration; it does not recreate D001. The one-proof timing amendment is not a global application-default change. |
 | D002 independent shared limits and recovery; same register | 17 assertions; 18 zero counters | Closed; no rerun | None. Application backpressure under mixed traffic is a different D006 observation. |
 | D003 actual required logs/metrics/traces; [plan](MILESTONE_7_IMPLEMENTATION_PLAN.md#exact-audit), [signal catalog](observability/signals-v1.json), [destination contract](OBSERVABILITY_ARCHITECTURE.md#destination-evidence) | 7.5 local privacy/cardinality/exporter checks and D001 scanner native rows. Private staging accepted the exact API liveness trace, gateway acknowledgment, fresh worker control and 32 validated API/worker readiness rows. | All 53 catalog metric producer sites mapped: measured pool/lock/timeout/transaction, storage/scanner, queue outcomes, index coverage/freshness/drift/conflicts, limiter health/saturation/bypass, provider usage-based cost, exporter health/bounds, optional API admission, integrity and native backup/forecast observations. API-to-worker links use actual operations. Unknown or truncated evidence is not healthy zero. | Full required signal coverage, including actual outbox rows and API-to-worker operation linkage, with source and run bindings. One native backup record was observed. Forecast failed for insufficient provider cost history. Provider emission and remaining alert evidence are unproved. |
-| D003 all 13 dashboards; [catalog](observability/dashboards-v1.json) | Existing dashboard definitions and local compiler checks. All 13 deployed workbook configurations matched the current catalog. | Explicit native expected/observed query validators and deployed workbook screenshot/review binding | Current-release panel query observations and all 13 actual renders. The staging package bound prior-release query files. Empty panels cannot establish healthy zero. |
-| D003 all 16 alert firing/recovery; [catalog](observability/alerts-v1.json) | Existing thresholds/hysteresis/runbooks; two corrected native rules created and read back | All rules enabled, supported five-minute evaluation, literal catalog lookback and consecutive-window semantics; terminal outbox behavior separated from backlog; native Fired/Resolved and observation-window validators | Each rule's actual stimulus, native evaluated windows and matching delivery/recovery. Integrity requires authorized investigation and native manual closure. Actual missing-data branch may satisfy the corresponding catalog branch; no invented aged backup or over-budget observation. |
+| D003 all 13 dashboards; [catalog](observability/dashboards-v1.json) | All 13 deployed configurations matched. The November 19 operator opened all 13 workbooks and recorded 14 visible charts across 27 panels. | Native expected/observed query validators and deployed screenshot/review binding | The other 13 panels returned no results. Their current-release signal and expected outcome still need evidence. |
+| D003 all 16 alert firing/recovery; [catalog](observability/alerts-v1.json) | Two corrected native rule configurations. The [November 24 alert history](#november-24-alert-history) also credits native firing for 12 rules and native resolution for three. | Compiled thresholds, timing and window validators | Each remaining stimulus, evaluated source window, matching delivery and recovery needs its own receipt. Integrity requires authorized investigation and native manual closure. |
 | D003 destination privacy/source rejection, outage, access and retention; [deployment](DEPLOYMENT.md#operational-telemetry-deployment) | Existing redaction and bounded exporter tests, prior gateway adapter checks, private VPN DNS/TLS, and restricted-user sign-in. Five native table retention settings and the 30-day purge flag were accepted. | Native rejection/absence, bounded drop/readiness/recovery, fresh-session revoke/restore and exact five-table retention validators | Actual 401/422/422 and destination absence, measured gateway outage and recovery, denied API/worker reads, operator revoke/regrant with fresh sessions. The staged transport probe is unproved. Long-term physical expiry requires its own observation. |
 | D004 actual worker polling and telemetry; [plan final scenarios](MILESTONE_7_IMPLEMENTATION_PLAN.md#required-final-scenarios) | 7.4 claim/lease/retry tests; accepted PG and D001 effects | Production operation instrumentation; observation failure cannot turn a committed job success into a retry | Actual separately deployed worker claim/process/publication and destination observations for authenticated upload. |
 | D004 multi-service delivery with durable ACK/dedup/retry/fencing; same plan | Existing activity-v1 outbox and claim/fence/retry; no new business integration | Separate HTTP activity-v1 receiver and production dispatcher, receipt/effect commit before HMAC ACK, independent receipt readback, final-claim recovery. Fourteen distinct local transport tests cover duplicate, lost ACK, actual TLS disconnect, bounded retry, terminal failure and stale claims. | Actual independent Container Apps processes over private HTTPS, same PostgreSQL durable receipt, 14 unused production events and all nine managed operation receipts plus post-fault recovery, standalone polling/drain and cleanup. User selected this boundary. No criterion located requires a third-party provider or independent datastore; this does not claim either. |
@@ -137,8 +137,9 @@ payload belongs in Git. Final local receipt hashes are recorded in the package.
 
 ## Finite alert identity inventory
 
-Every existing identity below remains **managed unproved** until its native
-scenario, timing and firing/recovery evidence is accepted.
+The rows below give the catalog windows. Individual managed transitions are
+credited in the dated history. Full scenario acceptance also requires its
+stimulus, evaluated windows and delivery evidence.
 
 - `api-latency-v1`: mobius.api.duration; 5 minute window.
 - `readiness-v1`: readiness; 5 minute window.
@@ -156,6 +157,41 @@ scenario, timing and firing/recovery evidence is accepted.
 - `backup-freshness-v1`: mobius.backup.freshness; 1440 minute window.
 - `capacity-v1`: mobius.capacity.utilization; 15 minute window.
 - `cost-v1`: mobius.cost.estimated; 1440 minute window.
+
+### November 24 alert history
+
+Run `run-f5797e58` yielded 21 native instances across 12 rules. The workspace,
+rule identities and creation times match the deployment. Each instance has a
+retained Alerts Management history. Times below are UTC on November 24, 2026.
+
+| Rule | Native firing | Native resolution |
+|---|---|---|
+| `readiness-v1` | 11:57:56 | Open |
+| `backup-freshness-v1` | 11:57:41 | Open |
+| `outbox-backlog-v1` | 11:59:19 | Open |
+| `evidence-integrity-v1` | Ten instances, 11:57:25–12:42:21 | Manual investigation and closure open |
+| `database-saturation-v1` | 11:55:35 | 12:51:33 |
+| `queue-backlog-v1` | 11:57:48 | 12:48:50 |
+| `worker-stale-v1` | 11:56:10 | 12:42:13 |
+| `cost-v1`, `scanner-outage-v1`, `limiter-outage-v1`, `storage-outage-v1`, `telemetry-loss-v1` | One instance each | Open for all five |
+
+The ten integrity evaluations ended at five-minute intervals from 11:56:49 to
+12:41:49. In each native context, `timeAggregation=Count` and `metricValue=1`
+refer to one row emitted by the final `where Firing`. The deployed query takes
+the maximum `mobius.evidence.integrity` value in each five-minute bucket. A
+positive maximum or absent signal rows can set the firing state. An earlier
+breach can keep it set across later buckets. The retained contexts omit
+`V`, `Presence`, `Missing` and the underlying rows. **All ten windows have
+insufficient retained evidence to attribute the firing.** The three resolution
+times above come from explicit `Fired` to `Resolved` history events. Landing
+the cleanup or triggering an action group supplies no recovery credit.
+
+The consolidated deployment captures release- and workspace-bound integrity
+rows with signal IDs, values, event and ingestion times, plus native evaluation
+cutoffs before teardown. Late, failed or truncated observations keep their
+actual status. Settled billing and production release controls remain separate.
+The private reconciliation receipt has SHA-256
+`c4a8414b2d525403c94b058bb8f685cc5f25257a176420f96f375f89f26dbb53`.
 
 ## Final local checkpoint additions
 

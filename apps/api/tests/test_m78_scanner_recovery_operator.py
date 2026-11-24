@@ -801,6 +801,59 @@ def test_retained_artifact_console_wrapper_and_failed_proof_disposition():
         )
 
 
+@pytest.fixture
+def primary_account_export():
+    binding = dict.fromkeys(("sourceCommit", "imageDigest", "release", "deployment"), "fixture")
+    receipt = binding | {
+        "operation": "account",
+        "executionId": "account-job",
+        "finishedAt": "2026-11-24T12:40:06Z",
+        "accountsReady": True,
+        "accountCreated": True,
+        "accountActions": {"primary": "signup"},
+        "userId": str(uuid4()),
+    }
+    return receipt, binding
+
+
+def test_staging_account_admission_uses_the_sealed_scope(primary_account_export):
+    receipt, binding = primary_account_export
+    primary_scope = binding | {"coreDiagnosticScope": CORE_DIAGNOSTIC_SCOPE}
+    assert operator.proof_disposition(receipt, primary_scope, "account-job", "account", "Succeeded") == (
+        "accepted"
+    )
+    with pytest.raises(CampaignError, match="account evidence incomplete"):
+        operator.proof_disposition(receipt, binding, "account-job", "account", "Succeeded")
+
+    two_accounts = receipt | {
+        "accountActions": {"primary": "signup", "secondary": "signup"},
+        "secondaryUserId": str(uuid4()),
+    }
+    assert operator.proof_disposition(two_accounts, binding, "account-job", "account", "Succeeded") == (
+        "accepted"
+    )
+    with pytest.raises(CampaignError, match="account evidence incomplete"):
+        operator.proof_disposition(
+            two_accounts | {"secondaryUserId": receipt["userId"]},
+            binding, "account-job", "account", "Succeeded",
+        )
+
+
+@pytest.mark.parametrize("difference", [
+    {"accountsReady": False},
+    {"accountCreated": False},
+    {"accountActions": {"primary": "resume"}},
+    {"accountActions": {"primary": "signup", "secondary": "signup"}},
+    {"secondaryUserId": None},
+    {"userId": "malformed-id"},
+])
+def test_core_diagnostic_rejects_out_of_scope_account_evidence(primary_account_export, difference):
+    receipt, binding = primary_account_export
+    plan = binding | {"coreDiagnosticScope": CORE_DIAGNOSTIC_SCOPE}
+    with pytest.raises(CampaignError, match="account evidence incomplete"):
+        operator.proof_disposition(receipt | difference, plan, "account-job", "account", "Succeeded")
+
+
 def test_unchanged_exact_scanner_role_permissions_are_required():
     from infra.milestone_7_8.pilot.scanner_operator import SCANNER_ROLE_ACTIONS, exact_role
 

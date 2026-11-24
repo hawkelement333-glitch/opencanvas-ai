@@ -63,6 +63,10 @@ def pack(
         raise ValueError("unsupported proof module")
     output = private_path(output)
     manifest = json.loads((bundle / "manifest.json").read_text())
+    if "consolidatedScope" in manifest:
+        from infra.milestone_7_8.pilot.consolidated import guard_dispatch
+
+        guard_dispatch(bundle, arguments, private_inputs or {})
     entries: dict[str, bytes] = {}
     for relative, expected in manifest["sourceBindings"].items():
         path = (ROOT / relative).resolve()

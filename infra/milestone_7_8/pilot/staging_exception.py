@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from infra.milestone_7_8.campaign import CampaignError
+from infra.milestone_7_8.pilot import consolidated
 from infra.milestone_7_8.pilot.telemetry_first import RELEASE_KEY_SHA256
 from infra.milestone_7_8.pilot_cleanup import file_hash, read
 from infra.milestone_7_8.pilot_validation import CORE_DIAGNOSTIC_SCOPE, SCANNER_OBSERVATION
@@ -60,6 +61,14 @@ CORE_POLICY = {
     "modelAttemptsIncludingRetries": 0,
     "embeddingTokens": 0,
 }
+CONSOLIDATED_POLICY = {
+    **SUCCESSOR_POLICY,
+    "schema": "m78-private-synthetic-staging-exception-v4",
+    "supersedesExpiredReview": consolidated.PREDECESSOR,
+    "consolidatedScope": consolidated.MODE,
+    "modelAttemptsIncludingRetries": 200,
+    "embeddingTokens": 160_000_000,
+}
 
 
 def validate_staging_admission(package: Path, review: dict, approval: dict) -> None:
@@ -83,7 +92,7 @@ def validate_staging_admission(package: Path, review: dict, approval: dict) -> N
         "signing/retained-signature-verification-receipt.json",
     }
     if (
-        policy not in (POLICY, SUCCESSOR_POLICY, CORE_POLICY)
+        policy not in (POLICY, SUCCESSOR_POLICY, CORE_POLICY, CONSOLIDATED_POLICY)
         or not required <= review["files"].keys()
         or read(policy_path) != policy
         or review["files"].get(policy_path.name) != file_hash(policy_path)
@@ -107,6 +116,8 @@ def validate_staging_admission(package: Path, review: dict, approval: dict) -> N
         or review.get("boundRuntimeDirectory") != ".runtime/milestone_7_8/psv2"
     ):
         raise CampaignError("staging successor observation or execution scope differs")
+    if policy == CONSOLIDATED_POLICY:
+        consolidated.validate_package(package, review)
     if policy == CORE_POLICY:
         scope = read(package / "successor-scope.json")
         credential_path = "credentials/application-secrets.parameters.json"

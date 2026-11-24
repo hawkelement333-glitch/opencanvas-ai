@@ -205,6 +205,7 @@ def validate_review(package: Path, approval: dict) -> dict:
             prior_by_exception = {
                 "m78-private-synthetic-staging-exception-v2": Decimal("460.40"),
                 "m78-private-synthetic-staging-exception-v3": Decimal("516.91"),
+                "m78-private-synthetic-staging-exception-v4": Decimal("573.42"),
             }
             if exception_schema in prior_by_exception:
                 # Preserve the entire previous ceiling while the ledger is unsettled.
@@ -264,6 +265,10 @@ def validate_review(package: Path, approval: dict) -> dict:
                 from infra.milestone_7_8.pilot.staging_exception import validate_staging_admission
 
                 expected_sources.add("infra/milestone_7_8/pilot/staging_exception.py")
+                if staging_exception.get("schema") == "m78-private-synthetic-staging-exception-v4":
+                    from infra.milestone_7_8.pilot.consolidated import OPERATOR_FILES
+
+                    expected_sources.update(OPERATOR_FILES)
                 validate_staging_admission(package, review, approval)
         if (
             review["schema"] != SIGNUP_REVIEW_SCHEMA

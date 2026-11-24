@@ -416,6 +416,7 @@ class Api:
         } | {
             "nodeId": nodes[0]["id"],
             "sessionPath": session_path,
+            "scanDeadlineAt": upload["scanDeadlineAt"],
             "contentSha256": hashlib.sha256(FIXTURE).hexdigest(),
             "scanElapsedSeconds": scan_elapsed,
             "publishedElapsedSeconds": time.monotonic() - started,
