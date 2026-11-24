@@ -7,10 +7,13 @@ import json
 import zipfile
 from types import SimpleNamespace
 
+import pytest
+
 from infra.milestone_7_8.pilot import artifact_transport, pack_execution
 
 
-def test_staging_reconstructs_the_host_archive_with_stable_zip_metadata(monkeypatch):
+@pytest.mark.parametrize("consolidated", [False, True])
+def test_staging_reconstructs_the_host_archive_with_stable_zip_metadata(monkeypatch, consolidated):
     class WindowsZipInfo(zipfile.ZipInfo):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
@@ -32,9 +35,13 @@ def test_staging_reconstructs_the_host_archive_with_stable_zip_metadata(monkeypa
             }
         )
     source_entries = {"wheel-manifest.json": json.dumps({"wheels": wheels}).encode()}
+    if consolidated:
+        source_entries["package/manifest.json"] = b'{"consolidatedScope":"consolidated-full-core-v1"}'
+        source_entries["capacity-stage.json"] = b"retained fixture" * 1200
     source = pack_execution.archive(source_entries, compressed=True)
+    original_wheels = {f"wheels/{name}": data for name, data in wheel_bytes.items()}
     expected = pack_execution.archive(
-        {**source_entries, **{f"wheels/{name}": data for name, data in wheel_bytes.items()}}
+        ({"bound-source.zip": source} if consolidated else source_entries) | original_wheels
     )
     with zipfile.ZipFile(io.BytesIO(expected)) as raw:
         assert {item.create_system for item in raw.infolist()} == {3}
@@ -72,3 +79,8 @@ def test_staging_reconstructs_the_host_archive_with_stable_zip_metadata(monkeypa
     monkeypatch.setenv("M78_PILOT_STORAGE_HOST", f"stm78o{suffix}.blob.core.windows.net")
     artifact_transport.stage_artifact()
     assert uploaded == [(expected, "*")]
+    assert artifact_transport.proof_entries(expected, hashlib.sha256(expected).hexdigest()) == source_entries | original_wheels
+    if consolidated:
+        damaged = pack_execution.archive({"bound-source.zip": source})
+        with pytest.raises(ValueError, match="eight separate wheels"):
+            artifact_transport.proof_entries(damaged, hashlib.sha256(damaged).hexdigest())

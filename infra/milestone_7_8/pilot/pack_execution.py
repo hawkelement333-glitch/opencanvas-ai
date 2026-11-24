@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 import zipfile
 
+from infra.milestone_7_8.pilot.artifact_transport import staged_source
+
 ROOT = Path(__file__).resolve().parents[3]
 MODULES = (
     "infra.milestone_7_8.pilot_validation",
@@ -22,8 +24,7 @@ SOURCE_VERIFIER = 'import hashlib,os; s=os.environ["M78_EXECUTION_SOURCE"]; asse
 
 
 def archive(entries: dict[str, bytes], *, compressed: bool = False) -> bytes:
-    # One lossless dictionary spans reviewed source files. The final wheel
-    # artifact remains the exact original stored ZIP and retains its own hash.
+    # One lossless dictionary spans the reviewed source and private fixture files.
     if compressed:
         entries = {"source-entries.zip": archive(entries)}
     target = io.BytesIO()
@@ -108,6 +109,8 @@ def pack(
         {"wheels": wheels}, sort_keys=True
     ).encode()
     source = archive(entries, compressed=True)
+    file_count = len(entries) + len(wheels)
+    entries = staged_source(entries, source)
     for wheel in wheels:
         name = wheel["name"]
         if Path(name).name != name or not name.endswith("-py3-none-any.whl"):
@@ -183,7 +186,7 @@ def pack(
         "artifactSha256": archive_hash,
         "artifactBytes": len(raw),
         "sourceEnvironmentBytes": len(encoded_source),
-        "files": len(entries),
+        "files": file_count,
     }
 
 

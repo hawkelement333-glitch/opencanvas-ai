@@ -15,6 +15,8 @@ import zipfile
 
 import httpx
 
+SOURCE_BUNDLE = "bound-source.zip"
+
 
 def checked_zip(raw: bytes, expected: str) -> dict[str, bytes]:
     if len(raw) > 2_000_000 or hashlib.sha256(raw).hexdigest() != expected:
@@ -50,6 +52,29 @@ def checked_source_zip(raw: bytes, expected: str) -> dict[str, bytes]:
     if "source-entries.zip" in entries:
         raise ValueError("recursive source wrapper rejected")
     return entries
+
+
+def staged_source(entries: dict[str, bytes], source: bytes) -> dict[str, bytes]:
+    manifest = json.loads(entries.get("package/manifest.json", b"{}"))
+    if "consolidatedScope" in manifest:
+        if SOURCE_BUNDLE in entries or any(name.startswith("wheels/") for name in entries):
+            raise ValueError("private input collides with the staged artifact layout")
+        return {SOURCE_BUNDLE: source}
+    return entries
+
+
+def proof_entries(raw: bytes, expected: str) -> dict[str, bytes]:
+    outer = checked_zip(raw, expected)
+    if SOURCE_BUNDLE not in outer:
+        return outer
+    source = outer.pop(SOURCE_BUNDLE)
+    entries = checked_source_zip(source, hashlib.sha256(source).hexdigest())
+    wheels = json.loads(entries["wheel-manifest.json"])["wheels"]
+    names = {"wheels/" + wheel["name"] for wheel in wheels}
+    if (len(wheels) != 8 or len(names) != 8 or set(outer) != names
+            or SOURCE_BUNDLE in entries or any(name.startswith("wheels/") for name in entries)):
+        raise ValueError("staged source and eight separate wheels required")
+    return entries | outer
 
 
 def artifact_url() -> str:
@@ -97,6 +122,7 @@ def stage_artifact() -> None:
     wheels = json.loads(entries["wheel-manifest.json"])["wheels"]
     if len(wheels) != 8:
         raise ValueError("exact wheel inventory required")
+    entries = staged_source(entries, source)
     with httpx.Client(timeout=30, follow_redirects=False, trust_env=False) as client:
         for wheel in wheels:
             parsed = urlparse(wheel["url"])
@@ -166,7 +192,7 @@ def load_probe() -> None:
         response.raise_for_status()
         if response.headers.get("x-ms-version-id") != version:
             raise ValueError("artifact version changed")
-        entries = checked_zip(response.content, os.environ["M78_PILOT_ARTIFACT_SHA256"])
+        entries = proof_entries(response.content, os.environ["M78_PILOT_ARTIFACT_SHA256"])
     root = Path("/tmp/m78-proof")
     root.mkdir(exist_ok=False)
     for name, data in entries.items():
