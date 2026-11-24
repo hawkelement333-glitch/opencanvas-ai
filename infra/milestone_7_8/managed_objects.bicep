@@ -298,7 +298,16 @@ resource scannerQueryRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' =
     description: 'Native scanner result table only; no application or security telemetry queries.'
     type: 'CustomRole'
     assignableScopes: [resourceGroup().id]
-    permissions: [{ actions: ['Microsoft.OperationalInsights/workspaces/read', 'Microsoft.OperationalInsights/workspaces/query/StorageMalwareScanningResults/read'], notActions: [], dataActions: [], notDataActions: [] }]
+    permissions: [{
+      actions: [
+        'Microsoft.OperationalInsights/workspaces/read'
+        'Microsoft.OperationalInsights/workspaces/query/read'
+        'Microsoft.OperationalInsights/workspaces/query/StorageMalwareScanningResults/read'
+      ]
+      notActions: []
+      dataActions: []
+      notDataActions: []
+    }]
   }
 }
 resource scannerQueryAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (pilotDestinationPrivacy) {

@@ -20,6 +20,7 @@ from infra.milestone_7_8.pilot import core_proof_operator as operator
 from infra.milestone_7_8.pilot.scanner_hold import POLICY, ProofOperator
 from infra.milestone_7_8.pilot.scanner_operator import (
     DiagnosticUnavailable,
+    SCANNER_ROLE_ACTIONS,
     read_worker_job,
     worker_command,
     worker_result,
@@ -206,6 +207,59 @@ async def test_both_native_reads_have_separate_failure_reasons(failed_source):
     assert result["requestExpired"] and result["correlation"]["status"] == "unproved"
     assert {window["window"] for window in result["timing"].values()} == {"post-deadline"}
     assert "raw sensitive message" not in str(result)
+
+
+@pytest.mark.parametrize("status", [None, 401, 403, 200])
+async def test_native_worker_query_records_token_stage_or_actual_http_status(status):
+    from opencanvas_api.services.scanner_bridge import AzureLogAnalyticsScanEvidenceClient
+
+    now = datetime.now(UTC)
+    uri = "https://fixture.blob.core.windows.net/quarantine/object"
+    calls = []
+
+    async def dns(_hostname):
+        pass
+
+    async def token(_resource):
+        calls.append("token")
+        if status is None:
+            raise DocumentStorageError("private-provider-message")
+        return "private-token"
+
+    def send(request):
+        calls.append("query")
+        assert request.method == "POST"
+        columns = [{"name": name} for name in AzureLogAnalyticsScanEvidenceClient._required_columns]
+        return httpx.Response(status, json={"tables": [{"columns": columns, "rows": []}]})
+
+    async def blob(*_args, **_kwargs):
+        return SimpleNamespace(etag="0xAAA", provider_version_id="version", object_uri=uri,
+                               account_name="fixture", scan_result="clean", scan_finished_at=now)
+
+    transport = httpx.MockTransport(send)
+    reader = AzureLogAnalyticsScanEvidenceClient(
+        workspace_id=uuid4(), endpoint="https://api.loganalytics.azure.com",
+        token_provider=SimpleNamespace(get_token=token), dns=SimpleNamespace(verify=dns),
+        transport=transport,
+    )
+    bridge = SimpleNamespace(log_reader=reader, storage=SimpleNamespace(object_url=lambda _: uri),
+                             blob_reader=SimpleNamespace(read=blob, hostname="fixture.blob.core.windows.net"),
+                             settings=SimpleNamespace(malware_scan_result_max_age_seconds=900))
+    result = await observe(
+        bridge, SimpleNamespace(physical_key="key", etag="0xAAA", provider_version_id="version"),
+        SimpleNamespace(requested_at=now - timedelta(seconds=900), deadline_at=now), now,
+    )
+    assert calls == (["token"] if status is None else ["token", "query"])
+    assert reader.transport is transport and result["blob"]["versionBound"] is True
+    logs = result["logAnalytics"]
+    if status is None:
+        assert logs["failureStage"] == "managed-identity-token" and "httpStatus" not in logs
+    elif status == 200:
+        assert logs == {"status": "read", "rows": 0, "exactRows": 0, "versionBound": False, "httpStatus": 200}
+    else:
+        assert logs == {"status": "failed", "versionBound": None, "failureStage": "workspace-query",
+                        "code": "scanner-log-query-authorization-unavailable", "httpStatus": status}
+    assert "private-provider-message" not in str(result) and "private-token" not in str(result)
 
 
 async def test_core_diagnostic_only_runs_one_upload_and_has_no_model_path():
@@ -421,7 +475,7 @@ def test_read_worker_job_restores_after_terminal_execution(tmp_path, scenario, s
         assert events == ["read-apply", "read-start", "read-restore"]
 
 
-@pytest.mark.parametrize("scenario", ["success", "apply-busy", "restore-busy", "restore-mismatch"])
+@pytest.mark.parametrize("scenario", ["success", "apply-busy", "restore-busy", "restore-mismatch", "prior-role"])
 def test_staging_cli_core_reconciles_asynchronous_helper(
     tmp_path, monkeypatch, scanner_helper, scenario, capsys
 ):
@@ -435,8 +489,10 @@ def test_staging_cli_core_reconciles_asynchronous_helper(
         workspaceResourceId=scope + "/providers/Microsoft.OperationalInsights/workspaces/fixture",
         workerResourceId=scope + "/providers/Microsoft.App/containerApps/worker",
         imageDigest=worker_container["image"].split("@")[1], release="fixture",
-        sourceCommit="a" * 40, scannerObservation=SCANNER_OBSERVATION,
+        sourceCommit="a" * 40, scannerObservation=SCANNER_OBSERVATION, verifyWorkerQueryBeforeUpload=True,
     )
+    worker["principalId"] = str(uuid4())
+    scanner_role_id = "/subscriptions/fixture/providers/Microsoft.Authorization/roleDefinitions/" + str(uuid4())
     foundation.update(postgresHost="fixture", storageUrl=settings["storageUrl"])
     activation = {"properties": {"outputs": {"foundationBindings": {"value": foundation}}}}
     write_new(run / "activation/application-terminal.json", activation)
@@ -490,6 +546,16 @@ def test_staging_cli_core_reconciles_asynchronous_helper(
             return worker_body
         if rid == plan["workspaceResourceId"]:
             return {"id": rid, "properties": {"customerId": settings["workspaceId"]}}
+        if label == "worker-query-assignment":
+            return {"id": rid, "properties": {"scope": plan["workspaceResourceId"],
+                    "principalId": worker["principalId"], "roleDefinitionId": scanner_role_id}}
+        if rid == scanner_role_id:
+            actions = set(SCANNER_ROLE_ACTIONS)
+            if scenario == "prior-role":
+                actions.remove("Microsoft.OperationalInsights/workspaces/query/read")
+            return {"id": rid, "properties": {"type": "CustomRole", "roleName": "m78o-0123456789-scanner-table-query",
+                    "assignableScopes": [scope], "permissions": [{"actions": sorted(actions),
+                    "notActions": [], "dataActions": [], "notDataActions": []}]}}
         if rid == helper + "/executions":
             return {"value": []}
         if rid == helper + "/executions/" + helper_execution:
@@ -591,6 +657,12 @@ def test_staging_cli_core_reconciles_asynchronous_helper(
         "core_proof_operator", "core", "--package", str(package), "--bound", str(bound), "--execute",
     ])
     operator.main()
+    if scenario == "prior-role":
+        assert events == ["unreconciled-operation"]
+        assert not (run / "scanner-in-window/worker-read-apply-intent.json").exists()
+        assert not (run / "scanner-in-window/worker-query-permission.json").exists()
+        return
+    assert read(run / "scanner-in-window/worker-query-permission.json")["verified"]
     receipt = read(run / "scanner-in-window/worker-read-restoration.json")
     if scenario == "success":
         assert events[-6:] == [
@@ -854,7 +926,7 @@ def test_core_diagnostic_rejects_out_of_scope_account_evidence(primary_account_e
         operator.proof_disposition(receipt | difference, plan, "account-job", "account", "Succeeded")
 
 
-def test_unchanged_exact_scanner_role_permissions_are_required():
+def test_exact_scanner_role_requires_query_execution_and_only_the_scanner_table():
     from infra.milestone_7_8.pilot.scanner_operator import SCANNER_ROLE_ACTIONS, exact_role
 
     props = {
@@ -872,6 +944,12 @@ def test_unchanged_exact_scanner_role_permissions_are_required():
     }
     supplied = {"id": "/synthetic/role", "properties": props}
     assert exact_role(supplied, "/synthetic", "scanner-role") == "/synthetic/role"
+    actions = props["permissions"][0]["actions"]
+    execution_action = "Microsoft.OperationalInsights/workspaces/query/read"
+    actions.remove(execution_action)
+    with pytest.raises(CampaignError, match="does not match the sealed narrow role"):
+        exact_role(supplied, "/synthetic", "scanner-role")
+    actions.append(execution_action)
     props["permissions"][0]["actions"].append(
         "Microsoft.OperationalInsights/workspaces/query/*/read"
     )

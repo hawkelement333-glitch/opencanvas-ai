@@ -1048,6 +1048,8 @@ def observe_infrastructure(context):
 
 
 def destination_readiness(context):
+    from infra.milestone_7_8.destination_acceptance import METRIC_VALUE_PROJECTION
+
     path = context.run / "destination-readiness"
     path.mkdir(exist_ok=False)
     plan_path = context.package / "destination-plan.bound.json"
@@ -1066,7 +1068,7 @@ def destination_readiness(context):
         "| summarize arg_max(TimeGenerated, *) by SignalId "
         "| partition by Service (top 16 by TimeGenerated desc) "
         "| project TimeGenerated, SignalId, Service, Environment, Release, Deployment, "
-        "Kind, Name, Component, Payload"
+        "Kind, Name, Component, Payload " + METRIC_VALUE_PROJECTION
     )
     if (context.run / "scanner-hold.json").exists():
         context.policy.require_hold()

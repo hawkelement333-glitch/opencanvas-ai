@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -84,6 +85,45 @@ class Evidence:
         return json.loads(self.raw(name))
 
 
+# A dynamic JSON number can lose precision in the Azure query response. For
+# positive nonintegral doubles, transfer the stored binary value as two native
+# integers. A power two bits below log2 leaves room for rounding near a power
+# boundary. Clamping at the smallest normal power also covers subnormal values.
+METRIC_VALUE_PROJECTION = (
+    '| extend M78Value = iff(Kind == "metric" and gettype(Payload.value) == "real", '
+    'todouble(Payload.value), real(null)) '
+    '| extend M78Scale = iff(M78Value > 0 and M78Value != bin(M78Value, 1.0), '
+    'max_of(long(-1022), tolong(log2(M78Value)) - long(2)), long(null)) '
+    '| extend NativeMetricExponent = M78Scale - 52, '
+    'NativeMetricSignificand = tolong((M78Value / pow(2.0, M78Scale)) * 4503599627370496.0) '
+    '| extend Payload = iff(isnotnull(M78Scale), bag_remove_keys(Payload, dynamic(["value"])), Payload) '
+    '| project-away M78Value, M78Scale'
+)
+
+
+def native_payload(row: dict) -> dict:
+    payload = row["Payload"]
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    require(("NativeMetricExponent" in row) == ("NativeMetricSignificand" in row),
+            "incomplete native metric encoding")
+    exponent, significand = row.get("NativeMetricExponent"), row.get("NativeMetricSignificand")
+    if exponent is None and significand is None:
+        return payload
+    require(
+        row["Kind"] == "metric" and isinstance(payload, dict) and "value" not in payload
+        and type(exponent) is int and -1074 <= exponent <= 0
+        and type(significand) is int and 0 < significand < 2**56
+        and int(float(significand)) == significand,
+        "invalid native metric encoding",
+    )
+    value = math.ldexp(float(significand), exponent)
+    numerator, denominator = value.as_integer_ratio()
+    require(not value.is_integer() and numerator * (1 << -exponent) == significand * denominator,
+            "inexact native metric encoding")
+    return payload | {"value": value}
+
+
 def validate_signal_row(
     row: dict,
     expected_sources: list[dict[str, str]],
@@ -93,9 +133,7 @@ def validate_signal_row(
     """Reproduce the signed gateway's digest from one native destination row."""
     from scripts.telemetry_destination import DestinationError, destination_rows
 
-    payload = row["Payload"]
-    if isinstance(payload, str):
-        payload = json.loads(payload)
+    payload = native_payload(row)
     signal = {
         "schema_version": "mobius-operational-v1",
         "kind": row["Kind"],

@@ -1,6 +1,10 @@
 # Milestone 7.8 finite closure ledger
 
-Current result, 2026-11-19 UTC: **Milestone 7.8 remains incomplete.**
+**Milestone 7.8 remains incomplete as of November 24, 2026.** The latest
+worker-identity diagnostic read clean Blob tags on the exact uploaded version.
+Its Log Analytics read failed. The upload remained quarantined. The
+[November 24 consolidated run](#november-24-consolidated-run) records the
+individual source outcomes, the subsequent integrity stop and teardown.
 PostgreSQL, M78-D-001 and M78-D-002 remain closed with their acceptance,
 failed-attempt history, finalized ledgers and verified cleanup preserved.
 
@@ -58,7 +62,7 @@ The approved private staging run used its separately recorded deadlines.
 | D002 independent shared limits and recovery; same register | 17 assertions; 18 zero counters | Closed; no rerun | None. Application backpressure under mixed traffic is a different D006 observation. |
 | D003 actual required logs/metrics/traces; [plan](MILESTONE_7_IMPLEMENTATION_PLAN.md#exact-audit), [signal catalog](observability/signals-v1.json), [destination contract](OBSERVABILITY_ARCHITECTURE.md#destination-evidence) | 7.5 local privacy/cardinality/exporter checks and D001 scanner native rows. Private staging accepted the exact API liveness trace, gateway acknowledgment, fresh worker control and 32 validated API/worker readiness rows. | All 53 catalog metric producer sites mapped: measured pool/lock/timeout/transaction, storage/scanner, queue outcomes, index coverage/freshness/drift/conflicts, limiter health/saturation/bypass, provider usage-based cost, exporter health/bounds, optional API admission, integrity and native backup/forecast observations. API-to-worker links use actual operations. Unknown or truncated evidence is not healthy zero. | Full required signal coverage, including actual outbox rows and API-to-worker operation linkage, with source and run bindings. One native backup record was observed. Forecast failed for insufficient provider cost history. Provider emission and remaining alert evidence are unproved. |
 | D003 all 13 dashboards; [catalog](observability/dashboards-v1.json) | All 13 deployed configurations matched. The November 19 operator opened all 13 workbooks and recorded 14 visible charts across 27 panels. | Native expected/observed query validators and deployed screenshot/review binding | The other 13 panels returned no results. Their current-release signal and expected outcome still need evidence. |
-| D003 all 16 alert firing/recovery; [catalog](observability/alerts-v1.json) | Two corrected native rule configurations. The [November 24 alert history](#november-24-alert-history) also credits native firing for 12 rules and native resolution for three. | Compiled thresholds, timing and window validators | Each remaining stimulus, evaluated source window, matching delivery and recovery needs its own receipt. Integrity requires authorized investigation and native manual closure. |
+| D003 all 16 alert firing/recovery; [catalog](observability/alerts-v1.json) | The two November 24 runs together show native firing for 13 distinct rules and native resolution for three. The later run adds API latency firing. Two corrected native rule configurations also passed. | Compiled thresholds, timing and window validators | Each remaining stimulus, evaluated source window, matching delivery and recovery needs its own receipt. Integrity requires authorized investigation and native manual closure. |
 | D003 destination privacy/source rejection, outage, access and retention; [deployment](DEPLOYMENT.md#operational-telemetry-deployment) | Existing redaction and bounded exporter tests, prior gateway adapter checks, private VPN DNS/TLS, and restricted-user sign-in. Five native table retention settings and the 30-day purge flag were accepted. | Native rejection/absence, bounded drop/readiness/recovery, fresh-session revoke/restore and exact five-table retention validators | Actual 401/422/422 and destination absence, measured gateway outage and recovery, denied API/worker reads, operator revoke/regrant with fresh sessions. The staged transport probe is unproved. Long-term physical expiry requires its own observation. |
 | D004 actual worker polling and telemetry; [plan final scenarios](MILESTONE_7_IMPLEMENTATION_PLAN.md#required-final-scenarios) | 7.4 claim/lease/retry tests; accepted PG and D001 effects | Production operation instrumentation; observation failure cannot turn a committed job success into a retry | Actual separately deployed worker claim/process/publication and destination observations for authenticated upload. |
 | D004 multi-service delivery with durable ACK/dedup/retry/fencing; same plan | Existing activity-v1 outbox and claim/fence/retry; no new business integration | Separate HTTP activity-v1 receiver and production dispatcher, receipt/effect commit before HMAC ACK, independent receipt readback, final-claim recovery. Fourteen distinct local transport tests cover duplicate, lost ACK, actual TLS disconnect, bounded retry, terminal failure and stale claims. | Actual independent Container Apps processes over private HTTPS, same PostgreSQL durable receipt, 14 unused production events and all nine managed operation receipts plus post-fault recovery, standalone polling/drain and cleanup. User selected this boundary. No criterion located requires a third-party provider or independent datastore; this does not claim either. |
@@ -74,7 +78,7 @@ The approved private staging run used its separately recorded deadlines.
 | D007 configured infrastructure categories/retention; [debt row](MILESTONE_7_8_DEFECT_REGISTER.md#evidence-debts-routed-to-later-audit-surfaces) | Historical private metrics and D001 scanner rows. The staging run observed both registry categories, Blob read/write, Key Vault AuditEvent, and three VPN gateway categories. | Existing PostgreSQL/Blob/registry/Key Vault diagnostic bindings reused | PostgreSQL log and Blob delete rows remain unproved. Preserve the native retention and category bindings. Historical Firewall/VM category evidence remains unlocated/unproved. User explicitly classified those categories not applicable to the final ACA topology; private networking, egress and deployed-resource category evidence remain mandatory. |
 | Two original real-stack editable-AI scenarios; [local browser boundary](MILESTONE_7_8_LOCAL_GAP_COMPLETION.md#local-browser-environment-and-contract-boundary) | Actual graph/upload/controlled-draft local flows; unchanged regressions credited | Runtime public API endpoint binding removes frontend build-time-hostname dependency; 12 affected web tests/types/production build and native container smoke | User selected explicit save/edit/reload with immutable original evidence; affected local browser/API tests now pass. Native provider/browser observations on the signed selected release remain required; historical failures are retained. |
 | Final results, limits and milestone exit; [plan exit](MILESTONE_7_IMPLEMENTATION_PLAN.md#documentation-commit-and-exit) | Prior accepted results and historical warnings/failures retained | This finite ledger and exact local receipts | Consolidate accepted managed observations, cleanup, limits, RPO/RTO, control dispositions and completion document only after preceding evidence/decisions. No Milestone8 start. |
-| D008 billing disclosure; defect register | Current cumulative ceiling $460.40 and posting limitations | Private staging forecast $40.8177 and replacement execution ceiling $56.51 | None as an added technical exit requirement. Billing remains unsettled; the forecast and ceilings are separate from actual charges. |
+| D008 billing disclosure; defect register | Through private staging v4, cumulative authorized exposure was $629.93. Its forecast was $41.5821 and its execution ceiling was $56.51. | Earlier forecasts and ceilings retain their dated scope. | Settled charges require a subsequent provider billing event. |
 
 ## Release bindings
 
@@ -192,6 +196,43 @@ cutoffs before teardown. Late, failed or truncated observations keep their
 actual status. Settled billing and production release controls remain separate.
 The private reconciliation receipt has SHA-256
 `c4a8414b2d525403c94b058bb8f685cc5f25257a176420f96f375f89f26dbb53`.
+
+### November 24 consolidated run
+
+Private staging v4 ran at source `cbf5d6767ede657dd2996e8a8668f1243eae2e25`. Native private readiness passed. The single API request returned HTTP 200 with its exact API row, gateway HTTP 202 and fresh worker control. Both retained images were published privately. The two-account job and the corrected admission check agreed on both distinct synthetic signups.
+
+The primary upload began at 14:52:58.157078 UTC. Its 900-second cutoff was 15:07:58.157078 UTC. The helper update reached Succeeded at 14:52:20.767629 UTC and its native configuration matched before upload. The worker-identity diagnostic dispatched once at 14:53:01.426765 UTC. PostgreSQL acceptance, D001, D002, prior signups and earlier Blob evidence remain credited.
+
+| Worker read | UTC on November 24 | Result for the primary upload |
+| --- | --- | --- |
+| Blob properties and tags | 14:53:34.394389–14:53:34.745662 | Properties matched both provider version and normalized ETag. A version-specific tag request with If-Match returned HTTP 200 and “No threats found.” Both required keys were present. The response omitted independent version and ETag headers. |
+| Log Analytics | 14:53:34.394471–14:53:34.624833 | The client reported `scanner-log-query-authorization-unavailable`. The read yielded no result set. The old diagnostic combined a token acquisition failure and query HTTP 401/403 under that code. |
+
+Both reads finished more than 863 seconds before cutoff. Two-source agreement remained unproved, the upload stayed quarantined and Core recorded zero generation or embedding calls. At 15:08:16.798923 UTC the native helper readback reported Succeeded, with an exact match to the original identity, configuration and template, and no outstanding operation.
+
+The workspace assignment existed once for the correct worker and had no condition. Its custom role omitted the workspace query execution action in Microsoft's example for a role with one readable table. The local correction adds that action and keeps table access confined to StorageMalwareScanningResults. The v4 receipt does not establish which authorization stage failed. [Microsoft table-level access](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/manage-table-access)
+
+The monitoring query returned its 10,000-row cap. The exact gateway SignalId validator accepted 9,943 rows and rejected 57 fractional metrics. In offline replay each of the 57 hashes matched after changing only the metric value by one adjacent binary64 value. The point where the representation changed remains unknown. All 57 original rows retain their failed result. The integrity stop at 15:09:34.563371 UTC ended proof. Delivery, isolated restore, capacity and editable AI stayed gated.
+
+The run produced 16 distinct native alert firings. Twelve belonged to evidence integrity, with one each for API latency, database saturation, queue backlog and worker stale. Queue backlog and worker stale each had a same-instance resolution. Complete source queries covering the 12 current integrity windows returned zero matching underlying rows. Readiness evaluation also showed a missing-signal breach. These captures establish missing source data for the captured windows and leave the ten previous deployment windows indeterminate. Integrity manual closure remains open.
+
+All 13 workbook configurations matched. At readiness, 11 of 27 panel queries had data and 16 were empty. No new actual render was captured because the available Portal surface could not verify its origin. The November 19 views of 13 workbooks and 14 chart-visible panels retain their original credit. A native backup inventory returned one entry. The provider forecast returned HTTP 424 for insufficient cost history. The transport fixture, deployed PostgreSQL log and Blob delete rows remain open.
+
+At 15:00:46 UTC the staging reader's credentials were accepted and Entra blocked Azure CLI device-code sign-in with `AADSTS530035` before resource access. No token-backed workspace query ran. The resource denial, revoke and restoration assertions remain open. The dedicated local CLI profile was removed and the owner confirmed the reader window closed.
+
+Automation returned a fresh monthly-quota HTTP 429. All 25 native jobs were accounted for and none had started cleanup. The approved exact-target fallback removed the staging group. Azure confirmed its absence at 15:37:05 UTC. The verifier confirmed the named Canada Central vault purge, schedule and binding removal, all 48 integer counters at zero and preservation of the reusable controller at 15:38:17 UTC (9:38:17 a.m. CST). Windows had zero staging routes or DNS policies using the staging resolver. All 25 native receipt hashes linked from the terminal receipt verified. The v4 authorization and its image exception are closed. V4's $41.5821 forecast and $56.51 ceiling remain estimates and limits. Billing is unsettled.
+
+The following SHA-256 hashes identify the retained private receipts for `run-c8266541`.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| Scanner execution and restoration | `67e71ea0a90157431dd776894287c72aae3a342075bb516710638da59b6ac5ff` |
+| Native worker grant reconciliation | `83844fdedcbd406e28bbc9ff466661bd849fdd02e90274fd491804dee35f9c69` |
+| Signal integrity stop | `b614b7cda1e82cbe2243c67f34c8fe382829afbbed2cabd220dd4c6ab9b72531` |
+| Offline numeric reconciliation | `54644767869527967eaec404948512d8cf1b38e23cda19f01fb5e0da717d8f03` |
+| Alert instances and source windows | `bd48370ed54ecc9f2a25af668dd537711b2669e100c1abf149ead30217a9c1bb` |
+| Restricted reader terminal outcome | `3aaafd9697db88e7d2b6d4ee513e6ef9d3975fbbb16b89b7408014a6e5b782a8` |
+| Verified teardown | `4b8b2ff1cfa0963b0b178a48ec16d8c76a7a63d3981352673ab3a0544390f63f` |
 
 ## Final local checkpoint additions
 

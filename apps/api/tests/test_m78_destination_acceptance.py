@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import math
 from datetime import UTC, datetime
 
 import pytest
@@ -15,6 +16,7 @@ from infra.milestone_7_8.destination_acceptance import (
     validate_outage,
     validate_rejection,
     validate_retention,
+    validate_signal_row,
     validate_signals,
     validate_workbooks,
 )
@@ -315,6 +317,45 @@ def test_api_worker_native_signal_privacy_and_trace_continuity():
     ] = "private-sentinel"
     with pytest.raises(ValueError, match="privacy/schema/source contract"):
         validate_signals(fixture)
+
+
+@pytest.mark.parametrize("value", [
+    0.007399998139590025, 0.11410300000136431, math.nextafter(1.0, 0.0),
+    math.ulp(0.0), math.nextafter(2.0**52, 0.0),
+])
+def test_native_metric_binary_projection_verifies_only_the_exact_gateway_digest(value):
+    from scripts.telemetry_destination import destination_rows
+
+    now = datetime(2026, 11, 24, tzinfo=UTC)
+    source = {"service": "mobius-worker", "environment": "staging", "release": "r", "deployment": "d"}
+    signal = source | {
+        "schema_version": "mobius-operational-v1", "kind": "metric", "name": "mobius.queue.depth",
+        "timestamp": now.isoformat(), "component": "queue", "payload": {
+            "catalog_version": "mobius-signals-v1", "type": "gauge", "unit": "job", "value": value,
+            "labels": {"component": "queue", "outcome": "success"},
+        },
+    }
+    row, = destination_rows({"resource": {"schema": "mobius-operational-v1"}, "signals": [signal]},
+                            [source], now=now)
+
+    def encode(number):
+        scale = max(-1022, int(math.log2(number)) - 2)
+        return {"NativeMetricExponent": scale - 52,
+                "NativeMetricSignificand": int((number / 2.0**scale) * 2**52)}
+
+    projected = row | encode(value) | {"Payload": {k: v for k, v in row["Payload"].items() if k != "value"}}
+    assert validate_signal_row(projected, [source], now, set()) == signal
+    altered = math.nextafter(value, math.inf)
+    with pytest.raises(ValueError):
+        validate_signal_row(projected | encode(altered), [source], now, set())
+    with pytest.raises(ValueError, match="invalid native metric encoding"):
+        validate_signal_row(projected | {"Payload": row["Payload"]}, [source], now, set())
+    incomplete = dict(projected)
+    del incomplete["NativeMetricExponent"]
+    with pytest.raises(ValueError, match="incomplete native metric encoding"):
+        validate_signal_row(incomplete, [source], now, set())
+    with pytest.raises(ValueError, match="native signal content/identity differs"):
+        validate_signal_row(row | {"Payload": row["Payload"] | {"value": altered}}, [source], now, set())
 
 
 def test_source_privacy_rejection_requires_destination_absence():

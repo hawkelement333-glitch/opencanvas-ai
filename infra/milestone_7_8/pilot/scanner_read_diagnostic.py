@@ -24,9 +24,12 @@ DB_BIND_TIMEOUT = PROBE_TIMEOUT - SOURCE_TIMEOUT - 5
 
 
 async def observe(bridge, version, request, now, *, cutoff=None, clock=lambda: datetime.now(UTC)):
+    import httpx
+
     from opencanvas_api.services.documents.errors import DocumentStorageError
     from opencanvas_api.services.scanner_bridge import (
         AzureBlobScanEvidenceClient,
+        AzureLogAnalyticsScanEvidenceClient,
         ScannerBridgeEvidenceError,
         _azure_etags_equal,
         _normalize_azure_etag,
@@ -145,9 +148,30 @@ async def observe(bridge, version, request, now, *, cutoff=None, clock=lambda: d
 
     async def read_logs():
         started = clock()
+        reader = bridge.log_reader
+        query_status = None
+        native = isinstance(reader, AzureLogAnalyticsScanEvidenceClient)
+        if native:
+            original_transport = reader.transport
+
+            async def record_status(response):
+                nonlocal query_status
+                query_status = response.status_code
+
+            class ObserveQueryResponse(httpx.AsyncBaseTransport):
+                async def handle_async_request(self, request):
+                    # Forward the existing request once using the reader's normal
+                    # transport, TLS, environment and timeout. Keep only its status.
+                    async with httpx.AsyncClient(
+                        transport=original_transport, timeout=reader.timeout_seconds,
+                        follow_redirects=False, event_hooks={"response": [record_status]},
+                    ) as client:
+                        return await client.send(request)
+
+            reader.transport = ObserveQueryResponse()
         try:
             async with asyncio.timeout(SOURCE_TIMEOUT):
-                logs = await bridge.log_reader.read(
+                logs = await reader.read(
                     account_name=account,
                     object_uri=uri,
                     etag=version.etag,
@@ -155,8 +179,17 @@ async def observe(bridge, version, request, now, *, cutoff=None, clock=lambda: d
                     observed_at=started,
                 )
         except Exception as error:
-            return None, failure(error)
+            result = failure(error)
+            if query_status is not None:
+                result.update(failureStage="workspace-query", httpStatus=query_status)
+            elif result["code"] == "scanner-log-query-authorization-unavailable" and isinstance(
+                error.__cause__, DocumentStorageError
+            ):
+                result["failureStage"] = "managed-identity-token"
+            return None, result
         finally:
+            if native:
+                reader.transport = original_transport
             timings["logAnalytics"] = timed(started, clock())
         exact = [
             row for row in logs
@@ -166,6 +199,7 @@ async def observe(bridge, version, request, now, *, cutoff=None, clock=lambda: d
         return logs, {
             "status": "read", "rows": len(logs), "exactRows": len(exact),
             "versionBound": bool(exact),
+            **({"httpStatus": query_status} if query_status is not None else {}),
         }
 
     (blob, blob_result), (logs, log_result) = await asyncio.gather(read_blob(), read_logs())

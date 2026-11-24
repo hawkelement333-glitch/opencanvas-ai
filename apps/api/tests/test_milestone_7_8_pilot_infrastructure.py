@@ -74,6 +74,7 @@ def test_scanner_cannot_query_application_telemetry_or_modify_scan_tags(compiled
     assert scanner["condition"] == "[parameters('pilotDestinationPrivacy')]"
     assert scanner["properties"]["permissions"][0]["actions"] == [
         "Microsoft.OperationalInsights/workspaces/read",
+        "Microsoft.OperationalInsights/workspaces/query/read",
         "Microsoft.OperationalInsights/workspaces/query/StorageMalwareScanningResults/read",
     ]
     assert scanner["properties"]["permissions"][0]["dataActions"] == []

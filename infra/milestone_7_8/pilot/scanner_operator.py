@@ -25,6 +25,7 @@ AUTH = "/providers/Microsoft.Authorization/"
 ROLE_API = "2022-04-01"
 SCANNER_ROLE_ACTIONS = {
     "Microsoft.OperationalInsights/workspaces/read",
+    "Microsoft.OperationalInsights/workspaces/query/read",
     "Microsoft.OperationalInsights/workspaces/query/StorageMalwareScanningResults/read",
 }
 BICEP_NAMESPACE = uuid.UUID("11fb06fb-712d-4ddd-98c7-e71bbd588830")
@@ -538,11 +539,44 @@ def upload_inputs(upload):
     } | {"challenge": uuid.uuid4().hex}
 
 
+def scanner_assignment_id(workspace, identity_id):
+    # Bicep guid(logs.id, identities[2].id, 'pilot-scanner-table-query').
+    token = uuid.uuid5(BICEP_NAMESPACE, "-".join((workspace, identity_id, "pilot-scanner-table-query")))
+    return f"{workspace}{AUTH}roleAssignments/{token}"
+
+
+def verify_worker_query_permission(context, root, worker, workspace, cutoff):
+    scope = context.plan["targetResourceGroupId"]
+    assignment_id = scanner_assignment_id(workspace, worker["id"])
+    assignment = context.get(root, "worker-query-assignment", assignment_id, ROLE_API, cutoff=cutoff)
+    if assignment["id"].casefold() != assignment_id.casefold():
+        raise CampaignError("exact worker workspace assignment is unproved")
+    rid = assignment["properties"]["roleDefinitionId"]
+    subscription = "/".join(scope.split("/")[:3])
+    prefixes = {prefix.casefold() + AUTH.casefold() + "roledefinitions" for prefix in (subscription, scope)}
+    prefix, guid = rid.rsplit("/", 1)
+    if prefix.casefold() not in prefixes or str(uuid.UUID(guid)) != guid.lower():
+        raise CampaignError("scanner role definition differs from the bound scope")
+    definition = context.get(root, "worker-query-definition", rid, ROLE_API, cutoff=cutoff)
+    name = "m78o-" + context.runtime["resourceGroupName"].split("-")[2] + "-scanner-table-query"
+    role = exact_role(definition, scope, name)
+    actual_prefix, actual_guid = role.rsplit("/", 1)
+    if (actual_prefix.casefold() not in prefixes or actual_guid.casefold() != guid.casefold()
+            or not exact_assignment(assignment, workspace, worker["principalId"], role)):
+        raise CampaignError("scanner query permission differs from the worker assignment")
+    write_new(root / "worker-query-permission.json", {
+        "verified": True, "actions": sorted(SCANNER_ROLE_ACTIONS), "assignment": assignment_id,
+        "roleDefinition": role, "workspace": workspace, "principal": worker["principalId"],
+    })
+
+
 @contextmanager
 def prepared_pending(context, cutoff):
     root = context.run / "scanner-in-window"
     root.mkdir(exist_ok=False)
-    worker, _, container, foundation, settings = worker_bindings(context, root, cutoff=cutoff)
+    worker, workspace, container, foundation, settings = worker_bindings(context, root, cutoff=cutoff)
+    if context.plan.get("verifyWorkerQueryBeforeUpload"):
+        verify_worker_query_permission(context, root, worker, workspace, cutoff)
     with prepared_worker_job(
         context, root, "worker-read", container, foundation, worker, settings, ready_by=cutoff,
     ) as observe:
@@ -606,12 +640,7 @@ def collect_and_repair(context, *, repair: bool) -> str:
     )
     if got.get("nextLink"):
         raise CampaignError("incomplete role-assignment read")
-    # Bicep guid(logs.id, identities[2].id, 'pilot-scanner-table-query').
-    token = uuid.uuid5(
-        BICEP_NAMESPACE,
-        "-".join((workspace, worker["id"], "pilot-scanner-table-query")),
-    )
-    rid = workspace + AUTH + "roleAssignments/" + str(token)
+    rid = scanner_assignment_id(workspace, worker["id"])
     principal = worker["principalId"]
     if any(
         row["id"].casefold() == rid.casefold()
