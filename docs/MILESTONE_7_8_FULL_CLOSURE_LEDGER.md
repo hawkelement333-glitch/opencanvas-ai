@@ -255,6 +255,27 @@ Microsoft's local Kusto engine ran the sealed query verbatim. A fractional numbe
 | Local Kusto execution | `f26f8885c0f57e9c602178d9117d733a43190a76f86d593049fb8ad6f2da3c0a` |
 | Verified teardown | `c46c32515158f097f6ac0c6b8825212bc20d3f08447293dedf787f45386110cd` |
 
+### November 25 private staging v6
+
+Run `run-7d37d0b2` used source `65e8a978ea6d9a01d54b69d6539221330257158c`. Azure verified the cleanup schedule and its exact binding before provisioning. Both retained images reached the private registry and its temporary network rule was removed. The installed VPN profile, split route, private DNS and TLS checks passed. All 13 workbook configurations matched.
+
+At 22:06:53 UTC the native readiness query returned 649 distinct production rows. The gateway content and SignalId matched for 646. Of 280 fractional metrics with an integer exponent and significand, 277 matched. Three database pool acquisition timings differed by one binary64 step, two from the worker and one from the outbox. Replaying each original SignalId identified the gateway value. Proof stopped before the API liveness request or account fixture. V6 therefore has no primary upload, scanner cutoff, worker Blob or Log Analytics read, or version and ETag comparison. The diagnostic helper received no update and required no restoration. The temporary reader did not sign in. Core, delivery, isolated restore, capacity and editable AI remain open.
+
+The in-flight monitoring capture recorded 11 distinct native firings. Evidence integrity fired seven times. Database saturation, outbox backlog, queue backlog and worker stale each fired once. The complete matching query returned zero underlying integrity rows across all seven evaluation windows. These windows support missing data. Same-instance recovery and manual integrity closure remain open. The ten earlier indeterminate windows retain their original disposition. V6 added no workbook renders, PostgreSQL log rows or Blob delete rows. PostgreSQL acceptance, D001, D002, signups, prior exact Blob evidence, telemetry, retention, workbook views and infrastructure observations retain their existing credit.
+
+Automation returned a fresh monthly-quota HTTP 429. The native inventory accounted for 25 jobs and zero cleanup starts for this run. Azure confirmed group absence at 22:33:55 UTC after the exact-target fallback. At **22:34:55 UTC (4:34:55 p.m. CST)** the verifier confirmed the named Canada Central vault purge, schedule and binding removal, all 48 integer counters at zero and preservation of the reusable controller. Windows reported zero profile entries, matching routes and staging resolver policies. All 29 linked native residue receipts matched their hashes. The v6 execution and staging exception are closed. Actual charges remain unsettled. The forecast was $40.0821, the execution ceiling was $56.51 and the cumulative ceiling was $742.95.
+
+The local Microsoft Kusto engine ingested the gateway's original JSON for the three failed timings and four passing controls. It reproduced the outbox mismatch before the sealed projection. The two worker values survived the local path, so the corresponding Azure conversion stage remains unknown. The corrected gateway preserves positive fractional metric values as canonical decimal text after computing the original SignalId. In local rehearsal through the staging readiness operator, all 649 original identities matched, all 280 fractional values survived, and the batch containing three altered controls stopped admission with all three rejected. The deployed alert conversion returned the original numeric value for all 280. Replaying the untouched v6 evidence still produced its three failures. The disposable local engine, its anonymous volumes and its newly pulled image reference were removed.
+
+| V6 private receipt | SHA-256 |
+| --- | --- |
+| Native metric query result | `c2a0e5db500b386f024778e747182058cbd32060fafb3c4bbe4d877866a858fd` |
+| Gateway content replay | `ee491a10bb4bb740cd37da243a091cb003410b06f2d6442fd06afb6c133f29ef` |
+| Alert firings and underlying windows | `142f1eeb8068d4e8105f752f7ac1a64796f5dea678e2c4ff3c015f73af04fdda` |
+| Corrected local gateway and Kusto rehearsal | `f83c4e9e71e64990403f357d9b268709dcf04a54cd3ec0545d4f520f40243410` |
+| Verified teardown | `399ddbfa3cdd5ae6aff03c0eb49ce5f77fb05eb7003ff8c6b8d2daefee87fa8b` |
+| Run disposition | `ac23d7d5b2a1ddc72920298ebd8f5d6607cfe085219583dd4ed1528020de416e` |
+
 ## Final local checkpoint additions
 
 The managed probe now preserves actual production telemetry context across
