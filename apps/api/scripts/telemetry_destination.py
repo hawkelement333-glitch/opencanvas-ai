@@ -39,6 +39,7 @@ SIGNAL_FIELDS = frozenset(
     ("kind", "name", "timestamp", "component", "payload", "schema_version", *SOURCE_FIELDS)
 )
 KINDS = frozenset(("application_log", "security_log", "metric", "span"))
+METRIC_VALUE_ENCODING = "binary64-decimal-v1"
 _SAFE_IDENTIFIER = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}\Z")
 
 
@@ -251,6 +252,13 @@ class AzureLogsDestination:
         self, payload: object, *, transport: httpx.AsyncBaseTransport | None = None
     ) -> None:
         rows = destination_rows(payload, self.sources)
+        # Keep the source SignalId. A dynamic JSON number can round during ingestion.
+        # A decimal string also supports the deployed todouble(Payload.value) queries.
+        for row in rows:
+            metric = row["Payload"]
+            value = metric.get("value")
+            if row["Kind"] == "metric" and isinstance(value, float) and not value.is_integer():
+                row["Payload"] = metric | {"value": repr(value), "value_encoding": METRIC_VALUE_ENCODING}
         try:
             # One dispatch only. Upstream owns bounded retries; stable IDs permit
             # query-side deduplication after an ambiguous ingestion response.

@@ -130,6 +130,25 @@ def native_payload(row: dict) -> dict:
     if typed:
         require(row["NativePayloadType"] in ("dictionary", "string")
                 and "NativeMetricExponent" in row, "invalid native payload type evidence")
+    if "value_encoding" in payload:
+        from scripts.telemetry_destination import METRIC_VALUE_ENCODING
+
+        text = payload.get("value")
+        require(row["Kind"] == "metric" and payload["value_encoding"] == METRIC_VALUE_ENCODING
+                and isinstance(text, str) and 0 < len(text) <= 24
+                and exponent is None and significand is None
+                and (not typed or row["NativeMetricValueType"] == "string"),
+                "invalid gateway metric encoding")
+        try:
+            value = float(text)
+        except ValueError:
+            raise ValueError("invalid gateway metric encoding") from None
+        require(math.isfinite(value) and value > 0 and not value.is_integer() and repr(value) == text,
+                "noncanonical gateway metric value")
+        decoded = payload.copy()
+        del decoded["value_encoding"]
+        decoded["value"] = value
+        return decoded
     if exponent is None and significand is None:
         value = payload.get("value")
         if typed and row["Kind"] == "metric" and type(value) is float and value > 0:

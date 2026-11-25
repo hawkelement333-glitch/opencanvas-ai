@@ -31,6 +31,8 @@ def save(path, data):
 @pytest.mark.parametrize("case,expected", [
     ("exact", "accepted"), ("altered", "integrity-failure"), ("skipped-fraction", "integrity-failure"),
     ("no-fraction", "unproved"), ("partial", "unproved"),
+    ("gateway-text", "accepted"), ("gateway-text-altered", "integrity-failure"),
+    ("legacy-when-text-required", "unproved"),
 ])
 def test_metric_readiness_through_staging_entry_point(tmp_path, monkeypatch, case, expected):
     from scripts.telemetry_destination import destination_rows
@@ -47,6 +49,8 @@ def test_metric_readiness_through_staging_entry_point(tmp_path, monkeypatch, cas
     query.write_text("MobiusMetric_CL " + METRIC_VALUE_PROJECTION, encoding="utf-8")
     source = {"service": "mobius-worker", "environment": "staging", "release": "r", "deployment": "d"}
     plan = {"requireNativeMetricReadiness": True, "queryFiles": {"production-signals": file_hash(query)}}
+    if case in ("gateway-text", "gateway-text-altered", "legacy-when-text-required"):
+        plan["requireGatewayMetricEncoding"] = True
     save(package / "planned-bindings.json", plan)
     save(package / "destination-plan.bound.json", {"workspaceResourceId": "/fixture/ws", "productionSources": [source]})
     signal = source | {"schema_version": "mobius-operational-v1", "kind": "metric", "name": "mobius.queue.depth",
@@ -56,9 +60,13 @@ def test_metric_readiness_through_staging_entry_point(tmp_path, monkeypatch, cas
     row, = destination_rows({"resource": {"schema": "mobius-operational-v1"}, "signals": [signal]}, [source], now=now)
     row.update(NativePayloadType="dictionary", NativeMetricValueType="double",
                NativeMetricExponent=None, NativeMetricSignificand=None)
-    if case in ("exact", "altered"):
+    if case in ("exact", "altered", "legacy-when-text-required"):
         row["Payload"] = {key: value for key, value in row["Payload"].items() if key != "value"}
-        row.update(NativeMetricExponent=-57, NativeMetricSignificand=2**(54 if case == "exact" else 55))
+        row.update(NativeMetricExponent=-57, NativeMetricSignificand=2**(55 if case == "altered" else 54))
+    if case.startswith("gateway-text"):
+        row["NativeMetricValueType"] = "string"
+        row["Payload"] = row["Payload"] | {"value_encoding": "binary64-decimal-v1",
+                                           "value": "0.125" if case == "gateway-text" else "0.12500000000000003"}
     result = {"tables": [{"columns": [{"name": name} for name in row], "rows": [list(row.values())]}]}
     if case == "partial":
         result["error"] = {"code": "PartialError"}
@@ -81,6 +89,8 @@ def test_metric_readiness_through_staging_entry_point(tmp_path, monkeypatch, cas
     assert actual == ("privacy-or-integrity-failure" if expected == "integrity-failure" else "liveness")
     summary = json.loads((run / "native-metric-readiness/summary.json").read_text())
     assert summary["status"] == expected
+    if case == "gateway-text":
+        assert summary["gatewayEncodedRows"] == 1
     if expected == "accepted":
         consolidated.guard_dispatch(package, ["account"], {})
         native = run / "native-metric-readiness/result.native.json"

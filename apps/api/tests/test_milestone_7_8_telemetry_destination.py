@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 from datetime import UTC, datetime
 
 import httpx
@@ -71,6 +72,48 @@ async def test_gateway_destination_uses_identity_and_actual_ingestion_ack() -> N
 
     await destination().export(payload(), transport=httpx.MockTransport(respond))
     assert len(requests) == 2
+
+
+@pytest.mark.parametrize("value", [
+    0.007600000003549212, 0.006401000064215623, 0.020700000050055678,
+    math.ulp(0.0), math.nextafter(2.0**52, 0.0),
+])
+async def test_fractional_metric_survives_ingestion_with_its_gateway_identity(value):
+    from infra.milestone_7_8.destination_acceptance import validate_signal_row
+
+    batch = payload()
+    signal = batch["signals"][0]
+    signal["payload"]["value"] = value
+    logical, = destination_rows(batch, [SOURCE])
+    sent = []
+
+    def reply(request):
+        if request.url.host == "localhost":
+            return httpx.Response(200, json={"access_token": "synthetic-token"})
+        sent.extend(json.loads(request.content))
+        return httpx.Response(204)
+
+    await destination().export(batch, transport=httpx.MockTransport(reply))
+    wire, = sent
+    assert wire["Payload"] == logical["Payload"] | {"value": repr(value), "value_encoding": "binary64-decimal-v1"}
+    assert wire["SignalId"] == logical["SignalId"]
+    native = wire | {"NativePayloadType": "dictionary", "NativeMetricValueType": "string",
+                     "NativeMetricExponent": None, "NativeMetricSignificand": None}
+    stamp = datetime.fromisoformat(signal["timestamp"])
+    assert validate_signal_row(native, [SOURCE], stamp, set()) == signal
+    for changed in (
+        logical["Payload"] | {"value": repr(value)},
+        wire["Payload"] | {"value": repr(math.nextafter(value, 0.0))},
+        wire["Payload"] | {"value": " " + repr(value)},
+        wire["Payload"] | {"value_encoding": "unknown"},
+    ):
+        with pytest.raises(ValueError):
+            validate_signal_row(native | {"Payload": changed}, [SOURCE], stamp, set())
+
+    signal["payload"] = wire["Payload"]
+    with pytest.raises(DestinationError, match="invalid_operational_signal"):
+        await destination().export(batch, transport=httpx.MockTransport(reply))
+    assert len(sent) == 1
 
 
 @pytest.mark.parametrize("status", [200, 202, 301, 401, 403, 429, 500])

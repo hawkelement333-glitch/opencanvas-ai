@@ -11,11 +11,12 @@ from infra.milestone_7_8.destination_acceptance import rows, validate_signal_row
 from infra.milestone_7_8.pilot_cleanup import file_hash, read, write_new
 
 
-def assess(response, sources, begin, end):
+def assess(response, sources, begin, end, *, require_gateway_encoding=False):
     records = rows({"status": 200, "result": response})
     seen = set()
     shapes = Counter()
     encoded = 0
+    gateway_encoded = 0
     rejected = []
     for row in records:
         try:
@@ -27,18 +28,27 @@ def assess(response, sources, begin, end):
                 raise ValueError("native precision columns absent")
             if row["Kind"] == "metric":
                 shapes[(row["NativePayloadType"], row["NativeMetricValueType"])] += 1
-            validate_signal_row(row, sources, stamp, seen)
-            encoded += row["NativeMetricExponent"] is not None
+            signal = validate_signal_row(row, sources, stamp, seen)
+            value = signal["payload"].get("value")
+            if row["NativeMetricExponent"] is not None:
+                encoded += 1
+            elif (row["Kind"] == "metric" and row["NativeMetricValueType"] == "string"
+                  and isinstance(value, float) and not value.is_integer()):
+                gateway_encoded += 1
+                encoded += 1
         except (KeyError, TypeError, ValueError, OverflowError, CampaignError) as error:
             rejected.append({"signalId": row.get("SignalId"), "reason": str(error)})
     status = "unproved"
     if rejected:
         status = "integrity-failure"
-    elif encoded and len(records) < 10000:
+    elif encoded and (gateway_encoded or not require_gateway_encoding) and len(records) < 10000:
         status = "accepted"
-    return {"status": status, "returnedRows": len(records), "validatedRows": len(seen),
-            "encodedRows": encoded, "atRowLimit": len(records) == 10000, "rejected": rejected,
-            "metricTypes": [{"payload": p, "value": v, "rows": n} for (p, v), n in shapes.items()]}
+    report = {"status": status, "returnedRows": len(records), "validatedRows": len(seen),
+              "encodedRows": encoded, "atRowLimit": len(records) == 10000, "rejected": rejected,
+              "metricTypes": [{"payload": p, "value": v, "rows": n} for (p, v), n in shapes.items()]}
+    if require_gateway_encoding or gateway_encoded:
+        report["gatewayEncodedRows"] = gateway_encoded
+    return report
 
 
 def capture(context):
@@ -66,7 +76,8 @@ def capture(context):
     if response is None or "error" in response:
         report = {"status": "unproved", "reason": "native query failed or returned a partial error"}
     else:
-        report = assess(response, plan["productionSources"], begin, end)
+        report = assess(response, plan["productionSources"], begin, end,
+                        require_gateway_encoding=context.plan.get("requireGatewayMetricEncoding", False))
     write_new(folder / "summary.json", report | {
         "atUtc": utc(context.policy.clock()), "workspace": rid, "querySha256": digest,
         "requestSha256": file_hash(request), "nativeSha256": file_hash(folder / "result.native.json"),
@@ -91,6 +102,8 @@ def require_accepted(package, run):
     reply = read(native)
     if reply.get("exitCode") != 0:
         raise CampaignError("successful native metric query required")
-    proof = assess(json.loads(reply["stdout"]), plan["productionSources"], start, end)
+    binding = read(package / "planned-bindings.json")
+    proof = assess(json.loads(reply["stdout"]), plan["productionSources"], start, end,
+                   require_gateway_encoding=binding.get("requireGatewayMetricEncoding", False))
     if proof["status"] != "accepted" or any(summary.get(k) != value for k, value in proof.items()):
         raise CampaignError("native metric evidence does not reproduce the readiness result")
