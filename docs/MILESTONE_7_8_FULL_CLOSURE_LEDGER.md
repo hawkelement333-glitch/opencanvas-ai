@@ -276,6 +276,14 @@ The local Microsoft Kusto engine ingested the gateway's original JSON for the th
 | Verified teardown | `399ddbfa3cdd5ae6aff03c0eb49ce5f77fb05eb7003ff8c6b8d2daefee87fa8b` |
 | Run disposition | `ac23d7d5b2a1ddc72920298ebd8f5d6607cfe085219583dd4ed1528020de416e` |
 
+### November 25 local successor image review
+
+The gateway repair at `05f62db66c1bcc5d159a839ea7265d63242e1711` changed an API image input. All 132 focused gateway, staging, scanner, transport and platform tests passed. The first corrected API image was built locally. Its network-isolated runtime check, installed-source verification, OCI graph and software inventory checks passed. The frontend application inputs match the retained signed frontend.
+
+Fresh scans of API `sha256:ad34cffad86b212a9a37fb5034cf9bef25766473aee4caea92ba45413aafb3ac` and frontend `sha256:1ee742b604d406ad8cc4c3c53001853ad58a033b68f4d613251ea7fc088fdb3a` each reported zero Critical and five High findings. Both contain glibc `2.41-12+deb13u4`. Debian provides `2.41-12+deb13u5` for CVE-2026-5435 and CVE-2026-19499. Debian lists CVE-2026-84786, CVE-2026-107493 and CVE-2026-107496 as open in trixie OpenSSL. The private image review has SHA-256 `809616f4230317606115354f40fedec3d21ba4448d29021762391454eb0da660`. [Debian glibc tracker](https://security-tracker.debian.org/tracker/source-package/glibc) · [Debian OpenSSL tracker](https://security-tracker.debian.org/tracker/source-package/openssl)
+
+The final successor image selection and its staging-only exception require an owner decision. A rebuilt frontend requires a fresh endorsement. The proposed footprint is $40.0821, with a $56.51 execution ceiling and $799.46 cumulative ceiling including all prior exposure. The package is in local preparation. The next deployment requires separate spending approval.
+
 ## Final local checkpoint additions
 
 The managed probe now preserves actual production telemetry context across
